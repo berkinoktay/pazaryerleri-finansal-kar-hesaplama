@@ -34,6 +34,7 @@ yarn-error.log*
 
 # supabase
 supabase/.temp/
+supabase/.branches/
 
 # Claude Code — personal toolchain and MCP secrets (project rules live in CLAUDE.md files)
 .claude/
