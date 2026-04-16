@@ -54,6 +54,25 @@ jobs:
       - run: pnpm api:sync # ensure generated types exist before typecheck
       - run: pnpm typecheck
 
+  lint:
+    name: Lint all packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm api:sync # generated types are imported by some packages
+      # Filter forces every workspace package into scope. Without it,
+      # turbo's affected-detection might skip packages it considers unchanged.
+      - run: pnpm turbo run lint --filter='@pazarsync/*'
+      - name: Format check
+        run: pnpm format:check
+
   test:
     name: Unit and integration tests
     runs-on: ubuntu-latest

@@ -17,15 +17,15 @@
 
 **Before writing ANY Trendyol-related code, you MUST read the relevant documentation:**
 
-| Task | Read First |
-|------|-----------|
-| Order sync | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/siparis-entegrasyonlari.md` |
-| Product sync | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md` |
-| Settlement/finance | `docs/integrations/trendyol/8-trendyol-muhasebe-ve-finans-entegrasyonu/` |
-| Returns/refunds | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/iade-entegrasyonu/` |
-| Auth/API keys | `docs/integrations/trendyol/2-authorization.md` |
-| Rate limits | `docs/integrations/trendyol/1-servis-limitleri.md` |
-| Error codes | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/hata-kodlari.md` |
+| Task               | Read First                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| Order sync         | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/siparis-entegrasyonlari.md` |
+| Product sync       | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md` |
+| Settlement/finance | `docs/integrations/trendyol/8-trendyol-muhasebe-ve-finans-entegrasyonu/`                    |
+| Returns/refunds    | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/iade-entegrasyonu/`         |
+| Auth/API keys      | `docs/integrations/trendyol/2-authorization.md`                                             |
+| Rate limits        | `docs/integrations/trendyol/1-servis-limitleri.md`                                          |
+| Error codes        | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/hata-kodlari.md`            |
 
 ## Route Architecture
 
@@ -198,22 +198,26 @@ return c.json({ error: 'Not found' }, 404);
 return c.json({ message: 'Bad request', field: 'cost_price' }, 400);
 
 // ✅ Good — RFC 7807 Problem Details
-return c.json({
-  type: 'https://api.pazarsync.com/errors/not-found',
-  title: 'Order Not Found',
-  status: 404,
-  detail: `Order ${orderId} not found in store ${storeId}`,
-}, 404);
+return c.json(
+  {
+    type: 'https://api.pazarsync.com/errors/not-found',
+    title: 'Order Not Found',
+    status: 404,
+    detail: `Order ${orderId} not found in store ${storeId}`,
+  },
+  404,
+);
 
-return c.json({
-  type: 'https://api.pazarsync.com/errors/validation',
-  title: 'Validation Error',
-  status: 422,
-  detail: 'Request body contains invalid fields',
-  errors: [
-    { field: 'cost_price', message: 'Must be a positive number' },
-  ],
-}, 422);
+return c.json(
+  {
+    type: 'https://api.pazarsync.com/errors/validation',
+    title: 'Validation Error',
+    status: 422,
+    detail: 'Request body contains invalid fields',
+    errors: [{ field: 'cost_price', message: 'Must be a positive number' }],
+  },
+  422,
+);
 ```
 
 ### Monetary Values
@@ -365,13 +369,13 @@ apps/api/tests/
 
 ### When tests are required
 
-| Change | Required test |
-|--------|---------------|
-| New utility function (`apps/api/src/lib/`) | Unit test, TDD |
-| New service function (`apps/api/src/services/`) | Integration test (real DB via factories) |
-| New route (`apps/api/src/routes/`) | Integration test in `tests/integration/routes/` |
-| New org-scoped route | Above + tenant-isolation test in `tests/integration/tenant-isolation/` |
-| New marketplace adapter (`apps/api/src/integrations/`) | Unit test for mapper logic; mock the HTTP client |
+| Change                                                 | Required test                                                          |
+| ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| New utility function (`apps/api/src/lib/`)             | Unit test, TDD                                                         |
+| New service function (`apps/api/src/services/`)        | Integration test (real DB via factories)                               |
+| New route (`apps/api/src/routes/`)                     | Integration test in `tests/integration/routes/`                        |
+| New org-scoped route                                   | Above + tenant-isolation test in `tests/integration/tenant-isolation/` |
+| New marketplace adapter (`apps/api/src/integrations/`) | Unit test for mapper logic; mock the HTTP client                       |
 
 ### Pattern reference
 

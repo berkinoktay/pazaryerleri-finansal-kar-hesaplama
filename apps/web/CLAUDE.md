@@ -35,7 +35,11 @@ function OrderSummary({ orders }: { orders: Order[] }) {
     setProfitableCount(orders.filter((o) => Number(o.netProfit) > 0).length);
   }, [orders]);
 
-  return <div>{formatCurrency(totalProfit)} ({profitableCount} profitable)</div>;
+  return (
+    <div>
+      {formatCurrency(totalProfit)} ({profitableCount} profitable)
+    </div>
+  );
 }
 
 // ✅ Good — derive during render
@@ -44,12 +48,13 @@ function OrderSummary({ orders }: { orders: Order[] }) {
     () => orders.reduce((sum, o) => sum.add(o.netProfit), new Decimal(0)),
     [orders],
   );
-  const profitableCount = useMemo(
-    () => orders.filter((o) => o.netProfit.gt(0)).length,
-    [orders],
-  );
+  const profitableCount = useMemo(() => orders.filter((o) => o.netProfit.gt(0)).length, [orders]);
 
-  return <div>{formatCurrency(totalProfit)} ({profitableCount} {t('orders.profitable')})</div>;
+  return (
+    <div>
+      {formatCurrency(totalProfit)} ({profitableCount} {t('orders.profitable')})
+    </div>
+  );
 }
 ```
 
@@ -57,9 +62,11 @@ function OrderSummary({ orders }: { orders: Order[] }) {
 // ❌ Bad — prop drilling through 4 levels
 function StorePage({ storeId }: { storeId: string }) {
   const { data: store } = useStore(storeId);
-  return <StoreLayout store={store}>
-    <OrderPanel store={store} />
-  </StoreLayout>;
+  return (
+    <StoreLayout store={store}>
+      <OrderPanel store={store} />
+    </StoreLayout>
+  );
 }
 function OrderPanel({ store }: { store: Store }) {
   return <OrderFilters store={store} />;
@@ -130,13 +137,13 @@ All API calls go through `apiClient`, an `openapi-fetch` instance defined in `ap
 
 ```typescript
 // apps/web/src/features/organization/api/organizations.api.ts
-import type { components } from "@pazarsync/api-client";
-import { apiClient } from "@/lib/api-client";
+import type { components } from '@pazarsync/api-client';
+import { apiClient } from '@/lib/api-client';
 
-export type Organization = components["schemas"]["Organization"];
+export type Organization = components['schemas']['Organization'];
 
 export async function listOrganizations(): Promise<Organization[]> {
-  const { data, error } = await apiClient.GET("/v1/organizations", {});
+  const { data, error } = await apiClient.GET('/v1/organizations', {});
   if (error) {
     throw new Error(`Failed to fetch organizations: ${JSON.stringify(error)}`);
   }
@@ -231,7 +238,10 @@ function ProfitBadge({ profit }: { profit: Decimal }) {
   const isPositive = profit.gt(0);
   return (
     <span
-      className={"rounded px-2 py-1 text-sm " + (isPositive ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}
+      className={
+        'rounded px-2 py-1 text-sm ' +
+        (isPositive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')
+      }
       style={{ minWidth: '73px', marginLeft: '13px' }}
     >
       {formatCurrency(profit)}
@@ -244,10 +254,8 @@ function ProfitBadge({ profit }: { profit: Decimal }) {
   return (
     <span
       className={cn(
-        'rounded px-2 py-1 text-sm min-w-[4.5rem] ml-3',
-        profit.gt(0)
-          ? 'bg-emerald-50 text-emerald-700'
-          : 'bg-red-50 text-red-700',
+        'ml-3 min-w-[4.5rem] rounded px-2 py-1 text-sm',
+        profit.gt(0) ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700',
       )}
     >
       {formatCurrency(profit)}
@@ -272,11 +280,7 @@ export default function OrderPage({ params }: { params: { id: string } }) {
 }
 
 // ✅ Good — async params (Next.js 16)
-export default async function OrderPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return <OrderDetail orderId={id} />;
 }
@@ -350,10 +354,9 @@ const DASHBOARD_METRICS = [
 import { BarChart, LineChart, PieChart } from 'recharts';
 
 // ✅ Good — dynamic import, loaded only when visible
-const ProfitChart = dynamic(
-  () => import('@/features/profitability/components/profit-chart'),
-  { loading: () => <ChartSkeleton /> },
-);
+const ProfitChart = dynamic(() => import('@/features/profitability/components/profit-chart'), {
+  loading: () => <ChartSkeleton />,
+});
 ```
 
 ## Testing
@@ -378,14 +381,15 @@ apps/web/tests/
 
 ### When tests are required
 
-| Change | Required test |
-|--------|---------------|
-| New custom React Query hook in `features/*/hooks/` | Hook test using MSW (`tests/unit/hooks/`) |
-| New form component (validation, error states) | Component test (`tests/component/`) |
-| New interactive component (modal, wizard, multi-step) | Component test |
-| New utility in `lib/` | Unit test |
+| Change                                                | Required test                             |
+| ----------------------------------------------------- | ----------------------------------------- |
+| New custom React Query hook in `features/*/hooks/`    | Hook test using MSW (`tests/unit/hooks/`) |
+| New form component (validation, error states)         | Component test (`tests/component/`)       |
+| New interactive component (modal, wizard, multi-step) | Component test                            |
+| New utility in `lib/`                                 | Unit test                                 |
 
 NOT required (over-testing slows iteration):
+
 - Pure presentational components (`<Card>`, `<Badge>`, layout primitives)
 - shadcn/ui re-exports
 - Trivial layout/wrapper components

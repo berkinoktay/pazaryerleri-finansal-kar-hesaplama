@@ -85,6 +85,7 @@ User (Supabase Auth)
 
 **Layer 1 — Application (Hono Middleware):**
 Every request passes through `orgContextMiddleware` which:
+
 1. Extracts `orgId` from URL params
 2. Verifies current user is a member of that org
 3. Injects `organizationId` into request context
@@ -92,6 +93,7 @@ Every request passes through `orgContextMiddleware` which:
 
 **Layer 2 — Database (RLS Policies):**
 Row-Level Security as defense-in-depth:
+
 ```sql
 -- Example RLS policy (applied on every tenant table)
 CREATE POLICY "org_isolation" ON orders
@@ -103,6 +105,7 @@ CREATE POLICY "org_isolation" ON orders
 
 **Layer 3 — Schema Design:**
 Every tenant-scoped table has:
+
 - `organization_id UUID NOT NULL REFERENCES organizations(id)`
 - Index on `organization_id`
 - Foreign key with `ON DELETE CASCADE`
@@ -110,11 +113,13 @@ Every tenant-scoped table has:
 ### Store-Scoped Views
 
 Operational pages (orders, products, profitability) ALWAYS show data for one selected store. The active store is:
+
 - Stored in frontend state (React Context + URL param)
 - Required — dashboard cannot render without a store selection
 - Default: first connected store
 
 Cross-store overview is available ONLY on:
+
 - Dashboard overview (aggregated revenue/profit cards)
 - Reports page (date-range based cross-store comparison)
 
@@ -679,18 +684,18 @@ model SyncLog {
 
 ### Key Indexes
 
-| Table | Index | Purpose |
-|-------|-------|---------|
-| `stores` | `organization_id` | Tenant isolation queries |
-| `products` | `(store_id, platform_product_id)` UNIQUE | Dedup marketplace products |
-| `products` | `organization_id` | Tenant isolation |
-| `orders` | `(store_id, platform_order_id)` UNIQUE | Dedup marketplace orders |
-| `orders` | `organization_id` | Tenant isolation |
-| `orders` | `order_date` | Date range queries for reports |
-| `settlements` | `organization_id` | Tenant isolation |
-| `expenses` | `organization_id` | Tenant isolation |
-| `sync_logs` | `(store_id, started_at)` | Sync history lookups |
-| `organization_members` | `(organization_id, user_id)` UNIQUE | Membership lookup |
+| Table                  | Index                                    | Purpose                        |
+| ---------------------- | ---------------------------------------- | ------------------------------ |
+| `stores`               | `organization_id`                        | Tenant isolation queries       |
+| `products`             | `(store_id, platform_product_id)` UNIQUE | Dedup marketplace products     |
+| `products`             | `organization_id`                        | Tenant isolation               |
+| `orders`               | `(store_id, platform_order_id)` UNIQUE   | Dedup marketplace orders       |
+| `orders`               | `organization_id`                        | Tenant isolation               |
+| `orders`               | `order_date`                             | Date range queries for reports |
+| `settlements`          | `organization_id`                        | Tenant isolation               |
+| `expenses`             | `organization_id`                        | Tenant isolation               |
+| `sync_logs`            | `(store_id, started_at)`                 | Sync history lookups           |
+| `organization_members` | `(organization_id, user_id)` UNIQUE      | Membership lookup              |
 
 ---
 
@@ -820,6 +825,7 @@ GET    /v1/organizations/:orgId/stores/:storeId/sync/logs    → Sync history
 ### Common Response Shapes
 
 **Success (single item):**
+
 ```json
 {
   "data": { ... },
@@ -828,6 +834,7 @@ GET    /v1/organizations/:orgId/stores/:storeId/sync/logs    → Sync history
 ```
 
 **Success (list):**
+
 ```json
 {
   "data": [ ... ],
@@ -842,15 +849,14 @@ GET    /v1/organizations/:orgId/stores/:storeId/sync/logs    → Sync history
 ```
 
 **Error (RFC 7807):**
+
 ```json
 {
   "type": "https://api.pazarsync.com/errors/validation",
   "title": "Validation Error",
   "status": 422,
   "detail": "cost_price must be a positive number",
-  "errors": [
-    { "field": "cost_price", "message": "Must be a positive number" }
-  ]
+  "errors": [{ "field": "cost_price", "message": "Must be a positive number" }]
 }
 ```
 
@@ -894,18 +900,18 @@ A single `pnpm api:sync` runs both steps. CI rejects PRs where the committed spe
 
 ### Role Permissions Matrix
 
-| Action | OWNER | ADMIN | MEMBER | VIEWER |
-|--------|:-----:|:-----:|:------:|:------:|
-| View dashboard & reports | Y | Y | Y | Y |
-| View orders & products | Y | Y | Y | Y |
-| Manage expenses | Y | Y | Y | N |
-| Update product costs | Y | Y | Y | N |
-| Run reconciliation | Y | Y | N | N |
-| Connect/disconnect stores | Y | Y | N | N |
-| Manage team members | Y | Y | N | N |
-| Change org settings | Y | Y | N | N |
-| Delete organization | Y | N | N | N |
-| Manage billing | Y | N | N | N |
+| Action                    | OWNER | ADMIN | MEMBER | VIEWER |
+| ------------------------- | :---: | :---: | :----: | :----: |
+| View dashboard & reports  |   Y   |   Y   |   Y    |   Y    |
+| View orders & products    |   Y   |   Y   |   Y    |   Y    |
+| Manage expenses           |   Y   |   Y   |   Y    |   N    |
+| Update product costs      |   Y   |   Y   |   Y    |   N    |
+| Run reconciliation        |   Y   |   Y   |   N    |   N    |
+| Connect/disconnect stores |   Y   |   Y   |   N    |   N    |
+| Manage team members       |   Y   |   Y   |   N    |   N    |
+| Change org settings       |   Y   |   Y   |   N    |   N    |
+| Delete organization       |   Y   |   N   |   N    |   N    |
+| Manage billing            |   Y   |   N   |   N    |   N    |
 
 ---
 
@@ -917,19 +923,19 @@ Each marketplace implements a common interface:
 
 ```typescript
 interface MarketplaceAdapter {
-  testConnection(): Promise<boolean>
-  fetchOrders(params: SyncParams): Promise<MarketplaceOrder[]>
-  fetchProducts(params: SyncParams): Promise<MarketplaceProduct[]>
-  fetchSettlements(params: SyncParams): Promise<MarketplaceSettlement[]>
+  testConnection(): Promise<boolean>;
+  fetchOrders(params: SyncParams): Promise<MarketplaceOrder[]>;
+  fetchProducts(params: SyncParams): Promise<MarketplaceProduct[]>;
+  fetchSettlements(params: SyncParams): Promise<MarketplaceSettlement[]>;
 }
 ```
 
 ### Supported Platforms
 
-| Platform | API Type | Auth | Rate Limit |
-|----------|----------|------|-----------|
-| **Trendyol** | REST | API Key + Secret + Seller ID | 10 req/sec |
-| **Hepsiburada** | REST | API Key + Secret + Merchant ID | TBD |
+| Platform        | API Type | Auth                           | Rate Limit |
+| --------------- | -------- | ------------------------------ | ---------- |
+| **Trendyol**    | REST     | API Key + Secret + Seller ID   | 10 req/sec |
+| **Hepsiburada** | REST     | API Key + Secret + Merchant ID | TBD        |
 
 ### Credential Storage
 
@@ -970,11 +976,11 @@ pg_cron (every 15 min)
 
 ### Sync Types & Frequencies
 
-| Sync Type | Default Frequency | Window |
-|-----------|------------------|--------|
-| Orders | Every 15 minutes | Last 24 hours |
-| Products | Every 6 hours | Full catalog |
-| Settlements | Every 24 hours | Last 7 days |
+| Sync Type   | Default Frequency | Window        |
+| ----------- | ----------------- | ------------- |
+| Orders      | Every 15 minutes  | Last 24 hours |
+| Products    | Every 6 hours     | Full catalog  |
+| Settlements | Every 24 hours    | Last 7 days   |
 
 ### Error Handling
 
@@ -1010,6 +1016,7 @@ pg_cron (every 15 min)
 ### Feature Module Pattern
 
 Each feature follows this structure:
+
 ```
 features/orders/
 ├── components/         # Feature-specific React components
@@ -1026,13 +1033,13 @@ features/orders/
 
 ### State Management
 
-| State Type | Solution |
-|-----------|---------|
-| Server state (orders, products, etc.) | TanStack React Query |
-| Auth state | Supabase Auth + React Context |
-| Organization context | React Context (OrgProvider) |
-| Store selection | React Context (StoreProvider) + URL search param |
-| UI state (modals, filters) | Local React state (useState) |
+| State Type                            | Solution                                         |
+| ------------------------------------- | ------------------------------------------------ |
+| Server state (orders, products, etc.) | TanStack React Query                             |
+| Auth state                            | Supabase Auth + React Context                    |
+| Organization context                  | React Context (OrgProvider)                      |
+| Store selection                       | React Context (StoreProvider) + URL search param |
+| UI state (modals, filters)            | Local React state (useState)                     |
 
 ### Data Fetching Pattern
 

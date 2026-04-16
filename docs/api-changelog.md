@@ -12,21 +12,27 @@ section "Versioning" for details.
 ## [Unreleased]
 
 ### Added
+
 - (PR template: list new endpoints, fields, schemas here)
 
 ### Changed
+
 - (Document non-breaking modifications here)
 
 ### Deprecated
+
 - (Mark endpoints scheduled for removal)
 
 ### Removed
+
 - (Document removed endpoints / fields)
 
 ### Fixed
+
 - (Document API behavior fixes)
 
 ### Security
+
 - (Document security-relevant changes)
 
 ## [1.0.0] — 2026-04-16
@@ -36,6 +42,7 @@ Initial release. API exposed under `/v1/`. Documentation served via Scalar at
 via the `@pazarsync/api-client` workspace package.
 
 ### Added
+
 - `GET /v1/health` (tag: System) — public, unauthenticated liveness check.
 - `GET /v1/organizations` (tag: Organizations) — lists organizations for the
   authenticated user. **Currently returns stub data**; real Prisma query +
@@ -60,11 +67,13 @@ via the `@pazarsync/api-client` workspace package.
   `InvalidCursorError`. Replaces the previous offset `paginationSchema`.
 
 ### Security
+
 - API spec and docs UI are NOT exposed in production builds.
 - `bearerAuth` is the only documented security scheme; no OAuth flows or
   cookie-based auth are implied.
 
 ### Notes
+
 - Path keys in the generated spec are version-prefixed (`/v1/health`,
   `/v1/organizations`) because `@hono/zod-openapi` inlines `basePath("/v1")`.
   Frontend `baseUrl` pairs with this by NOT including `/v1`.

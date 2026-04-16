@@ -43,13 +43,13 @@ No hard coverage thresholds. Coverage is a symptom, not a goal.
 
 ## 2. Test Categories
 
-| Category | Where | Speed | Discipline |
-|----------|-------|-------|-----------|
-| Unit | `tests/unit/` | <10ms each | Strict TDD for pure logic |
-| Integration (route) | `tests/integration/routes/` | ~50ms each | Same-PR-as-code |
-| Integration (DB) | `tests/integration/` | ~50ms each | Same-PR-as-code |
-| Tenant isolation | `tests/integration/tenant-isolation/` | ~50ms each | MANDATORY |
-| Component (frontend) | `tests/component/` | ~30ms each | Pragmatic |
+| Category             | Where                                 | Speed      | Discipline                |
+| -------------------- | ------------------------------------- | ---------- | ------------------------- |
+| Unit                 | `tests/unit/`                         | <10ms each | Strict TDD for pure logic |
+| Integration (route)  | `tests/integration/routes/`           | ~50ms each | Same-PR-as-code           |
+| Integration (DB)     | `tests/integration/`                  | ~50ms each | Same-PR-as-code           |
+| Tenant isolation     | `tests/integration/tenant-isolation/` | ~50ms each | MANDATORY                 |
+| Component (frontend) | `tests/component/`                    | ~30ms each | Pragmatic                 |
 
 ---
 
@@ -95,6 +95,7 @@ packages/utils/tests/       # Flat, unit only
 The "see it fail" step is non-negotiable. Tests that pass before implementation are testing the wrong thing.
 
 Example (cursor utility):
+
 ```ts
 // 1. Write the test
 it("round-trips a cursor with the same sort", () => {
@@ -115,10 +116,10 @@ it("round-trips a cursor with the same sort", () => {
 Every DB-touching test follows this skeleton:
 
 ```ts
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { ensureDbReachable, truncateAll, prisma } from "../helpers/db";
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { ensureDbReachable, truncateAll, prisma } from '../helpers/db';
 
-describe("MyService", () => {
+describe('MyService', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -127,7 +128,7 @@ describe("MyService", () => {
     await truncateAll();
   });
 
-  it("does the thing", async () => {
+  it('does the thing', async () => {
     // Arrange — use factories
     // Act — call the function or HTTP route
     // Assert — verify DB state or response
@@ -152,27 +153,28 @@ If you ever see `Cannot reach test database at DATABASE_URL=undefined`, your `.e
 Every org-scoped endpoint MUST have at least one isolation test. Pattern:
 
 ```ts
-it("does not leak Org A data to Org B queries", async () => {
-  const orgA = await createOrganization({ slug: "org-a" });
-  const orgB = await createOrganization({ slug: "org-b" });
+it('does not leak Org A data to Org B queries', async () => {
+  const orgA = await createOrganization({ slug: 'org-a' });
+  const orgB = await createOrganization({ slug: 'org-b' });
   const storeA = await createStore(orgA.id);
   await createOrder(orgA.id, storeA.id);
 
   const ordersForOrgB = await prisma.order.findMany({
     where: { organizationId: orgB.id },
   });
-  expect(ordersForOrgB).toEqual([]);  // ← The critical assertion
+  expect(ordersForOrgB).toEqual([]); // ← The critical assertion
 });
 ```
 
 For HTTP-level isolation tests (once auth middleware exists):
+
 ```ts
 // FUTURE — pattern for when signTestJwt() lands
-it("returns 403 when user is not a member of the requested organization", async () => {
+it('returns 403 when user is not a member of the requested organization', async () => {
   const orgA = await createOrganization();
   const orgB = await createOrganization();
   const userA = await createUserProfile();
-  await createMembership(orgA.id, userA.id, "OWNER");
+  await createMembership(orgA.id, userA.id, 'OWNER');
   // userA is NOT a member of orgB
 
   const token = signTestJwt({ userId: userA.id });
@@ -180,7 +182,7 @@ it("returns 403 when user is not a member of the requested organization", async 
     headers: { Authorization: `Bearer ${token}` },
   });
 
-  expect(res.status).toBe(403);  // never 200, never leak orgB data
+  expect(res.status).toBe(403); // never 200, never leak orgB data
 });
 ```
 
@@ -189,11 +191,13 @@ it("returns 403 when user is not a member of the requested organization", async 
 ## 8. Test Data Factories
 
 Located in `apps/api/tests/helpers/factories.ts`. Each factory:
+
 - Accepts an overrides object for any field
 - Generates sensible defaults (random UUIDs, deterministic-ish names)
 - Returns the created Prisma record
 
 Available factories:
+
 - `createUserProfile(overrides?)`
 - `createOrganization(overrides?)`
 - `createMembership(orgId, userId, role?)`
@@ -207,6 +211,7 @@ To extend with new factories: add to `factories.ts`, follow the same `(scopeId, 
 ## 9. Frontend Hook Tests (MSW + React Query)
 
 Pattern:
+
 ```tsx
 import { describe, it, expect } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
@@ -246,24 +251,25 @@ Default MSW handlers live in `tests/helpers/msw.ts`. Add new endpoint defaults t
 Use React Testing Library. Test interaction, not implementation.
 
 ```tsx
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "../../helpers/render";
-import { MyForm } from "@/features/my-feature/components/my-form";
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '../../helpers/render';
+import { MyForm } from '@/features/my-feature/components/my-form';
 
-describe("<MyForm>", () => {
-  it("submits valid input", async () => {
+describe('<MyForm>', () => {
+  it('submits valid input', async () => {
     const onSubmit = vi.fn();
     const { user } = render(<MyForm onSubmit={onSubmit} />);
 
-    await user.type(screen.getByLabelText("Name"), "Acme");
-    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await user.type(screen.getByLabelText('Name'), 'Acme');
+    await user.click(screen.getByRole('button', { name: /submit/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith({ name: "Acme" });
+    expect(onSubmit).toHaveBeenCalledWith({ name: 'Acme' });
   });
 });
 ```
 
 Guidance:
+
 - Query by accessible role first (`getByRole("button", { name: ... })`)
 - Fall back to `getByLabelText`, `getByText`
 - AVOID `getByTestId` unless nothing else works
@@ -273,16 +279,16 @@ Guidance:
 
 ## 11. Test Helpers Reference
 
-| Helper | Path | Purpose |
-|--------|------|---------|
-| `prisma` | `apps/api/tests/helpers/db.ts` | Re-exports the singleton from `@pazarsync/db` |
-| `truncateAll()` | `apps/api/tests/helpers/db.ts` | Empty all tenant tables; call in `beforeEach` |
-| `ensureDbReachable()` | `apps/api/tests/helpers/db.ts` | Fail fast with help if Supabase isn't up |
-| `createUserProfile`, `createOrganization`, … | `apps/api/tests/helpers/factories.ts` | Test data factories |
-| `render` | `apps/web/tests/helpers/render.tsx` | RTL render with QueryClientProvider |
-| `createTestQueryClient` | `apps/web/tests/helpers/render.tsx` | Fresh, retry-disabled QueryClient |
-| `server` | `apps/web/tests/helpers/msw.ts` | MSW server (auto-listening per setup.ts) |
-| `http`, `HttpResponse` | `apps/web/tests/helpers/msw.ts` | Re-exports for per-test handler overrides |
+| Helper                                       | Path                                  | Purpose                                       |
+| -------------------------------------------- | ------------------------------------- | --------------------------------------------- |
+| `prisma`                                     | `apps/api/tests/helpers/db.ts`        | Re-exports the singleton from `@pazarsync/db` |
+| `truncateAll()`                              | `apps/api/tests/helpers/db.ts`        | Empty all tenant tables; call in `beforeEach` |
+| `ensureDbReachable()`                        | `apps/api/tests/helpers/db.ts`        | Fail fast with help if Supabase isn't up      |
+| `createUserProfile`, `createOrganization`, … | `apps/api/tests/helpers/factories.ts` | Test data factories                           |
+| `render`                                     | `apps/web/tests/helpers/render.tsx`   | RTL render with QueryClientProvider           |
+| `createTestQueryClient`                      | `apps/web/tests/helpers/render.tsx`   | Fresh, retry-disabled QueryClient             |
+| `server`                                     | `apps/web/tests/helpers/msw.ts`       | MSW server (auto-listening per setup.ts)      |
+| `http`, `HttpResponse`                       | `apps/web/tests/helpers/msw.ts`       | Re-exports for per-test handler overrides     |
 
 ---
 
@@ -357,9 +363,9 @@ No coverage thresholds. The reviewer's question is "does this PR have the tests 
 
 Two root scripts mirror what CI runs and give you the same gate locally:
 
-| Script | Runs | DB needed? | Use when |
-|--------|------|------------|----------|
-| `pnpm check:all` | typecheck + lint + `test:unit` + format check | No | **Before each commit** — fast loop |
+| Script            | Runs                                                              | DB needed?                   | Use when                                      |
+| ----------------- | ----------------------------------------------------------------- | ---------------------------- | --------------------------------------------- |
+| `pnpm check:all`  | typecheck + lint + `test:unit` + format check                     | No                           | **Before each commit** — fast loop            |
 | `pnpm check:full` | typecheck + lint + full `test` (incl. integration) + format check | Yes (`supabase start` first) | **Before opening a PR** — full parity with CI |
 
 `check:all` is the pre-commit gate; `check:full` is the pre-PR gate.

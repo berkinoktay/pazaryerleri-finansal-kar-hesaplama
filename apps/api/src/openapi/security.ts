@@ -4,8 +4,8 @@
  * on each authenticated route.
  */
 export const bearerAuthScheme = {
-  type: "http",
-  scheme: "bearer",
-  bearerFormat: "JWT",
-  description: "Supabase JWT token issued by `/v1/auth/signin`",
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'JWT',
+  description: 'Supabase JWT token issued by `/v1/auth/signin`',
 } as const;
