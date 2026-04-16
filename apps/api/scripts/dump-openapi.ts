@@ -1,11 +1,11 @@
-import { writeFile, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { writeFile, mkdir } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 
-import { bearerAuthScheme } from "../src/openapi";
-import organizationRoutes from "../src/routes/organization.routes";
+import { bearerAuthScheme } from '../src/openapi';
+import organizationRoutes from '../src/routes/organization.routes';
 
 // NOTE: This script must mirror the spec configuration in apps/api/src/index.ts.
 // We construct a minimal OpenAPIHono just to call getOpenAPI31Document and write
@@ -18,49 +18,51 @@ import organizationRoutes from "../src/routes/organization.routes";
 // factory without side effects) so this script can import it directly. Deferred
 // until we have ≥3 routes per the plan's "Open Items" section.
 
-const app = new OpenAPIHono().basePath("/v1");
+const app = new OpenAPIHono().basePath('/v1');
 
-app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", bearerAuthScheme);
+app.openAPIRegistry.registerComponent('securitySchemes', 'bearerAuth', bearerAuthScheme);
 
 const healthRoute = createRoute({
-  method: "get",
-  path: "/health",
-  tags: ["System"],
-  summary: "Health check",
-  description: "Returns 200 when the service is up.",
+  method: 'get',
+  path: '/health',
+  tags: ['System'],
+  summary: 'Health check',
+  description: 'Returns 200 when the service is up.',
   responses: {
     200: {
       content: {
-        "application/json": { schema: z.object({ status: z.literal("ok") }).openapi("HealthResponse") },
+        'application/json': {
+          schema: z.object({ status: z.literal('ok') }).openapi('HealthResponse'),
+        },
       },
-      description: "Service is healthy",
+      description: 'Service is healthy',
     },
   },
 });
 
-app.openapi(healthRoute, (c) => c.json({ status: "ok" as const }, 200));
+app.openapi(healthRoute, (c) => c.json({ status: 'ok' as const }, 200));
 
 // Feature routes (mirror apps/api/src/index.ts).
-app.route("/", organizationRoutes);
+app.route('/', organizationRoutes);
 
 const spec = app.getOpenAPI31Document({
-  openapi: "3.1.0",
+  openapi: '3.1.0',
   info: {
-    title: "PazarSync API",
-    version: "1.0.0",
-    description: "Internal REST API.",
+    title: 'PazarSync API',
+    version: '1.0.0',
+    description: 'Internal REST API.',
   },
   servers: [
-    { url: "http://localhost:3001", description: "Local dev" },
-    { url: "https://staging-api.pazarsync.com", description: "Staging" },
+    { url: 'http://localhost:3001', description: 'Local dev' },
+    { url: 'https://staging-api.pazarsync.com', description: 'Staging' },
   ],
   security: [{ bearerAuth: [] }],
 });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const outPath = resolve(__dirname, "../../../packages/api-client/openapi.json");
+const outPath = resolve(__dirname, '../../../packages/api-client/openapi.json');
 
 await mkdir(dirname(outPath), { recursive: true });
-await writeFile(outPath, JSON.stringify(spec, null, 2) + "\n", "utf-8");
+await writeFile(outPath, JSON.stringify(spec, null, 2) + '\n', 'utf-8');
 
 console.log(`✓ Wrote OpenAPI 3.1 spec to ${outPath}`);

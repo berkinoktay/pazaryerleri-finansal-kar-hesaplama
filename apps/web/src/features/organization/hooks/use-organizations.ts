@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery } from '@tanstack/react-query';
 
-import { listOrganizations, type Organization } from "../api/organizations.api";
-import { organizationKeys } from "../query-keys";
+import { listOrganizations, type Organization } from '../api/organizations.api';
+import { organizationKeys } from '../query-keys';
 
 /**
  * Lists organizations the authenticated user is a member of.

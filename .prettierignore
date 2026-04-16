@@ -1,0 +1,26 @@
+# Imported third-party documentation — keep source structure intact.
+# These come from upstream marketplace docs and should not be reformatted.
+docs/integrations/
+
+# Historical design and implementation plans — frozen records of past
+# decisions. Reformatting them creates noise without value.
+docs/plans/
+
+# Generated code — produced by tooling, never hand-edited.
+packages/db/generated/
+packages/api-client/src/generated/
+packages/api-client/openapi.json
+
+# Build artifacts and dependencies.
+node_modules/
+dist/
+.next/
+.turbo/
+.worktrees/
+
+# Lock files — managed by package manager.
+pnpm-lock.yaml
+
+# Supabase local state.
+supabase/.branches/
+supabase/.temp/

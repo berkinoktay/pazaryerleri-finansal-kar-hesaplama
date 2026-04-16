@@ -1,4 +1,4 @@
-import { prisma } from "@pazarsync/db";
+import { prisma } from '@pazarsync/db';
 
 export { prisma };
 
@@ -39,7 +39,7 @@ export async function ensureDbReachable(): Promise<void> {
     await prisma.$queryRaw`SELECT 1`;
   } catch (error) {
     throw new Error(
-      `Cannot reach test database at DATABASE_URL=${process.env["DATABASE_URL"]}. ` +
+      `Cannot reach test database at DATABASE_URL=${process.env['DATABASE_URL']}. ` +
         `Run \`supabase start\` and \`pnpm db:push\` before integration tests. ` +
         `Original error: ${error instanceof Error ? error.message : String(error)}`,
     );

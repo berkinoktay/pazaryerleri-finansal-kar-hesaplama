@@ -17,20 +17,20 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Monorepo** | Turborepo + pnpm workspaces |
-| **Frontend** | Next.js 16 (App Router), React 19.2, TypeScript 5.x |
-| **Styling** | Tailwind CSS 4, shadcn/ui, Hugeicons |
-| **Backend** | Hono (Node.js runtime) |
-| **API Pattern** | REST + Zod validation |
-| **Data Fetching** | TanStack React Query v5 |
-| **Database** | Supabase (PostgreSQL 15) |
-| **ORM** | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`) |
-| **Auth** | Supabase Auth (email/password, OAuth) |
-| **Background Jobs** | Supabase Edge Functions + pg_cron |
-| **Package Manager** | pnpm 9+ |
-| **Formatting** | Prettier + ESLint (flat config) |
+| Layer               | Technology                                                  |
+| ------------------- | ----------------------------------------------------------- |
+| **Monorepo**        | Turborepo + pnpm workspaces                                 |
+| **Frontend**        | Next.js 16 (App Router), React 19.2, TypeScript 5.x         |
+| **Styling**         | Tailwind CSS 4, shadcn/ui, Hugeicons                        |
+| **Backend**         | Hono (Node.js runtime)                                      |
+| **API Pattern**     | REST + Zod validation                                       |
+| **Data Fetching**   | TanStack React Query v5                                     |
+| **Database**        | Supabase (PostgreSQL 15)                                    |
+| **ORM**             | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`) |
+| **Auth**            | Supabase Auth (email/password, OAuth)                       |
+| **Background Jobs** | Supabase Edge Functions + pg_cron                           |
+| **Package Manager** | pnpm 9+                                                     |
+| **Formatting**      | Prettier + ESLint (flat config)                             |
 
 ## Monorepo Structure
 
@@ -58,19 +58,20 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 
 ## Documentation References
 
-| Document | Path | When to Read |
-|----------|------|-------------|
-| **Security Rules** | **`docs/SECURITY.md`** | **MUST READ before touching user data, credentials, or cross-tenant code** |
-| Architecture & DB Schema | `docs/ARCHITECTURE.md` | Before designing new features or modifying the DB |
-| Product Vision | `docs/PRODUCT_VISION.md` | Before making UX or feature scope decisions |
-| Trendyol API Docs | `docs/integrations/trendyol/` | **MUST READ** before any Trendyol integration work |
-| Frontend Rules | `apps/web/CLAUDE.md` | When working in `apps/web/` |
-| Backend Rules | `apps/api/CLAUDE.md` | When working in `apps/api/` |
-| API Changelog | `docs/api-changelog.md` | When changing any route — log under `[Unreleased]` |
-| Design Plans | `docs/plans/` | When designing or implementing a non-trivial feature |
-| Testing Patterns | `docs/TESTING.md` | When writing OR running tests |
+| Document                 | Path                          | When to Read                                                               |
+| ------------------------ | ----------------------------- | -------------------------------------------------------------------------- |
+| **Security Rules**       | **`docs/SECURITY.md`**        | **MUST READ before touching user data, credentials, or cross-tenant code** |
+| Architecture & DB Schema | `docs/ARCHITECTURE.md`        | Before designing new features or modifying the DB                          |
+| Product Vision           | `docs/PRODUCT_VISION.md`      | Before making UX or feature scope decisions                                |
+| Trendyol API Docs        | `docs/integrations/trendyol/` | **MUST READ** before any Trendyol integration work                         |
+| Frontend Rules           | `apps/web/CLAUDE.md`          | When working in `apps/web/`                                                |
+| Backend Rules            | `apps/api/CLAUDE.md`          | When working in `apps/api/`                                                |
+| API Changelog            | `docs/api-changelog.md`       | When changing any route — log under `[Unreleased]`                         |
+| Design Plans             | `docs/plans/`                 | When designing or implementing a non-trivial feature                       |
+| Testing Patterns         | `docs/TESTING.md`             | When writing OR running tests                                              |
 
 **Trendyol integration:** Before writing any Trendyol-related code, read the relevant files under `docs/integrations/trendyol/`. Key files:
+
 - `2-authorization.md` — API authentication
 - `7-trendyol-marketplace-entegrasyonu/siparis-entegrasyonlari.md` — Order sync
 - `7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md` — Product sync
@@ -181,21 +182,30 @@ function getStoreCredentials(store: Store): TrendyolCredentials {
 // ❌ Bad — non-exhaustive switch, missing cases silently ignored
 function getOrderStatusLabel(status: OrderStatus): string {
   switch (status) {
-    case 'DELIVERED': return 'Teslim Edildi';
-    case 'SHIPPED': return 'Kargoda';
-    default: return 'Bilinmiyor';
+    case 'DELIVERED':
+      return 'Teslim Edildi';
+    case 'SHIPPED':
+      return 'Kargoda';
+    default:
+      return 'Bilinmiyor';
   }
 }
 
 // ✅ Good — exhaustive switch with never guard
 function getOrderStatusLabel(status: OrderStatus): string {
   switch (status) {
-    case 'PENDING': return t('order.status.pending');
-    case 'PROCESSING': return t('order.status.processing');
-    case 'SHIPPED': return t('order.status.shipped');
-    case 'DELIVERED': return t('order.status.delivered');
-    case 'CANCELLED': return t('order.status.cancelled');
-    case 'RETURNED': return t('order.status.returned');
+    case 'PENDING':
+      return t('order.status.pending');
+    case 'PROCESSING':
+      return t('order.status.processing');
+    case 'SHIPPED':
+      return t('order.status.shipped');
+    case 'DELIVERED':
+      return t('order.status.delivered');
+    case 'CANCELLED':
+      return t('order.status.cancelled');
+    case 'RETURNED':
+      return t('order.status.returned');
     default: {
       const _exhaustive: never = status;
       throw new Error(`Unhandled order status: ${_exhaustive}`);
@@ -315,9 +325,12 @@ async function syncOrders(store: Store): Promise<SyncResult> {
 // ❌ Bad — switch chain for lookup
 function getPlatformIcon(platform: Platform): string {
   switch (platform) {
-    case 'TRENDYOL': return '/icons/trendyol.svg';
-    case 'HEPSIBURADA': return '/icons/hepsiburada.svg';
-    default: return '/icons/default.svg';
+    case 'TRENDYOL':
+      return '/icons/trendyol.svg';
+    case 'HEPSIBURADA':
+      return '/icons/hepsiburada.svg';
+    default:
+      return '/icons/default.svg';
   }
 }
 
@@ -393,6 +406,7 @@ format-currency.ts       → descriptive name
 PazarSync uses a hybrid testing strategy — strict TDD for pure logic, test-with-code for routes/services, pragmatic for UI, MANDATORY for multi-tenancy invariants. See `docs/TESTING.md` for the full pattern library.
 
 Non-negotiable rules:
+
 - Every org-scoped endpoint MUST have a multi-tenancy isolation test in `apps/api/tests/integration/tenant-isolation/`. No exceptions.
 - Every utility/pure function MUST have unit tests. TDD discipline (write test → see it fail → implement → see it pass).
 - Every new endpoint MUST have at least one happy-path integration test in the SAME PR as the route code.
@@ -400,6 +414,7 @@ Non-negotiable rules:
 - Never commit with failing tests, never commit with `it.skip` without a comment + tracked TODO.
 
 Commands:
+
 - `pnpm test:unit` — fast (no DB), run on every change
 - `pnpm test:integration` — slow (needs `supabase start` + `pnpm db:push`), run before commits
 - `pnpm test` — both
@@ -416,6 +431,7 @@ The same function must NEVER be defined in more than one place. Before writing a
 3. Check `apps/api/src/lib/` — backend-only utilities
 
 **Rules:**
+
 - If both frontend and backend need it → `packages/utils/`
 - If only frontend needs it → `apps/web/src/lib/`
 - If only backend needs it → `apps/api/src/lib/`
@@ -459,9 +475,7 @@ const profit = order.totalAmount - order.commissionAmount - order.shippingCost;
 // 100.10 - 23.64 - 29.99 = 46.46999999999999
 
 // ✅ Good — Decimal.js for precision
-const profit = order.totalAmount
-  .sub(order.commissionAmount)
-  .sub(order.shippingCost);
+const profit = order.totalAmount.sub(order.commissionAmount).sub(order.shippingCost);
 // 100.10 - 23.64 - 29.99 = 46.47
 ```
 
@@ -513,6 +527,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 ## Pre-Commit Skill Workflow
 
 Before running `pnpm check:all`, apply skills in this order on all changed code:
+
 1. Run `/simplify` on all changed code.
 2. After `/simplify` finishes, run `/vercel-react-best-practices` on changed React/Next.js code, and `/postgres` on changed database code (if applicable).
 3. After all skill fixes are done, run `pnpm check:all` and fix every error.
@@ -520,6 +535,7 @@ Before running `pnpm check:all`, apply skills in this order on all changed code:
 ## Bug Fix Workflow
 
 For any bug fix:
+
 1. Read all relevant files first.
 2. State the root cause and which layer (data vs rendering vs layout) is broken.
 3. Fix autonomously — no approval needed.

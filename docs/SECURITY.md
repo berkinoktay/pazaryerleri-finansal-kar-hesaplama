@@ -26,6 +26,7 @@ PazarSync stores **highly sensitive commercial data** for multiple independent T
 - **Financial settlements** — revenue, commissions, net profit figures
 
 **Assumed adversaries:**
+
 - Other tenants on the same platform (most common threat — curiosity or malice)
 - Malicious insiders (rogue team members within an org)
 - External attackers with valid auth tokens (session hijacking, credential stuffing)
@@ -124,18 +125,18 @@ Within a single organization, a user's access to stores is further restricted. E
 
 ### Role Matrix (within an Organization)
 
-| Action | OWNER | ADMIN | MEMBER | VIEWER |
-|--------|:-----:|:-----:|:------:|:------:|
-| View dashboard & reports | ✓ | ✓ | ✓ | ✓ |
-| View orders & products | ✓ | ✓ | ✓ | ✓ |
-| Manage expenses | ✓ | ✓ | ✓ | ✗ |
-| Update product costs | ✓ | ✓ | ✓ | ✗ |
-| Run reconciliation | ✓ | ✓ | ✗ | ✗ |
-| Connect/disconnect stores | ✓ | ✓ | ✗ | ✗ |
-| Manage team members | ✓ | ✓ | ✗ | ✗ |
-| Change org settings | ✓ | ✓ | ✗ | ✗ |
-| Delete organization | ✓ | ✗ | ✗ | ✗ |
-| Manage billing | ✓ | ✗ | ✗ | ✗ |
+| Action                    | OWNER | ADMIN | MEMBER | VIEWER |
+| ------------------------- | :---: | :---: | :----: | :----: |
+| View dashboard & reports  |   ✓   |   ✓   |   ✓    |   ✓    |
+| View orders & products    |   ✓   |   ✓   |   ✓    |   ✓    |
+| Manage expenses           |   ✓   |   ✓   |   ✓    |   ✗    |
+| Update product costs      |   ✓   |   ✓   |   ✓    |   ✗    |
+| Run reconciliation        |   ✓   |   ✓   |   ✗    |   ✗    |
+| Connect/disconnect stores |   ✓   |   ✓   |   ✗    |   ✗    |
+| Manage team members       |   ✓   |   ✓   |   ✗    |   ✗    |
+| Change org settings       |   ✓   |   ✓   |   ✗    |   ✗    |
+| Delete organization       |   ✓   |   ✗   |   ✗    |   ✗    |
+| Manage billing            |   ✓   |   ✗   |   ✗    |   ✗    |
 
 ### Role Check Pattern
 
@@ -210,9 +211,9 @@ async function getOrders(orgId: string, storeId: string) {
 ```typescript
 // apps/api/src/lib/encryption.ts
 export interface EncryptedPayload {
-  ciphertext: string;  // base64
-  iv: string;          // base64
-  authTag: string;     // base64
+  ciphertext: string; // base64
+  iv: string; // base64
+  authTag: string; // base64
 }
 
 export function encryptCredentials(plaintext: Record<string, unknown>): EncryptedPayload;
@@ -230,6 +231,7 @@ model Store {
 ```
 
 Example of stored value:
+
 ```json
 {
   "ciphertext": "V8f2...base64...",
@@ -242,8 +244,8 @@ Example of stored value:
 
 ```typescript
 // ❌ Bad — credentials logged, exposed in response, passed around plaintext
-console.log('Syncing with creds:', creds);  // LOG LEAK
-return c.json({ store: { ...store, credentials: creds } });  // API LEAK
+console.log('Syncing with creds:', creds); // LOG LEAK
+return c.json({ store: { ...store, credentials: creds } }); // API LEAK
 
 // ✅ Good — decrypt only in the marketplace adapter, scope narrowly
 async function syncTrendyolOrders(store: Store): Promise<void> {
@@ -278,14 +280,14 @@ function toStoreResponse(store: Store): StoreResponse {
 
 All data tied to an organization is sensitive, but these require extra care:
 
-| Data | Sensitivity | Why |
-|------|------------|-----|
-| API credentials | **CRITICAL** | Leak = marketplace account takeover |
-| Product cost prices | **HIGH** | Competitive intelligence — competitor advantage |
-| Customer names/addresses (orders) | **HIGH** | PII under KVKK/GDPR |
-| Settlement/revenue figures | **HIGH** | Commercial confidentiality |
-| Product titles, barcodes | Medium | Public-ish but enables scraping/competitive analysis |
-| Organization name, team members | Medium | Privacy of business relationships |
+| Data                              | Sensitivity  | Why                                                  |
+| --------------------------------- | ------------ | ---------------------------------------------------- |
+| API credentials                   | **CRITICAL** | Leak = marketplace account takeover                  |
+| Product cost prices               | **HIGH**     | Competitive intelligence — competitor advantage      |
+| Customer names/addresses (orders) | **HIGH**     | PII under KVKK/GDPR                                  |
+| Settlement/revenue figures        | **HIGH**     | Commercial confidentiality                           |
+| Product titles, barcodes          | Medium       | Public-ish but enables scraping/competitive analysis |
+| Organization name, team members   | Medium       | Privacy of business relationships                    |
 
 ### Rules
 
@@ -439,32 +441,38 @@ audit_logs (
 Before merging any PR that touches user data, credentials, or cross-tenant code:
 
 ### Query Safety
+
 - [ ] Every `prisma.*.findMany`, `findFirst`, `findUnique`, `update`, `delete` includes `organizationId` in the `where` clause (or is explicitly marked as a public/admin query)
 - [ ] Store-scoped queries verify `storeId` belongs to the current `organizationId`
 - [ ] No raw SQL with string concatenation (use parameterized queries or Prisma)
 
 ### Credentials
+
 - [ ] Any new credential storage uses the `encryptCredentials`/`decryptCredentials` helpers
 - [ ] Credentials never appear in API responses (use `toStoreResponse`-style mappers)
 - [ ] Credentials never appear in logs (grep the PR for `credentials`, `apiKey`, `secret`, `token`)
 - [ ] Env vars (`ENCRYPTION_KEY`, `JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) are not committed
 
 ### Authorization
+
 - [ ] New routes are protected by `authMiddleware` + `orgContextMiddleware`
 - [ ] Role-gated actions use `requireRole()` middleware
 - [ ] Frontend role checks are duplicated in backend (never trust the client)
 
 ### API Responses
+
 - [ ] No sensitive field bleed-through (use explicit response types, not `...entity`)
 - [ ] Error messages don't confirm the existence of resources in other tenants
 - [ ] Response bodies validated against expected schema before returning
 
 ### RLS
+
 - [ ] New tables have `organization_id` column and RLS policy enabled
 - [ ] Migration file includes the RLS policy SQL
 - [ ] RLS tested with a second tenant to confirm isolation
 
 ### Transport
+
 - [ ] No HTTP-only flows added
 - [ ] CORS origins are explicit, not wildcarded
 - [ ] No sensitive data in query params or URL segments
