@@ -55,15 +55,52 @@ jobs:
       - run: pnpm typecheck
 
   test:
-    name: Run unit tests
+    name: Unit and integration tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: "pnpm"
+
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @pazarsync/utils test
-      - run: pnpm --filter @pazarsync/api test
+
+      - run: pnpm db:generate
+      - run: pnpm api:sync
+
+      # Fast feedback: unit tests first, fail before spinning up DB.
+      - name: Run unit tests
+        run: pnpm test:unit
+
+      # DB integration tests run against a fresh local Supabase instance
+      # spun up just for this job. Schema applied via prisma db push so
+      # no migration artifacts leak into the run.
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase local
+        run: supabase start
+
+      - name: Apply Prisma schema to local DB
+        run: pnpm db:push
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+      - name: Run integration tests
+        run: pnpm test:integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+      # Mandatory cleanup even on test failure — leaves no hanging
+      # containers around between job runs.
+      - name: Stop Supabase local
+        if: always()
+        run: supabase stop
