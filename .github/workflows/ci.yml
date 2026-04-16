@@ -15,6 +15,12 @@ jobs:
   changes:
     name: Detect non-docs changes
     runs-on: ubuntu-latest
+    # dorny/paths-filter calls the GitHub PR-files API to compute the diff.
+    # The default GITHUB_TOKEN permissions don't include `pull-requests: read`
+    # in repos where the org has tightened defaults — grant it explicitly.
+    permissions:
+      pull-requests: read
+      contents: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
