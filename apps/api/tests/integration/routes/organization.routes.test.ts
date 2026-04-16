@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { OpenAPIHono } from "@hono/zod-openapi";
 
-import organizationRoutes from "../../src/routes/organization.routes";
+import organizationRoutes from "../../../src/routes/organization.routes";
 
 describe("GET /v1/organizations", () => {
   const app = new OpenAPIHono().basePath("/v1");
