@@ -35,10 +35,14 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["ok"]
+            "enum": [
+              "ok"
+            ]
           }
         },
-        "required": ["status"]
+        "required": [
+          "status"
+        ]
       },
       "Organization": {
         "type": "object",
@@ -67,7 +71,13 @@
             "example": "2026-04-01T14:00:00Z"
           }
         },
-        "required": ["id", "name", "slug", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "createdAt",
+          "updatedAt"
+        ],
         "description": "An organization (tenant). Users can be members of multiple organizations."
       },
       "OrganizationListResponse": {
@@ -80,7 +90,9 @@
             }
           }
         },
-        "required": ["data"]
+        "required": [
+          "data"
+        ]
       },
       "ValidationErrorDetail": {
         "type": "object",
@@ -101,7 +113,10 @@
             }
           }
         },
-        "required": ["field", "code"]
+        "required": [
+          "field",
+          "code"
+        ]
       },
       "ProblemDetails": {
         "type": "object",
@@ -136,7 +151,13 @@
             }
           }
         },
-        "required": ["type", "title", "status", "code", "detail"]
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code",
+          "detail"
+        ]
       }
     },
     "parameters": {}
@@ -144,7 +165,9 @@
   "paths": {
     "/v1/health": {
       "get": {
-        "tags": ["System"],
+        "tags": [
+          "System"
+        ],
         "summary": "Health check",
         "description": "Returns 200 when the service is up.",
         "responses": {
@@ -163,7 +186,9 @@
     },
     "/v1/organizations": {
       "get": {
-        "tags": ["Organizations"],
+        "tags": [
+          "Organizations"
+        ],
         "summary": "List organizations the authenticated user is a member of",
         "description": "Returns all organizations where the authenticated user has an OrganizationMember record. Not paginated — typical users belong to fewer than 10 organizations.",
         "security": [
