@@ -35,9 +35,12 @@ yarn-error.log*
 # supabase
 supabase/.temp/
 
-# Claude Code — user-local config and MCP secrets
-.claude/settings.local.json
+# Claude Code — personal toolchain and MCP secrets (project rules live in CLAUDE.md files)
+.claude/
 .mcp.json
 
 # Prisma generated (alternate path)
 packages/db/prisma/generated/
+
+# Git worktrees
+.worktrees/

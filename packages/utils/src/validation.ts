@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
+export const cursorPaginationSchema = z.object({
+  cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
@@ -10,5 +10,5 @@ export const dateRangeSchema = z.object({
   to: z.coerce.date(),
 });
 
-export type PaginationInput = z.infer<typeof paginationSchema>;
+export type CursorPaginationInput = z.infer<typeof cursorPaginationSchema>;
 export type DateRangeInput = z.infer<typeof dateRangeSchema>;

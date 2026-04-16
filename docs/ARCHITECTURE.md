@@ -194,18 +194,18 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │   │
 │   └── api/                          # Hono Backend
 │       ├── src/
-│       │   ├── routes/               # Route definitions
-│       │   │   ├── auth.routes.ts
-│       │   │   ├── organization.routes.ts
-│       │   │   ├── store.routes.ts
-│       │   │   ├── order.routes.ts
-│       │   │   ├── product.routes.ts
-│       │   │   ├── profitability.routes.ts
-│       │   │   ├── expense.routes.ts
-│       │   │   ├── settlement.routes.ts
-│       │   │   ├── reconciliation.routes.ts
-│       │   │   ├── sync.routes.ts
-│       │   │   └── dashboard.routes.ts
+│       │   ├── routes/               # Route definitions (planned — scaffolded incrementally)
+│       │   │   ├── organization.routes.ts  # Currently implemented (stub handler)
+│       │   │   ├── auth.routes.ts          # Planned
+│       │   │   ├── store.routes.ts         # Planned
+│       │   │   ├── order.routes.ts         # Planned
+│       │   │   ├── product.routes.ts       # Planned
+│       │   │   ├── profitability.routes.ts # Planned
+│       │   │   ├── expense.routes.ts       # Planned
+│       │   │   ├── settlement.routes.ts    # Planned
+│       │   │   ├── reconciliation.routes.ts # Planned
+│       │   │   ├── sync.routes.ts          # Planned
+│       │   │   └── dashboard.routes.ts     # Planned
 │       │   ├── services/             # Business logic
 │       │   │   ├── organization.service.ts
 │       │   │   ├── store.service.ts
@@ -216,16 +216,19 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │       │   │   ├── settlement.service.ts
 │       │   │   ├── reconciliation.service.ts
 │       │   │   └── dashboard.service.ts
-│       │   ├── marketplace/          # Marketplace API adapters
-│       │   │   ├── types.ts          # Common marketplace interface
-│       │   │   ├── trendyol/
-│       │   │   │   ├── client.ts     # Trendyol API client
-│       │   │   │   ├── mapper.ts     # Response → domain model mapping
-│       │   │   │   └── types.ts      # Trendyol-specific types
-│       │   │   └── hepsiburada/
-│       │   │       ├── client.ts
-│       │   │       ├── mapper.ts
-│       │   │       └── types.ts
+│       │   ├── integrations/
+│       │   │   └── marketplace/       # Marketplace API adapters
+│       │   │       ├── types.ts       # Common marketplace interface
+│       │   │       ├── trendyol/
+│       │   │       │   ├── client.ts  # Trendyol API client
+│       │   │       │   ├── mapper.ts  # Response → domain model mapping
+│       │   │       │   └── types.ts   # Trendyol-specific types
+│       │   │       └── hepsiburada/
+│       │   │           ├── client.ts
+│       │   │           ├── mapper.ts
+│       │   │           └── types.ts
+│       │   ├── openapi/               # Shared OpenAPI components (error/pagination/rate-limit/security)
+│       │   ├── routes/                # Route definitions (createRoute + app.openapi handler)
 │       │   ├── middleware/           # Hono middleware
 │       │   │   ├── auth.middleware.ts       # JWT verification
 │       │   │   ├── org-context.middleware.ts # Org isolation
@@ -240,7 +243,10 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │       │   │   ├── store.validator.ts
 │       │   │   ├── expense.validator.ts
 │       │   │   └── common.validator.ts
-│       │   └── index.ts              # App entry point
+│       │   └── index.ts              # App entry point (OpenAPIHono + serve())
+│       ├── scripts/
+│       │   └── dump-openapi.ts       # Build-time spec writer → packages/api-client/openapi.json
+│       ├── tests/                    # Vitest (integration tests with app.request())
 │       ├── Dockerfile
 │       ├── tsconfig.json
 │       └── package.json
@@ -258,6 +264,13 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │   │   │   └── index.ts             # PrismaClient singleton with adapter-pg
 │   │   ├── tsconfig.json
 │   │   └── package.json
+│   │
+│   ├── api-client/                   # Typed API client (openapi-fetch + openapi-typescript)
+│   │   ├── openapi.json              # Committed snapshot of the OpenAPI 3.1 spec
+│   │   ├── src/
+│   │   │   ├── generated/            # Generated TS types (gitignored)
+│   │   │   └── index.ts              # Re-exports paths/components + createApiClient
+│   │   └── package.json              # Runs openapi-typescript via `pnpm codegen`
 │   │
 │   ├── types/                        # Shared types
 │   │   ├── src/
@@ -840,6 +853,28 @@ GET    /v1/organizations/:orgId/stores/:storeId/sync/logs    → Sync history
   ]
 }
 ```
+
+### Documentation Pipeline
+
+The REST API is documented via OpenAPI 3.1, auto-generated from Zod schemas using `@hono/zod-openapi`. The spec is served at `/v1/openapi.json` and a Scalar UI at `/v1/docs` (both dev/staging only, gated on `NODE_ENV !== "production"`). Frontend request/response types are generated by `openapi-typescript` into the `@pazarsync/api-client` workspace package, consumed by `apps/web` via `openapi-fetch`.
+
+```
+apps/api/validators + routes (Zod + createRoute)
+        │ app.getOpenAPI31Document()
+        ▼
+apps/api/scripts/dump-openapi.ts
+        │ pnpm api:openapi
+        ▼
+packages/api-client/openapi.json (committed)
+        │ pnpm api:codegen (openapi-typescript)
+        ▼
+packages/api-client/src/generated/api.d.ts (gitignored)
+        │
+        ▼
+apps/web/src/lib/api-client.ts (openapi-fetch<paths>) → feature hooks
+```
+
+A single `pnpm api:sync` runs both steps. CI rejects PRs where the committed spec drifts from the registered routes. See `docs/plans/2026-04-16-api-docs-design.md` for the full design and `docs/plans/2026-04-16-api-docs-implementation.md` for implementation history.
 
 ---
 

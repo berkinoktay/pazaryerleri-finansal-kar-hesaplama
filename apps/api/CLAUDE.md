@@ -46,16 +46,20 @@ src/
 │   ├── order.validator.ts       # Zod schemas for request validation
 │   ├── store.validator.ts
 │   └── ...
-├── marketplace/                 # Marketplace API adapters
-│   ├── types.ts                 # Common MarketplaceAdapter interface
-│   ├── trendyol/
-│   │   ├── client.ts
-│   │   ├── mapper.ts
-│   │   └── types.ts
-│   └── hepsiburada/
-│       ├── client.ts
-│       ├── mapper.ts
-│       └── types.ts
+├── integrations/
+│   └── marketplace/             # Marketplace API adapters
+│       ├── types.ts             # Common MarketplaceAdapter interface
+│       ├── trendyol/
+│       │   ├── client.ts
+│       │   ├── mapper.ts
+│       │   └── types.ts
+│       └── hepsiburada/
+│           ├── client.ts
+│           ├── mapper.ts
+│           └── types.ts
+├── openapi/                     # Shared OpenAPI components (errors, pagination, rate-limit, security)
+├── scripts/
+│   └── dump-openapi.ts          # Build-time spec writer → packages/api-client/openapi.json
 ├── middleware/
 ├── lib/
 └── index.ts
@@ -241,7 +245,7 @@ return c.json({ orderDate: '2026-04-15T14:30:00.000Z' });
 Each marketplace implements a common interface. New marketplaces are added by implementing this interface:
 
 ```typescript
-// marketplace/types.ts
+// integrations/marketplace/types.ts
 export interface MarketplaceAdapter {
   testConnection(): Promise<boolean>;
   fetchOrders(params: SyncParams): Promise<MarketplaceOrder[]>;
@@ -287,13 +291,64 @@ const orders = await adapter.fetchOrders({ since: lastSyncAt });
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
-// ✅ Good — Prisma 7 with adapter
+// ✅ Good — Prisma 7 with adapter (note: output dir has no index, import client.ts directly)
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '../generated/prisma/client';
 
 const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] });
 export const prisma = new PrismaClient({ adapter });
 ```
+
+## REST API Documentation
+
+The REST API is self-documenting via OpenAPI 3.1, auto-generated from Zod schemas using `@hono/zod-openapi@0.19.x` (pinned — v1.x requires Zod 4). Every route in `apps/api/src/routes/` is defined with `createRoute()`. Schemas live in `apps/api/src/validators/` with `.openapi()` metadata. Shared error/pagination/rate-limit/security components live in `apps/api/src/openapi/`.
+
+### Required per route
+
+- `tags: [...]`, `summary`, `description`
+- `security: [{ bearerAuth: [] }]` for authenticated endpoints
+- All possible response status codes (200, 400, 401, 403, 404, 422, 429, …)
+- `headers: RateLimitHeaders` on 200s of protected endpoints
+- `429: Common429Response` on protected endpoints
+- Examples on schemas via `.openapi({ example })` — placeholder data only, never real customer data
+- `deprecated: true` on routes scheduled for removal
+
+### Shared OpenAPI components (apps/api/src/openapi/)
+
+- `ProblemDetailsSchema` (RFC 7807 with machine-readable `code`) — use as the schema on every error response
+- `ValidationErrorDetailSchema` — nested inside `ProblemDetails.errors` on 422
+- `RateLimitHeaders` — **a `z.object({...})` whose fields are header names** (`X-RateLimit-Limit/Remaining/Reset`). Pass it directly as `responses[200].headers: RateLimitHeaders`; the library accepts `AnyZodObject | HeadersObject` there.
+- `Common429Response` — complete `{ description, headers, content }` with `Retry-After` header and `ProblemDetailsSchema` body
+- `CursorMetaSchema` + `paginated(itemSchema)` — paginated list response shape
+- `bearerAuthScheme` — HTTP Bearer JWT, registered on the document via `openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", bearerAuthScheme)` in `index.ts` (and mirrored in `scripts/dump-openapi.ts`)
+
+### Adding or changing a route
+
+1. Define/update the Zod schema in `apps/api/src/validators/<feature>.validator.ts` with `.openapi(name, { description, example })`.
+2. Define the route in `apps/api/src/routes/<feature>.routes.ts` using `createRoute(...)` + `app.openapi(route, handler)`.
+3. Mount in `apps/api/src/index.ts` via `app.route("/", <feature>Routes)`.
+4. **Mirror the mount in `apps/api/scripts/dump-openapi.ts`** — the dump script duplicates route registration by design (importing `index.ts` would trigger `serve()`). Until the `createApp()` factory refactor lands (deferred, needs ≥3 routes), both files must stay in sync.
+5. From the repo root: `pnpm api:sync` — regenerates `packages/api-client/openapi.json` and `packages/api-client/src/generated/api.d.ts`.
+6. Commit the regenerated `openapi.json` snapshot. Types are gitignored and rebuilt from the snapshot.
+7. Log the change in `docs/api-changelog.md` under `[Unreleased]`.
+
+CI rejects PRs where the spec snapshot drifts from the registered routes (see `.github/workflows/ci.yml`).
+
+### Serving the docs
+
+- Dev/staging: `/v1/openapi.json` (spec) and `/v1/docs` (Scalar UI) are mounted by `index.ts` gated on `NODE_ENV !== "production"`. Production does not expose either.
+- Local: `pnpm dev --filter api` binds the server via `@hono/node-server`'s `serve()`. `export default app` alone does not listen on Node.
+
+### Conventions
+
+- **Casing**: camelCase in all JSON request/response bodies, query/path params, and headers. Snake_case is confined to the DB layer (Prisma `@@map`).
+- **Pagination**: cursor-based only. Use `cursorPaginationSchema` from `@pazarsync/utils`. Cursor encodes `{ v, sort, values: { …, id } }`. Server validates `sort` matches the request param; mismatch returns `400 CURSOR_SORT_MISMATCH`.
+- **Errors**: RFC 7807 `ProblemDetails` with a stable `code` field (SCREAMING_SNAKE_CASE). English `title`/`detail` for logs; `code` is what the frontend translates.
+- **Money**: `Decimal` in services, string representation in API responses.
+- **Dates**: ISO 8601 (UTC) on the wire.
+- **Path keys in the spec are version-prefixed** (`/v1/organizations`) because `OpenAPIHono().basePath("/v1")` bakes the prefix into the paths. Pair with a frontend `baseUrl` that does NOT include `/v1`.
+
+See `docs/plans/2026-04-16-api-docs-design.md` for the full design and `docs/plans/2026-04-16-api-docs-implementation.md` for the implementation history.
 
 ## No Utility Duplication
 

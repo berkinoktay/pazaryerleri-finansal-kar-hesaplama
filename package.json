@@ -15,7 +15,10 @@
     "db:seed": "pnpm --filter @pazarsync/db seed",
     "db:studio": "pnpm --filter @pazarsync/db studio",
     "check:all": "turbo run typecheck lint && pnpm format:check",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "api:openapi": "pnpm --filter @pazarsync/api openapi:dump",
+    "api:codegen": "pnpm --filter @pazarsync/api-client codegen",
+    "api:sync": "pnpm api:openapi && pnpm api:codegen"
   },
   "devDependencies": {
     "prettier": "^3.5.0",

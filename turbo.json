@@ -17,6 +17,10 @@
     },
     "clean": {
       "cache": false
+    },
+    "codegen": {
+      "inputs": ["openapi.json"],
+      "outputs": ["src/generated/**"]
     }
   }
 }

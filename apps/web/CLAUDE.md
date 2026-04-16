@@ -116,7 +116,33 @@ const { data: orders } = useOrders(storeId, { status });
 - `select` for data transformation, not in component body
 - Sensible `staleTime` defaults in QueryClient config — don't set `staleTime: 0` everywhere
 - Prefetch on hover/focus for navigation-heavy UIs
-- API client with typed request/response using Zod schemas from `@pazarsync/types`
+- All API calls go through the **typed openapi-fetch client** (see subsection below); never raw `fetch()`
+
+### Typed API Client
+
+All API calls go through `apiClient`, an `openapi-fetch` instance defined in `apps/web/src/lib/api-client.ts`. The client is typed by the `paths` and `components` interfaces exported from `@pazarsync/api-client`, which is regenerated from `apps/api`'s OpenAPI spec.
+
+- **Never** use raw `fetch()` against the API — the typed client gives autocomplete on paths, params, request bodies, and responses, plus a discriminated `{ data, error }` result.
+- **Path keys are `/v1/...`** in the generated `paths` interface because `@hono/zod-openapi` inlines the backend's `basePath("/v1")`. Pair with a frontend `baseUrl` that does NOT include `/v1`.
+- **Response body types** come from `components["schemas"]["..."]` — one source of truth, generated from the backend Zod schemas.
+- API call functions live in `src/features/<feature>/api/<feature>.api.ts` and are wrapped by React Query hooks in `hooks/`.
+- After backend route changes, run `pnpm api:sync` from the repo root to refresh both the spec snapshot and the generated types; TypeScript surfaces breakage immediately.
+
+```typescript
+// apps/web/src/features/organization/api/organizations.api.ts
+import type { components } from "@pazarsync/api-client";
+import { apiClient } from "@/lib/api-client";
+
+export type Organization = components["schemas"]["Organization"];
+
+export async function listOrganizations(): Promise<Organization[]> {
+  const { data, error } = await apiClient.GET("/v1/organizations", {});
+  if (error) {
+    throw new Error(`Failed to fetch organizations: ${JSON.stringify(error)}`);
+  }
+  return data.data;
+}
+```
 
 ```typescript
 // ✅ Query key factory — every feature MUST have one
@@ -136,7 +162,7 @@ queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
 ```
 
 ```typescript
-// ❌ Bad — raw fetch in component, inline query key
+// ❌ Bad — raw fetch in component, inline query key, untyped response
 function OrderList({ storeId }: { storeId: string }) {
   const { data } = useQuery({
     queryKey: ['orders', storeId],
@@ -156,17 +182,36 @@ function OrderList({ storeId }: { storeId: string }) {
   return <DataTable data={orders} />;
 }
 
-// In features/orders/hooks/use-orders.ts
+// In features/orders/api/orders.api.ts — thin wrapper over the typed client
+import type { components } from "@pazarsync/api-client";
+import { apiClient } from "@/lib/api-client";
+
+export type Order = components["schemas"]["Order"];
+
+export async function listOrders(
+  orgId: string,
+  storeId: string,
+  filters: { status?: Order["status"] },
+): Promise<Order[]> {
+  const { data, error } = await apiClient.GET(
+    "/v1/organizations/{orgId}/stores/{storeId}/orders",
+    { params: { path: { orgId, storeId }, query: filters } },
+  );
+  if (error) throw new Error(`Failed to fetch orders: ${JSON.stringify(error)}`);
+  return data.data;
+}
+
+// In features/orders/hooks/use-orders.ts — React Query layer, keyed via factory
 export function useOrders(
   storeId: string,
-  options?: { status?: OrderStatus; select?: (data: Order[]) => Order[] },
+  options?: { status?: Order["status"]; select?: (data: Order[]) => Order[] },
 ): UseQueryResult<Order[]> {
   const { orgId } = useOrgContext();
-  const filters: OrderFilters = { storeId, status: options?.status };
+  const filters = { storeId, status: options?.status };
 
   return useQuery({
     queryKey: orderKeys.list(filters),
-    queryFn: () => ordersApi.list(orgId, storeId, filters),
+    queryFn: () => listOrders(orgId, storeId, { status: options?.status }),
     select: options?.select,
   });
 }
