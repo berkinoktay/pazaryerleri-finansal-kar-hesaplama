@@ -4,12 +4,12 @@ Pure utility functions shared between the frontend and the backend. No framework
 
 ## What's here
 
-| Module          | Purpose                                                                                  |
-| --------------- | ---------------------------------------------------------------------------------------- |
-| `currency.ts`   | TRY formatting and `decimal.js` helpers. Money is never a `number` — always `Decimal`.   |
+| Module          | Purpose                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------- |
+| `currency.ts`   | TRY formatting and `decimal.js` helpers. Money is never a `number` — always `Decimal`.  |
 | `date.ts`       | ISO 8601 parsing, formatting, and timezone-safe helpers. The wire format is always UTC. |
-| `cursor.ts`     | `encodeCursor` / `decodeCursor` for paginated APIs. Cursors carry sort + version locks.  |
-| `validation.ts` | Zod schemas reused on both sides (e.g. `cursorPaginationSchema`).                        |
+| `cursor.ts`     | `encodeCursor` / `decodeCursor` for paginated APIs. Cursors carry sort + version locks. |
+| `validation.ts` | Zod schemas reused on both sides (e.g. `cursorPaginationSchema`).                       |
 
 ## Decision rules
 

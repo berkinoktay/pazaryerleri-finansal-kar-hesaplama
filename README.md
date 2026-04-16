@@ -97,17 +97,17 @@ pnpm check:full             # pre-PR gate  (above + integration tests)
 
 ## Documentation
 
-| Document                                                                | When to read                                                             |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **[`docs/SECURITY.md`](docs/SECURITY.md)**                              | **Mandatory** before touching user data, credentials, or tenant boundaries |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                          | Before designing a feature or modifying the DB schema                    |
-| [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)                      | Before scoping or making UX decisions                                    |
-| [`docs/TESTING.md`](docs/TESTING.md)                                    | Before writing or running tests                                          |
-| [`docs/api-changelog.md`](docs/api-changelog.md)                        | When changing any API route                                              |
-| [`docs/integrations/trendyol/`](docs/integrations/trendyol)             | **Mandatory** before any Trendyol integration work                       |
-| [`CLAUDE.md`](CLAUDE.md)                                                | Shared coding standards (TypeScript discipline, error handling, naming)  |
-| [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md)                              | Frontend rules (React Query, MSW, happy-dom, Next.js 16 specifics)       |
-| [`apps/api/CLAUDE.md`](apps/api/CLAUDE.md)                              | Backend rules (route architecture, multi-tenancy enforcement, OpenAPI)   |
+| Document                                                    | When to read                                                               |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **[`docs/SECURITY.md`](docs/SECURITY.md)**                  | **Mandatory** before touching user data, credentials, or tenant boundaries |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)              | Before designing a feature or modifying the DB schema                      |
+| [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)          | Before scoping or making UX decisions                                      |
+| [`docs/TESTING.md`](docs/TESTING.md)                        | Before writing or running tests                                            |
+| [`docs/api-changelog.md`](docs/api-changelog.md)            | When changing any API route                                                |
+| [`docs/integrations/trendyol/`](docs/integrations/trendyol) | **Mandatory** before any Trendyol integration work                         |
+| [`CLAUDE.md`](CLAUDE.md)                                    | Shared coding standards (TypeScript discipline, error handling, naming)    |
+| [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md)                  | Frontend rules (React Query, MSW, happy-dom, Next.js 16 specifics)         |
+| [`apps/api/CLAUDE.md`](apps/api/CLAUDE.md)                  | Backend rules (route architecture, multi-tenancy enforcement, OpenAPI)     |
 
 ---
 
