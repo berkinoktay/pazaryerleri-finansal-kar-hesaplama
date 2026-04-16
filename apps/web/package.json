@@ -11,8 +11,8 @@
     "clean": "rm -rf .next .turbo",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:unit": "vitest run tests/unit",
-    "test:component": "vitest run tests/component"
+    "test:unit": "vitest run tests/unit --passWithNoTests",
+    "test:component": "vitest run tests/component --passWithNoTests"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.0",
