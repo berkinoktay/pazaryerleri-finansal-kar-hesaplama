@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../generated/prisma";
+import { PrismaClient } from "../generated/prisma/client";
 
 const adapter = new PrismaPg({ connectionString: process.env["DATABASE_URL"] });
 
@@ -15,4 +15,4 @@ if (process.env["NODE_ENV"] !== "production") {
 }
 
 export type { PrismaClient };
-export * from "../generated/prisma";
+export * from "../generated/prisma/client";
