@@ -6,6 +6,35 @@ on:
     branches: [main]
 
 jobs:
+  # Detects whether the PR/push touches any non-docs files. The `test`
+  # job below gates on this so that docs-only changes (READMEs, the
+  # docs/ folder) skip the slow Supabase spin-up entirely. typecheck,
+  # lint, and api-spec-sync stay unconditional — they're fast (~45s)
+  # and useful even on docs PRs (format check, broken doc links via
+  # markdown lint in the future, etc).
+  changes:
+    name: Detect non-docs changes
+    runs-on: ubuntu-latest
+    # dorny/paths-filter calls the GitHub PR-files API to compute the diff.
+    # The default GITHUB_TOKEN permissions don't include `pull-requests: read`
+    # in repos where the org has tightened defaults — grant it explicitly.
+    permissions:
+      pull-requests: read
+      contents: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!.github/**/*.md'
+
   api-spec-sync:
     name: OpenAPI spec is in sync
     runs-on: ubuntu-latest
@@ -75,6 +104,11 @@ jobs:
 
   test:
     name: Unit and integration tests
+    needs: changes
+    # Skipped jobs report as "Skipped" (counts as success for branch
+    # protection), unlike workflow-level paths-ignore which leaves
+    # required checks pending forever.
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
