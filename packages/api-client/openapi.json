@@ -7,11 +7,11 @@
   },
   "servers": [
     {
-      "url": "http://localhost:3001/v1",
+      "url": "http://localhost:3001",
       "description": "Local dev"
     },
     {
-      "url": "https://staging-api.pazarsync.com/v1",
+      "url": "https://staging-api.pazarsync.com",
       "description": "Staging"
     }
   ],

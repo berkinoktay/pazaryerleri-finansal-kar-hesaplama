@@ -47,8 +47,8 @@ const spec = app.getOpenAPI31Document({
     description: "Internal REST API.",
   },
   servers: [
-    { url: "http://localhost:3001/v1", description: "Local dev" },
-    { url: "https://staging-api.pazarsync.com/v1", description: "Staging" },
+    { url: "http://localhost:3001", description: "Local dev" },
+    { url: "https://staging-api.pazarsync.com", description: "Staging" },
   ],
   security: [{ bearerAuth: [] }],
 });
