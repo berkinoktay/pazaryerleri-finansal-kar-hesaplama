@@ -68,6 +68,7 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 | Backend Rules | `apps/api/CLAUDE.md` | When working in `apps/api/` |
 | API Changelog | `docs/api-changelog.md` | When changing any route — log under `[Unreleased]` |
 | Design Plans | `docs/plans/` | When designing or implementing a non-trivial feature |
+| Testing Patterns | `docs/TESTING.md` | When writing OR running tests |
 
 **Trendyol integration:** Before writing any Trendyol-related code, read the relevant files under `docs/integrations/trendyol/`. Key files:
 - `2-authorization.md` — API authentication
@@ -387,6 +388,25 @@ order.types.ts           → domain-specific name
 format-currency.ts       → descriptive name
 ```
 
+## Testing
+
+PazarSync uses a hybrid testing strategy — strict TDD for pure logic, test-with-code for routes/services, pragmatic for UI, MANDATORY for multi-tenancy invariants. See `docs/TESTING.md` for the full pattern library.
+
+Non-negotiable rules:
+- Every org-scoped endpoint MUST have a multi-tenancy isolation test in `apps/api/tests/integration/tenant-isolation/`. No exceptions.
+- Every utility/pure function MUST have unit tests. TDD discipline (write test → see it fail → implement → see it pass).
+- Every new endpoint MUST have at least one happy-path integration test in the SAME PR as the route code.
+- Frontend hooks that fetch data MUST have a test using MSW. Components with user interaction (forms, modals) MUST have a component test.
+- Never commit with failing tests, never commit with `it.skip` without a comment + tracked TODO.
+
+Commands:
+- `pnpm test:unit` — fast (no DB), run on every change
+- `pnpm test:integration` — slow (needs `supabase start` + `pnpm db:push`), run before commits
+- `pnpm test` — both
+- `pnpm test:watch` — watch mode
+- `pnpm check:all` — pre-commit gate: typecheck + lint + unit tests + format check (no DB)
+- `pnpm check:full` — pre-PR gate: typecheck + lint + ALL tests + format check (needs Supabase local)
+
 ## No Utility Duplication
 
 The same function must NEVER be defined in more than one place. Before writing a new utility:
@@ -477,9 +497,18 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 ## Verification
 
-- After ANY code edit to TypeScript/TSX files, run `npx tsc --noEmit` before proceeding. Fix errors immediately — do not ask the user.
-- Before committing, run `pnpm check:all` (tsc, eslint, suppressions, knip, i18n, type-coverage, cpd, vitest).
-- Every task must have explicit success criteria before implementation starts.
+- After editing any source file, run the affected package's tests:
+  - `pnpm --filter <package> test:unit` — for any logic change
+  - `pnpm --filter <package> test:integration` — for any route, service, or DB query change (needs `supabase start`)
+- After adding a new endpoint, write the integration test in the same PR. Do NOT merge route code without its test.
+- After adding a new org-scoped endpoint, write the multi-tenancy isolation test in the same PR (see `docs/TESTING.md` § "Multi-Tenancy Test Pattern").
+- **Before committing**: run `pnpm check:all` — typecheck + lint + unit tests + format check. Fast, no DB required.
+- **Before opening a PR**: run `supabase start && pnpm check:full` — same as `check:all` plus the full integration suite. Mirrors what CI runs.
+- Never commit with failing tests. If a test reveals a bug in your work, fix the bug — don't disable the test.
+- Never commit with skipped tests (`it.skip`, `describe.skip`) without:
+  - A code comment explaining why it's skipped, AND
+  - A tracked issue/TODO with the unskip plan
+- After ANY code edit to TypeScript/TSX files, run `npx tsc --noEmit` for the affected package before proceeding. Fix errors immediately — do not ask the user.
 
 ## Pre-Commit Skill Workflow
 
