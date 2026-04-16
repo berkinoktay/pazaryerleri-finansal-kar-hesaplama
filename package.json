@@ -23,9 +23,12 @@
     "clean": "turbo run clean",
     "api:openapi": "pnpm --filter @pazarsync/api openapi:dump",
     "api:codegen": "pnpm --filter @pazarsync/api-client codegen",
-    "api:sync": "pnpm api:openapi && pnpm api:codegen"
+    "api:sync": "pnpm api:openapi && pnpm api:codegen",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.5.0",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "turbo": "^2.5.0",
@@ -34,5 +37,8 @@
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=20.19.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,css,md}": "prettier --write"
   }
 }
