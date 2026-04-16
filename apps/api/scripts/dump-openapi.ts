@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 
 import { bearerAuthScheme } from "../src/openapi";
+import organizationRoutes from "../src/routes/organization.routes";
 
 // NOTE: This script must mirror the spec configuration in apps/api/src/index.ts.
 // We construct a minimal OpenAPIHono just to call getOpenAPI31Document and write
@@ -38,6 +39,9 @@ const healthRoute = createRoute({
 });
 
 app.openapi(healthRoute, (c) => c.json({ status: "ok" as const }, 200));
+
+// Feature routes (mirror apps/api/src/index.ts).
+app.route("/", organizationRoutes);
 
 const spec = app.getOpenAPI31Document({
   openapi: "3.1.0",

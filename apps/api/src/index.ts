@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
 import { bearerAuthScheme } from "./openapi";
+import organizationRoutes from "./routes/organization.routes";
 
 const app = new OpenAPIHono().basePath("/v1");
 
@@ -32,6 +33,9 @@ const healthRoute = createRoute({
 });
 
 app.openapi(healthRoute, (c) => c.json({ status: "ok" as const }, 200));
+
+// Feature routes.
+app.route("/", organizationRoutes);
 
 // Spec + docs UI — DEV/STAGING ONLY. Production has no public surface here.
 if (process.env["NODE_ENV"] !== "production") {
