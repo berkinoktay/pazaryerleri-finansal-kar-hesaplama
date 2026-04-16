@@ -356,6 +356,57 @@ const ProfitChart = dynamic(
 );
 ```
 
+## Testing
+
+Frontend tests live in `apps/web/tests/`, organized by category:
+
+```
+apps/web/tests/
+├── unit/                   # Hook tests, pure utility tests
+├── component/              # React component tests via RTL
+└── helpers/                # render, msw
+```
+
+### Stack
+
+- **Vitest** — test runner
+- **happy-dom** — DOM environment (NOT jsdom — see Forbidden patterns below)
+- **@testing-library/react** — component rendering
+- **@testing-library/user-event** — typing, clicking (preferred over `fireEvent`)
+- **@testing-library/jest-dom** — DOM matchers (`toBeInTheDocument`, etc.)
+- **MSW (Mock Service Worker)** — intercepts HTTP at the network layer
+
+### When tests are required
+
+| Change | Required test |
+|--------|---------------|
+| New custom React Query hook in `features/*/hooks/` | Hook test using MSW (`tests/unit/hooks/`) |
+| New form component (validation, error states) | Component test (`tests/component/`) |
+| New interactive component (modal, wizard, multi-step) | Component test |
+| New utility in `lib/` | Unit test |
+
+NOT required (over-testing slows iteration):
+- Pure presentational components (`<Card>`, `<Badge>`, layout primitives)
+- shadcn/ui re-exports
+- Trivial layout/wrapper components
+
+### Pattern reference
+
+Full patterns in `docs/TESTING.md`. The most important ones:
+
+- **Hook tests use MSW**, never mock `apiClient`. The whole point of the typed client is end-to-end type safety from backend Zod → frontend hook. Mocking `apiClient` defeats this.
+- **Custom render wrapper**: use `render` from `tests/helpers/render.tsx` — provides `QueryClientProvider` and a `user` instance for `userEvent`.
+- **MSW handlers**: defaults in `tests/helpers/msw.ts`. Per-test overrides via `server.use(http.get(...))`.
+
+### Forbidden patterns
+
+- ❌ Switching back to `environment: "jsdom"` — jsdom 29 isolates fetch in its own per-realm context, so MSW v2's `setupServer` never sees requests issued from the test. Hook tests will hang. happy-dom uses Node's native fetch which MSW intercepts cleanly.
+- ❌ Mocking `@pazarsync/api-client` directly — use MSW
+- ❌ `getByTestId` as the first choice — use `getByRole` (accessibility-first)
+- ❌ `fireEvent` for typing/clicking — use `userEvent`
+- ❌ Snapshot tests — fragile, hide intent
+- ❌ Testing internal state — assert on what the user sees, not implementation
+
 ## No Utility Duplication
 
 Before writing a new utility, check `packages/utils/src/` first. If it's frontend-only (e.g., React hooks, DOM helpers), put it in `apps/web/src/lib/`. If it's shared (currency, date, validation), it goes in `@pazarsync/utils`.
