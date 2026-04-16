@@ -66,6 +66,8 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 | Trendyol API Docs | `docs/integrations/trendyol/` | **MUST READ** before any Trendyol integration work |
 | Frontend Rules | `apps/web/CLAUDE.md` | When working in `apps/web/` |
 | Backend Rules | `apps/api/CLAUDE.md` | When working in `apps/api/` |
+| API Changelog | `docs/api-changelog.md` | When changing any route — log under `[Unreleased]` |
+| Design Plans | `docs/plans/` | When designing or implementing a non-trivial feature |
 
 **Trendyol integration:** Before writing any Trendyol-related code, read the relevant files under `docs/integrations/trendyol/`. Key files:
 - `2-authorization.md` — API authentication
