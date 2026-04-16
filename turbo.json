@@ -21,6 +21,21 @@
     "codegen": {
       "inputs": ["openapi.json"],
       "outputs": ["src/generated/**"]
+    },
+    "test": {
+      "dependsOn": ["^build", "codegen"],
+      "outputs": []
+    },
+    "test:unit": {
+      "outputs": []
+    },
+    "test:integration": {
+      "outputs": [],
+      "env": ["DATABASE_URL", "DIRECT_URL"]
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true
     }
   }
 }
