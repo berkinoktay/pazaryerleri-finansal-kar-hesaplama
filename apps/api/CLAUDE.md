@@ -350,6 +350,55 @@ CI rejects PRs where the spec snapshot drifts from the registered routes (see `.
 
 See `docs/plans/2026-04-16-api-docs-design.md` for the full design and `docs/plans/2026-04-16-api-docs-implementation.md` for the implementation history.
 
+## Testing
+
+Backend tests live in `apps/api/tests/`, organized by category:
+
+```
+apps/api/tests/
+├── unit/                       # Pure logic — no DB, no I/O. Strict TDD.
+├── integration/
+│   ├── routes/                 # Hono routes via app.request() — uses real DB
+│   └── tenant-isolation/       # CRITICAL — multi-tenancy invariants
+└── helpers/                    # db, factories, (future) auth
+```
+
+### When tests are required
+
+| Change | Required test |
+|--------|---------------|
+| New utility function (`apps/api/src/lib/`) | Unit test, TDD |
+| New service function (`apps/api/src/services/`) | Integration test (real DB via factories) |
+| New route (`apps/api/src/routes/`) | Integration test in `tests/integration/routes/` |
+| New org-scoped route | Above + tenant-isolation test in `tests/integration/tenant-isolation/` |
+| New marketplace adapter (`apps/api/src/integrations/`) | Unit test for mapper logic; mock the HTTP client |
+
+### Pattern reference
+
+Full patterns in `docs/TESTING.md`. The most important ones:
+
+- **DB integration pattern**: every DB test does `await ensureDbReachable()` in `beforeAll`, `await truncateAll()` in `beforeEach` (see `tests/helpers/db.ts`)
+- **Test data factories**: use `createOrganization`, `createStore`, `createOrder`, etc. from `tests/helpers/factories.ts` — never hand-construct Prisma create payloads in tests
+- **Multi-tenancy isolation pattern**: create two orgs, write data in one, query in the other, assert empty result. See `tests/integration/tenant-isolation/data-layer-isolation.test.ts` for the canonical example.
+
+### Pre-requisites for running integration tests
+
+```bash
+supabase start             # local Postgres on port 54322
+pnpm db:push               # apply Prisma schema to local DB
+pnpm --filter @pazarsync/api test:integration
+```
+
+The workspace-root `.env` is auto-loaded by `apps/api/vitest.config.ts` via dotenv, so `DATABASE_URL` and `DIRECT_URL` don't need to be exported in your shell. If integration tests error with "Cannot reach test database", you skipped one of the steps above (or your `.env` is missing). The `ensureDbReachable` helper prints the exact remediation.
+
+### Forbidden patterns
+
+- ❌ Mocking Prisma in integration tests — they exist to test real SQL
+- ❌ Sharing state across tests — every test starts with empty DB via `truncateAll`
+- ❌ Hand-rolled JWTs in tests — when auth lands, use `signTestJwt` from `tests/helpers/auth.ts` (planned)
+- ❌ Skipping the tenant-isolation test for a "trivial" endpoint — there is no trivial multi-tenant endpoint
+- ❌ Removing `fileParallelism: false` from `vitest.config.ts` — integration tests share one DB; parallel files race on `truncateAll`
+
 ## No Utility Duplication
 
 Before writing a new utility, check `packages/utils/src/` first. If it's backend-only (e.g., encryption, JWT verification), put it in `apps/api/src/lib/`. If it's shared (currency, date, validation), it goes in `@pazarsync/utils`.
