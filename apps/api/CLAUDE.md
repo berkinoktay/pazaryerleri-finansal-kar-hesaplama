@@ -1,0 +1,309 @@
+# CLAUDE.md — PazarSync Backend
+
+> See also: root `CLAUDE.md` for shared coding standards, and `docs/ARCHITECTURE.md` for system architecture.
+
+## CRITICAL: Security First
+
+> **`docs/SECURITY.md` is mandatory reading.** The backend is the enforcement point for tenant isolation and credential security. Every route, service, and DB query you write must satisfy:
+>
+> 1. **Tenant isolation** — every query filters by `organizationId` from the request context (set by `orgContextMiddleware`). Cross-tenant data leak = critical bug.
+> 2. **Store authorization** — store-scoped queries verify the store belongs to the current org before returning data.
+> 3. **Credential encryption** — marketplace API keys are stored encrypted (AES-256-GCM), decrypted only inside marketplace adapters, never logged, never returned in API responses.
+> 4. **Role enforcement** — destructive or sensitive actions are gated by `requireRole()` middleware on the backend, not the frontend.
+>
+> See [`docs/SECURITY.md`](../../docs/SECURITY.md) for full rules, enforcement patterns, and the Security Review Checklist.
+
+## Marketplace Integration References
+
+**Before writing ANY Trendyol-related code, you MUST read the relevant documentation:**
+
+| Task | Read First |
+|------|-----------|
+| Order sync | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/siparis-entegrasyonlari.md` |
+| Product sync | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md` |
+| Settlement/finance | `docs/integrations/trendyol/8-trendyol-muhasebe-ve-finans-entegrasyonu/` |
+| Returns/refunds | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/iade-entegrasyonu/` |
+| Auth/API keys | `docs/integrations/trendyol/2-authorization.md` |
+| Rate limits | `docs/integrations/trendyol/1-servis-limitleri.md` |
+| Error codes | `docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/hata-kodlari.md` |
+
+## Route Architecture
+
+Feature-based folder structure. Each route module has its own route, service, validator, and types:
+
+```
+src/
+├── routes/
+│   ├── order.routes.ts          # Route definitions, delegates to service
+│   ├── product.routes.ts
+│   ├── store.routes.ts
+│   └── ...
+├── services/
+│   ├── order.service.ts         # Business logic, uses Prisma
+│   ├── product.service.ts
+│   └── ...
+├── validators/
+│   ├── order.validator.ts       # Zod schemas for request validation
+│   ├── store.validator.ts
+│   └── ...
+├── marketplace/                 # Marketplace API adapters
+│   ├── types.ts                 # Common MarketplaceAdapter interface
+│   ├── trendyol/
+│   │   ├── client.ts
+│   │   ├── mapper.ts
+│   │   └── types.ts
+│   └── hepsiburada/
+│       ├── client.ts
+│       ├── mapper.ts
+│       └── types.ts
+├── middleware/
+├── lib/
+└── index.ts
+```
+
+```typescript
+// ❌ Bad — business logic in route handler
+app.get('/orders', async (c) => {
+  const orgId = c.get('organizationId');
+  const orders = await prisma.order.findMany({
+    where: { organizationId: orgId },
+    include: { items: true },
+  });
+  const withProfit = orders.map((o) => ({
+    ...o,
+    profit: Number(o.totalAmount) - Number(o.commissionAmount) - Number(o.shippingCost),
+  }));
+  return c.json({ data: withProfit });
+});
+
+// ✅ Good — route delegates to service
+// routes/order.routes.ts
+app.get('/orders', zValidator('query', orderListSchema), async (c) => {
+  const filters = c.req.valid('query');
+  const orgId = c.get('organizationId');
+  const storeId = c.req.param('storeId');
+  const result = await orderService.list(orgId, storeId, filters);
+  return c.json(result);
+});
+
+// services/order.service.ts
+export async function list(
+  orgId: string,
+  storeId: string,
+  filters: OrderListInput,
+): Promise<PaginatedResponse<OrderWithProfit>> {
+  const orders = await prisma.order.findMany({
+    where: { organizationId: orgId, storeId, ...buildFilters(filters) },
+    include: { items: true },
+    ...buildPagination(filters),
+  });
+  return toPaginatedResponse(orders.map(calculateOrderProfit), filters);
+}
+```
+
+## Middleware Chain
+
+Every request passes through this middleware chain in order:
+
+```
+cors → logger → auth → orgContext → rateLimit → handler
+```
+
+```typescript
+// ❌ Bad — auth check inside route handler
+app.get('/orders', async (c) => {
+  const token = c.req.header('Authorization');
+  if (!token) return c.json({ error: 'Unauthorized' }, 401);
+  const user = await verifyToken(token);
+  if (!user) return c.json({ error: 'Invalid token' }, 401);
+  // ... then check org membership manually
+});
+
+// ✅ Good — middleware handles auth + org context
+// middleware/auth.middleware.ts
+export const authMiddleware = createMiddleware(async (c, next) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '');
+  if (!token) throw new UnauthorizedError();
+  const payload = await verifySupabaseJwt(token);
+  c.set('userId', payload.sub);
+  await next();
+});
+
+// middleware/org-context.middleware.ts
+export const orgContextMiddleware = createMiddleware(async (c, next) => {
+  const orgId = c.req.param('orgId');
+  const userId = c.get('userId');
+  const membership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: orgId, userId } },
+  });
+  if (!membership) throw new ForbiddenError('Not a member of this organization');
+  c.set('organizationId', orgId);
+  c.set('memberRole', membership.role);
+  await next();
+});
+```
+
+## Multi-Tenancy Enforcement
+
+**Every database query MUST filter by `organization_id`.** This is enforced by the `orgContext` middleware injecting it into context.
+
+```typescript
+// ❌ Bad — no org filter, data leak across tenants
+async function getProducts(storeId: string) {
+  return prisma.product.findMany({
+    where: { storeId },
+  });
+}
+
+// ✅ Good — always filter by organizationId
+async function getProducts(orgId: string, storeId: string) {
+  return prisma.product.findMany({
+    where: {
+      organizationId: orgId,
+      storeId,
+    },
+  });
+}
+```
+
+## API Design
+
+### Request Validation
+
+Every route validates input with Zod. Never trust raw request data.
+
+```typescript
+// validators/order.validator.ts
+export const orderListSchema = z.object({
+  status: z.nativeEnum(OrderStatus).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  sort: z.string().default('order_date:desc'),
+});
+
+export type OrderListInput = z.infer<typeof orderListSchema>;
+```
+
+### Error Responses (RFC 7807)
+
+```typescript
+// ❌ Bad — inconsistent error format
+return c.json({ error: 'Not found' }, 404);
+return c.json({ message: 'Bad request', field: 'cost_price' }, 400);
+
+// ✅ Good — RFC 7807 Problem Details
+return c.json({
+  type: 'https://api.pazarsync.com/errors/not-found',
+  title: 'Order Not Found',
+  status: 404,
+  detail: `Order ${orderId} not found in store ${storeId}`,
+}, 404);
+
+return c.json({
+  type: 'https://api.pazarsync.com/errors/validation',
+  title: 'Validation Error',
+  status: 422,
+  detail: 'Request body contains invalid fields',
+  errors: [
+    { field: 'cost_price', message: 'Must be a positive number' },
+  ],
+}, 422);
+```
+
+### Monetary Values
+
+All money values use `Decimal` in the service layer and string representation in API responses:
+
+```typescript
+// ❌ Bad — floating point in API response
+return c.json({ profit: 46.46999999999999 });
+
+// ✅ Good — string representation preserving precision
+return c.json({ profit: order.netProfit.toString() }); // "46.47"
+```
+
+### Dates
+
+ISO 8601 format (UTC) across all API boundaries:
+
+```typescript
+// ❌ Bad — locale-specific date format
+return c.json({ orderDate: '15/04/2026' });
+
+// ✅ Good — ISO 8601 UTC
+return c.json({ orderDate: '2026-04-15T14:30:00.000Z' });
+```
+
+## Marketplace Adapters (Strategy Pattern)
+
+Each marketplace implements a common interface. New marketplaces are added by implementing this interface:
+
+```typescript
+// marketplace/types.ts
+export interface MarketplaceAdapter {
+  testConnection(): Promise<boolean>;
+  fetchOrders(params: SyncParams): Promise<MarketplaceOrder[]>;
+  fetchProducts(params: SyncParams): Promise<MarketplaceProduct[]>;
+  fetchSettlements(params: SyncParams): Promise<MarketplaceSettlement[]>;
+}
+
+// ❌ Bad — marketplace-specific logic scattered everywhere
+if (store.platform === 'TRENDYOL') {
+  const orders = await fetchTrendyolOrders(store.credentials);
+} else if (store.platform === 'HEPSIBURADA') {
+  const orders = await fetchHepsiburadaOrders(store.credentials);
+}
+
+// ✅ Good — adapter pattern
+function getAdapter(store: Store): MarketplaceAdapter {
+  const adapters: Record<Platform, (creds: Json) => MarketplaceAdapter> = {
+    TRENDYOL: (creds) => new TrendyolAdapter(creds),
+    HEPSIBURADA: (creds) => new HepsiburadaAdapter(creds),
+  };
+  const credentials = decryptCredentials(store.credentials);
+  return adapters[store.platform](credentials);
+}
+
+const adapter = getAdapter(store);
+const orders = await adapter.fetchOrders({ since: lastSyncAt });
+```
+
+## Prisma 7 Conventions
+
+- Generator: `prisma-client` (not `prisma-client-js`)
+- Output: `../generated/prisma` (relative to schema dir)
+- Datasource URL: configured in `prisma.config.ts`, not in schema
+- Driver adapter: `@prisma/adapter-pg` required
+- ESM default: `"type": "module"` in package.json
+- Schema: `@@map` for snake_case table names
+- All tenant tables: `organization_id` with index
+- Hard delete with cascading (no soft delete)
+- `created_at` + `updated_at` on all tables
+
+```typescript
+// ❌ Bad — importing from old Prisma path
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+
+// ✅ Good — Prisma 7 with adapter
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma';
+
+const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] });
+export const prisma = new PrismaClient({ adapter });
+```
+
+## No Utility Duplication
+
+Before writing a new utility, check `packages/utils/src/` first. If it's backend-only (e.g., encryption, JWT verification), put it in `apps/api/src/lib/`. If it's shared (currency, date, validation), it goes in `@pazarsync/utils`.
+
+```typescript
+// ❌ Bad — redefining formatCurrency in the backend
+// apps/api/src/lib/format.ts
+export function formatCurrency(val: number) { ... }
+
+// ✅ Good — import from shared package
+import { formatCurrency } from '@pazarsync/utils';
+```

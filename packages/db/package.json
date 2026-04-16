@@ -1,0 +1,31 @@
+{
+  "name": "@pazarsync/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate:dev": "prisma migrate dev",
+    "push": "prisma db push",
+    "seed": "tsx prisma/seed.ts",
+    "studio": "prisma studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.7.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@prisma/client": "^7.7.0",
+    "@types/pg": "^8.11.0",
+    "dotenv": "^16.4.0",
+    "prisma": "^7.7.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5"
+  }
+}

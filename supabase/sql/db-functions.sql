@@ -1,0 +1,2 @@
+-- PostgreSQL functions for business logic that runs at DB level
+-- (e.g., trigger functions, RLS helper functions)

@@ -1,0 +1,3 @@
+-- Row-Level Security policies for multi-tenant isolation
+-- Applied after Prisma migrations create the tables
+-- Run via: psql or Supabase Dashboard SQL Editor

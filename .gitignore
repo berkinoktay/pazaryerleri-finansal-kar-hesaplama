@@ -1,0 +1,43 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build
+dist/
+.next/
+.turbo/
+out/
+
+# prisma (Prisma 7 output: ../generated/prisma relative to schema)
+packages/db/generated/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# debug
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# vercel
+.vercel/
+
+# supabase
+supabase/.temp/
+
+# Claude Code — user-local config and MCP secrets
+.claude/settings.local.json
+.mcp.json
+
+# Prisma generated (alternate path)
+packages/db/prisma/generated/

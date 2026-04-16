@@ -1,0 +1,2 @@
+-- pg_cron job definitions for marketplace sync
+-- Requires: pg_cron and pg_net extensions enabled in Supabase Dashboard
