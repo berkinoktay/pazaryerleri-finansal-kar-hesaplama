@@ -24,6 +24,7 @@
     "api:openapi": "pnpm --filter @pazarsync/api openapi:dump",
     "api:codegen": "pnpm --filter @pazarsync/api-client codegen",
     "api:sync": "pnpm api:openapi && pnpm api:codegen",
+    "gen:encryption-key": "pnpm --filter @pazarsync/api gen:encryption-key",
     "prepare": "husky"
   },
   "devDependencies": {
