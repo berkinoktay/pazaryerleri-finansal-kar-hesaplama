@@ -1,0 +1,80 @@
+/**
+ * Typography tokens
+ *
+ * Scale calibrated for a data-dense financial dashboard read all day long.
+ * Low end lifted +1px vs the original ratio to keep secondary labels and
+ * small body copy comfortably readable without zoom. Line-heights absolute
+ * for reliable vertical rhythm in KPI grids and tables.
+ *
+ *   2xs  12/16  — eyebrow labels, chips, table column headers
+ *   xs   13/18  — secondary body, helper text, tooltip, badge
+ *   sm   14/20  — table cells, form fields, dense lists (default dashboard size)
+ *   base 15/22  — primary body, landing paragraph baseline
+ *   md   16/24  — lead paragraph, card title, form label hero
+ *   lg   18/26  — sub-section heading
+ *   xl   20/28  — section heading
+ *   2xl  24/30  — page title
+ *   3xl  30/38  — headline
+ *   4xl  38/44  — KPI hero
+ *   5xl  48/56  — landing hero
+ *   6xl  60/64  — oversized display
+ *
+ * Font stack:
+ * - Host Grotesk: body + display. Loaded via next/font in app/layout.tsx.
+ * - JetBrains Mono: code, IDs (order numbers, SKUs). Primary numeric
+ *   tabular alignment is achieved via `font-variant-numeric: tabular-nums`
+ *   on Host Grotesk, not via mono.
+ */
+
+:root {
+  --font-sans:
+    var(--font-host-grotesk), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-2xs: 12px;
+  --text-2xs--line-height: 16px;
+
+  --text-xs: 13px;
+  --text-xs--line-height: 18px;
+
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+
+  --text-base: 15px;
+  --text-base--line-height: 22px;
+
+  --text-md: 16px;
+  --text-md--line-height: 24px;
+
+  --text-lg: 18px;
+  --text-lg--line-height: 26px;
+
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+
+  --text-2xl: 24px;
+  --text-2xl--line-height: 30px;
+
+  --text-3xl: 30px;
+  --text-3xl--line-height: 38px;
+
+  --text-4xl: 38px;
+  --text-4xl--line-height: 44px;
+
+  --text-5xl: 48px;
+  --text-5xl--line-height: 56px;
+
+  --text-6xl: 60px;
+  --text-6xl--line-height: 64px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.08em;
+}

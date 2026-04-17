@@ -226,14 +226,50 @@ export function useOrders(
 
 ## CSS & Tailwind
 
-- Tailwind only, no inline `style={}` except truly dynamic values (e.g., chart dimensions)
+- Tailwind v4 with token-first design system. Token definitions live in `src/app/tokens/*.css`; `globals.css` wires them through `@theme inline`. **Never add arbitrary values in component code** — if a value is missing, extend the token system.
 - `cn()` for conditional classes, never string concatenation
-- Prefer Tailwind scale over arbitrary values (`p-4` not `p-[17px]`)
+- No inline `style={}` except truly runtime-dynamic values (progress bar width, drag offsets). Mark each with a `// runtime-dynamic: <reason>` comment so code review can distinguish legitimate cases from violations.
 - Mobile-first responsive design
 - Turkish text always through i18n (next-intl), never inline
+- Raw shadcn/ui primitives live in `src/components/ui/`. All feature code imports from there — never fork a primitive to "tweak" styles; extend the token layer or add a pattern wrapper in `src/components/patterns/` instead.
+
+### Tailwind v4 token namespaces (load-bearing)
+
+Tailwind v4 maps named utility classes to CSS custom properties by namespace. The full list:
+
+| Namespace         | Drives utilities                                                   |
+| ----------------- | ------------------------------------------------------------------ |
+| `--color-*`       | `bg-*`, `text-*`, `border-*`, `fill-*`, `ring-*`                   |
+| `--font-*`        | `font-sans`, `font-mono`                                           |
+| `--text-*`        | `text-xs`, `text-base`, `text-md`, `text-2xl`, ...                 |
+| `--font-weight-*` | `font-medium`, `font-semibold`, ...                                |
+| `--tracking-*`    | `tracking-tight`, `tracking-wide`                                  |
+| `--radius-*`      | `rounded-sm`, `rounded-md`, `rounded-lg`, ...                      |
+| `--shadow-*`      | `shadow-xs`, `shadow-md`, `shadow-lg`                              |
+| `--ease-*`        | `ease-out-quart`, `ease-out-expo`                                  |
+| `--duration-*`    | `duration-fast`, `duration-base`, `duration-slow`                  |
+| `--spacing-*`     | `p-*`, `m-*`, `gap-*`, `w-*`, `h-*`, `min-w-*`, **`max-w-*`**, ... |
+
+Reference: https://tailwindcss.com/docs/theme
+
+**CRITICAL gotcha — `max-w-*` collision.** In Tailwind v4 the `--spacing-*` namespace drives both spacing (`p-md`) and sizing utilities (`max-w-md`). Our design system defines a semantic spacing scale (`--space-xs` … `--space-5xl`). Without care, `max-w-md` resolves to `16px` (our `--space-md`), not `28rem`. Never use the T3-era `max-w-(xs|sm|md|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl)` names — ESLint blocks them. Use role-based domain tokens instead:
+
+```
+max-w-input-narrow  →  20rem  (320px) · single short field
+max-w-input         →  24rem  (384px) · search / text field column
+max-w-form          →  28rem  (448px) · form column
+max-w-sheet         →  24rem  (384px) · slide-over sheet (mobile)
+max-w-sheet-wide    →  28rem  (448px) · slide-over sheet (sm+)
+max-w-modal         →  32rem  (512px) · dialog content
+max-w-headline      →  56rem  (896px) · landing hero H1 column
+max-w-content-max   →  1440px        · page body cap
+max-w-prose-max     →  68ch          · readable prose column
+```
+
+If a new role emerges, add it to `src/app/tokens/spacing.css` (as `--size-<role>`) and consume it as `max-w-<role>`. Do not reach for `max-w-[32rem]`.
 
 ```tsx
-// ❌ Bad — string concatenation, arbitrary values, inline styles
+// ❌ Bad — string concatenation, arbitrary values, inline styles, Tailwind T3-era max-w names
 function ProfitBadge({ profit }: { profit: Decimal }) {
   const isPositive = profit.gt(0);
   return (
@@ -249,13 +285,15 @@ function ProfitBadge({ profit }: { profit: Decimal }) {
   );
 }
 
-// ✅ Good — cn(), Tailwind scale, no inline styles
+// ✅ Good — cn(), token utilities, no inline styles, semantic tones
 function ProfitBadge({ profit }: { profit: Decimal }) {
   return (
     <span
       className={cn(
-        'ml-3 min-w-[4.5rem] rounded px-2 py-1 text-sm',
-        profit.gt(0) ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700',
+        'ml-sm px-xs py-3xs text-2xs rounded-full font-medium tabular-nums',
+        profit.gt(0)
+          ? 'bg-success-surface text-success'
+          : 'bg-destructive-surface text-destructive',
       )}
     >
       {formatCurrency(profit)}
@@ -263,6 +301,84 @@ function ProfitBadge({ profit }: { profit: Decimal }) {
   );
 }
 ```
+
+### Responsive, touch, and transparency discipline
+
+Three additional guardrails that extend the token-first rule above. Each is grep-able in code review.
+
+**1. Content-driven breakpoints, not device-ladders.** Don't add breakpoints because a phone/tablet/desktop "should" have one — add them where the content actually starts to break. Start narrow, widen the viewport until alignment, line length, or hierarchy fails, add a breakpoint there. Three is usually enough (`sm`, `md`, `lg`). `clamp()` and `auto-fit` grids reduce the need for breakpoints entirely. Anti-pattern: a component with `sm: md: lg: xl: 2xl:` variants that only re-tile at two of them — the rest are noise.
+
+**2. Detect input method, not just viewport.** Touch devices can't hover, and a desktop user with a stylus can have a small viewport. Use `@media (pointer: coarse)` to widen touch targets and swap hover affordances for always-visible ones, independent of breakpoint. Critical for tables/toolbars where 32–36px icon buttons are fine with a mouse but fail the 44px rule under finger. Pair with `@media (hover: hover)` when a hover-reveal is only safe on pointer devices.
+
+```tsx
+// ✅ Good — touch target expands under finger regardless of viewport width
+<button className={cn(
+  'size-8 rounded-md',                 // 32px — fine for mouse
+  'pointer-coarse:size-11',            // 44px — required for touch
+)}>
+```
+
+If `pointer-coarse:` isn't wired as a Tailwind variant yet, extend the theme before reaching for an arbitrary `@media` block.
+
+**3. Transparency is a signal, not a style.** Heavy reliance on alpha (`bg-*/30`, `ring-*/40`, `border-*/10`) almost always means the palette is missing a step. Before writing `bg-muted/50`, ask: "is this a new semantic surface I need?" If yes, add a named token (`--surface-subtle`, `--overlay-scrim`). Reserve alpha for cases where the value behind is genuinely dynamic — scrims over photography, blur-behind overlays, hover tints on interactive rows.
+
+```tsx
+// ❌ Bad — alpha as a palette shortcut
+<div className="border-white/10 bg-black/5" />
+
+// ✅ Good — named token; the alpha only lives in the token definition
+<div className="border-border bg-muted" />
+
+// ✅ Acceptable — genuinely runtime-dynamic backdrop
+<div className="bg-background/80 backdrop-blur-sm" /> {/* scrim over scrolling content */}
+```
+
+Rule of thumb: if you wrote `/<number>` more than once in the same component, you need a token.
+
+### Dark-mode discipline
+
+Dark mode is a separate design, not an inversion. Four rules keep it from decaying into the classic "black surface, barely-visible card" failure mode. Each came from a real bug caught in the showcase audit — the whys are in the token files.
+
+**1. Raised surfaces need both outer shadow AND inset top highlight.** In dark mode, a pure-black outer shadow (`0 2px 6px oklch(0% 0 0 / 0.1)`) on a dark background is functionally invisible — there's nothing darker than black to read as "lifted." Linear/Stripe/Ramp solve this by stacking a stronger outer shadow with an inset top highlight (`inset 0 1px 0 0 oklch(100% 0 0 / 0.04-0.07)`) that simulates light catching the top edge. All `--shadow-*` tokens in `tokens/shadow.css` already include this for `.dark`. Never hand-roll shadows in component code — extend the token.
+
+**2. Semantic tone contract: `text-<tone>` on `bg-<tone>-surface`, solid `bg-<tone>` uses `text-<tone>-foreground`.** The four semantic tones (`success`, `warning`, `destructive`, `info`) each ship three tokens:
+
+| Use case                      | Pair                                   |
+| ----------------------------- | -------------------------------------- |
+| Chip / alert / tinted callout | `bg-<tone>-surface` + `text-<tone>`    |
+| Solid button / filled bar     | `bg-<tone>` + `text-<tone>-foreground` |
+| Icon on neutral bg            | `text-<tone>`                          |
+
+`text-<tone>-foreground` is a near-white (or near-dark in dark mode) designed for solid `bg-<tone>` contrast. Using it on `bg-<tone>-surface` (which is a heavily-desaturated tint of the same hue) produces a near-invisible foreground — the exact warning badge failure we shipped and reverted. Keep all four tones consistent — if you change one (e.g. badge warning), change all four or the system drifts.
+
+The `text-<tone>` color itself must clear ≥4.5:1 against both neutral backgrounds (`bg-background`, `bg-card`) AND its own `bg-<tone>-surface` in both light and dark modes. If the only way to make it clear surface contrast in one mode is to make it illegible in the other, redo the token (we darkened light `--warning` from `70%` → `55%` for exactly this reason).
+
+**3. Chart series must read color from `--color-<key>`, not raw `--chart-N`.** `ChartContainer` config already wires series colors through CSS custom properties that swap per theme:
+
+```tsx
+// ❌ Bad — hard-codes the light-mode token, ignores dark-mode chart palette
+<Line stroke="var(--chart-3)" />;
+
+// ✅ Good — resolves through ChartContainer, picks up .dark overrides
+const CONFIG = { margin: { label: 'Marj %', color: 'var(--chart-3)' } } satisfies ChartConfig;
+<Line stroke="var(--color-margin)" />;
+```
+
+Area-chart `fillOpacity` is inherently mode-sensitive: a 0.15 alpha that reads as a gentle tint on white reads as nearly nothing on near-black. Leave strokes as the primary signal; if the fill matters for comparison, either raise opacity in dark mode via a CSS variable (`--area-fill-opacity`) or accept that dark-mode area fills are subtler and lean on legend + tooltip.
+
+**4. Alpha shortcuts (`/50`, `/30`, `/10`) are a dark-mode trap.** Alpha on a light bg produces a predictable tint; the same alpha on a dark bg produces a nearly-black mud that reads flat. Whenever you feel the urge to write `bg-muted/50`, add the named surface token (`--surface-subtle`, `--border-muted`, `--muted-foreground-dim`) and consume it as a proper utility. The token's alpha (if any) lives in its definition, once, per theme. This is already the rule in the transparency section above — the dark-mode failure pattern is just the most visible reason.
+
+### Design system showcase
+
+The live reference for every token, primitive, and pattern lives under `/design/*`:
+
+- `/design/tokens` — colors, typography, spacing, radius, shadow, motion (live swatches)
+- `/design/primitives/*` — every shadcn primitive with variants and states
+- `/design/patterns` — PazarSync-specific composites (KpiTile, TrendDelta, Currency, SyncBadge, PageHeader, EmptyState)
+- `/design/data` — DataTable with filters, sorting, selection, import/export
+- `/design/layout-demo` — dual-rail AppShell with mock store data
+
+Before building a new screen, check the showcase to see what's already available. Before tweaking styles on a primitive, check whether the change belongs at the token layer (affects the whole system) or whether a pattern wrapper is the right home.
 
 ## Next.js 16 Specifics
 

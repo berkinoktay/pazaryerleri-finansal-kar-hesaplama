@@ -1,0 +1,50 @@
+/**
+ * Shadow tokens
+ *
+ * Hairline-first: borders do the primary separation work, shadows only
+ * layer when an element genuinely floats (popovers, dialogs, floating
+ * actions). Shadow chroma comes from brand hue at tiny alpha — the
+ * effect is felt, not seen.
+ *
+ * Do not paint cards with lg+ shadows. Cards are a flat surface with
+ * a 1px border; reserve lg shadows for the top layer of UI only.
+ */
+
+:root {
+  --shadow-xs: 0 1px 0 0 oklch(22% 0.02 265 / 0.04);
+  --shadow-sm: 0 1px 2px 0 oklch(22% 0.02 265 / 0.04), 0 1px 0 0 oklch(22% 0.02 265 / 0.03);
+  --shadow-md:
+    0 4px 10px -2px oklch(22% 0.02 265 / 0.08), 0 2px 4px -2px oklch(22% 0.02 265 / 0.04);
+  --shadow-lg:
+    0 12px 28px -8px oklch(22% 0.02 265 / 0.14), 0 4px 10px -4px oklch(22% 0.02 265 / 0.06);
+  --shadow-xl:
+    0 24px 48px -12px oklch(22% 0.02 265 / 0.2), 0 8px 16px -8px oklch(22% 0.02 265 / 0.08);
+
+  --shadow-ring: inset 0 0 0 1px var(--border);
+  --shadow-ring-strong: inset 0 0 0 1px var(--border-strong);
+  --shadow-focus: 0 0 0 3px oklch(55% 0.14 265 / 0.35);
+}
+
+.dark {
+  /* Dark-mode depth recipe (Linear/Stripe/Ramp pattern):
+   *   - Stronger outer shadows (pure black loses contrast against a dark
+   *     background unless alpha is high) +
+   *   - A thin top inner highlight (100% lightness, very low alpha) that
+   *     suggests the element is catching ambient light from above.
+   * Together these read as "lifted" even when the base color is dark. */
+  --shadow-xs: 0 1px 0 0 oklch(0% 0 0 / 0.35), inset 0 1px 0 0 oklch(100% 0 0 / 0.03);
+  --shadow-sm:
+    0 1px 2px 0 oklch(0% 0 0 / 0.45), 0 1px 0 0 oklch(0% 0 0 / 0.3),
+    inset 0 1px 0 0 oklch(100% 0 0 / 0.04);
+  --shadow-md:
+    0 6px 16px -2px oklch(0% 0 0 / 0.55), 0 2px 6px -2px oklch(0% 0 0 / 0.3),
+    inset 0 1px 0 0 oklch(100% 0 0 / 0.05);
+  --shadow-lg:
+    0 16px 36px -8px oklch(0% 0 0 / 0.65), 0 6px 14px -4px oklch(0% 0 0 / 0.4),
+    inset 0 1px 0 0 oklch(100% 0 0 / 0.06);
+  --shadow-xl:
+    0 28px 56px -12px oklch(0% 0 0 / 0.75), 0 10px 20px -8px oklch(0% 0 0 / 0.4),
+    inset 0 1px 0 0 oklch(100% 0 0 / 0.07);
+
+  --shadow-focus: 0 0 0 3px oklch(68% 0.12 265 / 0.45);
+}

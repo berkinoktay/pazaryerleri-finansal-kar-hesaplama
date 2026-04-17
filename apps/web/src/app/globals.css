@@ -1,26 +1,280 @@
-@import 'tailwindcss';
+/**
+ * PazarSync global stylesheet
+ *
+ * Token layer lives in ./tokens/*.css and is imported first so CSS
+ * custom properties are available to Tailwind's @theme block below.
+ *
+ * Tailwind v4 theme contract:
+ *   - Color tokens map via `@theme inline` so `bg-background`,
+ *     `text-foreground`, etc. resolve at runtime and respect .dark.
+ *   - Static tokens (spacing, radius, motion) are exposed directly so
+ *     utilities like `p-md`, `rounded-md`, `duration-base` exist.
+ *
+ * Never add arbitrary values in component code. Extend the token layer.
+ */
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@import './tokens/colors.css';
+@import './tokens/typography.css';
+@import './tokens/spacing.css';
+@import './tokens/motion.css';
+@import './tokens/shadow.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Input-method variants — decoupled from viewport size. Touch targets must
+   expand to ≥44px under finger regardless of breakpoint. See apps/web/CLAUDE.md
+   §"Responsive, touch, and transparency discipline" for the rule. */
+@custom-variant pointer-coarse (@media (pointer: coarse));
+@custom-variant pointer-fine (@media (pointer: fine));
+@custom-variant hover-hover (@media (hover: hover));
 
 @theme inline {
+  /* Font families */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* Color contract — shadcn variable names */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted-foreground-dim: var(--muted-foreground-dim);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-muted: var(--border-muted);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-surface: var(--success-surface);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-surface: var(--destructive-surface);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-surface: var(--warning-surface);
+
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-surface: var(--info-surface);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+
+  /* Typography scale */
+  --text-2xs: var(--text-2xs);
+  --text-2xs--line-height: var(--text-2xs--line-height);
+  --text-xs: var(--text-xs);
+  --text-xs--line-height: var(--text-xs--line-height);
+  --text-sm: var(--text-sm);
+  --text-sm--line-height: var(--text-sm--line-height);
+  --text-base: var(--text-base);
+  --text-base--line-height: var(--text-base--line-height);
+  --text-md: var(--text-md);
+  --text-md--line-height: var(--text-md--line-height);
+  --text-lg: var(--text-lg);
+  --text-lg--line-height: var(--text-lg--line-height);
+  --text-xl: var(--text-xl);
+  --text-xl--line-height: var(--text-xl--line-height);
+  --text-2xl: var(--text-2xl);
+  --text-2xl--line-height: var(--text-2xl--line-height);
+  --text-3xl: var(--text-3xl);
+  --text-3xl--line-height: var(--text-3xl--line-height);
+  --text-4xl: var(--text-4xl);
+  --text-4xl--line-height: var(--text-4xl--line-height);
+  --text-5xl: var(--text-5xl);
+  --text-5xl--line-height: var(--text-5xl--line-height);
+  --text-6xl: var(--text-6xl);
+  --text-6xl--line-height: var(--text-6xl--line-height);
+
+  --font-weight-normal: var(--font-weight-normal);
+  --font-weight-medium: var(--font-weight-medium);
+  --font-weight-semibold: var(--font-weight-semibold);
+  --font-weight-bold: var(--font-weight-bold);
+
+  --tracking-tight: var(--tracking-tight);
+  --tracking-normal: var(--tracking-normal);
+  --tracking-wide: var(--tracking-wide);
+  --tracking-wider: var(--tracking-wider);
+
+  /* Spacing — drives gap-*, p-*, m-*, space-* */
+  --spacing-3xs: var(--space-3xs);
+  --spacing-2xs: var(--space-2xs);
+  --spacing-xs: var(--space-xs);
+  --spacing-sm: var(--space-sm);
+  --spacing-md: var(--space-md);
+  --spacing-lg: var(--space-lg);
+  --spacing-xl: var(--space-xl);
+  --spacing-2xl: var(--space-2xl);
+  --spacing-3xl: var(--space-3xl);
+  --spacing-4xl: var(--space-4xl);
+  --spacing-5xl: var(--space-5xl);
+
+  /* Semantic sizes — drives w-*, h-*, min-w-*, max-w-* */
+  --spacing-icon-xs: var(--size-icon-xs);
+  --spacing-icon-sm: var(--size-icon-sm);
+  --spacing-icon: var(--size-icon);
+  --spacing-icon-lg: var(--size-icon-lg);
+  --spacing-icon-xl: var(--size-icon-xl);
+
+  --spacing-rail-icon: var(--size-rail-icon);
+  --spacing-rail-context: var(--size-rail-context);
+  --spacing-rail-activity: var(--size-rail-activity);
+  --spacing-rail-activity-open: var(--size-rail-activity-open);
+
+  --spacing-header-h: var(--size-header-h);
+  --spacing-page-header-h: var(--size-page-header-h);
+  --spacing-tile-min: var(--size-tile-min);
+  --spacing-tile-min-sm: var(--size-tile-min-sm);
+  --spacing-table-row-h: var(--size-table-row-h);
+  --spacing-content-max: var(--size-content-max);
+  --spacing-prose-max: var(--size-prose-max);
+  --spacing-shell-demo: var(--size-shell-demo);
+
+  /* Domain-specific max-width tokens. Using role names (form, modal,
+     sheet, headline) avoids collision with the xs/sm/md/lg/xl spacing
+     scale, which Tailwind v4 also uses for max-w-* utilities. */
+  --spacing-input-narrow: var(--size-input-narrow);
+  --spacing-input: var(--size-input);
+  --spacing-form: var(--size-form);
+  --spacing-sheet: var(--size-sheet);
+  --spacing-sheet-wide: var(--size-sheet-wide);
+  --spacing-modal: var(--size-modal);
+  --spacing-headline: var(--size-headline);
+
+  /* Radius */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-full: var(--radius-full);
+
+  /* Shadows */
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-ring: var(--shadow-ring);
+  --shadow-ring-strong: var(--shadow-ring-strong);
+  --shadow-focus: var(--shadow-focus);
+
+  /* Motion */
+  --ease-out-quart: var(--ease-out-quart);
+  --ease-out-quint: var(--ease-out-quint);
+  --ease-out-expo: var(--ease-out-expo);
+  --ease-in-out-quad: var(--ease-in-out-quad);
+
+  --animate-duration-instant: var(--duration-instant);
+  --animate-duration-fast: var(--duration-fast);
+  --animate-duration-base: var(--duration-base);
+  --animate-duration-slow: var(--duration-slow);
+  --animate-duration-entrance: var(--duration-entrance);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Base layer — HTML elements */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--border);
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings:
+      'cv11' 1,
+      'ss01' 1;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    font-weight: var(--font-weight-normal);
+    min-height: 100vh;
+  }
+
+  /* Tabular numerics for any element with this class, any numeric column
+     in a table, and KPI values rendered via the Currency / KpiTile patterns. */
+  .tabular-nums,
+  [data-tabular='true'],
+  table td[data-numeric='true'],
+  table th[data-numeric='true'] {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  /* Default focus-visible ring — applies to every interactive element unless
+     overridden by a component. Ring is always independently viable from hover
+     because keyboard users never see hover. */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-sm);
+  }
+
+  /* Selection */
+  ::selection {
+    background-color: var(--accent);
+    color: var(--accent-foreground);
+  }
+
+  /* Scrollbar — subtle, not decorative. Stays out of the way in data-dense
+     tables; visible enough to scan in long lists. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border-radius: var(--radius-full);
+    border: 2px solid var(--background);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: var(--tracking-tight);
+  }
 }
