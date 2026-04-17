@@ -1,65 +1,101 @@
-import Image from 'next/image';
+import Link from 'next/link';
+import {
+  ArrowRight01Icon,
+  ChartLineData01Icon,
+  InvoiceIcon,
+  ReceiptDollarIcon,
+} from 'hugeicons-react';
 
-export default function Home() {
+import { Wordmark } from '@/components/brand/wordmark';
+import { Button } from '@/components/ui/button';
+
+const VALUE_PROPS = [
+  {
+    icon: ChartLineData01Icon,
+    title: 'Sipariş bazında gerçek kar',
+    description:
+      'Komisyon, kargo, platform bedeli ve KDV ayrıştırmasıyla her siparişten ne kazandığını saniyeler içinde gör.',
+  },
+  {
+    icon: InvoiceIcon,
+    title: 'Otomatik mutabakat',
+    description:
+      'Hakediş raporlarını, kargo faturalarını ve sipariş verisini eşleştirip, "pazaryeri doğru mu ödedi?" sorusunu cevapla.',
+  },
+  {
+    icon: ReceiptDollarIcon,
+    title: 'Gider yönetimi',
+    description:
+      'Ürün maliyetleri, reklam, paketleme — tüm operasyonel giderleri sisteme ekle, kârı gerçekten doğru hesapla.',
+  },
+];
+
+export default function HomePage(): React.ReactElement {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex w-full max-w-3xl flex-1 flex-col items-center justify-between bg-white px-16 py-32 sm:items-start dark:bg-black">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl leading-10 font-semibold tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="bg-background text-foreground min-h-screen">
+      <header className="border-border border-b">
+        <div className="max-w-content-max px-lg py-md mx-auto flex items-center justify-between">
+          <Wordmark />
+          <nav className="gap-sm flex items-center">
+            <Link
+              href="/design"
+              className="px-sm py-3xs text-muted-foreground hover:text-foreground rounded-md text-sm font-medium transition-colors focus-visible:outline-none"
+            >
+              Design system
+            </Link>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/login">Giriş</Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/signup">Başla</Link>
+            </Button>
+          </nav>
+        </div>
+      </header>
+
+      <main className="max-w-content-max gap-4xl px-lg py-4xl mx-auto flex flex-col">
+        <section className="gap-lg flex flex-col items-start">
+          <span className="border-border bg-muted px-sm py-3xs text-2xs text-muted-foreground rounded-full border font-medium tracking-wide uppercase">
+            Türkiye pazaryerleri için
+          </span>
+          <h1 className="text-foreground max-w-headline text-5xl font-bold tracking-tight">
+            Ciro değil, <span className="text-primary">gerçek kârı</span> gör.
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{' '}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{' '}
-            or the{' '}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{' '}
-            center.
+          <p className="max-w-prose-max text-muted-foreground text-lg">
+            Trendyol ve Hepsiburada mağazanı bağla; komisyon, kargo, platform bedeli ve KDV
+            ayrıştırılmış halde her siparişin net kârını saniyeler içinde gör.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="bg-foreground text-background flex h-12 w-full items-center justify-center gap-2 rounded-full px-5 transition-colors hover:bg-[#383838] md:w-[158px] dark:hover:bg-[#ccc]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] md:w-[158px] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+          <div className="gap-xs flex items-center">
+            <Button asChild size="lg">
+              <Link href="/signup">
+                Ücretsiz başla <ArrowRight01Icon className="size-icon-sm" />
+              </Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg">
+              <Link href="/design/layout-demo">Paneli gör</Link>
+            </Button>
+          </div>
+        </section>
+
+        <section className="gap-lg grid sm:grid-cols-3">
+          {VALUE_PROPS.map(({ icon: Icon, title, description }) => (
+            <div key={title} className="gap-sm flex flex-col">
+              <div className="size-icon-xl bg-muted text-primary flex items-center justify-center rounded-md">
+                <Icon className="size-icon" />
+              </div>
+              <h2 className="text-foreground text-lg font-semibold">{title}</h2>
+              <p className="text-muted-foreground text-sm">{description}</p>
+            </div>
+          ))}
+        </section>
       </main>
+
+      <footer className="border-border border-t">
+        <div className="max-w-content-max px-lg py-lg text-2xs text-muted-foreground mx-auto flex items-center justify-between">
+          <span>© 2026 PazarSync</span>
+          <span>Made in Turkey</span>
+        </div>
+      </footer>
     </div>
   );
 }

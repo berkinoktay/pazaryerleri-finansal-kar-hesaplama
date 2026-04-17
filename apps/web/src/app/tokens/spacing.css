@@ -1,0 +1,76 @@
+/**
+ * Spacing, sizing, and radius tokens
+ *
+ * 4pt semantic scale — component authors never pick raw pixel values,
+ * they pick a role. If a new role emerges (e.g., a rail that needs a
+ * unique width), we add the role here rather than reaching for [NNpx]
+ * in className. The ESLint rule in eslint.config.mjs enforces that.
+ *
+ * Rail widths below are load-bearing for the dual-rail layout shell.
+ * Changing them shifts every screen, so treat them as product contract.
+ */
+
+:root {
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+  --space-4xl: 96px;
+  --space-5xl: 128px;
+
+  --size-icon-xs: 14px;
+  --size-icon-sm: 16px;
+  --size-icon: 18px;
+  --size-icon-lg: 20px;
+  --size-icon-xl: 24px;
+
+  --size-rail-icon: 48px;
+  --size-rail-context: 240px;
+  --size-rail-activity: 32px;
+  --size-rail-activity-open: 320px;
+
+  --size-header-h: 56px;
+  --size-page-header-h: 72px;
+  --size-tile-min: 280px;
+  --size-tile-min-sm: 220px;
+  --size-table-row-h: 44px;
+
+  --size-content-max: 1440px;
+  --size-prose-max: 68ch;
+
+  /* Demo/preview embed height (used by showcase layout-demo to frame the
+     AppShell without swallowing the whole viewport). */
+  --size-shell-demo: 720px;
+
+  /* Domain-specific max-width tokens.
+   *
+   * IMPORTANT: Tailwind v4 has a single spacing scale — tokens named
+   * `md`, `lg`, `sm`, `xs` feed BOTH `p-md` AND `max-w-md`. Our
+   * `--space-md` (16px) therefore makes `max-w-md` render as 16px.
+   * So instead of relying on Tailwind's old T3-era container defaults,
+   * we name widths after their role. `max-w-form`, `max-w-modal`, etc.
+   * carry semantic meaning and never collide with spacing.
+   */
+  --size-input-narrow: 20rem; /* single short field (320px) */
+  --size-input: 24rem; /* search/text input column (384px) */
+  --size-form: 28rem; /* form column (448px) */
+  --size-sheet: 24rem; /* sheet panel default (384px) */
+  --size-sheet-wide: 28rem; /* sheet on ≥sm viewports (448px) */
+  --size-modal: 32rem; /* dialog content (512px) */
+  --size-headline: 56rem; /* landing hero H1 column (896px) */
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+  --radius-full: 9999px;
+
+  --radius: var(--radius-md);
+}

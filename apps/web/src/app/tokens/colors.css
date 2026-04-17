@@ -1,0 +1,140 @@
+/**
+ * PazarSync color tokens (OKLCH)
+ *
+ * Contract:
+ * - Brand hue: 265 (disciplined violet-blue). Neutrals tinted toward this hue at chroma ~0.005
+ *   so surfaces feel intentional rather than off-the-shelf gray.
+ * - As lightness approaches 0% or 100%, chroma drops to avoid garish extremes.
+ * - No pure #000 or #fff anywhere.
+ * - Names follow the shadcn/ui variable contract; semantic additions (success/warning/info)
+ *   extend the same layer, not a parallel system.
+ * - Each semantic color ships with a foreground (text over solid) and a surface (tinted bg).
+ */
+
+:root {
+  /* Surfaces */
+  --background: oklch(99% 0.004 265);
+  --foreground: oklch(18% 0.02 265);
+
+  --muted: oklch(96.5% 0.005 265);
+  --muted-foreground: oklch(46% 0.015 265);
+  /* One step dimmer than muted-foreground for non-interactive out-of-scope
+     text (e.g. calendar days outside the active month). Keeps semantics —
+     avoids `text-muted-foreground/50` alpha shortcuts. */
+  --muted-foreground-dim: oklch(62% 0.012 265);
+
+  /* Surface one step subtler than --muted; sits above --background but below
+     --muted. Use for static zones like table footers, code blocks, callouts,
+     placeholders. Avoid reaching for `bg-muted/50`. */
+  --surface-subtle: oklch(97.5% 0.005 265);
+
+  --card: oklch(100% 0 0);
+  --card-foreground: var(--foreground);
+
+  --popover: oklch(100% 0 0);
+  --popover-foreground: var(--foreground);
+
+  /* Lines */
+  --border: oklch(92% 0.006 265);
+  --border-strong: oklch(85% 0.008 265);
+  /* Softer than --border for incidental accents (active tab ring, inner
+     dividers) where a full border reads too heavy. */
+  --border-muted: oklch(95% 0.006 265);
+  --input: oklch(94% 0.006 265);
+  --ring: oklch(55% 0.14 265);
+
+  /* Brand */
+  --primary: oklch(45% 0.15 265);
+  --primary-foreground: oklch(98% 0.004 265);
+  --primary-hover: oklch(40% 0.15 265);
+
+  --secondary: oklch(96% 0.006 265);
+  --secondary-foreground: oklch(22% 0.02 265);
+
+  --accent: oklch(94% 0.02 265);
+  --accent-foreground: oklch(25% 0.04 265);
+
+  /* Semantic — financial data */
+  --success: oklch(52% 0.13 155);
+  --success-foreground: oklch(98% 0.003 155);
+  --success-surface: oklch(96% 0.02 155);
+
+  --destructive: oklch(54% 0.19 27);
+  --destructive-foreground: oklch(98% 0.004 27);
+  --destructive-surface: oklch(96% 0.025 27);
+
+  /* --warning: darker amber than the classic 70% so `text-warning` on any
+     neutral or light-amber surface still clears ≥4.5:1. Solid `bg-warning`
+     uses --warning-foreground (near-white) on top. */
+  --warning: oklch(55% 0.15 75);
+  --warning-foreground: oklch(98% 0.003 75);
+  --warning-surface: oklch(96% 0.04 75);
+
+  --info: oklch(54% 0.13 240);
+  --info-foreground: oklch(98% 0.004 240);
+  --info-surface: oklch(96% 0.025 240);
+
+  /* Chart palette — qualitative, balanced chroma */
+  --chart-1: oklch(55% 0.14 265);
+  --chart-2: oklch(58% 0.13 200);
+  --chart-3: oklch(60% 0.13 155);
+  --chart-4: oklch(65% 0.15 75);
+  --chart-5: oklch(58% 0.17 27);
+  --chart-6: oklch(52% 0.13 310);
+}
+
+.dark {
+  --background: oklch(14% 0.01 265);
+  --foreground: oklch(96% 0.005 265);
+
+  --muted: oklch(20% 0.012 265);
+  --muted-foreground: oklch(66% 0.015 265);
+  --muted-foreground-dim: oklch(48% 0.012 265);
+
+  --surface-subtle: oklch(17% 0.01 265);
+
+  --card: oklch(17% 0.012 265);
+  --card-foreground: var(--foreground);
+
+  --popover: oklch(17% 0.012 265);
+  --popover-foreground: var(--foreground);
+
+  --border: oklch(24% 0.014 265);
+  --border-strong: oklch(32% 0.018 265);
+  --border-muted: oklch(28% 0.012 265);
+  --input: oklch(22% 0.014 265);
+  --ring: oklch(68% 0.12 265);
+
+  --primary: oklch(72% 0.13 265);
+  --primary-foreground: oklch(15% 0.01 265);
+  --primary-hover: oklch(78% 0.11 265);
+
+  --secondary: oklch(22% 0.012 265);
+  --secondary-foreground: oklch(92% 0.008 265);
+
+  --accent: oklch(26% 0.04 265);
+  --accent-foreground: oklch(92% 0.02 265);
+
+  --success: oklch(64% 0.12 155);
+  --success-foreground: oklch(14% 0.02 155);
+  --success-surface: oklch(22% 0.04 155);
+
+  --destructive: oklch(66% 0.18 27);
+  --destructive-foreground: oklch(14% 0.02 27);
+  --destructive-surface: oklch(24% 0.06 27);
+
+  --warning: oklch(76% 0.14 75);
+  --warning-foreground: oklch(16% 0.04 75);
+  --warning-surface: oklch(26% 0.06 75);
+
+  --info: oklch(66% 0.12 240);
+  --info-foreground: oklch(14% 0.02 240);
+  --info-surface: oklch(22% 0.04 240);
+
+  --chart-1: oklch(70% 0.13 265);
+  --chart-2: oklch(70% 0.12 200);
+  --chart-3: oklch(70% 0.12 155);
+  --chart-4: oklch(76% 0.14 75);
+  --chart-5: oklch(70% 0.16 27);
+  --chart-6: oklch(66% 0.12 310);
+}

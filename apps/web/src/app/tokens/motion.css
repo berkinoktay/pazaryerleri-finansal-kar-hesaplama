@@ -1,0 +1,43 @@
+/**
+ * Motion tokens
+ *
+ * Exponential ease-out family by default — decelerates into place,
+ * reads as precise rather than playful. No bounce/elastic: this is a
+ * financial product and overshoot undermines trust.
+ *
+ * Duration hierarchy:
+ *   instant (≤150ms) — immediate feedback (press, toggle)
+ *   fast/base (150–260ms) — menus, tooltips, popovers
+ *   slow (300–400ms) — accordions, sheets
+ *   entrance (480ms+) — page-level enter
+ *
+ * Exits run at ~75% of entrance duration.
+ *
+ * prefers-reduced-motion is enforced globally so components don't need
+ * to implement it individually — functional motion (spinners) stays,
+ * decorative transitions collapse.
+ */
+
+:root {
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-quad: cubic-bezier(0.45, 0, 0.55, 1);
+
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-slow: 360ms;
+  --duration-entrance: 480ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
