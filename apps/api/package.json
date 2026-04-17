@@ -14,7 +14,8 @@
     "test:unit": "vitest run tests/unit --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:watch": "vitest",
-    "openapi:dump": "tsx scripts/dump-openapi.ts"
+    "openapi:dump": "tsx scripts/dump-openapi.ts",
+    "gen:encryption-key": "tsx scripts/gen-encryption-key.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
