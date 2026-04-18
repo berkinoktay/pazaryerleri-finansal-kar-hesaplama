@@ -1,0 +1,131 @@
+{
+  "common": {
+    "appName": "PazarSync",
+    "loading": "Loading",
+    "empty": "No data",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "search": "Search",
+    "lastSynced": "Last synced",
+    "gmtOffset": "GMT+3"
+  },
+  "metadata": {
+    "title": "PazarSync — E-commerce Profitability & Operations",
+    "titleTemplate": "%s · PazarSync",
+    "description": "Platform for Turkish marketplace sellers: per-order real profitability, automated settlement reconciliation, and expense management."
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "orders": "Orders",
+    "products": "Products",
+    "profitability": "Profitability",
+    "reconciliation": "Reconciliation",
+    "expenses": "Expenses",
+    "settings": "Settings"
+  },
+  "navSections": {
+    "orders": {
+      "status": {
+        "title": "Status",
+        "all": "All",
+        "pending": "Pending",
+        "shipped": "Shipped",
+        "delivered": "Delivered",
+        "returned": "Returned"
+      }
+    },
+    "products": {
+      "catalog": {
+        "title": "Catalog",
+        "active": "Active products",
+        "draft": "Drafts",
+        "costs": "Costs"
+      }
+    },
+    "profitability": {
+      "views": {
+        "title": "Views",
+        "period": "By period",
+        "byProduct": "By product",
+        "byCampaign": "By campaign"
+      }
+    }
+  },
+  "iconRail": {
+    "ariaLabel": "Primary navigation",
+    "brandAriaLabel": "PazarSync",
+    "userMenuAriaLabel": "User menu",
+    "userTooltip": "User"
+  },
+  "contextRail": {
+    "ariaLabel": "Context panel",
+    "syncNow": "Sync now",
+    "addStore": "Connect store"
+  },
+  "storeSwitcher": {
+    "searchPlaceholder": "Search stores…",
+    "empty": "No stores found.",
+    "heading": "Stores",
+    "active": "Active",
+    "addStore": "Connect store"
+  },
+  "activityRail": {
+    "ariaLabel": "Activity panel",
+    "open": "Open activity panel",
+    "close": "Close activity panel"
+  },
+  "toast": {
+    "storeFlowNotReady": "Connect-store flow is not ready yet",
+    "syncStarted": "Sync started"
+  },
+  "landing": {
+    "nav": {
+      "designSystem": "Design system",
+      "login": "Log in",
+      "signup": "Get started"
+    },
+    "hero": {
+      "eyebrow": "Built for Turkish marketplaces",
+      "titlePrefix": "See profit,",
+      "titleHighlight": "not just revenue",
+      "titleSuffix": ".",
+      "subtitle": "Connect your Trendyol and Hepsiburada stores. See every order's net profit in seconds — commissions, shipping, platform fees, and VAT broken out cleanly.",
+      "ctaPrimary": "Start free",
+      "ctaSecondary": "See the dashboard"
+    },
+    "valueProps": {
+      "profit": {
+        "title": "Real per-order profit",
+        "description": "Commission, shipping, platform fees, and VAT itemized so you know what each order actually earned in seconds."
+      },
+      "reconciliation": {
+        "title": "Automated reconciliation",
+        "description": "Match payout reports, carrier invoices, and order data to answer the one question that matters: did the marketplace pay correctly?"
+      },
+      "expenses": {
+        "title": "Expense management",
+        "description": "Product costs, ads, packaging — add every operational expense so your profit figure is honest, not optimistic."
+      }
+    },
+    "footer": {
+      "copyright": "© {year} PazarSync",
+      "tagline": "Made in Turkey"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Log in",
+      "subtitle": "Sign in to your account."
+    },
+    "register": {
+      "title": "Create account",
+      "subtitle": "Create your free account."
+    }
+  },
+  "languageSwitcher": {
+    "label": "Language",
+    "tr": "Türkçe",
+    "en": "English"
+  }
+}

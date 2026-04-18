@@ -8,30 +8,7 @@ import {
   ShoppingBag01Icon,
 } from 'hugeicons-react';
 
-/** Icons are React components with Hugeicons' own prop shape; derive it from one. */
-export type NavIconComponent = typeof DashboardSquare02Icon;
-
-export interface NavItem {
-  key: string;
-  labelKey: `nav.${string}`;
-  href: string;
-  icon: NavIconComponent;
-  /** Sub-navigation shown in the context rail when this item is active. */
-  sections?: NavSection[];
-}
-
-export interface NavSection {
-  key: string;
-  label: string;
-  items: Array<{ key: string; label: string; href: string; badge?: string }>;
-}
-
-/**
- * Global navigation config — consumed by IconRail (for the icon list) and
- * ContextRail (for sub-sections of the active item). Config-driven so adding
- * a new module means one entry here, not changes in three components.
- */
-export const NAV_ITEMS: NavItem[] = [
+export const NAV_ITEMS = [
   {
     key: 'dashboard',
     labelKey: 'nav.dashboard',
@@ -46,13 +23,29 @@ export const NAV_ITEMS: NavItem[] = [
     sections: [
       {
         key: 'status',
-        label: 'Durum',
+        labelKey: 'navSections.orders.status.title',
         items: [
-          { key: 'all', label: 'Hepsi', href: '/orders' },
-          { key: 'pending', label: 'Bekleyen', href: '/orders?status=pending' },
-          { key: 'shipped', label: 'Kargoda', href: '/orders?status=shipped' },
-          { key: 'delivered', label: 'Teslim edildi', href: '/orders?status=delivered' },
-          { key: 'returned', label: 'İade', href: '/orders?status=returned' },
+          { key: 'all', labelKey: 'navSections.orders.status.all', href: '/orders' },
+          {
+            key: 'pending',
+            labelKey: 'navSections.orders.status.pending',
+            href: '/orders?status=pending',
+          },
+          {
+            key: 'shipped',
+            labelKey: 'navSections.orders.status.shipped',
+            href: '/orders?status=shipped',
+          },
+          {
+            key: 'delivered',
+            labelKey: 'navSections.orders.status.delivered',
+            href: '/orders?status=delivered',
+          },
+          {
+            key: 'returned',
+            labelKey: 'navSections.orders.status.returned',
+            href: '/orders?status=returned',
+          },
         ],
       },
     ],
@@ -65,11 +58,19 @@ export const NAV_ITEMS: NavItem[] = [
     sections: [
       {
         key: 'catalog',
-        label: 'Katalog',
+        labelKey: 'navSections.products.catalog.title',
         items: [
-          { key: 'active', label: 'Aktif ürünler', href: '/products' },
-          { key: 'draft', label: 'Taslaklar', href: '/products?status=draft' },
-          { key: 'costs', label: 'Maliyetler', href: '/products/costs' },
+          { key: 'active', labelKey: 'navSections.products.catalog.active', href: '/products' },
+          {
+            key: 'draft',
+            labelKey: 'navSections.products.catalog.draft',
+            href: '/products?status=draft',
+          },
+          {
+            key: 'costs',
+            labelKey: 'navSections.products.catalog.costs',
+            href: '/products/costs',
+          },
         ],
       },
     ],
@@ -82,11 +83,23 @@ export const NAV_ITEMS: NavItem[] = [
     sections: [
       {
         key: 'views',
-        label: 'Görünümler',
+        labelKey: 'navSections.profitability.views.title',
         items: [
-          { key: 'period', label: 'Dönem', href: '/profitability' },
-          { key: 'by-product', label: 'Ürün bazında', href: '/profitability/products' },
-          { key: 'by-campaign', label: 'Kampanya bazında', href: '/profitability/campaigns' },
+          {
+            key: 'period',
+            labelKey: 'navSections.profitability.views.period',
+            href: '/profitability',
+          },
+          {
+            key: 'by-product',
+            labelKey: 'navSections.profitability.views.byProduct',
+            href: '/profitability/products',
+          },
+          {
+            key: 'by-campaign',
+            labelKey: 'navSections.profitability.views.byCampaign',
+            href: '/profitability/campaigns',
+          },
         ],
       },
     ],
@@ -109,4 +122,7 @@ export const NAV_ITEMS: NavItem[] = [
     href: '/settings',
     icon: Settings02Icon,
   },
-];
+] as const;
+
+export type NavItem = (typeof NAV_ITEMS)[number];
+export type NavIconComponent = NavItem['icon'];

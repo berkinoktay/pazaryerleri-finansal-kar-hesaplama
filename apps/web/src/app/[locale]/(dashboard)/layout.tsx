@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
 
@@ -17,6 +18,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
+  const t = useTranslations('toast');
   const [activeStoreId, setActiveStoreId] = React.useState(MOCK_STORES[0]!.id);
 
   return (
@@ -25,8 +27,8 @@ export default function DashboardLayout({
         stores={MOCK_STORES}
         activeStoreId={activeStoreId}
         onSelectStore={setActiveStoreId}
-        onAddStore={() => toast.info('Mağaza bağla akışı henüz hazır değil')}
-        onSyncNow={() => toast.success('Senkronizasyon başlatıldı')}
+        onAddStore={() => toast.info(t('storeFlowNotReady'))}
+        onSyncNow={() => toast.success(t('syncStarted'))}
         activity={MOCK_ACTIVITY}
       >
         {children}

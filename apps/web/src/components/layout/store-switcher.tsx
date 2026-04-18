@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowDown01Icon, PlusSignIcon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import {
@@ -52,6 +53,7 @@ export function StoreSwitcher({
   onSelect,
   onAddStore,
 }: StoreSwitcherProps): React.ReactElement {
+  const t = useTranslations('storeSwitcher');
   const [open, setOpen] = React.useState(false);
   const active = stores.find((s) => s.id === activeStoreId) ?? stores[0];
 
@@ -80,10 +82,10 @@ export function StoreSwitcher({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-0">
         <Command>
-          <CommandInput placeholder="Mağaza ara…" />
+          <CommandInput placeholder={t('searchPlaceholder')} />
           <CommandList>
-            <CommandEmpty>Mağaza bulunamadı.</CommandEmpty>
-            <CommandGroup heading="Mağazalar">
+            <CommandEmpty>{t('empty')}</CommandEmpty>
+            <CommandGroup heading={t('heading')}>
               {stores.map((store) => (
                 <CommandItem
                   key={store.id}
@@ -101,7 +103,7 @@ export function StoreSwitcher({
                     </span>
                   </div>
                   {store.id === activeStoreId ? (
-                    <span className="text-2xs text-muted-foreground">Aktif</span>
+                    <span className="text-2xs text-muted-foreground">{t('active')}</span>
                   ) : null}
                 </CommandItem>
               ))}
@@ -112,7 +114,7 @@ export function StoreSwitcher({
                 <CommandGroup>
                   <CommandItem onSelect={onAddStore}>
                     <PlusSignIcon className="size-icon-sm text-muted-foreground" />
-                    Mağaza bağla
+                    {t('addStore')}
                   </CommandItem>
                 </CommandGroup>
               </>

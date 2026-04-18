@@ -11,7 +11,7 @@ export function Toaster(props: ToasterProps): React.ReactElement {
 
   return (
     <Sonner
-      theme={resolvedTheme}
+      theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
       className="toaster group"
       position="bottom-right"
       toastOptions={{

@@ -1,34 +1,33 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import { Wordmark } from '@/components/brand/wordmark';
 import { NAV_ITEMS } from '@/components/layout/nav-config';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Link, usePathname } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 
 /**
  * Primary icon rail — 48px wide, icon-only. Every icon is tooltipped with
- * its Turkish label so the visual-only surface is keyboard/screen-reader
- * accessible. Active item gets a solid surface + tinted icon; others are
- * muted until hover.
+ * its localized label so the visual-only surface is keyboard/screen-reader
+ * accessible.
  */
 export function IconRail(): React.ReactElement {
   const pathname = usePathname();
   const t = useTranslations();
+  const tRail = useTranslations('iconRail');
 
   return (
     <nav
-      aria-label="Ana gezinme"
+      aria-label={tRail('ariaLabel')}
       className="w-rail-icon gap-xs border-border bg-card py-sm flex h-full flex-col items-center border-r"
     >
       <Link
         href="/dashboard"
         className="flex size-8 items-center justify-center rounded-md focus-visible:outline-none"
-        aria-label="PazarSync"
+        aria-label={tRail('brandAriaLabel')}
       >
         <Wordmark withText={false} />
       </Link>
@@ -64,14 +63,14 @@ export function IconRail(): React.ReactElement {
           <button
             type="button"
             className="mt-auto flex size-9 items-center justify-center rounded-md focus-visible:outline-none"
-            aria-label="Kullanıcı menüsü"
+            aria-label={tRail('userMenuAriaLabel')}
           >
             <Avatar className="size-7">
               <AvatarFallback>BO</AvatarFallback>
             </Avatar>
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">Kullanıcı</TooltipContent>
+        <TooltipContent side="right">{tRail('userTooltip')}</TooltipContent>
       </Tooltip>
     </nav>
   );

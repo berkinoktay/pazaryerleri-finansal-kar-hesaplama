@@ -1,0 +1,131 @@
+{
+  "common": {
+    "appName": "PazarSync",
+    "loading": "Yükleniyor",
+    "empty": "Veri yok",
+    "retry": "Tekrar dene",
+    "save": "Kaydet",
+    "cancel": "Vazgeç",
+    "search": "Ara",
+    "lastSynced": "Son senkronizasyon",
+    "gmtOffset": "GMT+3"
+  },
+  "metadata": {
+    "title": "PazarSync — E-ticaret Karlılık ve Operasyon Yönetimi",
+    "titleTemplate": "%s · PazarSync",
+    "description": "Türkiye pazaryerlerinde satış yapan işletmeler için sipariş bazında gerçek karlılık, otomatik mutabakat ve gider yönetimi platformu."
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "orders": "Siparişler",
+    "products": "Ürünler",
+    "profitability": "Karlılık",
+    "reconciliation": "Mutabakat",
+    "expenses": "Giderler",
+    "settings": "Ayarlar"
+  },
+  "navSections": {
+    "orders": {
+      "status": {
+        "title": "Durum",
+        "all": "Hepsi",
+        "pending": "Bekleyen",
+        "shipped": "Kargoda",
+        "delivered": "Teslim edildi",
+        "returned": "İade"
+      }
+    },
+    "products": {
+      "catalog": {
+        "title": "Katalog",
+        "active": "Aktif ürünler",
+        "draft": "Taslaklar",
+        "costs": "Maliyetler"
+      }
+    },
+    "profitability": {
+      "views": {
+        "title": "Görünümler",
+        "period": "Dönem",
+        "byProduct": "Ürün bazında",
+        "byCampaign": "Kampanya bazında"
+      }
+    }
+  },
+  "iconRail": {
+    "ariaLabel": "Ana gezinme",
+    "brandAriaLabel": "PazarSync",
+    "userMenuAriaLabel": "Kullanıcı menüsü",
+    "userTooltip": "Kullanıcı"
+  },
+  "contextRail": {
+    "ariaLabel": "Bağlam paneli",
+    "syncNow": "Şimdi senkronize et",
+    "addStore": "Mağaza bağla"
+  },
+  "storeSwitcher": {
+    "searchPlaceholder": "Mağaza ara…",
+    "empty": "Mağaza bulunamadı.",
+    "heading": "Mağazalar",
+    "active": "Aktif",
+    "addStore": "Mağaza bağla"
+  },
+  "activityRail": {
+    "ariaLabel": "Aktivite paneli",
+    "open": "Aktivite panelini aç",
+    "close": "Aktivite panelini kapat"
+  },
+  "toast": {
+    "storeFlowNotReady": "Mağaza bağla akışı henüz hazır değil",
+    "syncStarted": "Senkronizasyon başlatıldı"
+  },
+  "landing": {
+    "nav": {
+      "designSystem": "Tasarım sistemi",
+      "login": "Giriş",
+      "signup": "Başla"
+    },
+    "hero": {
+      "eyebrow": "Türkiye pazaryerleri için",
+      "titlePrefix": "Ciro değil,",
+      "titleHighlight": "gerçek kârı",
+      "titleSuffix": "gör.",
+      "subtitle": "Trendyol ve Hepsiburada mağazanı bağla; komisyon, kargo, platform bedeli ve KDV ayrıştırılmış halde her siparişin net kârını saniyeler içinde gör.",
+      "ctaPrimary": "Ücretsiz başla",
+      "ctaSecondary": "Paneli gör"
+    },
+    "valueProps": {
+      "profit": {
+        "title": "Sipariş bazında gerçek kar",
+        "description": "Komisyon, kargo, platform bedeli ve KDV ayrıştırmasıyla her siparişten ne kazandığını saniyeler içinde gör."
+      },
+      "reconciliation": {
+        "title": "Otomatik mutabakat",
+        "description": "Hakediş raporlarını, kargo faturalarını ve sipariş verisini eşleştirip, \"pazaryeri doğru mu ödedi?\" sorusunu cevapla."
+      },
+      "expenses": {
+        "title": "Gider yönetimi",
+        "description": "Ürün maliyetleri, reklam, paketleme — tüm operasyonel giderleri sisteme ekle, kârı gerçekten doğru hesapla."
+      }
+    },
+    "footer": {
+      "copyright": "© {year} PazarSync",
+      "tagline": "Made in Turkey"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Giriş Yap",
+      "subtitle": "Hesabına giriş yap."
+    },
+    "register": {
+      "title": "Hesap Oluştur",
+      "subtitle": "Ücretsiz hesap oluştur."
+    }
+  },
+  "languageSwitcher": {
+    "label": "Dil",
+    "tr": "Türkçe",
+    "en": "English"
+  }
+}
