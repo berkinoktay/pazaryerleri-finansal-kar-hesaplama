@@ -9,8 +9,8 @@ Hono-based REST backend for PazarSync. Multi-tenant API for managing organizatio
 ## Stack
 
 - **Framework:** [Hono](https://hono.dev) on Node.js (`@hono/node-server`)
-- **OpenAPI:** `@hono/zod-openapi@0.19.x` (pinned — v1 needs Zod 4)
-- **Validation:** Zod 3 + `@hono/zod-validator`
+- **OpenAPI:** `@hono/zod-openapi@1.x`
+- **Validation:** Zod 4 + `@hono/zod-validator`
 - **ORM:** Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`) — see [`@pazarsync/db`](../../packages/db)
 - **Auth:** Supabase JWT verification _(middleware planned)_
 - **Money:** `decimal.js` — never floating point
