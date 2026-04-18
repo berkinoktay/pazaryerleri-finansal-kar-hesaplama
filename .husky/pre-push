@@ -1,0 +1,4 @@
+# Heavier validation before sharing code. Mirrors CI's fast jobs (typecheck +
+# lint + unit tests + format check) — no DB needed. If you intentionally need
+# to push WIP that won't pass, use `git push --no-verify`.
+pnpm check:all
