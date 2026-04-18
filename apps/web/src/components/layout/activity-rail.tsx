@@ -7,6 +7,7 @@ import {
   Pulse01Icon,
   SidebarRightIcon,
 } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -40,17 +41,16 @@ export interface ActivityRailProps {
 
 /**
  * Right rail — collapsed to 32px by default showing only status glyphs,
- * expands to 320px on trigger to reveal the full activity feed. Tuck
- * ambient context (sync progress, recent webhooks) here so it never
- * competes with the primary content for attention.
+ * expands to 320px on trigger to reveal the full activity feed.
  */
 export function ActivityRail({ entries }: ActivityRailProps): React.ReactElement {
+  const t = useTranslations('activityRail');
   const [open, setOpen] = React.useState(false);
   const hasWarning = entries.some((e) => e.icon === 'warning');
 
   return (
     <aside
-      aria-label="Aktivite paneli"
+      aria-label={t('ariaLabel')}
       className={cn(
         'border-border bg-card duration-slow ease-out-quart flex h-full flex-col border-l transition-[width]',
         open ? 'w-rail-activity-open' : 'w-rail-activity',
@@ -61,7 +61,7 @@ export function ActivityRail({ entries }: ActivityRailProps): React.ReactElement
           variant="ghost"
           size="icon-sm"
           onClick={() => setOpen((prev) => !prev)}
-          aria-label={open ? 'Aktivite panelini kapat' : 'Aktivite panelini aç'}
+          aria-label={open ? t('close') : t('open')}
           aria-expanded={open}
           className="relative"
         >

@@ -1,15 +1,15 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { Refresh01Icon, PlusSignIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 
+import { LanguageSwitcher } from '@/components/common/language-switcher';
 import { NAV_ITEMS } from '@/components/layout/nav-config';
 import { StoreSwitcher, type Store } from '@/components/layout/store-switcher';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Link, usePathname } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 
 export interface ContextRailProps {
@@ -34,14 +34,16 @@ export function ContextRail({
 }: ContextRailProps): React.ReactElement {
   const pathname = usePathname();
   const t = useTranslations();
+  const tRail = useTranslations('contextRail');
 
   const activeItem =
     NAV_ITEMS.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)) ??
     NAV_ITEMS[0];
+  const sections = activeItem && 'sections' in activeItem ? activeItem.sections : [];
 
   return (
     <aside
-      aria-label="Bağlam paneli"
+      aria-label={tRail('ariaLabel')}
       className="w-rail-context border-border bg-background flex h-full flex-col border-r"
     >
       <div className="gap-xs border-border p-sm flex flex-col border-b">
@@ -53,7 +55,7 @@ export function ContextRail({
         />
       </div>
 
-      {activeItem?.sections?.length ? (
+      {sections.length ? (
         <div className="px-sm py-sm flex items-center justify-between">
           <h2 className="text-2xs text-muted-foreground font-semibold tracking-wide uppercase">
             {t(activeItem.labelKey)}
@@ -63,10 +65,10 @@ export function ContextRail({
 
       <ScrollArea className="flex-1">
         <div className="gap-md px-sm pb-md flex flex-col">
-          {activeItem?.sections?.map((section) => (
+          {sections.map((section) => (
             <div key={section.key} className="gap-3xs flex flex-col">
               <span className="px-xs text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-                {section.label}
+                {t(section.labelKey)}
               </span>
               <ul className="gap-3xs flex flex-col">
                 {section.items.map((sub) => {
@@ -84,12 +86,7 @@ export function ContextRail({
                             : 'text-muted-foreground',
                         )}
                       >
-                        <span>{sub.label}</span>
-                        {sub.badge ? (
-                          <span className="bg-accent px-xs py-3xs text-2xs text-accent-foreground rounded-full font-medium">
-                            {sub.badge}
-                          </span>
-                        ) : null}
+                        <span>{t(sub.labelKey)}</span>
                       </Link>
                     </li>
                   );
@@ -105,12 +102,14 @@ export function ContextRail({
       <div className="gap-xs p-sm flex flex-col">
         <Button variant="outline" size="sm" onClick={onSyncNow} className="justify-start">
           <Refresh01Icon className="size-icon-sm" />
-          Şimdi senkronize et
+          {tRail('syncNow')}
         </Button>
         <Button variant="ghost" size="sm" onClick={onAddStore} className="justify-start">
           <PlusSignIcon className="size-icon-sm" />
-          Mağaza bağla
+          {tRail('addStore')}
         </Button>
+        <Separator className="my-3xs" />
+        <LanguageSwitcher />
       </div>
     </aside>
   );
