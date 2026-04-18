@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "bradlc.vscode-tailwindcss",
+    "prisma.prisma",
+    "vitest.explorer",
+    "denoland.vscode-deno",
+    "yoavbls.pretty-ts-errors",
+    "github.vscode-github-actions"
+  ]
+}

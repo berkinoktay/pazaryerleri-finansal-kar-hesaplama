@@ -16,8 +16,11 @@ packages/db/generated/
 .env.local
 .env.*.local
 
-# IDE
-.vscode/
+# IDE — only the two shared workspace files are tracked, everything else
+# (launch.json, tasks.json, personal overrides) stays local.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 *.swp
 *.swo
