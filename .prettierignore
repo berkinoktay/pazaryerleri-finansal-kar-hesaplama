@@ -10,6 +10,7 @@ docs/plans/
 packages/db/generated/
 packages/api-client/src/generated/
 packages/api-client/openapi.json
+apps/web/next-env.d.ts
 
 # Build artifacts and dependencies.
 node_modules/
