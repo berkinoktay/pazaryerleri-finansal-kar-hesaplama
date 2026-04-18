@@ -21,7 +21,7 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 
 | Layer               | Technology                                                                                                                                                 |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Monorepo**        | Turborepo 2.x + pnpm workspaces (pnpm 9.15 — 10.x migration in roadmap)                                                                                    |
+| **Monorepo**        | Turborepo 2.x + pnpm workspaces (pnpm 10.33)                                                                                                               |
 | **Frontend**        | Next.js 16 (App Router), React 19.2, TypeScript 5.9 — TS 6 migration in roadmap                                                                            |
 | **Styling**         | Tailwind CSS 4 (token-first), shadcn/ui, Hugeicons                                                                                                         |
 | **Backend**         | Hono 4.x on Node.js (`@hono/node-server`)                                                                                                                  |
@@ -35,12 +35,12 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 | **Crypto**          | Node `crypto` (AES-256-GCM via `apps/api/src/lib/crypto.ts`)                                                                                               |
 | **Money**           | `decimal.js` end-to-end — never floating point                                                                                                             |
 | **Testing**         | Vitest 4 + React Testing Library + MSW v2 + happy-dom (NOT jsdom — see `apps/web/CLAUDE.md`)                                                               |
-| **Package Manager** | pnpm 9.15 (Node ≥ 20.19) — 10.x migration in roadmap                                                                                                       |
+| **Package Manager** | pnpm 10.33 (Node ≥ 20.19)                                                                                                                                  |
 | **Lint / Format**   | ESLint 9 (flat config) + Prettier 3 — ESLint 10 migration in roadmap                                                                                       |
 
 ## Version Pinning & Migration Roadmap
 
-The four majors below are intentionally held back. Each has a reason and a planned upgrade window — do not bump them on a whim, and do not let a fresh AI session reach for the latest just because it is "current."
+The four majors below are intentionally held back. Each has a reason and a planned upgrade window — do not bump them on a whim, and do not let a fresh AI session reach for the latest just because it is "current." (pnpm was on this list; it was migrated to 10.x — see commit history.)
 
 ### Pinned
 
@@ -50,7 +50,6 @@ The four majors below are intentionally held back. Each has a reason and a plann
 | `@hono/zod-openapi` | 0.19.10 | 1.x    | v1 requires Zod 4. The bridge between Zod schemas and OpenAPI changed shape; routes' `createRoute({ responses: ... })` calls need a once-over. Coupled with the Zod 4 migration.                                           |
 | `typescript`        | 5.9.x   | 6.x    | TS 6 tightens several inference rules and changes some `lib.d.ts` shapes. Across our monorepo this surfaces as scattered type errors. Schedule an explicit upgrade window — not a "while I am here" change.                |
 | `eslint`            | 9.x     | 10.x   | ESLint 10 bumps the minimum Node version and changes how some rule modules are resolved. Our flat configs in `apps/web/eslint.config.mjs` + `apps/api/eslint.config.mjs` need verification. Schedule alongside TS 6.       |
-| `pnpm`              | 9.15    | 10.x   | Affects `packageManager` in root `package.json` AND CI workflow `pnpm/action-setup` resolution. Low risk but non-zero — verify lockfile shape stays stable, run full CI before declaring done.                             |
 
 ### Anti-pattern: bumping a pinned major in a feature PR
 
