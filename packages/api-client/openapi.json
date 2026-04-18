@@ -44,6 +44,20 @@
           "status"
         ]
       },
+      "OrganizationListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Organization"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
       "Organization": {
         "type": "object",
         "properties": {
@@ -80,18 +94,45 @@
         ],
         "description": "An organization (tenant). Users can be members of multiple organizations."
       },
-      "OrganizationListResponse": {
+      "ProblemDetails": {
         "type": "object",
         "properties": {
-          "data": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://api.pazarsync.com/errors/order-not-found",
+            "description": "URI identifying the error category"
+          },
+          "title": {
+            "type": "string",
+            "example": "Order Not Found"
+          },
+          "status": {
+            "type": "integer",
+            "example": 404
+          },
+          "code": {
+            "type": "string",
+            "example": "ORDER_NOT_FOUND",
+            "description": "Stable machine-readable error code (SCREAMING_SNAKE_CASE)"
+          },
+          "detail": {
+            "type": "string",
+            "example": "Order abc-uuid not found in store xyz-uuid"
+          },
+          "errors": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Organization"
+              "$ref": "#/components/schemas/ValidationErrorDetail"
             }
           }
         },
         "required": [
-          "data"
+          "type",
+          "title",
+          "status",
+          "code",
+          "detail"
         ]
       },
       "ValidationErrorDetail": {
@@ -116,47 +157,6 @@
         "required": [
           "field",
           "code"
-        ]
-      },
-      "ProblemDetails": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "description": "URI identifying the error category",
-            "example": "https://api.pazarsync.com/errors/order-not-found"
-          },
-          "title": {
-            "type": "string",
-            "example": "Order Not Found"
-          },
-          "status": {
-            "type": "integer",
-            "example": 404
-          },
-          "code": {
-            "type": "string",
-            "description": "Stable machine-readable error code (SCREAMING_SNAKE_CASE)",
-            "example": "ORDER_NOT_FOUND"
-          },
-          "detail": {
-            "type": "string",
-            "example": "Order abc-uuid not found in store xyz-uuid"
-          },
-          "errors": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ValidationErrorDetail"
-            }
-          }
-        },
-        "required": [
-          "type",
-          "title",
-          "status",
-          "code",
-          "detail"
         ]
       }
     },
@@ -205,21 +205,24 @@
                   "type": "integer",
                   "description": "Maximum requests permitted in the current window"
                 },
-                "required": true
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
               },
               "X-RateLimit-Remaining": {
                 "schema": {
                   "type": "integer",
                   "description": "Requests remaining in the current window"
                 },
-                "required": true
+                "required": true,
+                "description": "Requests remaining in the current window"
               },
               "X-RateLimit-Reset": {
                 "schema": {
                   "type": "integer",
                   "description": "Epoch seconds when the current window resets"
                 },
-                "required": true
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
               }
             },
             "content": {
@@ -248,7 +251,8 @@
                   "type": "integer",
                   "description": "Seconds to wait before retrying"
                 },
-                "required": true
+                "required": true,
+                "description": "Seconds to wait before retrying"
               }
             },
             "content": {

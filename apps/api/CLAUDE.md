@@ -305,7 +305,7 @@ export const prisma = new PrismaClient({ adapter });
 
 ## REST API Documentation
 
-The REST API is self-documenting via OpenAPI 3.1, auto-generated from Zod schemas using `@hono/zod-openapi@0.19.x` (pinned — v1.x requires Zod 4). Every route in `apps/api/src/routes/` is defined with `createRoute()`. Schemas live in `apps/api/src/validators/` with `.openapi()` metadata. Shared error/pagination/rate-limit/security components live in `apps/api/src/openapi/`.
+The REST API is self-documenting via OpenAPI 3.1, auto-generated from Zod schemas using `@hono/zod-openapi@1.x`. Every route in `apps/api/src/routes/` is defined with `createRoute()`. Schemas live in `apps/api/src/validators/` with `.openapi()` metadata. Shared error/pagination/rate-limit/security components live in `apps/api/src/openapi/`.
 
 ### Required per route
 
