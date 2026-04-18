@@ -17,20 +17,52 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 
 ## Tech Stack
 
-| Layer               | Technology                                                  |
-| ------------------- | ----------------------------------------------------------- |
-| **Monorepo**        | Turborepo + pnpm workspaces                                 |
-| **Frontend**        | Next.js 16 (App Router), React 19.2, TypeScript 5.x         |
-| **Styling**         | Tailwind CSS 4, shadcn/ui, Hugeicons                        |
-| **Backend**         | Hono (Node.js runtime)                                      |
-| **API Pattern**     | REST + Zod validation                                       |
-| **Data Fetching**   | TanStack React Query v5                                     |
-| **Database**        | Supabase (PostgreSQL 15)                                    |
-| **ORM**             | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`) |
-| **Auth**            | Supabase Auth (email/password, OAuth)                       |
-| **Background Jobs** | Supabase Edge Functions + pg_cron                           |
-| **Package Manager** | pnpm 9+                                                     |
-| **Formatting**      | Prettier + ESLint (flat config)                             |
+> **Always use the current latest version when adding a new dependency.** Run `npm view <pkg> version` (or check the package's docs site / `llms.txt`) to verify before installing. The versions below are the floor that the codebase is known-good against — Dependabot keeps minors/patches current automatically. Anything pinned to a specific major has a reason recorded in the **Version Pinning & Migration Roadmap** section right below this table; consult it before bumping.
+
+| Layer               | Technology                                                                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Monorepo**        | Turborepo 2.x + pnpm workspaces (pnpm 9.15 — 10.x migration in roadmap)                                                                                    |
+| **Frontend**        | Next.js 16 (App Router), React 19.2, TypeScript 5.9 — TS 6 migration in roadmap                                                                            |
+| **Styling**         | Tailwind CSS 4 (token-first), shadcn/ui, Hugeicons                                                                                                         |
+| **Backend**         | Hono 4.x on Node.js (`@hono/node-server`)                                                                                                                  |
+| **API Pattern**     | REST + Zod 3 validation — Zod 4 migration in roadmap                                                                                                       |
+| **OpenAPI**         | `@hono/zod-openapi` 0.19.x — **pinned** (1.x needs Zod 4); generates spec → `openapi-typescript` → typed `openapi-fetch` client in `@pazarsync/api-client` |
+| **Data Fetching**   | TanStack React Query v5 (frontend), typed `openapi-fetch` client                                                                                           |
+| **Database**        | Supabase (PostgreSQL 15)                                                                                                                                   |
+| **ORM**             | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                                                                                                |
+| **Auth**            | Supabase Auth (email/password, OAuth) + `jose` for JWT verification                                                                                        |
+| **Background Jobs** | Supabase Edge Functions + pg_cron                                                                                                                          |
+| **Crypto**          | Node `crypto` (AES-256-GCM via `apps/api/src/lib/crypto.ts`)                                                                                               |
+| **Money**           | `decimal.js` end-to-end — never floating point                                                                                                             |
+| **Testing**         | Vitest 4 + React Testing Library + MSW v2 + happy-dom (NOT jsdom — see `apps/web/CLAUDE.md`)                                                               |
+| **Package Manager** | pnpm 9.15 (Node ≥ 20.19) — 10.x migration in roadmap                                                                                                       |
+| **Lint / Format**   | ESLint 9 (flat config) + Prettier 3 — ESLint 10 migration in roadmap                                                                                       |
+
+## Version Pinning & Migration Roadmap
+
+The four majors below are intentionally held back. Each has a reason and a planned upgrade window — do not bump them on a whim, and do not let a fresh AI session reach for the latest just because it is "current."
+
+### Pinned
+
+| Package             | Current | Latest | Why pinned                                                                                                                                                                                                                 |
+| ------------------- | ------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `zod`               | 3.24.x  | 4.x    | Zod 4 changes the inference machinery and several runtime APIs. Migration touches every validator file in `apps/api/src/validators/` plus the OpenAPI bridge. Coupled with `@hono/zod-openapi` v1 (below) — bump together. |
+| `@hono/zod-openapi` | 0.19.10 | 1.x    | v1 requires Zod 4. The bridge between Zod schemas and OpenAPI changed shape; routes' `createRoute({ responses: ... })` calls need a once-over. Coupled with the Zod 4 migration.                                           |
+| `typescript`        | 5.9.x   | 6.x    | TS 6 tightens several inference rules and changes some `lib.d.ts` shapes. Across our monorepo this surfaces as scattered type errors. Schedule an explicit upgrade window — not a "while I am here" change.                |
+| `eslint`            | 9.x     | 10.x   | ESLint 10 bumps the minimum Node version and changes how some rule modules are resolved. Our flat configs in `apps/web/eslint.config.mjs` + `apps/api/eslint.config.mjs` need verification. Schedule alongside TS 6.       |
+| `pnpm`              | 9.15    | 10.x   | Affects `packageManager` in root `package.json` AND CI workflow `pnpm/action-setup` resolution. Low risk but non-zero — verify lockfile shape stays stable, run full CI before declaring done.                             |
+
+### Anti-pattern: bumping a pinned major in a feature PR
+
+Pin removals get their own dedicated PR with the migration in the body. Mixing a Zod 4 bump into a "feat: add stores route" PR makes both the security review and the migration review impossible. If you find yourself reaching for a pinned major mid-feature, stop and open a separate migration PR first.
+
+### Anti-pattern: chasing every patch
+
+Dependabot opens grouped PRs for non-major bumps weekly (see `.github/dependabot.yml`). Do not run `pnpm update` ad-hoc — the grouped PRs are the audit trail. If a single bug fix is urgent, comment `@dependabot recreate` on the existing dev/prod-deps group PR rather than bypassing it.
+
+### What "use the latest" means in practice
+
+When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z` pinning) and let Dependabot keep it current. When working with an EXISTING dependency from the table above: assume it is at the version listed unless you just ran `pnpm install` and read the lockfile. Use `pnpm --filter <pkg> ls <dep>` to confirm at any moment.
 
 ## Monorepo Structure
 
@@ -542,7 +574,10 @@ For any bug fix:
 
 ## LLM Reference Docs
 
+Pull current docs via `WebFetch` or the `context7` MCP server before writing code that touches a library API — Anthropic's training cutoff is January 2026 and these libs ship monthly.
+
 - Hono: https://hono.dev/llms-full.txt
 - Supabase: https://supabase.com/llms.txt
 - Next.js: https://nextjs.org/llms.txt
 - Prisma: https://prisma.io/llms.txt
+- For everything else: `mcp__context7__query-docs` with the library name (React Query, Zod, Tailwind, Vitest, MSW, jose, react-hook-form, decimal.js, etc.) — do not rely on training-time memory for API shapes.
