@@ -86,7 +86,7 @@
     "happy-dom": "^20.9.0",
     "msw": "^2",
     "tailwindcss": "^4",
-    "typescript": "^5",
+    "typescript": "^6",
     "vitest": "^4.1.4"
   }
 }
