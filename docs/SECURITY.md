@@ -315,10 +315,10 @@ if (!store) return c.json({ type: '.../not-found', title: 'Not Found', status: 4
 
 ### Authentication
 
-- All API endpoints (except `/health`, `/auth/signup`, `/auth/signin`) require a valid Supabase JWT
-- JWT is verified on every request using `JWT_SECRET` (HS256)
-- Expired tokens → `401 Unauthorized` (client must refresh)
-- Invalid tokens → `401 Unauthorized`, NEVER log the token value
+- All API endpoints (except `/v1/health`, `/v1/openapi.json`, `/v1/docs`) require a valid Supabase JWT in the `Authorization: Bearer <jwt>` header.
+- Tokens are verified by delegating to `supabase.auth.getUser(token)` via the Supabase JS SDK using `SUPABASE_SECRET_KEY`. The SDK handles signature verification, algorithm selection (HS256 / ES256), claim validation (`aud`, `iss`, `exp`), and stays current with Supabase Auth's evolving token format — no custom JWT crypto in this codebase.
+- Expired tokens → `401 Unauthorized` (client must refresh).
+- Invalid tokens → `401 Unauthorized`, NEVER log the token value.
 
 ### Transport
 
@@ -451,7 +451,8 @@ Before merging any PR that touches user data, credentials, or cross-tenant code:
 - [ ] Any new credential storage uses the `encryptCredentials`/`decryptCredentials` helpers
 - [ ] Credentials never appear in API responses (use `toStoreResponse`-style mappers)
 - [ ] Credentials never appear in logs (grep the PR for `credentials`, `apiKey`, `secret`, `token`)
-- [ ] Env vars (`ENCRYPTION_KEY`, `JWT_SECRET`, `SUPABASE_SECRET_KEY`) are not committed
+- [ ] Env vars (`ENCRYPTION_KEY`, `SUPABASE_SECRET_KEY`, database connection strings) are not committed
+- [ ] Test-only hardcoded values in `.github/workflows/ci.yml` are scoped to Supabase local (ephemeral, non-production) defaults — no real secrets inline in workflow files
 
 ### Authorization
 

@@ -5,8 +5,8 @@
 // don't have one (stores, products, orders) so re-running stays clean.
 //
 // What you get:
-//   - 2 users (berkin, demo) with fixed UUIDs — so re-seeding keeps the
-//     same IDs, convenient for pointing a Supabase Auth user at them.
+//   - 2 login-capable users (berkin, demo) with fixed UUIDs in BOTH
+//     auth.users and user_profiles. Password: SEED_PASSWORD below.
 //   - 2 organizations (Akyıldız, Yıldırım) with intentionally mixed
 //     memberships to exercise the tenant-isolation invariant:
 //
@@ -18,13 +18,12 @@
 //   - Products and orders per store, spanning OrderStatus values so the
 //     profit panel / status filters have meaningful sample data.
 //
-// What this seed does NOT do:
-//   - Create `auth.users` rows. Supabase Auth manages that schema
-//     separately. To log in as one of these users:
-//       1. Sign up via Supabase Studio → Authentication → Add User.
-//       2. Copy the new user's UUID.
-//       3. Replace the matching `USERS.*.id` below and re-seed
-//          (or update `user_profiles.id` directly once).
+// To sign in as a seed user from a Next.js frontend (or via curl):
+//   POST {SUPABASE_URL}/auth/v1/token?grant_type=password
+//     apikey: {NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+//     body: { email, password: SEED_PASSWORD }
+//   → response.access_token goes into `Authorization: Bearer …` for
+//     backend calls. authMiddleware verifies via supabase.auth.getUser.
 import path from 'node:path';
 import { createCipheriv, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -35,11 +34,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 import { PrismaPg } from '@prisma/adapter-pg';
+import { createClient } from '@supabase/supabase-js';
 
 import { PrismaClient } from '../generated/prisma/client.js';
 
 const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] });
 const prisma = new PrismaClient({ adapter });
+
+function supabaseAdmin() {
+  const url = process.env['SUPABASE_URL'];
+  const secret = process.env['SUPABASE_SECRET_KEY'];
+  if (url === undefined || url.length === 0 || secret === undefined || secret.length === 0) {
+    throw new Error(
+      'SUPABASE_URL and SUPABASE_SECRET_KEY are required to seed auth.users. ' +
+        'Check workspace-root .env or run `supabase status -o env`.',
+    );
+  }
+  return createClient(url, secret, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 // Mirror of apps/api/src/lib/crypto.ts encryptCredentials. Kept inline
 // because packages/db must not depend on apps/api (dependency direction
@@ -63,6 +77,9 @@ function encryptCredentials(creds: Record<string, unknown>): string {
   return Buffer.concat([iv, authTag, ciphertext]).toString('base64');
 }
 
+// Fixed UUIDs so re-seeding stays stable and Supabase Studio keeps the
+// same user rows. admin.createUser accepts an `id` parameter; if a row
+// with that email already exists we reuse its id.
 const USERS = {
   berkin: {
     id: '00000000-0000-0000-0000-000000000001',
@@ -76,20 +93,48 @@ const USERS = {
   },
 } as const;
 
+// Single seed-wide password for local dev convenience. NEVER use in prod.
+const SEED_PASSWORD = 'pazarsync-dev-password';
+
 const ORGS = {
   akyildiz: { slug: 'akyildiz-ticaret', name: 'Akyıldız Ticaret' },
   yildirim: { slug: 'yildirim-ev-urunleri', name: 'Yıldırım Ev Ürünleri' },
 } as const;
 
+/**
+ * Ensure an auth.users row exists with the given email + id, then mirror
+ * it into user_profiles. Idempotent — re-running uses the existing row.
+ *
+ * Resolves the mismatch noted in the original seed header: previously
+ * USERS.*.id didn't match any auth.users UUID, so seed users couldn't
+ * actually log in. Now they can (password = SEED_PASSWORD).
+ */
 async function seedUsers(): Promise<void> {
+  const admin = supabaseAdmin();
+
   for (const u of Object.values(USERS)) {
+    // Idempotent create: if email already registered, we reuse the row.
+    const { error } = await admin.auth.admin.createUser({
+      id: u.id,
+      email: u.email,
+      password: SEED_PASSWORD,
+      email_confirm: true,
+      user_metadata: { full_name: u.fullName },
+    });
+    if (error !== null && !/already (been )?registered|already exists/i.test(error.message)) {
+      throw new Error(`auth.admin.createUser failed for ${u.email}: ${error.message}`);
+    }
+
     await prisma.userProfile.upsert({
       where: { email: u.email },
       create: { id: u.id, email: u.email, fullName: u.fullName },
       update: { fullName: u.fullName },
     });
   }
-  console.log(`\u2713 user_profiles: ${Object.keys(USERS).length.toString()} rows`);
+  console.log(
+    `\u2713 auth.users + user_profiles: ${Object.keys(USERS).length.toString()} rows each`,
+  );
+  console.log(`  login password for seed users: ${SEED_PASSWORD}`);
 }
 
 async function seedOrgsAndMemberships(): Promise<{

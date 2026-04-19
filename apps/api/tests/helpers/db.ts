@@ -9,6 +9,10 @@ export { prisma };
  * any FKs we forgot to enumerate. RESTART IDENTITY resets auto-increment
  * sequences so test data is deterministic.
  *
+ * `auth.users` is also truncated so `createAuthenticatedTestUser` starts
+ * from a clean slate each test — no collisions on retried emails, no
+ * accumulation between test runs against a long-lived Supabase local.
+ *
  * Order doesn't matter for TRUNCATE CASCADE — Postgres figures out the FK
  * dependency graph itself.
  */
@@ -28,6 +32,10 @@ export async function truncateAll(): Promise<void> {
        user_profiles
      RESTART IDENTITY CASCADE`,
   );
+  // auth.users cannot be TRUNCATEd from the `postgres` role because Supabase's
+  // auth schema has sequences owned by `supabase_auth_admin`. DELETE works
+  // and cascades through auth.identities / sessions / refresh_tokens via FK.
+  await prisma.$executeRawUnsafe(`DELETE FROM auth.users`);
 }
 
 /**

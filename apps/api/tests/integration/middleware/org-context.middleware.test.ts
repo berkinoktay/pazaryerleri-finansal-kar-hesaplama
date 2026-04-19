@@ -4,9 +4,9 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ForbiddenError, UnauthorizedError } from '../../../src/lib/errors';
 import { authMiddleware } from '../../../src/middleware/auth.middleware';
 import { orgContextMiddleware } from '../../../src/middleware/org-context.middleware';
-import { bearer, signTestJwt } from '../../helpers/auth';
+import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
+import { createMembership, createOrganization } from '../../helpers/factories';
 
 function makeApp() {
   const app = new Hono<{
@@ -49,14 +49,13 @@ describe('orgContextMiddleware', () => {
   });
 
   it('sets organizationId + memberRole for a member', async () => {
-    const user = await createUserProfile();
+    const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id, 'OWNER');
-    const token = await signTestJwt(user.id);
     const app = makeApp();
 
     const res = await app.request(`/organizations/${org.id}/echo`, {
-      headers: { Authorization: bearer(token) },
+      headers: { Authorization: bearer(user.accessToken) },
     });
 
     expect(res.status).toBe(200);
@@ -66,13 +65,12 @@ describe('orgContextMiddleware', () => {
   });
 
   it('returns 403 when user is NOT a member of the org', async () => {
-    const user = await createUserProfile();
+    const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
-    const token = await signTestJwt(user.id);
     const app = makeApp();
 
     const res = await app.request(`/organizations/${org.id}/echo`, {
-      headers: { Authorization: bearer(token) },
+      headers: { Authorization: bearer(user.accessToken) },
     });
 
     expect(res.status).toBe(403);
@@ -81,26 +79,24 @@ describe('orgContextMiddleware', () => {
   });
 
   it('returns 403 when the user is a member of a DIFFERENT org', async () => {
-    const user = await createUserProfile();
+    const user = await createAuthenticatedTestUser();
     const [orgA, orgB] = await Promise.all([createOrganization(), createOrganization()]);
     await createMembership(orgA.id, user.id, 'OWNER');
-    const token = await signTestJwt(user.id);
     const app = makeApp();
 
     const res = await app.request(`/organizations/${orgB.id}/echo`, {
-      headers: { Authorization: bearer(token) },
+      headers: { Authorization: bearer(user.accessToken) },
     });
 
     expect(res.status).toBe(403);
   });
 
   it('returns 403 when orgId is a non-existent UUID', async () => {
-    const user = await createUserProfile();
-    const token = await signTestJwt(user.id);
+    const user = await createAuthenticatedTestUser();
     const app = makeApp();
 
     const res = await app.request('/organizations/00000000-0000-0000-0000-000000000000/echo', {
-      headers: { Authorization: bearer(token) },
+      headers: { Authorization: bearer(user.accessToken) },
     });
 
     expect(res.status).toBe(403);

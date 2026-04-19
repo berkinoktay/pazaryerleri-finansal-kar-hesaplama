@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../src/app';
-import { bearer, signTestJwt } from '../../helpers/auth';
+import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
+import { createMembership, createOrganization } from '../../helpers/factories';
 
 describe('Tenant isolation — GET /v1/organizations', () => {
   const app = createApp();
@@ -17,7 +17,10 @@ describe('Tenant isolation — GET /v1/organizations', () => {
   });
 
   it("user A CANNOT see user B's organizations", async () => {
-    const [userA, userB] = await Promise.all([createUserProfile(), createUserProfile()]);
+    const [userA, userB] = await Promise.all([
+      createAuthenticatedTestUser(),
+      createAuthenticatedTestUser(),
+    ]);
     const [orgA, orgB] = await Promise.all([
       createOrganization({ name: 'A Corp' }),
       createOrganization({ name: 'B Corp' }),
@@ -27,9 +30,8 @@ describe('Tenant isolation — GET /v1/organizations', () => {
       createMembership(orgB.id, userB.id, 'OWNER'),
     ]);
 
-    const tokenA = await signTestJwt(userA.id);
     const res = await app.request('/v1/organizations', {
-      headers: { Authorization: bearer(tokenA) },
+      headers: { Authorization: bearer(userA.accessToken) },
     });
 
     expect(res.status).toBe(200);
@@ -44,13 +46,15 @@ describe('Tenant isolation — GET /v1/organizations', () => {
   });
 
   it("a user with no memberships sees nobody else's orgs", async () => {
-    const [lurker, owner] = await Promise.all([createUserProfile(), createUserProfile()]);
+    const [lurker, owner] = await Promise.all([
+      createAuthenticatedTestUser(),
+      createAuthenticatedTestUser(),
+    ]);
     const org = await createOrganization({ name: 'Private Corp' });
     await createMembership(org.id, owner.id, 'OWNER');
 
-    const token = await signTestJwt(lurker.id);
     const res = await app.request('/v1/organizations', {
-      headers: { Authorization: bearer(token) },
+      headers: { Authorization: bearer(lurker.accessToken) },
     });
 
     expect(res.status).toBe(200);

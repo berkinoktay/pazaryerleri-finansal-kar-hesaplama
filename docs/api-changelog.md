@@ -13,15 +13,22 @@ section "Versioning" for details.
 
 ### Added
 
-- Auth middleware chain. `authMiddleware` verifies Supabase HS256 JWTs
-  and sets `userId` on the request context; `orgContextMiddleware`
+- Auth middleware chain. `authMiddleware` delegates to
+  `supabase.auth.getUser(token)` to verify the Bearer token and sets
+  `userId` + `email` on the request context. `orgContextMiddleware`
   verifies `OrganizationMember` for `:orgId` path params and sets
-  `organizationId` + `memberRole`.
+  `organizationId` + `memberRole`. SDK-delegated verification handles
+  both HS256 and asymmetric (ES256/RS256) tokens transparently — the
+  backend stays correct as Supabase migrates projects between signing
+  modes.
 - RFC 7807 error handler mapping `UnauthorizedError` → 401
   `UNAUTHENTICATED` and `ForbiddenError` → 403 `FORBIDDEN`. Unknown
   errors collapse to a generic 500 `INTERNAL_ERROR`.
-- `signTestJwt` + `bearer` helpers in `apps/api/tests/helpers/auth.ts`
-  for integration tests.
+- `createAuthenticatedTestUser` helper in
+  `apps/api/tests/helpers/auth.ts` creates real Supabase Auth users via
+  the admin API and returns a genuine access token. Replaces the
+  hand-signed HS256 tokens used previously; tests now exercise the same
+  verification path as production.
 - `createApp()` factory in `apps/api/src/app.ts` — single source of
   truth for route registration, used by both the runtime entry and
   `scripts/dump-openapi.ts` (replaces the previous duplication).

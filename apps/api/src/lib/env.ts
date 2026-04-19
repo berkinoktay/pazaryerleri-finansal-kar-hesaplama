@@ -1,7 +1,8 @@
 /**
  * Read a required env var. Throws if missing or empty — prefer failing
- * fast over silently producing surprise 401s (missing JWT_SECRET), 500s
- * (missing DATABASE_URL), or cryptographic errors (missing ENCRYPTION_KEY).
+ * fast over silently producing surprise 500s (missing DATABASE_URL),
+ * 401s (missing Supabase creds), or cryptographic errors (missing
+ * ENCRYPTION_KEY).
  */
 export function requireEnv(key: string): string {
   const value = process.env[key];
@@ -25,7 +26,12 @@ export function requireEnv(key: string): string {
  * dump script can import `createApp()` without a full env setup.
  */
 export function validateRequiredEnv(): void {
-  const required = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY'] as const;
+  const required = [
+    'DATABASE_URL',
+    'ENCRYPTION_KEY',
+    'SUPABASE_URL',
+    'SUPABASE_SECRET_KEY',
+  ] as const;
   for (const key of required) {
     requireEnv(key);
   }

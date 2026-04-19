@@ -65,9 +65,6 @@ importers:
       hono:
         specifier: ^4.12.0
         version: 4.12.14
-      jose:
-        specifier: ^6.2.2
-        version: 6.2.2
       zod:
         specifier: ^4.3.0
         version: 4.3.6
@@ -338,6 +335,9 @@ importers:
       '@prisma/adapter-pg':
         specifier: ^7.7.0
         version: 7.7.0
+      '@supabase/supabase-js':
+        specifier: ^2.103.3
+        version: 2.103.3
       pg:
         specifier: ^8.13.0
         version: 8.20.0
@@ -4099,9 +4099,6 @@ packages:
   jiti@2.6.1:
     resolution: {integrity: sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==}
     hasBin: true
-
-  jose@6.2.2:
-    resolution: {integrity: sha512-d7kPDd34KO/YnzaDOlikGpOurfF0ByC2sEV4cANCtdqLlTfBlw2p14O/5d/zv40gJPbIQxfES3nSx1/oYNyuZQ==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -8060,7 +8057,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.16
       tinyrainbow: 3.1.0
-      vitest: 4.1.4(@types/node@22.19.17)(@vitest/ui@4.1.4)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@22.19.17)(typescript@6.0.3))(vite@8.0.8(@types/node@22.19.17)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+      vitest: 4.1.4(@types/node@25.6.0)(@vitest/ui@4.1.4)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@6.0.3))(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   '@vitest/utils@4.1.4':
     dependencies:
@@ -9391,8 +9388,6 @@ snapshots:
       set-function-name: 2.0.2
 
   jiti@2.6.1: {}
-
-  jose@6.2.2: {}
 
   joycon@3.1.1: {}
 

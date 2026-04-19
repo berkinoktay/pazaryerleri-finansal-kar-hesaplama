@@ -124,12 +124,14 @@ app.get('/orders', async (c) => {
 });
 
 // ✅ Good — middleware handles auth + org context
-// middleware/auth.middleware.ts
+// middleware/auth.middleware.ts (delegates to Supabase SDK)
 export const authMiddleware = createMiddleware(async (c, next) => {
   const token = c.req.header('Authorization')?.replace('Bearer ', '');
   if (!token) throw new UnauthorizedError();
-  const payload = await verifySupabaseJwt(token);
-  c.set('userId', payload.sub);
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) throw new UnauthorizedError('Invalid token');
+  c.set('userId', data.user.id);
+  c.set('email', data.user.email);
   await next();
 });
 
@@ -399,7 +401,8 @@ The workspace-root `.env` is auto-loaded by `apps/api/vitest.config.ts` via dote
 
 - ❌ Mocking Prisma in integration tests — they exist to test real SQL
 - ❌ Sharing state across tests — every test starts with empty DB via `truncateAll`
-- ❌ Hand-rolled JWTs in tests — use `signTestJwt` and `bearer()` from `tests/helpers/auth.ts`
+- ❌ Hand-rolled JWTs in tests — use `createAuthenticatedTestUser()` and `bearer()` from `tests/helpers/auth.ts`. The helper creates a real Supabase Auth user via the admin API and returns a real access token, so tests exercise the actual `supabase.auth.getUser` verification path.
+- ❌ Shipping auth-touching changes without the manual smoke test — `pnpm dev --filter @pazarsync/api`, sign in via the `/auth/v1/token?grant_type=password` Supabase endpoint as a seed user, confirm `GET /v1/organizations` returns 200 with real data. Integration tests mint their own tokens; only an end-to-end sign-in catches drift between what Supabase emits and what the backend accepts. PR #25 shipped broken because this step was skipped.
 - ❌ Skipping the tenant-isolation test for a "trivial" endpoint — there is no trivial multi-tenant endpoint
 - ❌ Removing `fileParallelism: false` from `vitest.config.ts` — integration tests share one DB; parallel files race on `truncateAll`
 
