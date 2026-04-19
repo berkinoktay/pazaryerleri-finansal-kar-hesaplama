@@ -1,3 +1,22 @@
--- Row-Level Security policies for multi-tenant isolation
--- Applied after Prisma migrations create the tables
--- Run via: psql or Supabase Dashboard SQL Editor
+-- Row-Level Security policies for multi-tenant isolation.
+-- Applied after Prisma's `db push` via `pnpm db:apply-policies`.
+--
+-- Design principles:
+--   - Policies target the `authenticated` role. The `postgres` superuser
+--     (which our Prisma DATABASE_URL uses today) bypasses RLS entirely,
+--     so backend service-role queries continue to work unchanged.
+--   - Only SELECT policies are defined in Phase A. INSERT/UPDATE/DELETE
+--     have no policy, which means default-deny for non-superuser roles.
+--     CRUD endpoints add their own policies when they land.
+--   - All policies use `auth.uid()`, which Supabase provides out of the
+--     box to read the JWT `sub` claim.
+--   - Idempotent: DROP POLICY IF EXISTS before each CREATE POLICY so
+--     `pnpm db:apply-policies` can run repeatedly without conflict.
+
+-- ─── user_profiles ─────────────────────────────────────────────────────
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS user_profiles_self_read ON user_profiles;
+CREATE POLICY user_profiles_self_read ON user_profiles
+  FOR SELECT TO authenticated
+  USING (id = auth.uid());
