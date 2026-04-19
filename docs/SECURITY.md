@@ -347,47 +347,72 @@ if (!store) return c.json({ type: '.../not-found', title: 'Not Found', status: 4
 
 ## 7. Database Security (RLS)
 
-### Enable RLS on ALL tenant tables
+Policies live in [`supabase/sql/rls-policies.sql`](../supabase/sql/rls-policies.sql). Applied automatically by `pnpm db:push` (which chains into `pnpm db:apply-policies`). Every tenant-scoped table has `ENABLE ROW LEVEL SECURITY` plus at least one SELECT policy. The coverage test in `apps/api/tests/integration/rls/coverage.rls.test.ts` fails CI if any table is missing.
+
+### Role model
+
+| Role                   | How the connection gets it                                 | RLS behavior                            |
+| ---------------------- | ---------------------------------------------------------- | --------------------------------------- |
+| `postgres` (superuser) | `DATABASE_URL` as `postgres:postgres@…`                    | **Bypasses RLS entirely**               |
+| `authenticated`        | Supabase JS client with `Authorization: Bearer <user JWT>` | RLS enforced; `auth.uid()` populated    |
+| `anon`                 | Supabase JS client with no user JWT                        | RLS enforced; `auth.uid()` returns NULL |
+
+The backend currently uses the `postgres` role via Prisma, so RLS does not filter backend queries. Phase A (shipped) makes RLS the **second** layer of tenant isolation — the primary layer is `orgContextMiddleware`'s explicit filters. RLS is still load-bearing:
+
+- Blocks direct psql access to the database
+- Blocks realtime subscribers from reading any tenant data
+- Blocks edge functions using the anon key from reading cross-tenant rows
+- Protects against future code paths that use a non-superuser connection
+
+Phase B (future plan) moves backend queries through a per-request `authenticated` role scoped via transaction, so RLS also filters backend queries directly. Deferred until service-function count grows and the refactor has a clean shape.
+
+### Policy patterns
+
+The `is_org_member(uuid)` helper — defined once in `rls-policies.sql` — is the canonical building block. `SECURITY DEFINER` makes it RLS-immune inside its own body, which breaks the infinite-recursion trap in "read rows where user is a member of the row's org".
 
 ```sql
-ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organization_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE stores ENABLE ROW LEVEL SECURITY;
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE settlements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE settlement_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sync_logs ENABLE ROW LEVEL SECURITY;
+-- Direct org tables (organization_id column):
+USING (is_org_member(organization_id))
+
+-- Reach-via-parent tables (order_items, settlement_items, sync_logs):
+USING (EXISTS (
+  SELECT 1 FROM <parent>
+  WHERE <parent>.id = <this>.<parent_fk>
+    AND is_org_member(<parent>.organization_id)
+))
+
+-- Self-scoped (user_profiles):
+USING (id = auth.uid())
 ```
 
-### Standard Policy Template
+### Adding a new tenant-scoped table
 
-```sql
-CREATE POLICY "tenant_isolation" ON <table>
-  FOR ALL
-  USING (
-    organization_id IN (
-      SELECT organization_id FROM organization_members
-      WHERE user_id = auth.uid()
-    )
-  );
-```
+1. Add the Prisma model, run `pnpm db:push` to create the table (this chains into `db:apply-policies`).
+2. Append to [`supabase/sql/rls-policies.sql`](../supabase/sql/rls-policies.sql):
+   ```sql
+   ALTER TABLE your_table ENABLE ROW LEVEL SECURITY;
+   DROP POLICY IF EXISTS your_table_org_member_read ON your_table;
+   CREATE POLICY your_table_org_member_read ON your_table
+     FOR SELECT TO authenticated
+     USING (is_org_member(organization_id));
+   ```
+3. Add the table's name to `TENANT_TABLES` in `coverage.rls.test.ts`.
+4. Add an integration test in `apps/api/tests/integration/rls/<table>.rls.test.ts` using `createRlsScopedClient` (see existing files for the pattern).
+5. `pnpm db:push && pnpm --filter @pazarsync/api test:integration -- rls` — all green before PR.
 
-### Service Role Bypass
+**RLS is never deferred to a later PR.** Every PR that adds or modifies a tenant table includes its RLS story.
 
-The backend uses the Supabase **service role key** to connect, which bypasses RLS. This is intentional — we rely on application middleware to inject `organization_id`. But:
+### Connection security
 
-- The service role key MUST be treated as a root secret (env var, never in code)
-- RLS is still the backup if middleware has a bug
-- Edge Functions also use service role; they must manually enforce tenant scope
-
-### Connection Security
-
-- Use connection pooling with SSL (`sslmode=require`)
+- Use connection pooling with SSL (`sslmode=require`) in production
 - Never expose the database port publicly
 - Read replicas (if added) inherit the same RLS policies
+
+### Test secrets policy
+
+Values hardcoded inline in `.github/workflows/ci.yml` are scoped to Supabase local's well-known ephemeral defaults (JWT signing key auto-generated per container, `0xDEADBEEF`-style encryption key for tests). They are not production secrets and cannot be used to access anything beyond a CI job's own temporary DB.
+
+Real secrets (production Supabase service key, Sentry DSN, deployment credentials) live in GitHub Secrets (referenced via `${{ secrets.NAME }}`), never inline. Rule of thumb: if the value would compromise anything non-ephemeral when leaked, it's a secret — store it in GitHub Secrets.
 
 ---
 

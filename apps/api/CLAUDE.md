@@ -386,6 +386,7 @@ Full patterns in `docs/TESTING.md`. The most important ones:
 - **DB integration pattern**: every DB test does `await ensureDbReachable()` in `beforeAll`, `await truncateAll()` in `beforeEach` (see `tests/helpers/db.ts`)
 - **Test data factories**: use `createOrganization`, `createStore`, `createOrder`, etc. from `tests/helpers/factories.ts` — never hand-construct Prisma create payloads in tests
 - **Multi-tenancy isolation pattern**: create two orgs, write data in one, query in the other, assert empty result. See `tests/integration/tenant-isolation/data-layer-isolation.test.ts` for the canonical example.
+- **RLS tests**: every new tenant-scoped table ships an integration test in `tests/integration/rls/<table>.rls.test.ts` using `createRlsScopedClient` from `tests/helpers/rls-client.ts`. Prisma via `DATABASE_URL` bypasses RLS (superuser), so only the scoped Supabase JS client can prove a policy actually enforces. See existing `user-profiles.rls.test.ts` / `org-scoped-tables.rls.test.ts` for the pattern. The coverage test (`coverage.rls.test.ts`) asserts that every entry in its `TENANT_TABLES` list has `ENABLE ROW LEVEL SECURITY` + at least one SELECT policy — add your table's name to that list when you add the policy.
 
 ### Pre-requisites for running integration tests
 
