@@ -26,11 +26,12 @@ describe('requireEnv', () => {
 describe('validateRequiredEnv', () => {
   beforeEach(() => {
     vi.stubEnv('DATABASE_URL', 'postgresql://fake/fake');
-    vi.stubEnv('JWT_SECRET', 'fake-secret-at-least-32-bytes-long-0000');
     vi.stubEnv(
       'ENCRYPTION_KEY',
       'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
     );
+    vi.stubEnv('SUPABASE_URL', 'http://localhost:54321');
+    vi.stubEnv('SUPABASE_SECRET_KEY', 'sb_secret_fake');
   });
 
   afterEach(() => {
@@ -41,9 +42,9 @@ describe('validateRequiredEnv', () => {
     expect(() => validateRequiredEnv()).not.toThrow();
   });
 
-  it('throws and names JWT_SECRET when it is missing', () => {
-    vi.stubEnv('JWT_SECRET', '');
-    expect(() => validateRequiredEnv()).toThrow(/JWT_SECRET/);
+  it('throws and names DATABASE_URL when it is missing', () => {
+    vi.stubEnv('DATABASE_URL', '');
+    expect(() => validateRequiredEnv()).toThrow(/DATABASE_URL/);
   });
 
   it('throws and names ENCRYPTION_KEY when it is missing', () => {
@@ -51,8 +52,13 @@ describe('validateRequiredEnv', () => {
     expect(() => validateRequiredEnv()).toThrow(/ENCRYPTION_KEY/);
   });
 
-  it('throws and names DATABASE_URL when it is missing', () => {
-    vi.stubEnv('DATABASE_URL', '');
-    expect(() => validateRequiredEnv()).toThrow(/DATABASE_URL/);
+  it('throws and names SUPABASE_URL when it is missing', () => {
+    vi.stubEnv('SUPABASE_URL', '');
+    expect(() => validateRequiredEnv()).toThrow(/SUPABASE_URL/);
+  });
+
+  it('throws and names SUPABASE_SECRET_KEY when it is missing', () => {
+    vi.stubEnv('SUPABASE_SECRET_KEY', '');
+    expect(() => validateRequiredEnv()).toThrow(/SUPABASE_SECRET_KEY/);
   });
 });

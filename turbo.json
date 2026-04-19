@@ -25,15 +25,26 @@
     "test": {
       "dependsOn": ["^build", "codegen"],
       "outputs": [],
-      "env": ["DATABASE_URL", "DIRECT_URL", "JWT_SECRET", "ENCRYPTION_KEY"]
+      "env": [
+        "DATABASE_URL",
+        "DIRECT_URL",
+        "SUPABASE_URL",
+        "SUPABASE_SECRET_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+      ]
     },
     "test:unit": {
-      "outputs": [],
-      "env": ["JWT_SECRET", "ENCRYPTION_KEY"]
+      "outputs": []
     },
     "test:integration": {
       "outputs": [],
-      "env": ["DATABASE_URL", "DIRECT_URL", "JWT_SECRET", "ENCRYPTION_KEY"]
+      "env": [
+        "DATABASE_URL",
+        "DIRECT_URL",
+        "SUPABASE_URL",
+        "SUPABASE_SECRET_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+      ]
     },
     "test:watch": {
       "cache": false,

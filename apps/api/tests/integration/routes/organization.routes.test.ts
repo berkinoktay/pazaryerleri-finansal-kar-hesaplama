@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../src/app';
-import { bearer, signTestJwt } from '../../helpers/auth';
+import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
+import { createMembership, createOrganization } from '../../helpers/factories';
 
 describe('GET /v1/organizations', () => {
   const app = createApp();
@@ -22,11 +22,10 @@ describe('GET /v1/organizations', () => {
   });
 
   it('returns an empty list for a user with no memberships', async () => {
-    const user = await createUserProfile();
-    const token = await signTestJwt(user.id);
+    const user = await createAuthenticatedTestUser();
 
     const res = await app.request('/v1/organizations', {
-      headers: { Authorization: bearer(token) },
+      headers: { Authorization: bearer(user.accessToken) },
     });
 
     expect(res.status).toBe(200);
@@ -35,7 +34,7 @@ describe('GET /v1/organizations', () => {
   });
 
   it('returns the orgs the user is a member of, in name order', async () => {
-    const user = await createUserProfile();
+    const user = await createAuthenticatedTestUser();
     const [orgA, orgB] = await Promise.all([
       createOrganization({ name: 'Beta Corp', slug: 'beta' }),
       createOrganization({ name: 'Alpha Corp', slug: 'alpha' }),
@@ -44,10 +43,9 @@ describe('GET /v1/organizations', () => {
       createMembership(orgA.id, user.id, 'OWNER'),
       createMembership(orgB.id, user.id, 'MEMBER'),
     ]);
-    const token = await signTestJwt(user.id);
 
     const res = await app.request('/v1/organizations', {
-      headers: { Authorization: bearer(token) },
+      headers: { Authorization: bearer(user.accessToken) },
     });
 
     expect(res.status).toBe(200);

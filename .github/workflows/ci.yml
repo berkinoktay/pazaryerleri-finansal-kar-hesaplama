@@ -140,6 +140,23 @@ jobs:
       - name: Start Supabase local
         run: supabase start
 
+      # Pull Supabase's local keys into $GITHUB_ENV so subsequent steps
+      # (db:push, integration tests) inherit them. Values are generated
+      # by `supabase start` and are not production secrets; tying them to
+      # the live instance protects against CLI-version drift in future.
+      - name: Export Supabase env to GITHUB_ENV
+        run: |
+          while IFS='=' read -r key value; do
+            [ -z "$key" ] && continue
+            clean="${value%\"}"
+            clean="${clean#\"}"
+            case "$key" in
+              API_URL) echo "SUPABASE_URL=$clean" >> "$GITHUB_ENV" ;;
+              SECRET_KEY) echo "SUPABASE_SECRET_KEY=$clean" >> "$GITHUB_ENV" ;;
+              PUBLISHABLE_KEY) echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$clean" >> "$GITHUB_ENV" ;;
+            esac
+          done < <(supabase status -o env)
+
       - name: Apply Prisma schema to local DB
         run: pnpm db:push
         env:
@@ -151,16 +168,11 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
-          # Matches the Supabase CLI local default — same value that
-          # `supabase start` above uses to sign JWTs. NOT a production
-          # secret; production JWT_SECRET comes from the hosting
-          # provider's environment configuration (Vercel / fly.io / etc).
-          JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-          # 32-byte test key (0xDE 0xAD 0xBE 0xEF repeated). AES-256-GCM
-          # is unused by integration tests today, but codepaths that call
-          # loadEncryptionKey() (seed, future store-connect handler)
-          # would throw at import time without this set.
-          ENCRYPTION_KEY: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+          # SUPABASE_URL, SUPABASE_SECRET_KEY, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+          # are populated by the "Export Supabase env" step above. The new auth
+          # middleware calls `supabase.auth.getUser(token)` via the secret
+          # client; the test helper `createAuthenticatedTestUser` signs in via
+          # the publishable client. Both need live Supabase local creds.
 
       # Mandatory cleanup even on test failure — leaves no hanging
       # containers around between job runs.
