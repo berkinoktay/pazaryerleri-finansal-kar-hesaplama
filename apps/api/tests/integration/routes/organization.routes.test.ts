@@ -1,24 +1,58 @@
-import { describe, it, expect } from 'vitest';
-import { OpenAPIHono } from '@hono/zod-openapi';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import organizationRoutes from '../../../src/routes/organization.routes';
+import { createApp } from '../../../src/app';
+import { bearer, signTestJwt } from '../../helpers/auth';
+import { ensureDbReachable, truncateAll } from '../../helpers/db';
+import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
 
 describe('GET /v1/organizations', () => {
-  const app = new OpenAPIHono().basePath('/v1');
-  app.route('/', organizationRoutes);
+  const app = createApp();
 
-  it('returns 200 with a data array of organizations', async () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('returns 401 without a token', async () => {
     const res = await app.request('/v1/organizations');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toHaveProperty('data');
-    expect(Array.isArray(body.data)).toBe(true);
-    expect(body.data[0]).toMatchObject({
-      id: expect.any(String),
-      name: expect.any(String),
-      slug: expect.any(String),
-      createdAt: expect.any(String),
-      updatedAt: expect.any(String),
+    expect(res.status).toBe(401);
+  });
+
+  it('returns an empty list for a user with no memberships', async () => {
+    const user = await createUserProfile();
+    const token = await signTestJwt(user.id);
+
+    const res = await app.request('/v1/organizations', {
+      headers: { Authorization: bearer(token) },
     });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: unknown[] };
+    expect(body.data).toEqual([]);
+  });
+
+  it('returns the orgs the user is a member of, in name order', async () => {
+    const user = await createUserProfile();
+    const [orgA, orgB] = await Promise.all([
+      createOrganization({ name: 'Beta Corp', slug: 'beta' }),
+      createOrganization({ name: 'Alpha Corp', slug: 'alpha' }),
+    ]);
+    await Promise.all([
+      createMembership(orgA.id, user.id, 'OWNER'),
+      createMembership(orgB.id, user.id, 'MEMBER'),
+    ]);
+    const token = await signTestJwt(user.id);
+
+    const res = await app.request('/v1/organizations', {
+      headers: { Authorization: bearer(token) },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Array<{ name: string; slug: string }> };
+    expect(body.data).toHaveLength(2);
+    expect(body.data.map((o) => o.name)).toEqual(['Alpha Corp', 'Beta Corp']);
   });
 });

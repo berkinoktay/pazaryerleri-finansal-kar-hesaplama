@@ -13,11 +13,27 @@ section "Versioning" for details.
 
 ### Added
 
-- (PR template: list new endpoints, fields, schemas here)
+- Auth middleware chain. `authMiddleware` verifies Supabase HS256 JWTs
+  and sets `userId` on the request context; `orgContextMiddleware`
+  verifies `OrganizationMember` for `:orgId` path params and sets
+  `organizationId` + `memberRole`.
+- RFC 7807 error handler mapping `UnauthorizedError` → 401
+  `UNAUTHENTICATED` and `ForbiddenError` → 403 `FORBIDDEN`. Unknown
+  errors collapse to a generic 500 `INTERNAL_ERROR`.
+- `signTestJwt` + `bearer` helpers in `apps/api/tests/helpers/auth.ts`
+  for integration tests.
+- `createApp()` factory in `apps/api/src/app.ts` — single source of
+  truth for route registration, used by both the runtime entry and
+  `scripts/dump-openapi.ts` (replaces the previous duplication).
 
 ### Changed
 
-- (Document non-breaking modifications here)
+- `GET /v1/organizations` now returns real organizations the
+  authenticated user is a member of, ordered by name ascending.
+  Replaces the previous stub payload. Responds `401 UNAUTHENTICATED`
+  without a valid Bearer token.
+- `/v1/health`, `/v1/openapi.json`, and `/v1/docs` remain public. All
+  other routes under `/v1/*` now require a Bearer token.
 
 ### Deprecated
 

@@ -451,7 +451,7 @@ Before merging any PR that touches user data, credentials, or cross-tenant code:
 - [ ] Any new credential storage uses the `encryptCredentials`/`decryptCredentials` helpers
 - [ ] Credentials never appear in API responses (use `toStoreResponse`-style mappers)
 - [ ] Credentials never appear in logs (grep the PR for `credentials`, `apiKey`, `secret`, `token`)
-- [ ] Env vars (`ENCRYPTION_KEY`, `JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) are not committed
+- [ ] Env vars (`ENCRYPTION_KEY`, `JWT_SECRET`, `SUPABASE_SECRET_KEY`) are not committed
 
 ### Authorization
 

@@ -1,9 +1,10 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
+import * as organizationService from '../services/organization.service';
 import { OrganizationListResponseSchema } from '../validators/organization.validator';
 
-const app = new OpenAPIHono();
+const app = new OpenAPIHono<{ Variables: { userId: string } }>();
 
 const listOrganizationsRoute = createRoute({
   method: 'get',
@@ -11,8 +12,8 @@ const listOrganizationsRoute = createRoute({
   tags: ['Organizations'],
   summary: 'List organizations the authenticated user is a member of',
   description:
-    'Returns all organizations where the authenticated user has an OrganizationMember record. ' +
-    'Not paginated — typical users belong to fewer than 10 organizations.',
+    'Returns all organizations where the authenticated user has an OrganizationMember record, ' +
+    'ordered by name ascending. Not paginated — typical users belong to fewer than 10 organizations.',
   security: [{ bearerAuth: [] }],
   responses: {
     200: {
@@ -28,23 +29,10 @@ const listOrganizationsRoute = createRoute({
   },
 });
 
-app.openapi(listOrganizationsRoute, (c) => {
-  // TODO: Replace with prisma.organization.findMany filtered by authenticated user's
-  // organization_members. Auth middleware must be in place first (separate plan).
-  return c.json(
-    {
-      data: [
-        {
-          id: '00000000-0000-0000-0000-000000000000',
-          name: 'Akyıldız Store',
-          slug: 'akyildiz-store',
-          createdAt: '2026-01-15T10:30:00Z',
-          updatedAt: '2026-04-01T14:00:00Z',
-        },
-      ],
-    },
-    200,
-  );
+app.openapi(listOrganizationsRoute, async (c) => {
+  const userId = c.get('userId');
+  const data = await organizationService.listForUser(userId);
+  return c.json({ data }, 200);
 });
 
 export default app;

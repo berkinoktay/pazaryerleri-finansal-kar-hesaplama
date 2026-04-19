@@ -169,7 +169,7 @@
           "System"
         ],
         "summary": "Health check",
-        "description": "Returns 200 when the service is up.",
+        "description": "Returns 200 when the service is up. Public endpoint, no auth required.",
         "responses": {
           "200": {
             "description": "Service is healthy",
@@ -190,7 +190,7 @@
           "Organizations"
         ],
         "summary": "List organizations the authenticated user is a member of",
-        "description": "Returns all organizations where the authenticated user has an OrganizationMember record. Not paginated — typical users belong to fewer than 10 organizations.",
+        "description": "Returns all organizations where the authenticated user has an OrganizationMember record, ordered by name ascending. Not paginated — typical users belong to fewer than 10 organizations.",
         "security": [
           {
             "bearerAuth": []

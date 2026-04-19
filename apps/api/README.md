@@ -82,7 +82,7 @@ tests/
 DATABASE_URL=               # Supabase Postgres
 DIRECT_URL=                 # Direct connection (for migrations)
 SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_SECRET_KEY=           # sb_secret_*, bypasses RLS, server-only
 JWT_SECRET=                 # Supabase JWT secret
 TRENDYOL_BASE_URL=
 HEPSIBURADA_BASE_URL=

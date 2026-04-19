@@ -2,48 +2,12 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
+import { createApp } from '../src/app';
 
-import { bearerAuthScheme } from '../src/openapi';
-import organizationRoutes from '../src/routes/organization.routes';
-
-// NOTE: This script must mirror the spec configuration in apps/api/src/index.ts.
-// We construct a minimal OpenAPIHono just to call getOpenAPI31Document and write
-// the result. Importing src/index.ts directly would trigger serve() and start
-// the HTTP server — undesirable for a build-time script.
-//
-// As routes are added to apps/api/src/routes/, they must be re-mounted here too.
-//
-// FUTURE: refactor index.ts to export the configured app (via a createApp()
-// factory without side effects) so this script can import it directly. Deferred
-// until we have ≥3 routes per the plan's "Open Items" section.
-
-const app = new OpenAPIHono().basePath('/v1');
-
-app.openAPIRegistry.registerComponent('securitySchemes', 'bearerAuth', bearerAuthScheme);
-
-const healthRoute = createRoute({
-  method: 'get',
-  path: '/health',
-  tags: ['System'],
-  summary: 'Health check',
-  description: 'Returns 200 when the service is up.',
-  responses: {
-    200: {
-      content: {
-        'application/json': {
-          schema: z.object({ status: z.literal('ok') }).openapi('HealthResponse'),
-        },
-      },
-      description: 'Service is healthy',
-    },
-  },
-});
-
-app.openapi(healthRoute, (c) => c.json({ status: 'ok' as const }, 200));
-
-// Feature routes (mirror apps/api/src/index.ts).
-app.route('/', organizationRoutes);
+// Uses the same app factory as the runtime entry, so route registrations
+// stay in exactly one place. Importing `src/app.ts` is side-effect free;
+// `src/index.ts` would trigger `serve()` and is deliberately avoided.
+const app = createApp();
 
 const spec = app.getOpenAPI31Document({
   openapi: '3.1.0',
@@ -65,4 +29,4 @@ const outPath = resolve(__dirname, '../../../packages/api-client/openapi.json');
 await mkdir(dirname(outPath), { recursive: true });
 await writeFile(outPath, JSON.stringify(spec, null, 2) + '\n', 'utf-8');
 
-console.log(`✓ Wrote OpenAPI 3.1 spec to ${outPath}`);
+console.log(`\u2713 Wrote OpenAPI 3.1 spec to ${outPath}`);
