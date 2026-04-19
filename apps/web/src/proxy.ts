@@ -70,5 +70,10 @@ export default async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/((?!api|trpc|_next|_vercel|.*\\..*).*)',
+  // Excludes `/auth/callback` from the middleware — it lives outside the
+  // `[locale]` group and next-intl's locale rewrite would send
+  // /auth/callback → /tr/auth/callback → 404 (no page at that path).
+  // The Route Handler at app/auth/callback/route.ts must receive the
+  // request untouched to run exchangeCodeForSession.
+  matcher: '/((?!api|trpc|_next|_vercel|auth/callback|.*\\..*).*)',
 };
