@@ -399,7 +399,7 @@ The workspace-root `.env` is auto-loaded by `apps/api/vitest.config.ts` via dote
 
 - ❌ Mocking Prisma in integration tests — they exist to test real SQL
 - ❌ Sharing state across tests — every test starts with empty DB via `truncateAll`
-- ❌ Hand-rolled JWTs in tests — when auth lands, use `signTestJwt` from `tests/helpers/auth.ts` (planned)
+- ❌ Hand-rolled JWTs in tests — use `signTestJwt` and `bearer()` from `tests/helpers/auth.ts`
 - ❌ Skipping the tenant-isolation test for a "trivial" endpoint — there is no trivial multi-tenant endpoint
 - ❌ Removing `fileParallelism: false` from `vitest.config.ts` — integration tests share one DB; parallel files race on `truncateAll`
 
