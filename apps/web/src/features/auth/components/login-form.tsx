@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { Link } from '@/i18n/navigation';
 import { useSignIn } from '@/features/auth/hooks/use-sign-in';
 import { Button } from '@/components/ui/button';
 import {
@@ -92,6 +93,12 @@ export function LoginForm(): React.ReactElement {
         <Button type="submit" disabled={signIn.isPending}>
           {signIn.isPending ? t('submitting') : t('submit')}
         </Button>
+        <Link
+          href="/forgot-password"
+          className="text-muted-foreground hover:text-foreground text-center text-sm"
+        >
+          {t('forgotPassword')}
+        </Link>
       </form>
     </Form>
   );

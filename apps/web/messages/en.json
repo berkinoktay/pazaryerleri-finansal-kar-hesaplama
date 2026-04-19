@@ -124,7 +124,8 @@
       "errors": {
         "invalidCredentials": "Incorrect email or password.",
         "generic": "Sign-in failed. Please try again."
-      }
+      },
+      "forgotPassword": "Forgot your password?"
     },
     "register": {
       "title": "Create account",
@@ -146,6 +147,39 @@
     "checkEmail": {
       "title": "Check your email",
       "body": "We've sent you a link to confirm your account. Open your inbox (and spam folder) and click the link to sign in."
+    },
+    "forgotPassword": {
+      "title": "Forgot password",
+      "subtitle": "Enter the email address where we'll send the reset link.",
+      "email": "Email",
+      "submit": "Send reset link",
+      "submitting": "Sending…",
+      "sent": {
+        "title": "Email sent",
+        "body": "We've sent the reset link to your email. Check your inbox (and spam folder)."
+      },
+      "errors": {
+        "invalidEmail": "Enter a valid email.",
+        "generic": "Couldn't send the email. Please try again."
+      }
+    },
+    "resetPassword": {
+      "title": "Set a new password",
+      "subtitle": "Choose a strong password. You'll be signed in automatically.",
+      "password": "New password",
+      "confirm": "New password (confirm)",
+      "submit": "Update password",
+      "submitting": "Updating…",
+      "invalidSession": {
+        "title": "Link invalid or expired",
+        "body": "Request a new password-reset email and click the link to return to this page."
+      },
+      "errors": {
+        "passwordTooShort": "Password must be at least 8 characters.",
+        "passwordMismatch": "Passwords do not match.",
+        "weakPassword": "Password is not strong enough.",
+        "generic": "Couldn't update the password. Please try again."
+      }
     },
     "userMenu": {
       "signOut": "Sign out"
