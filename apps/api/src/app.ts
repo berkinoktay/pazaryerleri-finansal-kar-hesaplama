@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
 import { ForbiddenError, UnauthorizedError } from './lib/errors';
+import { authMiddleware } from './middleware/auth.middleware';
 import { bearerAuthScheme } from './openapi';
 import organizationRoutes from './routes/organization.routes';
 
@@ -84,10 +85,12 @@ export function createApp(): OpenAPIHono {
     },
   });
 
+  // ─── Public routes (mounted BEFORE authMiddleware) ──────────────────
+  // Health check is public so load balancers don't need to present a JWT.
   app.openapi(healthRoute, (c) => c.json({ status: 'ok' as const }, 200));
 
-  app.route('/', organizationRoutes);
-
+  // Spec + Scalar docs UI — dev/staging only, and also public (they
+  // document the API for developers, not end users).
   if (process.env['NODE_ENV'] !== 'production') {
     app.doc31('/openapi.json', {
       openapi: '3.1.0',
@@ -112,6 +115,13 @@ export function createApp(): OpenAPIHono {
       }),
     );
   }
+
+  // ─── Auth boundary ─────────────────────────────────────────────────
+  // Everything below here requires a valid Supabase Bearer token.
+  app.use('*', authMiddleware);
+
+  // ─── Authenticated routes ──────────────────────────────────────────
+  app.route('/', organizationRoutes);
 
   return app;
 }
