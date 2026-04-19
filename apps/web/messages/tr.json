@@ -116,11 +116,22 @@
   "auth": {
     "login": {
       "title": "Giriş Yap",
-      "subtitle": "Hesabına giriş yap."
+      "subtitle": "Hesabına giriş yap.",
+      "email": "E-posta",
+      "password": "Parola",
+      "submit": "Giriş yap",
+      "submitting": "Giriş yapılıyor…",
+      "errors": {
+        "invalidCredentials": "E-posta veya parola hatalı.",
+        "generic": "Giriş yapılamadı. Lütfen tekrar deneyin."
+      }
     },
     "register": {
       "title": "Hesap Oluştur",
       "subtitle": "Ücretsiz hesap oluştur."
+    },
+    "userMenu": {
+      "signOut": "Çıkış yap"
     }
   },
   "languageSwitcher": {

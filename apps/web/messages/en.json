@@ -116,11 +116,22 @@
   "auth": {
     "login": {
       "title": "Log in",
-      "subtitle": "Sign in to your account."
+      "subtitle": "Sign in to your account.",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Log in",
+      "submitting": "Signing in…",
+      "errors": {
+        "invalidCredentials": "Incorrect email or password.",
+        "generic": "Sign-in failed. Please try again."
+      }
     },
     "register": {
       "title": "Create account",
       "subtitle": "Create your free account."
+    },
+    "userMenu": {
+      "signOut": "Sign out"
     }
   },
   "languageSwitcher": {
