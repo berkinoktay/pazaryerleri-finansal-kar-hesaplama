@@ -20,3 +20,17 @@ DROP POLICY IF EXISTS user_profiles_self_read ON user_profiles;
 CREATE POLICY user_profiles_self_read ON user_profiles
   FOR SELECT TO authenticated
   USING (id = auth.uid());
+
+-- ─── organizations ─────────────────────────────────────────────────────
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS organizations_member_read ON organizations;
+CREATE POLICY organizations_member_read ON organizations
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM organization_members
+      WHERE organization_members.organization_id = organizations.id
+        AND organization_members.user_id = auth.uid()
+    )
+  );
