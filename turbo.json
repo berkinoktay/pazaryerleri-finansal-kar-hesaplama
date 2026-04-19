@@ -24,14 +24,16 @@
     },
     "test": {
       "dependsOn": ["^build", "codegen"],
-      "outputs": []
+      "outputs": [],
+      "env": ["DATABASE_URL", "DIRECT_URL", "JWT_SECRET", "ENCRYPTION_KEY"]
     },
     "test:unit": {
-      "outputs": []
+      "outputs": [],
+      "env": ["JWT_SECRET", "ENCRYPTION_KEY"]
     },
     "test:integration": {
       "outputs": [],
-      "env": ["DATABASE_URL", "DIRECT_URL"]
+      "env": ["DATABASE_URL", "DIRECT_URL", "JWT_SECRET", "ENCRYPTION_KEY"]
     },
     "test:watch": {
       "cache": false,
