@@ -30,7 +30,7 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 | **Data Fetching**   | TanStack React Query v5 (frontend), typed `openapi-fetch` client                                                          |
 | **Database**        | Supabase (PostgreSQL 15)                                                                                                  |
 | **ORM**             | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                                                               |
-| **Auth**            | Supabase Auth (email/password, OAuth) + `jose` for JWT verification                                                       |
+| **Auth**            | Supabase Auth (email/password, OAuth); backend delegates token verification to `supabase.auth.getUser`                    |
 | **Background Jobs** | Supabase Edge Functions + pg_cron                                                                                         |
 | **Crypto**          | Node `crypto` (AES-256-GCM via `apps/api/src/lib/crypto.ts`)                                                              |
 | **Money**           | `decimal.js` end-to-end — never floating point                                                                            |
@@ -86,17 +86,18 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 
 ## Documentation References
 
-| Document                 | Path                          | When to Read                                                               |
-| ------------------------ | ----------------------------- | -------------------------------------------------------------------------- |
-| **Security Rules**       | **`docs/SECURITY.md`**        | **MUST READ before touching user data, credentials, or cross-tenant code** |
-| Architecture & DB Schema | `docs/ARCHITECTURE.md`        | Before designing new features or modifying the DB                          |
-| Product Vision           | `docs/PRODUCT_VISION.md`      | Before making UX or feature scope decisions                                |
-| Trendyol API Docs        | `docs/integrations/trendyol/` | **MUST READ** before any Trendyol integration work                         |
-| Frontend Rules           | `apps/web/CLAUDE.md`          | When working in `apps/web/`                                                |
-| Backend Rules            | `apps/api/CLAUDE.md`          | When working in `apps/api/`                                                |
-| API Changelog            | `docs/api-changelog.md`       | When changing any route — log under `[Unreleased]`                         |
-| Design Plans             | `docs/plans/`                 | When designing or implementing a non-trivial feature                       |
-| Testing Patterns         | `docs/TESTING.md`             | When writing OR running tests                                              |
+| Document                 | Path                            | When to Read                                                               |
+| ------------------------ | ------------------------------- | -------------------------------------------------------------------------- |
+| **Security Rules**       | **`docs/SECURITY.md`**          | **MUST READ before touching user data, credentials, or cross-tenant code** |
+| Architecture & DB Schema | `docs/ARCHITECTURE.md`          | Before designing new features or modifying the DB                          |
+| Product Vision           | `docs/PRODUCT_VISION.md`        | Before making UX or feature scope decisions                                |
+| Trendyol API Docs        | `docs/integrations/trendyol/`   | **MUST READ** before any Trendyol integration work                         |
+| Frontend Rules           | `apps/web/CLAUDE.md`            | When working in `apps/web/`                                                |
+| Backend Rules            | `apps/api/CLAUDE.md`            | When working in `apps/api/`                                                |
+| API Changelog            | `docs/api-changelog.md`         | When changing any route — log under `[Unreleased]`                         |
+| Design Plans             | `docs/plans/`                   | When designing or implementing a non-trivial feature                       |
+| Testing Patterns         | `docs/TESTING.md`               | When writing OR running tests                                              |
+| RLS Policies             | `supabase/sql/rls-policies.sql` | When adding a tenant-scoped table or changing tenant access patterns       |
 
 **Trendyol integration:** Before writing any Trendyol-related code, read the relevant files under `docs/integrations/trendyol/`. Key files:
 

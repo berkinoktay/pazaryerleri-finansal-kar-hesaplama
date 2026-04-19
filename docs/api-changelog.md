@@ -32,6 +32,23 @@ section "Versioning" for details.
 - `createApp()` factory in `apps/api/src/app.ts` — single source of
   truth for route registration, used by both the runtime entry and
   `scripts/dump-openapi.ts` (replaces the previous duplication).
+- Row-Level Security policies on all 11 tenant-scoped tables
+  (`user_profiles`, `organizations`, `organization_members`, `stores`,
+  `products`, `orders`, `order_items`, `expenses`, `settlements`,
+  `settlement_items`, `sync_logs`). Applied via `pnpm db:push` (which
+  chains `pnpm db:apply-policies`). SELECT policies only in this phase
+  — INSERT/UPDATE/DELETE default-deny until CRUD endpoints ship their
+  own. Helper `is_org_member(uuid)` (SECURITY DEFINER) avoids the
+  classic "infinite recursion detected in policy" trap.
+- `createRlsScopedClient()` test helper in
+  `apps/api/tests/helpers/rls-client.ts` — composes on
+  `createAuthenticatedTestUser` and returns a Supabase JS client whose
+  queries route through PostgREST with the authenticated role. Used in
+  `tests/integration/rls/*.rls.test.ts` to prove each policy enforces;
+  Prisma via `DATABASE_URL` bypasses RLS and cannot verify policies.
+- Coverage test (`tests/integration/rls/coverage.rls.test.ts`) asserts
+  every tenant-scoped table has RLS enabled + at least one SELECT
+  policy. Forgetting a policy on a new table flips it red.
 
 ### Changed
 
