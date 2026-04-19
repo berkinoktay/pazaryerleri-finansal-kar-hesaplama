@@ -342,6 +342,15 @@ async function main(): Promise<void> {
   await seedUsers();
   const orgs = await seedOrgsAndMemberships();
   await seedStoresProductsOrders(orgs);
+
+  // Surface the RLS policy count as a quick "did db:apply-policies run?"
+  // sanity check. Zero would mean the policy file never landed — seed
+  // otherwise succeeds silently on a wide-open DB.
+  const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    SELECT COUNT(*)::bigint AS count FROM pg_policies WHERE schemaname = 'public'
+  `;
+  console.log(`\u2713 rls policies applied: ${rows[0]?.count.toString() ?? '0'}`);
+
   console.log('\n\u2713 Seed complete. Open http://127.0.0.1:54323 to browse.');
 }
 
