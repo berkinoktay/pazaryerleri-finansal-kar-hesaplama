@@ -1,6 +1,6 @@
 import type { components } from '@pazarsync/api-client';
 
-import { apiClient } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client/browser';
 
 export type Organization = components['schemas']['Organization'];
 

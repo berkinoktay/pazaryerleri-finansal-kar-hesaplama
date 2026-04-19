@@ -116,12 +116,81 @@
   "auth": {
     "login": {
       "title": "Giriş Yap",
-      "subtitle": "Hesabına giriş yap."
+      "subtitle": "Hesabına giriş yap.",
+      "email": "E-posta",
+      "password": "Parola",
+      "submit": "Giriş yap",
+      "submitting": "Giriş yapılıyor…",
+      "errors": {
+        "invalidCredentials": "E-posta veya parola hatalı.",
+        "generic": "Giriş yapılamadı. Lütfen tekrar deneyin."
+      },
+      "forgotPassword": "Parolanı mı unuttun?"
     },
     "register": {
       "title": "Hesap Oluştur",
-      "subtitle": "Ücretsiz hesap oluştur."
-    }
+      "subtitle": "Ücretsiz hesap oluştur.",
+      "email": "E-posta",
+      "password": "Parola",
+      "confirm": "Parola (tekrar)",
+      "submit": "Hesap oluştur",
+      "submitting": "Hesap oluşturuluyor…",
+      "errors": {
+        "invalidEmail": "Geçerli bir e-posta gir.",
+        "passwordTooShort": "Parola en az 8 karakter olmalı.",
+        "passwordMismatch": "Parolalar eşleşmiyor.",
+        "userAlreadyExists": "Bu e-posta zaten kayıtlı.",
+        "weakPassword": "Parola yeterince güçlü değil.",
+        "generic": "Hesap oluşturulamadı. Lütfen tekrar deneyin."
+      }
+    },
+    "checkEmail": {
+      "title": "E-postanı kontrol et",
+      "body": "Hesabını doğrulamak için sana bir bağlantı gönderdik. Gelen kutuna (ve spam klasörüne) bakıp bağlantıya tıklayarak giriş yap."
+    },
+    "verified": {
+      "title": "E-postan doğrulandı",
+      "body": "PazarSync hesabın hazır. Seni panelinin içine alıyoruz.",
+      "redirecting": "{seconds} saniye içinde panel'e yönlendiriliyorsun…",
+      "goNow": "Hemen git"
+    },
+    "forgotPassword": {
+      "title": "Parolamı unuttum",
+      "subtitle": "Sıfırlama bağlantısı göndereceğimiz e-posta adresini gir.",
+      "email": "E-posta",
+      "submit": "Sıfırlama bağlantısı gönder",
+      "submitting": "Gönderiliyor…",
+      "sent": {
+        "title": "E-posta gönderildi",
+        "body": "Sıfırlama bağlantısını içeren e-postayı gönderdik. Gelen kutunu (ve spam klasörünü) kontrol et."
+      },
+      "errors": {
+        "invalidEmail": "Geçerli bir e-posta gir.",
+        "generic": "E-posta gönderilemedi. Lütfen tekrar deneyin."
+      }
+    },
+    "resetPassword": {
+      "title": "Yeni parola belirle",
+      "subtitle": "Güçlü bir parola seç. Hesabına otomatik giriş yapılacak.",
+      "password": "Yeni parola",
+      "confirm": "Yeni parola (tekrar)",
+      "submit": "Parolayı güncelle",
+      "submitting": "Güncelleniyor…",
+      "invalidSession": {
+        "title": "Bağlantı geçersiz veya süresi dolmuş",
+        "body": "Yeni bir parola sıfırlama e-postası talep et ve bağlantıya tıklayıp bu sayfaya geri dön."
+      },
+      "errors": {
+        "passwordTooShort": "Parola en az 8 karakter olmalı.",
+        "passwordMismatch": "Parolalar eşleşmiyor.",
+        "weakPassword": "Parola yeterince güçlü değil.",
+        "generic": "Parola güncellenemedi. Lütfen tekrar deneyin."
+      }
+    },
+    "userMenu": {
+      "signOut": "Çıkış yap"
+    },
+    "sessionExpired": "Oturumun süresi dolmuş. Lütfen tekrar giriş yap."
   },
   "languageSwitcher": {
     "label": "Dil",

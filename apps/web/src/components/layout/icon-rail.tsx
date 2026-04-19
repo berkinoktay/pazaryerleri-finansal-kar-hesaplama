@@ -4,8 +4,8 @@ import { useTranslations } from 'next-intl';
 
 import { Wordmark } from '@/components/brand/wordmark';
 import { NAV_ITEMS } from '@/components/layout/nav-config';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { UserMenu } from '@/features/auth/components/user-menu';
 import { Link, usePathname } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 
@@ -58,20 +58,9 @@ export function IconRail(): React.ReactElement {
         })}
       </div>
 
-      <Tooltip delayDuration={200}>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="mt-auto flex size-9 items-center justify-center rounded-md focus-visible:outline-none"
-            aria-label={tRail('userMenuAriaLabel')}
-          >
-            <Avatar className="size-7">
-              <AvatarFallback>BO</AvatarFallback>
-            </Avatar>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{tRail('userTooltip')}</TooltipContent>
-      </Tooltip>
+      <div className="mt-auto">
+        <UserMenu />
+      </div>
     </nav>
   );
 }

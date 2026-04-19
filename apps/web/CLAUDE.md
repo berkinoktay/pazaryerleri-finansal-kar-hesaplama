@@ -113,6 +113,106 @@ const [status, setStatus] = useQueryState('status', parseAsString);
 const { data: orders } = useOrders(storeId, { status });
 ```
 
+## Auth (Supabase SSR)
+
+Three Supabase client flavors — different execution contexts, different cookie access APIs:
+
+| Use from                                     | Import                                              |
+| -------------------------------------------- | --------------------------------------------------- |
+| Client Components                            | `createClient` from `@/lib/supabase/client`         |
+| Server Components / Actions / Route Handlers | `createClient` from `@/lib/supabase/server` (async) |
+| `proxy.ts` middleware                        | `updateSession` from `@/lib/supabase/middleware`    |
+
+Mixing them up causes silent session desync (cookies written by one context don't round-trip through the other). When in doubt: browser client in `'use client'` files, server client everywhere else.
+
+### Session refresh + route guard
+
+`proxy.ts` runs before every server render. It calls `updateSession()` to rotate near-expiry tokens (writing fresh cookies onto the response), then makes redirect decisions:
+
+- Unauthenticated request to `/dashboard` or `/onboarding` → 307 to `/login?redirect=<original>`.
+- Authenticated request to `/login` or `/register` → 307 to `/dashboard`.
+
+Adding a new protected route: append its path to the `PROTECTED` array in `proxy.ts`. Adding a guest-only route (e.g., a future `/reset-password`): append to `GUEST_ONLY`.
+
+### API calls — apiClient injects the Bearer token
+
+Client Components import `apiClient` from `@/lib/api-client/browser`. The middleware in `makeApiClient` reads the current session from the browser Supabase client and attaches `Authorization: Bearer <jwt>` on every request.
+
+Server Components / Server Actions / Route Handlers call `getServerApiClient()` from `@/lib/api-client/server` per request (not at module scope — cookies are request-scoped; caching across requests would cross-leak sessions).
+
+```typescript
+// ❌ Bad — raw fetch without auth
+const res = await fetch('/api/orders');
+
+// ❌ Bad — using server client in a Client Component
+('use client');
+import { getServerApiClient } from '@/lib/api-client/server'; // will throw
+
+// ✅ Good — Client Component
+('use client');
+import { apiClient } from '@/lib/api-client/browser';
+const { data } = await apiClient.GET('/v1/organizations', {});
+
+// ✅ Good — Server Component
+import { getServerApiClient } from '@/lib/api-client/server';
+const api = await getServerApiClient();
+const { data } = await api.GET('/v1/organizations', {});
+```
+
+### Auth flow hooks (the only entry points)
+
+All Supabase Auth operations go through hooks in `@/features/auth/hooks/*`. Never call `supabase.auth.*` directly in a component — the hooks wrap `router.refresh()` (so the proxy re-evaluates session on next request) and query-cache invalidation (so the next render starts fresh).
+
+| Flow                | Hook                | Redirect target                    |
+| ------------------- | ------------------- | ---------------------------------- |
+| Sign in             | `useSignIn`         | `?redirect=<x>` or `/dashboard`    |
+| Sign up             | `useSignUp`         | `/check-email`                     |
+| Sign out            | `useSignOut`        | `/login`                           |
+| Forgot password     | `useForgotPassword` | (no redirect; inline "email sent") |
+| Reset password      | `useResetPassword`  | `/dashboard`                       |
+| Current user (read) | `useCurrentUser`    | n/a                                |
+
+### Email callback
+
+`/auth/callback` (Route Handler, outside `[locale]` group) receives Supabase redirects from confirmation / recovery / magic-link emails. It reads the `?code=` query param, exchanges for a session, and redirects to `?next=...` or `/dashboard`. The URL stays stable across locales because Supabase Dashboard config depends on it.
+
+### Session expired
+
+`SessionExpiredHandler` (mounted under `NextIntlClientProvider` in `[locale]/layout.tsx`) subscribes to the `AUTH_SESSION_EXPIRED` event dispatched by the apiClient when the backend returns 401. Any 401 response globally triggers: sign out → cache clear → toast → redirect to `/login`. A ref guard keeps parallel-request 401s from firing the flow multiple times.
+
+### Route access rules (proxy.ts)
+
+Two lists in `apps/web/src/proxy.ts` drive every gate:
+
+- `PROTECTED` — `/dashboard`, `/onboarding`, `/auth/verified`. Anonymous hits → `/login?redirect=<path>`.
+- `GUEST_ONLY` — `/login`, `/register`, `/check-email`, `/forgot-password`. Authenticated hits → `/dashboard`. (`/reset-password` deliberately isn't guest-only — recovery-session users need access to finish setting their new password.)
+
+| Page               | Anonymous                 | Authenticated                        |
+| ------------------ | ------------------------- | ------------------------------------ |
+| `/login`           | ✓                         | → /dashboard                         |
+| `/register`        | ✓                         | → /dashboard                         |
+| `/check-email`     | ✓                         | → /dashboard                         |
+| `/forgot-password` | ✓                         | → /dashboard                         |
+| `/reset-password`  | form shows "invalid link" | ✓ (expected use is recovery session) |
+| `/auth/callback`   | ✓ entry                   | ✓ entry                              |
+| `/auth/verified`   | → /login                  | ✓ (countdown)                        |
+| `/dashboard`       | → /login                  | ✓                                    |
+| `/onboarding`      | → /login                  | ✓                                    |
+
+### Form hardening
+
+Every auth form is `<form method="post" noValidate onSubmit={form.handleSubmit(onSubmit)}>`.
+
+- `method="post"` — if JS ever fails to hydrate, native submission goes as a POST body instead of a GET with fields in the URL. Prevents credential leakage into browser history, access logs, and Referer headers.
+- `noValidate` — disables the browser's built-in validation bubble so the zod-driven `FormMessage` remains the single source of field-error UI.
+- `onSubmit={form.handleSubmit(...)}` — react-hook-form preventDefaults internally.
+
+Never omit `method="post"` on an auth form; it's the last line of defense for a JS-broken edge case.
+
+### Supabase redirect allowlist
+
+`supabase/config.toml::site_url` + `additional_redirect_urls` must include every host:port the app is served on. Both `http://localhost:3000` and `http://127.0.0.1:3000` are listed because browsers may land on either. A mismatch causes Supabase to silently fall back to `site_url` — the symptom is "email confirmation link opens the landing page instead of /auth/callback". Restart Supabase after editing (`supabase stop && supabase start`).
+
 ## TanStack React Query Conventions
 
 - No raw `fetch()` in components — all data fetching through custom hooks wrapping `useQuery`/`useMutation`
