@@ -100,3 +100,37 @@ CREATE POLICY order_items_org_member_read ON order_items
         AND is_org_member(orders.organization_id)
     )
   );
+
+-- ─── settlements ───────────────────────────────────────────────────────
+ALTER TABLE settlements ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS settlements_org_member_read ON settlements;
+CREATE POLICY settlements_org_member_read ON settlements
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── settlement_items — reach via parent settlement ────────────────────
+ALTER TABLE settlement_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS settlement_items_org_member_read ON settlement_items;
+CREATE POLICY settlement_items_org_member_read ON settlement_items
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM settlements
+      WHERE settlements.id = settlement_items.settlement_id
+        AND is_org_member(settlements.organization_id)
+    )
+  );
+
+-- ─── sync_logs — reach via parent store ────────────────────────────────
+-- sync_logs has only store_id; walk to stores to get the tenant context.
+ALTER TABLE sync_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS sync_logs_org_member_read ON sync_logs;
+CREATE POLICY sync_logs_org_member_read ON sync_logs
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM stores
+      WHERE stores.id = sync_logs.store_id
+        AND is_org_member(stores.organization_id)
+    )
+  );
