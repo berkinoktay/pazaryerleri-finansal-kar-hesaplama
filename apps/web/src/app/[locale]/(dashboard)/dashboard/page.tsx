@@ -4,6 +4,7 @@ import { KpiTile } from '@/components/patterns/kpi-tile';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { SyncBadge } from '@/components/patterns/sync-badge';
+import { OrganizationsPanel } from '@/features/organization/components/organizations-panel';
 
 export const metadata = {
   title: 'Gösterge paneli',
@@ -51,6 +52,7 @@ export default function DashboardPage(): React.ReactElement {
           context="İade oranı %2.6"
         />
       </StatGroup>
+      <OrganizationsPanel />
     </>
   );
 }
