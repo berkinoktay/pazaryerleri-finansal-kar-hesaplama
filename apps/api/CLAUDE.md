@@ -331,7 +331,7 @@ The REST API is self-documenting via OpenAPI 3.1, auto-generated from Zod schema
 1. Define/update the Zod schema in `apps/api/src/validators/<feature>.validator.ts` with `.openapi(name, { description, example })`.
 2. Define the route in `apps/api/src/routes/<feature>.routes.ts` using `createRoute(...)` + `app.openapi(route, handler)`.
 3. Mount in `apps/api/src/index.ts` via `app.route("/", <feature>Routes)`.
-4. **Mirror the mount in `apps/api/scripts/dump-openapi.ts`** — the dump script duplicates route registration by design (importing `index.ts` would trigger `serve()`). Until the `createApp()` factory refactor lands (deferred, needs ≥3 routes), both files must stay in sync.
+4. Route registrations live inside `createApp()` in `apps/api/src/app.ts`. `index.ts` (runtime entry that calls `serve()`) and `scripts/dump-openapi.ts` (build-time spec writer) both import this single factory, so there is no duplication to keep in sync — edit the factory once.
 5. From the repo root: `pnpm api:sync` — regenerates `packages/api-client/openapi.json` and `packages/api-client/src/generated/api.d.ts`.
 6. Commit the regenerated `openapi.json` snapshot. Types are gitignored and rebuilt from the snapshot.
 7. Log the change in `docs/api-changelog.md` under `[Unreleased]`.
@@ -340,8 +340,8 @@ CI rejects PRs where the spec snapshot drifts from the registered routes (see `.
 
 ### Serving the docs
 
-- Dev/staging: `/v1/openapi.json` (spec) and `/v1/docs` (Scalar UI) are mounted by `index.ts` gated on `NODE_ENV !== "production"`. Production does not expose either.
-- Local: `pnpm dev --filter api` binds the server via `@hono/node-server`'s `serve()`. `export default app` alone does not listen on Node.
+- Dev/staging: `/v1/openapi.json` (spec) and `/v1/docs` (Scalar UI) are mounted inside `createApp()` gated on `NODE_ENV !== "production"`. Production does not expose either.
+- Local: `pnpm dev --filter api` runs `src/index.ts`, which calls `createApp()` and hands the app to `@hono/node-server`'s `serve()` to bind port 3001.
 
 ### Conventions
 
