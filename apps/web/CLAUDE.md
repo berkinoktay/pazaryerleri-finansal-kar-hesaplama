@@ -159,9 +159,26 @@ const api = await getServerApiClient();
 const { data } = await api.GET('/v1/organizations', {});
 ```
 
-### Sign-in / sign-out pattern
+### Auth flow hooks (the only entry points)
 
-`useSignIn()` and `useSignOut()` in `@/features/auth/hooks/*` are the only entry points. Never call `supabase.auth.signInWithPassword` directly in a component — route through the hook so `router.refresh()` fires and the proxy sees the cookie change on the next request.
+All Supabase Auth operations go through hooks in `@/features/auth/hooks/*`. Never call `supabase.auth.*` directly in a component — the hooks wrap `router.refresh()` (so the proxy re-evaluates session on next request) and query-cache invalidation (so the next render starts fresh).
+
+| Flow                | Hook                | Redirect target                    |
+| ------------------- | ------------------- | ---------------------------------- |
+| Sign in             | `useSignIn`         | `?redirect=<x>` or `/dashboard`    |
+| Sign up             | `useSignUp`         | `/check-email`                     |
+| Sign out            | `useSignOut`        | `/login`                           |
+| Forgot password     | `useForgotPassword` | (no redirect; inline "email sent") |
+| Reset password      | `useResetPassword`  | `/dashboard`                       |
+| Current user (read) | `useCurrentUser`    | n/a                                |
+
+### Email callback
+
+`/auth/callback` (Route Handler, outside `[locale]` group) receives Supabase redirects from confirmation / recovery / magic-link emails. It reads the `?code=` query param, exchanges for a session, and redirects to `?next=...` or `/dashboard`. The URL stays stable across locales because Supabase Dashboard config depends on it.
+
+### Session expired
+
+`SessionExpiredHandler` (mounted under `NextIntlClientProvider` in `[locale]/layout.tsx`) subscribes to the `AUTH_SESSION_EXPIRED` event dispatched by the apiClient when the backend returns 401. Any 401 response globally triggers: sign out → cache clear → toast → redirect to `/login`. A ref guard keeps parallel-request 401s from firing the flow multiple times.
 
 ## TanStack React Query Conventions
 

@@ -62,6 +62,11 @@ section "Versioning" for details.
   dashboard OrganizationsPanel. No backend shape change — noting the
   integration so future response-shape edits are known to have a UI
   caller and require a coordinated frontend update.
+- Frontend now has the full self-serve auth flow: sign in, sign up,
+  email confirmation (via `/auth/callback`), forgot/reset password,
+  sign out, and a global session-expired handler that drives 401
+  responses into toast + redirect. No backend change — all flows
+  terminate on Supabase Auth and backend-verified Bearer tokens.
 
 ### Deprecated
 
