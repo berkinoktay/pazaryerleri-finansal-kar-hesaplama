@@ -151,6 +151,16 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          # Matches the Supabase CLI local default — same value that
+          # `supabase start` above uses to sign JWTs. NOT a production
+          # secret; production JWT_SECRET comes from the hosting
+          # provider's environment configuration (Vercel / fly.io / etc).
+          JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          # 32-byte test key (0xDE 0xAD 0xBE 0xEF repeated). AES-256-GCM
+          # is unused by integration tests today, but codepaths that call
+          # loadEncryptionKey() (seed, future store-connect handler)
+          # would throw at import time without this set.
+          ENCRYPTION_KEY: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 
       # Mandatory cleanup even on test failure — leaves no hanging
       # containers around between job runs.
