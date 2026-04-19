@@ -12,6 +12,7 @@
     "db:generate": "pnpm --filter @pazarsync/db generate",
     "db:migrate": "pnpm --filter @pazarsync/db migrate:dev",
     "db:push": "pnpm --filter @pazarsync/db push",
+    "db:apply-policies": "pnpm --filter @pazarsync/db apply-policies",
     "db:seed": "pnpm --filter @pazarsync/db seed",
     "db:studio": "pnpm --filter @pazarsync/db studio",
     "test": "turbo run test",
