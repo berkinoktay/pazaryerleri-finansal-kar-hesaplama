@@ -183,7 +183,8 @@
     },
     "userMenu": {
       "signOut": "Çıkış yap"
-    }
+    },
+    "sessionExpired": "Oturumun süresi dolmuş. Lütfen tekrar giriş yap."
   },
   "languageSwitcher": {
     "label": "Dil",

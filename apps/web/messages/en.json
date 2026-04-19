@@ -183,7 +183,8 @@
     },
     "userMenu": {
       "signOut": "Sign out"
-    }
+    },
+    "sessionExpired": "Your session has expired. Please sign in again."
   },
   "languageSwitcher": {
     "label": "Language",

@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { hasLocale, NextIntlClientProvider } from 'next-intl';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 
+import { SessionExpiredHandler } from '@/features/auth/components/session-expired-handler';
 import { routing } from '@/i18n/routing';
 
 export function generateStaticParams(): Array<{ locale: string }> {
@@ -41,5 +42,10 @@ export default async function LocaleLayout({
 
   setRequestLocale(locale);
 
-  return <NextIntlClientProvider>{children}</NextIntlClientProvider>;
+  return (
+    <NextIntlClientProvider>
+      <SessionExpiredHandler />
+      {children}
+    </NextIntlClientProvider>
+  );
 }
