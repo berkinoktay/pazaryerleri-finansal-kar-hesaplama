@@ -1249,7 +1249,7 @@ Expected: all green.
 - **Rate limiting.** Middleware chain diagram in apps/api/CLAUDE.md lists `rateLimit` between `orgContext` and the handler, but no implementation exists yet. Tracked in `docs/plans/2026-04-18-launch-readiness.md` as "Group 3: Production-ready" — implement before first deploy.
 - **Row Level Security (RLS) policies.** Defense layer 2 of 3. The Supabase SQL side (`supabase/sql/`) should mirror the middleware's org-membership check so that even a catastrophic middleware bypass cannot leak data. Scoped to a separate plan because it requires hand-writing PostgreSQL policy SQL and testing via `supabase.auth.setSession` from the test harness.
 - **Session / refresh token handling.** Entirely frontend's job — the backend only verifies access tokens issued by Supabase Auth. Token refresh happens on the client via `supabase-js`.
-- **Service-role operations.** Background workers (Edge Functions doing marketplace sync) will use the `SUPABASE_SERVICE_ROLE_KEY`, which bypasses auth and RLS. They do not use this middleware and do not need a `userId`. Keep them physically separate from the request-handling code.
+- **Service-role operations.** Background workers (Edge Functions doing marketplace sync) will use the `SUPABASE_SECRET_KEY` (`sb_secret_*`, Supabase's current recommended format — replaces the legacy JWT-shaped `SUPABASE_SERVICE_ROLE_KEY`), which bypasses auth and RLS. They do not use this middleware and do not need a `userId`. Keep them physically separate from the request-handling code.
 
 **File inventory (what this plan creates).**
 

@@ -512,14 +512,14 @@ const profit = order.totalAmount.sub(order.commissionAmount).sub(order.shippingC
 ```bash
 # apps/web
 NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=   # sb_publishable_*, safe client-side
 NEXT_PUBLIC_API_URL=           # Hono backend URL
 
 # apps/api
 DATABASE_URL=                  # Supabase PostgreSQL connection string
 DIRECT_URL=                    # Supabase direct connection (for migrations)
 SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=     # Server-side Supabase client
+SUPABASE_SECRET_KEY=           # sb_secret_*, server-only (bypasses RLS)
 JWT_SECRET=                    # Supabase JWT secret for token verification
 TRENDYOL_BASE_URL=             # Marketplace API base URLs
 HEPSIBURADA_BASE_URL=
@@ -527,7 +527,7 @@ ENCRYPTION_KEY=                # For encrypting store credentials
 
 # supabase/functions
 SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_SECRET_KEY=
 ```
 
 ## Git Conventions
