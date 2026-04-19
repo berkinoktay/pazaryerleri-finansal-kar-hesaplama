@@ -41,6 +41,8 @@ supabase/.branches/
 
 # Claude Code — personal toolchain and MCP secrets (project rules live in CLAUDE.md files)
 .claude/
+.agents/
+skills-lock.json
 .mcp.json
 
 # Prisma generated (alternate path)
