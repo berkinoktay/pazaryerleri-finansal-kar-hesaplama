@@ -60,3 +60,43 @@ DROP POLICY IF EXISTS organization_members_co_member_read ON organization_member
 CREATE POLICY organization_members_co_member_read ON organization_members
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
+
+-- ─── stores / products / orders / expenses — same org-member pattern ───
+ALTER TABLE stores ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS stores_org_member_read ON stores;
+CREATE POLICY stores_org_member_read ON stores
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS products_org_member_read ON products;
+CREATE POLICY products_org_member_read ON products
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS orders_org_member_read ON orders;
+CREATE POLICY orders_org_member_read ON orders
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS expenses_org_member_read ON expenses;
+CREATE POLICY expenses_org_member_read ON expenses
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── order_items — reach via parent order ──────────────────────────────
+-- order_items has no organization_id column; walk up to orders to find
+-- the tenant context, then apply is_org_member.
+ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS order_items_org_member_read ON order_items;
+CREATE POLICY order_items_org_member_read ON order_items
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM orders
+      WHERE orders.id = order_items.order_id
+        AND is_org_member(orders.organization_id)
+    )
+  );
