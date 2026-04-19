@@ -520,7 +520,6 @@ DATABASE_URL=                  # Supabase PostgreSQL connection string
 DIRECT_URL=                    # Supabase direct connection (for migrations)
 SUPABASE_URL=
 SUPABASE_SECRET_KEY=           # sb_secret_*, server-only (bypasses RLS)
-JWT_SECRET=                    # Supabase JWT secret for token verification
 TRENDYOL_BASE_URL=             # Marketplace API base URLs
 HEPSIBURADA_BASE_URL=
 ENCRYPTION_KEY=                # For encrypting store credentials
