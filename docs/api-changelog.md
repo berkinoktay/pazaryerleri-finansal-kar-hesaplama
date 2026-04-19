@@ -58,6 +58,10 @@ section "Versioning" for details.
   without a valid Bearer token.
 - `/v1/health`, `/v1/openapi.json`, and `/v1/docs` remain public. All
   other routes under `/v1/*` now require a Bearer token.
+- First live consumer of `/v1/organizations`: the Next.js frontend's
+  dashboard OrganizationsPanel. No backend shape change — noting the
+  integration so future response-shape edits are known to have a UI
+  caller and require a coordinated frontend update.
 
 ### Deprecated
 

@@ -113,6 +113,56 @@ const [status, setStatus] = useQueryState('status', parseAsString);
 const { data: orders } = useOrders(storeId, { status });
 ```
 
+## Auth (Supabase SSR)
+
+Three Supabase client flavors — different execution contexts, different cookie access APIs:
+
+| Use from                                     | Import                                              |
+| -------------------------------------------- | --------------------------------------------------- |
+| Client Components                            | `createClient` from `@/lib/supabase/client`         |
+| Server Components / Actions / Route Handlers | `createClient` from `@/lib/supabase/server` (async) |
+| `proxy.ts` middleware                        | `updateSession` from `@/lib/supabase/middleware`    |
+
+Mixing them up causes silent session desync (cookies written by one context don't round-trip through the other). When in doubt: browser client in `'use client'` files, server client everywhere else.
+
+### Session refresh + route guard
+
+`proxy.ts` runs before every server render. It calls `updateSession()` to rotate near-expiry tokens (writing fresh cookies onto the response), then makes redirect decisions:
+
+- Unauthenticated request to `/dashboard` or `/onboarding` → 307 to `/login?redirect=<original>`.
+- Authenticated request to `/login` or `/register` → 307 to `/dashboard`.
+
+Adding a new protected route: append its path to the `PROTECTED` array in `proxy.ts`. Adding a guest-only route (e.g., a future `/reset-password`): append to `GUEST_ONLY`.
+
+### API calls — apiClient injects the Bearer token
+
+Client Components import `apiClient` from `@/lib/api-client/browser`. The middleware in `makeApiClient` reads the current session from the browser Supabase client and attaches `Authorization: Bearer <jwt>` on every request.
+
+Server Components / Server Actions / Route Handlers call `getServerApiClient()` from `@/lib/api-client/server` per request (not at module scope — cookies are request-scoped; caching across requests would cross-leak sessions).
+
+```typescript
+// ❌ Bad — raw fetch without auth
+const res = await fetch('/api/orders');
+
+// ❌ Bad — using server client in a Client Component
+('use client');
+import { getServerApiClient } from '@/lib/api-client/server'; // will throw
+
+// ✅ Good — Client Component
+('use client');
+import { apiClient } from '@/lib/api-client/browser';
+const { data } = await apiClient.GET('/v1/organizations', {});
+
+// ✅ Good — Server Component
+import { getServerApiClient } from '@/lib/api-client/server';
+const api = await getServerApiClient();
+const { data } = await api.GET('/v1/organizations', {});
+```
+
+### Sign-in / sign-out pattern
+
+`useSignIn()` and `useSignOut()` in `@/features/auth/hooks/*` are the only entry points. Never call `supabase.auth.signInWithPassword` directly in a component — route through the hook so `router.refresh()` fires and the proxy sees the cookie change on the next request.
+
 ## TanStack React Query Conventions
 
 - No raw `fetch()` in components — all data fetching through custom hooks wrapping `useQuery`/`useMutation`
