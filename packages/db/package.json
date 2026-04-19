@@ -12,7 +12,7 @@
     "generate": "prisma generate",
     "migrate:dev": "prisma migrate dev",
     "push": "prisma db push && pnpm apply-policies",
-    "apply-policies": "tsx --env-file=../../.env scripts/apply-policies.ts",
+    "apply-policies": "tsx --env-file-if-exists=../../.env scripts/apply-policies.ts",
     "seed": "tsx prisma/seed.ts",
     "studio": "prisma studio",
     "typecheck": "tsc --noEmit"
