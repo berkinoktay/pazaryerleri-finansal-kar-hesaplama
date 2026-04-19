@@ -11,7 +11,16 @@ const PROTECTED = ['/dashboard', '/onboarding'] as const;
 
 // Routes where an already-authenticated user should bounce back to
 // the dashboard (guests only).
-const GUEST_ONLY = ['/login', '/register'] as const;
+const GUEST_ONLY = [
+  '/login',
+  '/register',
+  '/check-email',
+  '/forgot-password',
+  // `/reset-password` is NOT guest-only: the user hits it from the
+  // recovery email link with an active recovery session (technically
+  // authenticated). The form itself handles the "no recovery session"
+  // fallback.
+] as const;
 
 /**
  * Strip the optional locale prefix so path-matching can use clean

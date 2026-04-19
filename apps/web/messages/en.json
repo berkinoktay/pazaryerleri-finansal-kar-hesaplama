@@ -128,7 +128,24 @@
     },
     "register": {
       "title": "Create account",
-      "subtitle": "Create your free account."
+      "subtitle": "Create your free account.",
+      "email": "Email",
+      "password": "Password",
+      "confirm": "Password (confirm)",
+      "submit": "Create account",
+      "submitting": "Creating account…",
+      "errors": {
+        "invalidEmail": "Enter a valid email.",
+        "passwordTooShort": "Password must be at least 8 characters.",
+        "passwordMismatch": "Passwords do not match.",
+        "userAlreadyExists": "This email is already registered.",
+        "weakPassword": "Password is not strong enough.",
+        "generic": "Sign-up failed. Please try again."
+      }
+    },
+    "checkEmail": {
+      "title": "Check your email",
+      "body": "We've sent you a link to confirm your account. Open your inbox (and spam folder) and click the link to sign in."
     },
     "userMenu": {
       "signOut": "Sign out"

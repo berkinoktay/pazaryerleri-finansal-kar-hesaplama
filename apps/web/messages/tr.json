@@ -128,7 +128,24 @@
     },
     "register": {
       "title": "Hesap Oluştur",
-      "subtitle": "Ücretsiz hesap oluştur."
+      "subtitle": "Ücretsiz hesap oluştur.",
+      "email": "E-posta",
+      "password": "Parola",
+      "confirm": "Parola (tekrar)",
+      "submit": "Hesap oluştur",
+      "submitting": "Hesap oluşturuluyor…",
+      "errors": {
+        "invalidEmail": "Geçerli bir e-posta gir.",
+        "passwordTooShort": "Parola en az 8 karakter olmalı.",
+        "passwordMismatch": "Parolalar eşleşmiyor.",
+        "userAlreadyExists": "Bu e-posta zaten kayıtlı.",
+        "weakPassword": "Parola yeterince güçlü değil.",
+        "generic": "Hesap oluşturulamadı. Lütfen tekrar deneyin."
+      }
+    },
+    "checkEmail": {
+      "title": "E-postanı kontrol et",
+      "body": "Hesabını doğrulamak için sana bir bağlantı gönderdik. Gelen kutuna (ve spam klasörüne) bakıp bağlantıya tıklayarak giriş yap."
     },
     "userMenu": {
       "signOut": "Çıkış yap"
