@@ -180,6 +180,39 @@ All Supabase Auth operations go through hooks in `@/features/auth/hooks/*`. Neve
 
 `SessionExpiredHandler` (mounted under `NextIntlClientProvider` in `[locale]/layout.tsx`) subscribes to the `AUTH_SESSION_EXPIRED` event dispatched by the apiClient when the backend returns 401. Any 401 response globally triggers: sign out → cache clear → toast → redirect to `/login`. A ref guard keeps parallel-request 401s from firing the flow multiple times.
 
+### Route access rules (proxy.ts)
+
+Two lists in `apps/web/src/proxy.ts` drive every gate:
+
+- `PROTECTED` — `/dashboard`, `/onboarding`, `/auth/verified`. Anonymous hits → `/login?redirect=<path>`.
+- `GUEST_ONLY` — `/login`, `/register`, `/check-email`, `/forgot-password`. Authenticated hits → `/dashboard`. (`/reset-password` deliberately isn't guest-only — recovery-session users need access to finish setting their new password.)
+
+| Page               | Anonymous                 | Authenticated                        |
+| ------------------ | ------------------------- | ------------------------------------ |
+| `/login`           | ✓                         | → /dashboard                         |
+| `/register`        | ✓                         | → /dashboard                         |
+| `/check-email`     | ✓                         | → /dashboard                         |
+| `/forgot-password` | ✓                         | → /dashboard                         |
+| `/reset-password`  | form shows "invalid link" | ✓ (expected use is recovery session) |
+| `/auth/callback`   | ✓ entry                   | ✓ entry                              |
+| `/auth/verified`   | → /login                  | ✓ (countdown)                        |
+| `/dashboard`       | → /login                  | ✓                                    |
+| `/onboarding`      | → /login                  | ✓                                    |
+
+### Form hardening
+
+Every auth form is `<form method="post" noValidate onSubmit={form.handleSubmit(onSubmit)}>`.
+
+- `method="post"` — if JS ever fails to hydrate, native submission goes as a POST body instead of a GET with fields in the URL. Prevents credential leakage into browser history, access logs, and Referer headers.
+- `noValidate` — disables the browser's built-in validation bubble so the zod-driven `FormMessage` remains the single source of field-error UI.
+- `onSubmit={form.handleSubmit(...)}` — react-hook-form preventDefaults internally.
+
+Never omit `method="post"` on an auth form; it's the last line of defense for a JS-broken edge case.
+
+### Supabase redirect allowlist
+
+`supabase/config.toml::site_url` + `additional_redirect_urls` must include every host:port the app is served on. Both `http://localhost:3000` and `http://127.0.0.1:3000` are listed because browsers may land on either. A mismatch causes Supabase to silently fall back to `site_url` — the symptom is "email confirmation link opens the landing page instead of /auth/callback". Restart Supabase after editing (`supabase stop && supabase start`).
+
 ## TanStack React Query Conventions
 
 - No raw `fetch()` in components — all data fetching through custom hooks wrapping `useQuery`/`useMutation`

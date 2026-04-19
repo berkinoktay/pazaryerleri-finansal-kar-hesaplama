@@ -148,6 +148,12 @@
       "title": "E-postanı kontrol et",
       "body": "Hesabını doğrulamak için sana bir bağlantı gönderdik. Gelen kutuna (ve spam klasörüne) bakıp bağlantıya tıklayarak giriş yap."
     },
+    "verified": {
+      "title": "E-postan doğrulandı",
+      "body": "PazarSync hesabın hazır. Seni panelinin içine alıyoruz.",
+      "redirecting": "{seconds} saniye içinde panel'e yönlendiriliyorsun…",
+      "goNow": "Hemen git"
+    },
     "forgotPassword": {
       "title": "Parolamı unuttum",
       "subtitle": "Sıfırlama bağlantısı göndereceğimiz e-posta adresini gir.",

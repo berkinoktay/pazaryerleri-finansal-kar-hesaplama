@@ -61,7 +61,7 @@ export function ResetPasswordForm(): React.ReactElement {
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="gap-md grid">
+      <form method="post" noValidate onSubmit={form.handleSubmit(onSubmit)} className="gap-md grid">
         <FormField
           control={form.control}
           name="password"

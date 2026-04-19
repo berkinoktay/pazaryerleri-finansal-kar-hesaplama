@@ -29,7 +29,10 @@ export function useSignUp() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          // After email confirmation Supabase redirects to this URL.
+          // /auth/callback exchanges the code for a session, then routes
+          // to /auth/verified for the welcome countdown before dashboard.
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/auth/verified`,
         },
       });
       if (error !== null) throw error;

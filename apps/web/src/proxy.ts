@@ -7,7 +7,7 @@ import { updateSession } from './lib/supabase/middleware';
 const intl = createIntlMiddleware(routing);
 
 // Routes that DO require an authenticated session.
-const PROTECTED = ['/dashboard', '/onboarding'] as const;
+const PROTECTED = ['/dashboard', '/onboarding', '/auth/verified'] as const;
 
 // Routes where an already-authenticated user should bounce back to
 // the dashboard (guests only).

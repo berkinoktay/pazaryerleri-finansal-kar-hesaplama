@@ -148,6 +148,12 @@
       "title": "Check your email",
       "body": "We've sent you a link to confirm your account. Open your inbox (and spam folder) and click the link to sign in."
     },
+    "verified": {
+      "title": "Your email is verified",
+      "body": "Your PazarSync account is ready. Taking you to the dashboard.",
+      "redirecting": "Redirecting to the dashboard in {seconds} seconds…",
+      "goNow": "Go now"
+    },
     "forgotPassword": {
       "title": "Forgot password",
       "subtitle": "Enter the email address where we'll send the reset link.",
