@@ -86,18 +86,18 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 
 ## Documentation References
 
-| Document                 | Path                            | When to Read                                                               |
-| ------------------------ | ------------------------------- | -------------------------------------------------------------------------- |
-| **Security Rules**       | **`docs/SECURITY.md`**          | **MUST READ before touching user data, credentials, or cross-tenant code** |
-| Architecture & DB Schema | `docs/ARCHITECTURE.md`          | Before designing new features or modifying the DB                          |
-| Product Vision           | `docs/PRODUCT_VISION.md`        | Before making UX or feature scope decisions                                |
-| Trendyol API Docs        | `docs/integrations/trendyol/`   | **MUST READ** before any Trendyol integration work                         |
-| Frontend Rules           | `apps/web/CLAUDE.md`            | When working in `apps/web/`                                                |
-| Backend Rules            | `apps/api/CLAUDE.md`            | When working in `apps/api/`                                                |
-| API Changelog            | `docs/api-changelog.md`         | When changing any route — log under `[Unreleased]`                         |
-| Design Plans             | `docs/plans/`                   | When designing or implementing a non-trivial feature                       |
-| Testing Patterns         | `docs/TESTING.md`               | When writing OR running tests                                              |
-| RLS Policies             | `supabase/sql/rls-policies.sql` | When adding a tenant-scoped table or changing tenant access patterns       |
+| Document                 | Path                            | When to Read                                                                                     |
+| ------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **Security Rules**       | **`docs/SECURITY.md`**          | **MUST READ before touching user data, credentials, or cross-tenant code**                       |
+| Architecture & DB Schema | `docs/ARCHITECTURE.md`          | Before designing new features or modifying the DB                                                |
+| Product Vision           | `docs/PRODUCT_VISION.md`        | Before making UX or feature scope decisions                                                      |
+| Trendyol API Docs        | `docs/integrations/trendyol/`   | **MUST READ** before any Trendyol integration work                                               |
+| Frontend Rules           | `apps/web/CLAUDE.md`            | When working in `apps/web/`                                                                      |
+| Backend Rules            | `apps/api/CLAUDE.md`            | When working in `apps/api/`                                                                      |
+| API Changelog            | `docs/api-changelog.md`         | When changing any route — log under `[Unreleased]`                                               |
+| Design Plans             | `docs/plans/`                   | When designing or implementing a non-trivial feature (shipped plans under `docs/plans/archive/`) |
+| Testing Patterns         | `docs/TESTING.md`               | When writing OR running tests                                                                    |
+| RLS Policies             | `supabase/sql/rls-policies.sql` | When adding a tenant-scoped table or changing tenant access patterns                             |
 
 **Trendyol integration:** Before writing any Trendyol-related code, read the relevant files under `docs/integrations/trendyol/`. Key files:
 
@@ -483,7 +483,7 @@ export function formatCurrency(value: Decimal | string | number): string { ... }
 - `@pazarsync/db` — Prisma 7 client (generated to `../generated/prisma`), driver adapter (`@prisma/adapter-pg`), migration scripts
 - `@pazarsync/utils` — Currency formatting (TRY), date helpers, Zod schemas shared between frontend and backend
 
-**API request/response contracts** are generated into `@pazarsync/api-client` from backend Zod schemas (see `docs/plans/2026-04-16-api-docs-design.md`). **Domain enums** (Platform, OrderStatus, MemberRole, …) come from `@pazarsync/db` — Prisma 7 emits them as TypeScript types during `pnpm db:generate`.
+**API request/response contracts** are generated into `@pazarsync/api-client` from backend Zod schemas (see `docs/plans/archive/2026-04-16-api-docs-design.md`). **Domain enums** (Platform, OrderStatus, MemberRole, …) come from `@pazarsync/db` — Prisma 7 emits them as TypeScript types during `pnpm db:generate`.
 
 ### Database (packages/db)
 
