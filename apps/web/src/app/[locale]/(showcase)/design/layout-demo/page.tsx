@@ -17,7 +17,10 @@ import { Card, CardContent } from '@/components/ui/card';
 const recentOrders = buildMockOrders(8);
 const MOCK_REVENUE = new Decimal('284390.45');
 const MOCK_PROFIT = new Decimal('48120.80');
-const MOCK_LAST_SYNCED = new Date(Date.now() - 4 * 60 * 1000);
+// Fixed ISO timestamp — `Date.now()` at module scope evaluates at different
+// moments on server vs client in client components, producing a hydration
+// mismatch when minute-precision labels straddle a minute boundary.
+const MOCK_LAST_SYNCED = new Date('2026-04-20T21:00:00Z');
 
 export default function LayoutDemoPage(): React.ReactElement {
   const [activeStoreId, setActiveStoreId] = React.useState(MOCK_STORES[0]!.id);

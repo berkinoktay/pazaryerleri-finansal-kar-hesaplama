@@ -2,12 +2,22 @@
 
 import { Toaster as Sonner } from 'sonner';
 
+import { useIsMounted } from '@/lib/use-is-mounted';
 import { useTheme } from '@/providers/theme-provider';
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
-export function Toaster(props: ToasterProps): React.ReactElement {
+export function Toaster(props: ToasterProps): React.ReactElement | null {
   const { resolvedTheme } = useTheme();
+  const mounted = useIsMounted();
+
+  // `resolvedTheme` is undefined on the server and during the first client
+  // render. Sonner's root carries a theme class on its portal wrapper — if
+  // we rendered during SSR we would bake in `theme="light"` and then swap
+  // to the user's actual theme at hydration, producing a mismatch. Waiting
+  // for mount keeps the hydrated tree empty for the toaster (users never
+  // see a toast on first paint anyway).
+  if (!mounted) return null;
 
   return (
     <Sonner
