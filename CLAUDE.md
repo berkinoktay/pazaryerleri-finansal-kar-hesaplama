@@ -481,8 +481,9 @@ export function formatCurrency(value: Decimal | string | number): string { ... }
 ## Shared Packages
 
 - `@pazarsync/db` — Prisma 7 client (generated to `../generated/prisma`), driver adapter (`@prisma/adapter-pg`), migration scripts
-- `@pazarsync/types` — API request/response types, domain model interfaces, marketplace enums
 - `@pazarsync/utils` — Currency formatting (TRY), date helpers, Zod schemas shared between frontend and backend
+
+**API request/response contracts** are generated into `@pazarsync/api-client` from backend Zod schemas (see `docs/plans/2026-04-16-api-docs-design.md`). **Domain enums** (Platform, OrderStatus, MemberRole, …) come from `@pazarsync/db` — Prisma 7 emits them as TypeScript types during `pnpm db:generate`.
 
 ### Database (packages/db)
 

@@ -530,7 +530,7 @@ src/features/orders/
 │   └── use-order-filters.ts
 ├── api/                 # API call functions
 │   └── orders.api.ts    # fetch functions used by hooks
-└── types.ts             # Feature-specific types (if not in @pazarsync/types)
+└── types.ts             # Feature-specific types (if not in @pazarsync/api-client)
 ```
 
 - Config-driven UI — map arrays for repeated elements, define shape once

@@ -277,16 +277,6 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │   │   │   └── index.ts              # Re-exports paths/components + createApiClient
 │   │   └── package.json              # Runs openapi-typescript via `pnpm codegen`
 │   │
-│   ├── types/                        # Shared types
-│   │   ├── src/
-│   │   │   ├── api.ts               # API request/response contracts
-│   │   │   ├── models.ts            # Domain model interfaces
-│   │   │   ├── marketplace.ts       # Platform enum, marketplace types
-│   │   │   ├── enums.ts             # Shared enums
-│   │   │   └── index.ts
-│   │   ├── tsconfig.json
-│   │   └── package.json
-│   │
 │   └── utils/                        # Shared utilities
 │       ├── src/
 │       │   ├── currency.ts           # TRY formatting, decimal math
@@ -1028,7 +1018,7 @@ features/orders/
 │   └── use-order-filters.ts
 ├── api/               # API call functions
 │   └── orders.api.ts  # fetch functions used by hooks
-└── types.ts           # Feature-specific types (if not in @pazarsync/types)
+└── types.ts           # Feature-specific types (if not in @pazarsync/api-client)
 ```
 
 ### State Management

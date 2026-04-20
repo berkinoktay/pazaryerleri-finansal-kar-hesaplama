@@ -2,7 +2,7 @@ import type { NextConfig } from 'next';
 import createNextIntlPlugin from 'next-intl/plugin';
 
 const nextConfig: NextConfig = {
-  transpilePackages: ['@pazarsync/types', '@pazarsync/utils'],
+  transpilePackages: ['@pazarsync/utils'],
 };
 
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
