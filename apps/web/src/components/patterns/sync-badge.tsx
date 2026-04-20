@@ -2,7 +2,9 @@
 
 import { CheckmarkCircle02Icon, AlertCircleIcon, Time04Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
+import * as React from 'react';
 
+import { useIsMounted } from '@/lib/use-is-mounted';
 import { cn } from '@/lib/utils';
 
 export type SyncState = 'fresh' | 'stale' | 'failed' | 'syncing';
@@ -30,6 +32,7 @@ export function SyncBadge({
 }: SyncBadgeProps): React.ReactElement {
   const formatter = useFormatter();
   const t = useTranslations('common');
+  const mounted = useIsMounted();
 
   const Icon =
     state === 'failed'
@@ -47,7 +50,17 @@ export function SyncBadge({
           ? 'text-info'
           : 'text-muted-foreground';
 
-  const timeLabel = lastSyncedAt ? formatter.relativeTime(new Date(lastSyncedAt), new Date()) : '—';
+  // Relative time depends on a client-only "now" reference — computing it
+  // during SSR produces a label that the client re-renders with a different
+  // timestamp, triggering a hydration mismatch. Render an absolute datetime
+  // (minute precision — deterministic within a minute across server / client)
+  // on SSR and the first client render, then swap to the relative label once
+  // mounted.
+  const timeLabel = lastSyncedAt
+    ? mounted
+      ? formatter.relativeTime(new Date(lastSyncedAt), new Date())
+      : formatter.dateTime(new Date(lastSyncedAt), 'short')
+    : '—';
 
   return (
     <span

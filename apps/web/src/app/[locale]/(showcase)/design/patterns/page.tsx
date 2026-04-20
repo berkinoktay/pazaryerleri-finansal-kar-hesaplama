@@ -15,6 +15,11 @@ import { Button } from '@/components/ui/button';
 
 // Hoisted mock values — stable references so React Compiler doesn't complain
 // about `new Decimal(...)` / `new Date(...)` being called during render.
+// Use fixed ISO timestamps for sync dates: `Date.now()` at module scope
+// evaluates at different moments on server vs client in client components,
+// producing hydration mismatches when the absolute-time fallback straddles
+// a minute boundary. Relative labels computed after mount still read fine.
+const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
 const MOCK = {
   revenue: new Decimal('284390.45'),
   profit: new Decimal('48120.80'),
@@ -22,11 +27,11 @@ const MOCK = {
   emphasisAmount: new Decimal('48120.80'),
   negativeAmount: new Decimal('-248.15'),
   headerAmount: new Decimal('120.00'),
-  syncFresh: new Date(Date.now() - 2 * 60 * 1000),
-  syncStale: new Date(Date.now() - 45 * 60 * 1000),
-  syncing: new Date(Date.now() - 30 * 1000),
-  syncFailed: new Date(Date.now() - 4 * 60 * 60 * 1000),
-  syncMeta: new Date(Date.now() - 4 * 60 * 1000),
+  syncFresh: new Date(MOCK_SYNC_REF.getTime() - 2 * 60 * 1000),
+  syncStale: new Date(MOCK_SYNC_REF.getTime() - 45 * 60 * 1000),
+  syncing: new Date(MOCK_SYNC_REF.getTime() - 30 * 1000),
+  syncFailed: new Date(MOCK_SYNC_REF.getTime() - 4 * 60 * 60 * 1000),
+  syncMeta: new Date(MOCK_SYNC_REF.getTime() - 4 * 60 * 1000),
 };
 
 export default function PatternsShowcasePage(): React.ReactElement {
