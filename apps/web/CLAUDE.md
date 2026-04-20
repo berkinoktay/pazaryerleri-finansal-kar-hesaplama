@@ -517,7 +517,18 @@ export default function ProductsPage() { ... }
 
 ## Component Architecture
 
-Each feature follows this structure:
+Top-level `src/components/` folders — each has a single, narrow purpose. Don't create new top-level folders without updating this table:
+
+| Folder      | Purpose                                                                            |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `ui/`       | Raw shadcn/ui primitives. Never fork; extend tokens or add a `patterns/` wrapper.  |
+| `patterns/` | PazarSync composites built on `ui/` (currency cells, kpi tiles, data-table shell). |
+| `layout/`   | App shell, rails, navigation config — structural chrome only.                      |
+| `brand/`    | Logo, wordmark, brand-specific marks.                                              |
+| `common/`   | Cross-feature UI utilities not tied to a single feature (e.g. language-switcher).  |
+| `showcase/` | Design system demo components, only rendered under `(showcase)` routes.            |
+
+Feature-specific components live under `src/features/<feature>/components/`, not here. Each feature follows this structure:
 
 ```
 src/features/orders/
