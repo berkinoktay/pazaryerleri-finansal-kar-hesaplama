@@ -19,5 +19,12 @@ export default defineConfig({
     // wipes the data file B just inserted in its beforeEach. Tests within
     // a single file still run in order, so TRUNCATE in beforeEach is safe.
     fileParallelism: false,
+    // After the whole vitest run completes, restore seed data so the
+    // developer's browser session (logged in as berkin / demo) sees the
+    // usual orgs and stores instead of an empty state. Skipped in CI and
+    // when PAZARSYNC_SKIP_RESEED=1 (set by `test:unit` — no DB touched).
+    // vitest uses the `globalSetup` hook; the file exports `setup` (no-op)
+    // and a `teardown` that shells out to `pnpm db:seed`.
+    globalSetup: [path.resolve(here, './tests/global-teardown.ts')],
   },
 });

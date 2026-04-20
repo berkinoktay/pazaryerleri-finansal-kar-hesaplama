@@ -11,7 +11,7 @@
     "lint": "eslint . --fix",
     "clean": "rm -rf dist .turbo",
     "test": "vitest run",
-    "test:unit": "vitest run tests/unit --passWithNoTests",
+    "test:unit": "PAZARSYNC_SKIP_RESEED=1 vitest run tests/unit --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:watch": "vitest",
     "openapi:dump": "tsx scripts/dump-openapi.ts",
