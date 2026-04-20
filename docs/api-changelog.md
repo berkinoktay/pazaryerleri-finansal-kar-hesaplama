@@ -13,6 +13,43 @@ section "Versioning" for details.
 
 ### Added
 
+- `POST /v1/organizations` — creates an organization and attaches the
+  authenticated caller as OWNER in a single Prisma transaction. Request
+  body is `{ name: string }` (2–80 chars, must contain a letter/digit,
+  blocklist of reserved names). Slug is auto-generated from the name
+  via `slugify + collision retry`. Response includes the new org
+  (id, name, slug, currency, timezone, timestamps) plus the membership
+  record `{ role: "OWNER" }`. Error codes: `INVALID_NAME_TOO_SHORT`,
+  `INVALID_NAME_TOO_LONG`, `INVALID_NAME_NO_ALPHANUMERIC`,
+  `INVALID_NAME_RESERVED` (400), `UNAUTHENTICATED` (401).
+- `GET /v1/me` — returns the authenticated user's profile
+  (`id`, `email`, `timezone`, `preferredLanguage`, timestamps). Never
+  404s: if the `user_profiles` row is missing (e.g., legacy user
+  pre-trigger), the service upserts defensively from the JWT's email
+  claim and returns 200.
+- New columns on `user_profiles`: `timezone` (default `'Europe/Istanbul'`)
+  and `preferred_language` (default `'tr'`). These drive viewer-side
+  localisation of timestamps and UI language.
+- New columns on `organizations`: `currency` (default `'TRY'`) and
+  `timezone` (default `'Europe/Istanbul'`) for business-ops localisation
+  (reporting period boundaries, sync windows, settlement day cuts) —
+  distinct from per-user viewer timezone.
+- Supabase `auth.users` AFTER INSERT trigger
+  (`supabase/sql/triggers.sql`) auto-creates a matching `user_profiles`
+  row on signup. SECURITY DEFINER so Supabase Auth's anonymous signup
+  path can write into a table it doesn't own. Applied by
+  `pnpm db:apply-policies` alongside the RLS file.
+- Self-write RLS policies for `user_profiles`:
+  `user_profiles_self_insert` and `user_profiles_self_update`
+  (`WITH CHECK (id = auth.uid())`). Covers the defensive upsert path
+  and the future account-settings screen.
+- Extended tenant-isolation test matrix to cover `POST /v1/organizations`
+  (a new org created by user A is invisible to user B).
+- RLS tests extended to assert API-only-write invariants on
+  `organizations` and `organization_members` (authenticated client
+  cannot INSERT/UPDATE directly; writes must go through the Hono API
+  via Prisma).
+
 - Auth middleware chain. `authMiddleware` delegates to
   `supabase.auth.getUser(token)` to verify the Bearer token and sets
   `userId` + `email` on the request context. `orgContextMiddleware`

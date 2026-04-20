@@ -13,6 +13,7 @@ import { Link, usePathname } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 
 export interface ContextRailProps {
+  orgSwitcher?: React.ReactNode;
   stores: Store[];
   activeStoreId: string;
   onSelectStore: (id: string) => void;
@@ -22,10 +23,12 @@ export interface ContextRailProps {
 
 /**
  * Second column of the dual-rail shell. Changes shape based on the active
- * module (sub-nav), but the store switcher + quick actions stay constant
- * at top and bottom — the two places the user reaches for most often.
+ * module (sub-nav), but the org + store switchers and quick actions stay
+ * constant at top and bottom — the three places the user reaches for most
+ * often.
  */
 export function ContextRail({
+  orgSwitcher,
   stores,
   activeStoreId,
   onSelectStore,
@@ -47,12 +50,15 @@ export function ContextRail({
       className="w-rail-context border-border bg-background flex h-full flex-col border-r"
     >
       <div className="gap-xs border-border p-sm flex flex-col border-b">
-        <StoreSwitcher
-          stores={stores}
-          activeStoreId={activeStoreId}
-          onSelect={onSelectStore}
-          onAddStore={onAddStore}
-        />
+        {orgSwitcher}
+        {stores.length > 0 ? (
+          <StoreSwitcher
+            stores={stores}
+            activeStoreId={activeStoreId}
+            onSelect={onSelectStore}
+            onAddStore={onAddStore}
+          />
+        ) : null}
       </div>
 
       {sections.length ? (

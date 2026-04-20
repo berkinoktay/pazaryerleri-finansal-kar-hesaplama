@@ -192,6 +192,57 @@
     },
     "sessionExpired": "Your session has expired. Please sign in again."
   },
+  "organizations": {
+    "panel": {
+      "title": "Organizations",
+      "description": "Organizations you are a member of.",
+      "empty": "No organizations yet.",
+      "loadError": "Couldn't load organizations."
+    },
+    "switcher": {
+      "trigger": "Switch organization",
+      "placeholder": "Search organizations…",
+      "empty": "No organizations found.",
+      "heading": "Your organizations",
+      "active": "Active",
+      "createNew": "Create new organization"
+    },
+    "create": {
+      "title": "New organization",
+      "subtitle": "Create an organization for your business. You'll connect marketplace stores under this organization.",
+      "nameLabel": "Organization name",
+      "namePlaceholder": "e.g. Acme Trading",
+      "nameHint": "This is an internal reference name. You can change it later.",
+      "submit": "Create",
+      "submitting": "Creating…",
+      "cancel": "Cancel",
+      "toast": {
+        "success": "{name} created and set as active.",
+        "error": "Couldn't create the organization. Please try again."
+      },
+      "errors": {
+        "INVALID_NAME_TOO_SHORT": "Name must be at least 2 characters.",
+        "INVALID_NAME_TOO_LONG": "Name must be at most 80 characters.",
+        "INVALID_NAME_NO_ALPHANUMERIC": "Name must contain at least one letter or digit.",
+        "INVALID_NAME_RESERVED": "This name is reserved. Please choose another.",
+        "generic": "Couldn't create the organization. Please try again."
+      }
+    },
+    "active": {
+      "title": "Active organization",
+      "description": "The dashboard and data are scoped to this organization.",
+      "slugLabel": "Slug",
+      "currencyLabel": "Currency",
+      "timezoneLabel": "Timezone",
+      "createdLabel": "Created"
+    }
+  },
+  "onboarding": {
+    "createOrganization": {
+      "title": "Let's get started",
+      "subtitle": "Create your first organization to begin using PazarSync. You'll manage marketplace stores, orders, and expenses under this organization."
+    }
+  },
   "languageSwitcher": {
     "label": "Language",
     "tr": "Türkçe",

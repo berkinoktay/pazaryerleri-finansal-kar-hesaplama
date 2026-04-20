@@ -44,21 +44,7 @@
           "status"
         ]
       },
-      "OrganizationListResponse": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Organization"
-            }
-          }
-        },
-        "required": [
-          "data"
-        ]
-      },
-      "Organization": {
+      "MeResponse": {
         "type": "object",
         "properties": {
           "id": {
@@ -66,33 +52,39 @@
             "format": "uuid",
             "example": "00000000-0000-0000-0000-000000000000"
           },
-          "name": {
+          "email": {
             "type": "string",
-            "example": "Akyıldız Store"
+            "format": "email",
+            "example": "seller@example.com"
           },
-          "slug": {
+          "timezone": {
             "type": "string",
-            "example": "akyildiz-store"
+            "example": "Europe/Istanbul"
+          },
+          "preferredLanguage": {
+            "type": "string",
+            "example": "tr"
           },
           "createdAt": {
             "type": "string",
             "format": "date-time",
-            "example": "2026-01-15T10:30:00Z"
+            "example": "2026-04-20T10:30:00Z"
           },
           "updatedAt": {
             "type": "string",
             "format": "date-time",
-            "example": "2026-04-01T14:00:00Z"
+            "example": "2026-04-20T10:30:00Z"
           }
         },
         "required": [
           "id",
-          "name",
-          "slug",
+          "email",
+          "timezone",
+          "preferredLanguage",
           "createdAt",
           "updatedAt"
         ],
-        "description": "An organization (tenant). Users can be members of multiple organizations."
+        "description": "The authenticated user’s own profile. Returns timezone + preferred language so the frontend can format timestamps in the viewer’s locale and preselect UI language. Never 404s for an authenticated user — the profile row is auto-created by trigger on signup, and GET /v1/me upserts it defensively if the trigger missed."
       },
       "ProblemDetails": {
         "type": "object",
@@ -158,6 +150,118 @@
           "field",
           "code"
         ]
+      },
+      "OrganizationListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Organization"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "Organization": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "00000000-0000-0000-0000-000000000000"
+          },
+          "name": {
+            "type": "string",
+            "example": "Akyıldız Store"
+          },
+          "slug": {
+            "type": "string",
+            "example": "akyildiz-store"
+          },
+          "currency": {
+            "type": "string",
+            "example": "TRY"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Europe/Istanbul"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-01-15T10:30:00Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-01T14:00:00Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "currency",
+          "timezone",
+          "createdAt",
+          "updatedAt"
+        ],
+        "description": "An organization (tenant). Users can be members of multiple organizations. The `currency` + `timezone` fields are business-ops defaults (reporting boundaries, settlement cuts); viewer-side display timezone lives on `user_profiles` via GET /v1/me."
+      },
+      "OrganizationCreatedResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Organization"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "membership": {
+                "$ref": "#/components/schemas/MembershipSummary"
+              }
+            },
+            "required": [
+              "membership"
+            ]
+          }
+        ],
+        "description": "An organization just created via POST /v1/organizations. The response includes the membership row — first creator is always OWNER."
+      },
+      "MembershipSummary": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MEMBER",
+              "VIEWER"
+            ],
+            "example": "OWNER"
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "CreateOrganizationInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80,
+            "pattern": "[\\p{L}\\p{N}]/u",
+            "example": "Akyıldız Ticaret"
+          }
+        },
+        "required": [
+          "name"
+        ]
       }
     },
     "parameters": {}
@@ -177,6 +281,88 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "Me"
+        ],
+        "summary": "Get the authenticated user’s profile",
+        "description": "Returns the profile for the user whose Bearer token authenticates the request. Used by the frontend to render timestamps in the viewer’s timezone and preselect UI language. Defensive upsert — never 404s for an authenticated user.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The user’s profile",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -229,6 +415,106 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrganizationListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Create an organization with the caller as OWNER",
+        "description": "Creates a new organization and attaches the authenticated user as its OWNER in a single transaction. Slug is auto-generated from the name (slugify + collision handling). currency defaults to TRY, timezone to Europe/Istanbul — these can be edited later via organization settings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganizationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The newly created organization with OWNER membership",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request body failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }

@@ -55,4 +55,19 @@ describe('RLS — organization_members', () => {
     expect(error).toBeNull();
     expect(data).toEqual([]);
   });
+
+  it('authenticated client CANNOT INSERT a membership directly — writes are API-only', async () => {
+    // First-membership insertion has to be server-side (chicken-and-egg:
+    // you are not yet a member until the INSERT commits, so any RLS
+    // policy keyed on is_org_member would fail). POST /v1/organizations
+    // handles this in a Prisma transaction.
+    const { user, client } = await createRlsScopedClient();
+    const org = await createOrganization();
+
+    const { error } = await client
+      .from('organization_members')
+      .insert({ organization_id: org.id, user_id: user.id, role: 'OWNER' });
+
+    expect(error).not.toBeNull();
+  });
 });

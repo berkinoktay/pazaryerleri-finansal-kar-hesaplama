@@ -6,6 +6,7 @@ import { logger } from 'hono/logger';
 import { ForbiddenError, UnauthorizedError } from './lib/errors';
 import { authMiddleware } from './middleware/auth.middleware';
 import { bearerAuthScheme } from './openapi';
+import meRoutes from './routes/me.routes';
 import organizationRoutes from './routes/organization.routes';
 
 /**
@@ -121,6 +122,7 @@ export function createApp(): OpenAPIHono {
   app.use('*', authMiddleware);
 
   // ─── Authenticated routes ──────────────────────────────────────────
+  app.route('/', meRoutes);
   app.route('/', organizationRoutes);
 
   return app;

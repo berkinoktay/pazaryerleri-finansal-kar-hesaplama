@@ -37,6 +37,11 @@ AS $$
 $$;
 
 -- ─── user_profiles ─────────────────────────────────────────────────────
+-- SELECT is self-only. INSERT is usually handled by the on_auth_user_created
+-- trigger (see supabase/sql/triggers.sql), but we allow a self-INSERT path
+-- for defensive `ensureExists()` upserts when the trigger missed (legacy
+-- users pre-trigger, or cold-restore scenarios). UPDATE lets the account
+-- settings screen change own timezone/language/fullName/avatar.
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS user_profiles_self_read ON user_profiles;
@@ -44,7 +49,24 @@ CREATE POLICY user_profiles_self_read ON user_profiles
   FOR SELECT TO authenticated
   USING (id = auth.uid());
 
+DROP POLICY IF EXISTS user_profiles_self_insert ON user_profiles;
+CREATE POLICY user_profiles_self_insert ON user_profiles
+  FOR INSERT TO authenticated
+  WITH CHECK (id = auth.uid());
+
+DROP POLICY IF EXISTS user_profiles_self_update ON user_profiles;
+CREATE POLICY user_profiles_self_update ON user_profiles
+  FOR UPDATE TO authenticated
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
+
 -- ─── organizations ─────────────────────────────────────────────────────
+-- Writes are API-only. The Hono backend uses Prisma with the postgres
+-- role (DATABASE_URL), which bypasses RLS; all POST/PATCH/DELETE land
+-- there. Authenticated clients (supabase-js from the browser) have no
+-- INSERT/UPDATE/DELETE policy, so those operations default-deny. This
+-- keeps first-membership atomicity and future billing/VKN write paths
+-- on the server. See apps/api/src/routes/organization.routes.ts.
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS organizations_member_read ON organizations;
@@ -54,6 +76,11 @@ CREATE POLICY organizations_member_read ON organizations
 
 -- ─── organization_members ──────────────────────────────────────────────
 -- A user reads any membership row for an org they are a member of.
+-- Writes are API-only for the same reason as organizations above:
+-- the POST /v1/organizations handler inserts org + OWNER membership
+-- in a single Prisma transaction. First-member insertion cannot go
+-- through authenticated-client RLS because the user isn't a member
+-- until the transaction commits (chicken-and-egg).
 ALTER TABLE organization_members ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS organization_members_co_member_read ON organization_members;

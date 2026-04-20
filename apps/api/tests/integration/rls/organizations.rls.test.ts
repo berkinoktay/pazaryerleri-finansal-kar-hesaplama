@@ -52,4 +52,36 @@ describe('RLS — organizations', () => {
     // Paranoid: "Theirs" must not even appear as substring
     expect(JSON.stringify(data)).not.toContain(theirs.name);
   });
+
+  it('authenticated client CANNOT INSERT directly — writes are API-only', async () => {
+    // organizations has no INSERT policy for the `authenticated` role,
+    // so default-deny applies. This locks first-membership atomicity
+    // and future billing/VKN write paths to the Hono API (Prisma via
+    // DATABASE_URL runs as postgres and bypasses RLS).
+    const { client } = await createRlsScopedClient();
+
+    const { error } = await client
+      .from('organizations')
+      .insert({ name: 'Should Fail', slug: 'should-fail' });
+
+    expect(error).not.toBeNull();
+  });
+
+  it('authenticated client CANNOT UPDATE an existing org — writes are API-only', async () => {
+    const { user, client } = await createRlsScopedClient();
+    const org = await createOrganization({ name: 'Original' });
+    await createMembership(org.id, user.id, 'OWNER');
+
+    const { data, error } = await client
+      .from('organizations')
+      .update({ name: 'Tampered' })
+      .eq('id', org.id)
+      .select();
+
+    // No UPDATE policy means the filter returns zero affected rows
+    // (or an explicit error). Either way the org is unchanged.
+    if (error === null) {
+      expect(data).toEqual([]);
+    }
+  });
 });
