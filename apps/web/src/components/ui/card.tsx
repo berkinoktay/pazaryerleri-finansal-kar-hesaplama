@@ -28,11 +28,39 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
 );
 Card.displayName = 'Card';
 
-export const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('gap-3xs p-lg flex flex-col', className)} {...props} />
-  ),
-);
+export interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Decorative icon on the left of the title column. Auto-sized to `size-icon-lg`. */
+  leadingIcon?: React.ReactNode;
+  /** Slot rendered on the right of the header for actions (menu, buttons, badges). */
+  actions?: React.ReactNode;
+}
+
+export const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>((props, ref) => {
+  const { className, leadingIcon, actions, children, ...rest } = props;
+  const hasAdornments = leadingIcon !== undefined || actions !== undefined;
+
+  if (!hasAdornments) {
+    return (
+      <div ref={ref} className={cn('gap-3xs p-lg flex flex-col', className)} {...rest}>
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={ref} className={cn('gap-md p-lg flex items-start', className)} {...rest}>
+      {leadingIcon !== undefined ? (
+        <span className="text-muted-foreground [&_svg]:size-icon-lg flex shrink-0 items-center">
+          {leadingIcon}
+        </span>
+      ) : null}
+      <div className="gap-3xs flex min-w-0 flex-1 flex-col">{children}</div>
+      {actions !== undefined ? (
+        <div className="gap-xs flex shrink-0 items-center">{actions}</div>
+      ) : null}
+    </div>
+  );
+});
 CardHeader.displayName = 'CardHeader';
 
 export const CardTitle = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(

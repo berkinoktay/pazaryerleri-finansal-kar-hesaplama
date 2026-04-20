@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircleIcon, CheckmarkCircle02Icon, InformationCircleIcon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
 
@@ -13,6 +13,7 @@ import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function FeedbackPrimitivePage(): React.ReactElement {
+  const t = useTranslations('common');
   const [progress, setProgress] = React.useState(32);
 
   return (
@@ -24,45 +25,53 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
       <PrimitiveNav />
 
       <Preview
-        title="Alert"
-        description="Inline uyarı. Yan-şerit border yasak — tone rengi arka plan + icon ile taşınır."
+        title="Alert — tone-based default icon"
+        description="Icon prop verilmezse tone'a göre otomatik (info/neutral → info, success → check, warning/destructive → alert). Yan-şerit border yasak."
       >
         <div className="gap-sm flex flex-col">
           <Alert tone="info">
-            <InformationCircleIcon />
             <AlertDescription>
               Nisan 2026 hakediş raporu hazır. 3 mağazada mutabakat farkı tespit edildi.
             </AlertDescription>
           </Alert>
           <Alert tone="success">
-            <CheckmarkCircle02Icon />
-            <div className="gap-3xs flex flex-col">
-              <AlertTitle>Senkronizasyon tamamlandı</AlertTitle>
-              <AlertDescription>
-                142 yeni sipariş çekildi. Karlılık yeniden hesaplandı.
-              </AlertDescription>
-            </div>
+            <AlertTitle>Senkronizasyon tamamlandı</AlertTitle>
+            <AlertDescription>
+              142 yeni sipariş çekildi. Karlılık yeniden hesaplandı.
+            </AlertDescription>
           </Alert>
           <Alert tone="warning">
-            <AlertCircleIcon />
-            <div className="gap-3xs flex flex-col">
-              <AlertTitle>3 ürünün maliyet bilgisi eksik</AlertTitle>
-              <AlertDescription>
-                Bu ürünler karlılık raporuna dahil edilmiyor. Maliyetler eklenmeden net kar eksik
-                kalır.
-              </AlertDescription>
-            </div>
+            <AlertTitle>3 ürünün maliyet bilgisi eksik</AlertTitle>
+            <AlertDescription>
+              Bu ürünler karlılık raporuna dahil edilmiyor. Maliyetler eklenmeden net kar eksik
+              kalır.
+            </AlertDescription>
           </Alert>
           <Alert tone="destructive">
-            <AlertCircleIcon />
-            <div className="gap-3xs flex flex-col">
-              <AlertTitle>Hepsiburada API bağlantısı başarısız</AlertTitle>
-              <AlertDescription>
-                401 Unauthorized. API bilgilerini ayarlar sayfasında güncelle.
-              </AlertDescription>
-            </div>
+            <AlertTitle>Hepsiburada API bağlantısı başarısız</AlertTitle>
+            <AlertDescription>
+              401 Unauthorized. API bilgilerini ayarlar sayfasında güncelle.
+            </AlertDescription>
           </Alert>
         </div>
+      </Preview>
+
+      <Preview
+        title="Alert — onDismiss"
+        description="onDismiss prop, aria-label i18n'den, 44px touch target (pointer-coarse:), full-border + tint (yan-şerit YASAK)."
+      >
+        <AlertDismissDemo dismissLabel={t('dismiss')} />
+      </Preview>
+
+      <Preview
+        title="Alert — icon=null (opt-out)"
+        description="Icon gerekmediğinde prop null geçilir, default bastırılır."
+      >
+        <Alert tone="neutral" icon={null}>
+          <AlertDescription>
+            İkon istemediğin durumlar için: opt-out ile metin tam genişlikte akar.
+          </AlertDescription>
+        </Alert>
       </Preview>
 
       <Preview
@@ -148,5 +157,37 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
         </div>
       </Preview>
     </>
+  );
+}
+
+function AlertDismissDemo({ dismissLabel }: { dismissLabel: string }): React.ReactElement {
+  const [alerts, setAlerts] = React.useState<Array<'info' | 'success' | 'warning' | 'destructive'>>(
+    ['info', 'success', 'warning', 'destructive'],
+  );
+
+  if (alerts.length === 0) {
+    return (
+      <span className="text-muted-foreground text-sm">
+        Tüm uyarılar kapatıldı. Yenilemek için sayfayı reload edin.
+      </span>
+    );
+  }
+
+  return (
+    <div className="gap-sm flex flex-col">
+      {alerts.map((tone) => (
+        <Alert
+          key={tone}
+          tone={tone}
+          dismissLabel={dismissLabel}
+          onDismiss={() => setAlerts((prev) => prev.filter((t) => t !== tone))}
+        >
+          <AlertTitle>Kapatılabilir — tone = {tone}</AlertTitle>
+          <AlertDescription>
+            Sağ üstte X butonu; klavye + ekran okuyucu erişilebilir.
+          </AlertDescription>
+        </Alert>
+      ))}
+    </div>
   );
 }

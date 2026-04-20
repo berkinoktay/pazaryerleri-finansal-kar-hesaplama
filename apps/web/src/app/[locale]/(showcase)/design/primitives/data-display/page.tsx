@@ -1,5 +1,7 @@
 'use client';
 
+import { Building03Icon, MoreVerticalIcon, Refresh01Icon } from 'hugeicons-react';
+
 import { PageHeader } from '@/components/patterns/page-header';
 import { PrimitiveNav } from '@/components/showcase/primitive-nav';
 import { Preview } from '@/components/showcase/preview';
@@ -11,7 +13,9 @@ import {
 } from '@/components/ui/accordion';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -42,7 +46,7 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
         title="Table"
         description="Ham tablo primitive'i. Sort/filter/pagination DataTable pattern'inde (Veri sekmesinde) canlı gösteriliyor."
       >
-        <div className="border-border rounded-lg border">
+        <div className="border-border overflow-hidden rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -178,6 +182,49 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
             </div>
           </AspectRatio>
         </div>
+      </Preview>
+
+      <Preview
+        title="Card — basit"
+        description="CardHeader varsayılan dikey stack (Title + Description)."
+      >
+        <Card className="max-w-form">
+          <CardHeader>
+            <CardTitle>Genel Bakış</CardTitle>
+            <CardDescription>Son 7 güne ait özet.</CardDescription>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-sm">İçerik bölümü.</CardContent>
+        </Card>
+      </Preview>
+
+      <Preview
+        title="CardHeader — leadingIcon + actions"
+        description="Header'a ikon ve sağ aksiyon slot'u eklenir. Layout yatay akışa geçer, title/description ortada daralmayan bir kolon olur."
+      >
+        <Card className="max-w-form">
+          <CardHeader
+            leadingIcon={<Building03Icon />}
+            actions={
+              <>
+                <Badge tone="success" size="sm">
+                  Aktif
+                </Badge>
+                <Button variant="ghost" size="icon-sm" aria-label="Senkronize et">
+                  <Refresh01Icon />
+                </Button>
+                <Button variant="ghost" size="icon-sm" aria-label="Menü">
+                  <MoreVerticalIcon />
+                </Button>
+              </>
+            }
+          >
+            <CardTitle>Trendyol — Ana Mağaza</CardTitle>
+            <CardDescription>Son senkron: 3 dk önce · GMT+3</CardDescription>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-sm">
+            Son 7 günde 142 sipariş, ₺18.240 brüt ciro. Net kâr marjı %22.
+          </CardContent>
+        </Card>
       </Preview>
     </>
   );

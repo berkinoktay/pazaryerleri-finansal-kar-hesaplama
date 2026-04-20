@@ -1,6 +1,17 @@
 'use client';
 
-import { PlusSignIcon, Search01Icon } from 'hugeicons-react';
+import {
+  AlertCircleIcon,
+  ArrowRight01Icon,
+  Cancel01Icon,
+  Download01Icon,
+  PlusSignIcon,
+  Search01Icon,
+  Tick02Icon,
+  Time04Icon,
+} from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
+import * as React from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
 import { PrimitiveNav } from '@/components/showcase/primitive-nav';
@@ -12,6 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { RADIUS_KEYS, SIZE_KEYS } from '@/lib/variants';
 
 export default function ButtonsPrimitivePage(): React.ReactElement {
+  const t = useTranslations('common');
   return (
     <>
       <PageHeader
@@ -97,6 +109,35 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
+        title="Button — leading & trailing icon slot"
+        description="leadingIcon / trailingIcon prop'ları — auto-sized (size-icon-sm), gap otomatik, ikon rengi buton variant'ından mirasla."
+      >
+        <div className="gap-xs flex flex-wrap">
+          <Button leadingIcon={<PlusSignIcon />}>Yeni Mağaza</Button>
+          <Button variant="outline" leadingIcon={<Download01Icon />}>
+            Dışa aktar
+          </Button>
+          <Button variant="ghost" trailingIcon={<ArrowRight01Icon />}>
+            Devam et
+          </Button>
+          <Button
+            variant="secondary"
+            leadingIcon={<Search01Icon />}
+            trailingIcon={<ArrowRight01Icon />}
+          >
+            Arama sonuçları
+          </Button>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Button — loading"
+        description="loading=true spinner + aria-busy + auto disabled. loadingText isteğe bağlı — geçici metin. prefers-reduced-motion altında spinner donar."
+      >
+        <ButtonLoadingDemo loadingLabel={t('loading')} />
+      </Preview>
+
+      <Preview
         title="Badge tonları"
         description="Neutral, Primary, Outline, Success, Destructive, Warning, Info. Ton rengi yüzeyle taşınır; yan-şerit border yasak."
       >
@@ -109,6 +150,33 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
           <Badge tone="warning">Bekleyen</Badge>
           <Badge tone="info">Kargoda</Badge>
         </div>
+      </Preview>
+
+      <Preview
+        title="Badge — leading / trailing icon"
+        description="leadingIcon tone'a göre renklenir (success → yeşil check, destructive → kırmızı x). size-icon-xs auto-sized."
+      >
+        <div className="gap-xs flex flex-wrap items-center">
+          <Badge tone="success" leadingIcon={<Tick02Icon />}>
+            Senkron
+          </Badge>
+          <Badge tone="destructive" leadingIcon={<Cancel01Icon />}>
+            Hata
+          </Badge>
+          <Badge tone="warning" leadingIcon={<AlertCircleIcon />}>
+            Bekleyen
+          </Badge>
+          <Badge tone="info" leadingIcon={<Time04Icon />}>
+            Kargoda
+          </Badge>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Badge — removable (onRemove)"
+        description="Filter chip / tag kullanımı. Buton 44px touch target, aria-label i18n'den."
+      >
+        <BadgeRemovableDemo removeLabel={t('remove')} />
       </Preview>
 
       <Preview
@@ -163,5 +231,79 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
         </div>
       </Preview>
     </>
+  );
+}
+
+function BadgeRemovableDemo({ removeLabel }: { removeLabel: string }): React.ReactElement {
+  const [filters, setFilters] = React.useState<string[]>([
+    'Trendyol',
+    'Teslim edildi',
+    '2026 Nisan',
+  ]);
+
+  if (filters.length === 0) {
+    return (
+      <span className="text-muted-foreground text-sm">
+        Tüm filtreler kaldırıldı. Yenilemek için sayfayı reload edin.
+      </span>
+    );
+  }
+
+  return (
+    <div className="gap-xs flex flex-wrap items-center">
+      {filters.map((label) => (
+        <Badge
+          key={label}
+          tone="neutral"
+          radius="full"
+          onRemove={() => setFilters((prev) => prev.filter((x) => x !== label))}
+          removeLabel={`${removeLabel}: ${label}`}
+        >
+          {label}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function ButtonLoadingDemo({ loadingLabel }: { loadingLabel: string }): React.ReactElement {
+  const [busy, setBusy] = React.useState(false);
+
+  const kickLoading = (): void => {
+    setBusy(true);
+    window.setTimeout(() => setBusy(false), 1800);
+  };
+
+  return (
+    <div className="gap-md flex flex-col">
+      <div className="gap-xs flex flex-wrap">
+        <Button loading loadingLabel={loadingLabel}>
+          Kaydet
+        </Button>
+        <Button loading loadingLabel={loadingLabel} loadingText="Kaydediliyor…">
+          Kaydet
+        </Button>
+        <Button variant="outline" loading loadingLabel={loadingLabel}>
+          Yenile
+        </Button>
+        <Button variant="destructive" loading loadingLabel={loadingLabel} loadingText="Siliniyor…">
+          Sil
+        </Button>
+      </div>
+      <div className="gap-xs flex flex-wrap items-center">
+        <Button
+          onClick={kickLoading}
+          loading={busy}
+          loadingLabel={loadingLabel}
+          loadingText="Gönderiliyor…"
+          leadingIcon={<PlusSignIcon />}
+        >
+          Denemek için tıkla
+        </Button>
+        <span className="text-2xs text-muted-foreground">
+          1.8 sn süren senkron mutasyonu taklit eder.
+        </span>
+      </div>
+    </div>
   );
 }

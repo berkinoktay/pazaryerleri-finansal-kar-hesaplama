@@ -7,6 +7,9 @@
     "save": "Kaydet",
     "cancel": "Vazgeç",
     "search": "Ara",
+    "clear": "Temizle",
+    "remove": "Kaldır",
+    "dismiss": "Kapat",
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3"
   },

@@ -2,9 +2,10 @@
 
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { cva, type VariantProps } from 'class-variance-authority';
-import { ArrowDown01Icon, ArrowUp01Icon, Tick02Icon } from 'hugeicons-react';
+import { ArrowDown01Icon, ArrowUp01Icon, Cancel01Icon, Tick02Icon } from 'hugeicons-react';
 import * as React from 'react';
 
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 export const Select = SelectPrimitive.Root;
@@ -13,11 +14,12 @@ export const SelectValue = SelectPrimitive.Value;
 
 const selectTriggerVariants = cva(
   [
-    'flex w-full items-center justify-between gap-xs border border-border bg-background text-foreground shadow-xs transition-colors duration-fast',
+    'flex w-full items-center gap-xs border border-border bg-background text-foreground shadow-xs transition-colors duration-fast',
     'placeholder:text-muted-foreground',
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:outline-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
+    'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive',
     '[&>span]:line-clamp-1',
   ].join(' '),
   {
@@ -45,23 +47,102 @@ const selectTriggerVariants = cva(
 export interface SelectTriggerProps
   extends
     React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>,
-    VariantProps<typeof selectTriggerVariants> {}
+    VariantProps<typeof selectTriggerVariants> {
+  /** Decorative icon on the left of the trigger. Auto-sized to `size-icon-sm`. */
+  leadingIcon?: React.ReactNode;
+  /** Shows a spinner inside the trigger; sets `aria-busy="true"`. Does not disable the trigger. */
+  loading?: boolean;
+  /** Translated aria-label for the loading spinner. Defaults to `'Loading'`. */
+  loadingLabel?: string;
+  /** When provided, renders a clear button before the chevron. Callback should reset the Select's value. */
+  onClear?: () => void;
+  /** Translated aria-label for the clear button. Defaults to `'Clear'`. */
+  clearLabel?: string;
+  /** Convenience boolean for `aria-invalid="true"` on the trigger. Triggers destructive border. */
+  invalid?: boolean;
+}
 
 export const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   SelectTriggerProps
->(({ className, size, radius, children, ...props }, ref) => (
-  <SelectPrimitive.Trigger
-    ref={ref}
-    className={cn(selectTriggerVariants({ size, radius, className }))}
-    {...props}
-  >
-    {children}
-    <SelectPrimitive.Icon asChild>
-      <ArrowDown01Icon className="size-icon-sm opacity-50" />
-    </SelectPrimitive.Icon>
-  </SelectPrimitive.Trigger>
-));
+>((props, ref) => {
+  const {
+    className,
+    size,
+    radius,
+    children,
+    leadingIcon,
+    loading,
+    loadingLabel = 'Loading',
+    onClear,
+    clearLabel = 'Clear',
+    invalid,
+    ...rest
+  } = props;
+
+  // Radix renders SelectTrigger as a <button>, and HTML forbids nested buttons
+  // (browsers silently re-parent them, causing a hydration mismatch). So the
+  // clear affordance is a <span role="button"> with keyboard + pointer handlers
+  // — accessible as a button, but not a DOM button.
+  const handleClear = (event: React.SyntheticEvent<HTMLSpanElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    onClear?.();
+  };
+
+  const handleClearKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>): void => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClear?.();
+    }
+  };
+
+  return (
+    <SelectPrimitive.Trigger
+      ref={ref}
+      aria-invalid={invalid ?? undefined}
+      aria-busy={loading ?? undefined}
+      className={cn(selectTriggerVariants({ size, radius, className }))}
+      {...rest}
+    >
+      {leadingIcon !== undefined ? (
+        <span className="text-muted-foreground [&_svg]:size-icon-sm flex shrink-0 items-center">
+          {leadingIcon}
+        </span>
+      ) : null}
+      <span className="flex min-w-0 flex-1 items-center truncate text-start">{children}</span>
+      <div className="gap-xs flex shrink-0 items-center">
+        {loading === true ? (
+          <Spinner label={loadingLabel} className="text-muted-foreground" />
+        ) : null}
+        {onClear !== undefined ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={handleClear}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={handleClearKeyDown}
+            aria-label={clearLabel}
+            className={cn(
+              'inline-flex shrink-0 cursor-pointer items-center justify-center',
+              'text-muted-foreground hover:text-foreground rounded-xs',
+              'duration-fast transition-colors',
+              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+              'p-2xs pointer-coarse:p-sm',
+              '[&_svg]:size-icon-sm',
+            )}
+          >
+            <Cancel01Icon />
+          </span>
+        ) : null}
+        <SelectPrimitive.Icon asChild>
+          <ArrowDown01Icon className="size-icon-sm opacity-50" />
+        </SelectPrimitive.Icon>
+      </div>
+    </SelectPrimitive.Trigger>
+  );
+});
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName;
 
 export { selectTriggerVariants };

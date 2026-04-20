@@ -2,6 +2,7 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
@@ -46,20 +47,65 @@ const buttonVariants = cva(
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  /** Auto-sized icon rendered before the button label. Ignored when `asChild` is true. */
+  leadingIcon?: React.ReactNode;
+  /** Auto-sized icon rendered after the button label. Ignored when `asChild` is true. */
+  trailingIcon?: React.ReactNode;
+  /** Shows a spinner in place of the leading icon; sets `aria-busy="true"`; auto-disables the button. Ignored when `asChild` is true. */
+  loading?: boolean;
+  /** Translated aria-label for the loading spinner. Defaults to `'Loading'`. */
+  loadingLabel?: string;
+  /** Optional label rendered in place of children while `loading` is true. */
+  loadingText?: React.ReactNode;
 }
 
-export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, radius, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : 'button';
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>((props, ref) => {
+  const {
+    className,
+    variant,
+    size,
+    radius,
+    asChild = false,
+    leadingIcon,
+    trailingIcon,
+    loading,
+    loadingLabel = 'Loading',
+    loadingText,
+    disabled,
+    children,
+    ...rest
+  } = props;
+
+  const classes = cn(buttonVariants({ variant, size, radius, className }));
+
+  if (asChild === true) {
     return (
-      <Comp
-        className={cn(buttonVariants({ variant, size, radius, className }))}
-        ref={ref}
-        {...props}
-      />
+      <Slot ref={ref} className={classes} {...rest}>
+        {children as React.ReactElement}
+      </Slot>
     );
-  },
-);
+  }
+
+  const isDisabled = loading === true || disabled === true;
+
+  return (
+    <button
+      ref={ref}
+      className={classes}
+      disabled={isDisabled}
+      aria-busy={loading ?? undefined}
+      {...rest}
+    >
+      {loading === true ? (
+        <Spinner label={loadingLabel} />
+      ) : leadingIcon !== undefined ? (
+        leadingIcon
+      ) : null}
+      {loading === true && loadingText !== undefined ? loadingText : children}
+      {loading !== true && trailingIcon !== undefined ? trailingIcon : null}
+    </button>
+  );
+});
 Button.displayName = 'Button';
 
 export { buttonVariants };

@@ -7,6 +7,9 @@
     "save": "Save",
     "cancel": "Cancel",
     "search": "Search",
+    "clear": "Clear",
+    "remove": "Remove",
+    "dismiss": "Dismiss",
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3"
   },
