@@ -468,6 +468,63 @@ Area-chart `fillOpacity` is inherently mode-sensitive: a 0.15 alpha that reads a
 
 **4. Alpha shortcuts (`/50`, `/30`, `/10`) are a dark-mode trap.** Alpha on a light bg produces a predictable tint; the same alpha on a dark bg produces a nearly-black mud that reads flat. Whenever you feel the urge to write `bg-muted/50`, add the named surface token (`--surface-subtle`, `--border-muted`, `--muted-foreground-dim`) and consume it as a proper utility. The token's alpha (if any) lives in its definition, once, per theme. This is already the rule in the transparency section above — the dark-mode failure pattern is just the most visible reason.
 
+### SSR safety — hydration-proof components
+
+The root `<html>` already carries `suppressHydrationWarning` because `next-themes` mutates `class` in a head script before React hydrates. That waiver is **only** for the `<html>` attribute — everywhere else, server and client must render byte-identical markup. Four failure modes we have already shipped and reverted:
+
+1. **Reading `theme` during render** (the "Sun vs. Moon" mismatch). `useTheme()` returns `undefined` on the server, the stored preference on the client. Selecting an icon by `theme === 'dark' ? Moon : Sun` bakes the wrong icon into SSR, the client re-renders the other, hydration fails.
+
+   **Fix — CSS-only toggle** (the shadcn pattern): render BOTH icons always; let the `dark:` variant hide/show one. `next-themes`' head script puts `class="dark"` on `<html>` before hydration, so CSS applies from the first paint.
+
+   ```tsx
+   // ❌ Bad — reads theme to decide what to render
+   <Button>{theme === 'dark' ? <Moon /> : <Sun />}</Button>
+
+   // ✅ Good — CSS swaps both, no JS branch
+   <Button>
+     <Sun className="scale-100 dark:scale-0 dark:-rotate-90 transition-transform" />
+     <Moon className="absolute scale-0 dark:scale-100 dark:rotate-0 transition-transform" />
+   </Button>
+   ```
+
+   When CSS can't cover it (e.g. Sonner takes `theme` as a prop), guard with `useIsMounted()` / `<ClientOnly>` (both in the shared toolkit) and return `null` or a skeleton during SSR.
+
+2. **Calling `new Date()` / `Date.now()` in the render path** (including for relative time, "now" references, and mock data at module scope in `'use client'` files). Server and client evaluate at different moments; minute- or second-precision labels diverge.
+
+   **Fix — mount gate plus stable fallback:** compute time-dependent labels only after mount.
+
+   ```tsx
+   const mounted = useIsMounted();
+   const label = mounted
+     ? formatter.relativeTime(lastSyncedAt, new Date())
+     : formatter.dateTime(lastSyncedAt, 'short'); // deterministic given the prop
+   ```
+
+   For showcase **mock** dates, hard-code ISO strings (`new Date('2026-04-20T21:00:00Z')`) — NEVER `new Date(Date.now() - N)` at module scope in a client component. The mocks will age; that is acceptable for demos.
+
+3. **Nested `<button>` in `<button>`** (invalid HTML — browsers silently re-parent, hydration fails). The canonical trap is putting an interactive addon inside a Radix primitive that itself renders as `<button>` (`SelectTrigger`, `DropdownMenuTrigger`, `PopoverTrigger`).
+
+   **Fix — `<span role="button" tabIndex={0}>`** with `onKeyDown` for Enter/Space. Stays keyboard-accessible and announces as a button, but satisfies the HTML nesting rules.
+
+4. **Missing format preset in next-intl.** `formatter.dateTime(date, 'short')` silently falls back to a toString-ish output when `'short'` is not registered in the `formats` config, and that output includes locale-dependent suffixes (`Türkiye Standart Saati` vs. `GMT+03:00`) that differ across platforms.
+
+   **Fix — all presets live in `src/i18n/formats.ts`.** Consume by name (`'short'`, `'long'`, `'date'`, `'currency'`, `'percentDelta'`, …), never by inline options. Add a new preset here before using it.
+
+**The SSR-safety toolkit (shared):**
+
+| Utility          | Location                          | Use for                                                                     |
+| ---------------- | --------------------------------- | --------------------------------------------------------------------------- |
+| `useIsMounted()` | `@/lib/use-is-mounted`            | Gate a prop or className conditionally                                      |
+| `<ClientOnly>`   | `@/components/common/client-only` | Defer a whole subtree to post-mount; pass a `fallback` for layout stability |
+| `FORMATS`        | `@/i18n/formats`                  | Named date / number presets — extend, don't inline                          |
+
+**Review checklist before committing any `'use client'` component that renders temporal or theme-dependent content:**
+
+- [ ] No `Date.now()` / `new Date()` / `Math.random()` at module scope — if the component needs "now", derive it from a client-only hook after mount.
+- [ ] No reading `theme`, `resolvedTheme`, `localStorage`, `window.matchMedia` during render without a mount gate or CSS-only alternative.
+- [ ] No interactive elements (`<button>`, `<a>`) nested inside another interactive element — Radix triggers ARE buttons; use `role="button"` spans for addon actions.
+- [ ] Date / number strings come from `useFormatter()` with a named preset from `formats.ts`, never hand-rolled `Intl.DateTimeFormat`.
+
 ### Design system showcase
 
 The live reference for every token, primitive, and pattern lives under `/design/*`:
@@ -514,6 +571,50 @@ export const metadata: Metadata = {
 
 export default function ProductsPage() { ... }
 ```
+
+## UI Development Workflow
+
+All UI work in `apps/web` follows a strict selection cascade. Bypassing it fragments the surface into duplicate/near-duplicate components and dilutes the design system.
+
+### The cascade (mandatory order)
+
+1. **Scan `apps/web/src/components/patterns/`** — PazarSync composites (KpiTile, StatGroup, Currency, TrendDelta, SyncBadge, PageHeader, EmptyState, DateRangePicker, DataTable, DataTableToolbar). Always reuse first.
+2. **Scan `apps/web/src/components/ui/`** — 41 shadcn/ui primitives already installed (Button, Card, Dialog, Form, Input, Select, Table, Tabs, Popover, Sheet, …).
+3. **Fallback to the shadcn registry** — if `ui/` is genuinely missing a primitive, add it with `pnpm dlx shadcn@latest add <name>`. Don't hand-roll a primitive shadcn already ships.
+4. **Custom component** — only if 1–3 all miss. Custom components MUST compose from `ui/` and `patterns/` — never raw HTML, never by forking a primitive.
+   - Feature-scoped → `apps/web/src/features/<feature>/components/`
+   - Cross-feature composite → promote to `apps/web/src/components/patterns/`
+
+Forking a `ui/` primitive to "tweak styles" is forbidden. Extend tokens or add a `patterns/` wrapper.
+
+### Dashboard aesthetic is locked in tokens
+
+The design system is tuned for a data-dense financial dashboard (Linear / Stripe / Ramp / Mercury tier). Its aesthetic lives in `src/app/tokens/*.css` — OKLCH palette tinted toward hue 265, Host Grotesk, the `--space-*` 4pt scale, and dual-mode shadows with inset highlights. Never introduce a second aesthetic under pressure:
+
+- No new palettes or one-off colors — extend tokens
+- No arbitrary values (`bg-[#…]`, `p-[13px]`) — ESLint already blocks these
+- Marketing / auth / onboarding use the same system — no separate aesthetic for "landing pages"
+
+If a genuinely new visual direction is needed, extend the design system via `/ui-design-system` — don't bypass it.
+
+### Mandatory skill integration
+
+| Skill               | When to invoke                                                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/ui-ux-pro-max`    | **Any** UI development or design task — new page, new flow, new component, UI review. Invoke at the start of the task.     |
+| `/ui-design-system` | When extending the system — new tokens, new primitives, new patterns, dark-mode adjustments. Additive to `/ui-ux-pro-max`. |
+
+### Before building a new screen
+
+Open the live showcase in the dev server:
+
+- `/design/tokens` — colors, typography, spacing, radius, shadow, motion
+- `/design/primitives/*` — every shadcn primitive with variants and states
+- `/design/patterns` — PazarSync composites
+- `/design/data` — DataTable with filters, sorting, selection
+- `/design/layout-demo` — dual-rail AppShell with mock store data
+
+Anything you need may already be there. The "Component Architecture" section below has full folder semantics.
 
 ## Component Architecture
 
