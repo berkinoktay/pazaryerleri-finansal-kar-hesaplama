@@ -75,12 +75,14 @@ enum SyncStatus {
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
-  id        String   @id @db.Uuid
-  email     String   @unique
-  fullName  String?  @map("full_name")
-  avatarUrl String?  @map("avatar_url")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                String   @id @db.Uuid
+  email             String   @unique
+  fullName          String?  @map("full_name")
+  avatarUrl         String?  @map("avatar_url")
+  timezone          String   @default("Europe/Istanbul")
+  preferredLanguage String   @default("tr") @map("preferred_language")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
   memberships OrganizationMember[]
 
@@ -91,6 +93,8 @@ model Organization {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
   slug      String   @unique
+  currency  String   @default("TRY")
+  timezone  String   @default("Europe/Istanbul")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

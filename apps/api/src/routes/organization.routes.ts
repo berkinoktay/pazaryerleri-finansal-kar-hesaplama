@@ -2,7 +2,11 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as organizationService from '../services/organization.service';
-import { OrganizationListResponseSchema } from '../validators/organization.validator';
+import {
+  CreateOrganizationInputSchema,
+  OrganizationCreatedResponseSchema,
+  OrganizationListResponseSchema,
+} from '../validators/organization.validator';
 
 const app = new OpenAPIHono<{ Variables: { userId: string } }>();
 
@@ -33,6 +37,48 @@ app.openapi(listOrganizationsRoute, async (c) => {
   const userId = c.get('userId');
   const data = await organizationService.listForUser(userId);
   return c.json({ data }, 200);
+});
+
+const createOrganizationRoute = createRoute({
+  method: 'post',
+  path: '/organizations',
+  tags: ['Organizations'],
+  summary: 'Create an organization with the caller as OWNER',
+  description:
+    'Creates a new organization and attaches the authenticated user as its OWNER ' +
+    'in a single transaction. Slug is auto-generated from the name (slugify + ' +
+    'collision handling). currency defaults to TRY, timezone to Europe/Istanbul — ' +
+    'these can be edited later via organization settings.',
+  security: [{ bearerAuth: [] }],
+  request: {
+    body: {
+      content: { 'application/json': { schema: CreateOrganizationInputSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    201: {
+      content: { 'application/json': { schema: OrganizationCreatedResponseSchema } },
+      description: 'The newly created organization with OWNER membership',
+      headers: RateLimitHeaders,
+    },
+    400: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Request body failed validation',
+    },
+    401: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Missing or invalid auth token',
+    },
+    429: Common429Response,
+  },
+});
+
+app.openapi(createOrganizationRoute, async (c) => {
+  const userId = c.get('userId');
+  const input = c.req.valid('json');
+  const created = await organizationService.createForOwner(userId, input);
+  return c.json(created, 201);
 });
 
 export default app;

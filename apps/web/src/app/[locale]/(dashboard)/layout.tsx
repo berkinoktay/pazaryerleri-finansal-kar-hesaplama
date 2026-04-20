@@ -1,36 +1,35 @@
-'use client';
-
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
-import { toast } from 'sonner';
 
 import { AppShell } from '@/components/layout/app-shell';
-import { MOCK_ACTIVITY, MOCK_STORES } from '@/components/showcase/showcase-mocks';
+import { OrgSwitcher } from '@/features/organization/components/org-switcher';
+import type { Organization } from '@/features/organization/api/organizations.api';
+import { getServerApiClient } from '@/lib/api-client/server';
+import { resolveActiveOrgId } from '@/lib/active-org';
 
 /**
- * Dashboard shell — scaffolding layout that wires the dual-rail AppShell
- * into every authenticated route. Store list and activity feed are served
- * from mocks for now; these will plug into React Query hooks (useStores,
- * useActivityFeed) once the feature layer is built.
+ * Dashboard shell — dual-rail AppShell wrapped around every
+ * authenticated route. Milestone #1 wires the organisation switcher
+ * to real data; stores + activity remain placeholder until milestone
+ * #2 ships store-connect.
+ *
+ * This layout is a Server Component because it does server-side data
+ * fetching (orgs + cookie-resolved activeOrgId) and embeds the
+ * OrgSwitcher as a Client Component child. The child only receives
+ * serialisable props (the orgs array and an id string).
  */
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
-}): React.ReactElement {
-  const t = useTranslations('toast');
-  const [activeStoreId, setActiveStoreId] = React.useState(MOCK_STORES[0]!.id);
+}): Promise<React.ReactElement> {
+  const api = await getServerApiClient();
+  const { data } = await api.GET('/v1/organizations', {});
+  const orgs: Organization[] = data?.data ?? [];
+  const activeOrgId = await resolveActiveOrgId(orgs);
 
   return (
     <div className="h-screen">
-      <AppShell
-        stores={MOCK_STORES}
-        activeStoreId={activeStoreId}
-        onSelectStore={setActiveStoreId}
-        onAddStore={() => toast.info(t('storeFlowNotReady'))}
-        onSyncNow={() => toast.success(t('syncStarted'))}
-        activity={MOCK_ACTIVITY}
-      >
+      <AppShell orgSwitcher={<OrgSwitcher orgs={orgs} activeOrgId={activeOrgId} />}>
         {children}
       </AppShell>
     </div>

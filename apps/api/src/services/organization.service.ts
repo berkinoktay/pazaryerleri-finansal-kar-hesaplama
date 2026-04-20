@@ -1,11 +1,27 @@
 import { prisma } from '@pazarsync/db';
 
+import { generateUniqueOrganizationSlug } from '../lib/slugify';
+import type { CreateOrganizationInput } from '../validators/organization.validator';
+
 export interface OrganizationListItem {
   id: string;
   name: string;
   slug: string;
+  currency: string;
+  timezone: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface OrganizationCreated {
+  id: string;
+  name: string;
+  slug: string;
+  currency: string;
+  timezone: string;
+  createdAt: string;
+  updatedAt: string;
+  membership: { role: 'OWNER' };
 }
 
 /**
@@ -23,7 +39,73 @@ export async function listForUser(userId: string): Promise<OrganizationListItem[
     id: o.id,
     name: o.name,
     slug: o.slug,
+    currency: o.currency,
+    timezone: o.timezone,
     createdAt: o.createdAt.toISOString(),
     updatedAt: o.updatedAt.toISOString(),
   }));
+}
+
+/**
+ * Create an organization and make the caller its OWNER, atomically.
+ *
+ * The two rows land in a single Prisma transaction — if membership
+ * creation fails (e.g., FK violation when the user_profile row is
+ * missing), the organization insert is rolled back too. No half-states.
+ *
+ * Prisma's DATABASE_URL connects as the `postgres` superuser, which
+ * bypasses RLS. This is how the chicken-and-egg ("user must be a
+ * member before inserting members") is resolved — the server owns the
+ * first-membership write.
+ *
+ * Race on slug collision: two concurrent calls with the same name
+ * both probe-find nothing, both attempt INSERT, one wins, the other
+ * gets Prisma's P2002 unique-constraint violation. We retry the slug
+ * generation once and try again. If it happens a second time (vanishingly
+ * rare), the second caller's error bubbles up as 500 — better than a
+ * user seeing a false "successful" response.
+ */
+const SLUG_RETRY_CODE = 'P2002';
+
+export async function createForOwner(
+  userId: string,
+  input: CreateOrganizationInput,
+): Promise<OrganizationCreated> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const slug = await generateUniqueOrganizationSlug(input.name);
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const org = await tx.organization.create({
+          data: { name: input.name, slug },
+        });
+        await tx.organizationMember.create({
+          data: { organizationId: org.id, userId, role: 'OWNER' },
+        });
+        return {
+          id: org.id,
+          name: org.name,
+          slug: org.slug,
+          currency: org.currency,
+          timezone: org.timezone,
+          createdAt: org.createdAt.toISOString(),
+          updatedAt: org.updatedAt.toISOString(),
+          membership: { role: 'OWNER' as const },
+        };
+      });
+    } catch (err) {
+      if (isUniqueConstraintError(err) && attempt === 0) continue;
+      throw err;
+    }
+  }
+  // Unreachable — loop either returns or throws. Assertion for TS narrowing.
+  throw new Error('createForOwner: exhausted slug retry without resolution');
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === SLUG_RETRY_CODE
+  );
 }

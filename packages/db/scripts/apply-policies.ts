@@ -1,8 +1,11 @@
-// Applies supabase/sql/rls-policies.sql to the local dev database.
+// Applies governance SQL (RLS policies + triggers) to the local dev DB.
 //
-// Chained into `pnpm db:push` so schema changes and RLS policies land
+// Chained into `pnpm db:push` so schema changes and governance land
 // together — no "forgot to re-run" footgun. In CI, the integration test
 // job runs `pnpm db:push` for the same effect.
+//
+// Files are applied in order; each file is itself idempotent (uses
+// DROP … IF EXISTS and ON CONFLICT … DO NOTHING), so re-running is safe.
 //
 // Uses `pg` directly rather than shelling to `psql` because `psql` is
 // an optional system dep; `pg` is already a workspace dep and works
@@ -14,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const sqlPath = path.resolve(__dirname, '../../../supabase/sql/rls-policies.sql');
+const sqlDir = path.resolve(__dirname, '../../../supabase/sql');
+const FILES = ['rls-policies.sql', 'triggers.sql'] as const;
 
 const connectionString = process.env['DATABASE_URL'];
 if (connectionString === undefined || connectionString.length === 0) {
@@ -22,13 +26,15 @@ if (connectionString === undefined || connectionString.length === 0) {
   process.exit(1);
 }
 
-const sql = readFileSync(sqlPath, 'utf8');
-
 const client = new Client({ connectionString });
 await client.connect();
 try {
-  await client.query(sql);
-  console.log(`\u2713 Applied ${sqlPath}`);
+  for (const file of FILES) {
+    const sqlPath = path.join(sqlDir, file);
+    const sql = readFileSync(sqlPath, 'utf8');
+    await client.query(sql);
+    console.log(`\u2713 Applied ${sqlPath}`);
+  }
 } finally {
   await client.end();
 }

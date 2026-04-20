@@ -61,4 +61,33 @@ describe('Tenant isolation — GET /v1/organizations', () => {
     const body = (await res.json()) as { data: unknown[] };
     expect(body.data).toEqual([]);
   });
+
+  it("POST — user A's newly-created org is invisible to user B", async () => {
+    const [userA, userB] = await Promise.all([
+      createAuthenticatedTestUser(),
+      createAuthenticatedTestUser(),
+    ]);
+
+    const createRes = await app.request('/v1/organizations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: bearer(userA.accessToken),
+      },
+      body: JSON.stringify({ name: 'A Private Corp' }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string };
+
+    const listRes = await app.request('/v1/organizations', {
+      headers: { Authorization: bearer(userB.accessToken) },
+    });
+    expect(listRes.status).toBe(200);
+    const body = (await listRes.json()) as { data: unknown[] };
+    expect(body.data).toEqual([]);
+
+    // Defense-in-depth: user B shouldn't see any trace of the org id
+    // in the response body either.
+    expect(JSON.stringify(body)).not.toContain(created.id);
+  });
 });

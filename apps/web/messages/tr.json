@@ -192,6 +192,57 @@
     },
     "sessionExpired": "Oturumun süresi dolmuş. Lütfen tekrar giriş yap."
   },
+  "organizations": {
+    "panel": {
+      "title": "Organizasyonlar",
+      "description": "Üyesi olduğun organizasyonlar.",
+      "empty": "Henüz bir organizasyon yok.",
+      "loadError": "Organizasyonlar yüklenemedi."
+    },
+    "switcher": {
+      "trigger": "Organizasyonu değiştir",
+      "placeholder": "Organizasyon ara…",
+      "empty": "Organizasyon bulunamadı.",
+      "heading": "Organizasyonların",
+      "active": "Aktif",
+      "createNew": "Yeni organizasyon oluştur"
+    },
+    "create": {
+      "title": "Yeni organizasyon",
+      "subtitle": "İşletmen için bir organizasyon oluştur. Pazaryeri mağazalarını bunun altına bağlayacaksın.",
+      "nameLabel": "Organizasyon adı",
+      "namePlaceholder": "Örn: Akyıldız Ticaret",
+      "nameHint": "Bu sadece iç referans adı. Sonra değiştirebilirsin.",
+      "submit": "Oluştur",
+      "submitting": "Oluşturuluyor…",
+      "cancel": "Vazgeç",
+      "toast": {
+        "success": "{name} oluşturuldu ve aktif edildi.",
+        "error": "Organizasyon oluşturulamadı. Lütfen tekrar dene."
+      },
+      "errors": {
+        "INVALID_NAME_TOO_SHORT": "İsim en az 2 karakter olmalı.",
+        "INVALID_NAME_TOO_LONG": "İsim en fazla 80 karakter olabilir.",
+        "INVALID_NAME_NO_ALPHANUMERIC": "İsim en az bir harf veya rakam içermeli.",
+        "INVALID_NAME_RESERVED": "Bu isim kullanılamaz. Lütfen başka bir isim seç.",
+        "generic": "Organizasyon oluşturulamadı. Lütfen tekrar dene."
+      }
+    },
+    "active": {
+      "title": "Aktif organizasyon",
+      "description": "Panel ve veriler bu organizasyona göre gösteriliyor.",
+      "slugLabel": "Slug",
+      "currencyLabel": "Para birimi",
+      "timezoneLabel": "Saat dilimi",
+      "createdLabel": "Oluşturuldu"
+    }
+  },
+  "onboarding": {
+    "createOrganization": {
+      "title": "Hadi başlayalım",
+      "subtitle": "İlk organizasyonunu oluşturarak PazarSync'e başla. Pazaryeri mağazalarını, siparişlerini ve giderlerini bu organizasyonun altında yöneteceksin."
+    }
+  },
   "languageSwitcher": {
     "label": "Dil",
     "tr": "Türkçe",

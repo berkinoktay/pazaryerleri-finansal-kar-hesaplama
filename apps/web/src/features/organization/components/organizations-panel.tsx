@@ -1,5 +1,7 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
@@ -12,13 +14,14 @@ import { useOrganizations } from '@/features/organization/hooks/use-organization
  * match what Supabase Studio shows under public.organizations.
  */
 export function OrganizationsPanel(): React.ReactElement {
-  const { data, isLoading, isError, error } = useOrganizations();
+  const t = useTranslations('organizations.panel');
+  const { data, isLoading, isError } = useOrganizations();
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Organizasyonlar</CardTitle>
-        <CardDescription>Üyesi olduğun organizasyonlar.</CardDescription>
+        <CardTitle>{t('title')}</CardTitle>
+        <CardDescription>{t('description')}</CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -27,11 +30,9 @@ export function OrganizationsPanel(): React.ReactElement {
             <Skeleton className="h-6 w-56" />
           </div>
         ) : isError ? (
-          <p className="text-destructive text-sm">
-            {error instanceof Error ? error.message : 'Organizasyonlar yüklenemedi.'}
-          </p>
+          <p className="text-destructive text-sm">{t('loadError')}</p>
         ) : data === undefined || data.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Henüz bir organizasyon yok.</p>
+          <p className="text-muted-foreground text-sm">{t('empty')}</p>
         ) : (
           <ul className="gap-xs flex flex-col">
             {data.map((org) => (

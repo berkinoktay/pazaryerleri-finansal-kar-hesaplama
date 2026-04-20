@@ -9,12 +9,18 @@ import { type Store } from '@/components/layout/store-switcher';
 import { cn } from '@/lib/utils';
 
 export interface AppShellProps {
-  stores: Store[];
-  activeStoreId: string;
-  onSelectStore: (id: string) => void;
+  /**
+   * Organisation picker rendered at the top of the ContextRail.
+   * Passed as a ReactNode so the shell stays dumb — the fetching,
+   * cookie handling, and create-org modal live in the feature layer.
+   */
+  orgSwitcher?: React.ReactNode;
+  stores?: Store[];
+  activeStoreId?: string;
+  onSelectStore?: (id: string) => void;
   onSyncNow?: () => void;
   onAddStore?: () => void;
-  activity: ActivityEntry[];
+  activity?: ActivityEntry[];
   children: React.ReactNode;
 }
 
@@ -30,12 +36,13 @@ export interface AppShellProps {
  * app-level top bar, keeping the content area starting at the top edge.
  */
 export function AppShell({
-  stores,
+  orgSwitcher,
+  stores = [],
   activeStoreId,
   onSelectStore,
   onSyncNow,
   onAddStore,
-  activity,
+  activity = [],
   children,
 }: AppShellProps): React.ReactElement {
   return (
@@ -44,9 +51,10 @@ export function AppShell({
 
       <div className="hidden md:block">
         <ContextRail
+          orgSwitcher={orgSwitcher}
           stores={stores}
-          activeStoreId={activeStoreId}
-          onSelectStore={onSelectStore}
+          activeStoreId={activeStoreId ?? ''}
+          onSelectStore={onSelectStore ?? (() => undefined)}
           onAddStore={onAddStore}
           onSyncNow={onSyncNow}
         />
