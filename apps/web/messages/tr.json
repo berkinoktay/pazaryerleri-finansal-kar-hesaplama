@@ -130,6 +130,20 @@
     }
   },
   "auth": {
+    "errors": {
+      "supabase": {
+        "invalidCredentials": "E-posta veya parola hatalı.",
+        "userAlreadyExists": "Bu e-posta adresi zaten kayıtlı.",
+        "weakPassword": "Parola yeterince güçlü değil.",
+        "emailNotConfirmed": "E-posta adresini henüz doğrulamadın. Gelen kutunu kontrol et.",
+        "emailAddressInvalid": "Geçersiz e-posta adresi.",
+        "otpExpired": "Kod süresi doldu. Yeni bir kod iste.",
+        "rateLimited": "Çok fazla istek. Lütfen bir süre bekle.",
+        "signupDisabled": "Kayıt şu anda kapalı.",
+        "userBanned": "Bu hesap askıya alındı.",
+        "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
+      }
+    },
     "login": {
       "title": "Giriş Yap",
       "subtitle": "Hesabına giriş yap.",

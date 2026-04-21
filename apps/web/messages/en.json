@@ -130,6 +130,20 @@
     }
   },
   "auth": {
+    "errors": {
+      "supabase": {
+        "invalidCredentials": "Invalid email or password.",
+        "userAlreadyExists": "This email address is already registered.",
+        "weakPassword": "Password is too weak.",
+        "emailNotConfirmed": "You haven't verified your email yet. Check your inbox.",
+        "emailAddressInvalid": "Invalid email address.",
+        "otpExpired": "Code expired. Request a new one.",
+        "rateLimited": "Too many requests. Please wait and retry.",
+        "signupDisabled": "Signup is currently disabled.",
+        "userBanned": "This account is suspended.",
+        "generic": "Something went wrong. Please try again."
+      }
+    },
     "login": {
       "title": "Log in",
       "subtitle": "Sign in to your account.",
