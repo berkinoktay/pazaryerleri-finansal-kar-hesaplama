@@ -1,3 +1,4 @@
+import { EncryptionKeyError } from './crypto';
 import {
   ConflictError,
   ForbiddenError,
@@ -124,6 +125,18 @@ export function problemDetailsForError(err: unknown): ProblemDetailsResult {
         status: 429,
         code: 'RATE_LIMITED',
         detail: err.message,
+      },
+    };
+  }
+  if (err instanceof EncryptionKeyError) {
+    return {
+      status: 500,
+      body: {
+        type: `${TYPE_BASE}/server-config`,
+        title: 'Server configuration error',
+        status: 500,
+        code: 'SERVER_CONFIG_ERROR',
+        detail: 'An unexpected error occurred',
       },
     };
   }

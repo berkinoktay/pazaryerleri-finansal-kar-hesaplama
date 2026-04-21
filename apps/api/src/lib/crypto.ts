@@ -12,7 +12,20 @@ const AUTH_TAG_LENGTH_BYTES = 16;
 
 const ENCRYPTION_KEY_ENV = 'ENCRYPTION_KEY';
 
+/**
+ * Thrown when `ENCRYPTION_KEY` is missing or malformed. Maps to 500
+ * `SERVER_CONFIG_ERROR` via `problemDetailsForError` — the `code`
+ * makes ops log-scanning find this fast (vs. "just another 500").
+ *
+ * `validateRequiredEnv()` at boot catches this case early, so in
+ * practice it cannot reach a live request. The class/branch pair
+ * is kept as defense-in-depth for any future caller that loads the
+ * key lazily (e.g. key rotation, per-tenant keys).
+ */
 export class EncryptionKeyError extends Error {
+  readonly status = 500 as const;
+  readonly code = 'SERVER_CONFIG_ERROR' as const;
+
   constructor(message: string) {
     super(message);
     this.name = 'EncryptionKeyError';
