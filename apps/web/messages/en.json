@@ -11,7 +11,20 @@
     "remove": "Remove",
     "dismiss": "Dismiss",
     "lastSynced": "Last synced",
-    "gmtOffset": "GMT+3"
+    "gmtOffset": "GMT+3",
+    "errors": {
+      "UNAUTHENTICATED": "Your session expired. Please sign in again.",
+      "FORBIDDEN": "You don't have permission for this action.",
+      "NOT_FOUND": "We couldn't find what you're looking for.",
+      "CONFLICT": "This action conflicts with an existing record.",
+      "VALIDATION_ERROR": "Some fields are invalid. Please review them.",
+      "INVALID_REFERENCE": "The reference you provided doesn't exist.",
+      "RATE_LIMITED": "Too many requests. Please try again shortly.",
+      "INTERNAL_ERROR": "An unexpected error occurred. Please try again.",
+      "NETWORK_ERROR": "Network error. Check your connection.",
+      "UNKNOWN_ERROR": "Something went wrong. Please try again.",
+      "generic": "Something went wrong. Please try again."
+    }
   },
   "metadata": {
     "title": "PazarSync — E-commerce Profitability & Operations",

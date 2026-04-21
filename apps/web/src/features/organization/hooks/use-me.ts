@@ -16,5 +16,6 @@ export function useMe(): UseQueryResult<Me> {
     queryKey: meKeys.all,
     queryFn: getMe,
     staleTime: 1000 * 60 * 5,
+    meta: { silent: true },
   });
 }

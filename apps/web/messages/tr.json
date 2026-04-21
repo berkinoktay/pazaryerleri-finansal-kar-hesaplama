@@ -11,7 +11,20 @@
     "remove": "Kaldır",
     "dismiss": "Kapat",
     "lastSynced": "Son senkronizasyon",
-    "gmtOffset": "GMT+3"
+    "gmtOffset": "GMT+3",
+    "errors": {
+      "UNAUTHENTICATED": "Oturumun sona erdi. Lütfen tekrar giriş yap.",
+      "FORBIDDEN": "Bu işleme yetkin yok.",
+      "NOT_FOUND": "Aradığın kaynağı bulamadık.",
+      "CONFLICT": "Bu işlem mevcut bir kayıtla çakışıyor.",
+      "VALIDATION_ERROR": "Girdi bazı alanlarda hatalı. Lütfen kontrol et.",
+      "INVALID_REFERENCE": "Geçersiz bir referans gönderdin.",
+      "RATE_LIMITED": "Çok fazla istek gönderdin. Biraz sonra tekrar dene.",
+      "INTERNAL_ERROR": "Beklenmeyen bir hata oluştu. Lütfen tekrar dene.",
+      "NETWORK_ERROR": "Bağlantı hatası. İnternetini kontrol et.",
+      "UNKNOWN_ERROR": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+      "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
+    }
   },
   "metadata": {
     "title": "PazarSync — E-ticaret Karlılık ve Operasyon Yönetimi",
