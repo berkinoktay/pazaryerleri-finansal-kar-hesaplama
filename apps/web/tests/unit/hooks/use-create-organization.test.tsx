@@ -92,4 +92,33 @@ describe('useCreateOrganization', () => {
     expect(result.current.error).toBeInstanceOf(ApiError);
     expect((result.current.error as ApiError).code).toBe('VALIDATION_ERROR');
   });
+
+  it('exposes the backend validation issues on a VALIDATION_ERROR', async () => {
+    server.use(
+      http.post('http://localhost:3001/v1/organizations', () =>
+        HttpResponse.json(
+          {
+            type: 'https://api.pazarsync.com/errors/validation',
+            title: 'Validation error',
+            status: 422,
+            code: 'VALIDATION_ERROR',
+            detail: 'name too short',
+            errors: [{ field: 'name', code: 'INVALID_NAME_TOO_SHORT' }],
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useCreateOrganization(), { wrapper });
+    result.current.mutate({ name: 'A' });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    const error = result.current.error;
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe('VALIDATION_ERROR');
+    expect((error as ApiError).problem.errors).toEqual([
+      { field: 'name', code: 'INVALID_NAME_TOO_SHORT' },
+    ]);
+  });
 });

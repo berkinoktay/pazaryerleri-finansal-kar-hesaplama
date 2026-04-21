@@ -2,7 +2,10 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+
+import { ApiError } from '@/lib/api-error';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -63,6 +66,19 @@ export function CreateOrganizationForm({
     defaultValues: { name: '' },
   });
 
+  useEffect(() => {
+    const error = createMutation.error;
+    if (!(error instanceof ApiError) || error.code !== 'VALIDATION_ERROR') return;
+    for (const issue of error.problem.errors ?? []) {
+      if (issue.field === 'name') {
+        // issue.code is e.g. 'INVALID_NAME_TOO_SHORT' — knownCodeFor already
+        // recognises these from client-side zod, and the FormField render
+        // pulls the i18n copy from tErr(code).
+        form.setError('name', { type: 'server', message: issue.code });
+      }
+    }
+  }, [createMutation.error, form]);
+
   function onSubmit(values: CreateOrganizationInput): void {
     createMutation.mutate(
       { name: values.name },
@@ -105,7 +121,11 @@ export function CreateOrganizationForm({
             );
           }}
         />
-        {createMutation.isError ? (
+        {createMutation.isError &&
+        !(
+          createMutation.error instanceof ApiError &&
+          createMutation.error.code === 'VALIDATION_ERROR'
+        ) ? (
           <p className="text-destructive text-sm" role="alert">
             {tErr('generic')}
           </p>
