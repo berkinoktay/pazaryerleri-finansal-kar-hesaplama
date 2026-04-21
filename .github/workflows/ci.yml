@@ -173,6 +173,13 @@ jobs:
           # middleware calls `supabase.auth.getUser(token)` via the secret
           # client; the test helper `createAuthenticatedTestUser` signs in via
           # the publishable client. Both need live Supabase local creds.
+          # Trendyol URLs are placeholders — integration tests mock fetch at
+          # the network layer. CI never touches the real Trendyol endpoints.
+          TRENDYOL_PROD_BASE_URL: https://apigw.trendyol.com
+          TRENDYOL_SANDBOX_BASE_URL: https://stageapigw.trendyol.com
+          TRENDYOL_INTEGRATOR_UA_SUFFIX: SelfIntegration
+          ALLOW_SANDBOX_CONNECTIONS: "true"
+          NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS: "true"
 
       # Mandatory cleanup even on test failure — leaves no hanging
       # containers around between job runs.

@@ -31,6 +31,8 @@ export function validateRequiredEnv(): void {
     'ENCRYPTION_KEY',
     'SUPABASE_URL',
     'SUPABASE_SECRET_KEY',
+    'TRENDYOL_PROD_BASE_URL',
+    'TRENDYOL_SANDBOX_BASE_URL',
   ] as const;
   for (const key of required) {
     requireEnv(key);

@@ -30,11 +30,22 @@
         "DIRECT_URL",
         "SUPABASE_URL",
         "SUPABASE_SECRET_KEY",
-        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "TRENDYOL_PROD_BASE_URL",
+        "TRENDYOL_SANDBOX_BASE_URL",
+        "TRENDYOL_INTEGRATOR_UA_SUFFIX",
+        "ALLOW_SANDBOX_CONNECTIONS",
+        "NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS"
       ]
     },
     "test:unit": {
-      "outputs": []
+      "outputs": [],
+      "env": [
+        "TRENDYOL_PROD_BASE_URL",
+        "TRENDYOL_SANDBOX_BASE_URL",
+        "TRENDYOL_INTEGRATOR_UA_SUFFIX",
+        "ALLOW_SANDBOX_CONNECTIONS"
+      ]
     },
     "test:integration": {
       "outputs": [],
@@ -43,7 +54,12 @@
         "DIRECT_URL",
         "SUPABASE_URL",
         "SUPABASE_SECRET_KEY",
-        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "TRENDYOL_PROD_BASE_URL",
+        "TRENDYOL_SANDBOX_BASE_URL",
+        "TRENDYOL_INTEGRATOR_UA_SUFFIX",
+        "ALLOW_SANDBOX_CONNECTIONS",
+        "NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS"
       ]
     },
     "test:watch": {
