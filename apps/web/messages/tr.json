@@ -289,5 +289,16 @@
     "label": "Dil",
     "tr": "Türkçe",
     "en": "English"
+  },
+  "errorBoundary": {
+    "title": "Bir şeyler ters gitti.",
+    "description": "Beklenmeyen bir hata oluştu. Tekrar dene, veya ana sayfaya dön.",
+    "retry": "Tekrar dene",
+    "home": "Ana sayfa"
+  },
+  "notFound": {
+    "title": "Sayfa bulunamadı",
+    "description": "Aradığın sayfa taşınmış veya silinmiş olabilir.",
+    "home": "Ana sayfa"
   }
 }

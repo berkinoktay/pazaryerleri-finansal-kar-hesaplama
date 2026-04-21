@@ -289,5 +289,16 @@
     "label": "Language",
     "tr": "Türkçe",
     "en": "English"
+  },
+  "errorBoundary": {
+    "title": "Something went wrong.",
+    "description": "An unexpected error occurred. Try again, or go home.",
+    "retry": "Try again",
+    "home": "Home"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The page you're looking for may have moved or been deleted.",
+    "home": "Home"
   }
 }
