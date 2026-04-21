@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
@@ -12,10 +13,16 @@ import { useOrganizations } from '@/features/organization/hooks/use-organization
  * auth-middleware chain (Supabase SSR cookie → Bearer header →
  * Hono authMiddleware → Prisma) is wired correctly, the names here
  * match what Supabase Studio shows under public.organizations.
+ *
+ * Error state renders the localized `loadError` copy plus a retry
+ * button wired to the query's `refetch` — the user can recover
+ * without a full page reload. `common.errors.*` toasts from the
+ * global onError still fire; inline UI + toast are complementary.
  */
 export function OrganizationsPanel(): React.ReactElement {
   const t = useTranslations('organizations.panel');
-  const { data, isLoading, isError } = useOrganizations();
+  const tCommon = useTranslations('common');
+  const { data, isLoading, isError, isFetching, refetch } = useOrganizations();
 
   return (
     <Card>
@@ -30,7 +37,19 @@ export function OrganizationsPanel(): React.ReactElement {
             <Skeleton className="h-6 w-56" />
           </div>
         ) : isError ? (
-          <p className="text-destructive text-sm">{t('loadError')}</p>
+          <div className="gap-sm flex flex-col items-start" role="alert">
+            <p className="text-destructive text-sm">{t('loadError')}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void refetch();
+              }}
+              disabled={isFetching}
+            >
+              {tCommon('retry')}
+            </Button>
+          </div>
         ) : data === undefined || data.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t('empty')}</p>
         ) : (
