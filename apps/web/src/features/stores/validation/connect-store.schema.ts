@@ -16,8 +16,23 @@ export const ConnectStoreFormSchema = z.object({
       .regex(/^[A-Za-z0-9]+$/, 'INVALID_SUPPLIER_ID_FORMAT')
       .min(1, 'INVALID_SUPPLIER_ID_FORMAT')
       .max(20, 'INVALID_SUPPLIER_ID_FORMAT'),
-    apiKey: z.string().min(8, 'INVALID_API_KEY_FORMAT').max(128, 'INVALID_API_KEY_FORMAT'),
-    apiSecret: z.string().min(8, 'INVALID_API_KEY_FORMAT').max(128, 'INVALID_API_KEY_FORMAT'),
+    // Trendyol dokümantasyonu spesifik bir API key / secret formatı
+    // tanımlamıyor. Buradaki validation sadece bariz kopyala-yapıştır
+    // hatalarını (çok kısa, çok uzun, içinde boşluk/newline) yakalar;
+    // gerçek doğrulama backend adapter probe'u ile olur — yanlış
+    // credentials → MARKETPLACE_AUTH_FAILED (422).
+    apiKey: z
+      .string()
+      .trim()
+      .min(8, 'INVALID_API_KEY_FORMAT')
+      .max(128, 'INVALID_API_KEY_FORMAT')
+      .regex(/^\S+$/, 'INVALID_API_KEY_FORMAT'),
+    apiSecret: z
+      .string()
+      .trim()
+      .min(8, 'INVALID_API_KEY_FORMAT')
+      .max(128, 'INVALID_API_KEY_FORMAT')
+      .regex(/^\S+$/, 'INVALID_API_KEY_FORMAT'),
   }),
 });
 

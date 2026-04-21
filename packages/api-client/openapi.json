@@ -398,12 +398,14 @@
                   "apiKey": {
                     "type": "string",
                     "minLength": 8,
-                    "maxLength": 128
+                    "maxLength": 128,
+                    "pattern": "^\\S+$"
                   },
                   "apiSecret": {
                     "type": "string",
                     "minLength": 8,
-                    "maxLength": 128
+                    "maxLength": 128,
+                    "pattern": "^\\S+$"
                   }
                 },
                 "required": [

@@ -6,14 +6,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { ApiError } from '@/lib/api-error';
 
@@ -152,12 +145,13 @@ export function ConnectStoreForm({
                       {...(autoFocus ? { autoFocus: true } : {})}
                     />
                   </FormControl>
-                  {code !== undefined ? (
+                  {fieldState.error !== undefined ? (
                     <p className="text-destructive text-sm">
-                      {tErr(code as Parameters<typeof tErr>[0])}
+                      {code !== undefined
+                        ? tErr(code as Parameters<typeof tErr>[0])
+                        : tErr('generic')}
                     </p>
                   ) : null}
-                  <FormMessage />
                 </FormItem>
               );
             }}
@@ -179,12 +173,13 @@ export function ConnectStoreForm({
                       {...field}
                     />
                   </FormControl>
-                  {code !== undefined ? (
+                  {fieldState.error !== undefined ? (
                     <p className="text-destructive text-sm">
-                      {tErr(code as Parameters<typeof tErr>[0])}
+                      {code !== undefined
+                        ? tErr(code as Parameters<typeof tErr>[0])
+                        : tErr('generic')}
                     </p>
                   ) : null}
-                  <FormMessage />
                 </FormItem>
               );
             }}
@@ -201,12 +196,13 @@ export function ConnectStoreForm({
                   <FormControl>
                     <Input type="password" autoComplete="off" {...field} />
                   </FormControl>
-                  {code !== undefined ? (
+                  {fieldState.error !== undefined ? (
                     <p className="text-destructive text-sm">
-                      {tErr(code as Parameters<typeof tErr>[0])}
+                      {code !== undefined
+                        ? tErr(code as Parameters<typeof tErr>[0])
+                        : tErr('generic')}
                     </p>
                   ) : null}
-                  <FormMessage />
                 </FormItem>
               );
             }}
@@ -223,12 +219,13 @@ export function ConnectStoreForm({
                   <FormControl>
                     <Input type="password" autoComplete="off" {...field} />
                   </FormControl>
-                  {code !== undefined ? (
+                  {fieldState.error !== undefined ? (
                     <p className="text-destructive text-sm">
-                      {tErr(code as Parameters<typeof tErr>[0])}
+                      {code !== undefined
+                        ? tErr(code as Parameters<typeof tErr>[0])
+                        : tErr('generic')}
                     </p>
                   ) : null}
-                  <FormMessage />
                 </FormItem>
               );
             }}

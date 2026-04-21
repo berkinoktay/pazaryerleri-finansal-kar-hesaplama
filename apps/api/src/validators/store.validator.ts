@@ -49,8 +49,22 @@ const TrendyolCredentialsSchema = z.object({
     .regex(/^[A-Za-z0-9]+$/, 'INVALID_SUPPLIER_ID_FORMAT')
     .min(1, 'INVALID_SUPPLIER_ID_FORMAT')
     .max(20, 'INVALID_SUPPLIER_ID_FORMAT'),
-  apiKey: z.string().min(8, 'INVALID_API_KEY_FORMAT').max(128, 'INVALID_API_KEY_FORMAT'),
-  apiSecret: z.string().min(8, 'INVALID_API_KEY_FORMAT').max(128, 'INVALID_API_KEY_FORMAT'),
+  // Trendyol docs don't specify a key/secret format. This validation
+  // only catches obvious copy-paste mistakes (too short, too long,
+  // embedded whitespace); the real verification is the adapter probe
+  // against Trendyol — wrong creds surface as MARKETPLACE_AUTH_FAILED.
+  apiKey: z
+    .string()
+    .trim()
+    .min(8, 'INVALID_API_KEY_FORMAT')
+    .max(128, 'INVALID_API_KEY_FORMAT')
+    .regex(/^\S+$/, 'INVALID_API_KEY_FORMAT'),
+  apiSecret: z
+    .string()
+    .trim()
+    .min(8, 'INVALID_API_KEY_FORMAT')
+    .max(128, 'INVALID_API_KEY_FORMAT')
+    .regex(/^\S+$/, 'INVALID_API_KEY_FORMAT'),
 });
 
 export const ConnectStoreInputSchema = z

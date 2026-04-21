@@ -8,14 +8,7 @@ import { useForm } from 'react-hook-form';
 import { ApiError } from '@/lib/api-error';
 
 import { Button } from '@/components/ui/button';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 
 import { useCreateOrganization } from '../hooks/use-create-organization';
@@ -111,12 +104,13 @@ export function CreateOrganizationForm({
                     {...(autoFocus ? { autoFocus: true } : {})}
                   />
                 </FormControl>
-                {code !== undefined ? (
-                  <p className="text-destructive text-sm">{tErr(code)}</p>
+                {fieldState.error !== undefined ? (
+                  <p className="text-destructive text-sm">
+                    {code !== undefined ? tErr(code) : tErr('generic')}
+                  </p>
                 ) : (
                   <p className="text-muted-foreground text-sm">{t('nameHint')}</p>
                 )}
-                <FormMessage />
               </FormItem>
             );
           }}
