@@ -26,5 +26,6 @@ export function useCurrentUser() {
       return data.user;
     },
     staleTime: 5 * 60 * 1000, // 5 min — proxy refreshes session cookies
+    meta: { silent: true },
   });
 }

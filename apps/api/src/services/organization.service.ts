@@ -1,5 +1,6 @@
 import { prisma } from '@pazarsync/db';
 
+import { mapPrismaError } from '../lib/map-prisma-error';
 import { generateUniqueOrganizationSlug } from '../lib/slugify';
 import type { CreateOrganizationInput } from '../validators/organization.validator';
 
@@ -65,13 +66,13 @@ export async function listForUser(userId: string): Promise<OrganizationListItem[
  * rare), the second caller's error bubbles up as 500 — better than a
  * user seeing a false "successful" response.
  */
-const SLUG_RETRY_CODE = 'P2002';
+const MAX_SLUG_RETRIES = 2;
 
 export async function createForOwner(
   userId: string,
   input: CreateOrganizationInput,
 ): Promise<OrganizationCreated> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < MAX_SLUG_RETRIES; attempt++) {
     const slug = await generateUniqueOrganizationSlug(input.name);
     try {
       return await prisma.$transaction(async (tx) => {
@@ -93,19 +94,22 @@ export async function createForOwner(
         };
       });
     } catch (err) {
-      if (isUniqueConstraintError(err) && attempt === 0) continue;
-      throw err;
+      // P2002 on slug during an earlier attempt → retry with a fresh slug.
+      // On the LAST attempt (or a different error code), delegate to
+      // mapPrismaError which either throws a typed domain error or rethrows.
+      if (isSlugUniqueViolation(err) && attempt < MAX_SLUG_RETRIES - 1) continue;
+      mapPrismaError(err);
     }
   }
-  // Unreachable — loop either returns or throws. Assertion for TS narrowing.
-  throw new Error('createForOwner: exhausted slug retry without resolution');
+  // Unreachable — mapPrismaError always throws on the last attempt.
+  throw new Error('createForOwner: unreachable');
 }
 
-function isUniqueConstraintError(err: unknown): boolean {
+function isSlugUniqueViolation(err: unknown): boolean {
   return (
     typeof err === 'object' &&
     err !== null &&
     'code' in err &&
-    (err as { code: unknown }).code === SLUG_RETRY_CODE
+    (err as { code: unknown }).code === 'P2002'
   );
 }

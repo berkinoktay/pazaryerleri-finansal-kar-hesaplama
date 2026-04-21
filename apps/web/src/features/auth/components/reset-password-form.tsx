@@ -1,11 +1,11 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AuthApiError } from '@supabase/supabase-js';
 import { useTranslations } from 'next-intl';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { supabaseAuthErrorKey } from '@/features/auth/lib/supabase-auth-error-key';
 import { useCurrentUser } from '@/features/auth/hooks/use-current-user';
 import { useResetPassword } from '@/features/auth/hooks/use-reset-password';
 import { Button } from '@/components/ui/button';
@@ -24,14 +24,10 @@ const resetPasswordSchema = z
 
 type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
-function errorKeyFor(error: unknown): 'weakPassword' | 'generic' {
-  if (error instanceof AuthApiError && error.code === 'weak_password') return 'weakPassword';
-  return 'generic';
-}
-
 export function ResetPasswordForm(): React.ReactElement {
   const t = useTranslations('auth.resetPassword');
   const tErr = useTranslations('auth.resetPassword.errors');
+  const tSupabaseErr = useTranslations('auth.errors.supabase');
 
   const { data: user, isLoading } = useCurrentUser();
   const resetPassword = useResetPassword();
@@ -94,7 +90,7 @@ export function ResetPasswordForm(): React.ReactElement {
         />
         {resetPassword.isError ? (
           <p className="text-destructive text-sm" role="alert">
-            {tErr(errorKeyFor(resetPassword.error))}
+            {tSupabaseErr(supabaseAuthErrorKey(resetPassword.error))}
           </p>
         ) : null}
         <Button type="submit" disabled={resetPassword.isPending}>

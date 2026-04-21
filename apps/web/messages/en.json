@@ -11,7 +11,20 @@
     "remove": "Remove",
     "dismiss": "Dismiss",
     "lastSynced": "Last synced",
-    "gmtOffset": "GMT+3"
+    "gmtOffset": "GMT+3",
+    "errors": {
+      "UNAUTHENTICATED": "Your session expired. Please sign in again.",
+      "FORBIDDEN": "You don't have permission for this action.",
+      "NOT_FOUND": "We couldn't find what you're looking for.",
+      "CONFLICT": "This action conflicts with an existing record.",
+      "VALIDATION_ERROR": "Some fields are invalid. Please review them.",
+      "INVALID_REFERENCE": "The reference you provided doesn't exist.",
+      "RATE_LIMITED": "Too many requests. Please try again shortly.",
+      "INTERNAL_ERROR": "An unexpected error occurred. Please try again.",
+      "NETWORK_ERROR": "Network error. Check your connection.",
+      "UNKNOWN_ERROR": "Something went wrong. Please try again.",
+      "generic": "Something went wrong. Please try again."
+    }
   },
   "metadata": {
     "title": "PazarSync — E-commerce Profitability & Operations",
@@ -117,6 +130,29 @@
     }
   },
   "auth": {
+    "callback": {
+      "errors": {
+        "otp_expired": "The verification link has expired. Please request a new one.",
+        "access_denied": "Verification was cancelled.",
+        "auth-callback-missing-code": "The verification link is incomplete. Please use the full link from the email.",
+        "auth-callback-failed": "Verification failed. Please try again.",
+        "generic": "We couldn't complete email verification. Please try again."
+      }
+    },
+    "errors": {
+      "supabase": {
+        "invalidCredentials": "Invalid email or password.",
+        "userAlreadyExists": "This email address is already registered.",
+        "weakPassword": "Password is too weak.",
+        "emailNotConfirmed": "You haven't verified your email yet. Check your inbox.",
+        "emailAddressInvalid": "Invalid email address.",
+        "otpExpired": "Code expired. Request a new one.",
+        "rateLimited": "Too many requests. Please wait and retry.",
+        "signupDisabled": "Signup is currently disabled.",
+        "userBanned": "This account is suspended.",
+        "generic": "Something went wrong. Please try again."
+      }
+    },
     "login": {
       "title": "Log in",
       "subtitle": "Sign in to your account.",
@@ -190,6 +226,9 @@
         "generic": "Couldn't update the password. Please try again."
       }
     },
+    "signOut": {
+      "error": "Couldn't sign out. Please try again."
+    },
     "userMenu": {
       "signOut": "Sign out"
     },
@@ -250,5 +289,16 @@
     "label": "Language",
     "tr": "Türkçe",
     "en": "English"
+  },
+  "errorBoundary": {
+    "title": "Something went wrong.",
+    "description": "An unexpected error occurred. Try again, or go home.",
+    "retry": "Try again",
+    "home": "Home"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The page you're looking for may have moved or been deleted.",
+    "home": "Home"
   }
 }

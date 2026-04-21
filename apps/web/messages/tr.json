@@ -11,7 +11,20 @@
     "remove": "Kaldır",
     "dismiss": "Kapat",
     "lastSynced": "Son senkronizasyon",
-    "gmtOffset": "GMT+3"
+    "gmtOffset": "GMT+3",
+    "errors": {
+      "UNAUTHENTICATED": "Oturumun sona erdi. Lütfen tekrar giriş yap.",
+      "FORBIDDEN": "Bu işleme yetkin yok.",
+      "NOT_FOUND": "Aradığın kaynağı bulamadık.",
+      "CONFLICT": "Bu işlem mevcut bir kayıtla çakışıyor.",
+      "VALIDATION_ERROR": "Girdi bazı alanlarda hatalı. Lütfen kontrol et.",
+      "INVALID_REFERENCE": "Geçersiz bir referans gönderdin.",
+      "RATE_LIMITED": "Çok fazla istek gönderdin. Biraz sonra tekrar dene.",
+      "INTERNAL_ERROR": "Beklenmeyen bir hata oluştu. Lütfen tekrar dene.",
+      "NETWORK_ERROR": "Bağlantı hatası. İnternetini kontrol et.",
+      "UNKNOWN_ERROR": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+      "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
+    }
   },
   "metadata": {
     "title": "PazarSync — E-ticaret Karlılık ve Operasyon Yönetimi",
@@ -117,6 +130,29 @@
     }
   },
   "auth": {
+    "callback": {
+      "errors": {
+        "otp_expired": "Doğrulama bağlantısının süresi dolmuş. Lütfen yeni bir bağlantı iste.",
+        "access_denied": "Doğrulama iptal edildi.",
+        "auth-callback-missing-code": "Doğrulama bağlantısı eksik. Lütfen e-postadaki tam bağlantıyı kullan.",
+        "auth-callback-failed": "Doğrulama başarısız. Lütfen tekrar dene.",
+        "generic": "E-posta doğrulaması tamamlanamadı. Lütfen tekrar dene."
+      }
+    },
+    "errors": {
+      "supabase": {
+        "invalidCredentials": "E-posta veya parola hatalı.",
+        "userAlreadyExists": "Bu e-posta adresi zaten kayıtlı.",
+        "weakPassword": "Parola yeterince güçlü değil.",
+        "emailNotConfirmed": "E-posta adresini henüz doğrulamadın. Gelen kutunu kontrol et.",
+        "emailAddressInvalid": "Geçersiz e-posta adresi.",
+        "otpExpired": "Kod süresi doldu. Yeni bir kod iste.",
+        "rateLimited": "Çok fazla istek. Lütfen bir süre bekle.",
+        "signupDisabled": "Kayıt şu anda kapalı.",
+        "userBanned": "Bu hesap askıya alındı.",
+        "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
+      }
+    },
     "login": {
       "title": "Giriş Yap",
       "subtitle": "Hesabına giriş yap.",
@@ -190,6 +226,9 @@
         "generic": "Parola güncellenemedi. Lütfen tekrar deneyin."
       }
     },
+    "signOut": {
+      "error": "Çıkış yapılamadı. Lütfen tekrar dene."
+    },
     "userMenu": {
       "signOut": "Çıkış yap"
     },
@@ -250,5 +289,16 @@
     "label": "Dil",
     "tr": "Türkçe",
     "en": "English"
+  },
+  "errorBoundary": {
+    "title": "Bir şeyler ters gitti.",
+    "description": "Beklenmeyen bir hata oluştu. Tekrar dene, veya ana sayfaya dön.",
+    "retry": "Tekrar dene",
+    "home": "Ana sayfa"
+  },
+  "notFound": {
+    "title": "Sayfa bulunamadı",
+    "description": "Aradığın sayfa taşınmış veya silinmiş olabilir.",
+    "home": "Ana sayfa"
   }
 }

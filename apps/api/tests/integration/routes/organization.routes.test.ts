@@ -129,7 +129,7 @@ describe('POST /v1/organizations', () => {
     expect(body.slug).toBe('akyildiz-ticaret-2');
   });
 
-  it('rejects a too-short name with 400', async () => {
+  it('rejects a too-short name with VALIDATION_ERROR', async () => {
     const user = await createAuthenticatedTestUser();
 
     const res = await app.request('/v1/organizations', {
@@ -141,10 +141,21 @@ describe('POST /v1/organizations', () => {
       body: JSON.stringify({ name: 'A' }),
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      code: string;
+      errors: Array<{ field: string; code: string }>;
+    };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'name', code: 'INVALID_NAME_TOO_SHORT' }),
+      ]),
+    );
   });
 
-  it('rejects a reserved name with 400', async () => {
+  it('rejects a reserved name with VALIDATION_ERROR', async () => {
     const user = await createAuthenticatedTestUser();
 
     const res = await app.request('/v1/organizations', {
@@ -156,7 +167,9 @@ describe('POST /v1/organizations', () => {
       body: JSON.stringify({ name: 'admin' }),
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { errors: Array<{ code: string }> };
+    expect(body.errors.map((e) => e.code)).toContain('INVALID_NAME_RESERVED');
   });
 
   it('lets the same user create multiple organizations', async () => {

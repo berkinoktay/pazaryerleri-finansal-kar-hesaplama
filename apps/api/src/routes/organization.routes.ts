@@ -1,5 +1,6 @@
-import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { createRoute } from '@hono/zod-openapi';
 
+import { createSubApp } from '../lib/create-hono-app';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as organizationService from '../services/organization.service';
 import {
@@ -8,7 +9,7 @@ import {
   OrganizationListResponseSchema,
 } from '../validators/organization.validator';
 
-const app = new OpenAPIHono<{ Variables: { userId: string } }>();
+const app = createSubApp<{ Variables: { userId: string } }>();
 
 const listOrganizationsRoute = createRoute({
   method: 'get',
@@ -62,7 +63,7 @@ const createOrganizationRoute = createRoute({
       description: 'The newly created organization with OWNER membership',
       headers: RateLimitHeaders,
     },
-    400: {
+    422: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description: 'Request body failed validation',
     },

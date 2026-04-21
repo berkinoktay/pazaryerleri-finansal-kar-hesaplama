@@ -1,13 +1,13 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AuthApiError } from '@supabase/supabase-js';
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 import { Link } from '@/i18n/navigation';
+import { supabaseAuthErrorKey } from '@/features/auth/lib/supabase-auth-error-key';
 import { useSignIn } from '@/features/auth/hooks/use-sign-in';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,23 +27,27 @@ const loginSchema = z.object({
 
 type LoginInput = z.infer<typeof loginSchema>;
 
-/**
- * Translate a Supabase AuthApiError into an i18n key. Missing/unknown
- * errors fall back to a generic "try again" message — we never surface
- * raw Supabase strings to end users.
- */
-function errorKeyFor(error: unknown): 'invalidCredentials' | 'generic' {
-  if (error instanceof AuthApiError && error.code === 'invalid_credentials') {
-    return 'invalidCredentials';
-  }
-  return 'generic';
-}
+type KnownCallbackCode =
+  | 'otp_expired'
+  | 'access_denied'
+  | 'auth-callback-missing-code'
+  | 'auth-callback-failed'
+  | 'generic';
+
+const KNOWN_CALLBACK_CODES: ReadonlySet<string> = new Set<KnownCallbackCode>([
+  'otp_expired',
+  'access_denied',
+  'auth-callback-missing-code',
+  'auth-callback-failed',
+]);
 
 export function LoginForm(): React.ReactElement {
   const t = useTranslations('auth.login');
-  const tErr = useTranslations('auth.login.errors');
+  const tSupabaseErr = useTranslations('auth.errors.supabase');
+  const tCallback = useTranslations('auth.callback.errors');
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') ?? undefined;
+  const callbackError = searchParams.get('error');
 
   const signIn = useSignIn();
 
@@ -58,6 +62,18 @@ export function LoginForm(): React.ReactElement {
 
   return (
     <Form {...form}>
+      {callbackError !== null ? (
+        <div
+          className="border-destructive/40 bg-destructive/10 p-md rounded-md border text-sm"
+          role="alert"
+        >
+          {tCallback(
+            (KNOWN_CALLBACK_CODES.has(callbackError)
+              ? callbackError
+              : 'generic') as KnownCallbackCode,
+          )}
+        </div>
+      ) : null}
       <form method="post" noValidate onSubmit={form.handleSubmit(onSubmit)} className="gap-md grid">
         <FormField
           control={form.control}
@@ -87,7 +103,7 @@ export function LoginForm(): React.ReactElement {
         />
         {signIn.isError ? (
           <p className="text-destructive text-sm" role="alert">
-            {tErr(errorKeyFor(signIn.error))}
+            {tSupabaseErr(supabaseAuthErrorKey(signIn.error))}
           </p>
         ) : null}
         <Button type="submit" disabled={signIn.isPending}>

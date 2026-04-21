@@ -1,11 +1,12 @@
-import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { createRoute } from '@hono/zod-openapi';
 
 import { UnauthorizedError } from '../lib/errors';
+import { createSubApp } from '../lib/create-hono-app';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as userProfileService from '../services/user-profile.service';
 import { MeResponseSchema } from '../validators/user-profile.validator';
 
-const app = new OpenAPIHono<{ Variables: { userId: string; email: string } }>();
+const app = createSubApp<{ Variables: { userId: string; email: string } }>();
 
 const getMeRoute = createRoute({
   method: 'get',

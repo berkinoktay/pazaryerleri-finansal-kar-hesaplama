@@ -21,7 +21,7 @@ section "Versioning" for details.
   (id, name, slug, currency, timezone, timestamps) plus the membership
   record `{ role: "OWNER" }`. Error codes: `INVALID_NAME_TOO_SHORT`,
   `INVALID_NAME_TOO_LONG`, `INVALID_NAME_NO_ALPHANUMERIC`,
-  `INVALID_NAME_RESERVED` (400), `UNAUTHENTICATED` (401).
+  `INVALID_NAME_RESERVED` (422), `UNAUTHENTICATED` (401).
 - `GET /v1/me` — returns the authenticated user's profile
   (`id`, `email`, `timezone`, `preferredLanguage`, timestamps). Never
   404s: if the `user_profiles` row is missing (e.g., legacy user
@@ -115,7 +115,13 @@ section "Versioning" for details.
 
 ### Fixed
 
-- (Document API behavior fixes)
+- `POST /v1/organizations` (and every future validated route) now emits
+  RFC 7807 `ProblemDetails` with `code: 'VALIDATION_ERROR'` and a
+  field-level `errors[]` array for Zod failures. Previously the route
+  returned the library's default 400 shape — the documented `INVALID_NAME_*`
+  codes lived only as Zod issue messages and never surfaced as
+  `ProblemDetails.code`. Status also changes from **400 → 422** to match
+  RFC 7807 semantics (400 reserved for shape-invalid bodies).
 
 ### Security
 

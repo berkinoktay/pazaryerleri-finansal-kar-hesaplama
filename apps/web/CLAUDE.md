@@ -235,18 +235,19 @@ All API calls go through `apiClient`, an `openapi-fetch` instance defined in `ap
 - API call functions live in `src/features/<feature>/api/<feature>.api.ts` and are wrapped by React Query hooks in `hooks/`.
 - After backend route changes, run `pnpm api:sync` from the repo root to refresh both the spec snapshot and the generated types; TypeScript surfaces breakage immediately.
 
+**All api functions MUST throw via `throwApiError` — never `new Error(JSON.stringify(error))`. The helper preserves `status`, `code`, and `problem.errors[]` for hooks and forms to branch on.** See `apps/web/src/lib/api-error.ts` for the `ApiError` class.
+
 ```typescript
 // apps/web/src/features/organization/api/organizations.api.ts
 import type { components } from '@pazarsync/api-client';
-import { apiClient } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client/browser';
+import { throwApiError } from '@/lib/api-error';
 
 export type Organization = components['schemas']['Organization'];
 
 export async function listOrganizations(): Promise<Organization[]> {
-  const { data, error } = await apiClient.GET('/v1/organizations', {});
-  if (error) {
-    throw new Error(`Failed to fetch organizations: ${JSON.stringify(error)}`);
-  }
+  const { data, error, response } = await apiClient.GET('/v1/organizations', {});
+  if (error !== undefined) throwApiError(error, response);
   return data.data;
 }
 ```
@@ -291,7 +292,8 @@ function OrderList({ storeId }: { storeId: string }) {
 
 // In features/orders/api/orders.api.ts — thin wrapper over the typed client
 import type { components } from "@pazarsync/api-client";
-import { apiClient } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client/browser";
+import { throwApiError } from "@/lib/api-error";
 
 export type Order = components["schemas"]["Order"];
 
@@ -300,11 +302,11 @@ export async function listOrders(
   storeId: string,
   filters: { status?: Order["status"] },
 ): Promise<Order[]> {
-  const { data, error } = await apiClient.GET(
+  const { data, error, response } = await apiClient.GET(
     "/v1/organizations/{orgId}/stores/{storeId}/orders",
     { params: { path: { orgId, storeId }, query: filters } },
   );
-  if (error) throw new Error(`Failed to fetch orders: ${JSON.stringify(error)}`);
+  if (error !== undefined) throwApiError(error, response);
   return data.data;
 }
 
@@ -323,6 +325,97 @@ export function useOrders(
   });
 }
 ```
+
+## Error Handling
+
+Frontend mirrors the backend's RFC 7807 contract end-to-end. Three concrete primitives + one global layer; every feature reuses them.
+
+### Primitives
+
+| Primitive                                               | Responsibility                                                                                           |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `ApiError` (`@/lib/api-error`)                          | Extends `Error` with `status`, `code`, `detail`, `problem`. Single type every hook receives.             |
+| `throwApiError(error, response)` (`@/lib/api-error`)    | Converts openapi-fetch's `{ error, response }` pair into a thrown `ApiError`. Use in every `.api.ts`.    |
+| `supabaseAuthErrorKey(err)` (`@/features/auth/lib/...`) | Maps `AuthApiError.code` to an i18n sub-key under `auth.errors.supabase.*`. One helper, every auth form. |
+
+**Every api function MUST throw via `throwApiError`** — never `new Error(JSON.stringify(error))`. The helper preserves `.code` and `problem.errors[]` for hooks and forms to branch on. See the pattern in the "Typed API Client" section above.
+
+### Global pipeline — `QueryProvider`
+
+`apps/web/src/providers/query-provider.tsx` registers `QueryCache({ onError })` and `MutationCache({ onError })` that toast localized messages for any unhandled `ApiError`:
+
+- Looks up `common.errors.<code>` in next-intl → Turkish toast via sonner
+- **Silences** `UNAUTHENTICATED` (handled by `SessionExpiredHandler` — sign-out + redirect)
+- **Silences** `VALIDATION_ERROR` (forms render field-level inline errors via `form.setError`)
+- **Retry policy** bails immediately on 4xx; one retry for 5xx / network
+
+```tsx
+// ❌ Bad — hand-rolls a generic toast inside every hook
+useMutation({ mutationFn: x, onError: () => toast.error(t('generic')) });
+
+// ✅ Good — let the global onError do its job
+useMutation({ mutationFn: x });
+```
+
+**Opt out with `meta.silent`** when a hook renders its own error UI (e.g. an auth form with a specific message, `useSignOut` with a dedicated "Couldn't sign out" toast):
+
+```tsx
+useMutation({
+  mutationFn: signOut,
+  onError: () => toast.error(tErr('auth.signOut.error')),
+  meta: { silent: true }, // stops the global onError from stacking a second toast
+});
+```
+
+For display-only queries (`useCurrentUser`, `useMe`) whose failures are cosmetic, set `meta: { silent: true }` on the `useQuery` config.
+
+### Adding a new error code
+
+1. Add the backend class + `problemDetailsForError` branch (see `apps/api/CLAUDE.md` — Error Responses).
+2. Add the translation in BOTH `apps/web/messages/tr.json` AND `en.json` under the right namespace:
+   - **`common.errors.<CODE>`** — pan-app codes (UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, VALIDATION_ERROR, INVALID_REFERENCE, RATE_LIMITED, INTERNAL_ERROR, NETWORK_ERROR, UNKNOWN_ERROR, generic)
+   - **`auth.errors.supabase.<subKey>`** — Supabase `AuthApiError.code` → UI copy
+   - **`auth.callback.errors.<code>`** — codes redirected by `app/auth/callback/route.ts`
+   - **`<feature>.errors.<DOMAIN_CODE>`** — feature-specific domain codes (e.g. `organizations.create.errors.INVALID_NAME_TOO_SHORT`)
+3. If the new code is pan-app (belongs in `common.errors`), also add it to `KNOWN_CODES` in `apps/web/src/providers/query-provider.tsx` — otherwise the global toast falls back to `generic`.
+4. If it's a Supabase code, also map it in `CODE_MAP` inside `apps/web/src/features/auth/lib/supabase-auth-error-key.ts`.
+
+### Route-segment error boundaries
+
+`error.tsx` is MANDATORY on every route segment that can throw during render. All three existing segments wrap the same shared `ErrorFallback`:
+
+```tsx
+// apps/web/src/app/[locale]/<segment>/error.tsx
+'use client';
+import { ErrorFallback } from '@/components/common/error-fallback';
+
+export default function SegmentError(props: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}): React.ReactElement {
+  return <ErrorFallback {...props} />;
+}
+```
+
+- **Never fork `ErrorFallback`.** If you need different copy, extend the `errorBoundary.*` i18n namespace and accept a `variant` prop on the fallback.
+- A server-rendered throw (e.g. our onboarding probe's re-thrown API error) hits this boundary — the localized fallback + retry button renders instead of Next's default blank page.
+- Localized 404 is at `apps/web/src/app/[locale]/not-found.tsx` — keep copy under `notFound.*`.
+
+### Forms + `VALIDATION_ERROR` propagation
+
+Mutations that POST validated payloads MUST surface backend field errors inline. The hook suppresses the toast on `VALIDATION_ERROR`; the form walks `error.problem.errors[]` and feeds each issue into `react-hook-form`'s `form.setError`:
+
+```tsx
+useEffect(() => {
+  const error = createMutation.error;
+  if (!(error instanceof ApiError) || error.code !== 'VALIDATION_ERROR') return;
+  for (const issue of error.problem.errors ?? []) {
+    form.setError(issue.field, { type: 'server', message: issue.code });
+  }
+}, [createMutation.error, form]);
+```
+
+The form's existing `tErr(knownCodeFor(fieldState.error?.message))` path then lights up the inline Turkish message — same i18n key used by client-side zod. See `create-organization-form.tsx` for the canonical example.
 
 ## CSS & Tailwind
 
@@ -674,7 +767,6 @@ const DASHBOARD_METRICS = [
 - `@tanstack/react-virtual` for lists > 50 items
 - Always `next/image` with proper dimensions
 - Dynamic import for large client-side libraries (charts, editors)
-- Error boundaries (`error.tsx`) on every route segment
 - `Decimal.js` for monetary calculations, never floating point
 
 ```tsx

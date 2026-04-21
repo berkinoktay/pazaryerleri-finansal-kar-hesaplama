@@ -1,11 +1,11 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AuthApiError } from '@supabase/supabase-js';
 import { useTranslations } from 'next-intl';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { supabaseAuthErrorKey } from '@/features/auth/lib/supabase-auth-error-key';
 import { useSignUp } from '@/features/auth/hooks/use-sign-up';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,17 +33,10 @@ const registerSchema = z
 
 type RegisterInput = z.infer<typeof registerSchema>;
 
-function errorKeyFor(error: unknown): 'userAlreadyExists' | 'weakPassword' | 'generic' {
-  if (error instanceof AuthApiError) {
-    if (error.code === 'user_already_exists') return 'userAlreadyExists';
-    if (error.code === 'weak_password') return 'weakPassword';
-  }
-  return 'generic';
-}
-
 export function RegisterForm(): React.ReactElement {
   const t = useTranslations('auth.register');
   const tErr = useTranslations('auth.register.errors');
+  const tSupabaseErr = useTranslations('auth.errors.supabase');
 
   const signUp = useSignUp();
 
@@ -107,7 +100,7 @@ export function RegisterForm(): React.ReactElement {
         />
         {signUp.isError ? (
           <p className="text-destructive text-sm" role="alert">
-            {tErr(errorKeyFor(signUp.error))}
+            {tSupabaseErr(supabaseAuthErrorKey(signUp.error))}
           </p>
         ) : null}
         <Button type="submit" disabled={signUp.isPending}>

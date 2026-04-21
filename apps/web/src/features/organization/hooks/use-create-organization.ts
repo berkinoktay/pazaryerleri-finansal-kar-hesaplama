@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
 import { setActiveOrgIdAction } from '@/lib/active-org-actions';
+import { ApiError } from '@/lib/api-error';
 
 import {
   createOrganization,
@@ -16,16 +17,17 @@ import { organizationKeys } from '../query-keys';
 
 /**
  * Create an organization and make the caller its OWNER. On success:
- *   1. Persist the new org id as `last_org_id` cookie (via Server Action)
- *      so the dashboard redirect picks it up on the next render.
+ *   1. Persist the new org id as `last_org_id` cookie (via Server Action).
  *   2. Invalidate the organizations list so the switcher rebuilds.
- *   3. Toast-notify the user — the switcher + URL don't always signal
- *      "it worked" loudly enough (especially when the modal opener is
- *      still covering the shell).
- *   4. `router.refresh()` so the RSC layout re-reads the cookie and
- *      re-fetches the org list; `router.push('/dashboard')` ensures
- *      the onboarding-page flow lands users at the dashboard, while
- *      the dashboard-modal flow becomes a no-op URL-wise.
+ *   3. Toast-notify the user.
+ *   4. Route to /dashboard.
+ *
+ * On VALIDATION_ERROR we suppress the toast — the form component reads
+ * `mutation.error.problem.errors` and projects each entry into
+ * `form.setError(field, ...)` so the per-field inline UI lights up.
+ *
+ * `meta.silent` stops the global QueryProvider MutationCache onError
+ * from also toasting; we own the user-visible feedback in this hook.
  */
 export function useCreateOrganization(): UseMutationResult<
   OrganizationCreatedResponse,
@@ -45,8 +47,13 @@ export function useCreateOrganization(): UseMutationResult<
       router.push('/dashboard');
       router.refresh();
     },
-    onError: () => {
+    onError: (error) => {
+      // Validation errors are surfaced inline by the form (field-level).
+      // Skip the toast; the form walks `problem.errors` and calls
+      // `form.setError` itself.
+      if (error instanceof ApiError && error.code === 'VALIDATION_ERROR') return;
       toast.error(tToast('error'));
     },
+    meta: { silent: true },
   });
 }
