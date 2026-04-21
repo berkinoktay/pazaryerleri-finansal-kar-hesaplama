@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { EncryptionKeyError } from '../../../src/lib/crypto';
 import {
   ConflictError,
   ForbiddenError,
@@ -87,5 +88,19 @@ describe('problemDetailsForError — extended error classes', () => {
     expect(status).toBe(429);
     expect(body.code).toBe('RATE_LIMITED');
     expect(headers).toEqual({ 'Retry-After': '45' });
+  });
+
+  it('maps EncryptionKeyError to 500 SERVER_CONFIG_ERROR without leaking the message', () => {
+    const { body, status } = problemDetailsForError(
+      new EncryptionKeyError('ENCRYPTION_KEY must be hex-encoded'),
+    );
+    expect(status).toBe(500);
+    expect(body).toEqual({
+      type: 'https://api.pazarsync.com/errors/server-config',
+      title: 'Server configuration error',
+      status: 500,
+      code: 'SERVER_CONFIG_ERROR',
+      detail: 'An unexpected error occurred',
+    });
   });
 });

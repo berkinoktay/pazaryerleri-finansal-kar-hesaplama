@@ -210,6 +210,8 @@ Domain error vocabulary (`apps/api/src/lib/errors.ts`) — every error thrown in
 
 Unknown throws collapse to 500 `INTERNAL_ERROR` via `problemDetailsForError` with `console.error` logging.
 
+> **Config-level exception:** `EncryptionKeyError` (in `lib/crypto.ts`, not `lib/errors.ts`) also maps — to 500 `SERVER_CONFIG_ERROR`. Lives in crypto.ts because it's a config/boot failure, not a business-domain error routes should throw. `validateRequiredEnv()` catches it at boot, so in practice it never reaches a live request; the branch exists as defense-in-depth for any future caller that loads the key lazily.
+
 ```typescript
 // ❌ Bad — hand-rolled response, drifts from the helper
 return c.json({ error: 'Not found' }, 404);

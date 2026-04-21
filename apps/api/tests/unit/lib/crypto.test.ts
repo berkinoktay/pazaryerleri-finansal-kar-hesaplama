@@ -119,6 +119,13 @@ describe('loadEncryptionKey', () => {
     expect(() => loadEncryptionKey()).toThrow(EncryptionKeyError);
   });
 
+  it('carries status 500 + stable code SERVER_CONFIG_ERROR', () => {
+    const err = new EncryptionKeyError('key is missing');
+    expect(err.status).toBe(500);
+    expect(err.code).toBe('SERVER_CONFIG_ERROR');
+    expect(err).toBeInstanceOf(Error);
+  });
+
   it('throws EncryptionKeyError when ENCRYPTION_KEY is empty', () => {
     process.env['ENCRYPTION_KEY'] = '';
     expect(() => loadEncryptionKey()).toThrow(EncryptionKeyError);
