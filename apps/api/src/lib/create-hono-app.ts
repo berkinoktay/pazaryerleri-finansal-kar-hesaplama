@@ -17,21 +17,14 @@ import { ValidationError, type ValidationIssue } from './errors';
  */
 function validationDefaultHook(result: { success: boolean; error?: { issues: unknown[] } }): void {
   if (!result.success && result.error !== undefined) {
-    const issues: ValidationIssue[] = (result.error.issues as Record<string, unknown>[]).map(
-      (rawIssue) => {
-        const path = Array.isArray(rawIssue['path'])
-          ? (rawIssue['path'] as (string | number)[])
-          : [];
-        const code = typeof rawIssue['message'] === 'string' ? rawIssue['message'] : 'UNKNOWN';
-        const zodCode = typeof rawIssue['code'] === 'string' ? rawIssue['code'] : undefined;
-        const { code: _c, path: _p, message: _m, ...rest } = rawIssue;
-        return {
-          field: path.length === 0 ? '(root)' : path.join('.'),
-          code,
-          meta: { zodCode, ...rest },
-        };
-      },
-    );
+    const issues: ValidationIssue[] = (result.error.issues as unknown[]).map((raw) => {
+      const issue = raw as { code: string; message: string; path: Array<string | number> };
+      return {
+        field: issue.path.length === 0 ? '(root)' : issue.path.join('.'),
+        code: issue.message,
+        meta: { zodCode: issue.code },
+      };
+    });
     throw new ValidationError(issues);
   }
 }

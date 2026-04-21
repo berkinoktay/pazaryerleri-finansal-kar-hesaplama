@@ -21,7 +21,7 @@ section "Versioning" for details.
   (id, name, slug, currency, timezone, timestamps) plus the membership
   record `{ role: "OWNER" }`. Error codes: `INVALID_NAME_TOO_SHORT`,
   `INVALID_NAME_TOO_LONG`, `INVALID_NAME_NO_ALPHANUMERIC`,
-  `INVALID_NAME_RESERVED` (400), `UNAUTHENTICATED` (401).
+  `INVALID_NAME_RESERVED` (422), `UNAUTHENTICATED` (401).
 - `GET /v1/me` — returns the authenticated user's profile
   (`id`, `email`, `timezone`, `preferredLanguage`, timestamps). Never
   404s: if the `user_profiles` row is missing (e.g., legacy user

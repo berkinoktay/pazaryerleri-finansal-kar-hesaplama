@@ -37,6 +37,7 @@ describe('Error response shape', () => {
     };
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(body.status).toBe(422);
+    expect(body.errors).toHaveLength(1);
     expect(body.errors).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ field: 'name', code: 'INVALID_NAME_TOO_SHORT' }),
