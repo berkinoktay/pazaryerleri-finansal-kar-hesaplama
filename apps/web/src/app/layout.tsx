@@ -3,7 +3,6 @@ import { getLocale } from 'next-intl/server';
 
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { QueryProvider } from '@/providers/query-provider';
 import { ThemeProvider } from '@/providers/theme-provider';
 import { cn } from '@/lib/utils';
 
@@ -39,12 +38,10 @@ export default async function RootLayout({
       <head />
       <body className="bg-background text-foreground min-h-full">
         <ThemeProvider>
-          <QueryProvider>
-            <TooltipProvider delayDuration={200} skipDelayDuration={300}>
-              {children}
-              <Toaster />
-            </TooltipProvider>
-          </QueryProvider>
+          <TooltipProvider delayDuration={200} skipDelayDuration={300}>
+            {children}
+            <Toaster />
+          </TooltipProvider>
         </ThemeProvider>
       </body>
     </html>

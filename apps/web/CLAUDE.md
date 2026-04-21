@@ -342,7 +342,9 @@ Frontend mirrors the backend's RFC 7807 contract end-to-end. Three concrete prim
 
 ### Global pipeline — `QueryProvider`
 
-`apps/web/src/providers/query-provider.tsx` registers `QueryCache({ onError })` and `MutationCache({ onError })` that toast localized messages for any unhandled `ApiError`:
+`apps/web/src/providers/query-provider.tsx` registers `QueryCache({ onError })` and `MutationCache({ onError })` that toast localized messages for any unhandled `ApiError`.
+
+> **Provider hierarchy matters.** `QueryProvider` calls `useTranslations('common.errors')` internally, so it MUST be mounted BELOW `NextIntlClientProvider`. The canonical mount point is `apps/web/src/app/[locale]/layout.tsx` — not the root `app/layout.tsx`. Unit tests passed with a local `<NextIntlClientProvider><QueryProvider>` wrapper, but the runtime app previously had them inverted and ran into `Failed to call useTranslations because the context from NextIntlClientProvider was not found` during SSR. When adding a new provider that depends on i18n, mount it under `[locale]/layout.tsx` or you will hit the same runtime failure.
 
 - Looks up `common.errors.<code>` in next-intl → Turkish toast via sonner
 - **Silences** `UNAUTHENTICATED` (handled by `SessionExpiredHandler` — sign-out + redirect)
