@@ -37,7 +37,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe('useCreateOrganization', () => {
-  it('sets the cookie, invalidates queries, and pushes to /dashboard on 201', async () => {
+  it('sets the cookie, invalidates queries, and pushes to /onboarding/connect-store on 201', async () => {
     server.use(
       http.post('http://localhost:3001/v1/organizations', async ({ request }) => {
         const body = (await request.json()) as { name: string };
@@ -65,7 +65,7 @@ describe('useCreateOrganization', () => {
 
     expect(result.current.data?.id).toBe('00000000-0000-0000-0000-000000000001');
     expect(setActiveOrgIdMock).toHaveBeenCalledWith('00000000-0000-0000-0000-000000000001');
-    expect(pushMock).toHaveBeenCalledWith('/dashboard');
+    expect(pushMock).toHaveBeenCalledWith('/onboarding/connect-store');
     expect(refreshMock).toHaveBeenCalled();
   });
 

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectStoreForm } from '@/features/stores/components/connect-store-form';
 
 import trMessages from '../../../../messages/tr.json';
-import { render, screen, userEvent } from '../../../helpers/render';
+import { render, screen } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000099';
