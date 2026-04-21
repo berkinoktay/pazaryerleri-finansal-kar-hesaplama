@@ -26,7 +26,60 @@
       "INTERNAL_ERROR": "An unexpected error occurred. Please try again.",
       "NETWORK_ERROR": "Network error. Check your connection.",
       "UNKNOWN_ERROR": "Something went wrong. Please try again.",
+      "MARKETPLACE_AUTH_FAILED": "The marketplace rejected these credentials. Please verify and try again.",
+      "MARKETPLACE_ACCESS_DENIED": "Marketplace access blocked. Sandbox may require IP allowlisting.",
+      "MARKETPLACE_UNREACHABLE": "The marketplace is currently unreachable. Please try again in a few minutes.",
       "generic": "Something went wrong. Please try again."
+    }
+  },
+  "stores": {
+    "platforms": {
+      "TRENDYOL": "Trendyol",
+      "HEPSIBURADA": "Hepsiburada"
+    },
+    "platformStatus": {
+      "comingSoon": "Coming soon"
+    },
+    "connect": {
+      "title": "Connect your store",
+      "subtitle": "Connect your seller account so we can compute orders and profit.",
+      "platformLabel": "Marketplace",
+      "environmentLabel": "Environment",
+      "environmentOptions": {
+        "PRODUCTION": "Production",
+        "SANDBOX": "Sandbox"
+      },
+      "labels": {
+        "name": "Store name",
+        "supplierId": "Supplier ID",
+        "apiKey": "API Key",
+        "apiSecret": "API Secret"
+      },
+      "placeholders": {
+        "name": "My Trendyol Store",
+        "supplierId": "123456",
+        "apiKey": "",
+        "apiSecret": ""
+      },
+      "hints": {
+        "credentials": "You can find these in the Trendyol seller panel under Account → Integration Info."
+      },
+      "actions": {
+        "submit": "Connect",
+        "submitting": "Verifying...",
+        "skip": "Skip for now"
+      },
+      "errors": {
+        "INVALID_NAME_TOO_SHORT": "Store name must be at least 2 characters.",
+        "INVALID_NAME_TOO_LONG": "Store name can be at most 80 characters.",
+        "INVALID_SUPPLIER_ID_FORMAT": "Supplier ID can only contain letters and digits.",
+        "INVALID_API_KEY_FORMAT": "API Key / Secret format is invalid.",
+        "INVALID_CREDENTIALS_SHAPE": "Credentials are missing or malformed.",
+        "SANDBOX_NOT_ALLOWED": "Sandbox environment is not available in this deployment.",
+        "PLATFORM_NOT_YET_AVAILABLE": "This marketplace is not yet supported.",
+        "DUPLICATE_STORE_CONNECTION": "This Trendyol account is already connected.",
+        "generic": "We couldn't connect the store. Please try again."
+      }
     }
   },
   "metadata": {
