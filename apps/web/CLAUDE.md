@@ -235,18 +235,19 @@ All API calls go through `apiClient`, an `openapi-fetch` instance defined in `ap
 - API call functions live in `src/features/<feature>/api/<feature>.api.ts` and are wrapped by React Query hooks in `hooks/`.
 - After backend route changes, run `pnpm api:sync` from the repo root to refresh both the spec snapshot and the generated types; TypeScript surfaces breakage immediately.
 
+**All api functions MUST throw via `throwApiError` — never `new Error(JSON.stringify(error))`. The helper preserves `status`, `code`, and `problem.errors[]` for hooks and forms to branch on.** See `apps/web/src/lib/api-error.ts` for the `ApiError` class.
+
 ```typescript
 // apps/web/src/features/organization/api/organizations.api.ts
 import type { components } from '@pazarsync/api-client';
-import { apiClient } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client/browser';
+import { throwApiError } from '@/lib/api-error';
 
 export type Organization = components['schemas']['Organization'];
 
 export async function listOrganizations(): Promise<Organization[]> {
-  const { data, error } = await apiClient.GET('/v1/organizations', {});
-  if (error) {
-    throw new Error(`Failed to fetch organizations: ${JSON.stringify(error)}`);
-  }
+  const { data, error, response } = await apiClient.GET('/v1/organizations', {});
+  if (error !== undefined) throwApiError(error, response);
   return data.data;
 }
 ```
@@ -291,7 +292,8 @@ function OrderList({ storeId }: { storeId: string }) {
 
 // In features/orders/api/orders.api.ts — thin wrapper over the typed client
 import type { components } from "@pazarsync/api-client";
-import { apiClient } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client/browser";
+import { throwApiError } from "@/lib/api-error";
 
 export type Order = components["schemas"]["Order"];
 
@@ -300,11 +302,11 @@ export async function listOrders(
   storeId: string,
   filters: { status?: Order["status"] },
 ): Promise<Order[]> {
-  const { data, error } = await apiClient.GET(
+  const { data, error, response } = await apiClient.GET(
     "/v1/organizations/{orgId}/stores/{storeId}/orders",
     { params: { path: { orgId, storeId }, query: filters } },
   );
-  if (error) throw new Error(`Failed to fetch orders: ${JSON.stringify(error)}`);
+  if (error !== undefined) throwApiError(error, response);
   return data.data;
 }
 
