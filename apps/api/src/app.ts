@@ -3,8 +3,8 @@ import { Scalar } from '@scalar/hono-api-reference';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
-import { ForbiddenError, UnauthorizedError } from './lib/errors';
 import { authMiddleware } from './middleware/auth.middleware';
+import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
 import meRoutes from './routes/me.routes';
 import organizationRoutes from './routes/organization.routes';
@@ -31,41 +31,11 @@ export function createApp(): OpenAPIHono {
   // the frontend translates it to i18n strings. Unknown errors collapse to
   // a generic 500 that never leaks internals to the client.
   app.onError((err, c) => {
-    if (err instanceof UnauthorizedError) {
-      return c.json(
-        {
-          type: 'https://api.pazarsync.com/errors/unauthenticated',
-          title: 'Authentication required',
-          status: 401,
-          code: err.code,
-          detail: err.message,
-        },
-        401,
-      );
+    const { body, status } = problemDetailsForError(err);
+    if (status === 500) {
+      console.error('Unhandled error:', err);
     }
-    if (err instanceof ForbiddenError) {
-      return c.json(
-        {
-          type: 'https://api.pazarsync.com/errors/forbidden',
-          title: 'Access denied',
-          status: 403,
-          code: err.code,
-          detail: err.message,
-        },
-        403,
-      );
-    }
-    console.error('Unhandled error:', err);
-    return c.json(
-      {
-        type: 'https://api.pazarsync.com/errors/internal',
-        title: 'Internal server error',
-        status: 500,
-        code: 'INTERNAL_ERROR',
-        detail: 'An unexpected error occurred',
-      },
-      500,
-    );
+    return c.json(body, status);
   });
 
   const healthRoute = createRoute({
