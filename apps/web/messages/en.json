@@ -130,6 +130,15 @@
     }
   },
   "auth": {
+    "callback": {
+      "errors": {
+        "otp_expired": "The verification link has expired. Please request a new one.",
+        "access_denied": "Verification was cancelled.",
+        "auth-callback-missing-code": "The verification link is incomplete. Please use the full link from the email.",
+        "auth-callback-failed": "Verification failed. Please try again.",
+        "generic": "We couldn't complete email verification. Please try again."
+      }
+    },
     "errors": {
       "supabase": {
         "invalidCredentials": "Invalid email or password.",

@@ -27,11 +27,27 @@ const loginSchema = z.object({
 
 type LoginInput = z.infer<typeof loginSchema>;
 
+type KnownCallbackCode =
+  | 'otp_expired'
+  | 'access_denied'
+  | 'auth-callback-missing-code'
+  | 'auth-callback-failed'
+  | 'generic';
+
+const KNOWN_CALLBACK_CODES: ReadonlySet<string> = new Set<KnownCallbackCode>([
+  'otp_expired',
+  'access_denied',
+  'auth-callback-missing-code',
+  'auth-callback-failed',
+]);
+
 export function LoginForm(): React.ReactElement {
   const t = useTranslations('auth.login');
   const tSupabaseErr = useTranslations('auth.errors.supabase');
+  const tCallback = useTranslations('auth.callback.errors');
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') ?? undefined;
+  const callbackError = searchParams.get('error');
 
   const signIn = useSignIn();
 
@@ -46,6 +62,18 @@ export function LoginForm(): React.ReactElement {
 
   return (
     <Form {...form}>
+      {callbackError !== null ? (
+        <div
+          className="border-destructive/40 bg-destructive/10 p-md rounded-md border text-sm"
+          role="alert"
+        >
+          {tCallback(
+            (KNOWN_CALLBACK_CODES.has(callbackError)
+              ? callbackError
+              : 'generic') as KnownCallbackCode,
+          )}
+        </div>
+      ) : null}
       <form method="post" noValidate onSubmit={form.handleSubmit(onSubmit)} className="gap-md grid">
         <FormField
           control={form.control}

@@ -130,6 +130,15 @@
     }
   },
   "auth": {
+    "callback": {
+      "errors": {
+        "otp_expired": "Doğrulama bağlantısının süresi dolmuş. Lütfen yeni bir bağlantı iste.",
+        "access_denied": "Doğrulama iptal edildi.",
+        "auth-callback-missing-code": "Doğrulama bağlantısı eksik. Lütfen e-postadaki tam bağlantıyı kullan.",
+        "auth-callback-failed": "Doğrulama başarısız. Lütfen tekrar dene.",
+        "generic": "E-posta doğrulaması tamamlanamadı. Lütfen tekrar dene."
+      }
+    },
     "errors": {
       "supabase": {
         "invalidCredentials": "E-posta veya parola hatalı.",
