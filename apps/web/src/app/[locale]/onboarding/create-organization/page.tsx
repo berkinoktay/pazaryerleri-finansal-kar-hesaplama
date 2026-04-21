@@ -20,12 +20,15 @@ export default async function CreateOrganizationPage({
   setRequestLocale(locale);
 
   // Mirror of the dashboard guard: if the user already has an org,
-  // they shouldn't see onboarding again. Send them home. On API error
-  // we let the page render — better to show the form (resilient) than
-  // redirect based on a failed fetch.
+  // they shouldn't see onboarding again. Send them home. If the API
+  // errors, throw — the route's error.tsx (Task 14) renders a localized
+  // fallback instead of silently rendering the form against unknown state.
   const api = await getServerApiClient();
-  const { data } = await api.GET('/v1/organizations', {});
-  if (data !== undefined && data.data.length > 0) {
+  const { data, error } = await api.GET('/v1/organizations', {});
+  if (error !== undefined) {
+    throw new Error(`onboarding.checkOrganizations: ${JSON.stringify(error)}`);
+  }
+  if (data.data.length > 0) {
     redirect('/dashboard');
   }
 
