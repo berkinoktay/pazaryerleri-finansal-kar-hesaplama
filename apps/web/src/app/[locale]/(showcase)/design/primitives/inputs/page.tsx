@@ -186,19 +186,34 @@ export default function InputsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Interactive trailing (password toggle)"
-        description="Trailing slot'a buton geçirilebilir. Etkileşim kullanıcıya bırakıldığı için slot içeriği kendi focus ring'ini ve aria-label'ını kendi yönetir."
+        title="Reveal toggle (password / API key / secret)"
+        description="type='password' + reveal prop → Input kendi görünürlük state'ini yönetir, trailing slot'u otomatik olarak Göster/Gizle butonuyla doldurur. Labels zorunlu (a11y disiplini) ve consumer'dan geçer."
       >
         <div className="max-w-form gap-3xs flex flex-col">
           <Label htmlFor="pw">Parola</Label>
           <Input
             id="pw"
-            type={passwordVisible ? 'text' : 'password'}
+            type="password"
             placeholder="En az 8 karakter"
+            reveal={{ show: 'Göster', hide: 'Gizle' }}
+          />
+        </div>
+      </Preview>
+
+      <Preview
+        title="Manual trailing slot (for non-reveal cases)"
+        description="reveal prop password tipine özel. Başka senaryolarda (birim, kısa etiket, custom buton) trailing slot'u hâlâ serbest — content kendi aria-label'ını ve focus ring'ini yönetir."
+      >
+        <div className="max-w-form gap-3xs flex flex-col">
+          <Label htmlFor="pw-manual">Manuel kontrol örneği</Label>
+          <Input
+            id="pw-manual"
+            type={passwordVisible ? 'text' : 'password'}
+            placeholder="Tam kontrol gerekirse"
             trailing={
               <button
                 type="button"
-                aria-label={passwordVisible ? 'Parolayı gizle' : 'Parolayı göster'}
+                aria-label={passwordVisible ? 'Gizle' : 'Göster'}
                 onClick={() => setPasswordVisible((v) => !v)}
                 className="text-muted-foreground hover:text-foreground focus-visible:ring-ring p-3xs duration-fast [&_svg]:size-icon-sm cursor-pointer rounded-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
               >

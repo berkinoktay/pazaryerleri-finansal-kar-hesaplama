@@ -1,7 +1,6 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ViewIcon, ViewOffIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -69,12 +68,12 @@ export function ConnectStoreForm({
   // Platform selector state (local — today there is only Trendyol).
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformKey>('TRENDYOL');
 
-  // Credential reveal state — one flag per sensitive field. Kept local
-  // (not react-hook-form) because it never feeds the submit payload.
-  const [apiKeyVisible, setApiKeyVisible] = useState(false);
-  const [apiSecretVisible, setApiSecretVisible] = useState(false);
-
   const connectMutation = useConnectStore(orgId);
+
+  const revealLabels = {
+    show: t('toggleSecret.show'),
+    hide: t('toggleSecret.hide'),
+  };
 
   const form = useForm<ConnectStoreFormValues>({
     resolver: zodResolver(ConnectStoreFormSchema),
@@ -200,24 +199,7 @@ export function ConnectStoreForm({
                 <FormItem>
                   <FormLabel>{t('labels.apiKey')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type={apiKeyVisible ? 'text' : 'password'}
-                      autoComplete="off"
-                      {...field}
-                      trailing={
-                        <button
-                          type="button"
-                          aria-label={
-                            apiKeyVisible ? t('toggleSecret.hide') : t('toggleSecret.show')
-                          }
-                          aria-pressed={apiKeyVisible}
-                          onClick={() => setApiKeyVisible((v) => !v)}
-                          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring p-3xs duration-fast [&_svg]:size-icon-sm cursor-pointer rounded-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                        >
-                          {apiKeyVisible ? <ViewOffIcon /> : <ViewIcon />}
-                        </button>
-                      }
-                    />
+                    <Input type="password" autoComplete="off" reveal={revealLabels} {...field} />
                   </FormControl>
                   {fieldState.error !== undefined ? (
                     <p className="text-destructive text-sm">
@@ -240,24 +222,7 @@ export function ConnectStoreForm({
                 <FormItem>
                   <FormLabel>{t('labels.apiSecret')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type={apiSecretVisible ? 'text' : 'password'}
-                      autoComplete="off"
-                      {...field}
-                      trailing={
-                        <button
-                          type="button"
-                          aria-label={
-                            apiSecretVisible ? t('toggleSecret.hide') : t('toggleSecret.show')
-                          }
-                          aria-pressed={apiSecretVisible}
-                          onClick={() => setApiSecretVisible((v) => !v)}
-                          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring p-3xs duration-fast [&_svg]:size-icon-sm cursor-pointer rounded-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                        >
-                          {apiSecretVisible ? <ViewOffIcon /> : <ViewIcon />}
-                        </button>
-                      }
-                    />
+                    <Input type="password" autoComplete="off" reveal={revealLabels} {...field} />
                   </FormControl>
                   {fieldState.error !== undefined ? (
                     <p className="text-destructive text-sm">
