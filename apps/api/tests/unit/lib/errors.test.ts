@@ -43,6 +43,13 @@ describe('NotFoundError', () => {
     expect(err.message).toContain('Organization');
     expect(err).toBeInstanceOf(Error);
   });
+
+  it('includes the id in the message when provided', () => {
+    const err = new NotFoundError('Order', 'abc');
+    expect(err.message).toContain('Order');
+    expect(err.message).toContain('abc');
+    expect(err.message).toBe('Order abc not found');
+  });
 });
 
 describe('ConflictError', () => {
@@ -50,6 +57,8 @@ describe('ConflictError', () => {
     const err = new ConflictError('slug already taken');
     expect(err.status).toBe(409);
     expect(err.code).toBe('CONFLICT');
+    expect(err.message).toBe('slug already taken');
+    expect(err).toBeInstanceOf(Error);
   });
 });
 

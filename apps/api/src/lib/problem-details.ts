@@ -6,6 +6,7 @@ import {
   RateLimitedError,
   UnauthorizedError,
   ValidationError,
+  type ValidationIssue,
 } from './errors';
 
 /**
@@ -19,19 +20,13 @@ import {
  * The caller is responsible for logging the original `err` — we never
  * leak its `.message` to clients.
  */
-export interface ValidationErrorBody {
-  field: string;
-  code: string;
-  meta?: Record<string, unknown>;
-}
-
 export interface ProblemDetailsBody {
   type: string;
   title: string;
   status: number;
   code: string;
   detail: string;
-  errors?: ValidationErrorBody[];
+  errors?: ValidationIssue[];
 }
 
 export interface ProblemDetailsResult {
@@ -113,7 +108,9 @@ export function problemDetailsForError(err: unknown): ProblemDetailsResult {
         status: 422,
         code: 'INVALID_REFERENCE',
         detail: err.message,
-        errors: [{ field: err.meta.field, code: 'INVALID_REFERENCE', meta: err.meta }],
+        errors: [
+          { field: err.meta.field, code: 'INVALID_REFERENCE', meta: { value: err.meta.value } },
+        ],
       },
     };
   }
