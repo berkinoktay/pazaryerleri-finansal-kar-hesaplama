@@ -376,34 +376,46 @@ function getPlatformIcon(platform: Platform): string {
 
 ### Error Handling
 
-- Never swallow errors (no empty catch blocks)
-- User-facing errors in Turkish through i18n
-- API errors follow RFC 7807 (Problem Details)
-- Zod validation errors returned field-level
+- Never swallow errors (no empty catch blocks, no `console.log(err); return null`)
+- API errors follow RFC 7807 Problem Details end-to-end — machine-readable `code`, English `title`/`detail` for logs, frontend localizes from the `code`
+- Zod validation errors returned field-level via `VALIDATION_ERROR` with `errors: [{ field, code, meta? }]`
+- User-facing copy ALWAYS in Turkish via next-intl on the frontend — NEVER in backend error messages, NEVER inline in components
+
+Full error handling contract:
+
+- **Backend** — throw one of the domain error classes from `apps/api/src/lib/errors.ts` (`UnauthorizedError`, `ForbiddenError`, `NotFoundError`, `ConflictError`, `ValidationError`, `InvalidReferenceError`, `RateLimitedError`). Wrap Prisma calls with `mapPrismaError`. Never build ProblemDetails by hand. See `apps/api/CLAUDE.md` — "Error Responses (RFC 7807)" for the full vocabulary table and examples.
+- **Frontend** — every `.api.ts` function uses `throwApiError(error, response)` from `@/lib/api-error`. React Query hooks do NOT hand-roll generic toasts — the global `onError` on `QueryCache`/`MutationCache` in `apps/web/src/providers/query-provider.tsx` translates `ApiError.code` to `common.errors.<CODE>` and toasts. Opt out with `meta.silent` only when the hook owns its own UI. `UNAUTHENTICATED` and `VALIDATION_ERROR` are pre-silenced (handled by the session-expired flow and form-level inline errors respectively). See `apps/web/CLAUDE.md` — "Error Handling" for the full pipeline.
 
 ```typescript
 // ❌ Bad — swallowed error, user sees nothing
 async function connectStore(data: CreateStoreInput) {
   try {
-    const result = await storesApi.create(orgId, data);
-    return result;
+    return await apiClient.POST('/v1/.../stores', { body: data });
   } catch (error) {
     console.log(error);
     return null;
   }
 }
 
-// ✅ Good — typed error, user-facing message, logged for debugging
-async function connectStore(data: CreateStoreInput): Promise<Store> {
-  try {
-    return await storesApi.create(orgId, data);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 422) {
-      throw new UserFacingError(t('stores.errors.invalidCredentials'));
-    }
-    logger.error('Failed to connect store', { orgId, platform: data.platform, error });
-    throw new UserFacingError(t('common.errors.unexpected'));
-  }
+// ❌ Bad — hand-rolled generic toast, stacks on top of the global onError, loses the code
+function useConnectStore() {
+  return useMutation({
+    mutationFn: connectStore,
+    onError: () => toast.error('Bağlanamadı'),
+  });
+}
+
+// ✅ Good — api function throws via throwApiError; hook lets the global onError translate
+// apps/web/src/features/stores/api/connect-store.api.ts
+export async function connectStore(body: ConnectStoreBody): Promise<Store> {
+  const { data, error, response } = await apiClient.POST('/v1/.../stores', { body });
+  if (error !== undefined) throwApiError(error, response);
+  return data;
+}
+
+// apps/web/src/features/stores/hooks/use-connect-store.ts — no custom onError
+export function useConnectStore() {
+  return useMutation({ mutationFn: connectStore });
 }
 ```
 

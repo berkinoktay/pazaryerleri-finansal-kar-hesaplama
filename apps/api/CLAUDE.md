@@ -194,33 +194,88 @@ export type OrderListInput = z.infer<typeof orderListSchema>;
 
 ### Error Responses (RFC 7807)
 
+**Never build ProblemDetails by hand in a route handler. Throw a domain error class — `app.onError` maps it to the response via `apps/api/src/lib/problem-details.ts`.**
+
+Domain error vocabulary (`apps/api/src/lib/errors.ts`) — every error thrown in a route/service/middleware must be one of these (or bubble up to INTERNAL_ERROR):
+
+| Class                   | HTTP | `code`              | When to use                                                               |
+| ----------------------- | ---- | ------------------- | ------------------------------------------------------------------------- |
+| `UnauthorizedError`     | 401  | `UNAUTHENTICATED`   | Auth middleware — missing/expired/invalid Bearer token                    |
+| `ForbiddenError`        | 403  | `FORBIDDEN`         | Role/membership check fails, or cross-tenant access attempt               |
+| `NotFoundError`         | 404  | `NOT_FOUND`         | Resource doesn't exist (or user cannot see it — don't leak existence)     |
+| `ConflictError`         | 409  | `CONFLICT`          | Uniqueness violation user can fix (duplicate slug, already-invited email) |
+| `ValidationError`       | 422  | `VALIDATION_ERROR`  | Semantic validation failures with field-level issues (auto from Zod)      |
+| `InvalidReferenceError` | 422  | `INVALID_REFERENCE` | FK target doesn't exist (e.g. posting an order under a non-member store)  |
+| `RateLimitedError`      | 429  | `RATE_LIMITED`      | Our own rate limit hit — paired with `Retry-After` header                 |
+
+Unknown throws collapse to 500 `INTERNAL_ERROR` via `problemDetailsForError` with `console.error` logging.
+
 ```typescript
-// ❌ Bad — inconsistent error format
+// ❌ Bad — hand-rolled response, drifts from the helper
 return c.json({ error: 'Not found' }, 404);
-return c.json({ message: 'Bad request', field: 'cost_price' }, 400);
+return c.json({ type: '...', title: '...', status: 404, detail: '...' }, 404);
 
-// ✅ Good — RFC 7807 Problem Details
-return c.json(
-  {
-    type: 'https://api.pazarsync.com/errors/not-found',
-    title: 'Order Not Found',
-    status: 404,
-    detail: `Order ${orderId} not found in store ${storeId}`,
-  },
-  404,
-);
+// ✅ Good — throw a typed domain error
+import { NotFoundError } from '../lib/errors';
 
-return c.json(
-  {
-    type: 'https://api.pazarsync.com/errors/validation',
-    title: 'Validation Error',
-    status: 422,
-    detail: 'Request body contains invalid fields',
-    errors: [{ field: 'cost_price', message: 'Must be a positive number' }],
-  },
-  422,
-);
+const order = await prisma.order.findFirst({ where: { id: orderId, organizationId: orgId } });
+if (order === null) throw new NotFoundError('Order', orderId);
 ```
+
+**Adding a new error category:** extend `apps/api/src/lib/errors.ts` with a new class AND add a matching branch to `problemDetailsForError` in `apps/api/src/lib/problem-details.ts`. Ship the unit test for both in the same PR. Both files live in `lib/` together so the compiler catches one-sided changes.
+
+### Zod validation → `VALIDATION_ERROR` (automatic)
+
+Route sub-apps must be built via `createSubApp()` from `apps/api/src/lib/create-hono-app.ts`:
+
+```typescript
+// ❌ Bad — bypasses the shared defaultHook; validation returns the library's raw 400
+const app = new OpenAPIHono<{ Variables: { userId: string } }>();
+
+// ✅ Good — inherits the Zod → ValidationError hook
+import { createSubApp } from '../lib/create-hono-app';
+const app = createSubApp<{ Variables: { userId: string } }>();
+```
+
+Validator schemas set the issue `message` to a SCREAMING_SNAKE_CASE code — that string becomes `errors[].code` in the response:
+
+```typescript
+// validators/organization.validator.ts
+export const CreateOrganizationInputSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, 'INVALID_NAME_TOO_SHORT') // code, not a sentence
+    .max(80, 'INVALID_NAME_TOO_LONG')
+    .regex(/[\p{L}\p{N}]/u, 'INVALID_NAME_NO_ALPHANUMERIC'),
+});
+
+// Wire-level response on POST { name: "A" }:
+// 422 { type, title, status: 422, code: 'VALIDATION_ERROR',
+//       errors: [{ field: 'name', code: 'INVALID_NAME_TOO_SHORT', meta: { zodCode: 'too_small' } }] }
+```
+
+The frontend's feature-specific `i18n` namespace (e.g. `organizations.create.errors.INVALID_NAME_TOO_SHORT`) owns the Turkish translation. Never put raw Turkish in validator messages.
+
+### Prisma → domain errors (`mapPrismaError`)
+
+Every Prisma call in a service that can fail with a known code MUST be wrapped. Use `mapPrismaError` from `apps/api/src/lib/map-prisma-error.ts`:
+
+```typescript
+// ❌ Bad — Prisma's P2025 falls through to 500 INTERNAL_ERROR
+await prisma.order.update({ where: { id }, data: { status } });
+
+// ✅ Good — P2025 → NotFoundError, P2003 → InvalidReferenceError, P2002 → ConflictError
+import { mapPrismaError } from '../lib/map-prisma-error';
+
+try {
+  return await prisma.order.update({ where: { id }, data: { status } });
+} catch (err) {
+  mapPrismaError(err); // throws a domain error or rethrows the original
+}
+```
+
+`mapPrismaError` has `: never` — TypeScript knows it always throws. Call it without `throw`. See `organization.service.ts::createForOwner` for the slug-retry pattern (structural pre-check + helper fallthrough on the last attempt).
 
 ### Monetary Values
 
