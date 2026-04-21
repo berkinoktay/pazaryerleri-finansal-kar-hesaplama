@@ -34,9 +34,10 @@ describe('ConnectStoreForm', () => {
         <ConnectStoreForm orgId={ORG_ID} />
       </Wrapper>,
     );
-    // Both platform cards render.
-    expect(screen.getByText('Trendyol')).toBeInTheDocument();
-    expect(screen.getByText('Hepsiburada')).toBeInTheDocument();
+    // Both platform cards render — logos carry the brand name, so we
+    // assert via the MarketplaceLogo's alt text rather than visible text.
+    expect(screen.getByAltText('Trendyol')).toBeInTheDocument();
+    expect(screen.getByAltText('Hepsiburada')).toBeInTheDocument();
     expect(screen.getByText('Yakında')).toBeInTheDocument();
   });
 

@@ -2,11 +2,12 @@
 
 import { useTranslations } from 'next-intl';
 
-import { cn } from '@/lib/utils';
+import { MarketplaceLogo, type MarketplacePlatform } from '@/components/patterns/marketplace-logo';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
-export type PlatformKey = 'TRENDYOL' | 'HEPSIBURADA';
+export type PlatformKey = MarketplacePlatform;
 
 export interface PlatformCardProps {
   platform: PlatformKey;
@@ -25,6 +26,7 @@ export function PlatformCard({
   const tStatus = useTranslations('stores.platformStatus');
 
   const handleClick = comingSoon ? undefined : onSelect;
+  const platformName = tPlatforms(platform);
 
   return (
     <Card
@@ -41,15 +43,19 @@ export function PlatformCard({
         }
       }}
       className={cn(
-        'gap-xs p-md flex min-h-20 cursor-pointer flex-col items-start justify-center transition-colors',
+        'p-lg duration-fast relative flex min-h-36 cursor-pointer items-center justify-center transition-all',
+        'hover:border-border-strong hover:shadow-md',
         selected && !comingSoon && 'border-primary ring-primary/20 ring-2',
-        comingSoon && 'cursor-not-allowed opacity-60',
+        comingSoon && 'cursor-not-allowed opacity-60 hover:shadow-xs',
       )}
     >
-      <div className="flex w-full items-center justify-between">
-        <span className="text-foreground text-base font-semibold">{tPlatforms(platform)}</span>
-        {comingSoon ? <Badge>{tStatus('comingSoon')}</Badge> : null}
-      </div>
+      {/* Logo is the name — wordmarks already contain the brand text,
+          so the SVG does the work. The alt text keeps it announced to
+          screen readers. Badge floats top-right when relevant. */}
+      <MarketplaceLogo platform={platform} size="2xl" alt={platformName} />
+      {comingSoon ? (
+        <Badge className="text-2xs top-xs right-xs absolute">{tStatus('comingSoon')}</Badge>
+      ) : null}
     </Card>
   );
 }

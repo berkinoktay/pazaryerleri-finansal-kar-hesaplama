@@ -45,7 +45,8 @@
       "SANDBOX": "Sandbox"
     },
     "panel": {
-      "title": "Bağlı mağazalar"
+      "title": "Bağlı mağazalar",
+      "integrations": "Desteklenen"
     },
     "connect": {
       "title": "Mağazanı bağla",

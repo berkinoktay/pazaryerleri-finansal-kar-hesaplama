@@ -45,7 +45,8 @@
       "SANDBOX": "Sandbox"
     },
     "panel": {
-      "title": "Connected stores"
+      "title": "Connected stores",
+      "integrations": "Supported"
     },
     "connect": {
       "title": "Connect your store",

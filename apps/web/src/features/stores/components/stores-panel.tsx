@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 
+import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 
@@ -41,11 +42,15 @@ export function StoresPanel({ orgId }: StoresPanelProps): React.ReactElement {
       </h2>
       <div className="gap-xs flex flex-col">
         {stores.map((s) => (
-          <Card key={s.id} className="p-md flex flex-row items-center justify-between">
-            <div className="gap-3xs flex flex-col">
-              <span className="text-foreground text-sm font-medium">{s.name}</span>
+          <Card
+            key={s.id}
+            className="gap-md p-md duration-fast hover:border-border-strong flex flex-row items-center transition-colors"
+          >
+            <MarketplaceLogo platform={s.platform} size="lg" alt={t(`platforms.${s.platform}`)} />
+            <div className="gap-3xs flex min-w-0 flex-1 flex-col">
+              <span className="text-foreground truncate text-sm font-medium">{s.name}</span>
               <span className="text-muted-foreground text-xs tabular-nums">
-                {t(`platforms.${s.platform}`)} · {s.externalAccountId}
+                #{s.externalAccountId}
               </span>
             </div>
             {s.environment === 'SANDBOX' ? (
