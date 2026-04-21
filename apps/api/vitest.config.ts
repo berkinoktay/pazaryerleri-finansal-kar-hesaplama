@@ -11,6 +11,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(here, '../../.env') });
 
 export default defineConfig({
+  resolve: {
+    // Mirror the `@/*` → `./src/*` alias declared in tsconfig.json so
+    // tests can import `@/lib/errors` instead of `../../../src/lib/errors`.
+    // The tsconfig `paths` entry only affects type checking; Vite/Vitest
+    // runtime resolution needs this explicit mapping.
+    alias: {
+      '@': path.resolve(here, './src'),
+    },
+  },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],

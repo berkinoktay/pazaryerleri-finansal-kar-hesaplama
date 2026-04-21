@@ -8,7 +8,7 @@ import {
   RateLimitedError,
   UnauthorizedError,
   ValidationError,
-} from '../../../src/lib/errors';
+} from '@/lib/errors';
 
 describe('UnauthorizedError', () => {
   it('has status 401 and stable code UNAUTHENTICATED', () => {

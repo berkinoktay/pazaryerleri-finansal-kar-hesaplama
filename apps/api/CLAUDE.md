@@ -440,6 +440,7 @@ apps/api/tests/
 
 Full patterns in `docs/TESTING.md`. The most important ones:
 
+- **Path alias**: import from `src/` via `@/...` (not `../../../src/...`). `tsconfig.json` declares `paths: { "@/*": ["./src/*"] }` and `vitest.config.ts` mirrors it under `resolve.alias` so both typecheck and runtime resolve the alias. Relative imports are still the norm for cross-test helpers (`../../helpers/db`) since they're short and local.
 - **DB integration pattern**: every DB test does `await ensureDbReachable()` in `beforeAll`, `await truncateAll()` in `beforeEach` (see `tests/helpers/db.ts`)
 - **Test data factories**: use `createOrganization`, `createStore`, `createOrder`, etc. from `tests/helpers/factories.ts` — never hand-construct Prisma create payloads in tests
 - **Multi-tenancy isolation pattern**: create two orgs, write data in one, query in the other, assert empty result. See `tests/integration/tenant-isolation/data-layer-isolation.test.ts` for the canonical example.

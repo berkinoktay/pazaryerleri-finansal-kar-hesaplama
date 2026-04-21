@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { requireEnv, validateRequiredEnv } from '../../../src/lib/env';
+import { requireEnv, validateRequiredEnv } from '@/lib/env';
 
 describe('requireEnv', () => {
   afterEach(() => {

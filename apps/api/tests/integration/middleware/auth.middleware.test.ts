@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { UnauthorizedError } from '../../../src/lib/errors';
-import { authMiddleware } from '../../../src/middleware/auth.middleware';
+import { UnauthorizedError } from '@/lib/errors';
+import { authMiddleware } from '@/middleware/auth.middleware';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 
