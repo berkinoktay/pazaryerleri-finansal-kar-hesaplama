@@ -31,9 +31,14 @@ export function createApp(): OpenAPIHono {
   // the frontend translates it to i18n strings. Unknown errors collapse to
   // a generic 500 that never leaks internals to the client.
   app.onError((err, c) => {
-    const { body, status } = problemDetailsForError(err);
+    const { body, status, headers } = problemDetailsForError(err);
     if (status === 500) {
       console.error('Unhandled error:', err);
+    }
+    if (headers !== undefined) {
+      for (const [name, value] of Object.entries(headers)) {
+        c.header(name, value);
+      }
     }
     return c.json(body, status);
   });

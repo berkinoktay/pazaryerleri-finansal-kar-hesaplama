@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { ForbiddenError, UnauthorizedError } from '../../../src/lib/errors';
+import {
+  ConflictError,
+  ForbiddenError,
+  InvalidReferenceError,
+  NotFoundError,
+  RateLimitedError,
+  UnauthorizedError,
+  ValidationError,
+} from '../../../src/lib/errors';
 import { problemDetailsForError } from '../../../src/lib/problem-details';
 
 describe('problemDetailsForError', () => {
@@ -38,5 +46,46 @@ describe('problemDetailsForError', () => {
       code: 'INTERNAL_ERROR',
       detail: 'An unexpected error occurred',
     });
+  });
+});
+
+describe('problemDetailsForError — extended error classes', () => {
+  it('maps NotFoundError to 404', () => {
+    const { body, status } = problemDetailsForError(new NotFoundError('Order', 'abc'));
+    expect(status).toBe(404);
+    expect(body.code).toBe('NOT_FOUND');
+  });
+
+  it('maps ConflictError to 409', () => {
+    const { body, status } = problemDetailsForError(new ConflictError('slug taken'));
+    expect(status).toBe(409);
+    expect(body.code).toBe('CONFLICT');
+  });
+
+  it('maps ValidationError to 422 with field-level errors[]', () => {
+    const err = new ValidationError([
+      { field: 'name', code: 'INVALID_NAME_TOO_SHORT' },
+      { field: 'email', code: 'INVALID_EMAIL' },
+    ]);
+    const { body, status } = problemDetailsForError(err);
+    expect(status).toBe(422);
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors).toHaveLength(2);
+    expect(body.errors?.[0]).toEqual({ field: 'name', code: 'INVALID_NAME_TOO_SHORT' });
+  });
+
+  it('maps InvalidReferenceError to 422 with single-entry errors[]', () => {
+    const err = new InvalidReferenceError('storeId', 'missing-uuid');
+    const { body, status } = problemDetailsForError(err);
+    expect(status).toBe(422);
+    expect(body.code).toBe('INVALID_REFERENCE');
+    expect(body.errors?.[0]?.field).toBe('storeId');
+  });
+
+  it('maps RateLimitedError to 429 with Retry-After header', () => {
+    const { body, status, headers } = problemDetailsForError(new RateLimitedError(45));
+    expect(status).toBe(429);
+    expect(body.code).toBe('RATE_LIMITED');
+    expect(headers).toEqual({ 'Retry-After': '45' });
   });
 });
