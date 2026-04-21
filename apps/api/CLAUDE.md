@@ -212,6 +212,8 @@ Unknown throws collapse to 500 `INTERNAL_ERROR` via `problemDetailsForError` wit
 
 > **Config-level exception:** `EncryptionKeyError` (in `lib/crypto.ts`, not `lib/errors.ts`) also maps — to 500 `SERVER_CONFIG_ERROR`. Lives in crypto.ts because it's a config/boot failure, not a business-domain error routes should throw. `validateRequiredEnv()` catches it at boot, so in practice it never reaches a live request; the branch exists as defense-in-depth for any future caller that loads the key lazily.
 
+> **Request correlation:** Every response carries an `X-Request-Id` header stamped by `requestIdMiddleware` — either echoed from an inbound header or freshly generated. `app.onError` reads it back out of `c.res.headers` and passes it as `problemDetailsForError(err, { requestId })`, which stamps it into `body.meta.requestId`. Server-side error logs include the same id so support tickets quoting the header can find the exact log line. When adding a new logger call in an error path, include the request id in the structured fields.
+
 ```typescript
 // ❌ Bad — hand-rolled response, drifts from the helper
 return c.json({ error: 'Not found' }, 404);

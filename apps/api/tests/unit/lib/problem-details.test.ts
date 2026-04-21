@@ -140,3 +140,30 @@ describe('problemDetailsForError — marketplace errors', () => {
     expect(body.meta).toEqual({ platform: 'TRENDYOL', httpStatus: 502 });
   });
 });
+
+describe('problemDetailsForError — request id stamping', () => {
+  it('attaches meta.requestId when provided', () => {
+    const { body } = problemDetailsForError(new NotFoundError('Order', 'abc'), {
+      requestId: '3d2c3b1a-5a7d-4f62-b1a0-1e5a9b6a1234',
+    });
+    expect(body.meta).toEqual({ requestId: '3d2c3b1a-5a7d-4f62-b1a0-1e5a9b6a1234' });
+  });
+
+  it('omits meta entirely when no requestId is provided', () => {
+    const { body } = problemDetailsForError(new NotFoundError('Order'));
+    expect(body.meta).toBeUndefined();
+  });
+
+  it('stamps meta on INTERNAL_ERROR too (unknown throws still get the correlation id)', () => {
+    const { body } = problemDetailsForError(new Error('db gone'), { requestId: 'abc-123' });
+    expect(body.code).toBe('INTERNAL_ERROR');
+    expect(body.meta).toEqual({ requestId: 'abc-123' });
+  });
+
+  it('merges requestId with existing meta (e.g. marketplace error platform key stays)', () => {
+    const { body } = problemDetailsForError(new MarketplaceAuthError('TRENDYOL'), {
+      requestId: 'req-xyz',
+    });
+    expect(body.meta).toEqual({ platform: 'TRENDYOL', requestId: 'req-xyz' });
+  });
+});

@@ -59,4 +59,58 @@ describe('throwApiError', () => {
       expect((err as ApiError).status).toBe(0);
     }
   });
+
+  it('exposes problem.meta.requestId as ApiError.requestId', () => {
+    const requestId = '3d2c3b1a-5a7d-4f62-b1a0-1e5a9b6a1234';
+    const body = {
+      type: 'https://api.pazarsync.com/errors/not-found',
+      title: 'Not Found',
+      status: 404,
+      code: 'NOT_FOUND',
+      detail: 'nope',
+      meta: { requestId },
+    };
+    const response = new Response(JSON.stringify(body), {
+      status: 404,
+      headers: { 'X-Request-Id': requestId },
+    });
+
+    try {
+      throwApiError(body, response);
+    } catch (err) {
+      expect((err as ApiError).requestId).toBe(requestId);
+    }
+  });
+
+  it('falls back to X-Request-Id header for non-ProblemDetails bodies', () => {
+    const requestId = 'proxy-generated-id-123';
+    const response = new Response('<html>boom</html>', {
+      status: 502,
+      headers: { 'X-Request-Id': requestId },
+    });
+
+    try {
+      throwApiError('<html>boom</html>', response);
+    } catch (err) {
+      expect((err as ApiError).code).toBe('UNKNOWN_ERROR');
+      expect((err as ApiError).requestId).toBe(requestId);
+    }
+  });
+
+  it('leaves requestId undefined when no meta or header is present', () => {
+    const body = {
+      type: 'https://api.pazarsync.com/errors/not-found',
+      title: 'Not Found',
+      status: 404,
+      code: 'NOT_FOUND',
+      detail: 'nope',
+    };
+    const response = new Response(JSON.stringify(body), { status: 404 });
+
+    try {
+      throwApiError(body, response);
+    } catch (err) {
+      expect((err as ApiError).requestId).toBeUndefined();
+    }
+  });
 });

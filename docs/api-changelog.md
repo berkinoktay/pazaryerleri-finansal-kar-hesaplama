@@ -41,6 +41,14 @@ supplierId, apiKey, apiSecret } }`. Credentials are probed against
   `lastConnectedAt`. Composite unique
   `(organization_id, platform, external_account_id)` enforces
   one-account-per-org.
+- Every response now carries an `X-Request-Id` header. Value is either
+  echoed from an inbound `X-Request-Id` header (so a client / gateway
+  can supply its own correlation id) or generated server-side as a UUID
+  v4. Error response bodies additionally embed the same id at
+  `meta.requestId` via the RFC 7807 `ProblemDetails` schema — support
+  tickets can quote this id to find the exact server log line. Generated
+  by `requestIdMiddleware` in `apps/api/src/middleware/`, stamped into
+  error bodies by `app.onError` + `problemDetailsForError({ requestId })`.
 
 ### Changed
 

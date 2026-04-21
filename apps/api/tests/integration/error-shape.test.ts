@@ -69,4 +69,30 @@ describe('Error response shape', () => {
     const body = (await res.json()) as { code: string };
     expect(body.code).toBe('UNAUTHENTICATED');
   });
+
+  it('stamps every response with an X-Request-Id header', async () => {
+    const res = await app.request('/v1/health');
+    expect(res.status).toBe(200);
+    const requestId = res.headers.get('X-Request-Id');
+    expect(requestId).not.toBeNull();
+    // UUID v4 shape (generated server-side)
+    expect(requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  });
+
+  it('echoes an inbound X-Request-Id instead of generating a new one', async () => {
+    const clientId = '11111111-2222-3333-4444-555555555555';
+    const res = await app.request('/v1/health', {
+      headers: { 'X-Request-Id': clientId },
+    });
+    expect(res.headers.get('X-Request-Id')).toBe(clientId);
+  });
+
+  it('stamps the request id into error body meta for correlation', async () => {
+    const res = await app.request('/v1/organizations');
+    expect(res.status).toBe(401);
+    const requestId = res.headers.get('X-Request-Id');
+    expect(requestId).not.toBeNull();
+    const body = (await res.json()) as { code: string; meta?: { requestId?: string } };
+    expect(body.meta?.requestId).toBe(requestId);
+  });
 });

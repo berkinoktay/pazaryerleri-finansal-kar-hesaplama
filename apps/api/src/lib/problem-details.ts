@@ -23,7 +23,25 @@ import {
  * Unknown errors collapse to 500 INTERNAL_ERROR with a generic message.
  * The caller is responsible for logging the original `err` — we never
  * leak its `.message` to clients.
+ *
+ * Pass `options.requestId` to stamp the response body with the request
+ * correlation id — support/ops tickets can quote it to find the exact
+ * server log line. Populated by `app.onError` from the `X-Request-Id`
+ * response header that `requestIdMiddleware` set earlier in the chain.
  */
+/**
+ * Structured metadata on ProblemDetails. `requestId` is typed because
+ * it is the one key every response is expected to carry (stamped by
+ * app.onError from the X-Request-Id header). Error-specific keys like
+ * `platform` (marketplace errors) or `httpStatus` (upstream code echo)
+ * ride on the same object via the index signature.
+ */
+export interface ProblemDetailsMeta {
+  /** Request correlation id, set by app.onError from the X-Request-Id response header. */
+  requestId?: string;
+  [key: string]: unknown;
+}
+
 export interface ProblemDetailsBody {
   type: string;
   title: string;
@@ -31,7 +49,7 @@ export interface ProblemDetailsBody {
   code: string;
   detail: string;
   errors?: ValidationIssue[];
-  meta?: Record<string, unknown>;
+  meta?: ProblemDetailsMeta;
 }
 
 export interface ProblemDetailsResult {
@@ -40,9 +58,27 @@ export interface ProblemDetailsResult {
   headers?: Record<string, string>;
 }
 
+export interface ProblemDetailsOptions {
+  /** Request correlation id — stamped onto `body.meta.requestId` if provided. */
+  requestId?: string;
+}
+
 const TYPE_BASE = 'https://api.pazarsync.com/errors';
 
-export function problemDetailsForError(err: unknown): ProblemDetailsResult {
+export function problemDetailsForError(
+  err: unknown,
+  options: ProblemDetailsOptions = {},
+): ProblemDetailsResult {
+  const result = classify(err);
+  if (options.requestId !== undefined) {
+    // Merge, not overwrite — marketplace/validation errors already set
+    // their own meta (platform, httpStatus, value). requestId rides alongside.
+    result.body.meta = { ...result.body.meta, requestId: options.requestId };
+  }
+  return result;
+}
+
+function classify(err: unknown): ProblemDetailsResult {
   if (err instanceof UnauthorizedError) {
     return {
       status: 401,

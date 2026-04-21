@@ -5,6 +5,7 @@ import { logger } from 'hono/logger';
 
 import { authMiddleware } from './middleware/auth.middleware';
 import { rateLimit } from './middleware/rate-limit.middleware';
+import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
@@ -24,6 +25,10 @@ import storeRoutes from './routes/store.routes';
 export function createApp(): OpenAPIHono {
   const app = createSubApp().basePath('/v1');
 
+  // Stamp every request with an X-Request-Id header (echoed if client
+  // supplied one, generated otherwise). Must run first so logger() +
+  // error responses can reference the same correlation id.
+  app.use('*', requestIdMiddleware);
   app.use('*', logger());
   app.use('*', cors());
 
@@ -34,9 +39,13 @@ export function createApp(): OpenAPIHono {
   // the frontend translates it to i18n strings. Unknown errors collapse to
   // a generic 500 that never leaks internals to the client.
   app.onError((err, c) => {
-    const { body, status, headers } = problemDetailsForError(err);
+    // Read the correlation id stamped by requestIdMiddleware. Nullable
+    // because onError is reachable from a few paths where the middleware
+    // may not have run (e.g. outer Hono-level failures) — stay defensive.
+    const requestId = c.res.headers.get('X-Request-Id') ?? undefined;
+    const { body, status, headers } = problemDetailsForError(err, { requestId });
     if (status === 500) {
-      console.error('Unhandled error:', err);
+      console.error('Unhandled error:', { requestId, err });
     }
     if (headers !== undefined) {
       for (const [name, value] of Object.entries(headers)) {

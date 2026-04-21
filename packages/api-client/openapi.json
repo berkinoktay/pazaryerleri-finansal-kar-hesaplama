@@ -117,6 +117,9 @@
             "items": {
               "$ref": "#/components/schemas/ValidationErrorDetail"
             }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProblemDetailsMeta"
           }
         },
         "required": [
@@ -149,6 +152,19 @@
         "required": [
           "field",
           "code"
+        ]
+      },
+      "ProblemDetailsMeta": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "example": "3d2c3b1a-5a7d-4f62-b1a0-1e5a9b6a1234",
+            "description": "Server-side correlation id for this request. Echoed in the `X-Request-Id` response header. Quote this id in support tickets so ops can find the matching log line."
+          }
+        },
+        "required": [
+          "requestId"
         ]
       },
       "OrganizationListResponse": {

@@ -402,6 +402,7 @@ export default function SegmentError(props: {
 
 - **Never fork `ErrorFallback`.** If you need different copy, extend the `errorBoundary.*` i18n namespace and accept a `variant` prop on the fallback.
 - A server-rendered throw (e.g. our onboarding probe's re-thrown API error) hits this boundary — the localized fallback + retry button renders instead of Next's default blank page.
+- `ErrorFallback` surfaces a **support id** (Destek kimliği) when the thrown error is an `ApiError` with `requestId` (from the backend's `X-Request-Id` → `meta.requestId` pipeline) or when Next attaches a `digest` to the error. Users can click to copy — quote this id in support tickets to find the matching server log line.
 - Localized 404 is at `apps/web/src/app/[locale]/not-found.tsx` — keep copy under `notFound.*`.
 
 ### Forms + `VALIDATION_ERROR` propagation
