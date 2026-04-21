@@ -19,14 +19,24 @@ describe('problemDetailsForError', () => {
   it('maps ForbiddenError to 403 FORBIDDEN', () => {
     const { body, status } = problemDetailsForError(new ForbiddenError('not a member'));
     expect(status).toBe(403);
-    expect(body.code).toBe('FORBIDDEN');
-    expect(body.detail).toBe('not a member');
+    expect(body).toEqual({
+      type: 'https://api.pazarsync.com/errors/forbidden',
+      title: 'Access denied',
+      status: 403,
+      code: 'FORBIDDEN',
+      detail: 'not a member',
+    });
   });
 
   it('collapses an unknown error to 500 INTERNAL_ERROR without leaking the message', () => {
     const { body, status } = problemDetailsForError(new Error('db connection refused'));
     expect(status).toBe(500);
-    expect(body.code).toBe('INTERNAL_ERROR');
-    expect(body.detail).toBe('An unexpected error occurred');
+    expect(body).toEqual({
+      type: 'https://api.pazarsync.com/errors/internal',
+      title: 'Internal server error',
+      status: 500,
+      code: 'INTERNAL_ERROR',
+      detail: 'An unexpected error occurred',
+    });
   });
 });
