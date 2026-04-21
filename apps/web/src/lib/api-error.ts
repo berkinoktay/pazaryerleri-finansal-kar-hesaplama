@@ -7,6 +7,16 @@
  * HTTP-level decisions (e.g. retry), and `.problem.errors` for
  * field-level validation details.
  */
+export interface ProblemDetailsMeta {
+  /**
+   * Server-side correlation id. Echoed in the `X-Request-Id` response
+   * header by `requestIdMiddleware` and stamped into the error body
+   * by `app.onError`. Surface this in `ErrorFallback` so support
+   * tickets can quote it.
+   */
+  requestId: string;
+}
+
 export interface ProblemDetails {
   type: string;
   title: string;
@@ -14,6 +24,7 @@ export interface ProblemDetails {
   code: string;
   detail: string;
   errors?: Array<{ field: string; code: string; meta?: Record<string, unknown> }>;
+  meta?: ProblemDetailsMeta;
 }
 
 export class ApiError extends Error {
@@ -21,6 +32,7 @@ export class ApiError extends Error {
   readonly code: string;
   readonly detail: string;
   readonly problem: ProblemDetails;
+  readonly requestId: string | undefined;
 
   constructor(status: number, code: string, detail: string, problem: ProblemDetails) {
     super(`[${status.toString()} ${code}] ${detail}`);
@@ -29,6 +41,7 @@ export class ApiError extends Error {
     this.code = code;
     this.detail = detail;
     this.problem = problem;
+    this.requestId = problem.meta?.requestId;
   }
 }
 
@@ -69,6 +82,11 @@ export function throwApiError(error: unknown, response: Response | undefined): n
     });
   }
 
+  // Non-ProblemDetails error body (e.g. upstream 502 HTML, proxy gateway
+  // response). Still try to capture the X-Request-Id header so support
+  // can correlate against server logs — the header may have been stamped
+  // by our middleware OR by an intermediate proxy.
+  const headerRequestId = response.headers.get('X-Request-Id') ?? undefined;
   throw new ApiError(
     response.status,
     'UNKNOWN_ERROR',
@@ -79,6 +97,7 @@ export function throwApiError(error: unknown, response: Response | undefined): n
       status: response.status,
       code: 'UNKNOWN_ERROR',
       detail: `Unexpected response ${response.status.toString()}`,
+      ...(headerRequestId !== undefined ? { meta: { requestId: headerRequestId } } : {}),
     },
   );
 }

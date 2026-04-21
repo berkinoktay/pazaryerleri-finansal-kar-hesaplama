@@ -362,7 +362,10 @@
     "title": "Bir şeyler ters gitti.",
     "description": "Beklenmeyen bir hata oluştu. Tekrar dene, veya ana sayfaya dön.",
     "retry": "Tekrar dene",
-    "home": "Ana sayfa"
+    "home": "Ana sayfa",
+    "supportIdLabel": "Destek kimliği",
+    "supportIdCopy": "Kopyala",
+    "supportIdCopied": "Kopyalandı"
   },
   "notFound": {
     "title": "Sayfa bulunamadı",

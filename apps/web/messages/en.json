@@ -362,7 +362,10 @@
     "title": "Something went wrong.",
     "description": "An unexpected error occurred. Try again, or go home.",
     "retry": "Try again",
-    "home": "Home"
+    "home": "Home",
+    "supportIdLabel": "Support ID",
+    "supportIdCopy": "Copy",
+    "supportIdCopied": "Copied"
   },
   "notFound": {
     "title": "Page not found",

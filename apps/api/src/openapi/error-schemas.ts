@@ -11,6 +11,16 @@ export const ValidationErrorDetailSchema = z
   })
   .openapi('ValidationErrorDetail');
 
+export const ProblemDetailsMetaSchema = z
+  .object({
+    requestId: z.string().openapi({
+      example: '3d2c3b1a-5a7d-4f62-b1a0-1e5a9b6a1234',
+      description:
+        'Server-side correlation id for this request. Echoed in the `X-Request-Id` response header. Quote this id in support tickets so ops can find the matching log line.',
+    }),
+  })
+  .openapi('ProblemDetailsMeta');
+
 export const ProblemDetailsSchema = z
   .object({
     type: z.string().url().openapi({
@@ -25,5 +35,6 @@ export const ProblemDetailsSchema = z
     }),
     detail: z.string().openapi({ example: 'Order abc-uuid not found in store xyz-uuid' }),
     errors: z.array(ValidationErrorDetailSchema).optional(),
+    meta: ProblemDetailsMetaSchema.optional(),
   })
   .openapi('ProblemDetails');
