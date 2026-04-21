@@ -12,6 +12,9 @@
     "dismiss": "Dismiss",
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3",
+    "networkStatus": {
+      "offline": "No internet connection. Your changes may not be saved."
+    },
     "errors": {
       "UNAUTHENTICATED": "Your session expired. Please sign in again.",
       "FORBIDDEN": "You don't have permission for this action.",

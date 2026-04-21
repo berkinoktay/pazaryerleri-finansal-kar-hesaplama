@@ -349,6 +349,7 @@ Frontend mirrors the backend's RFC 7807 contract end-to-end. Three concrete prim
 - Looks up `common.errors.<code>` in next-intl → Turkish toast via sonner
 - **Silences** `UNAUTHENTICATED` (handled by `SessionExpiredHandler` — sign-out + redirect)
 - **Silences** `VALIDATION_ERROR` (forms render field-level inline errors via `form.setError`)
+- **Silences** `NETWORK_ERROR` when `navigator.onLine === false` (handled by `NetworkStatusBanner` — persistent top banner + auto-invalidate on reconnect)
 - **Retry policy** bails immediately on 4xx; one retry for 5xx / network
 
 ```tsx
