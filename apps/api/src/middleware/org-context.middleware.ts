@@ -1,7 +1,7 @@
 import { prisma } from '@pazarsync/db';
 import { createMiddleware } from 'hono/factory';
 
-import { ForbiddenError } from '../lib/errors';
+import { ForbiddenError, UnauthorizedError } from '../lib/errors';
 
 type MemberRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
 
@@ -29,6 +29,16 @@ export const orgContextMiddleware = createMiddleware<{
     throw new ForbiddenError('Organization id is required');
   }
   const userId = c.get('userId');
+  if (typeof userId !== 'string' || userId.length === 0) {
+    // Signal an auth-chain ordering bug — authMiddleware should have run
+    // before this and populated userId. Surfacing as 401 keeps error
+    // codes clean (never 500 from a context mis-order).
+    console.error('[orgContext] userId missing on context — authMiddleware did not run', {
+      path: c.req.path,
+      method: c.req.method,
+    });
+    throw new UnauthorizedError('Authentication required');
+  }
 
   const membership = await prisma.organizationMember.findUnique({
     where: { organizationId_userId: { organizationId: orgId, userId } },
