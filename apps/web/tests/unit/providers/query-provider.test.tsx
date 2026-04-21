@@ -102,4 +102,50 @@ describe('QueryProvider', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(toastError).not.toHaveBeenCalled();
   });
+
+  it('does NOT toast NETWORK_ERROR while the browser is offline (NetworkStatusBanner owns this)', async () => {
+    Object.defineProperty(globalThis.navigator, 'onLine', {
+      configurable: true,
+      get: () => false,
+    });
+
+    try {
+      renderHook(
+        () =>
+          useQuery({
+            queryKey: ['test', 'offline-network-error'],
+            queryFn: () => {
+              throw makeError('NETWORK_ERROR', 0);
+            },
+            retry: false,
+          }),
+        { wrapper },
+      );
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(toastError).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(globalThis.navigator, 'onLine', {
+        configurable: true,
+        get: () => true,
+      });
+    }
+  });
+
+  it('DOES toast NETWORK_ERROR while the browser is online (genuine transport failure)', async () => {
+    renderHook(
+      () =>
+        useQuery({
+          queryKey: ['test', 'online-network-error'],
+          queryFn: () => {
+            throw makeError('NETWORK_ERROR', 0);
+          },
+          retry: false,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError).toHaveBeenCalledWith('Bağlantı hatası. İnternetini kontrol et.');
+  });
 });

@@ -65,6 +65,16 @@ export function QueryProvider({ children }: { children: React.ReactNode }): Reac
         return;
       }
       if (SILENT_CODES.has(error.code)) return;
+      // When the browser is offline, NetworkStatusBanner already shows
+      // a persistent top banner. Suppress the toast so we don't stack
+      // two signals for the same condition.
+      if (
+        error.code === 'NETWORK_ERROR' &&
+        typeof navigator !== 'undefined' &&
+        navigator.onLine === false
+      ) {
+        return;
+      }
       const key: KnownErrorKey = KNOWN_CODES.has(error.code)
         ? (error.code as KnownErrorKey)
         : 'generic';

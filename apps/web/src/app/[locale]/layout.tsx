@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { hasLocale, NextIntlClientProvider } from 'next-intl';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 
+import { NetworkStatusBanner } from '@/components/common/network-status-banner';
 import { SessionExpiredHandler } from '@/features/auth/components/session-expired-handler';
 import { routing } from '@/i18n/routing';
 import { QueryProvider } from '@/providers/query-provider';
@@ -47,6 +48,7 @@ export default async function LocaleLayout({
     <NextIntlClientProvider>
       <QueryProvider>
         <SessionExpiredHandler />
+        <NetworkStatusBanner />
         {children}
       </QueryProvider>
     </NextIntlClientProvider>

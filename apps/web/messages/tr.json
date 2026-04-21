@@ -12,6 +12,9 @@
     "dismiss": "Kapat",
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3",
+    "networkStatus": {
+      "offline": "İnternet bağlantın yok. Değişikliklerin kaydedilmeyebilir."
+    },
     "errors": {
       "UNAUTHENTICATED": "Oturumun sona erdi. Lütfen tekrar giriş yap.",
       "FORBIDDEN": "Bu işleme yetkin yok.",
