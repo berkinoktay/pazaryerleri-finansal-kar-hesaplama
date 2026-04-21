@@ -226,6 +226,9 @@
         "generic": "Parola güncellenemedi. Lütfen tekrar deneyin."
       }
     },
+    "signOut": {
+      "error": "Çıkış yapılamadı. Lütfen tekrar dene."
+    },
     "userMenu": {
       "signOut": "Çıkış yap"
     },

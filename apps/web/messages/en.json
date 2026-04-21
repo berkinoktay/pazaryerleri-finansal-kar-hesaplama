@@ -226,6 +226,9 @@
         "generic": "Couldn't update the password. Please try again."
       }
     },
+    "signOut": {
+      "error": "Couldn't sign out. Please try again."
+    },
     "userMenu": {
       "signOut": "Sign out"
     },
