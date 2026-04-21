@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EncryptionKeyError } from '../../../src/lib/crypto';
+import { EncryptionKeyError } from '@/lib/crypto';
 import {
   ConflictError,
   ForbiddenError,
@@ -9,8 +9,8 @@ import {
   RateLimitedError,
   UnauthorizedError,
   ValidationError,
-} from '../../../src/lib/errors';
-import { problemDetailsForError } from '../../../src/lib/problem-details';
+} from '@/lib/errors';
+import { problemDetailsForError } from '@/lib/problem-details';
 
 describe('problemDetailsForError', () => {
   it('maps UnauthorizedError to 401 UNAUTHENTICATED', () => {

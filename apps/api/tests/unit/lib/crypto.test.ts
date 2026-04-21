@@ -9,7 +9,7 @@ import {
   encryptCredentials,
   EncryptionKeyError,
   loadEncryptionKey,
-} from '../../../src/lib/crypto';
+} from '@/lib/crypto';
 
 const VALID_HEX_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 

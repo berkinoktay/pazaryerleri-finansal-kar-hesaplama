@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { slugify } from '../../../src/lib/slugify';
+import { slugify } from '@/lib/slugify';
 
 describe('slugify', () => {
   it('lowercases and hyphenates a simple ASCII name', () => {
