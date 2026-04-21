@@ -49,7 +49,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: "pnpm"
+          cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
 
@@ -77,7 +77,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: "pnpm"
+          cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm api:sync # ensure generated types exist before typecheck
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: "pnpm"
+          cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm api:sync # generated types are imported by some packages
@@ -118,7 +118,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: "pnpm"
+          cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
 
@@ -178,8 +178,13 @@ jobs:
           TRENDYOL_PROD_BASE_URL: https://apigw.trendyol.com
           TRENDYOL_SANDBOX_BASE_URL: https://stageapigw.trendyol.com
           TRENDYOL_INTEGRATOR_UA_SUFFIX: SelfIntegration
-          ALLOW_SANDBOX_CONNECTIONS: "true"
-          NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS: "true"
+          ALLOW_SANDBOX_CONNECTIONS: 'true'
+          NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS: 'true'
+          # Fake 32-byte hex for tests — store-create calls encryptCredentials
+          # which demands a valid key. Per SECURITY.md §7, ephemeral test-only
+          # secrets inline in workflow files are fine; this value cannot unlock
+          # anything outside of the CI job's own DB.
+          ENCRYPTION_KEY: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 
       # Mandatory cleanup even on test failure — leaves no hanging
       # containers around between job runs.
