@@ -1,7 +1,7 @@
 'use client';
 
 import { cva, type VariantProps } from 'class-variance-authority';
-import { Cancel01Icon } from 'hugeicons-react';
+import { Cancel01Icon, ViewIcon, ViewOffIcon } from 'hugeicons-react';
 import * as React from 'react';
 
 import { Spinner } from '@/components/ui/spinner';
@@ -99,6 +99,18 @@ export interface InputProps
   loadingLabel?: string;
   /** Convenience boolean for `aria-invalid="true"`. Triggers destructive border. */
   invalid?: boolean;
+  /**
+   * Adds a show/hide toggle for password-masked fields. Only active when
+   * `type="password"` — the Input owns the visibility state internally
+   * and swaps to `type="text"` while the toggle is engaged. Both labels
+   * are required (a11y must not be optional; keeps copy outside of the
+   * primitive so the consumer owns the i18n).
+   *
+   * Mutually exclusive with a custom `trailing` slot: when `reveal` is
+   * set, any caller-provided `trailing` is ignored in favour of the
+   * generated toggle.
+   */
+  reveal?: { show: string; hide: string };
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forwardedRef) => {
@@ -116,6 +128,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     loading,
     loadingLabel = 'Loading',
     invalid,
+    reveal,
     value,
     defaultValue,
     onChange,
@@ -124,8 +137,32 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     ...rest
   } = props;
 
+  const [revealed, setRevealed] = React.useState(false);
+  const revealActive = reveal !== undefined && type === 'password';
+  const effectiveType = revealActive && revealed ? 'text' : type;
+
+  // When reveal is active, the primitive owns the trailing slot and
+  // ignores a caller-supplied trailing. Documented on the prop above.
+  const revealSlot = revealActive ? (
+    <button
+      type="button"
+      aria-label={revealed ? reveal.hide : reveal.show}
+      aria-pressed={revealed}
+      onClick={() => setRevealed((prev) => !prev)}
+      className={cn(
+        'text-muted-foreground hover:text-foreground p-3xs rounded-xs',
+        'duration-fast transition-colors',
+        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+        '[&_svg]:size-icon-sm cursor-pointer',
+      )}
+    >
+      {revealed ? <ViewOffIcon /> : <ViewIcon />}
+    </button>
+  ) : null;
+
+  const effectiveTrailing = revealSlot ?? trailing;
   const hasLeading = leadingIcon !== undefined || leading !== undefined;
-  const hasTrailing = trailingIcon !== undefined || trailing !== undefined;
+  const hasTrailing = trailingIcon !== undefined || effectiveTrailing !== undefined;
   const needsWrapper = hasLeading || hasTrailing || onClear !== undefined || loading === true;
 
   const isControlled = value !== undefined;
@@ -170,7 +207,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     return (
       <input
         ref={inputRef}
-        type={type}
+        type={effectiveType}
         value={value}
         defaultValue={defaultValue}
         onChange={handleChange}
@@ -211,7 +248,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
       ) : null}
       <input
         ref={inputRef}
-        type={type}
+        type={effectiveType}
         value={value}
         defaultValue={defaultValue}
         onChange={handleChange}
@@ -230,8 +267,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
               {trailingIcon}
             </span>
           ) : null}
-          {!loading && trailing !== undefined ? (
-            <span className="flex items-center">{trailing}</span>
+          {!loading && effectiveTrailing !== undefined ? (
+            <span className="flex items-center">{effectiveTrailing}</span>
           ) : null}
           {showClearButton ? (
             <button

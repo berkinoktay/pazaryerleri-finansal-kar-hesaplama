@@ -3,6 +3,9 @@ import {
   ConflictError,
   ForbiddenError,
   InvalidReferenceError,
+  MarketplaceAccessError,
+  MarketplaceAuthError,
+  MarketplaceUnreachable,
   NotFoundError,
   RateLimitedError,
   UnauthorizedError,
@@ -28,11 +31,12 @@ export interface ProblemDetailsBody {
   code: string;
   detail: string;
   errors?: ValidationIssue[];
+  meta?: Record<string, unknown>;
 }
 
 export interface ProblemDetailsResult {
   body: ProblemDetailsBody;
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500;
+  status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 503;
   headers?: Record<string, string>;
 }
 
@@ -137,6 +141,45 @@ export function problemDetailsForError(err: unknown): ProblemDetailsResult {
         status: 500,
         code: 'SERVER_CONFIG_ERROR',
         detail: 'An unexpected error occurred',
+      },
+    };
+  }
+  if (err instanceof MarketplaceAuthError) {
+    return {
+      status: 422,
+      body: {
+        type: `${TYPE_BASE}/marketplace-auth-failed`,
+        title: 'Marketplace authentication failed',
+        status: 422,
+        code: 'MARKETPLACE_AUTH_FAILED',
+        detail: err.message,
+        meta: { platform: err.platform },
+      },
+    };
+  }
+  if (err instanceof MarketplaceAccessError) {
+    return {
+      status: 422,
+      body: {
+        type: `${TYPE_BASE}/marketplace-access-denied`,
+        title: 'Marketplace access denied',
+        status: 422,
+        code: 'MARKETPLACE_ACCESS_DENIED',
+        detail: err.message,
+        meta: { platform: err.platform, ...err.meta },
+      },
+    };
+  }
+  if (err instanceof MarketplaceUnreachable) {
+    return {
+      status: 503,
+      body: {
+        type: `${TYPE_BASE}/marketplace-unreachable`,
+        title: 'Marketplace unreachable',
+        status: 503,
+        code: 'MARKETPLACE_UNREACHABLE',
+        detail: err.message,
+        meta: { platform: err.platform, ...err.meta },
       },
     };
   }

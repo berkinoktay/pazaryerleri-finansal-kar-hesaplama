@@ -13,6 +13,41 @@ section "Versioning" for details.
 
 ### Added
 
+- **Store connection (Trendyol Phase 1)** — four new endpoints under
+  `/v1/organizations/:orgId/stores`:
+  - `GET /stores` — list connected stores for the organization, most
+    recent first. Response never includes `credentials`.
+  - `POST /stores` — connect a marketplace account. Request body is
+    `{ name, environment, credentials: { platform: 'TRENDYOL',
+supplierId, apiKey, apiSecret } }`. Credentials are probed against
+    Trendyol (cheapest product-filter endpoint) BEFORE persist — a
+    failed probe leaves no DB row. Encrypted at rest with AES-256-GCM.
+    Rate-limited at 5 requests/minute/user.
+  - `GET /stores/:storeId` — single store. 404 on cross-tenant access.
+  - `DELETE /stores/:storeId` — hard delete, cascades products/orders/
+    settlements/sync_logs.
+- Three new pan-app error codes:
+  - `MARKETPLACE_AUTH_FAILED` (422) — credentials rejected by vendor.
+  - `MARKETPLACE_ACCESS_DENIED` (422) — environment-specific access
+    block (e.g. Trendyol sandbox IP whitelist missing).
+  - `MARKETPLACE_UNREACHABLE` (503) — upstream 5xx / timeout.
+- New validator-level error codes on `POST /stores`:
+  `INVALID_SUPPLIER_ID_FORMAT`, `INVALID_API_KEY_FORMAT`,
+  `INVALID_NAME_TOO_SHORT`, `INVALID_NAME_TOO_LONG`,
+  `SANDBOX_NOT_ALLOWED`, `DUPLICATE_STORE_CONNECTION`.
+- Store schema columns: `environment` (StoreEnvironment:
+  PRODUCTION|SANDBOX), `externalAccountId` (unencrypted supplierId /
+  merchantId), `status` (StoreStatus: ACTIVE|CONNECTION_ERROR|DISABLED),
+  `lastConnectedAt`. Composite unique
+  `(organization_id, platform, external_account_id)` enforces
+  one-account-per-org.
+
+### Changed
+
+- Global per-user rate limit of 300 req/min applies to every
+  authenticated route via in-memory token-bucket middleware. Surfaces
+  as `RATE_LIMITED` (429) with `Retry-After` header.
+
 - `POST /v1/organizations` — creates an organization and attaches the
   authenticated caller as OWNER in a single Prisma transaction. Request
   body is `{ name: string }` (2–80 chars, must contain a letter/digit,

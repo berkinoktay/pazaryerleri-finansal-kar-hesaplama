@@ -8,6 +8,7 @@ import { SyncBadge } from '@/components/patterns/sync-badge';
 import { ActiveOrganizationPanel } from '@/features/organization/components/active-organization-panel';
 import { OrganizationsPanel } from '@/features/organization/components/organizations-panel';
 import type { Organization } from '@/features/organization/api/organizations.api';
+import { StoresPanel } from '@/features/stores/components/stores-panel';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
 
@@ -60,6 +61,7 @@ export default async function DashboardPage({
       {activeOrg ? (
         <ActiveOrganizationPanel org={activeOrg} locale={locale} viewerTimezone={viewerTimezone} />
       ) : null}
+      {activeOrg ? <StoresPanel orgId={activeOrg.id} /> : null}
       <StatGroup>
         <KpiTile
           label="Ciro"

@@ -20,7 +20,9 @@ import { organizationKeys } from '../query-keys';
  *   1. Persist the new org id as `last_org_id` cookie (via Server Action).
  *   2. Invalidate the organizations list so the switcher rebuilds.
  *   3. Toast-notify the user.
- *   4. Route to /dashboard.
+ *   4. Route to /onboarding/connect-store so the user can connect
+ *      their first marketplace account. If they skip, the dashboard
+ *      shows an empty-state CTA to connect later.
  *
  * On VALIDATION_ERROR we suppress the toast — the form component reads
  * `mutation.error.problem.errors` and projects each entry into
@@ -44,7 +46,7 @@ export function useCreateOrganization(): UseMutationResult<
       await setActiveOrgIdAction(created.id);
       await queryClient.invalidateQueries({ queryKey: organizationKeys.all });
       toast.success(tToast('success', { name: created.name }));
-      router.push('/dashboard');
+      router.push('/onboarding/connect-store');
       router.refresh();
     },
     onError: (error) => {

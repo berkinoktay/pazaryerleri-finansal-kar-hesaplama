@@ -85,3 +85,60 @@ export class RateLimitedError extends Error {
     this.retryAfterSeconds = retryAfterSeconds;
   }
 }
+
+/**
+ * Marketplace rejected our credentials (401 or a generic 4xx that is
+ * not obviously an access/environment issue). Maps to 422 because it is
+ * user-submitted data (API keys) that failed remote validation.
+ */
+export class MarketplaceAuthError extends Error {
+  readonly status = 422 as const;
+  readonly code = 'MARKETPLACE_AUTH_FAILED' as const;
+  readonly platform: string;
+
+  constructor(platform: string, message = 'Marketplace rejected the provided credentials') {
+    super(message);
+    this.name = 'MarketplaceAuthError';
+    this.platform = platform;
+  }
+}
+
+/**
+ * Marketplace denied access due to environment-specific policy (e.g.
+ * Trendyol sandbox IP whitelist missing → 503; or 403 on a prod
+ * endpoint that requires additional entitlement). Distinct from
+ * MarketplaceAuthError so the frontend can explain what to do next.
+ */
+export class MarketplaceAccessError extends Error {
+  readonly status = 422 as const;
+  readonly code = 'MARKETPLACE_ACCESS_DENIED' as const;
+  readonly platform: string;
+  readonly meta: { httpStatus: number };
+
+  constructor(platform: string, meta: { httpStatus: number }) {
+    super(
+      `Marketplace denied access (${meta.httpStatus.toString()}) — likely environment-specific policy`,
+    );
+    this.name = 'MarketplaceAccessError';
+    this.platform = platform;
+    this.meta = meta;
+  }
+}
+
+/**
+ * Marketplace itself is down / timed out / 5xx. 503 tells the client to
+ * retry later; the underlying issue is upstream, not our data.
+ */
+export class MarketplaceUnreachable extends Error {
+  readonly status = 503 as const;
+  readonly code = 'MARKETPLACE_UNREACHABLE' as const;
+  readonly platform: string;
+  readonly meta: { httpStatus: number };
+
+  constructor(platform: string, meta: { httpStatus: number }) {
+    super(`Marketplace unreachable (${meta.httpStatus.toString()}) — upstream issue`);
+    this.name = 'MarketplaceUnreachable';
+    this.platform = platform;
+    this.meta = meta;
+  }
+}

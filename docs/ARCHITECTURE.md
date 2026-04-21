@@ -434,6 +434,17 @@ enum Platform {
   HEPSIBURADA
 }
 
+enum StoreEnvironment {
+  PRODUCTION
+  SANDBOX
+}
+
+enum StoreStatus {
+  ACTIVE
+  CONNECTION_ERROR
+  DISABLED
+}
+
 enum OrderStatus {
   PENDING
   PROCESSING
@@ -527,15 +538,19 @@ model OrganizationMember {
 }
 
 model Store {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  name           String
-  platform       Platform
-  credentials    Json                                      // encrypted JSON
-  isActive       Boolean  @default(true) @map("is_active")
-  lastSyncAt     DateTime? @map("last_sync_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id                String           @id @default(uuid()) @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  name              String
+  platform          Platform
+  environment       StoreEnvironment @default(PRODUCTION)
+  externalAccountId String           @map("external_account_id")  // unencrypted — Trendyol supplierId / HB merchantId; supports UNIQUE without decrypt
+  credentials       Json                                           // AES-256-GCM ciphertext of { supplierId, apiKey, apiSecret } (Trendyol)
+  status            StoreStatus      @default(ACTIVE)
+  isActive          Boolean          @default(true) @map("is_active")  // DEPRECATED — removed after status is backfilled in a follow-up PR
+  lastConnectedAt   DateTime?        @map("last_connected_at")
+  lastSyncAt        DateTime?        @map("last_sync_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt      @map("updated_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   products     Product[]
@@ -543,6 +558,7 @@ model Store {
   settlements  Settlement[]
   syncLogs     SyncLog[]
 
+  @@unique([organizationId, platform, externalAccountId])  // one marketplace account per org
   @@index([organizationId])
   @@map("stores")
 }
@@ -674,18 +690,19 @@ model SyncLog {
 
 ### Key Indexes
 
-| Table                  | Index                                    | Purpose                        |
-| ---------------------- | ---------------------------------------- | ------------------------------ |
-| `stores`               | `organization_id`                        | Tenant isolation queries       |
-| `products`             | `(store_id, platform_product_id)` UNIQUE | Dedup marketplace products     |
-| `products`             | `organization_id`                        | Tenant isolation               |
-| `orders`               | `(store_id, platform_order_id)` UNIQUE   | Dedup marketplace orders       |
-| `orders`               | `organization_id`                        | Tenant isolation               |
-| `orders`               | `order_date`                             | Date range queries for reports |
-| `settlements`          | `organization_id`                        | Tenant isolation               |
-| `expenses`             | `organization_id`                        | Tenant isolation               |
-| `sync_logs`            | `(store_id, started_at)`                 | Sync history lookups           |
-| `organization_members` | `(organization_id, user_id)` UNIQUE      | Membership lookup              |
+| Table                  | Index                                                     | Purpose                         |
+| ---------------------- | --------------------------------------------------------- | ------------------------------- |
+| `stores`               | `organization_id`                                         | Tenant isolation queries        |
+| `stores`               | `(organization_id, platform, external_account_id)` UNIQUE | One marketplace account per org |
+| `products`             | `(store_id, platform_product_id)` UNIQUE                  | Dedup marketplace products      |
+| `products`             | `organization_id`                                         | Tenant isolation                |
+| `orders`               | `(store_id, platform_order_id)` UNIQUE                    | Dedup marketplace orders        |
+| `orders`               | `organization_id`                                         | Tenant isolation                |
+| `orders`               | `order_date`                                              | Date range queries for reports  |
+| `settlements`          | `organization_id`                                         | Tenant isolation                |
+| `expenses`             | `organization_id`                                         | Tenant isolation                |
+| `sync_logs`            | `(store_id, started_at)`                                  | Sync history lookups            |
+| `organization_members` | `(organization_id, user_id)` UNIQUE                       | Membership lookup               |
 
 ---
 

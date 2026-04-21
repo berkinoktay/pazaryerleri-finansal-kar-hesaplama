@@ -4,11 +4,13 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
 import { authMiddleware } from './middleware/auth.middleware';
+import { rateLimit } from './middleware/rate-limit.middleware';
 import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
 import meRoutes from './routes/me.routes';
 import organizationRoutes from './routes/organization.routes';
+import storeRoutes from './routes/store.routes';
 
 /**
  * Builds the Hono application without side effects.
@@ -97,9 +99,16 @@ export function createApp(): OpenAPIHono {
   // Everything below here requires a valid Supabase Bearer token.
   app.use('*', authMiddleware);
 
+  // ─── Global per-user rate limit (SECURITY.md §6 baseline) ──────────
+  // 300 req/min matches the documented authenticated-user baseline. Per-
+  // route limits (e.g. POST /stores at 5/min) layer on top inside the
+  // sub-app's route definitions via the `middleware` option on createRoute.
+  app.use('*', rateLimit({ max: 300, windowSec: 60, keyPrefix: 'global' }));
+
   // ─── Authenticated routes ──────────────────────────────────────────
   app.route('/', meRoutes);
   app.route('/', organizationRoutes);
+  app.route('/', storeRoutes);
 
   return app;
 }

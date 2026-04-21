@@ -49,6 +49,9 @@ export async function createMembership(
 export interface CreateStoreOverrides {
   name?: string;
   platform?: 'TRENDYOL' | 'HEPSIBURADA';
+  environment?: 'PRODUCTION' | 'SANDBOX';
+  externalAccountId?: string;
+  status?: 'ACTIVE' | 'CONNECTION_ERROR' | 'DISABLED';
 }
 
 export async function createStore(organizationId: string, overrides: CreateStoreOverrides = {}) {
@@ -57,12 +60,15 @@ export async function createStore(organizationId: string, overrides: CreateStore
       organizationId,
       name: overrides.name ?? 'Test Store',
       platform: overrides.platform ?? 'TRENDYOL',
-      // Encrypted credential placeholder — never use real credentials in tests
-      credentials: {
-        ciphertext: 'test-ciphertext',
-        iv: 'test-iv',
-        authTag: 'test-auth-tag',
-      },
+      environment: overrides.environment ?? 'PRODUCTION',
+      // Default is a fresh UUID per call so the composite unique
+      // (organizationId, platform, externalAccountId) constraint does
+      // not trip when a fixture creates multiple stores under one org.
+      externalAccountId: overrides.externalAccountId ?? randomUUID(),
+      status: overrides.status ?? 'ACTIVE',
+      // Opaque placeholder; tests that need a real encrypted value
+      // call encryptCredentials themselves.
+      credentials: 'test-encrypted-blob',
     },
   });
 }

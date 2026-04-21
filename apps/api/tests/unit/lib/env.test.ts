@@ -32,6 +32,8 @@ describe('validateRequiredEnv', () => {
     );
     vi.stubEnv('SUPABASE_URL', 'http://localhost:54321');
     vi.stubEnv('SUPABASE_SECRET_KEY', 'sb_secret_fake');
+    vi.stubEnv('TRENDYOL_PROD_BASE_URL', 'https://apigw.trendyol.com');
+    vi.stubEnv('TRENDYOL_SANDBOX_BASE_URL', 'https://stageapigw.trendyol.com');
   });
 
   afterEach(() => {
@@ -60,5 +62,15 @@ describe('validateRequiredEnv', () => {
   it('throws and names SUPABASE_SECRET_KEY when it is missing', () => {
     vi.stubEnv('SUPABASE_SECRET_KEY', '');
     expect(() => validateRequiredEnv()).toThrow(/SUPABASE_SECRET_KEY/);
+  });
+
+  it('throws and names TRENDYOL_PROD_BASE_URL when it is missing', () => {
+    vi.stubEnv('TRENDYOL_PROD_BASE_URL', '');
+    expect(() => validateRequiredEnv()).toThrow(/TRENDYOL_PROD_BASE_URL/);
+  });
+
+  it('throws and names TRENDYOL_SANDBOX_BASE_URL when it is missing', () => {
+    vi.stubEnv('TRENDYOL_SANDBOX_BASE_URL', '');
+    expect(() => validateRequiredEnv()).toThrow(/TRENDYOL_SANDBOX_BASE_URL/);
   });
 });

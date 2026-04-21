@@ -26,7 +26,72 @@
       "INTERNAL_ERROR": "Beklenmeyen bir hata oluştu. Lütfen tekrar dene.",
       "NETWORK_ERROR": "Bağlantı hatası. İnternetini kontrol et.",
       "UNKNOWN_ERROR": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+      "MARKETPLACE_AUTH_FAILED": "Girilen bilgiler pazar yeri tarafından reddedildi. Lütfen kontrol edip tekrar dene.",
+      "MARKETPLACE_ACCESS_DENIED": "Pazar yerine erişim engellendi. Sandbox ise IP yetkilendirmesi gerekebilir.",
+      "MARKETPLACE_UNREACHABLE": "Pazar yerine şu anda ulaşılamıyor. Lütfen birkaç dakika sonra tekrar dene.",
       "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
+    }
+  },
+  "stores": {
+    "platforms": {
+      "TRENDYOL": "Trendyol",
+      "HEPSIBURADA": "Hepsiburada"
+    },
+    "platformStatus": {
+      "comingSoon": "Yakında"
+    },
+    "environments": {
+      "PRODUCTION": "Canlı",
+      "SANDBOX": "Sandbox"
+    },
+    "panel": {
+      "title": "Bağlı mağazalar",
+      "integrations": "Desteklenen"
+    },
+    "connect": {
+      "title": "Mağazanı bağla",
+      "subtitle": "Siparişleri ve karı hesaplamamız için satıcı hesabına bağlan.",
+      "platformLabel": "Pazar yeri",
+      "environmentLabel": "Ortam",
+      "environmentOptions": {
+        "PRODUCTION": "Canlı",
+        "SANDBOX": "Test (Sandbox)"
+      },
+      "labels": {
+        "name": "Mağaza adı",
+        "supplierId": "Satıcı ID",
+        "apiKey": "API Key",
+        "apiSecret": "API Secret"
+      },
+      "placeholders": {
+        "name": "Trendyol Mağazam",
+        "supplierId": "123456",
+        "apiKey": "",
+        "apiSecret": ""
+      },
+      "hints": {
+        "credentials": "Trendyol satıcı panelinden Hesap Bilgilerim → Entegrasyon Bilgileri sayfasından alabilirsin."
+      },
+      "actions": {
+        "submit": "Bağla",
+        "submitting": "Doğrulanıyor...",
+        "skip": "Şimdilik geç"
+      },
+      "toggleSecret": {
+        "show": "Göster",
+        "hide": "Gizle"
+      },
+      "errors": {
+        "INVALID_NAME_TOO_SHORT": "Mağaza adı en az 2 karakter olmalı.",
+        "INVALID_NAME_TOO_LONG": "Mağaza adı en fazla 80 karakter olabilir.",
+        "INVALID_SUPPLIER_ID_FORMAT": "Satıcı ID yalnızca harf ve rakam içerebilir.",
+        "INVALID_API_KEY_FORMAT": "API Key / Secret formatı geçersiz.",
+        "INVALID_CREDENTIALS_SHAPE": "Kimlik bilgileri eksik veya hatalı.",
+        "SANDBOX_NOT_ALLOWED": "Sandbox ortamı bu dağıtımda kullanılamaz.",
+        "PLATFORM_NOT_YET_AVAILABLE": "Bu pazar yeri henüz desteklenmiyor.",
+        "DUPLICATE_STORE_CONNECTION": "Bu Trendyol hesabı zaten bağlı.",
+        "generic": "Mağaza bağlanamadı. Lütfen tekrar dene."
+      }
     }
   },
   "metadata": {

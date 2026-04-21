@@ -5,6 +5,9 @@ import {
   ConflictError,
   ForbiddenError,
   InvalidReferenceError,
+  MarketplaceAccessError,
+  MarketplaceAuthError,
+  MarketplaceUnreachable,
   NotFoundError,
   RateLimitedError,
   UnauthorizedError,
@@ -102,5 +105,38 @@ describe('problemDetailsForError — extended error classes', () => {
       code: 'SERVER_CONFIG_ERROR',
       detail: 'An unexpected error occurred',
     });
+  });
+});
+
+describe('problemDetailsForError — marketplace errors', () => {
+  it('maps MarketplaceAuthError to 422 MARKETPLACE_AUTH_FAILED with platform meta', () => {
+    const { body, status } = problemDetailsForError(new MarketplaceAuthError('TRENDYOL'));
+    expect(status).toBe(422);
+    expect(body).toEqual({
+      type: 'https://api.pazarsync.com/errors/marketplace-auth-failed',
+      title: 'Marketplace authentication failed',
+      status: 422,
+      code: 'MARKETPLACE_AUTH_FAILED',
+      detail: 'Marketplace rejected the provided credentials',
+      meta: { platform: 'TRENDYOL' },
+    });
+  });
+
+  it('maps MarketplaceAccessError to 422 with httpStatus in meta', () => {
+    const { body, status } = problemDetailsForError(
+      new MarketplaceAccessError('TRENDYOL', { httpStatus: 503 }),
+    );
+    expect(status).toBe(422);
+    expect(body.code).toBe('MARKETPLACE_ACCESS_DENIED');
+    expect(body.meta).toEqual({ platform: 'TRENDYOL', httpStatus: 503 });
+  });
+
+  it('maps MarketplaceUnreachable to 503', () => {
+    const { body, status } = problemDetailsForError(
+      new MarketplaceUnreachable('TRENDYOL', { httpStatus: 502 }),
+    );
+    expect(status).toBe(503);
+    expect(body.code).toBe('MARKETPLACE_UNREACHABLE');
+    expect(body.meta).toEqual({ platform: 'TRENDYOL', httpStatus: 502 });
   });
 });
