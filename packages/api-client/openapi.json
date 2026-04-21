@@ -509,8 +509,8 @@
               }
             }
           },
-          "400": {
-            "description": "Request body failed validation",
+          "401": {
+            "description": "Missing or invalid auth token",
             "content": {
               "application/json": {
                 "schema": {
@@ -519,8 +519,8 @@
               }
             }
           },
-          "401": {
-            "description": "Missing or invalid auth token",
+          "422": {
+            "description": "Request body failed validation",
             "content": {
               "application/json": {
                 "schema": {

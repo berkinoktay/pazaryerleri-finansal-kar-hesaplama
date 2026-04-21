@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
 import { authMiddleware } from './middleware/auth.middleware';
+import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
 import meRoutes from './routes/me.routes';
@@ -19,7 +20,7 @@ import organizationRoutes from './routes/organization.routes';
  * OpenAPI dump that would otherwise duplicate route registration.
  */
 export function createApp(): OpenAPIHono {
-  const app = new OpenAPIHono().basePath('/v1');
+  const app = createSubApp().basePath('/v1');
 
   app.use('*', logger());
   app.use('*', cors());

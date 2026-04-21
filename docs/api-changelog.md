@@ -115,7 +115,13 @@ section "Versioning" for details.
 
 ### Fixed
 
-- (Document API behavior fixes)
+- `POST /v1/organizations` (and every future validated route) now emits
+  RFC 7807 `ProblemDetails` with `code: 'VALIDATION_ERROR'` and a
+  field-level `errors[]` array for Zod failures. Previously the route
+  returned the library's default 400 shape — the documented `INVALID_NAME_*`
+  codes lived only as Zod issue messages and never surfaced as
+  `ProblemDetails.code`. Status also changes from **400 → 422** to match
+  RFC 7807 semantics (400 reserved for shape-invalid bodies).
 
 ### Security
 
