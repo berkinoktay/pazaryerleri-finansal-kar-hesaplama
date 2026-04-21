@@ -55,7 +55,7 @@ export async function probeTrendyolCredentials(
       },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-  } catch (err) {
+  } catch {
     // Network error / timeout / DNS — treat as upstream unreachable.
     // We do NOT leak err.message (may contain IP / hostname) to callers.
     throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0 });
