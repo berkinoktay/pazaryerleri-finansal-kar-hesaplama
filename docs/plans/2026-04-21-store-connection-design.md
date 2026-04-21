@@ -706,3 +706,43 @@ If a regression is caught post-merge:
 The goal is a one-click "connect Trendyol" that is **atomically safe** (probe + encrypt + persist in one route), **environment-gated** (sandbox unreachable in prod by backend rule, not just UI), **tenant-isolated** at three layers per `docs/SECURITY.md`, and **open to Hepsiburada** without touching Trendyol code.
 
 The bulk of this doc is not new infrastructure — it is threading store creation through the existing primitives (encryption helper, RFC 7807 error pipeline, throwApiError, QueryProvider onError, createSubApp, mapPrismaError, RLS template, three-file env discipline). Two genuinely new things land: the marketplace adapter interface + registry (§6) and the rate-limit middleware (§11). Both are minimum-viable shapes chosen to make the second adapter and the second rate-limit backend painless.
+
+---
+
+## 19. Post-approval deltas
+
+Changes made during implementation that diverged from the approved design. Recorded here so the archive copy matches what actually shipped.
+
+### 19.1 Stores table was already RLS-scoped (§5.3 / §10.5 / §14.1 correction)
+
+Plan claimed `stores` had no RLS policy and required a new `stores.rls.test.ts`. In practice PR #27 (RLS foundations) already enabled RLS on `stores`, added it to `TENANT_TABLES`, and covered cross-tenant reads in `org-scoped-tables.rls.test.ts`. No new RLS work shipped; Task 1's commit message records this.
+
+### 19.2 Credential reveal toggle (§12.1 reversal)
+
+Plan said: "Credential fields are `type="password"` — no eye-toggle reveal; zero copy-out paths." After user review, a reveal toggle was added to `apiKey` and `apiSecret`. Implemented via a new `reveal={{ show, hide }}` prop on the `Input` primitive itself (not a custom per-field wrapper), so the affordance stays consistent across future credential surfaces. Accepted trade-off: UX/readability over strict copy-out prevention, since users often need to verify what they pasted.
+
+### 19.3 Dashboard connect entry point (§12.2 deviation)
+
+Plan put the recurring connect-store CTA inside the OrgSwitcher dropdown ("+ Yeni Mağaza" item). In practice the dashboard shell already had a `+ Mağaza bağla` button in the ContextRail's quick-actions row (initial layout design, `onAddStore` prop), with no handler wired. The shipped version wires that button via a new `DashboardStoreLauncher` client wrapper that owns the modal state — more discoverable than a dropdown item.
+
+### 19.4 UI primitives grown during implementation (§12.3 extension)
+
+Three additions to the component inventory not listed in the approved cascade table:
+
+- `components/ui/input.tsx` — gained `reveal?: { show, hide }` prop (§19.2).
+- `components/patterns/empty-state.tsx` — gained `footer?: React.ReactNode` slot so `StoresEmptyState` can render a "supported integrations" pill row under the CTA.
+- `components/patterns/marketplace-logo.tsx` (NEW) — cross-feature pattern loading vendor SVGs from `public/brands/`. Used by `PlatformCard`, `StoresPanel`, and the empty-state footer. Size scale: sm/md/lg/xl/2xl mapping to `h-5`/`h-7`/`h-10`/`h-14`/`h-20`.
+
+All three are backward-compatible extensions (new optional props / new file); no consumer was refactored.
+
+### 19.5 i18n namespace: `stores.empty.*` vs `stores.connect.*` (§13 clarification)
+
+Plan listed a separate `stores.empty.{title, subtitle, cta}` namespace. In practice the empty state reuses `stores.connect.title` + `stores.connect.subtitle` + `stores.connect.actions.submit` since the copy was identical. A new `stores.panel.integrations` key was added for the supported-integrations footer. Net result: one fewer namespace than planned, same user-facing strings.
+
+### 19.6 Generic 4xx mapping (§16 O1 resolution)
+
+Open question O1 recommended: non-mapped 4xx from Trendyol should surface as `MarketplaceUnreachable`. Shipped: non-mapped 4xx surfaces as `MarketplaceAuthError` instead. Rationale: a 4xx on a valid endpoint is overwhelmingly a credentials issue (expired API key, supplierId typo) — `AuthError` is the closer UX match 9/10 times. If Trendyol ever changes the probe path and returns 404, the mis-categorisation would show as "credentials rejected" which logs surface the same way. Acceptable trade-off; revisit if vendor path churn becomes a real pattern.
+
+### 19.7 Baseline migration deferral (§5.3 side-note)
+
+Plan implied `prisma migrate dev` would produce a migration file for the schema changes. Actual flow used `prisma db push --accept-data-loss` because the repo has never produced a migration file (`migrations/` is `.gitkeep`-only). Since the project is pre-launch, this is consistent with the existing convention. Launch-time baseline migration tracked in `docs/plans/2026-04-21-organization-milestone-2-backlog.md` §8.
