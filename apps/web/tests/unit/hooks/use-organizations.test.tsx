@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode } from 'react';
 
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
+import { ApiError } from '@/lib/api-error';
 import { createTestQueryClient } from '../../helpers/render';
 import { server, http, HttpResponse } from '../../helpers/msw';
 
@@ -47,5 +48,27 @@ describe('useOrganizations', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error).toBeInstanceOf(Error);
     expect(result.current.error?.message).toMatch(/500|INTERNAL_ERROR/);
+  });
+
+  it('throws an ApiError with the backend code on 500', async () => {
+    server.use(
+      http.get('http://localhost:3001/v1/organizations', () =>
+        HttpResponse.json(
+          {
+            type: 'https://api.pazarsync.com/errors/internal',
+            title: 'Internal server error',
+            status: 500,
+            code: 'INTERNAL_ERROR',
+            detail: 'db gone',
+          },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useOrganizations(), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeInstanceOf(ApiError);
+    expect((result.current.error as ApiError).code).toBe('INTERNAL_ERROR');
   });
 });

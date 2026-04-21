@@ -4,6 +4,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { type ReactNode } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 
+import { ApiError } from '@/lib/api-error';
+
 import { useCreateOrganization } from '@/features/organization/hooks/use-create-organization';
 import trMessages from '../../../messages/tr.json';
 
@@ -74,10 +76,11 @@ describe('useCreateOrganization', () => {
           {
             type: 'https://api.pazarsync.com/errors/validation',
             title: 'Validation Error',
-            status: 400,
+            status: 422,
             code: 'VALIDATION_ERROR',
+            detail: 'Validation failed',
           },
-          { status: 400 },
+          { status: 422 },
         );
       }),
     );
@@ -86,6 +89,7 @@ describe('useCreateOrganization', () => {
     result.current.mutate({ name: 'A' });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.error).toBeInstanceOf(Error);
+    expect(result.current.error).toBeInstanceOf(ApiError);
+    expect((result.current.error as ApiError).code).toBe('VALIDATION_ERROR');
   });
 });
