@@ -24,6 +24,17 @@ enum Platform {
   HEPSIBURADA
 }
 
+enum StoreEnvironment {
+  PRODUCTION
+  SANDBOX
+}
+
+enum StoreStatus {
+  ACTIVE
+  CONNECTION_ERROR
+  DISABLED
+}
+
 enum OrderStatus {
   PENDING
   PROCESSING
@@ -121,15 +132,19 @@ model OrganizationMember {
 }
 
 model Store {
-  id             String    @id @default(uuid()) @db.Uuid
-  organizationId String    @map("organization_id") @db.Uuid
-  name           String
-  platform       Platform
-  credentials    Json
-  isActive       Boolean   @default(true) @map("is_active")
-  lastSyncAt     DateTime? @map("last_sync_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  id                String           @id @default(uuid()) @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  name              String
+  platform          Platform
+  environment       StoreEnvironment @default(PRODUCTION)
+  externalAccountId String           @map("external_account_id")
+  credentials       Json
+  status            StoreStatus      @default(ACTIVE)
+  isActive          Boolean          @default(true) @map("is_active")
+  lastConnectedAt   DateTime?        @map("last_connected_at")
+  lastSyncAt        DateTime?        @map("last_sync_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   products     Product[]
@@ -137,6 +152,7 @@ model Store {
   settlements  Settlement[]
   syncLogs     SyncLog[]
 
+  @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
   @@map("stores")
 }

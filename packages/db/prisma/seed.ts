@@ -188,6 +188,7 @@ async function seedStoresProductsOrders(orgs: {
       organizationId: orgs.akyildiz.id,
       name: 'Akyıldız Trendyol',
       platform: 'TRENDYOL',
+      externalAccountId: '99999',
       credentials: encryptCredentials({
         apiKey: 'seed-trendyol-api-key',
         apiSecret: 'seed-trendyol-api-secret',
@@ -201,6 +202,7 @@ async function seedStoresProductsOrders(orgs: {
       organizationId: orgs.yildirim.id,
       name: 'Yıldırım Hepsiburada',
       platform: 'HEPSIBURADA',
+      externalAccountId: 'seed-merchant-1',
       credentials: encryptCredentials({
         username: 'seed-hb-username',
         password: 'seed-hb-password',
