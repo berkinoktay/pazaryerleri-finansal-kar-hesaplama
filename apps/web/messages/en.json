@@ -40,6 +40,13 @@
     "platformStatus": {
       "comingSoon": "Coming soon"
     },
+    "environments": {
+      "PRODUCTION": "Production",
+      "SANDBOX": "Sandbox"
+    },
+    "panel": {
+      "title": "Connected stores"
+    },
     "connect": {
       "title": "Connect your store",
       "subtitle": "Connect your seller account so we can compute orders and profit.",
@@ -68,6 +75,10 @@
         "submit": "Connect",
         "submitting": "Verifying...",
         "skip": "Skip for now"
+      },
+      "toggleSecret": {
+        "show": "Show",
+        "hide": "Hide"
       },
       "errors": {
         "INVALID_NAME_TOO_SHORT": "Store name must be at least 2 characters.",

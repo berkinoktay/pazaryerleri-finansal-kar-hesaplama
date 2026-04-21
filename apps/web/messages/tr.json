@@ -40,6 +40,13 @@
     "platformStatus": {
       "comingSoon": "Yakında"
     },
+    "environments": {
+      "PRODUCTION": "Canlı",
+      "SANDBOX": "Sandbox"
+    },
+    "panel": {
+      "title": "Bağlı mağazalar"
+    },
     "connect": {
       "title": "Mağazanı bağla",
       "subtitle": "Siparişleri ve karı hesaplamamız için satıcı hesabına bağlan.",
@@ -68,6 +75,10 @@
         "submit": "Bağla",
         "submitting": "Doğrulanıyor...",
         "skip": "Şimdilik geç"
+      },
+      "toggleSecret": {
+        "show": "Göster",
+        "hide": "Gizle"
       },
       "errors": {
         "INVALID_NAME_TOO_SHORT": "Mağaza adı en az 2 karakter olmalı.",

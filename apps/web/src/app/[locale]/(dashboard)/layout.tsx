@@ -1,8 +1,8 @@
 import * as React from 'react';
 
-import { AppShell } from '@/components/layout/app-shell';
 import { OrgSwitcher } from '@/features/organization/components/org-switcher';
 import type { Organization } from '@/features/organization/api/organizations.api';
+import { DashboardStoreLauncher } from '@/features/stores/components/dashboard-store-launcher';
 import { getServerApiClient } from '@/lib/api-client/server';
 import { resolveActiveOrgId } from '@/lib/active-org';
 
@@ -29,9 +29,12 @@ export default async function DashboardLayout({
 
   return (
     <div className="h-screen">
-      <AppShell orgSwitcher={<OrgSwitcher orgs={orgs} activeOrgId={activeOrgId} />}>
+      <DashboardStoreLauncher
+        orgSwitcher={<OrgSwitcher orgs={orgs} activeOrgId={activeOrgId} />}
+        activeOrgId={activeOrgId}
+      >
         {children}
-      </AppShell>
+      </DashboardStoreLauncher>
     </div>
   );
 }
