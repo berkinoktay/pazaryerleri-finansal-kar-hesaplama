@@ -190,6 +190,18 @@
     "active": "Aktif",
     "addStore": "Mağaza bağla"
   },
+  "storeSummary": {
+    "heading": "Mağaza özeti",
+    "commission": "Komisyon",
+    "activeProducts": "Aktif ürün",
+    "apiHealth": "API",
+    "lastSync": "Son sync",
+    "health": {
+      "healthy": "Sağlıklı",
+      "degraded": "Yavaş",
+      "down": "Çalışmıyor"
+    }
+  },
   "notificationBell": {
     "label": "Bildirimler",
     "empty": "Henüz bildirim yok",

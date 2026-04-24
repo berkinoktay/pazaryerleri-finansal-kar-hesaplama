@@ -190,6 +190,18 @@
     "active": "Active",
     "addStore": "Connect store"
   },
+  "storeSummary": {
+    "heading": "Store summary",
+    "commission": "Commission",
+    "activeProducts": "Active products",
+    "apiHealth": "API",
+    "lastSync": "Last sync",
+    "health": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "down": "Down"
+    }
+  },
   "notificationBell": {
     "label": "Notifications",
     "empty": "No notifications yet",
