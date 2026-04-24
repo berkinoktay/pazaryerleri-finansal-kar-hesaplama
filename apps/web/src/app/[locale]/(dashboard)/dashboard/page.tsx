@@ -1,3 +1,4 @@
+import type { components } from '@pazarsync/api-client';
 import { redirect } from 'next/navigation';
 
 import { NotificationBell } from '@/components/patterns/notification-bell';
@@ -9,6 +10,17 @@ import { ActiveOrganizationPanel } from '@/features/organization/components/acti
 import { StoresPanel } from '@/features/stores/components/stores-panel';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
+
+type Store = components['schemas']['Store'];
+
+const PLATFORM_LABEL: Record<Store['platform'], string> = {
+  TRENDYOL: 'Trendyol',
+  HEPSIBURADA: 'Hepsiburada',
+};
+
+function formatPlatformLabel(platform: Store['platform']): string {
+  return PLATFORM_LABEL[platform] ?? platform;
+}
 
 export const metadata = {
   title: 'Gösterge paneli',
@@ -52,19 +64,29 @@ export default async function DashboardPage({
   // cookie/endpoint. For now, fetch the org's stores server-side and
   // pick the first one as the dashboard scope. Future iteration will
   // read a cookie set by the StoreSwitcher.
-  let activeStoreId = '';
+  let activeStore: Pick<Store, 'id' | 'name' | 'platform'> | undefined;
   if (activeOrg) {
     const storesResult = await api.GET('/v1/organizations/{orgId}/stores', {
       params: { path: { orgId: activeOrg.id } },
     });
-    activeStoreId = storesResult.data?.data?.[0]?.id ?? '';
+    const first = storesResult.data?.data?.[0];
+    if (first) {
+      activeStore = { id: first.id, name: first.name, platform: first.platform };
+    }
   }
+  const activeStoreId = activeStore?.id ?? '';
 
   return (
     <>
       <PageHeader
         title="Gösterge paneli"
-        intent={activeOrg ? `${activeOrg.name} · Trendyol TR` : undefined}
+        intent={
+          activeOrg
+            ? activeStore
+              ? `${activeOrg.name} · ${formatPlatformLabel(activeStore.platform)} ${activeStore.name}`
+              : activeOrg.name
+            : undefined
+        }
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
         actions={
           <NotificationBell
