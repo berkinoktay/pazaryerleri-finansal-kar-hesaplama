@@ -202,6 +202,14 @@
       "down": "Down"
     }
   },
+  "periodPresets": {
+    "heading": "Period",
+    "last-30d": "Last 30 days",
+    "this-month": "This month",
+    "last-7d": "Last 7 days",
+    "this-quarter": "This quarter",
+    "custom": "Custom…"
+  },
   "notificationBell": {
     "label": "Notifications",
     "empty": "No notifications yet",

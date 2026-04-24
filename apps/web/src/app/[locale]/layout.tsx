@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { hasLocale, NextIntlClientProvider } from 'next-intl';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
+import { NuqsAdapter } from 'nuqs/adapters/next/app';
 
 import { NetworkStatusBanner } from '@/components/common/network-status-banner';
 import { SessionExpiredHandler } from '@/features/auth/components/session-expired-handler';
@@ -47,9 +48,11 @@ export default async function LocaleLayout({
   return (
     <NextIntlClientProvider>
       <QueryProvider>
-        <SessionExpiredHandler />
-        <NetworkStatusBanner />
-        {children}
+        <NuqsAdapter>
+          <SessionExpiredHandler />
+          <NetworkStatusBanner />
+          {children}
+        </NuqsAdapter>
       </QueryProvider>
     </NextIntlClientProvider>
   );
