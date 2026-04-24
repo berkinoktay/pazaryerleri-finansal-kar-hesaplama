@@ -1,20 +1,34 @@
 import type { Metadata } from 'next';
+import { hasLocale } from 'next-intl';
+import { getTranslations } from 'next-intl/server';
 
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
+import { routing } from '@/i18n/routing';
 
-export const metadata: Metadata = {
-  title: 'Bildirimler',
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'notificationsPage' });
+  return { title: t('title') };
+}
 
-export default function NotificationsPage(): React.ReactElement {
+export default async function NotificationsPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<React.ReactElement> {
+  const { locale } = await params;
+  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'notificationsPage' });
   return (
     <>
-      <PageHeader title="Bildirimler" intent="Sistemden gelen tüm bildirimlerin geçmişi." />
-      <EmptyState
-        title="Bildirim merkezi yakında"
-        description="Senkronizasyon olayları, yeni sipariş bildirimleri ve uyarı geçmişi burada listelenecek."
-      />
+      <PageHeader title={t('title')} intent={t('intent')} />
+      <EmptyState title={t('empty.title')} description={t('empty.description')} />
     </>
   );
 }

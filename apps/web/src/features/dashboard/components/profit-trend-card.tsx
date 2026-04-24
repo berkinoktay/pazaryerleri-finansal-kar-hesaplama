@@ -17,18 +17,15 @@ export interface ProfitTrendCardProps {
   points: readonly DashboardTrendPoint[] | undefined;
 }
 
-const CHART_CONFIG = {
-  profit: { label: 'Kâr', color: 'var(--color-success)' },
-} satisfies ChartConfig;
-
 /**
  * Area line chart of net profit over the selected period. Stroke uses the
  * success token; the fill is a vertical gradient à la Stripe / Vercel so
  * the curve carries weight without dominating the card.
  *
  * `--color-profit` is injected at runtime by `ChartContainer` from the
- * `CHART_CONFIG.profit.color` mapping — Recharts children resolve it via
- * `var(--color-profit)` without hardcoding hex values.
+ * `chartConfig.profit.color` mapping — Recharts children resolve it via
+ * `var(--color-profit)` without hardcoding hex values. The config is
+ * built inside the component so its label can flow through `t()`.
  *
  * Date labels go through next-intl's `'date'` preset (dateStyle: 'short')
  * so the axis stays compact (`21.04.2026`) without including time.
@@ -36,6 +33,10 @@ const CHART_CONFIG = {
 export function ProfitTrendCard({ points }: ProfitTrendCardProps): React.ReactElement {
   const t = useTranslations();
   const formatter = useFormatter();
+
+  const chartConfig = {
+    profit: { label: t('dashboard.kpi.netProfit'), color: 'var(--color-success)' },
+  } satisfies ChartConfig;
 
   const data = (points ?? []).map((point) => ({
     date: point.date,
@@ -50,7 +51,7 @@ export function ProfitTrendCard({ points }: ProfitTrendCardProps): React.ReactEl
           {t('dashboard.section.profitTrend')}
         </h2>
       </header>
-      <ChartContainer config={CHART_CONFIG} className="aspect-video w-full">
+      <ChartContainer config={chartConfig} className="aspect-video w-full">
         <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="profit-trend-fill" x1="0" x2="0" y1="0" y2="1">

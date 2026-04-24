@@ -249,6 +249,13 @@
       "count": "Sipariş",
       "avgValue": "Ortalama satış",
       "avgProfit": "Ortalama kâr"
+    },
+    "kpi": {
+      "revenue": "Ciro",
+      "costedRevenue": "Maliyetli ciro",
+      "netProfit": "Net kâr",
+      "profitMargin": "Kâr/Satış",
+      "returns": "İade"
     }
   },
   "dashboardRail": {
@@ -504,5 +511,16 @@
   "mobileNavSheet": {
     "title": "Menü",
     "close": "Kapat"
+  },
+  "dashboardPage": {
+    "title": "Gösterge paneli"
+  },
+  "notificationsPage": {
+    "title": "Bildirimler",
+    "intent": "Sistemden gelen tüm bildirimlerin geçmişi.",
+    "empty": {
+      "title": "Bildirim merkezi yakında",
+      "description": "Senkronizasyon olayları, yeni sipariş bildirimleri ve uyarı geçmişi burada listelenecek."
+    }
   }
 }

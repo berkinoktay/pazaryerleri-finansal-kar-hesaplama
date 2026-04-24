@@ -88,6 +88,15 @@
   --color-chart-7: var(--chart-7);
   --color-chart-8: var(--chart-8);
 
+  --color-funnel-step-1: var(--funnel-step-1);
+  --color-funnel-step-2: var(--funnel-step-2);
+  --color-funnel-step-3: var(--funnel-step-3);
+  --color-funnel-step-4: var(--funnel-step-4);
+  --color-funnel-step-5: var(--funnel-step-5);
+
+  --color-warning-border: var(--warning-border);
+  --color-destructive-border: var(--destructive-border);
+
   /* Typography scale */
   --text-2xs: var(--text-2xs);
   --text-2xs--line-height: var(--text-2xs--line-height);

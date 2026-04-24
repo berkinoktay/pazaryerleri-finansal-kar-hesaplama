@@ -249,6 +249,13 @@
       "count": "Orders",
       "avgValue": "Avg order value",
       "avgProfit": "Avg profit"
+    },
+    "kpi": {
+      "revenue": "Revenue",
+      "costedRevenue": "Costed revenue",
+      "netProfit": "Net profit",
+      "profitMargin": "Profit margin",
+      "returns": "Returns"
     }
   },
   "dashboardRail": {
@@ -504,5 +511,16 @@
   "mobileNavSheet": {
     "title": "Menu",
     "close": "Close"
+  },
+  "dashboardPage": {
+    "title": "Dashboard"
+  },
+  "notificationsPage": {
+    "title": "Notifications",
+    "intent": "History of all system notifications.",
+    "empty": {
+      "title": "Notification center coming soon",
+      "description": "Sync events, new order notifications, and alert history will appear here."
+    }
   }
 }

@@ -20,15 +20,10 @@ const STEP_LABEL_KEY = {
   net: 'dashboard.funnel.net',
 } as const satisfies Record<FunnelStep['key'], string>;
 
-// Color scale: saturated success at the top, fading to muted as value drains.
-// Single-purpose visual gradient; doesn't fit a semantic token slot, kept inline.
-const FILL = [
-  'oklch(70% 0.18 145)',
-  'oklch(75% 0.16 145)',
-  'oklch(80% 0.13 145)',
-  'oklch(85% 0.10 145)',
-  'oklch(90% 0.06 145)',
-] as const;
+// Funnel ramp tokens are defined in tokens/colors.css; light mode fades AWAY
+// from saturation as value drains, dark mode darkens. Steps beyond 5 reuse
+// step-5 (the deepest "drained" tone).
+const FUNNEL_STEP_COUNT = 5;
 
 /**
  * 5-step funnel from gross revenue to net profit, drawn with CSS clip-path
@@ -79,7 +74,7 @@ export function NetProfitFunnelCard({ steps }: NetProfitFunnelCardProps): React.
                   // runtime-dynamic: trapezoid geometry derived from per-step value
                   clipPath: trapezoid,
                   WebkitClipPath: trapezoid,
-                  background: FILL[i] ?? FILL[FILL.length - 1],
+                  background: `var(--color-funnel-step-${Math.min(i + 1, FUNNEL_STEP_COUNT)})`,
                 }}
                 aria-hidden="true"
               />

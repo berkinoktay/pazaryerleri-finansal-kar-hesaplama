@@ -17,13 +17,13 @@ export interface RailWarningCardProps {
 const TONE = {
   warning: {
     bg: 'bg-warning-surface',
-    border: 'border-warning/40',
+    border: 'border-warning-border',
     title: 'text-warning',
     body: 'text-warning',
   },
   destructive: {
     bg: 'bg-destructive-surface',
-    border: 'border-destructive/40',
+    border: 'border-destructive-border',
     title: 'text-destructive',
     body: 'text-destructive',
   },

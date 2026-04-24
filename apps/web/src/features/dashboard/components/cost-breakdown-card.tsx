@@ -28,16 +28,16 @@ const CATEGORY_LABEL_KEY = {
   other: 'dashboard.cost.other',
 } as const satisfies Record<CategoryKey, string>;
 
-const CATEGORY_COLOR = {
-  product: 'var(--color-chart-1)',
-  commission: 'var(--color-chart-2)',
-  shipping: 'var(--color-chart-3)',
-  service: 'var(--color-chart-4)',
-  intl: 'var(--color-chart-5)',
-  withholding: 'var(--color-chart-6)',
-  vat: 'var(--color-chart-7)',
-  other: 'var(--color-chart-8)',
-} as const satisfies Record<CategoryKey, string>;
+const CATEGORY_KEYS = [
+  'product',
+  'commission',
+  'shipping',
+  'service',
+  'intl',
+  'withholding',
+  'vat',
+  'other',
+] as const satisfies readonly CategoryKey[];
 
 /**
  * Donut chart + 8-category legend for the dashboard's "maliyet dağılımı"
@@ -62,11 +62,18 @@ export function CostBreakdownCard({ entries }: CostBreakdownCardProps): React.Re
     }));
 
   const chartConfig = Object.fromEntries(
-    data.map((entry) => [
-      entry.key,
-      { label: t(CATEGORY_LABEL_KEY[entry.key]), color: CATEGORY_COLOR[entry.key] },
+    CATEGORY_KEYS.map((key, i) => [
+      key,
+      { label: t(CATEGORY_LABEL_KEY[key]), color: `var(--color-chart-${i + 1})` },
     ]),
   ) satisfies ChartConfig;
+
+  // Hoist --color-<key> CSS vars onto the wrapping flex container so the
+  // legend grid (sibling of ChartContainer) can resolve `var(--color-product)`
+  // etc. without re-deriving the palette outside chart context.
+  const chartCssVars = Object.fromEntries(
+    CATEGORY_KEYS.map((key, i) => [`--color-${key}`, `var(--color-chart-${i + 1})`]),
+  ) as React.CSSProperties;
 
   const total = data.reduce((sum, entry) => sum.add(entry.amount.abs()), new Decimal(0));
 
@@ -86,7 +93,12 @@ export function CostBreakdownCard({ entries }: CostBreakdownCardProps): React.Re
         </span>
       </header>
 
-      <div className="gap-lg flex flex-col items-center md:flex-row md:items-center">
+      <div
+        className="gap-lg flex flex-col items-center md:flex-row md:items-center"
+        // runtime-dynamic: hoist --color-<key> CSS vars so legend (outside
+        // ChartContainer) resolves the same palette as the chart slices
+        style={chartCssVars}
+      >
         <ChartContainer
           config={chartConfig}
           className="max-w-input-narrow md:w-input-narrow aspect-square w-full shrink-0"
@@ -101,7 +113,7 @@ export function CostBreakdownCard({ entries }: CostBreakdownCardProps): React.Re
               strokeWidth={0}
             >
               {chartData.map((slice) => (
-                <Cell key={slice.key} fill={CATEGORY_COLOR[slice.key]} />
+                <Cell key={slice.key} fill={`var(--color-${slice.key})`} />
               ))}
             </Pie>
             <Tooltip
@@ -120,7 +132,7 @@ export function CostBreakdownCard({ entries }: CostBreakdownCardProps): React.Re
                 <span
                   className="size-2 shrink-0 rounded-sm"
                   // runtime-dynamic: legend swatch color varies by category key
-                  style={{ backgroundColor: CATEGORY_COLOR[entry.key] }}
+                  style={{ backgroundColor: `var(--color-${entry.key})` }}
                 />
                 {t(CATEGORY_LABEL_KEY[entry.key])}
               </span>
@@ -160,7 +172,7 @@ function CostBreakdownTooltip({
       <span
         className="size-2 shrink-0 rounded-sm"
         // runtime-dynamic: tooltip swatch color varies by category key
-        style={{ backgroundColor: CATEGORY_COLOR[key] }}
+        style={{ backgroundColor: `var(--color-${key})` }}
       />
       <span className="text-muted-foreground">{t(CATEGORY_LABEL_KEY[key])}</span>
       <span className="text-foreground ml-auto font-semibold tabular-nums">

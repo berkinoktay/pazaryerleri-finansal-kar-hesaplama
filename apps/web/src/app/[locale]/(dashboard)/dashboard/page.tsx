@@ -1,4 +1,7 @@
 import type { components } from '@pazarsync/api-client';
+import type { Metadata } from 'next';
+import { hasLocale } from 'next-intl';
+import { getTranslations } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 
 import { NotificationBell } from '@/components/patterns/notification-bell';
@@ -8,6 +11,7 @@ import { DashboardBody } from '@/features/dashboard/components/dashboard-body';
 import type { Organization } from '@/features/organization/api/organizations.api';
 import { ActiveOrganizationPanel } from '@/features/organization/components/active-organization-panel';
 import { StoresPanel } from '@/features/stores/components/stores-panel';
+import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
 
@@ -22,9 +26,16 @@ function formatPlatformLabel(platform: Store['platform']): string {
   return PLATFORM_LABEL[platform] ?? platform;
 }
 
-export const metadata = {
-  title: 'Gösterge paneli',
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'dashboardPage' });
+  return { title: t('title') };
+}
 
 // Mock value hoisted out of render so it doesn't re-construct on every pass
 // and so React Compiler doesn't flag `new Date(...)` as an impure call in
@@ -32,12 +43,27 @@ export const metadata = {
 // backend ships that endpoint.
 const MOCK_LAST_SYNCED = new Date('2026-04-22T00:13:00Z');
 
+// MOCK ENTRIES — replaced by useNotifications() when the feed endpoint ships.
+// Inline TR is acceptable for mock fixtures; production strings come from
+// the backend payload which is already localised.
+const MOCK_NOTIFICATIONS = [
+  {
+    id: '1',
+    icon: 'success' as const,
+    title: 'Sipariş senkronizasyonu tamam',
+    timestamp: '3 dk',
+  },
+  { id: '2', icon: 'warning' as const, title: '2 iade incelemeyi bekliyor', timestamp: '15 dk' },
+];
+
 export default async function DashboardPage({
   params,
 }: {
   params: Promise<{ locale: string }>;
 }): Promise<React.ReactElement> {
   const { locale } = await params;
+  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'dashboardPage' });
   // Server-side onboarding guard: a freshly-signed-up user with zero
   // orgs lands on /dashboard by default (see `/auth/verified`). Send
   // them to the create-org flow before they see an empty shell.
@@ -79,7 +105,7 @@ export default async function DashboardPage({
   return (
     <>
       <PageHeader
-        title="Gösterge paneli"
+        title={t('title')}
         intent={
           activeOrg
             ? activeStore
@@ -88,20 +114,7 @@ export default async function DashboardPage({
             : undefined
         }
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
-        actions={
-          <NotificationBell
-            entries={[
-              {
-                id: '1',
-                icon: 'success',
-                title: 'Sipariş senkronizasyonu tamam',
-                timestamp: '3 dk',
-              },
-              { id: '2', icon: 'warning', title: '2 iade incelemeyi bekliyor', timestamp: '15 dk' },
-            ]}
-            unreadCount={2}
-          />
-        }
+        actions={<NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />}
       />
       {activeOrg ? (
         <>

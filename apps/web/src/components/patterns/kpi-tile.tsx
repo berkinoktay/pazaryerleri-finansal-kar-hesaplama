@@ -1,4 +1,7 @@
+'use client';
+
 import Decimal from 'decimal.js';
+import { useFormatter } from 'next-intl';
 
 import { Currency } from '@/components/patterns/currency';
 import { TrendDelta } from '@/components/patterns/trend-delta';
@@ -9,7 +12,8 @@ export interface KpiTileProps extends React.HTMLAttributes<HTMLDivElement> {
   label: string;
   /**
    * The primary value. Currency type renders ₺ via the shared formatter;
-   * count type renders an integer with tr-TR grouping.
+   * count type renders an integer with locale-aware grouping (resolved via
+   * next-intl from the active NextIntlClientProvider locale).
    */
   value:
     | { kind: 'currency'; amount: Decimal | string | number }
@@ -57,6 +61,7 @@ export function KpiTile({
   className,
   ...props
 }: KpiTileProps): React.ReactElement {
+  const formatter = useFormatter();
   const hasSparkline = sparkline !== undefined && sparkline.length > 1;
   return (
     <Card
@@ -84,7 +89,7 @@ export function KpiTile({
               data-tabular="true"
               className="text-foreground text-4xl font-semibold tracking-tight tabular-nums"
             >
-              {new Intl.NumberFormat('tr-TR').format(value.amount)}
+              {formatter.number(value.amount, 'integer')}
             </span>
           )}
           {delta ? <TrendDelta value={delta.percent} goodDirection={delta.goodDirection} /> : null}

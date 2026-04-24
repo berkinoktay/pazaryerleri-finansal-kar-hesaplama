@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { parseAsStringEnum, useQueryState } from 'nuqs';
 
@@ -35,6 +36,7 @@ export interface DashboardBodyProps {
  *   percentage and intentionally has no sparkline.
  */
 export function DashboardBody({ orgId, storeId }: DashboardBodyProps): React.ReactElement {
+  const t = useTranslations();
   const [period] = useQueryState(
     'period',
     parseAsStringEnum<PeriodKey>(PERIOD_KEYS).withDefault('last-30d'),
@@ -48,27 +50,27 @@ export function DashboardBody({ orgId, storeId }: DashboardBodyProps): React.Rea
     <>
       <StatGroup>
         <KpiTile
-          label="Ciro"
+          label={t('dashboard.kpi.revenue')}
           value={{ kind: 'currency', amount: data?.kpis.revenue ?? '0' }}
           delta={data ? { percent: data.kpis.revenueDelta, goodDirection: 'up' } : undefined}
           sparkline={trendNorm}
           sparklineTone="primary"
         />
         <KpiTile
-          label="Maliyetli ciro"
+          label={t('dashboard.kpi.costedRevenue')}
           value={{ kind: 'currency', amount: data?.kpis.costedRevenue ?? '0' }}
           delta={data ? { percent: data.kpis.costedRevenueDelta, goodDirection: 'up' } : undefined}
           sparkline={trendNorm}
         />
         <KpiTile
-          label="Net kâr"
+          label={t('dashboard.kpi.netProfit')}
           value={{ kind: 'currency', amount: data?.kpis.netProfit ?? '0' }}
           delta={data ? { percent: data.kpis.netProfitDelta, goodDirection: 'up' } : undefined}
           sparkline={trendNorm}
           sparklineTone="success"
         />
         <KpiTile
-          label="Kâr/Satış"
+          label={t('dashboard.kpi.profitMargin')}
           value={{
             kind: 'count',
             amount: Math.round((data?.kpis.profitMarginPercent ?? 0) * 10) / 10,
@@ -78,7 +80,7 @@ export function DashboardBody({ orgId, storeId }: DashboardBodyProps): React.Rea
           }
         />
         <KpiTile
-          label="İade"
+          label={t('dashboard.kpi.returns')}
           value={{ kind: 'count', amount: data?.kpis.returnCount ?? 0 }}
           delta={data ? { percent: data.kpis.returnDelta, goodDirection: 'down' } : undefined}
           sparkline={trendNorm}
