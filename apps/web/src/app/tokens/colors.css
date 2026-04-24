@@ -81,6 +81,8 @@
   --chart-4: oklch(65% 0.15 75);
   --chart-5: oklch(58% 0.17 27);
   --chart-6: oklch(52% 0.13 310);
+  --chart-7: oklch(58% 0.12 330);
+  --chart-8: oklch(55% 0.06 260);
 }
 
 .dark {
@@ -137,4 +139,6 @@
   --chart-4: oklch(76% 0.14 75);
   --chart-5: oklch(70% 0.16 27);
   --chart-6: oklch(66% 0.12 310);
+  --chart-7: oklch(72% 0.11 330);
+  --chart-8: oklch(66% 0.05 260);
 }

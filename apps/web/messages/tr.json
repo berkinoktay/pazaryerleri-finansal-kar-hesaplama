@@ -210,6 +210,22 @@
     "this-quarter": "Bu çeyrek",
     "custom": "Özel…"
   },
+  "dashboard": {
+    "section": {
+      "costBreakdown": "Maliyet dağılımı"
+    },
+    "cost": {
+      "total": "Toplam",
+      "product": "Ürün maliyeti",
+      "commission": "Komisyon",
+      "shipping": "Kargo",
+      "service": "Hizmet bedeli",
+      "intl": "Uluslararası",
+      "withholding": "Stopaj",
+      "vat": "KDV",
+      "other": "Diğer"
+    }
+  },
   "dashboardRail": {
     "warning": {
       "missingCost": {

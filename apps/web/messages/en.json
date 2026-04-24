@@ -210,6 +210,22 @@
     "this-quarter": "This quarter",
     "custom": "Custom…"
   },
+  "dashboard": {
+    "section": {
+      "costBreakdown": "Cost breakdown"
+    },
+    "cost": {
+      "total": "Total",
+      "product": "Product cost",
+      "commission": "Commission",
+      "shipping": "Shipping",
+      "service": "Service fee",
+      "intl": "International",
+      "withholding": "Withholding tax",
+      "vat": "VAT",
+      "other": "Other"
+    }
+  },
   "dashboardRail": {
     "warning": {
       "missingCost": {
