@@ -7,10 +7,11 @@ import { getServerApiClient } from '@/lib/api-client/server';
 import { resolveActiveOrgId } from '@/lib/active-org';
 
 /**
- * Dashboard shell — dual-rail AppShell wrapped around every
- * authenticated route. Milestone #1 wires the organisation switcher
- * to real data; stores + activity remain placeholder until milestone
- * #2 ships store-connect.
+ * Dashboard shell — three-column AppShell (IconRail + ContextRail +
+ * Main, with MobileTopBar + Sheet replacing the rails below md)
+ * wrapped around every authenticated route. Milestone #1 wires the
+ * organisation switcher to real data; stores + activity remain
+ * placeholder until milestone #2 ships store-connect.
  *
  * This layout is a Server Component because it does server-side data
  * fetching (orgs + cookie-resolved activeOrgId) and embeds the

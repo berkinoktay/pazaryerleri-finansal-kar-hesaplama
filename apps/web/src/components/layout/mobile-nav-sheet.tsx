@@ -23,7 +23,7 @@ export interface MobileNavSheetProps {
  * Slide-over drawer triggered by the MobileTopBar hamburger. Hosts the
  * primary nav items, the store switcher, and the page-specific sub-nav
  * (mirroring the desktop ContextRail) so mobile users have parity with
- * the dual-rail shell.
+ * the three-column shell.
  */
 export function MobileNavSheet({
   open,
