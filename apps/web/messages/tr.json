@@ -210,6 +210,15 @@
     "this-quarter": "Bu çeyrek",
     "custom": "Özel…"
   },
+  "dashboardRail": {
+    "warning": {
+      "missingCost": {
+        "title": "Eksik maliyet",
+        "description": "{count} ürün maliyet bekliyor",
+        "cta": "Tamamla"
+      }
+    }
+  },
   "notificationBell": {
     "label": "Bildirimler",
     "empty": "Henüz bildirim yok",

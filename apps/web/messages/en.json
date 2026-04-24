@@ -210,6 +210,15 @@
     "this-quarter": "This quarter",
     "custom": "Custom…"
   },
+  "dashboardRail": {
+    "warning": {
+      "missingCost": {
+        "title": "Missing cost",
+        "description": "{count} product(s) need cost data",
+        "cta": "Complete"
+      }
+    }
+  },
   "notificationBell": {
     "label": "Notifications",
     "empty": "No notifications yet",
