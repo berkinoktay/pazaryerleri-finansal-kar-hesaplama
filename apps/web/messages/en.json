@@ -212,7 +212,8 @@
   },
   "dashboard": {
     "section": {
-      "costBreakdown": "Cost breakdown"
+      "costBreakdown": "Cost breakdown",
+      "profitTrend": "Profit performance"
     },
     "cost": {
       "total": "Total",

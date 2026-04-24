@@ -212,7 +212,8 @@
   },
   "dashboard": {
     "section": {
-      "costBreakdown": "Maliyet dağılımı"
+      "costBreakdown": "Maliyet dağılımı",
+      "profitTrend": "Kâr performansı"
     },
     "cost": {
       "total": "Toplam",
