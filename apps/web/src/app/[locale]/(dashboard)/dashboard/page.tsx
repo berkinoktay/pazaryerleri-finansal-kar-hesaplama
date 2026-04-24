@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Decimal from 'decimal.js';
 
 import { KpiTile } from '@/components/patterns/kpi-tile';
+import { NotificationBell } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { SyncBadge } from '@/components/patterns/sync-badge';
@@ -57,6 +58,20 @@ export default async function DashboardPage({
         title="Gösterge paneli"
         intent="Seçili mağaza ve dönem için özet finansal durum. Detay sayfaları için sol context rail'i kullan."
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
+        actions={
+          <NotificationBell
+            entries={[
+              {
+                id: '1',
+                icon: 'success',
+                title: 'Sipariş senkronizasyonu tamam',
+                timestamp: '3 dk',
+              },
+              { id: '2', icon: 'warning', title: '2 iade incelemeyi bekliyor', timestamp: '15 dk' },
+            ]}
+            unreadCount={2}
+          />
+        }
       />
       {activeOrg ? (
         <ActiveOrganizationPanel org={activeOrg} locale={locale} viewerTimezone={viewerTimezone} />
