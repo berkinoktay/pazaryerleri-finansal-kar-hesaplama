@@ -496,5 +496,9 @@
     "title": "Page not found",
     "description": "The page you're looking for may have moved or been deleted.",
     "home": "Home"
+  },
+  "mobileTopBar": {
+    "openNav": "Open menu",
+    "home": "Home"
   }
 }

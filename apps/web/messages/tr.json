@@ -496,5 +496,9 @@
     "title": "Sayfa bulunamadı",
     "description": "Aradığın sayfa taşınmış veya silinmiş olabilir.",
     "home": "Ana sayfa"
+  },
+  "mobileTopBar": {
+    "openNav": "Menüyü aç",
+    "home": "Ana sayfa"
   }
 }
