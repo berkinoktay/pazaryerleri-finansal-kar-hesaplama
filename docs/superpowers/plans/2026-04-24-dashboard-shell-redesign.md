@@ -2255,6 +2255,9 @@ export function UserMenu(): React.ReactElement {
   };
 
   const initials = deriveInitials(user?.email ?? '?');
+  // TODO(post-MVP): wire up user_metadata.full_name once sign-up captures it.
+  const metadataFullName = user?.user_metadata?.full_name;
+  const fullName = typeof metadataFullName === 'string' ? metadataFullName : undefined;
 
   return (
     <Popover>
@@ -2273,10 +2276,8 @@ export function UserMenu(): React.ReactElement {
               <AvatarFallback>{initials}</AvatarFallback>
             </Avatar>
             <div className="flex min-w-0 flex-1 flex-col leading-tight">
-              {user.fullName ? (
-                <span className="text-foreground truncate text-sm font-semibold">
-                  {user.fullName}
-                </span>
+              {fullName ? (
+                <span className="text-foreground truncate text-sm font-semibold">{fullName}</span>
               ) : null}
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
             </div>

@@ -57,7 +57,9 @@ export function UserMenu(): React.ReactElement {
   };
 
   const initials = deriveInitials(user?.email ?? '?');
-  const fullName = (user as { fullName?: string } | undefined)?.fullName;
+  // TODO(post-MVP): wire up user_metadata.full_name once sign-up captures it.
+  const metadataFullName = user?.user_metadata?.full_name;
+  const fullName = typeof metadataFullName === 'string' ? metadataFullName : undefined;
 
   return (
     <Popover>
