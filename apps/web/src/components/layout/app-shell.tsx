@@ -4,6 +4,8 @@ import * as React from 'react';
 
 import { ContextRail } from '@/components/layout/context-rail';
 import { IconRail } from '@/components/layout/icon-rail';
+import { MobileNavSheet } from '@/components/layout/mobile-nav-sheet';
+import { MobileTopBar } from '@/components/layout/mobile-top-bar';
 import { type Store } from '@/components/layout/store-switcher';
 import { cn } from '@/lib/utils';
 
@@ -24,11 +26,12 @@ export interface AppShellProps {
 /**
  * Three-column workspace shell — IconRail (48px) · ContextRail (220px,
  * sheet under md) · Content (1fr). Each page owns its own header via
- * <PageHeader>; the shell does not provide an app-level top bar.
+ * <PageHeader>; the shell does not provide an app-level top bar above md.
  *
- * The notification bell lives in PageHeader actions, not in the shell.
- * On screens narrower than md, the IconRail and ContextRail are hidden
- * and replaced by a MobileNavSheet triggered from a top bar.
+ * Below md: IconRail + ContextRail are hidden and replaced by a
+ * MobileTopBar (hamburger trigger + brand + bell + user menu). Tapping
+ * the hamburger opens MobileNavSheet (a slide-over drawer that hosts
+ * the same nav + store switcher + sub-nav as the rails).
  */
 export function AppShell({
   orgSwitcher,
@@ -38,10 +41,23 @@ export function AppShell({
   onAddStore,
   children,
 }: AppShellProps): React.ReactElement {
-  return (
-    <div className="bg-background text-foreground grid h-full grid-cols-[auto_auto_1fr] grid-rows-1 overflow-hidden">
-      <IconRail />
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
+  return (
+    <div className="bg-background text-foreground flex h-full flex-col overflow-hidden md:grid md:grid-cols-[auto_auto_1fr] md:grid-rows-1">
+      <MobileTopBar onOpenNav={() => setMobileNavOpen(true)} />
+      <MobileNavSheet
+        open={mobileNavOpen}
+        onOpenChange={setMobileNavOpen}
+        stores={stores}
+        activeStoreId={activeStoreId ?? ''}
+        onSelectStore={onSelectStore ?? (() => undefined)}
+        onAddStore={onAddStore}
+      />
+
+      <div className="hidden md:block">
+        <IconRail />
+      </div>
       <div className="hidden md:block">
         <ContextRail
           orgSwitcher={orgSwitcher}
@@ -54,9 +70,11 @@ export function AppShell({
 
       <main
         id="main"
-        className={cn('relative min-w-0 overflow-y-auto', 'focus-visible:outline-none')}
+        className={cn('relative min-w-0 flex-1 overflow-y-auto', 'focus-visible:outline-none')}
       >
-        <div className="max-w-content-max gap-lg px-lg py-lg mx-auto flex flex-col">{children}</div>
+        <div className="max-w-content-max gap-lg px-sm py-sm md:px-lg md:py-lg mx-auto flex flex-col">
+          {children}
+        </div>
       </main>
     </div>
   );
