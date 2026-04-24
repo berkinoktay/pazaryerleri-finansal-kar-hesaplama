@@ -778,16 +778,20 @@ Create `apps/web/src/components/patterns/sub-nav-list.tsx`:
 ```tsx
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { type MessageKeys, type Messages, type NestedKeyOf, useTranslations } from 'next-intl';
 
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
+
+// AnyMessageKey is the typed message-key constraint defined in sub-nav-list.tsx;
+// nav-config consumers naturally satisfy it via 'as const' literals.
+type AnyMessageKey = MessageKeys<Messages, NestedKeyOf<Messages>>;
 
 export type SubNavTone = 'default' | 'warning' | 'info';
 
 export interface SubNavItem {
   key: string;
-  labelKey: string;
+  labelKey: AnyMessageKey;
   href: string;
   count?: number;
   tone?: SubNavTone;
@@ -795,7 +799,7 @@ export interface SubNavItem {
 
 export interface SubNavListProps {
   /** i18n key for the optional heading shown above the list. */
-  headingKey?: string;
+  headingKey?: AnyMessageKey;
   /** Current pathname + query, used to compute active state. */
   currentHref: string;
   items: readonly SubNavItem[];

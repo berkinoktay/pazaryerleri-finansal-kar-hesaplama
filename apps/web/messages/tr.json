@@ -124,15 +124,51 @@
         "title": "Katalog",
         "active": "Aktif ürünler",
         "draft": "Taslaklar",
+        "noCost": "Maliyetsiz",
+        "noDesi": "Desisiz",
+        "lowStock": "Düşük stok"
+      },
+      "meta": {
+        "title": "Ek bilgiler",
         "costs": "Maliyetler"
       }
     },
     "profitability": {
-      "views": {
-        "title": "Görünümler",
-        "period": "Dönem",
-        "byProduct": "Ürün bazında",
-        "byCampaign": "Kampanya bazında"
+      "reports": {
+        "title": "Raporlar",
+        "order": "Sipariş",
+        "product": "Ürün",
+        "category": "Kategori",
+        "return": "İade",
+        "campaign": "Reklam"
+      }
+    },
+    "reconciliation": {
+      "status": {
+        "title": "Mutabakat durumu",
+        "matched": "Eşleşen",
+        "pending": "Bekleyen",
+        "mismatch": "Uyumsuz"
+      }
+    },
+    "expenses": {
+      "category": {
+        "title": "Kategori",
+        "all": "Tümü",
+        "product": "Ürün maliyeti",
+        "ad": "Reklam",
+        "packaging": "Paketleme",
+        "other": "Diğer"
+      }
+    },
+    "settings": {
+      "sections": {
+        "title": "Bölümler",
+        "profile": "Profil",
+        "team": "Ekip",
+        "billing": "Fatura",
+        "stores": "Mağaza bağlantıları",
+        "notifications": "Bildirimler"
       }
     }
   },

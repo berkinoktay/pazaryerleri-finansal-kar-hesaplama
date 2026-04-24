@@ -124,15 +124,51 @@
         "title": "Catalog",
         "active": "Active products",
         "draft": "Drafts",
+        "noCost": "Missing cost",
+        "noDesi": "Missing desi",
+        "lowStock": "Low stock"
+      },
+      "meta": {
+        "title": "Extras",
         "costs": "Costs"
       }
     },
     "profitability": {
-      "views": {
-        "title": "Views",
-        "period": "By period",
-        "byProduct": "By product",
-        "byCampaign": "By campaign"
+      "reports": {
+        "title": "Reports",
+        "order": "Orders",
+        "product": "Products",
+        "category": "Categories",
+        "return": "Returns",
+        "campaign": "Campaigns"
+      }
+    },
+    "reconciliation": {
+      "status": {
+        "title": "Reconciliation status",
+        "matched": "Matched",
+        "pending": "Pending",
+        "mismatch": "Mismatch"
+      }
+    },
+    "expenses": {
+      "category": {
+        "title": "Category",
+        "all": "All",
+        "product": "Product cost",
+        "ad": "Ads",
+        "packaging": "Packaging",
+        "other": "Other"
+      }
+    },
+    "settings": {
+      "sections": {
+        "title": "Sections",
+        "profile": "Profile",
+        "team": "Team",
+        "billing": "Billing",
+        "stores": "Store connections",
+        "notifications": "Notifications"
       }
     }
   },
