@@ -477,7 +477,6 @@ export function NotificationBell({
                 'right-3xs top-3xs text-2xs absolute flex min-w-4 items-center justify-center rounded-full px-1 font-semibold',
                 'bg-warning text-warning-foreground',
               )}
-              aria-label={`${unreadCount} okunmamış`}
             >
               {display}
             </span>

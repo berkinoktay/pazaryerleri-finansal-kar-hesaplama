@@ -77,4 +77,30 @@ describe('NotificationBell', () => {
       '/notifications',
     );
   });
+
+  it('caps the visible entry list at 5 items', async () => {
+    const entries = Array.from({ length: 7 }, (_, i) => ({
+      id: String(i + 1),
+      icon: 'info' as const,
+      title: `Olay ${i + 1}`,
+      timestamp: `${i + 1} dk`,
+    }));
+    const { user } = renderBell({ entries, unreadCount: 7 });
+    await user.click(screen.getByRole('button', { name: 'Bildirimler' }));
+    expect(await screen.findByText('Olay 1')).toBeInTheDocument();
+    expect(screen.getByText('Olay 5')).toBeInTheDocument();
+    expect(screen.queryByText('Olay 6')).not.toBeInTheDocument();
+    expect(screen.queryByText('Olay 7')).not.toBeInTheDocument();
+  });
+
+  it('renders the source separator when entry has a source', async () => {
+    const { user } = renderBell({
+      entries: [
+        { id: '1', icon: 'success', title: 'Sync tamam', timestamp: '3 dk', source: 'Trendyol' },
+      ],
+      unreadCount: 1,
+    });
+    await user.click(screen.getByRole('button', { name: 'Bildirimler' }));
+    expect(await screen.findByText(/3 dk · Trendyol/)).toBeInTheDocument();
+  });
 });
