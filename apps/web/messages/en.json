@@ -106,7 +106,8 @@
     "profitability": "Profitability",
     "reconciliation": "Reconciliation",
     "expenses": "Expenses",
-    "settings": "Settings"
+    "settings": "Settings",
+    "notifications": "Notifications"
   },
   "navSections": {
     "orders": {
@@ -169,6 +170,16 @@
         "billing": "Billing",
         "stores": "Store connections",
         "notifications": "Notifications"
+      }
+    },
+    "notifications": {
+      "filter": {
+        "title": "Filter",
+        "all": "All",
+        "unread": "Unread",
+        "sync": "Sync",
+        "orders": "Orders",
+        "warning": "Warning"
       }
     }
   },
@@ -514,6 +525,28 @@
   },
   "dashboardPage": {
     "title": "Dashboard"
+  },
+  "placeholderPage": {
+    "comingSoon": "Coming soon",
+    "description": "This page is still under development. It will be active in upcoming updates."
+  },
+  "ordersPage": {
+    "title": "Orders"
+  },
+  "productsPage": {
+    "title": "Products"
+  },
+  "profitabilityPage": {
+    "title": "Profitability"
+  },
+  "reconciliationPage": {
+    "title": "Reconciliation"
+  },
+  "expensesPage": {
+    "title": "Expenses"
+  },
+  "settingsPage": {
+    "title": "Settings"
   },
   "notificationsPage": {
     "title": "Notifications",

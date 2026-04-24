@@ -7,7 +7,18 @@ import { IconRail } from '@/components/layout/icon-rail';
 import { MobileNavSheet } from '@/components/layout/mobile-nav-sheet';
 import { MobileTopBar } from '@/components/layout/mobile-top-bar';
 import { type Store } from '@/components/layout/store-switcher';
+import { NotificationBell, type NotificationEntry } from '@/components/patterns/notification-bell';
 import { cn } from '@/lib/utils';
+
+// MOCK ENTRIES — same fixture as dashboard/page.tsx; both consumers should
+// converge on a `useNotifications()` hook when the /v1/notifications endpoint
+// ships. AppShell carries this so the bell is reachable from EVERY page on
+// mobile, not just /dashboard. Acceptable layering smell for now.
+// TODO: replace MOCK with useNotifications() when the feed endpoint lands.
+const MOCK_TOP_BAR_NOTIFICATIONS: NotificationEntry[] = [
+  { id: '1', icon: 'success', title: 'Sipariş senkronizasyonu tamam', timestamp: '3 dk' },
+  { id: '2', icon: 'warning', title: '2 iade incelemeyi bekliyor', timestamp: '15 dk' },
+];
 
 export interface AppShellProps {
   /**
@@ -45,7 +56,17 @@ export function AppShell({
 
   return (
     <div className="bg-background text-foreground flex h-full flex-col overflow-hidden md:grid md:grid-cols-[auto_auto_1fr] md:grid-rows-1">
-      <MobileTopBar onOpenNav={() => setMobileNavOpen(true)} />
+      {/*
+        TEMPORARY DUPLICATION: PageHeader.actions also renders a NotificationBell
+        on every page. On mobile that bell scrolls with content, so we surface a
+        second bell here in the always-visible top bar. When useNotifications()
+        ships, refactor the PageHeader bell to `hidden md:flex` so only this one
+        shows on mobile.
+      */}
+      <MobileTopBar
+        onOpenNav={() => setMobileNavOpen(true)}
+        trailing={<NotificationBell entries={MOCK_TOP_BAR_NOTIFICATIONS} unreadCount={2} />}
+      />
       <MobileNavSheet
         open={mobileNavOpen}
         onOpenChange={setMobileNavOpen}

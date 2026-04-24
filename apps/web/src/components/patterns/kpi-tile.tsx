@@ -13,11 +13,13 @@ export interface KpiTileProps extends React.HTMLAttributes<HTMLDivElement> {
   /**
    * The primary value. Currency type renders ₺ via the shared formatter;
    * count type renders an integer with locale-aware grouping (resolved via
-   * next-intl from the active NextIntlClientProvider locale).
+   * next-intl from the active NextIntlClientProvider locale); percent type
+   * renders a 1-decimal value with the Turkish `%` PREFIX (e.g. `%16,9`).
    */
   value:
     | { kind: 'currency'; amount: Decimal | string | number }
-    | { kind: 'count'; amount: number };
+    | { kind: 'count'; amount: number }
+    | { kind: 'percent'; amount: number };
   /** Period-over-period percent delta to display as a chip next to the value. */
   delta?: { percent: number; goodDirection?: 'up' | 'down' };
   /** Subtext anchored under the value — comparison window, source, or caveat. */
@@ -84,6 +86,13 @@ export function KpiTile({
               emphasis
               className="text-foreground text-4xl font-semibold tracking-tight"
             />
+          ) : value.kind === 'percent' ? (
+            <span
+              data-tabular="true"
+              className="text-foreground text-4xl font-semibold tracking-tight tabular-nums"
+            >
+              %{formatter.number(value.amount, 'percent1')}
+            </span>
           ) : (
             <span
               data-tabular="true"

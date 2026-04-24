@@ -2,6 +2,7 @@ import {
   ChartLineData01Icon,
   DashboardSquare02Icon,
   InvoiceIcon,
+  Notification03Icon,
   PackageIcon,
   ReceiptDollarIcon,
   Settings02Icon,
@@ -26,6 +27,8 @@ export interface NavItemBase {
   labelKey: SubNavItem['labelKey'];
   href: string;
   icon: React.ComponentType<{ className?: string }>;
+  /** When true, IconRail skips this item (visible to ContextRail only). */
+  hideFromIconRail?: boolean;
 }
 
 export type NavItem =
@@ -259,6 +262,43 @@ export const NAV_ITEMS = [
             key: 'notifications',
             labelKey: 'navSections.settings.sections.notifications',
             href: '/settings/notifications',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'notifications',
+    labelKey: 'nav.notifications',
+    href: '/notifications',
+    icon: Notification03Icon,
+    hideFromIconRail: true,
+    sections: [
+      {
+        key: 'filter',
+        labelKey: 'navSections.notifications.filter.title',
+        items: [
+          { key: 'all', labelKey: 'navSections.notifications.filter.all', href: '/notifications' },
+          {
+            key: 'unread',
+            labelKey: 'navSections.notifications.filter.unread',
+            href: '/notifications?filter=unread',
+          },
+          {
+            key: 'sync',
+            labelKey: 'navSections.notifications.filter.sync',
+            href: '/notifications?filter=sync',
+          },
+          {
+            key: 'orders',
+            labelKey: 'navSections.notifications.filter.orders',
+            href: '/notifications?filter=orders',
+          },
+          {
+            key: 'warning',
+            labelKey: 'navSections.notifications.filter.warning',
+            href: '/notifications?filter=warning',
+            tone: 'warning',
           },
         ],
       },

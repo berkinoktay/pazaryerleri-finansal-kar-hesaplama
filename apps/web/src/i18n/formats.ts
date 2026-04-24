@@ -38,6 +38,13 @@ export const FORMATS = {
     decimal: { minimumFractionDigits: 2, maximumFractionDigits: 2 },
     currency: { style: 'currency', currency: 'TRY' },
     percent: { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 },
+    /**
+     * Plain 1-decimal number preset, no `%` glyph applied. Use when the
+     * value is ALREADY a percentage figure (e.g. `16.9`) and the caller
+     * supplies its own glyph (Turkish convention is `%` prefix, not suffix
+     * — `formatter.number(16.9, 'percent')` would yield `1.690,0%`).
+     */
+    percent1: { minimumFractionDigits: 1, maximumFractionDigits: 1 },
     percentDelta: {
       style: 'percent',
       minimumFractionDigits: 1,

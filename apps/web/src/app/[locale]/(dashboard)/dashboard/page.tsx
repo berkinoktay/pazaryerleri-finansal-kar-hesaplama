@@ -9,8 +9,6 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { SyncBadge } from '@/components/patterns/sync-badge';
 import { DashboardBody } from '@/features/dashboard/components/dashboard-body';
 import type { Organization } from '@/features/organization/api/organizations.api';
-import { ActiveOrganizationPanel } from '@/features/organization/components/active-organization-panel';
-import { StoresPanel } from '@/features/stores/components/stores-panel';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
@@ -72,10 +70,7 @@ export default async function DashboardPage({
   // page render — better to show the shell with an error panel than
   // to bounce an authenticated user back to onboarding every time.
   const api = await getServerApiClient();
-  const [orgsResult, meResult] = await Promise.all([
-    api.GET('/v1/organizations', {}),
-    api.GET('/v1/me', {}),
-  ]);
+  const orgsResult = await api.GET('/v1/organizations', {});
 
   const orgs: Organization[] = orgsResult.data?.data ?? [];
   if (orgsResult.data !== undefined && orgs.length === 0) {
@@ -84,7 +79,6 @@ export default async function DashboardPage({
 
   const activeOrgId = await resolveActiveOrgId(orgs);
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? orgs[0];
-  const viewerTimezone = meResult.data?.timezone;
 
   // Active store: backend doesn't yet expose a "last selected store"
   // cookie/endpoint. For now, fetch the org's stores server-side and
@@ -116,16 +110,8 @@ export default async function DashboardPage({
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
         actions={<NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />}
       />
-      {activeOrg ? (
-        <>
-          <ActiveOrganizationPanel
-            org={activeOrg}
-            locale={locale}
-            viewerTimezone={viewerTimezone}
-          />
-          <StoresPanel orgId={activeOrg.id} />
-          {activeStoreId ? <DashboardBody orgId={activeOrg.id} storeId={activeStoreId} /> : null}
-        </>
+      {activeOrg && activeStoreId ? (
+        <DashboardBody orgId={activeOrg.id} storeId={activeStoreId} />
       ) : null}
     </>
   );

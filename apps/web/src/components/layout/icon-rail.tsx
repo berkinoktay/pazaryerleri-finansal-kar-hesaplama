@@ -33,29 +33,31 @@ export function IconRail(): React.ReactElement {
       </Link>
 
       <div className="mt-sm gap-3xs flex flex-1 flex-col items-center">
-        {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const Icon = item.icon;
-          return (
-            <Tooltip key={item.key} delayDuration={200}>
-              <TooltipTrigger asChild>
-                <Link
-                  href={item.href}
-                  className={cn(
-                    'duration-fast flex size-9 items-center justify-center rounded-md transition-colors',
-                    'text-muted-foreground hover:bg-muted hover:text-foreground',
-                    'focus-visible:outline-none',
-                    isActive && 'bg-accent text-primary hover:bg-accent',
-                  )}
-                  aria-current={isActive ? 'page' : undefined}
-                >
-                  <Icon className="size-icon" />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
-            </Tooltip>
-          );
-        })}
+        {NAV_ITEMS.filter((item) => !('hideFromIconRail' in item && item.hideFromIconRail)).map(
+          (item) => {
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const Icon = item.icon;
+            return (
+              <Tooltip key={item.key} delayDuration={200}>
+                <TooltipTrigger asChild>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      'duration-fast flex size-9 items-center justify-center rounded-md transition-colors',
+                      'text-muted-foreground hover:bg-muted hover:text-foreground',
+                      'focus-visible:outline-none',
+                      isActive && 'bg-accent text-primary hover:bg-accent',
+                    )}
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <Icon className="size-icon" />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
+              </Tooltip>
+            );
+          },
+        )}
       </div>
 
       <div className="mt-auto">

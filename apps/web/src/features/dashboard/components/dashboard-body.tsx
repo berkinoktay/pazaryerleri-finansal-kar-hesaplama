@@ -71,10 +71,7 @@ export function DashboardBody({ orgId, storeId }: DashboardBodyProps): React.Rea
         />
         <KpiTile
           label={t('dashboard.kpi.profitMargin')}
-          value={{
-            kind: 'count',
-            amount: Math.round((data?.kpis.profitMarginPercent ?? 0) * 10) / 10,
-          }}
+          value={{ kind: 'percent', amount: data?.kpis.profitMarginPercent ?? 0 }}
           delta={
             data ? { percent: data.kpis.profitMarginDeltaPoints, goodDirection: 'up' } : undefined
           }

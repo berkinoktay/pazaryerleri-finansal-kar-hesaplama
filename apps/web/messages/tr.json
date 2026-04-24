@@ -106,7 +106,8 @@
     "profitability": "Karlılık",
     "reconciliation": "Mutabakat",
     "expenses": "Giderler",
-    "settings": "Ayarlar"
+    "settings": "Ayarlar",
+    "notifications": "Bildirimler"
   },
   "navSections": {
     "orders": {
@@ -169,6 +170,16 @@
         "billing": "Fatura",
         "stores": "Mağaza bağlantıları",
         "notifications": "Bildirimler"
+      }
+    },
+    "notifications": {
+      "filter": {
+        "title": "Filtre",
+        "all": "Tümü",
+        "unread": "Okunmamış",
+        "sync": "Senkronizasyon",
+        "orders": "Sipariş",
+        "warning": "Uyarı"
       }
     }
   },
@@ -514,6 +525,28 @@
   },
   "dashboardPage": {
     "title": "Gösterge paneli"
+  },
+  "placeholderPage": {
+    "comingSoon": "Yakında geliştirilecek",
+    "description": "Bu sayfa henüz geliştirme aşamasında. İlerleyen güncellemelerde aktif olacak."
+  },
+  "ordersPage": {
+    "title": "Siparişler"
+  },
+  "productsPage": {
+    "title": "Ürünler"
+  },
+  "profitabilityPage": {
+    "title": "Kârlılık"
+  },
+  "reconciliationPage": {
+    "title": "Mutabakat"
+  },
+  "expensesPage": {
+    "title": "Giderler"
+  },
+  "settingsPage": {
+    "title": "Ayarlar"
   },
   "notificationsPage": {
     "title": "Bildirimler",
