@@ -213,7 +213,8 @@
   "dashboard": {
     "section": {
       "costBreakdown": "Cost breakdown",
-      "profitTrend": "Profit performance"
+      "profitTrend": "Profit performance",
+      "funnel": "Net profit funnel"
     },
     "cost": {
       "total": "Total",
@@ -225,6 +226,13 @@
       "withholding": "Withholding tax",
       "vat": "VAT",
       "other": "Other"
+    },
+    "funnel": {
+      "revenue": "Revenue",
+      "minusShipping": "Less shipping",
+      "minusMarketplace": "Less marketplace fees",
+      "minusCost": "Less product cost",
+      "net": "Net profit"
     }
   },
   "dashboardRail": {

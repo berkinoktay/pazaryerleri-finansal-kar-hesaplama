@@ -213,7 +213,8 @@
   "dashboard": {
     "section": {
       "costBreakdown": "Maliyet dağılımı",
-      "profitTrend": "Kâr performansı"
+      "profitTrend": "Kâr performansı",
+      "funnel": "Net kâr funnel"
     },
     "cost": {
       "total": "Toplam",
@@ -225,6 +226,13 @@
       "withholding": "Stopaj",
       "vat": "KDV",
       "other": "Diğer"
+    },
+    "funnel": {
+      "revenue": "Ciro",
+      "minusShipping": "Kargo düşüldü",
+      "minusMarketplace": "Pazaryeri masrafı düşüldü",
+      "minusCost": "Ürün maliyeti düşüldü",
+      "net": "Net kâr"
     }
   },
   "dashboardRail": {
