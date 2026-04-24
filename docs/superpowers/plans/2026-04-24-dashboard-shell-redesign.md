@@ -1524,6 +1524,17 @@ EOF
 )"
 ```
 
+- [ ] **Step 8: Drop orphan activity-rail tokens**
+
+Remove the orphaned tokens left by the activity-rail removal:
+
+- `apps/web/src/app/tokens/spacing.css` — delete the `--size-rail-activity` and `--size-rail-activity-open` declarations (currently lines 34-35 area).
+- `apps/web/src/app/globals.css` — delete the matching `--spacing-rail-activity` and `--spacing-rail-activity-open` lines (around line 147-148).
+
+Verify zero references: `grep -rn "rail-activity" apps/web/src` should be empty after the edit.
+
+Stage these into the same Task 9 commit (no separate commit needed).
+
 ---
 
 ### Task 10: StoreSwitcher prominence tweak
@@ -4260,6 +4271,16 @@ EOF
 ### Task 30: Final pre-PR check
 
 **Files:** none
+
+- [ ] **Step 0: Doc-language sweep**
+
+The shell architecture changed (no more "dual-rail"). Search and update stale references:
+
+```
+grep -rn "dual-rail\|dual rail" apps/web/src apps/web/CLAUDE.md
+```
+
+For each hit, change "dual-rail AppShell" → "three-column AppShell" (or similar). Don't change `apps/web/CLAUDE.md` if the change is in a code-fence example that intentionally reflects the old architecture.
 
 - [ ] **Step 1: Run the full check suite**
 

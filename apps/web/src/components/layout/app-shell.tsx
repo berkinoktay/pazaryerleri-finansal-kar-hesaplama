@@ -40,9 +40,7 @@ export function AppShell({
 }: AppShellProps): React.ReactElement {
   return (
     <div className="bg-background text-foreground grid h-full grid-cols-[auto_auto_1fr] grid-rows-1 overflow-hidden">
-      <div className="hidden md:block">
-        <IconRail />
-      </div>
+      <IconRail />
 
       <div className="hidden md:block">
         <ContextRail

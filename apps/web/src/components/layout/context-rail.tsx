@@ -106,10 +106,12 @@ export function ContextRail({
       <Separator />
 
       <div className="gap-xs p-sm flex flex-col">
-        <Button variant="outline" size="sm" onClick={onSyncNow} className="justify-start">
-          <Refresh01Icon className="size-icon-sm" />
-          {tRail('syncNow')}
-        </Button>
+        {onSyncNow ? (
+          <Button variant="outline" size="sm" onClick={onSyncNow} className="justify-start">
+            <Refresh01Icon className="size-icon-sm" />
+            {tRail('syncNow')}
+          </Button>
+        ) : null}
         <Button variant="ghost" size="sm" onClick={onAddStore} className="justify-start">
           <PlusSignIcon className="size-icon-sm" />
           {tRail('addStore')}
