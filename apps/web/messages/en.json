@@ -154,11 +154,6 @@
     "active": "Active",
     "addStore": "Connect store"
   },
-  "activityRail": {
-    "ariaLabel": "Activity panel",
-    "open": "Open activity panel",
-    "close": "Close activity panel"
-  },
   "toast": {
     "storeFlowNotReady": "Connect-store flow is not ready yet",
     "syncStarted": "Sync started"

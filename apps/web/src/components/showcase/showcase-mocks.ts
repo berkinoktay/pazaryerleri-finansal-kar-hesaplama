@@ -1,7 +1,20 @@
 import Decimal from 'decimal.js';
 
 import type { Store } from '@/components/layout/store-switcher';
-import type { ActivityEntry } from '@/components/layout/activity-rail';
+
+/**
+ * Shape of a single activity-feed entry. Originally lived alongside the
+ * ActivityRail component; that rail was removed when the shell collapsed
+ * from four to three columns. The mock data below is kept and will be
+ * reused by the upcoming /notifications page.
+ */
+export interface ActivityEntry {
+  id: string;
+  icon: 'success' | 'warning' | 'info';
+  title: string;
+  timestamp: string;
+  source?: string;
+}
 
 export const MOCK_STORES: Store[] = [
   { id: 'store-ty-main', name: 'Ana Mağaza', platform: 'TRENDYOL', status: 'active' },

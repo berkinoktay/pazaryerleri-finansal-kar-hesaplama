@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 
-import { ActivityRail, type ActivityEntry } from '@/components/layout/activity-rail';
 import { ContextRail } from '@/components/layout/context-rail';
 import { IconRail } from '@/components/layout/icon-rail';
 import { type Store } from '@/components/layout/store-switcher';
@@ -18,36 +17,32 @@ export interface AppShellProps {
   stores?: Store[];
   activeStoreId?: string;
   onSelectStore?: (id: string) => void;
-  onSyncNow?: () => void;
   onAddStore?: () => void;
-  activity?: ActivityEntry[];
   children: React.ReactNode;
 }
 
 /**
- * Dual-rail workspace shell — the single most distinctive structural
- * element of PazarSync.
+ * Three-column workspace shell — IconRail (48px) · ContextRail (220px,
+ * sheet under md) · Content (1fr). Each page owns its own header via
+ * <PageHeader>; the shell does not provide an app-level top bar.
  *
- * Columns: IconRail (48px) · ContextRail (240px, sheet under 900px) ·
- * Content (1fr) · ActivityRail (32px → 320px).
- *
- * This is the default shell for every authenticated route. The page
- * itself owns its header via <PageHeader> — there is deliberately no
- * app-level top bar, keeping the content area starting at the top edge.
+ * The notification bell lives in PageHeader actions, not in the shell.
+ * On screens narrower than md, the IconRail and ContextRail are hidden
+ * and replaced by a MobileNavSheet triggered from a top bar.
  */
 export function AppShell({
   orgSwitcher,
   stores = [],
   activeStoreId,
   onSelectStore,
-  onSyncNow,
   onAddStore,
-  activity = [],
   children,
 }: AppShellProps): React.ReactElement {
   return (
-    <div className="bg-background text-foreground grid h-full grid-cols-[auto_auto_1fr_auto] grid-rows-1 overflow-hidden">
-      <IconRail />
+    <div className="bg-background text-foreground grid h-full grid-cols-[auto_auto_1fr] grid-rows-1 overflow-hidden">
+      <div className="hidden md:block">
+        <IconRail />
+      </div>
 
       <div className="hidden md:block">
         <ContextRail
@@ -56,7 +51,6 @@ export function AppShell({
           activeStoreId={activeStoreId ?? ''}
           onSelectStore={onSelectStore ?? (() => undefined)}
           onAddStore={onAddStore}
-          onSyncNow={onSyncNow}
         />
       </div>
 
@@ -66,10 +60,6 @@ export function AppShell({
       >
         <div className="max-w-content-max gap-lg px-lg py-lg mx-auto flex flex-col">{children}</div>
       </main>
-
-      <div className="hidden lg:block">
-        <ActivityRail entries={activity} />
-      </div>
     </div>
   );
 }

@@ -154,11 +154,6 @@
     "active": "Aktif",
     "addStore": "Mağaza bağla"
   },
-  "activityRail": {
-    "ariaLabel": "Aktivite paneli",
-    "open": "Aktivite panelini aç",
-    "close": "Aktivite panelini kapat"
-  },
   "toast": {
     "storeFlowNotReady": "Mağaza bağla akışı henüz hazır değil",
     "syncStarted": "Senkronizasyon başlatıldı"

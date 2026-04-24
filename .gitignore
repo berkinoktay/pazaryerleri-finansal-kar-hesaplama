@@ -50,3 +50,6 @@ packages/db/prisma/generated/
 
 # Git worktrees
 .worktrees/
+
+# Superpowers brainstorm scratch (HTML mockups, server state)
+.superpowers/
