@@ -500,5 +500,9 @@
   "mobileTopBar": {
     "openNav": "Open menu",
     "home": "Home"
+  },
+  "mobileNavSheet": {
+    "title": "Menu",
+    "close": "Close"
   }
 }

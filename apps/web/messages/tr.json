@@ -500,5 +500,9 @@
   "mobileTopBar": {
     "openNav": "Menüyü aç",
     "home": "Ana sayfa"
+  },
+  "mobileNavSheet": {
+    "title": "Menü",
+    "close": "Kapat"
   }
 }
