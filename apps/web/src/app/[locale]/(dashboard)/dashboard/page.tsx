@@ -1,14 +1,11 @@
 import { redirect } from 'next/navigation';
-import Decimal from 'decimal.js';
 
-import { KpiTile } from '@/components/patterns/kpi-tile';
 import { NotificationBell } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
-import { StatGroup } from '@/components/patterns/stat-group';
 import { SyncBadge } from '@/components/patterns/sync-badge';
-import { ActiveOrganizationPanel } from '@/features/organization/components/active-organization-panel';
-import { OrganizationsPanel } from '@/features/organization/components/organizations-panel';
+import { DashboardBody } from '@/features/dashboard/components/dashboard-body';
 import type { Organization } from '@/features/organization/api/organizations.api';
+import { ActiveOrganizationPanel } from '@/features/organization/components/active-organization-panel';
 import { StoresPanel } from '@/features/stores/components/stores-panel';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
@@ -17,12 +14,11 @@ export const metadata = {
   title: 'Gösterge paneli',
 };
 
-// Mock values hoisted out of render so they don't re-construct on every pass
-// and so React Compiler doesn't flag `new Decimal(...)` as an impure call in
-// the render body. Real values will flow from React Query hooks.
-const MOCK_REVENUE = new Decimal('284390.45');
-const MOCK_PROFIT = new Decimal('48120.80');
-const MOCK_LAST_SYNCED = new Date(Date.now() - 3 * 60 * 1000);
+// Mock value hoisted out of render so it doesn't re-construct on every pass
+// and so React Compiler doesn't flag `new Date(...)` as an impure call in
+// the render body. Real value will flow from the latest sync log when the
+// backend ships that endpoint.
+const MOCK_LAST_SYNCED = new Date('2026-04-22T00:13:00Z');
 
 export default async function DashboardPage({
   params,
@@ -52,11 +48,23 @@ export default async function DashboardPage({
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? orgs[0];
   const viewerTimezone = meResult.data?.timezone;
 
+  // Active store: backend doesn't yet expose a "last selected store"
+  // cookie/endpoint. For now, fetch the org's stores server-side and
+  // pick the first one as the dashboard scope. Future iteration will
+  // read a cookie set by the StoreSwitcher.
+  let activeStoreId = '';
+  if (activeOrg) {
+    const storesResult = await api.GET('/v1/organizations/{orgId}/stores', {
+      params: { path: { orgId: activeOrg.id } },
+    });
+    activeStoreId = storesResult.data?.data?.[0]?.id ?? '';
+  }
+
   return (
     <>
       <PageHeader
         title="Gösterge paneli"
-        intent="Seçili mağaza ve dönem için özet finansal durum. Detay sayfaları için sol context rail'i kullan."
+        intent={activeOrg ? `${activeOrg.name} · Trendyol TR` : undefined}
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
         actions={
           <NotificationBell
@@ -74,37 +82,16 @@ export default async function DashboardPage({
         }
       />
       {activeOrg ? (
-        <ActiveOrganizationPanel org={activeOrg} locale={locale} viewerTimezone={viewerTimezone} />
+        <>
+          <ActiveOrganizationPanel
+            org={activeOrg}
+            locale={locale}
+            viewerTimezone={viewerTimezone}
+          />
+          <StoresPanel orgId={activeOrg.id} />
+          {activeStoreId ? <DashboardBody orgId={activeOrg.id} storeId={activeStoreId} /> : null}
+        </>
       ) : null}
-      {activeOrg ? <StoresPanel orgId={activeOrg.id} /> : null}
-      <StatGroup>
-        <KpiTile
-          label="Ciro"
-          value={{ kind: 'currency', amount: MOCK_REVENUE }}
-          delta={{ percent: 12.4, goodDirection: 'up' }}
-          context="Nisan 1-17 · Dün: ₺24.820"
-          wide
-        />
-        <KpiTile
-          label="Net kar"
-          value={{ kind: 'currency', amount: MOCK_PROFIT }}
-          delta={{ percent: 8.1, goodDirection: 'up' }}
-          context="Marj %16.9"
-        />
-        <KpiTile
-          label="Sipariş"
-          value={{ kind: 'count', amount: 1472 }}
-          delta={{ percent: -3.2, goodDirection: 'up' }}
-          context="Nisan 1-17"
-        />
-        <KpiTile
-          label="İade"
-          value={{ kind: 'count', amount: 38 }}
-          delta={{ percent: -14.2, goodDirection: 'down' }}
-          context="İade oranı %2.6"
-        />
-      </StatGroup>
-      <OrganizationsPanel />
     </>
   );
 }
