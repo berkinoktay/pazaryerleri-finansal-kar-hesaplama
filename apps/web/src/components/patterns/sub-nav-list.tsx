@@ -34,8 +34,8 @@ const TONE_CLASS: Record<SubNavTone, string> = {
 
 /**
  * Generic sub-navigation list with optional count badges and tone hints.
- * Designed for the ContextRail middle slot — slim, vertical, indigo
- * border-left accent on the active item.
+ * Designed for the ContextRail middle slot — slim, vertical, active item
+ * painted in `bg-accent text-primary` (matches IconRail nav active state).
  */
 export function SubNavList({
   headingKey,
@@ -63,9 +63,7 @@ export function SubNavList({
                   'gap-xs px-xs py-3xs duration-fast flex items-center justify-between rounded-md text-sm transition-colors',
                   'hover:bg-muted',
                   'focus-visible:outline-none',
-                  isActive
-                    ? 'bg-muted text-foreground border-primary border-l-2 font-medium'
-                    : 'text-muted-foreground',
+                  isActive ? 'bg-accent text-primary font-medium' : 'text-muted-foreground',
                 )}
               >
                 <span>{t(item.labelKey)}</span>

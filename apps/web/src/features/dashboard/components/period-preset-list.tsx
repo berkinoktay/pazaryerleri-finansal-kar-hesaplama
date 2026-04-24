@@ -51,9 +51,7 @@ export function PeriodPresetList(): React.ReactElement {
                 'gap-xs px-xs py-3xs duration-fast flex items-center rounded-md text-left text-sm transition-colors',
                 'hover:bg-muted',
                 'focus-visible:outline-none',
-                isActive
-                  ? 'bg-muted text-foreground border-primary border-l-2 font-medium'
-                  : 'text-muted-foreground',
+                isActive ? 'bg-accent text-primary font-medium' : 'text-muted-foreground',
               )}
             >
               {t(key)}
