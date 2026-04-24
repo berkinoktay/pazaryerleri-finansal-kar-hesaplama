@@ -1,16 +1,17 @@
 'use client';
 
-import { Refresh01Icon, PlusSignIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
+import * as React from 'react';
 
-import { LanguageSwitcher } from '@/components/common/language-switcher';
-import { NAV_ITEMS } from '@/components/layout/nav-config';
+import { NAV_ITEMS, type NavItem } from '@/components/layout/nav-config';
 import { StoreSwitcher, type Store } from '@/components/layout/store-switcher';
-import { Button } from '@/components/ui/button';
+import { SubNavList } from '@/components/patterns/sub-nav-list';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { Link, usePathname } from '@/i18n/navigation';
-import { cn } from '@/lib/utils';
+import { usePathname } from '@/i18n/navigation';
+
+const DashboardContextMiddle = React.lazy(
+  () => import('@/features/dashboard/components/dashboard-context-middle'),
+);
 
 export interface ContextRailProps {
   orgSwitcher?: React.ReactNode;
@@ -18,14 +19,13 @@ export interface ContextRailProps {
   activeStoreId: string;
   onSelectStore: (id: string) => void;
   onAddStore?: () => void;
-  onSyncNow?: () => void;
 }
 
 /**
- * Second column of the dual-rail shell. Changes shape based on the active
- * module (sub-nav), but the org + store switchers and quick actions stay
- * constant at top and bottom — the three places the user reaches for most
- * often.
+ * Second column of the 3-rail shell. Top: org + prominent store
+ * switcher. Middle: page-specific (sub-nav, or a custom component
+ * via meta). No bottom — utility actions (sync, language, theme)
+ * moved to PageHeader actions and UserMenu respectively.
  */
 export function ContextRail({
   orgSwitcher,
@@ -33,16 +33,13 @@ export function ContextRail({
   activeStoreId,
   onSelectStore,
   onAddStore,
-  onSyncNow,
 }: ContextRailProps): React.ReactElement {
   const pathname = usePathname();
-  const t = useTranslations();
   const tRail = useTranslations('contextRail');
 
-  const activeItem =
-    NAV_ITEMS.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)) ??
-    NAV_ITEMS[0];
-  const sections = activeItem && 'sections' in activeItem ? activeItem.sections : [];
+  const activeItem: NavItem | undefined = NAV_ITEMS.find(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
 
   return (
     <aside
@@ -61,64 +58,25 @@ export function ContextRail({
         ) : null}
       </div>
 
-      {sections.length ? (
-        <div className="px-sm py-sm flex items-center justify-between">
-          <h2 className="text-2xs text-muted-foreground font-semibold tracking-wide uppercase">
-            {t(activeItem.labelKey)}
-          </h2>
-        </div>
-      ) : null}
-
       <ScrollArea className="flex-1">
-        <div className="gap-md px-sm pb-md flex flex-col">
-          {sections.map((section) => (
-            <div key={section.key} className="gap-3xs flex flex-col">
-              <span className="px-xs text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-                {t(section.labelKey)}
-              </span>
-              <ul className="gap-3xs flex flex-col">
-                {section.items.map((sub) => {
-                  const isActive = pathname === sub.href;
-                  return (
-                    <li key={sub.key}>
-                      <Link
-                        href={sub.href}
-                        className={cn(
-                          'gap-xs px-xs py-3xs duration-fast flex items-center justify-between rounded-md text-sm transition-colors',
-                          'hover:bg-muted',
-                          'focus-visible:outline-none',
-                          isActive
-                            ? 'bg-muted text-foreground font-medium'
-                            : 'text-muted-foreground',
-                        )}
-                      >
-                        <span>{t(sub.labelKey)}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
+        <div className="gap-md px-sm py-md flex flex-col">
+          {activeItem?.meta === 'dashboard' ? (
+            <React.Suspense fallback={null}>
+              <DashboardContextMiddle />
+            </React.Suspense>
+          ) : null}
+          {activeItem && 'sections' in activeItem && activeItem.sections
+            ? activeItem.sections.map((section) => (
+                <SubNavList
+                  key={section.key}
+                  headingKey={section.labelKey}
+                  currentHref={pathname}
+                  items={section.items}
+                />
+              ))
+            : null}
         </div>
       </ScrollArea>
-
-      <Separator />
-
-      <div className="gap-xs p-sm flex flex-col">
-        {onSyncNow ? (
-          <Button variant="outline" size="sm" onClick={onSyncNow} className="justify-start">
-            <Refresh01Icon className="size-icon-sm" />
-            {tRail('syncNow')}
-          </Button>
-        ) : null}
-        <Button variant="ghost" size="sm" onClick={onAddStore} className="justify-start">
-          <PlusSignIcon className="size-icon-sm" />
-          {tRail('addStore')}
-        </Button>
-        <Separator className="my-3xs" />
-        <LanguageSwitcher />
-      </div>
     </aside>
   );
 }
