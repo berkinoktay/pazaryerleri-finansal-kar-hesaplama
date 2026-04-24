@@ -216,7 +216,9 @@
       "profitTrend": "Kâr performansı",
       "funnel": "Net kâr funnel",
       "productMetrics": "Ürün metrikleri",
-      "orderMetrics": "Sipariş metrikleri"
+      "orderMetrics": "Sipariş metrikleri",
+      "topProfitable": "En karlı ürünler",
+      "topLossy": "Zararlı ürünler"
     },
     "cost": {
       "total": "Toplam",

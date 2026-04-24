@@ -216,7 +216,9 @@
       "profitTrend": "Profit performance",
       "funnel": "Net profit funnel",
       "productMetrics": "Product metrics",
-      "orderMetrics": "Order metrics"
+      "orderMetrics": "Order metrics",
+      "topProfitable": "Top profitable products",
+      "topLossy": "Loss-making products"
     },
     "cost": {
       "total": "Total",
