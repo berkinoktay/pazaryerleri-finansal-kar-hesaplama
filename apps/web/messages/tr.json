@@ -154,6 +154,11 @@
     "active": "Aktif",
     "addStore": "Mağaza bağla"
   },
+  "notificationBell": {
+    "label": "Bildirimler",
+    "empty": "Henüz bildirim yok",
+    "seeAll": "Tümünü gör"
+  },
   "toast": {
     "storeFlowNotReady": "Mağaza bağla akışı henüz hazır değil",
     "syncStarted": "Senkronizasyon başlatıldı"

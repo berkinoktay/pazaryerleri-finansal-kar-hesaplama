@@ -154,6 +154,11 @@
     "active": "Active",
     "addStore": "Connect store"
   },
+  "notificationBell": {
+    "label": "Notifications",
+    "empty": "No notifications yet",
+    "seeAll": "See all"
+  },
   "toast": {
     "storeFlowNotReady": "Connect-store flow is not ready yet",
     "syncStarted": "Sync started"
