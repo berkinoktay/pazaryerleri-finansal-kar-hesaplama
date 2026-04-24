@@ -214,7 +214,9 @@
     "section": {
       "costBreakdown": "Cost breakdown",
       "profitTrend": "Profit performance",
-      "funnel": "Net profit funnel"
+      "funnel": "Net profit funnel",
+      "productMetrics": "Product metrics",
+      "orderMetrics": "Order metrics"
     },
     "cost": {
       "total": "Total",
@@ -233,6 +235,18 @@
       "minusMarketplace": "Less marketplace fees",
       "minusCost": "Less product cost",
       "net": "Net profit"
+    },
+    "product": {
+      "netSales": "Net sales",
+      "avgProfit": "Avg profit",
+      "avgShipping": "Avg shipping",
+      "avgCommission": "Avg commission",
+      "avgDiscount": "Avg discount"
+    },
+    "order": {
+      "count": "Orders",
+      "avgValue": "Avg order value",
+      "avgProfit": "Avg profit"
     }
   },
   "dashboardRail": {
