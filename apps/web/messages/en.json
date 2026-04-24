@@ -224,6 +224,25 @@
     "empty": "No notifications yet",
     "seeAll": "See all"
   },
+  "userMenu": {
+    "open": "Open user menu",
+    "profile": "Profile",
+    "settings": "Settings",
+    "theme": {
+      "heading": "Theme",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "language": {
+      "heading": "Language"
+    },
+    "help": {
+      "docs": "Help & Docs",
+      "shortcuts": "Keyboard shortcuts",
+      "feedback": "Send feedback"
+    }
+  },
   "toast": {
     "storeFlowNotReady": "Connect-store flow is not ready yet",
     "syncStarted": "Sync started"

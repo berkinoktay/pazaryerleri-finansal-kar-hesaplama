@@ -224,6 +224,25 @@
     "empty": "Henüz bildirim yok",
     "seeAll": "Tümünü gör"
   },
+  "userMenu": {
+    "open": "Kullanıcı menüsünü aç",
+    "profile": "Profil",
+    "settings": "Ayarlar",
+    "theme": {
+      "heading": "Tema",
+      "light": "Açık",
+      "dark": "Koyu",
+      "system": "Sistem"
+    },
+    "language": {
+      "heading": "Dil"
+    },
+    "help": {
+      "docs": "Yardım & Dokümanlar",
+      "shortcuts": "Klavye kısayolları",
+      "feedback": "Geri bildirim"
+    }
+  },
   "toast": {
     "storeFlowNotReady": "Mağaza bağla akışı henüz hazır değil",
     "syncStarted": "Senkronizasyon başlatıldı"
