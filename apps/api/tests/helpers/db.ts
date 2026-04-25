@@ -9,13 +9,23 @@ export { prisma };
  * any FKs we forgot to enumerate. RESTART IDENTITY resets auto-increment
  * sequences so test data is deterministic.
  *
- * **Does NOT touch `auth.users`.** Earlier revisions did, which wiped the
- * login-capable seed users (pazarsync-dev-password) every time the test
- * suite ran — then the first manual browser sign-in failed with
- * `invalid_credentials` until the developer remembered to re-run `pnpm db:seed`.
- * Collision avoidance is already handled by `createAuthenticatedTestUser`
- * using random emails. auth.users accumulation is harmless locally and
- * absent in CI (ephemeral Supabase per job).
+ * **Does NOT touch `auth.users` OR `user_profiles`.**
+ *
+ * Earlier revisions truncated `auth.users` and wiped the login-capable
+ * seed users; that bug was fixed.  The same trap survived for
+ * `user_profiles`: integration runs would CASCADE through the
+ * `on_auth_user_created` trigger's row, leaving any developer who had
+ * signed up via the browser with an `auth.users` entry but no profile.
+ * Org creation then 422s with P2003 because
+ * `organization_members.user_id` is FK'd to `user_profiles(id)`
+ * (not `auth.users.id`); the orphan auth user can never enroll itself
+ * back without a manual backfill.
+ *
+ * Profile collision avoidance for tests is handled by
+ * `createAuthenticatedTestUser` and `createUserProfile` which generate
+ * random UUIDs/emails — their rows safely coexist with accumulated
+ * dev profiles.  Profile accumulation is harmless locally and absent
+ * in CI (ephemeral Supabase per job).
  *
  * Order doesn't matter for TRUNCATE CASCADE — Postgres figures out the FK
  * dependency graph itself.
@@ -32,8 +42,7 @@ export async function truncateAll(): Promise<void> {
        expenses,
        stores,
        organization_members,
-       organizations,
-       user_profiles
+       organizations
      RESTART IDENTITY CASCADE`,
   );
 }

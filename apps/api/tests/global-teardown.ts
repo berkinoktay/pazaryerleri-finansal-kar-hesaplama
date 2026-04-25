@@ -28,6 +28,12 @@ export default function globalSetup(): () => Promise<void> {
       // Wipe any leftover rows from the last test's `beforeEach`-less
       // aftermath (e.g. tenant-isolation tests leave "iso-a" / "iso-b"
       // orgs behind). Otherwise they accumulate run after run.
+      //
+      // Mirrors `helpers/db.ts::truncateAll` — does NOT touch
+      // `auth.users` or `user_profiles`. Wiping `user_profiles` here
+      // would orphan any browser-signed-up developer's auth.users row
+      // (P2003 on the next org-create attempt).  The seed step below
+      // upserts the canonical profiles so dev UI still hydrates.
       await prisma.$executeRawUnsafe(
         `TRUNCATE TABLE
            sync_logs,
@@ -39,8 +45,7 @@ export default function globalSetup(): () => Promise<void> {
            expenses,
            stores,
            organization_members,
-           organizations,
-           user_profiles
+           organizations
          RESTART IDENTITY CASCADE`,
       );
 
