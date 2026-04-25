@@ -513,6 +513,13 @@
       "description": "Mağaza özeti ve dönem kontrolü solda hazır. Detaylı raporlar ileride bu alana eklenecek."
     }
   },
+  "dashboard": {
+    "quickAccess": {
+      "pendingOrders": { "label": "Bekleyen Sipariş", "cta": "Hemen incele →" },
+      "noCostProducts": { "label": "Maliyet Eksik Ürün", "cta": "Toplu güncelle →" },
+      "returnReviews": { "label": "İade İncelemesi", "cta": "Onay bekle →" }
+    }
+  },
   "placeholderPage": {
     "comingSoon": "Yakında geliştirilecek",
     "description": "Bu sayfa henüz geliştirme aşamasında. İlerleyen güncellemelerde aktif olacak."

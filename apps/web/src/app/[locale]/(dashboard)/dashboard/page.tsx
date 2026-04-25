@@ -7,6 +7,10 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { NotificationBell } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
 import { SyncBadge } from '@/components/patterns/sync-badge';
+import {
+  QuickAccessPanel,
+  type QuickAccessItem,
+} from '@/features/dashboard/components/quick-access-panel';
 import type { Organization } from '@/features/organization/api/organizations.api';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
@@ -40,6 +44,16 @@ const MOCK_NOTIFICATIONS = [
     timestamp: '3 dk',
   },
   { id: '2', icon: 'warning' as const, title: '2 iade incelemeyi bekliyor', timestamp: '15 dk' },
+];
+
+// MOCK COUNTS — replaced by real "needs action" queries when the
+// dashboard summary endpoint ships. Hoisted to module scope so the
+// array reference is stable across renders (otherwise React Query /
+// React Compiler treat it as a new prop on every pass).
+const QUICK_ACCESS_ITEMS: QuickAccessItem[] = [
+  { key: 'pendingOrders', href: '/orders?status=pending', count: 5, tone: 'warning' },
+  { key: 'noCostProducts', href: '/products?filter=no-cost', count: 12, tone: 'warning' },
+  { key: 'returnReviews', href: '/orders?status=returned', count: 3, tone: 'warning' },
 ];
 
 export default async function DashboardPage({
@@ -76,6 +90,7 @@ export default async function DashboardPage({
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
         actions={<NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />}
       />
+      <QuickAccessPanel items={QUICK_ACCESS_ITEMS} />
       <EmptyState title={t('empty.title')} description={t('empty.description')} />
     </>
   );
