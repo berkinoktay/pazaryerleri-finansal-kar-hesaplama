@@ -1,28 +1,16 @@
-import type { components } from '@pazarsync/api-client';
 import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 
+import { EmptyState } from '@/components/patterns/empty-state';
 import { NotificationBell } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
 import { SyncBadge } from '@/components/patterns/sync-badge';
-import { DashboardBody } from '@/features/dashboard/components/dashboard-body';
 import type { Organization } from '@/features/organization/api/organizations.api';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
-
-type Store = components['schemas']['Store'];
-
-const PLATFORM_LABEL: Record<Store['platform'], string> = {
-  TRENDYOL: 'Trendyol',
-  HEPSIBURADA: 'Hepsiburada',
-};
-
-function formatPlatformLabel(platform: Store['platform']): string {
-  return PLATFORM_LABEL[platform] ?? platform;
-}
 
 export async function generateMetadata({
   params,
@@ -80,39 +68,15 @@ export default async function DashboardPage({
   const activeOrgId = await resolveActiveOrgId(orgs);
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? orgs[0];
 
-  // Active store: backend doesn't yet expose a "last selected store"
-  // cookie/endpoint. For now, fetch the org's stores server-side and
-  // pick the first one as the dashboard scope. Future iteration will
-  // read a cookie set by the StoreSwitcher.
-  let activeStore: Pick<Store, 'id' | 'name' | 'platform'> | undefined;
-  if (activeOrg) {
-    const storesResult = await api.GET('/v1/organizations/{orgId}/stores', {
-      params: { path: { orgId: activeOrg.id } },
-    });
-    const first = storesResult.data?.data?.[0];
-    if (first) {
-      activeStore = { id: first.id, name: first.name, platform: first.platform };
-    }
-  }
-  const activeStoreId = activeStore?.id ?? '';
-
   return (
     <>
       <PageHeader
         title={t('title')}
-        intent={
-          activeOrg
-            ? activeStore
-              ? `${activeOrg.name} · ${formatPlatformLabel(activeStore.platform)} ${activeStore.name}`
-              : activeOrg.name
-            : undefined
-        }
+        intent={activeOrg?.name}
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
         actions={<NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />}
       />
-      {activeOrg && activeStoreId ? (
-        <DashboardBody orgId={activeOrg.id} storeId={activeStoreId} />
-      ) : null}
+      <EmptyState title={t('empty.title')} description={t('empty.description')} />
     </>
   );
 }

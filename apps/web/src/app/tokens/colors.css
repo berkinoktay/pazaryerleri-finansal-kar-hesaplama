@@ -81,18 +81,6 @@
   --chart-4: oklch(65% 0.15 75);
   --chart-5: oklch(58% 0.17 27);
   --chart-6: oklch(52% 0.13 310);
-  --chart-7: oklch(58% 0.12 330);
-  --chart-8: oklch(55% 0.06 260);
-
-  /* Net-profit funnel — sequential success ramp. Light mode fades AWAY from
-     saturation as value drains (high lightness → lower chroma at same hue);
-     the dark-mode block inverts so the strongest step stays dominant on dark
-     bg. Used by NetProfitFunnelCard's per-step trapezoid fill. */
-  --funnel-step-1: oklch(70% 0.18 145);
-  --funnel-step-2: oklch(75% 0.16 145);
-  --funnel-step-3: oklch(80% 0.13 145);
-  --funnel-step-4: oklch(85% 0.1 145);
-  --funnel-step-5: oklch(90% 0.06 145);
 
   /* Semantic tone borders — explicit named tokens instead of `border-tone/40`
      alpha shortcuts. Live in tandem with --warning, --warning-surface,
@@ -156,17 +144,6 @@
   --chart-4: oklch(76% 0.14 75);
   --chart-5: oklch(70% 0.16 27);
   --chart-6: oklch(66% 0.12 310);
-  --chart-7: oklch(72% 0.11 330);
-  --chart-8: oklch(66% 0.05 260);
-
-  /* Inverted lightness ramp for dark mode — the strongest step stays dominant
-     against the dark canvas and progressively darker steps read as "less
-     value" rather than washing out. Same hue / chroma cadence as light. */
-  --funnel-step-1: oklch(70% 0.18 145);
-  --funnel-step-2: oklch(60% 0.16 145);
-  --funnel-step-3: oklch(48% 0.13 145);
-  --funnel-step-4: oklch(36% 0.1 145);
-  --funnel-step-5: oklch(26% 0.06 145);
 
   --warning-border: oklch(50% 0.1 75);
   --destructive-border: oklch(48% 0.14 27);

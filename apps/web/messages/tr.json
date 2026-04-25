@@ -221,54 +221,6 @@
     "this-quarter": "Bu çeyrek",
     "custom": "Özel…"
   },
-  "dashboard": {
-    "section": {
-      "costBreakdown": "Maliyet dağılımı",
-      "profitTrend": "Kâr performansı",
-      "funnel": "Net kâr funnel",
-      "productMetrics": "Ürün metrikleri",
-      "orderMetrics": "Sipariş metrikleri",
-      "topProfitable": "En karlı ürünler",
-      "topLossy": "Zararlı ürünler"
-    },
-    "cost": {
-      "total": "Toplam",
-      "product": "Ürün maliyeti",
-      "commission": "Komisyon",
-      "shipping": "Kargo",
-      "service": "Hizmet bedeli",
-      "intl": "Uluslararası",
-      "withholding": "Stopaj",
-      "vat": "KDV",
-      "other": "Diğer"
-    },
-    "funnel": {
-      "revenue": "Ciro",
-      "minusShipping": "Kargo düşüldü",
-      "minusMarketplace": "Pazaryeri masrafı düşüldü",
-      "minusCost": "Ürün maliyeti düşüldü",
-      "net": "Net kâr"
-    },
-    "product": {
-      "netSales": "Net satış",
-      "avgProfit": "Ortalama kâr",
-      "avgShipping": "Ortalama kargo",
-      "avgCommission": "Ortalama komisyon",
-      "avgDiscount": "Ortalama indirim"
-    },
-    "order": {
-      "count": "Sipariş",
-      "avgValue": "Ortalama satış",
-      "avgProfit": "Ortalama kâr"
-    },
-    "kpi": {
-      "revenue": "Ciro",
-      "costedRevenue": "Maliyetli ciro",
-      "netProfit": "Net kâr",
-      "profitMargin": "Kâr/Satış",
-      "returns": "İade"
-    }
-  },
   "dashboardRail": {
     "warning": {
       "missingCost": {
@@ -524,7 +476,11 @@
     "close": "Kapat"
   },
   "dashboardPage": {
-    "title": "Gösterge paneli"
+    "title": "Gösterge paneli",
+    "empty": {
+      "title": "Pano içeriği planlama aşamasında",
+      "description": "Mağaza özeti ve dönem kontrolü solda hazır. Detaylı raporlar ileride bu alana eklenecek."
+    }
   },
   "placeholderPage": {
     "comingSoon": "Yakında geliştirilecek",

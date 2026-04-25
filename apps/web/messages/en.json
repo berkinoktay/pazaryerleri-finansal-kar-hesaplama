@@ -221,54 +221,6 @@
     "this-quarter": "This quarter",
     "custom": "Custom…"
   },
-  "dashboard": {
-    "section": {
-      "costBreakdown": "Cost breakdown",
-      "profitTrend": "Profit performance",
-      "funnel": "Net profit funnel",
-      "productMetrics": "Product metrics",
-      "orderMetrics": "Order metrics",
-      "topProfitable": "Top profitable products",
-      "topLossy": "Loss-making products"
-    },
-    "cost": {
-      "total": "Total",
-      "product": "Product cost",
-      "commission": "Commission",
-      "shipping": "Shipping",
-      "service": "Service fee",
-      "intl": "International",
-      "withholding": "Withholding tax",
-      "vat": "VAT",
-      "other": "Other"
-    },
-    "funnel": {
-      "revenue": "Revenue",
-      "minusShipping": "Less shipping",
-      "minusMarketplace": "Less marketplace fees",
-      "minusCost": "Less product cost",
-      "net": "Net profit"
-    },
-    "product": {
-      "netSales": "Net sales",
-      "avgProfit": "Avg profit",
-      "avgShipping": "Avg shipping",
-      "avgCommission": "Avg commission",
-      "avgDiscount": "Avg discount"
-    },
-    "order": {
-      "count": "Orders",
-      "avgValue": "Avg order value",
-      "avgProfit": "Avg profit"
-    },
-    "kpi": {
-      "revenue": "Revenue",
-      "costedRevenue": "Costed revenue",
-      "netProfit": "Net profit",
-      "profitMargin": "Profit margin",
-      "returns": "Returns"
-    }
-  },
   "dashboardRail": {
     "warning": {
       "missingCost": {
@@ -524,7 +476,11 @@
     "close": "Close"
   },
   "dashboardPage": {
-    "title": "Dashboard"
+    "title": "Dashboard",
+    "empty": {
+      "title": "Dashboard content under planning",
+      "description": "Store summary and period controls are ready in the rail. Detailed reports will populate this area later."
+    }
   },
   "placeholderPage": {
     "comingSoon": "Coming soon",
