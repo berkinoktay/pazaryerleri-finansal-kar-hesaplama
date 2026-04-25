@@ -1,17 +1,21 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { useState, type ReactElement, type ReactNode } from 'react';
 
 import { AppShell } from '@/components/layout/app-shell';
+import type { Organization as SwitcherOrg } from '@/components/patterns/org-store-switcher';
+import type { Organization as OrgApiData } from '@/features/organization/api/organizations.api';
 import type { Store as ApiStore } from '@/features/stores/api/list-stores.api';
 import { useStores } from '@/features/stores/hooks/use-stores';
-import { toUiStore } from '@/features/stores/lib/to-ui-store';
+import { toSwitcherStore } from '@/features/stores/lib/to-ui-store';
+import { setActiveOrgIdAction } from '@/lib/active-org-actions';
 import { setActiveStoreIdAction } from '@/lib/active-store-actions';
 
 import { ConnectStoreModal } from './connect-store-modal';
 
 export interface DashboardStoreLauncherProps {
-  orgSwitcher: ReactNode;
+  orgs: OrgApiData[];
   activeOrgId: string | undefined;
   initialStores: ApiStore[];
   initialActiveStoreId: string | undefined;
@@ -19,42 +23,75 @@ export interface DashboardStoreLauncherProps {
 }
 
 /**
- * Client wrapper around AppShell. Owns three pieces of state:
+ * Adapter — API Organization → switcher's Organization shape. The
+ * switcher needs role, storeCount, lastSyncedAt; GET /v1/organizations
+ * doesn't carry any of these today, so we use static fallbacks.
+ *
+ * When the endpoint evolves to include membership role + per-org store
+ * count + lastSyncedAt summary, swap the constants for real fields.
+ */
+function toSwitcherOrg(org: OrgApiData): SwitcherOrg {
+  return {
+    id: org.id,
+    name: org.name,
+    role: 'MEMBER',
+    storeCount: 0,
+    lastSyncedAt: null,
+  };
+}
+
+/**
+ * Client wrapper around the new single-sidebar AppShell. Owns three
+ * pieces of state plus an org-switch handler:
  *   1. Connect-store modal open/close.
  *   2. The currently selected store id (initial = server-resolved
  *      cookie value; updates flow back to the cookie on selection).
  *   3. The hot list of stores (RQ hook hydrated from `initialStores`,
  *      revalidated in background after connect/disconnect).
  *
- * Backend Store → UI Store mapping happens here (via `toUiStore`) so
- * the rail components stay decoupled from the OpenAPI shape.
+ * The org switch handler persists the cookie via setActiveOrgIdAction
+ * then router.refresh() so the server layout re-fetches stores for the
+ * newly active org.
+ *
+ * Backend Store/Organization → switcher shape mapping happens here so
+ * the AppShell stays decoupled from the OpenAPI shape.
  */
 export function DashboardStoreLauncher({
-  orgSwitcher,
+  orgs,
   activeOrgId,
   initialStores,
   initialActiveStoreId,
   children,
-}: DashboardStoreLauncherProps): React.ReactElement {
+}: DashboardStoreLauncherProps): ReactElement {
+  const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
   const [activeStoreId, setActiveStoreId] = useState<string | undefined>(initialActiveStoreId);
 
   const storesQuery = useStores(activeOrgId ?? null, initialStores);
-  const stores = (storesQuery.data ?? []).map(toUiStore);
-  const effectiveActiveId = activeStoreId ?? stores[0]?.id ?? '';
+  const switcherStores = (storesQuery.data ?? []).map(toSwitcherStore);
+  const switcherOrgs = orgs.map(toSwitcherOrg);
+  const effectiveActiveId = activeStoreId ?? switcherStores[0]?.id;
 
-  function handleSelect(storeId: string): void {
+  function handleSelectStore(storeId: string): void {
     setActiveStoreId(storeId);
     void setActiveStoreIdAction(storeId);
+  }
+
+  async function handleSelectOrg(orgId: string): Promise<void> {
+    if (orgId === activeOrgId) return;
+    await setActiveOrgIdAction(orgId);
+    router.refresh();
   }
 
   return (
     <>
       <AppShell
-        orgSwitcher={orgSwitcher}
-        stores={stores}
+        orgs={switcherOrgs}
+        stores={switcherStores}
+        activeOrgId={activeOrgId}
         activeStoreId={effectiveActiveId}
-        onSelectStore={handleSelect}
+        onSelectOrg={(orgId) => void handleSelectOrg(orgId)}
+        onSelectStore={handleSelectStore}
         onAddStore={activeOrgId !== undefined ? () => setModalOpen(true) : undefined}
       >
         {children}

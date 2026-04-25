@@ -1,7 +1,5 @@
 import Decimal from 'decimal.js';
 
-import type { Store } from '@/components/layout/store-switcher';
-
 /**
  * Shape of a single activity-feed entry. Originally lived alongside the
  * ActivityRail component; that rail was removed when the shell collapsed
@@ -15,12 +13,6 @@ export interface ActivityEntry {
   timestamp: string;
   source?: string;
 }
-
-export const MOCK_STORES: Store[] = [
-  { id: 'store-ty-main', name: 'Ana Mağaza', platform: 'TRENDYOL', status: 'active' },
-  { id: 'store-ty-outlet', name: 'Outlet', platform: 'TRENDYOL', status: 'active' },
-  { id: 'store-hb-main', name: 'Hepsiburada Mağazası', platform: 'HEPSIBURADA', status: 'paused' },
-];
 
 export const MOCK_ACTIVITY: ActivityEntry[] = [
   {

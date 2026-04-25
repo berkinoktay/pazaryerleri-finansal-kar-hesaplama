@@ -107,7 +107,8 @@
     "reconciliation": "Reconciliation",
     "expenses": "Expenses",
     "settings": "Settings",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "support": "Support"
   },
   "navSections": {
     "orders": {
@@ -510,6 +511,13 @@
     "empty": {
       "title": "Dashboard content under planning",
       "description": "Store summary and period controls are ready in the rail. Detailed reports will populate this area later."
+    }
+  },
+  "dashboard": {
+    "quickAccess": {
+      "pendingOrders": { "label": "Pending Orders", "cta": "Review now →" },
+      "noCostProducts": { "label": "Products Missing Cost", "cta": "Bulk update →" },
+      "returnReviews": { "label": "Return Reviews", "cta": "Awaiting approval →" }
     }
   },
   "placeholderPage": {

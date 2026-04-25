@@ -107,7 +107,8 @@
     "reconciliation": "Mutabakat",
     "expenses": "Giderler",
     "settings": "Ayarlar",
-    "notifications": "Bildirimler"
+    "notifications": "Bildirimler",
+    "support": "Destek"
   },
   "navSections": {
     "orders": {
@@ -510,6 +511,13 @@
     "empty": {
       "title": "Pano içeriği planlama aşamasında",
       "description": "Mağaza özeti ve dönem kontrolü solda hazır. Detaylı raporlar ileride bu alana eklenecek."
+    }
+  },
+  "dashboard": {
+    "quickAccess": {
+      "pendingOrders": { "label": "Bekleyen Sipariş", "cta": "Hemen incele →" },
+      "noCostProducts": { "label": "Maliyet Eksik Ürün", "cta": "Toplu güncelle →" },
+      "returnReviews": { "label": "İade İncelemesi", "cta": "Onay bekle →" }
     }
   },
   "placeholderPage": {
