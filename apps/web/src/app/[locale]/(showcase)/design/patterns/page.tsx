@@ -13,6 +13,11 @@ import { TrendDelta } from '@/components/patterns/trend-delta';
 import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
 
+import { BottomDockShowcase } from './bottom-dock-showcase';
+import { NavGroupShowcase } from './nav-group-showcase';
+import { OrgStoreSwitcherShowcase } from './org-store-switcher-showcase';
+import { ThemeToggleShowcase } from './theme-toggle-showcase';
+
 // Hoisted mock values — stable references so React Compiler doesn't complain
 // about `new Decimal(...)` / `new Date(...)` being called during render.
 // Use fixed ISO timestamps for sync dates: `Date.now()` at module scope
@@ -158,6 +163,34 @@ export default function PatternsShowcasePage(): React.ReactElement {
             }
           />
         </div>
+      </Preview>
+
+      <Preview
+        title="BottomDock"
+        description="Tek-sidebar tasarımının altına oturan yardımcı küme. Destek / Ayarlar / Tema / Kullanıcı satırını barındırır. Yapısal olarak minimal — içeriği AppShell üzerinden enjekte edilir, pattern i18n-bağımsızdır."
+      >
+        <BottomDockShowcase />
+      </Preview>
+
+      <Preview
+        title="ThemeToggleInline"
+        description="Sidebar bottom dock için satır-içi tema anahtarı. Sun + Moon ikonları her iki render'da da DOM'da; `dark:` Tailwind varyantı görünürlüğü değiştirir. resolvedTheme yalnızca useIsMounted gate'inin arkasında okunur — SSR çıktısı ilk paint ile byte-eşit kalır."
+      >
+        <ThemeToggleShowcase />
+      </Preview>
+
+      <Preview
+        title="NavGroup"
+        description="Tek-sidebar tasarımında nested feature grupları için açılır-kapanır başlık. Animasyon `grid-template-rows: 0fr → 1fr` üzerinden — height transition'ları yasak (apps/web/CLAUDE.md motion guidance). İsteğe bağlı Yeni / Beta / count rozeti satır-içi."
+      >
+        <NavGroupShowcase />
+      </Preview>
+
+      <Preview
+        title="OrgStoreSwitcher"
+        description="Tek-sidebar başlığındaki birleşik org+mağaza chip'i. 32px renk paletli avatar + sağ-alt platform rozeti + sol-üst sync nabzı. Açılır panel cmdk fuzzy search, role badge'leri ve aktif duruma göre check işareti gösterir. orgs=[] olduğunda + Yeni Organizasyon Oluştur / Davet Kodum Var CTA'larıyla boş duruma düşer. Daraltılmış sidebar modunda yalnızca avatar + rozet kalır."
+      >
+        <OrgStoreSwitcherShowcase />
       </Preview>
     </>
   );

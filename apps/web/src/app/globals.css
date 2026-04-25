@@ -166,6 +166,7 @@
   --spacing-sheet: var(--size-sheet);
   --spacing-sheet-wide: var(--size-sheet-wide);
   --spacing-modal: var(--size-modal);
+  --spacing-dropdown-popover: var(--size-dropdown-popover);
   --spacing-headline: var(--size-headline);
 
   /* Radius */

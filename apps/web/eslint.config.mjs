@@ -69,6 +69,18 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // React Compiler rules don't apply to shadcn-generated primitives.
+  // shadcn ships canonical patterns (e.g. Math.random in skeleton width,
+  // sync setState in viewport hook effects) we are not meant to touch —
+  // see UI-development workflow rules in apps/web/CLAUDE.md.
+  // The hooks/ folder is the shadcn-canonical location for `use-mobile`.
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}', 'src/hooks/use-mobile.{ts,tsx}'],
+    rules: {
+      'react-hooks/purity': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
   globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts']),
 ]);
 

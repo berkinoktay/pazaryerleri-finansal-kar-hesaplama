@@ -12,6 +12,27 @@ import {
 import type { SubNavItem } from '@/components/patterns/sub-nav-list';
 
 /**
+ * Inline badge for a nav item — Yeni / Beta / count indicator.
+ * Renders as a small pill next to the label in the nav.  Variants
+ * map to existing semantic tokens (success / warning / muted) — no
+ * new color tokens are introduced.
+ */
+export interface NavItemBadge {
+  variant: 'new' | 'beta' | 'count';
+  label: string;
+}
+
+/**
+ * Visual divider in the nav scroll body — renders as a horizontal
+ * dashed separator.  Used to delimit primary nav from a section like
+ * "Yenilikler" that lives below the main scroll.
+ */
+export interface NavDivider {
+  type: 'divider';
+  key: string;
+}
+
+/**
  * Shape of a section block inside the ContextRail middle slot.
  * `meta` is an alternative render hint — when set, the rail picks
  * a custom React component instead of rendering a SubNavList.
@@ -29,12 +50,21 @@ export interface NavItemBase {
   icon: React.ComponentType<{ className?: string }>;
   /** When true, IconRail skips this item (visible to ContextRail only). */
   hideFromIconRail?: boolean;
+  /** Optional inline badge — Yeni / Beta / count indicator. */
+  badge?: NavItemBadge;
 }
 
 export type NavItem =
   | (NavItemBase & { sections: readonly NavSection[]; meta?: never })
   | (NavItemBase & { sections?: never; meta: 'dashboard' })
   | (NavItemBase & { sections?: never; meta?: never });
+
+/** All renderable nav entries — items plus dividers. */
+export type NavEntry = NavItem | NavDivider;
+
+export function isNavDivider(entry: NavEntry): entry is NavDivider {
+  return 'type' in entry && entry.type === 'divider';
+}
 
 export const NAV_ITEMS = [
   {
@@ -305,5 +335,12 @@ export const NAV_ITEMS = [
     ],
   },
 ] as const satisfies readonly NavItem[];
+
+/**
+ * Same data as `NAV_ITEMS`, typed as the broader `NavEntry[]` so the
+ * sidebar renderer can consume both items and dividers uniformly.
+ * Phase 3 will introduce divider entries here.
+ */
+export const NAV_ENTRIES = NAV_ITEMS as readonly NavEntry[];
 
 export type NavIconComponent = NavItem['icon'];

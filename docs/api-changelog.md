@@ -13,6 +13,14 @@ section "Versioning" for details.
 
 ### Added
 
+- `POST /v1/organizations/:orgId/access` — records that the caller
+  accessed this organization by setting
+  `organization_members.last_accessed_at = NOW()`. Returns 204 on
+  success, 404 when the caller is not a member of the requested org
+  (existence non-disclosure — same response whether the org doesn't
+  exist or just isn't visible to the caller). Called by the frontend
+  org-store switcher so the next sign-in can resume the most-recently-
+  used context.
 - **Store connection (Trendyol Phase 1)** — four new endpoints under
   `/v1/organizations/:orgId/stores`:
   - `GET /stores` — list connected stores for the organization, most

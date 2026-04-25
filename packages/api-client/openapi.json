@@ -729,6 +729,76 @@
         }
       }
     },
+    "/v1/organizations/{orgId}/access": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Record that the caller accessed this organization",
+        "description": "Updates the caller's organization_members.last_accessed_at to NOW(). Called by the frontend when the user switches into an org so the next sign-in can resume the most-recently-used context. The membership check is implicit: the Prisma update's where-clause filters by (userId, orgId), so a non-member's update affects zero rows and Prisma raises P2025 — which `mapPrismaError` translates to NotFoundError → 404. This means cross-tenant attempts and missing-org are indistinguishable, preventing existence leak (SECURITY.md §3).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Access timestamp updated"
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Organization not found, or caller is not a member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/organizations/{orgId}/stores": {
       "get": {
         "tags": [
