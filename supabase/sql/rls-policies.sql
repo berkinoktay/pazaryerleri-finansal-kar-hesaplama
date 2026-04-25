@@ -81,6 +81,9 @@ CREATE POLICY organizations_member_read ON organizations
 -- in a single Prisma transaction. First-member insertion cannot go
 -- through authenticated-client RLS because the user isn't a member
 -- until the transaction commits (chicken-and-egg).
+--
+-- last_accessed_at: read+write authorized via existing is_org_member(organization_id)
+-- policy. No new policy needed; column inherits row-level access.
 ALTER TABLE organization_members ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS organization_members_co_member_read ON organization_members;
