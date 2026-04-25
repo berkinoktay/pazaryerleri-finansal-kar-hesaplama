@@ -13,6 +13,8 @@ import { TrendDelta } from '@/components/patterns/trend-delta';
 import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
 
+import { BottomDockShowcase } from './bottom-dock-showcase';
+
 // Hoisted mock values — stable references so React Compiler doesn't complain
 // about `new Decimal(...)` / `new Date(...)` being called during render.
 // Use fixed ISO timestamps for sync dates: `Date.now()` at module scope
@@ -158,6 +160,13 @@ export default function PatternsShowcasePage(): React.ReactElement {
             }
           />
         </div>
+      </Preview>
+
+      <Preview
+        title="BottomDock"
+        description="Tek-sidebar tasarımının altına oturan yardımcı küme. Destek / Ayarlar / Tema / Kullanıcı satırını barındırır. Yapısal olarak minimal — içeriği AppShell üzerinden enjekte edilir, pattern i18n-bağımsızdır."
+      >
+        <BottomDockShowcase />
       </Preview>
     </>
   );
