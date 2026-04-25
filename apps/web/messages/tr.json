@@ -108,7 +108,10 @@
     "expenses": "Giderler",
     "settings": "Ayarlar",
     "notifications": "Bildirimler",
-    "support": "Destek"
+    "support": "Destek",
+    "tools": "Maliyet & Araçlar",
+    "whatsNew": "Yenilikler",
+    "livePerformance": "Canlı Performans"
   },
   "navSections": {
     "orders": {
@@ -143,6 +146,15 @@
         "category": "Kategori",
         "return": "İade",
         "campaign": "Reklam"
+      }
+    },
+    "tools": {
+      "tools": {
+        "title": "Araçlar",
+        "commissionCalculator": "Komisyon Hesaplama",
+        "categoryCommissions": "Kategori Komisyonları",
+        "plusCommissionRates": "Plus Komisyon Tarifesi",
+        "productPricing": "Ürün Fiyatlandırma"
       }
     },
     "reconciliation": {
@@ -541,6 +553,20 @@
   },
   "settingsPage": {
     "title": "Ayarlar"
+  },
+  "settings": {
+    "nav": {
+      "ariaLabel": "Ayarlar menüsü",
+      "sections": {
+        "account": "Hesap",
+        "connections": "Bağlantılar"
+      },
+      "profile": "Profil",
+      "team": "Ekip",
+      "billing": "Faturalama",
+      "stores": "Mağazalar",
+      "notifications": "Bildirimler"
+    }
   },
   "notificationsPage": {
     "title": "Bildirimler",

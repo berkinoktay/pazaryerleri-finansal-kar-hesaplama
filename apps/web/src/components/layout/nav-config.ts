@@ -1,11 +1,13 @@
 import {
+  Activity03Icon,
+  Calculator01Icon,
   ChartLineData01Icon,
   DashboardSquare02Icon,
   InvoiceIcon,
+  Megaphone01Icon,
   Notification03Icon,
   PackageIcon,
   ReceiptDollarIcon,
-  Settings02Icon,
   ShoppingBag01Icon,
 } from 'hugeicons-react';
 
@@ -73,6 +75,13 @@ export const NAV_ITEMS = [
     href: '/dashboard',
     icon: DashboardSquare02Icon,
     meta: 'dashboard',
+  },
+  {
+    key: 'live-performance',
+    labelKey: 'nav.livePerformance',
+    href: '/live-performance',
+    icon: Activity03Icon,
+    badge: { variant: 'new', label: 'Yeni' },
   },
   {
     key: 'orders',
@@ -157,8 +166,9 @@ export const NAV_ITEMS = [
   {
     key: 'profitability',
     labelKey: 'nav.profitability',
-    href: '/profitability',
+    href: '/profitability/orders',
     icon: ChartLineData01Icon,
+    badge: { variant: 'beta', label: 'Beta' },
     sections: [
       {
         key: 'reports',
@@ -224,6 +234,40 @@ export const NAV_ITEMS = [
     ],
   },
   {
+    key: 'tools',
+    labelKey: 'nav.tools',
+    href: '/tools/commission-calculator',
+    icon: Calculator01Icon,
+    sections: [
+      {
+        key: 'tools',
+        labelKey: 'navSections.tools.tools.title',
+        items: [
+          {
+            key: 'commission-calculator',
+            labelKey: 'navSections.tools.tools.commissionCalculator',
+            href: '/tools/commission-calculator',
+          },
+          {
+            key: 'category-commissions',
+            labelKey: 'navSections.tools.tools.categoryCommissions',
+            href: '/tools/category-commissions',
+          },
+          {
+            key: 'plus-commission-rates',
+            labelKey: 'navSections.tools.tools.plusCommissionRates',
+            href: '/tools/plus-commission-rates',
+          },
+          {
+            key: 'product-pricing',
+            labelKey: 'navSections.tools.tools.productPricing',
+            href: '/tools/product-pricing',
+          },
+        ],
+      },
+    ],
+  },
+  {
     key: 'expenses',
     labelKey: 'nav.expenses',
     href: '/expenses',
@@ -253,45 +297,6 @@ export const NAV_ITEMS = [
             key: 'other',
             labelKey: 'navSections.expenses.category.other',
             href: '/expenses?category=other',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    key: 'settings',
-    labelKey: 'nav.settings',
-    href: '/settings',
-    icon: Settings02Icon,
-    sections: [
-      {
-        key: 'sections',
-        labelKey: 'navSections.settings.sections.title',
-        items: [
-          {
-            key: 'profile',
-            labelKey: 'navSections.settings.sections.profile',
-            href: '/settings/profile',
-          },
-          {
-            key: 'team',
-            labelKey: 'navSections.settings.sections.team',
-            href: '/settings/team',
-          },
-          {
-            key: 'billing',
-            labelKey: 'navSections.settings.sections.billing',
-            href: '/settings/billing',
-          },
-          {
-            key: 'stores',
-            labelKey: 'navSections.settings.sections.stores',
-            href: '/settings/stores',
-          },
-          {
-            key: 'notifications',
-            labelKey: 'navSections.settings.sections.notifications',
-            href: '/settings/notifications',
           },
         ],
       },
@@ -337,10 +342,20 @@ export const NAV_ITEMS = [
 ] as const satisfies readonly NavItem[];
 
 /**
- * Same data as `NAV_ITEMS`, typed as the broader `NavEntry[]` so the
- * sidebar renderer can consume both items and dividers uniformly.
- * Phase 3 will introduce divider entries here.
+ * Renderable nav surface — primary items from NAV_ITEMS plus the
+ * trailing "Yenilikler" leaf preceded by a dashed section divider.
+ * Sidebar renderer consumes this; tests that exercise just primary
+ * nav still import NAV_ITEMS directly.
  */
-export const NAV_ENTRIES = NAV_ITEMS as readonly NavEntry[];
+export const NAV_ENTRIES: readonly NavEntry[] = [
+  ...NAV_ITEMS,
+  { type: 'divider', key: 'before-whats-new' },
+  {
+    key: 'whats-new',
+    labelKey: 'nav.whatsNew',
+    href: '/whats-new',
+    icon: Megaphone01Icon,
+  },
+];
 
 export type NavIconComponent = NavItem['icon'];

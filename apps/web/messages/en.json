@@ -108,7 +108,10 @@
     "expenses": "Expenses",
     "settings": "Settings",
     "notifications": "Notifications",
-    "support": "Support"
+    "support": "Support",
+    "tools": "Tools & Pricing",
+    "whatsNew": "What's New",
+    "livePerformance": "Live Performance"
   },
   "navSections": {
     "orders": {
@@ -143,6 +146,15 @@
         "category": "Categories",
         "return": "Returns",
         "campaign": "Campaigns"
+      }
+    },
+    "tools": {
+      "tools": {
+        "title": "Tools",
+        "commissionCalculator": "Commission Calculator",
+        "categoryCommissions": "Category Commissions",
+        "plusCommissionRates": "Plus Commission Rates",
+        "productPricing": "Product Pricing"
       }
     },
     "reconciliation": {
@@ -541,6 +553,20 @@
   },
   "settingsPage": {
     "title": "Settings"
+  },
+  "settings": {
+    "nav": {
+      "ariaLabel": "Settings menu",
+      "sections": {
+        "account": "Account",
+        "connections": "Connections"
+      },
+      "profile": "Profile",
+      "team": "Team",
+      "billing": "Billing",
+      "stores": "Stores",
+      "notifications": "Notifications"
+    }
   },
   "notificationsPage": {
     "title": "Notifications",
