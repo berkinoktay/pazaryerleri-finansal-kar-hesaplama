@@ -542,6 +542,20 @@
   "settingsPage": {
     "title": "Ayarlar"
   },
+  "settings": {
+    "nav": {
+      "ariaLabel": "Ayarlar menüsü",
+      "sections": {
+        "account": "Hesap",
+        "connections": "Bağlantılar"
+      },
+      "profile": "Profil",
+      "team": "Ekip",
+      "billing": "Faturalama",
+      "stores": "Mağazalar",
+      "notifications": "Bildirimler"
+    }
+  },
   "notificationsPage": {
     "title": "Bildirimler",
     "intent": "Sistemden gelen tüm bildirimlerin geçmişi.",

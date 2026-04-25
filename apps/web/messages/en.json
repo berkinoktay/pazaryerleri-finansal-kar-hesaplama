@@ -542,6 +542,20 @@
   "settingsPage": {
     "title": "Settings"
   },
+  "settings": {
+    "nav": {
+      "ariaLabel": "Settings menu",
+      "sections": {
+        "account": "Account",
+        "connections": "Connections"
+      },
+      "profile": "Profile",
+      "team": "Team",
+      "billing": "Billing",
+      "stores": "Stores",
+      "notifications": "Notifications"
+    }
+  },
   "notificationsPage": {
     "title": "Notifications",
     "intent": "History of all system notifications.",

@@ -147,6 +147,7 @@
 
   --spacing-rail-icon: var(--size-rail-icon);
   --spacing-rail-context: var(--size-rail-context);
+  --spacing-settings-aside: var(--size-settings-aside);
 
   --spacing-header-h: var(--size-header-h);
   --spacing-page-header-h: var(--size-page-header-h);
