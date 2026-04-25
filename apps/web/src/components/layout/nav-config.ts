@@ -5,7 +5,6 @@ import {
   Notification03Icon,
   PackageIcon,
   ReceiptDollarIcon,
-  Settings02Icon,
   ShoppingBag01Icon,
 } from 'hugeicons-react';
 
@@ -253,45 +252,6 @@ export const NAV_ITEMS = [
             key: 'other',
             labelKey: 'navSections.expenses.category.other',
             href: '/expenses?category=other',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    key: 'settings',
-    labelKey: 'nav.settings',
-    href: '/settings',
-    icon: Settings02Icon,
-    sections: [
-      {
-        key: 'sections',
-        labelKey: 'navSections.settings.sections.title',
-        items: [
-          {
-            key: 'profile',
-            labelKey: 'navSections.settings.sections.profile',
-            href: '/settings/profile',
-          },
-          {
-            key: 'team',
-            labelKey: 'navSections.settings.sections.team',
-            href: '/settings/team',
-          },
-          {
-            key: 'billing',
-            labelKey: 'navSections.settings.sections.billing',
-            href: '/settings/billing',
-          },
-          {
-            key: 'stores',
-            labelKey: 'navSections.settings.sections.stores',
-            href: '/settings/stores',
-          },
-          {
-            key: 'notifications',
-            labelKey: 'navSections.settings.sections.notifications',
-            href: '/settings/notifications',
           },
         ],
       },
