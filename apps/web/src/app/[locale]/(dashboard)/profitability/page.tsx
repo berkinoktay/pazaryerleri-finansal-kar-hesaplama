@@ -1,41 +1,10 @@
-import type { Metadata } from 'next';
-import { hasLocale } from 'next-intl';
-import { getTranslations } from 'next-intl/server';
+import { redirect } from 'next/navigation';
 
-import { EmptyState } from '@/components/patterns/empty-state';
-import { PageHeader } from '@/components/patterns/page-header';
-import { routing } from '@/i18n/routing';
-
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ locale: string }>;
-}): Promise<Metadata> {
-  const { locale } = await params;
-  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const t = await getTranslations({ locale: effectiveLocale, namespace: 'profitabilityPage' });
-  return { title: t('title') };
-}
-
-export default async function ProfitabilityPage({
-  params,
-}: {
-  params: Promise<{ locale: string }>;
-}): Promise<React.ReactElement> {
-  const { locale } = await params;
-  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const tPage = await getTranslations({
-    locale: effectiveLocale,
-    namespace: 'profitabilityPage',
-  });
-  const tEmpty = await getTranslations({
-    locale: effectiveLocale,
-    namespace: 'placeholderPage',
-  });
-  return (
-    <>
-      <PageHeader title={tPage('title')} />
-      <EmptyState title={tEmpty('comingSoon')} description={tEmpty('description')} />
-    </>
-  );
+/**
+ * /profitability is the entry point for the Karlilik Analizi group —
+ * redirect to the first sub-report so the sidebar always has an
+ * active row when the user lands on the parent route.
+ */
+export default function ProfitabilityIndexPage(): never {
+  redirect('/profitability/orders');
 }

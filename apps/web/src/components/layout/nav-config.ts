@@ -156,8 +156,9 @@ export const NAV_ITEMS = [
   {
     key: 'profitability',
     labelKey: 'nav.profitability',
-    href: '/profitability',
+    href: '/profitability/orders',
     icon: ChartLineData01Icon,
+    badge: { variant: 'beta', label: 'Beta' },
     sections: [
       {
         key: 'reports',
