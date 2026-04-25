@@ -14,6 +14,7 @@ import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
 
 import { BottomDockShowcase } from './bottom-dock-showcase';
+import { NavGroupShowcase } from './nav-group-showcase';
 import { ThemeToggleShowcase } from './theme-toggle-showcase';
 
 // Hoisted mock values — stable references so React Compiler doesn't complain
@@ -175,6 +176,13 @@ export default function PatternsShowcasePage(): React.ReactElement {
         description="Sidebar bottom dock için satır-içi tema anahtarı. Sun + Moon ikonları her iki render'da da DOM'da; `dark:` Tailwind varyantı görünürlüğü değiştirir. resolvedTheme yalnızca useIsMounted gate'inin arkasında okunur — SSR çıktısı ilk paint ile byte-eşit kalır."
       >
         <ThemeToggleShowcase />
+      </Preview>
+
+      <Preview
+        title="NavGroup"
+        description="Tek-sidebar tasarımında nested feature grupları için açılır-kapanır başlık. Animasyon `grid-template-rows: 0fr → 1fr` üzerinden — height transition'ları yasak (apps/web/CLAUDE.md motion guidance). İsteğe bağlı Yeni / Beta / count rozeti satır-içi."
+      >
+        <NavGroupShowcase />
       </Preview>
     </>
   );
