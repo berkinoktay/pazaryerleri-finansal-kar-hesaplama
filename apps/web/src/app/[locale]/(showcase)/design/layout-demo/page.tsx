@@ -7,10 +7,11 @@ import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/app-shell';
 import { Currency } from '@/components/patterns/currency';
 import { KpiTile } from '@/components/patterns/kpi-tile';
+import { type Organization, type Store } from '@/components/patterns/org-store-switcher';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { SyncBadge } from '@/components/patterns/sync-badge';
-import { MOCK_STORES, buildMockOrders } from '@/components/showcase/showcase-mocks';
+import { buildMockOrders } from '@/components/showcase/showcase-mocks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -22,6 +23,42 @@ const MOCK_PROFIT = new Decimal('48120.80');
 // mismatch when minute-precision labels straddle a minute boundary.
 const MOCK_LAST_SYNCED = new Date('2026-04-20T21:00:00Z');
 
+// T2.1 cutover left this page on minimal mocks for the new AppShell
+// surface — T2.4 owns the proper refresh of this demo.
+const MOCK_ORGS: Organization[] = [
+  {
+    id: 'org-demo',
+    name: 'Demo Organizasyon',
+    role: 'OWNER',
+    storeCount: 3,
+    lastSyncedAt: '2026-04-20T21:00:00Z',
+  },
+];
+
+const MOCK_STORES: Store[] = [
+  {
+    id: 'store-ty-main',
+    name: 'Ana Mağaza',
+    platform: 'TRENDYOL',
+    syncState: 'fresh',
+    lastSyncedAt: '2026-04-20T21:00:00Z',
+  },
+  {
+    id: 'store-ty-outlet',
+    name: 'Outlet',
+    platform: 'TRENDYOL',
+    syncState: 'fresh',
+    lastSyncedAt: '2026-04-20T21:00:00Z',
+  },
+  {
+    id: 'store-hb-main',
+    name: 'Hepsiburada Mağazası',
+    platform: 'HEPSIBURADA',
+    syncState: 'stale',
+    lastSyncedAt: '2026-04-19T15:00:00Z',
+  },
+];
+
 export default function LayoutDemoPage(): React.ReactElement {
   const [activeStoreId, setActiveStoreId] = React.useState(MOCK_STORES[0]!.id);
   const activeStore = MOCK_STORES.find((s) => s.id === activeStoreId) ?? MOCK_STORES[0]!;
@@ -29,8 +66,11 @@ export default function LayoutDemoPage(): React.ReactElement {
   return (
     <div className="h-shell-demo border-border-strong overflow-hidden rounded-xl border shadow-lg">
       <AppShell
+        orgs={MOCK_ORGS}
         stores={MOCK_STORES}
+        activeOrgId={MOCK_ORGS[0]!.id}
         activeStoreId={activeStoreId}
+        onSelectOrg={() => undefined}
         onSelectStore={setActiveStoreId}
         onAddStore={() => toast.info('Mağaza bağla akışı burada açılır')}
       >

@@ -107,7 +107,8 @@
     "reconciliation": "Reconciliation",
     "expenses": "Expenses",
     "settings": "Settings",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "support": "Support"
   },
   "navSections": {
     "orders": {
