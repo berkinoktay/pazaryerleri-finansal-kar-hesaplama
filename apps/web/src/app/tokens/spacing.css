@@ -61,6 +61,7 @@
   --size-sheet: 24rem; /* sheet panel default (384px) */
   --size-sheet-wide: 28rem; /* sheet on ≥sm viewports (448px) */
   --size-modal: 32rem; /* dialog content (512px) */
+  --size-dropdown-popover: 24rem; /* org+store switcher dropdown panel (384px) */
   --size-headline: 56rem; /* landing hero H1 column (896px) */
 
   --radius-xs: 4px;
