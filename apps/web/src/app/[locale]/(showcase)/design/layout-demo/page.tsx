@@ -14,6 +14,7 @@ import { SyncBadge } from '@/components/patterns/sync-badge';
 import { buildMockOrders } from '@/components/showcase/showcase-mocks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { QuickAccessPanel } from '@/features/dashboard/components/quick-access-panel';
 
 const recentOrders = buildMockOrders(8);
 const MOCK_REVENUE = new Decimal('284390.45');
@@ -23,8 +24,10 @@ const MOCK_PROFIT = new Decimal('48120.80');
 // mismatch when minute-precision labels straddle a minute boundary.
 const MOCK_LAST_SYNCED = new Date('2026-04-20T21:00:00Z');
 
-// T2.1 cutover left this page on minimal mocks for the new AppShell
-// surface — T2.4 owns the proper refresh of this demo.
+// Canonical demo of the new tek-sidebar AppShell.  Two orgs are
+// deliberate so OrgStoreSwitcher's multi-org behavior (search, role
+// badges, deterministic per-org avatar palette) renders meaningfully
+// when designers open this page.
 const MOCK_ORGS: Organization[] = [
   {
     id: 'org-demo',
@@ -32,6 +35,34 @@ const MOCK_ORGS: Organization[] = [
     role: 'OWNER',
     storeCount: 3,
     lastSyncedAt: '2026-04-20T21:00:00Z',
+  },
+  {
+    id: 'org-secondary',
+    name: 'İkinci Şirket A.Ş.',
+    role: 'ADMIN',
+    storeCount: 1,
+    lastSyncedAt: '2026-04-19T15:00:00Z',
+  },
+];
+
+const MOCK_QUICK_ACCESS = [
+  {
+    key: 'pendingOrders' as const,
+    href: '/orders?status=pending',
+    count: 5,
+    tone: 'warning' as const,
+  },
+  {
+    key: 'noCostProducts' as const,
+    href: '/products?filter=no-cost',
+    count: 12,
+    tone: 'warning' as const,
+  },
+  {
+    key: 'returnReviews' as const,
+    href: '/orders?status=returned',
+    count: 3,
+    tone: 'warning' as const,
   },
 ];
 
@@ -93,6 +124,8 @@ export default function LayoutDemoPage(): React.ReactElement {
             </>
           }
         />
+
+        <QuickAccessPanel items={MOCK_QUICK_ACCESS} />
 
         <StatGroup>
           <KpiTile
