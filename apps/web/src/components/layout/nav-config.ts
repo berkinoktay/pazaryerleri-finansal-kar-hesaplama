@@ -1,8 +1,10 @@
 import {
+  Activity03Icon,
   Calculator01Icon,
   ChartLineData01Icon,
   DashboardSquare02Icon,
   InvoiceIcon,
+  Megaphone01Icon,
   Notification03Icon,
   PackageIcon,
   ReceiptDollarIcon,
@@ -73,6 +75,13 @@ export const NAV_ITEMS = [
     href: '/dashboard',
     icon: DashboardSquare02Icon,
     meta: 'dashboard',
+  },
+  {
+    key: 'live-performance',
+    labelKey: 'nav.livePerformance',
+    href: '/live-performance',
+    icon: Activity03Icon,
+    badge: { variant: 'new', label: 'Yeni' },
   },
   {
     key: 'orders',
@@ -333,10 +342,20 @@ export const NAV_ITEMS = [
 ] as const satisfies readonly NavItem[];
 
 /**
- * Same data as `NAV_ITEMS`, typed as the broader `NavEntry[]` so the
- * sidebar renderer can consume both items and dividers uniformly.
- * Phase 3 will introduce divider entries here.
+ * Renderable nav surface — primary items from NAV_ITEMS plus the
+ * trailing "Yenilikler" leaf preceded by a dashed section divider.
+ * Sidebar renderer consumes this; tests that exercise just primary
+ * nav still import NAV_ITEMS directly.
  */
-export const NAV_ENTRIES = NAV_ITEMS as readonly NavEntry[];
+export const NAV_ENTRIES: readonly NavEntry[] = [
+  ...NAV_ITEMS,
+  { type: 'divider', key: 'before-whats-new' },
+  {
+    key: 'whats-new',
+    labelKey: 'nav.whatsNew',
+    href: '/whats-new',
+    icon: Megaphone01Icon,
+  },
+];
 
 export type NavIconComponent = NavItem['icon'];
