@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 
 import { BottomDockShowcase } from './bottom-dock-showcase';
 import { NavGroupShowcase } from './nav-group-showcase';
+import { OrgStoreSwitcherShowcase } from './org-store-switcher-showcase';
 import { ThemeToggleShowcase } from './theme-toggle-showcase';
 
 // Hoisted mock values — stable references so React Compiler doesn't complain
@@ -183,6 +184,13 @@ export default function PatternsShowcasePage(): React.ReactElement {
         description="Tek-sidebar tasarımında nested feature grupları için açılır-kapanır başlık. Animasyon `grid-template-rows: 0fr → 1fr` üzerinden — height transition'ları yasak (apps/web/CLAUDE.md motion guidance). İsteğe bağlı Yeni / Beta / count rozeti satır-içi."
       >
         <NavGroupShowcase />
+      </Preview>
+
+      <Preview
+        title="OrgStoreSwitcher"
+        description="Tek-sidebar başlığındaki birleşik org+mağaza chip'i. 32px renk paletli avatar + sağ-alt platform rozeti + sol-üst sync nabzı. Açılır panel cmdk fuzzy search, role badge'leri ve aktif duruma göre check işareti gösterir. orgs=[] olduğunda + Yeni Organizasyon Oluştur / Davet Kodum Var CTA'larıyla boş duruma düşer. Daraltılmış sidebar modunda yalnızca avatar + rozet kalır."
+      >
+        <OrgStoreSwitcherShowcase />
       </Preview>
     </>
   );
