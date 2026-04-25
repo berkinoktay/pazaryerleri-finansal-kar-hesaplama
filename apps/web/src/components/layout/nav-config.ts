@@ -1,4 +1,5 @@
 import {
+  Calculator01Icon,
   ChartLineData01Icon,
   DashboardSquare02Icon,
   InvoiceIcon,
@@ -218,6 +219,40 @@ export const NAV_ITEMS = [
             labelKey: 'navSections.reconciliation.status.mismatch',
             href: '/reconciliation?status=mismatch',
             tone: 'warning',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'tools',
+    labelKey: 'nav.tools',
+    href: '/tools/commission-calculator',
+    icon: Calculator01Icon,
+    sections: [
+      {
+        key: 'tools',
+        labelKey: 'navSections.tools.tools.title',
+        items: [
+          {
+            key: 'commission-calculator',
+            labelKey: 'navSections.tools.tools.commissionCalculator',
+            href: '/tools/commission-calculator',
+          },
+          {
+            key: 'category-commissions',
+            labelKey: 'navSections.tools.tools.categoryCommissions',
+            href: '/tools/category-commissions',
+          },
+          {
+            key: 'plus-commission-rates',
+            labelKey: 'navSections.tools.tools.plusCommissionRates',
+            href: '/tools/plus-commission-rates',
+          },
+          {
+            key: 'product-pricing',
+            labelKey: 'navSections.tools.tools.productPricing',
+            href: '/tools/product-pricing',
           },
         ],
       },
