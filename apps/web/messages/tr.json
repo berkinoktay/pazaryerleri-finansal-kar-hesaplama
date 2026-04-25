@@ -239,6 +239,11 @@
     "empty": "Henüz bildirim yok",
     "seeAll": "Tümünü gör"
   },
+  "themeToggle": {
+    "label": "Tema",
+    "light": "Açık tema",
+    "dark": "Koyu tema"
+  },
   "userMenu": {
     "open": "Kullanıcı menüsünü aç",
     "profile": "Profil",

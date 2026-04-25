@@ -239,6 +239,11 @@
     "empty": "No notifications yet",
     "seeAll": "See all"
   },
+  "themeToggle": {
+    "label": "Theme",
+    "light": "Light theme",
+    "dark": "Dark theme"
+  },
   "userMenu": {
     "open": "Open user menu",
     "profile": "Profile",

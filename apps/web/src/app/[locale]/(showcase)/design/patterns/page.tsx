@@ -14,6 +14,7 @@ import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
 
 import { BottomDockShowcase } from './bottom-dock-showcase';
+import { ThemeToggleShowcase } from './theme-toggle-showcase';
 
 // Hoisted mock values — stable references so React Compiler doesn't complain
 // about `new Decimal(...)` / `new Date(...)` being called during render.
@@ -167,6 +168,13 @@ export default function PatternsShowcasePage(): React.ReactElement {
         description="Tek-sidebar tasarımının altına oturan yardımcı küme. Destek / Ayarlar / Tema / Kullanıcı satırını barındırır. Yapısal olarak minimal — içeriği AppShell üzerinden enjekte edilir, pattern i18n-bağımsızdır."
       >
         <BottomDockShowcase />
+      </Preview>
+
+      <Preview
+        title="ThemeToggleInline"
+        description="Sidebar bottom dock için satır-içi tema anahtarı. Sun + Moon ikonları her iki render'da da DOM'da; `dark:` Tailwind varyantı görünürlüğü değiştirir. resolvedTheme yalnızca useIsMounted gate'inin arkasında okunur — SSR çıktısı ilk paint ile byte-eşit kalır."
+      >
+        <ThemeToggleShowcase />
       </Preview>
     </>
   );
