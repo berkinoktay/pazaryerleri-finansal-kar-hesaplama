@@ -57,7 +57,31 @@ export function StoreSwitcher({
   const [open, setOpen] = React.useState(false);
   const active = stores.find((s) => s.id === activeStoreId) ?? stores[0];
 
-  if (!active) return <div className="h-9 w-full" />;
+  if (!active) {
+    if (!onAddStore) return <div className="h-9 w-full" />;
+    return (
+      <button
+        type="button"
+        onClick={onAddStore}
+        className={cn(
+          'gap-sm border-border-strong bg-background px-sm py-xs duration-fast flex w-full items-center rounded-md border border-dashed text-left text-sm transition-colors',
+          'hover:border-primary hover:bg-accent',
+          'focus-visible:outline-none',
+        )}
+      >
+        <span
+          className="bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center rounded-md"
+          aria-hidden="true"
+        >
+          <PlusSignIcon className="size-icon-sm" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="text-foreground font-semibold">{t('connectFirst.title')}</span>
+          <span className="text-2xs text-muted-foreground">{t('connectFirst.hint')}</span>
+        </span>
+      </button>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

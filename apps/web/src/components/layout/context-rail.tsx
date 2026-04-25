@@ -48,14 +48,12 @@ export function ContextRail({
     >
       <div className="gap-xs border-border p-sm flex flex-col border-b">
         {orgSwitcher}
-        {stores.length > 0 ? (
-          <StoreSwitcher
-            stores={stores}
-            activeStoreId={activeStoreId}
-            onSelect={onSelectStore}
-            onAddStore={onAddStore}
-          />
-        ) : null}
+        <StoreSwitcher
+          stores={stores}
+          activeStoreId={activeStoreId}
+          onSelect={onSelectStore}
+          onAddStore={onAddStore}
+        />
       </div>
 
       <ScrollArea className="flex-1">

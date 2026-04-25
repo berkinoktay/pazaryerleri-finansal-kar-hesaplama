@@ -199,7 +199,11 @@
     "empty": "Mağaza bulunamadı.",
     "heading": "Mağazalar",
     "active": "Aktif",
-    "addStore": "Mağaza bağla"
+    "addStore": "Mağaza bağla",
+    "connectFirst": {
+      "title": "İlk mağazanı bağla",
+      "hint": "Veri akışını başlat"
+    }
   },
   "storeSummary": {
     "heading": "Mağaza özeti",

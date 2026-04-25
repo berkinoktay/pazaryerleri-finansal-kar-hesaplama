@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowDown01Icon, Building03Icon, PlusSignIcon, Tick01Icon } from 'hugeicons-react';
+import { useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -34,6 +35,7 @@ export function OrgSwitcher({ orgs, activeOrgId }: OrgSwitcherProps): React.Reac
   const [modalOpen, setModalOpen] = React.useState(false);
 
   const active = orgs.find((o) => o.id === activeOrgId) ?? orgs[0];
+  const initial = useMemo(() => active?.name.charAt(0).toUpperCase() ?? '', [active]);
 
   async function handleSelect(orgId: string): Promise<void> {
     setOpen(false);
@@ -58,17 +60,18 @@ export function OrgSwitcher({ orgs, activeOrgId }: OrgSwitcherProps): React.Reac
             type="button"
             aria-label={t('trigger')}
             className={cn(
-              'gap-xs border-border bg-background px-xs py-xs duration-fast flex w-full items-center rounded-md border text-left text-sm shadow-xs transition-colors',
-              'hover:border-border-strong',
+              'gap-xs px-xs py-3xs duration-fast text-muted-foreground hover:bg-muted hover:text-foreground flex w-full items-center rounded-md text-left text-xs transition-colors',
               'focus-visible:outline-none',
             )}
           >
-            <Building03Icon className="size-icon-sm text-muted-foreground shrink-0" />
-            <span className="flex min-w-0 flex-1 flex-col leading-tight">
-              <span className="text-foreground truncate font-medium">{active.name}</span>
-              <span className="text-2xs text-muted-foreground font-mono">{active.slug}</span>
+            <span
+              aria-hidden="true"
+              className="bg-muted text-muted-foreground text-2xs flex size-5 shrink-0 items-center justify-center rounded-sm font-semibold uppercase"
+            >
+              {initial}
             </span>
-            <ArrowDown01Icon className="size-icon-sm text-muted-foreground shrink-0" />
+            <span className="min-w-0 flex-1 truncate font-medium">{active.name}</span>
+            <ArrowDown01Icon className="size-3 shrink-0" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-72 p-0">

@@ -199,7 +199,11 @@
     "empty": "No stores found.",
     "heading": "Stores",
     "active": "Active",
-    "addStore": "Connect store"
+    "addStore": "Connect store",
+    "connectFirst": {
+      "title": "Connect your first store",
+      "hint": "Start the data flow"
+    }
   },
   "storeSummary": {
     "heading": "Store summary",
