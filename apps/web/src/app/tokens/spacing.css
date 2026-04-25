@@ -6,8 +6,9 @@
  * unique width), we add the role here rather than reaching for [NNpx]
  * in className. The ESLint rule in eslint.config.mjs enforces that.
  *
- * Rail widths below are load-bearing for the dual-rail layout shell.
- * Changing them shifts every screen, so treat them as product contract.
+ * Rail widths below are load-bearing for the three-column layout shell
+ * (IconRail + ContextRail + Main). Changing them shifts every screen,
+ * so treat them as product contract.
  */
 
 :root {
@@ -31,8 +32,6 @@
 
   --size-rail-icon: 48px;
   --size-rail-context: 240px;
-  --size-rail-activity: 32px;
-  --size-rail-activity-open: 320px;
 
   --size-header-h: 56px;
   --size-page-header-h: 72px;

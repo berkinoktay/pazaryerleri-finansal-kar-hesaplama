@@ -18,7 +18,7 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
 
 /**
  * Inline page header — no separate app-wide header bar exists in the
- * dual-rail layout. Each page owns its own header so context (store,
+ * three-column layout. Each page owns its own header so context (store,
  * period, last sync) lives next to the content it describes.
  */
 export function PageHeader({

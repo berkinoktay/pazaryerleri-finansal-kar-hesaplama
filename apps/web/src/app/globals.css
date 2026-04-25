@@ -86,6 +86,9 @@
   --color-chart-5: var(--chart-5);
   --color-chart-6: var(--chart-6);
 
+  --color-warning-border: var(--warning-border);
+  --color-destructive-border: var(--destructive-border);
+
   /* Typography scale */
   --text-2xs: var(--text-2xs);
   --text-2xs--line-height: var(--text-2xs--line-height);
@@ -144,8 +147,6 @@
 
   --spacing-rail-icon: var(--size-rail-icon);
   --spacing-rail-context: var(--size-rail-context);
-  --spacing-rail-activity: var(--size-rail-activity);
-  --spacing-rail-activity-open: var(--size-rail-activity-open);
 
   --spacing-header-h: var(--size-header-h);
   --spacing-page-header-h: var(--size-page-header-h);

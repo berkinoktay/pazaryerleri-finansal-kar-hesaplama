@@ -57,7 +57,31 @@ export function StoreSwitcher({
   const [open, setOpen] = React.useState(false);
   const active = stores.find((s) => s.id === activeStoreId) ?? stores[0];
 
-  if (!active) return <div className="h-9 w-full" />;
+  if (!active) {
+    if (!onAddStore) return <div className="h-9 w-full" />;
+    return (
+      <button
+        type="button"
+        onClick={onAddStore}
+        className={cn(
+          'gap-sm border-border-strong bg-background px-sm py-xs duration-fast flex w-full items-center rounded-md border border-dashed text-left text-sm transition-colors',
+          'hover:border-primary hover:bg-accent',
+          'focus-visible:outline-none',
+        )}
+      >
+        <span
+          className="bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center rounded-md"
+          aria-hidden="true"
+        >
+          <PlusSignIcon className="size-icon-sm" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="text-foreground font-semibold">{t('connectFirst.title')}</span>
+          <span className="text-2xs text-muted-foreground">{t('connectFirst.hint')}</span>
+        </span>
+      </button>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -65,16 +89,27 @@ export function StoreSwitcher({
         <button
           type="button"
           className={cn(
-            'gap-xs border-border bg-background px-xs py-xs duration-fast flex w-full items-center rounded-md border text-left text-sm shadow-xs transition-colors',
+            'gap-sm border-border bg-background px-sm py-xs duration-fast flex w-full items-center rounded-md border text-left text-sm shadow-xs transition-colors',
             'hover:border-border-strong',
             'focus-visible:outline-none',
           )}
         >
-          <span className={cn('size-2 shrink-0 rounded-full', STATUS_TONE[active.status])} />
+          <span
+            className={cn(
+              'flex size-7 shrink-0 items-center justify-center rounded-md font-bold uppercase',
+              active.platform === 'TRENDYOL'
+                ? 'bg-warning-surface text-warning'
+                : 'bg-info-surface text-info',
+            )}
+            aria-hidden="true"
+          >
+            {active.platform === 'TRENDYOL' ? 'T' : 'H'}
+          </span>
           <span className="flex min-w-0 flex-1 flex-col leading-tight">
-            <span className="text-foreground truncate font-medium">{active.name}</span>
-            <span className="text-2xs text-muted-foreground">
-              {PLATFORM_LABEL[active.platform]}
+            <span className="text-foreground truncate font-semibold">{active.name}</span>
+            <span className="text-2xs gap-3xs flex items-center">
+              <span className={cn('size-1.5 rounded-full', STATUS_TONE[active.status])} />
+              <span className="text-muted-foreground">{PLATFORM_LABEL[active.platform]}</span>
             </span>
           </span>
           <ArrowDown01Icon className="size-icon-sm text-muted-foreground shrink-0" />

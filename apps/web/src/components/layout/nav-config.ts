@@ -2,11 +2,39 @@ import {
   ChartLineData01Icon,
   DashboardSquare02Icon,
   InvoiceIcon,
+  Notification03Icon,
   PackageIcon,
   ReceiptDollarIcon,
   Settings02Icon,
   ShoppingBag01Icon,
 } from 'hugeicons-react';
+
+import type { SubNavItem } from '@/components/patterns/sub-nav-list';
+
+/**
+ * Shape of a section block inside the ContextRail middle slot.
+ * `meta` is an alternative render hint — when set, the rail picks
+ * a custom React component instead of rendering a SubNavList.
+ */
+export interface NavSection {
+  key: string;
+  labelKey: SubNavItem['labelKey'];
+  items: readonly SubNavItem[];
+}
+
+export interface NavItemBase {
+  key: string;
+  labelKey: SubNavItem['labelKey'];
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** When true, IconRail skips this item (visible to ContextRail only). */
+  hideFromIconRail?: boolean;
+}
+
+export type NavItem =
+  | (NavItemBase & { sections: readonly NavSection[]; meta?: never })
+  | (NavItemBase & { sections?: never; meta: 'dashboard' })
+  | (NavItemBase & { sections?: never; meta?: never });
 
 export const NAV_ITEMS = [
   {
@@ -14,6 +42,7 @@ export const NAV_ITEMS = [
     labelKey: 'nav.dashboard',
     href: '/dashboard',
     icon: DashboardSquare02Icon,
+    meta: 'dashboard',
   },
   {
     key: 'orders',
@@ -45,6 +74,7 @@ export const NAV_ITEMS = [
             key: 'returned',
             labelKey: 'navSections.orders.status.returned',
             href: '/orders?status=returned',
+            tone: 'warning',
           },
         ],
       },
@@ -67,10 +97,29 @@ export const NAV_ITEMS = [
             href: '/products?status=draft',
           },
           {
-            key: 'costs',
-            labelKey: 'navSections.products.catalog.costs',
-            href: '/products/costs',
+            key: 'no-cost',
+            labelKey: 'navSections.products.catalog.noCost',
+            href: '/products?filter=no-cost',
+            tone: 'warning',
           },
+          {
+            key: 'no-desi',
+            labelKey: 'navSections.products.catalog.noDesi',
+            href: '/products?filter=no-desi',
+            tone: 'warning',
+          },
+          {
+            key: 'low-stock',
+            labelKey: 'navSections.products.catalog.lowStock',
+            href: '/products?filter=low-stock',
+          },
+        ],
+      },
+      {
+        key: 'meta',
+        labelKey: 'navSections.products.meta.title',
+        items: [
+          { key: 'costs', labelKey: 'navSections.products.meta.costs', href: '/products/costs' },
         ],
       },
     ],
@@ -82,22 +131,32 @@ export const NAV_ITEMS = [
     icon: ChartLineData01Icon,
     sections: [
       {
-        key: 'views',
-        labelKey: 'navSections.profitability.views.title',
+        key: 'reports',
+        labelKey: 'navSections.profitability.reports.title',
         items: [
           {
-            key: 'period',
-            labelKey: 'navSections.profitability.views.period',
-            href: '/profitability',
+            key: 'order',
+            labelKey: 'navSections.profitability.reports.order',
+            href: '/profitability/orders',
           },
           {
-            key: 'by-product',
-            labelKey: 'navSections.profitability.views.byProduct',
+            key: 'product',
+            labelKey: 'navSections.profitability.reports.product',
             href: '/profitability/products',
           },
           {
-            key: 'by-campaign',
-            labelKey: 'navSections.profitability.views.byCampaign',
+            key: 'category',
+            labelKey: 'navSections.profitability.reports.category',
+            href: '/profitability/categories',
+          },
+          {
+            key: 'return',
+            labelKey: 'navSections.profitability.reports.return',
+            href: '/profitability/returns',
+          },
+          {
+            key: 'campaign',
+            labelKey: 'navSections.profitability.reports.campaign',
             href: '/profitability/campaigns',
           },
         ],
@@ -109,20 +168,142 @@ export const NAV_ITEMS = [
     labelKey: 'nav.reconciliation',
     href: '/reconciliation',
     icon: InvoiceIcon,
+    sections: [
+      {
+        key: 'status',
+        labelKey: 'navSections.reconciliation.status.title',
+        items: [
+          {
+            key: 'matched',
+            labelKey: 'navSections.reconciliation.status.matched',
+            href: '/reconciliation?status=matched',
+          },
+          {
+            key: 'pending',
+            labelKey: 'navSections.reconciliation.status.pending',
+            href: '/reconciliation?status=pending',
+          },
+          {
+            key: 'mismatch',
+            labelKey: 'navSections.reconciliation.status.mismatch',
+            href: '/reconciliation?status=mismatch',
+            tone: 'warning',
+          },
+        ],
+      },
+    ],
   },
   {
     key: 'expenses',
     labelKey: 'nav.expenses',
     href: '/expenses',
     icon: ReceiptDollarIcon,
+    sections: [
+      {
+        key: 'category',
+        labelKey: 'navSections.expenses.category.title',
+        items: [
+          { key: 'all', labelKey: 'navSections.expenses.category.all', href: '/expenses' },
+          {
+            key: 'product',
+            labelKey: 'navSections.expenses.category.product',
+            href: '/expenses?category=product',
+          },
+          {
+            key: 'ad',
+            labelKey: 'navSections.expenses.category.ad',
+            href: '/expenses?category=ad',
+          },
+          {
+            key: 'packaging',
+            labelKey: 'navSections.expenses.category.packaging',
+            href: '/expenses?category=packaging',
+          },
+          {
+            key: 'other',
+            labelKey: 'navSections.expenses.category.other',
+            href: '/expenses?category=other',
+          },
+        ],
+      },
+    ],
   },
   {
     key: 'settings',
     labelKey: 'nav.settings',
     href: '/settings',
     icon: Settings02Icon,
+    sections: [
+      {
+        key: 'sections',
+        labelKey: 'navSections.settings.sections.title',
+        items: [
+          {
+            key: 'profile',
+            labelKey: 'navSections.settings.sections.profile',
+            href: '/settings/profile',
+          },
+          {
+            key: 'team',
+            labelKey: 'navSections.settings.sections.team',
+            href: '/settings/team',
+          },
+          {
+            key: 'billing',
+            labelKey: 'navSections.settings.sections.billing',
+            href: '/settings/billing',
+          },
+          {
+            key: 'stores',
+            labelKey: 'navSections.settings.sections.stores',
+            href: '/settings/stores',
+          },
+          {
+            key: 'notifications',
+            labelKey: 'navSections.settings.sections.notifications',
+            href: '/settings/notifications',
+          },
+        ],
+      },
+    ],
   },
-] as const;
+  {
+    key: 'notifications',
+    labelKey: 'nav.notifications',
+    href: '/notifications',
+    icon: Notification03Icon,
+    hideFromIconRail: true,
+    sections: [
+      {
+        key: 'filter',
+        labelKey: 'navSections.notifications.filter.title',
+        items: [
+          { key: 'all', labelKey: 'navSections.notifications.filter.all', href: '/notifications' },
+          {
+            key: 'unread',
+            labelKey: 'navSections.notifications.filter.unread',
+            href: '/notifications?filter=unread',
+          },
+          {
+            key: 'sync',
+            labelKey: 'navSections.notifications.filter.sync',
+            href: '/notifications?filter=sync',
+          },
+          {
+            key: 'orders',
+            labelKey: 'navSections.notifications.filter.orders',
+            href: '/notifications?filter=orders',
+          },
+          {
+            key: 'warning',
+            labelKey: 'navSections.notifications.filter.warning',
+            href: '/notifications?filter=warning',
+            tone: 'warning',
+          },
+        ],
+      },
+    ],
+  },
+] as const satisfies readonly NavItem[];
 
-export type NavItem = (typeof NAV_ITEMS)[number];
 export type NavIconComponent = NavItem['icon'];

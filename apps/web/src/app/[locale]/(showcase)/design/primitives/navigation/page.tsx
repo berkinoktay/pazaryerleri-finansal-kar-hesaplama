@@ -50,7 +50,7 @@ export default function NavigationPrimitivePage(): React.ReactElement {
     <>
       <PageHeader
         title="Gezinme"
-        intent="Tab, breadcrumb, pagination, navigation-menu, menubar. Dual-rail layout dışındaki her gezinme deseni buradan."
+        intent="Tab, breadcrumb, pagination, navigation-menu, menubar. Üç sütunlu layout dışındaki her gezinme deseni buradan."
       />
       <PrimitiveNav />
 
@@ -179,7 +179,7 @@ export default function NavigationPrimitivePage(): React.ReactElement {
 
       <Preview
         title="NavigationMenu"
-        description="Mega-menu / top-level navigation. Dashboard'un dual-rail'i ile değiştirdik ama landing sayfasının navbar'ı için uygun."
+        description="Mega-menu / top-level navigation. Dashboard'un üç sütunlu shell'i ile değiştirdik ama landing sayfasının navbar'ı için uygun."
       >
         <NavigationMenu>
           <NavigationMenuList>

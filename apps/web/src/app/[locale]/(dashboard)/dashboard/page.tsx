@@ -1,27 +1,46 @@
+import type { Metadata } from 'next';
+import { hasLocale } from 'next-intl';
+import { getTranslations } from 'next-intl/server';
 import { redirect } from 'next/navigation';
-import Decimal from 'decimal.js';
 
-import { KpiTile } from '@/components/patterns/kpi-tile';
+import { EmptyState } from '@/components/patterns/empty-state';
+import { NotificationBell } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
-import { StatGroup } from '@/components/patterns/stat-group';
 import { SyncBadge } from '@/components/patterns/sync-badge';
-import { ActiveOrganizationPanel } from '@/features/organization/components/active-organization-panel';
-import { OrganizationsPanel } from '@/features/organization/components/organizations-panel';
 import type { Organization } from '@/features/organization/api/organizations.api';
-import { StoresPanel } from '@/features/stores/components/stores-panel';
+import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
 
-export const metadata = {
-  title: 'Gösterge paneli',
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'dashboardPage' });
+  return { title: t('title') };
+}
 
-// Mock values hoisted out of render so they don't re-construct on every pass
-// and so React Compiler doesn't flag `new Decimal(...)` as an impure call in
-// the render body. Real values will flow from React Query hooks.
-const MOCK_REVENUE = new Decimal('284390.45');
-const MOCK_PROFIT = new Decimal('48120.80');
-const MOCK_LAST_SYNCED = new Date(Date.now() - 3 * 60 * 1000);
+// Mock value hoisted out of render so it doesn't re-construct on every pass
+// and so React Compiler doesn't flag `new Date(...)` as an impure call in
+// the render body. Real value will flow from the latest sync log when the
+// backend ships that endpoint.
+const MOCK_LAST_SYNCED = new Date('2026-04-22T00:13:00Z');
+
+// MOCK ENTRIES — replaced by useNotifications() when the feed endpoint ships.
+// Inline TR is acceptable for mock fixtures; production strings come from
+// the backend payload which is already localised.
+const MOCK_NOTIFICATIONS = [
+  {
+    id: '1',
+    icon: 'success' as const,
+    title: 'Sipariş senkronizasyonu tamam',
+    timestamp: '3 dk',
+  },
+  { id: '2', icon: 'warning' as const, title: '2 iade incelemeyi bekliyor', timestamp: '15 dk' },
+];
 
 export default async function DashboardPage({
   params,
@@ -29,6 +48,8 @@ export default async function DashboardPage({
   params: Promise<{ locale: string }>;
 }): Promise<React.ReactElement> {
   const { locale } = await params;
+  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'dashboardPage' });
   // Server-side onboarding guard: a freshly-signed-up user with zero
   // orgs lands on /dashboard by default (see `/auth/verified`). Send
   // them to the create-org flow before they see an empty shell.
@@ -37,10 +58,7 @@ export default async function DashboardPage({
   // page render — better to show the shell with an error panel than
   // to bounce an authenticated user back to onboarding every time.
   const api = await getServerApiClient();
-  const [orgsResult, meResult] = await Promise.all([
-    api.GET('/v1/organizations', {}),
-    api.GET('/v1/me', {}),
-  ]);
+  const orgsResult = await api.GET('/v1/organizations', {});
 
   const orgs: Organization[] = orgsResult.data?.data ?? [];
   if (orgsResult.data !== undefined && orgs.length === 0) {
@@ -49,47 +67,16 @@ export default async function DashboardPage({
 
   const activeOrgId = await resolveActiveOrgId(orgs);
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? orgs[0];
-  const viewerTimezone = meResult.data?.timezone;
 
   return (
     <>
       <PageHeader
-        title="Gösterge paneli"
-        intent="Seçili mağaza ve dönem için özet finansal durum. Detay sayfaları için sol context rail'i kullan."
+        title={t('title')}
+        intent={activeOrg?.name}
         meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
+        actions={<NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />}
       />
-      {activeOrg ? (
-        <ActiveOrganizationPanel org={activeOrg} locale={locale} viewerTimezone={viewerTimezone} />
-      ) : null}
-      {activeOrg ? <StoresPanel orgId={activeOrg.id} /> : null}
-      <StatGroup>
-        <KpiTile
-          label="Ciro"
-          value={{ kind: 'currency', amount: MOCK_REVENUE }}
-          delta={{ percent: 12.4, goodDirection: 'up' }}
-          context="Nisan 1-17 · Dün: ₺24.820"
-          wide
-        />
-        <KpiTile
-          label="Net kar"
-          value={{ kind: 'currency', amount: MOCK_PROFIT }}
-          delta={{ percent: 8.1, goodDirection: 'up' }}
-          context="Marj %16.9"
-        />
-        <KpiTile
-          label="Sipariş"
-          value={{ kind: 'count', amount: 1472 }}
-          delta={{ percent: -3.2, goodDirection: 'up' }}
-          context="Nisan 1-17"
-        />
-        <KpiTile
-          label="İade"
-          value={{ kind: 'count', amount: 38 }}
-          delta={{ percent: -14.2, goodDirection: 'down' }}
-          context="İade oranı %2.6"
-        />
-      </StatGroup>
-      <OrganizationsPanel />
+      <EmptyState title={t('empty.title')} description={t('empty.description')} />
     </>
   );
 }

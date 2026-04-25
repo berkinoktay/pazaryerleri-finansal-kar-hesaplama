@@ -630,7 +630,7 @@ The live reference for every token, primitive, and pattern lives under `/design/
 - `/design/primitives/*` — every shadcn primitive with variants and states
 - `/design/patterns` — PazarSync-specific composites (KpiTile, TrendDelta, Currency, SyncBadge, PageHeader, EmptyState)
 - `/design/data` — DataTable with filters, sorting, selection, import/export
-- `/design/layout-demo` — dual-rail AppShell with mock store data
+- `/design/layout-demo` — three-column AppShell with mock store data
 
 Before building a new screen, check the showcase to see what's already available. Before tweaking styles on a primitive, check whether the change belongs at the token layer (affects the whole system) or whether a pattern wrapper is the right home.
 
@@ -709,7 +709,7 @@ Open the live showcase in the dev server:
 - `/design/primitives/*` — every shadcn primitive with variants and states
 - `/design/patterns` — PazarSync composites
 - `/design/data` — DataTable with filters, sorting, selection
-- `/design/layout-demo` — dual-rail AppShell with mock store data
+- `/design/layout-demo` — three-column AppShell with mock store data
 
 Anything you need may already be there. The "Component Architecture" section below has full folder semantics.
 

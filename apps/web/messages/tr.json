@@ -106,7 +106,8 @@
     "profitability": "Karlılık",
     "reconciliation": "Mutabakat",
     "expenses": "Giderler",
-    "settings": "Ayarlar"
+    "settings": "Ayarlar",
+    "notifications": "Bildirimler"
   },
   "navSections": {
     "orders": {
@@ -124,15 +125,61 @@
         "title": "Katalog",
         "active": "Aktif ürünler",
         "draft": "Taslaklar",
+        "noCost": "Maliyetsiz",
+        "noDesi": "Desisiz",
+        "lowStock": "Düşük stok"
+      },
+      "meta": {
+        "title": "Ek bilgiler",
         "costs": "Maliyetler"
       }
     },
     "profitability": {
-      "views": {
-        "title": "Görünümler",
-        "period": "Dönem",
-        "byProduct": "Ürün bazında",
-        "byCampaign": "Kampanya bazında"
+      "reports": {
+        "title": "Raporlar",
+        "order": "Sipariş",
+        "product": "Ürün",
+        "category": "Kategori",
+        "return": "İade",
+        "campaign": "Reklam"
+      }
+    },
+    "reconciliation": {
+      "status": {
+        "title": "Mutabakat durumu",
+        "matched": "Eşleşen",
+        "pending": "Bekleyen",
+        "mismatch": "Uyumsuz"
+      }
+    },
+    "expenses": {
+      "category": {
+        "title": "Kategori",
+        "all": "Tümü",
+        "product": "Ürün maliyeti",
+        "ad": "Reklam",
+        "packaging": "Paketleme",
+        "other": "Diğer"
+      }
+    },
+    "settings": {
+      "sections": {
+        "title": "Bölümler",
+        "profile": "Profil",
+        "team": "Ekip",
+        "billing": "Fatura",
+        "stores": "Mağaza bağlantıları",
+        "notifications": "Bildirimler"
+      }
+    },
+    "notifications": {
+      "filter": {
+        "title": "Filtre",
+        "all": "Tümü",
+        "unread": "Okunmamış",
+        "sync": "Senkronizasyon",
+        "orders": "Sipariş",
+        "warning": "Uyarı"
       }
     }
   },
@@ -152,12 +199,64 @@
     "empty": "Mağaza bulunamadı.",
     "heading": "Mağazalar",
     "active": "Aktif",
-    "addStore": "Mağaza bağla"
+    "addStore": "Mağaza bağla",
+    "connectFirst": {
+      "title": "İlk mağazanı bağla",
+      "hint": "Veri akışını başlat"
+    }
   },
-  "activityRail": {
-    "ariaLabel": "Aktivite paneli",
-    "open": "Aktivite panelini aç",
-    "close": "Aktivite panelini kapat"
+  "storeSummary": {
+    "heading": "Mağaza özeti",
+    "commission": "Komisyon",
+    "activeProducts": "Aktif ürün",
+    "apiHealth": "API",
+    "lastSync": "Son sync",
+    "health": {
+      "healthy": "Sağlıklı",
+      "degraded": "Yavaş",
+      "down": "Çalışmıyor"
+    }
+  },
+  "periodPresets": {
+    "heading": "Dönem",
+    "last-30d": "Son 30 gün",
+    "this-month": "Bu ay",
+    "last-7d": "Son 7 gün",
+    "this-quarter": "Bu çeyrek",
+    "custom": "Özel…"
+  },
+  "dashboardRail": {
+    "warning": {
+      "missingCost": {
+        "title": "Eksik maliyet",
+        "description": "{count} ürün maliyet bekliyor",
+        "cta": "Tamamla"
+      }
+    }
+  },
+  "notificationBell": {
+    "label": "Bildirimler",
+    "empty": "Henüz bildirim yok",
+    "seeAll": "Tümünü gör"
+  },
+  "userMenu": {
+    "open": "Kullanıcı menüsünü aç",
+    "profile": "Profil",
+    "settings": "Ayarlar",
+    "theme": {
+      "heading": "Tema",
+      "light": "Açık",
+      "dark": "Koyu",
+      "system": "Sistem"
+    },
+    "language": {
+      "heading": "Dil"
+    },
+    "help": {
+      "docs": "Yardım & Dokümanlar",
+      "shortcuts": "Klavye kısayolları",
+      "feedback": "Geri bildirim"
+    }
   },
   "toast": {
     "storeFlowNotReady": "Mağaza bağla akışı henüz hazır değil",
@@ -371,5 +470,50 @@
     "title": "Sayfa bulunamadı",
     "description": "Aradığın sayfa taşınmış veya silinmiş olabilir.",
     "home": "Ana sayfa"
+  },
+  "mobileTopBar": {
+    "openNav": "Menüyü aç",
+    "home": "Ana sayfa"
+  },
+  "mobileNavSheet": {
+    "title": "Menü",
+    "close": "Kapat"
+  },
+  "dashboardPage": {
+    "title": "Gösterge paneli",
+    "empty": {
+      "title": "Pano içeriği planlama aşamasında",
+      "description": "Mağaza özeti ve dönem kontrolü solda hazır. Detaylı raporlar ileride bu alana eklenecek."
+    }
+  },
+  "placeholderPage": {
+    "comingSoon": "Yakında geliştirilecek",
+    "description": "Bu sayfa henüz geliştirme aşamasında. İlerleyen güncellemelerde aktif olacak."
+  },
+  "ordersPage": {
+    "title": "Siparişler"
+  },
+  "productsPage": {
+    "title": "Ürünler"
+  },
+  "profitabilityPage": {
+    "title": "Kârlılık"
+  },
+  "reconciliationPage": {
+    "title": "Mutabakat"
+  },
+  "expensesPage": {
+    "title": "Giderler"
+  },
+  "settingsPage": {
+    "title": "Ayarlar"
+  },
+  "notificationsPage": {
+    "title": "Bildirimler",
+    "intent": "Sistemden gelen tüm bildirimlerin geçmişi.",
+    "empty": {
+      "title": "Bildirim merkezi yakında",
+      "description": "Senkronizasyon olayları, yeni sipariş bildirimleri ve uyarı geçmişi burada listelenecek."
+    }
   }
 }

@@ -106,7 +106,8 @@
     "profitability": "Profitability",
     "reconciliation": "Reconciliation",
     "expenses": "Expenses",
-    "settings": "Settings"
+    "settings": "Settings",
+    "notifications": "Notifications"
   },
   "navSections": {
     "orders": {
@@ -124,15 +125,61 @@
         "title": "Catalog",
         "active": "Active products",
         "draft": "Drafts",
+        "noCost": "Missing cost",
+        "noDesi": "Missing desi",
+        "lowStock": "Low stock"
+      },
+      "meta": {
+        "title": "Extras",
         "costs": "Costs"
       }
     },
     "profitability": {
-      "views": {
-        "title": "Views",
-        "period": "By period",
-        "byProduct": "By product",
-        "byCampaign": "By campaign"
+      "reports": {
+        "title": "Reports",
+        "order": "Orders",
+        "product": "Products",
+        "category": "Categories",
+        "return": "Returns",
+        "campaign": "Campaigns"
+      }
+    },
+    "reconciliation": {
+      "status": {
+        "title": "Reconciliation status",
+        "matched": "Matched",
+        "pending": "Pending",
+        "mismatch": "Mismatch"
+      }
+    },
+    "expenses": {
+      "category": {
+        "title": "Category",
+        "all": "All",
+        "product": "Product cost",
+        "ad": "Ads",
+        "packaging": "Packaging",
+        "other": "Other"
+      }
+    },
+    "settings": {
+      "sections": {
+        "title": "Sections",
+        "profile": "Profile",
+        "team": "Team",
+        "billing": "Billing",
+        "stores": "Store connections",
+        "notifications": "Notifications"
+      }
+    },
+    "notifications": {
+      "filter": {
+        "title": "Filter",
+        "all": "All",
+        "unread": "Unread",
+        "sync": "Sync",
+        "orders": "Orders",
+        "warning": "Warning"
       }
     }
   },
@@ -152,12 +199,64 @@
     "empty": "No stores found.",
     "heading": "Stores",
     "active": "Active",
-    "addStore": "Connect store"
+    "addStore": "Connect store",
+    "connectFirst": {
+      "title": "Connect your first store",
+      "hint": "Start the data flow"
+    }
   },
-  "activityRail": {
-    "ariaLabel": "Activity panel",
-    "open": "Open activity panel",
-    "close": "Close activity panel"
+  "storeSummary": {
+    "heading": "Store summary",
+    "commission": "Commission",
+    "activeProducts": "Active products",
+    "apiHealth": "API",
+    "lastSync": "Last sync",
+    "health": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "down": "Down"
+    }
+  },
+  "periodPresets": {
+    "heading": "Period",
+    "last-30d": "Last 30 days",
+    "this-month": "This month",
+    "last-7d": "Last 7 days",
+    "this-quarter": "This quarter",
+    "custom": "Custom…"
+  },
+  "dashboardRail": {
+    "warning": {
+      "missingCost": {
+        "title": "Missing cost",
+        "description": "{count} product(s) need cost data",
+        "cta": "Complete"
+      }
+    }
+  },
+  "notificationBell": {
+    "label": "Notifications",
+    "empty": "No notifications yet",
+    "seeAll": "See all"
+  },
+  "userMenu": {
+    "open": "Open user menu",
+    "profile": "Profile",
+    "settings": "Settings",
+    "theme": {
+      "heading": "Theme",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "language": {
+      "heading": "Language"
+    },
+    "help": {
+      "docs": "Help & Docs",
+      "shortcuts": "Keyboard shortcuts",
+      "feedback": "Send feedback"
+    }
   },
   "toast": {
     "storeFlowNotReady": "Connect-store flow is not ready yet",
@@ -371,5 +470,50 @@
     "title": "Page not found",
     "description": "The page you're looking for may have moved or been deleted.",
     "home": "Home"
+  },
+  "mobileTopBar": {
+    "openNav": "Open menu",
+    "home": "Home"
+  },
+  "mobileNavSheet": {
+    "title": "Menu",
+    "close": "Close"
+  },
+  "dashboardPage": {
+    "title": "Dashboard",
+    "empty": {
+      "title": "Dashboard content under planning",
+      "description": "Store summary and period controls are ready in the rail. Detailed reports will populate this area later."
+    }
+  },
+  "placeholderPage": {
+    "comingSoon": "Coming soon",
+    "description": "This page is still under development. It will be active in upcoming updates."
+  },
+  "ordersPage": {
+    "title": "Orders"
+  },
+  "productsPage": {
+    "title": "Products"
+  },
+  "profitabilityPage": {
+    "title": "Profitability"
+  },
+  "reconciliationPage": {
+    "title": "Reconciliation"
+  },
+  "expensesPage": {
+    "title": "Expenses"
+  },
+  "settingsPage": {
+    "title": "Settings"
+  },
+  "notificationsPage": {
+    "title": "Notifications",
+    "intent": "History of all system notifications.",
+    "empty": {
+      "title": "Notification center coming soon",
+      "description": "Sync events, new order notifications, and alert history will appear here."
+    }
   }
 }

@@ -43,7 +43,7 @@ const CATEGORIES = [
     href: '/design/layout-demo',
     title: 'Layout demo',
     description:
-      'Dual-rail workspace layout, store switcher, icon rail, context rail ve activity rail canlı çalışıyor.',
+      'Üç sütunlu workspace layout, store switcher, icon rail ve context rail canlı çalışıyor.',
     icon: DashboardSquare02Icon,
   },
 ];

@@ -10,7 +10,7 @@ import { KpiTile } from '@/components/patterns/kpi-tile';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { SyncBadge } from '@/components/patterns/sync-badge';
-import { MOCK_ACTIVITY, MOCK_STORES, buildMockOrders } from '@/components/showcase/showcase-mocks';
+import { MOCK_STORES, buildMockOrders } from '@/components/showcase/showcase-mocks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -33,8 +33,6 @@ export default function LayoutDemoPage(): React.ReactElement {
         activeStoreId={activeStoreId}
         onSelectStore={setActiveStoreId}
         onAddStore={() => toast.info('Mağaza bağla akışı burada açılır')}
-        onSyncNow={() => toast.success(`${activeStore.name} senkronizasyonu başlatıldı`)}
-        activity={MOCK_ACTIVITY}
       >
         <PageHeader
           title={activeStore.name}
