@@ -13,6 +13,16 @@ section "Versioning" for details.
 
 ### Added
 
+- `GET /v1/organizations` response is enriched with **four caller-scoped
+  fields** per organization: `role` (caller's `MemberRole` on this org),
+  `storeCount` (every status counted — ACTIVE, CONNECTION_ERROR, DISABLED),
+  `lastSyncedAt` (`MAX(stores.last_sync_at)` aggregate; `null` if no store
+  has synced yet), and `lastAccessedAt` (caller's
+  `organization_members.last_accessed_at`; `null` if the caller has never
+  switched into the org via `POST /:orgId/access`). Powers the redesigned
+  org/store switcher's role badges, "X mağaza · son senkron N dk" meta,
+  and recently-used pinning. **Backwards compatible** — fields are
+  additive, all existing fields keep their shape.
 - `POST /v1/organizations/:orgId/access` — records that the caller
   accessed this organization by setting
   `organization_members.last_accessed_at = NOW()`. Returns 204 on

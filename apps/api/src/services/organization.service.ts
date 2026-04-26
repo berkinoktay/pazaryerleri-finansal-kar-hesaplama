@@ -4,6 +4,8 @@ import { mapPrismaError } from '../lib/map-prisma-error';
 import { generateUniqueOrganizationSlug } from '../lib/slugify';
 import type { CreateOrganizationInput } from '../validators/organization.validator';
 
+export type OrganizationListItemRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+
 export interface OrganizationListItem {
   id: string;
   name: string;
@@ -12,6 +14,10 @@ export interface OrganizationListItem {
   timezone: string;
   createdAt: string;
   updatedAt: string;
+  role: OrganizationListItemRole;
+  storeCount: number;
+  lastSyncedAt: string | null;
+  lastAccessedAt: string | null;
 }
 
 export interface OrganizationCreated {
@@ -22,29 +28,77 @@ export interface OrganizationCreated {
   timezone: string;
   createdAt: string;
   updatedAt: string;
+  /** Always OWNER — the caller becomes owner of the org they just created. */
+  role: 'OWNER';
+  /** Always 0 — a fresh org has no stores yet. */
+  storeCount: 0;
+  /** Always null — no store sync has happened against a brand-new org. */
+  lastSyncedAt: null;
+  /** Always null — POST does not stamp `last_accessed_at`; the explicit
+   * `POST /v1/organizations/{orgId}/access` call does. */
+  lastAccessedAt: null;
   membership: { role: 'OWNER' };
 }
 
 /**
  * Return every organization where `userId` has an OrganizationMember row.
- * Ordered by name ASC for stable, human-friendly output.
+ *
+ * Ordered by name ASC for stable, human-friendly output. The dropdown
+ * applies its own "recently used" pinning client-side from `lastAccessedAt`
+ * so the wire ordering stays predictable across devices.
+ *
+ * Each row carries four caller-scoped fields beyond the bare org:
+ *   - `role` — the caller's MemberRole on this org
+ *   - `lastAccessedAt` — when the caller last switched into this org
+ *   - `storeCount` — total stores under the org (every status counted, so
+ *     the switcher reflects the operator-visible total — a CONNECTION_ERROR
+ *     store is still an attached store the user expects to see)
+ *   - `lastSyncedAt` — MAX(stores.last_sync_at) across the org's stores;
+ *     `null` when no store has completed a sync yet
+ *
+ * Implementation: one query pulls the membership join + nested stores
+ * with only `lastSyncAt` selected, so the working set stays small even
+ * when an org has many stores. The aggregate is computed in memory.
  */
 export async function listForUser(userId: string): Promise<OrganizationListItem[]> {
   const memberships = await prisma.organizationMember.findMany({
     where: { userId },
-    include: { organization: true },
+    include: {
+      organization: {
+        include: {
+          stores: { select: { lastSyncAt: true } },
+        },
+      },
+    },
     orderBy: { organization: { name: 'asc' } },
   });
 
-  return memberships.map(({ organization: o }) => ({
-    id: o.id,
-    name: o.name,
-    slug: o.slug,
-    currency: o.currency,
-    timezone: o.timezone,
-    createdAt: o.createdAt.toISOString(),
-    updatedAt: o.updatedAt.toISOString(),
-  }));
+  return memberships.map((m) => {
+    const o = m.organization;
+    const lastSyncedAt = maxSyncedAt(o.stores);
+    return {
+      id: o.id,
+      name: o.name,
+      slug: o.slug,
+      currency: o.currency,
+      timezone: o.timezone,
+      createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString(),
+      role: m.role,
+      storeCount: o.stores.length,
+      lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
+      lastAccessedAt: m.lastAccessedAt?.toISOString() ?? null,
+    };
+  });
+}
+
+function maxSyncedAt(stores: Array<{ lastSyncAt: Date | null }>): Date | null {
+  let max: Date | null = null;
+  for (const s of stores) {
+    if (s.lastSyncAt === null) continue;
+    if (max === null || s.lastSyncAt > max) max = s.lastSyncAt;
+  }
+  return max;
 }
 
 /**
@@ -90,6 +144,10 @@ export async function createForOwner(
           timezone: org.timezone,
           createdAt: org.createdAt.toISOString(),
           updatedAt: org.updatedAt.toISOString(),
+          role: 'OWNER' as const,
+          storeCount: 0 as const,
+          lastSyncedAt: null,
+          lastAccessedAt: null,
           membership: { role: 'OWNER' as const },
         };
       });

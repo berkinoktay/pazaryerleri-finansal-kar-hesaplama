@@ -11,13 +11,50 @@ export const OrganizationSchema = z
     timezone: z.string().openapi({ example: 'Europe/Istanbul' }),
     createdAt: z.string().datetime().openapi({ example: '2026-01-15T10:30:00Z' }),
     updatedAt: z.string().datetime().openapi({ example: '2026-04-01T14:00:00Z' }),
+    role: z
+      .enum(['OWNER', 'ADMIN', 'MEMBER', 'VIEWER'])
+      .openapi({ example: 'OWNER', description: "The caller's role inside this organization." }),
+    storeCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({
+        example: 2,
+        description:
+          'Total stores attached to this organization. Counts every status — ACTIVE, ' +
+          'CONNECTION_ERROR, and DISABLED — so the switcher reflects the operator-visible total.',
+      }),
+    lastSyncedAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .openapi({
+        example: '2026-04-26T15:42:00Z',
+        description:
+          'Most recent successful sync across every store in this organization (MAX of ' +
+          '`stores.last_sync_at`). `null` when the organization has no stores or none have ' +
+          'completed a sync yet.',
+      }),
+    lastAccessedAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .openapi({
+        example: '2026-04-26T18:00:00Z',
+        description:
+          'Last time the caller switched into this organization (their organization_members.' +
+          'last_accessed_at). Powers the recently-used section of the switcher.',
+      }),
   })
   .openapi('Organization', {
     description:
       'An organization (tenant). Users can be members of multiple organizations. ' +
       'The `currency` + `timezone` fields are business-ops defaults (reporting ' +
       'boundaries, settlement cuts); viewer-side display timezone lives on ' +
-      '`user_profiles` via GET /v1/me.',
+      '`user_profiles` via GET /v1/me. The `role` / `storeCount` / `lastSyncedAt` / ' +
+      '`lastAccessedAt` fields are all caller-scoped: every member of the same ' +
+      'organization receives the same `storeCount` and `lastSyncedAt` but their ' +
+      'own `role` and `lastAccessedAt`.',
   });
 
 export const OrganizationListResponseSchema = z
