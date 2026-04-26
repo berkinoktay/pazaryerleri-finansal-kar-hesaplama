@@ -4,7 +4,6 @@ import { ArrowDown01Icon, PlusSignIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -60,6 +59,25 @@ const SYNC_BG: Record<SyncState, string> = {
   fresh: 'bg-success',
   stale: 'bg-warning',
   failed: 'bg-destructive',
+};
+
+/**
+ * Platform corner mark color for the chip's bottom-right badge.
+ *
+ * Trendyol's brand orange and Hepsiburada's brand red aren't ours to
+ * own — but at this 12px corner-tile size, the wordmark from
+ * MarketplaceLogo is unreadable. We instead use the SEMANTIC tokens
+ * whose hues happen to read as the right vendor color:
+ *   - Trendyol (#FF671D, vivid orange) ≈ `bg-warning` (amber-orange)
+ *   - Hepsiburada (#FF6000, red-orange) ≈ `bg-destructive` (red)
+ * This is documented in the wireframe spec as the explicit mapping
+ * (Section 01 anatomy item 2). At larger sizes — e.g. dropdown store
+ * rows — we still use the actual MarketplaceLogo SVG so the wordmark
+ * is visible.
+ */
+const PLATFORM_CORNER_BG: Record<Store['platform'], string> = {
+  TRENDYOL: 'bg-warning',
+  HEPSIBURADA: 'bg-destructive',
 };
 
 /** Border tint applied to the chip itself when the active store has a
@@ -147,13 +165,13 @@ export function OrgStoreSwitcher({
       type="button"
       aria-label={triggerLabel}
       className={cn(
-        'duration-fast flex items-center rounded-sm border transition-colors',
-        'bg-muted hover:bg-accent',
+        'group duration-fast flex items-center rounded-md border transition-colors',
+        'hover:bg-muted bg-transparent',
         'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
         chipBorder,
         collapsed
-          ? 'size-xl justify-center p-0 pointer-coarse:size-11'
-          : 'gap-xs px-xs py-3xs w-full',
+          ? 'size-9 justify-center p-0 pointer-coarse:size-11'
+          : 'gap-xs px-2xs py-2xs w-full',
       )}
     >
       {activeOrg ? (
@@ -167,7 +185,7 @@ export function OrgStoreSwitcher({
       ) : (
         <span
           aria-hidden
-          className="bg-muted-foreground/20 text-foreground size-xl flex shrink-0 items-center justify-center rounded-sm"
+          className="bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md"
         >
           <PlusSignIcon className="size-icon-sm" />
         </span>
@@ -175,20 +193,23 @@ export function OrgStoreSwitcher({
       {!collapsed ? (
         <>
           <span className="gap-3xs flex min-w-0 flex-1 flex-col items-start overflow-hidden">
-            <span className="text-foreground w-full truncate text-left text-sm font-medium">
+            <span className="text-foreground w-full truncate text-left text-xs leading-tight font-medium">
               {activeOrg?.name ?? t('emptyCreate')}
             </span>
             {activeStore ? (
-              <span className="text-muted-foreground gap-3xs text-2xs flex w-full items-center truncate text-left">
+              <span className="text-muted-foreground gap-3xs text-2xs flex w-full items-center truncate text-left leading-tight">
                 <span
                   aria-hidden
-                  className={cn('size-2xs shrink-0 rounded-full', SYNC_BG[activeStore.syncState])}
+                  className={cn('size-2 shrink-0 rounded-full', SYNC_BG[activeStore.syncState])}
                 />
                 <span className="truncate">{activeStore.name}</span>
               </span>
             ) : null}
           </span>
-          <ArrowDown01Icon className="size-icon-xs text-muted-foreground shrink-0" aria-hidden />
+          <ArrowDown01Icon
+            className="size-icon-xs text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-180"
+            aria-hidden
+          />
         </>
       ) : null}
     </button>
@@ -247,17 +268,17 @@ interface OrgAvatarWithBadgesProps {
 
 /**
  * 32px avatar tile with up to three corner badges:
- *  - platform mark (sağ-alt) — the active store's marketplace logo,
- *    ringed in `bg-card` to read clearly over the colored avatar.
- *  - sync pulse (sol-üst) — 8px circle whose tint matches the active
- *    store's sync state.
- *  - multi-org indicator (sol-alt, collapsed-only) — "+N" chip when
- *    the user belongs to 3+ orgs, signaling "you have more orgs to
- *    switch to" without needing the expanded label.
+ *  - platform mark (sağ-alt) — small marketplace logo at xs (14px), ringed
+ *    in `bg-card` to read clearly over the colored avatar. The brand color
+ *    in the SVG carries the vendor signal — we don't tint the container.
+ *  - sync pulse (sol-üst) — tiny 6px dot tinted by sync state (fresh/stale/
+ *    failed). Only shown when an active store is selected.
+ *  - multi-org indicator (sol-alt, collapsed-only) — "+N" chip when the
+ *    user belongs to 3+ orgs.
  *
- * Solid palette background (not gradient) per token discipline — raw
- * oklch values are banned in component code; the 6 semantic tokens
- * already cover both modes via theme variables.
+ * Avatar uses a SOLID palette background from the 6 semantic tokens
+ * (primary/success/warning/info/destructive/accent) — no gradient, no
+ * one-off colors.
  */
 function OrgAvatarWithBadges({
   org,
@@ -271,8 +292,8 @@ function OrgAvatarWithBadges({
 
   return (
     <span className="relative shrink-0">
-      <Avatar size="sm" className={cn('rounded-sm', PALETTE_BG[palette])}>
-        <AvatarFallback className={cn('rounded-sm font-semibold', PALETTE_BG[palette])}>
+      <Avatar size="sm" className={cn('rounded-md', PALETTE_BG[palette])}>
+        <AvatarFallback className={cn('rounded-md text-xs font-semibold', PALETTE_BG[palette])}>
           {initial}
         </AvatarFallback>
       </Avatar>
@@ -281,16 +302,17 @@ function OrgAvatarWithBadges({
           <span
             aria-hidden
             className={cn(
-              'top-3xs left-3xs ring-card size-2xs absolute rounded-full ring-2',
+              'top-3xs left-3xs ring-card absolute size-2 rounded-full ring-2',
               SYNC_BG[activeStore.syncState],
             )}
           />
           <span
             aria-hidden
-            className="-bottom-3xs -right-3xs ring-card bg-card p-3xs absolute flex items-center justify-center rounded-full ring-2"
-          >
-            <MarketplaceLogo platform={activeStore.platform} size="sm" alt="" />
-          </span>
+            className={cn(
+              '-bottom-3xs -right-3xs ring-card absolute size-3 rounded-sm ring-2',
+              PLATFORM_CORNER_BG[activeStore.platform],
+            )}
+          />
         </>
       ) : null}
       {showMultiOrgIndicator ? (
@@ -299,7 +321,7 @@ function OrgAvatarWithBadges({
           className={cn(
             '-bottom-3xs -left-3xs ring-card bg-card text-foreground absolute',
             'text-2xs flex items-center justify-center rounded-sm leading-none font-semibold ring-2',
-            'px-2xs py-3xs',
+            'px-3xs py-3xs',
           )}
         >
           {multiOrgLabel}

@@ -29,7 +29,8 @@ const PLATFORM_SRC: Record<MarketplacePlatform, string> = {
  * wordmark's natural aspect ratio is preserved. The Next.js `width`
  * attribute is a hint for intrinsic size only — the class below wins.
  */
-const SIZE_CLASS: Record<'sm' | 'md' | 'lg' | 'xl' | '2xl', string> = {
+const SIZE_CLASS: Record<'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl', string> = {
+  xs: 'h-3.5', // 14px — corner badge on org avatar, switcher list rows
   sm: 'h-5', // 20px — inline sub-text
   md: 'h-7', // 28px — empty-state pill / compact surface
   lg: 'h-10', // 40px — store list main identifier, left-aligned

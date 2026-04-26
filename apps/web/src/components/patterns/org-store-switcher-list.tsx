@@ -5,7 +5,9 @@ import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Command,
   CommandEmpty,
@@ -98,19 +100,17 @@ function splitRecent(orgs: Organization[]): OrgListSplit {
 /**
  * Inner list rendered inside the switcher's popover panel.
  *
- * Two-section layout when the user has 5+ orgs (Son Kullanılan +
- * Tüm Organizasyonlar) and a single section otherwise. Each org row
- * shows the role badge + a meta line ("X mağaza · son senkron N dk")
- * computed from the data the API now carries; the active org gets a
- * left accent border and a check mark. Hover on a non-active row
- * surfaces a settings shortcut to that org's settings page.
+ * Tight, information-dense layout: 28px avatars, text-xs primary names,
+ * text-2xs muted meta. The hierarchy is driven by typography weight, not
+ * background saturation — active rows are a subtle bg-muted plus a check
+ * icon, never a heavy primary fill. The footer is three Button primitives
+ * sharing one height (h-8) so the visual hierarchy is "primary CTA on the
+ * right" rather than "huge button next to text links".
  *
- * Stores belong to the active org only — selecting another org
- * triggers a server roundtrip (in DashboardStoreLauncher) before this
- * panel re-renders with that org's stores. The Mağazalar header
- * carries an inline "+ Bağla" CTA so the connect-store flow stays
- * one click away. Footer is a 3-button cluster: Org settings |
- * Store management | + Yeni Org (primary).
+ * Search input height is overridden to h-8 / text-xs so the popover
+ * header doesn't dominate the panel — the previous shadcn default
+ * (h-11 text-sm) was sized for full-page command palettes, not this
+ * compact 384px dropdown.
  */
 export function OrgStoreSwitcherList({
   orgs,
@@ -128,10 +128,16 @@ export function OrgStoreSwitcherList({
 
   return (
     <div className="flex flex-col">
-      <Command>
-        <CommandInput placeholder={t('search')} />
-        <CommandList>
-          <CommandEmpty>{t('emptyDescription')}</CommandEmpty>
+      <Command className="rounded-none">
+        <CommandInput
+          placeholder={t('search')}
+          className="placeholder:text-muted-foreground h-8 text-xs"
+        />
+        <CommandList className="max-h-80">
+          <CommandEmpty className="py-md text-muted-foreground text-2xs text-center">
+            {t('emptyDescription')}
+          </CommandEmpty>
+
           {split.recent.length > 0 ? (
             <>
               <SectionHeading
@@ -140,7 +146,7 @@ export function OrgStoreSwitcherList({
                 actionHref="/onboarding/create-organization"
                 actionLabel={t('newOrgInline')}
               />
-              <CommandGroup heading="">
+              <CommandGroup heading="" className="px-2xs pb-2xs pt-0">
                 {split.recent.map((org) => (
                   <OrgRow
                     key={org.id}
@@ -165,7 +171,7 @@ export function OrgStoreSwitcherList({
                 actionHref={split.recent.length === 0 ? '/onboarding/create-organization' : null}
                 actionLabel={split.recent.length === 0 ? t('newOrgInline') : null}
               />
-              <CommandGroup heading="">
+              <CommandGroup heading="" className="px-2xs pb-2xs pt-0">
                 {split.rest.map((org) => (
                   <OrgRow
                     key={org.id}
@@ -190,7 +196,7 @@ export function OrgStoreSwitcherList({
                 actionHref={activeOrg ? '/settings/stores' : null}
                 actionLabel={activeOrg ? t('connectStore') : null}
               />
-              <CommandGroup heading="">
+              <CommandGroup heading="" className="px-2xs pb-2xs pt-0">
                 {stores.map((store) => (
                   <StoreRow
                     key={store.id}
@@ -207,25 +213,17 @@ export function OrgStoreSwitcherList({
           ) : null}
         </CommandList>
       </Command>
-      <div className="border-border gap-2xs p-xs flex items-center border-t">
-        <Link
-          href="/settings/organization"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted px-xs py-3xs text-2xs flex flex-1 items-center justify-center rounded-sm"
-        >
-          {t('footerOrgSettings')}
-        </Link>
-        <Link
-          href="/settings/stores"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted px-xs py-3xs text-2xs flex flex-1 items-center justify-center rounded-sm"
-        >
-          {t('footerStoreManagement')}
-        </Link>
-        <Link
-          href="/onboarding/create-organization"
-          className="bg-primary text-primary-foreground hover:bg-primary/90 px-sm py-3xs text-2xs flex flex-1 items-center justify-center rounded-sm font-medium"
-        >
-          {t('footerNewOrg')}
-        </Link>
+
+      <div className="border-border gap-2xs p-2xs flex items-center border-t">
+        <Button asChild variant="ghost" size="sm" className="flex-1">
+          <Link href="/settings/organization">{t('footerOrgSettings')}</Link>
+        </Button>
+        <Button asChild variant="ghost" size="sm" className="flex-1">
+          <Link href="/settings/stores">{t('footerStoreManagement')}</Link>
+        </Button>
+        <Button asChild variant="default" size="sm" className="flex-1">
+          <Link href="/onboarding/create-organization">{t('footerNewOrg')}</Link>
+        </Button>
       </div>
     </div>
   );
@@ -239,11 +237,13 @@ interface SectionHeadingProps {
 }
 
 /**
- * Custom section heading that mirrors cmdk's auto-rendered group
- * heading typography but adds an inline CTA on the right (e.g. "+ Yeni"
- * for orgs, "+ Bağla" for stores). cmdk's `CommandGroup heading` prop
- * only takes a string — to render a button next to the label, we hide
- * cmdk's heading slot and render this row above the group instead.
+ * Section heading mirroring cmdk's auto-rendered group heading typography
+ * but with a quiet inline CTA on the right (e.g. "+ Yeni" / "+ Bağla").
+ * cmdk's `CommandGroup heading` prop only takes a string — to render a
+ * link next to the label we hide cmdk's heading slot (pass empty string)
+ * and render this row above the group. Inline CTA is text-only with the
+ * primary color, NOT a button — this is a quiet affordance, not an
+ * action that should compete with the footer's primary CTA.
  */
 function SectionHeading({
   label,
@@ -252,14 +252,14 @@ function SectionHeading({
   actionLabel,
 }: SectionHeadingProps): React.ReactElement {
   return (
-    <div className="text-muted-foreground gap-xs px-md pt-xs pb-3xs text-2xs flex items-center justify-between font-medium tracking-wide uppercase">
+    <div className="text-muted-foreground gap-xs px-sm pt-sm pb-2xs text-2xs flex items-center justify-between font-medium tracking-wide uppercase">
       <span className="truncate">
         {label} <span className="text-muted-foreground/70 normal-case">({count})</span>
       </span>
       {actionHref && actionLabel ? (
         <Link
           href={actionHref}
-          className="text-primary hover:text-primary hover:bg-primary/10 px-2xs py-3xs rounded-sm tracking-normal normal-case"
+          className="text-primary hover:text-primary-hover px-3xs py-3xs text-2xs rounded-xs font-medium tracking-normal normal-case"
         >
           {actionLabel}
         </Link>
@@ -286,6 +286,7 @@ function OrgRow({
   t,
 }: OrgRowProps): React.ReactElement {
   const palette = getOrgAvatarPalette(org.id);
+  const initial = org.name.charAt(0).toUpperCase();
   const meta = formatOrgMeta(org, formatter, mounted, t);
 
   return (
@@ -293,25 +294,20 @@ function OrgRow({
       value={`${org.name} ${org.id}`}
       onSelect={() => onSelect(org.id)}
       className={cn(
-        'group/row gap-xs py-2xs relative items-start',
-        isActive &&
-          'bg-muted before:bg-primary before:inset-y-3xs before:absolute before:left-0 before:w-3xs before:rounded-r-sm',
+        'group/row gap-xs px-2xs py-2xs items-center rounded-sm',
+        isActive && 'bg-muted',
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          'size-md text-2xs flex shrink-0 items-center justify-center rounded-sm font-semibold',
-          PALETTE_BG[palette],
-        )}
-      >
-        {org.name.charAt(0).toUpperCase()}
-      </span>
-      <span className="gap-3xs flex min-w-0 flex-1 flex-col">
+      <Avatar size="sm" className={cn('size-7 rounded-md', PALETTE_BG[palette])}>
+        <AvatarFallback className={cn('text-2xs rounded-md font-semibold', PALETTE_BG[palette])}>
+          {initial}
+        </AvatarFallback>
+      </Avatar>
+      <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
         <span className="text-foreground truncate text-xs font-medium">{org.name}</span>
         {meta ? <span className="text-muted-foreground text-2xs truncate">{meta}</span> : null}
       </span>
-      <Badge tone={ROLE_TONE[org.role]} size="sm" className="shrink-0">
+      <Badge tone={ROLE_TONE[org.role]} size="sm" radius="sm" className="shrink-0">
         {t(ROLE_KEY[org.role])}
       </Badge>
       {isActive ? (
@@ -320,7 +316,7 @@ function OrgRow({
         <Link
           href={{ pathname: '/settings/organization' }}
           aria-label={t('orgSettingsLabel', { name: org.name })}
-          className="duration-fast hover:bg-muted hover:text-foreground text-muted-foreground p-3xs flex shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover/row:opacity-100"
+          className="duration-fast hover:bg-card hover:text-foreground text-muted-foreground p-3xs flex shrink-0 items-center justify-center rounded-xs opacity-0 transition-opacity group-hover/row:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
           <Settings02Icon className="size-icon-xs" />
@@ -354,20 +350,22 @@ function StoreRow({
       value={`${store.name} ${store.id}`}
       onSelect={() => onSelect(store.id)}
       className={cn(
-        'group/row gap-xs py-2xs relative items-start',
-        isActive &&
-          'bg-muted before:bg-primary before:inset-y-3xs before:absolute before:left-0 before:w-3xs before:rounded-r-sm',
+        'group/row gap-xs px-2xs py-2xs items-center rounded-sm',
+        isActive && 'bg-muted',
       )}
     >
-      <span aria-hidden className="shrink-0">
-        <MarketplaceLogo platform={store.platform} size="sm" alt="" />
+      <span
+        aria-hidden
+        className="bg-card border-border inline-flex size-7 shrink-0 items-center justify-center rounded-md border"
+      >
+        <MarketplaceLogo platform={store.platform} size="xs" alt="" />
       </span>
-      <span className="gap-3xs flex min-w-0 flex-1 flex-col">
+      <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
         <span className="text-foreground truncate text-xs font-medium">{store.name}</span>
         <span className="text-muted-foreground gap-3xs text-2xs flex items-center truncate">
           <span
             aria-hidden
-            className={cn('size-2xs shrink-0 rounded-full', SYNC_BG[store.syncState])}
+            className={cn('size-2 shrink-0 rounded-full', SYNC_BG[store.syncState])}
           />
           <span className="truncate">{meta}</span>
         </span>
@@ -414,21 +412,17 @@ export function OrgStoreSwitcherEmpty(): React.ReactElement {
   const t = useTranslations('orgStoreSwitcher');
   return (
     <div className="gap-sm p-md flex flex-col">
-      <h3 className="text-foreground text-sm font-semibold">{t('emptyTitle')}</h3>
-      <p className="text-muted-foreground text-2xs">{t('emptyDescription')}</p>
+      <div className="gap-3xs flex flex-col">
+        <h3 className="text-foreground text-sm font-semibold">{t('emptyTitle')}</h3>
+        <p className="text-muted-foreground text-2xs leading-snug">{t('emptyDescription')}</p>
+      </div>
       <div className="gap-2xs flex flex-col">
-        <Link
-          href="/onboarding/create-organization"
-          className="bg-primary text-primary-foreground hover:bg-primary/90 px-sm py-xs text-2xs rounded-sm text-center font-medium"
-        >
-          {t('emptyCreate')}
-        </Link>
-        <Link
-          href="/onboarding/join-organization"
-          className="bg-muted text-foreground hover:bg-accent px-sm py-xs text-2xs rounded-sm text-center"
-        >
-          {t('emptyJoinInvite')}
-        </Link>
+        <Button asChild variant="default" size="sm">
+          <Link href="/onboarding/create-organization">{t('emptyCreate')}</Link>
+        </Button>
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/onboarding/join-organization">{t('emptyJoinInvite')}</Link>
+        </Button>
       </div>
     </div>
   );
