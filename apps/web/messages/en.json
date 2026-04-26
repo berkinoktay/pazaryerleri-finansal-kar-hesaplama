@@ -277,7 +277,17 @@
     "syncStateFresh": "In sync",
     "syncStateStale": "Refresh",
     "syncStateFailed": "Sync failed",
-    "openShortcut": "Switch with ⌘O"
+    "openShortcut": "Switch with ⌘O",
+    "recentSection": "Recently Used",
+    "allOrgsSection": "All Organizations",
+    "newOrgInline": "+ New",
+    "orgMetaStores": "{count} stores",
+    "orgMetaNoStores": "no stores yet",
+    "orgMetaWithSync": "{stores} · last sync {time}",
+    "storeSyncRelative": "Synced {time}",
+    "storeNoSync": "Not synced yet",
+    "orgSettingsLabel": "{name} settings",
+    "multiOrgIndicator": "+{count}"
   },
   "userMenu": {
     "open": "Open user menu",

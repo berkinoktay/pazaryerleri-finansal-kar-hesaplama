@@ -277,7 +277,17 @@
     "syncStateFresh": "Senkron",
     "syncStateStale": "Yenile",
     "syncStateFailed": "Senkron başarısız",
-    "openShortcut": "⌘O ile değiştir"
+    "openShortcut": "⌘O ile değiştir",
+    "recentSection": "Son Kullanılan",
+    "allOrgsSection": "Tüm Organizasyonlar",
+    "newOrgInline": "+ Yeni",
+    "orgMetaStores": "{count} mağaza",
+    "orgMetaNoStores": "henüz mağaza yok",
+    "orgMetaWithSync": "{stores} · son senkron {time}",
+    "storeSyncRelative": "Senkron {time}",
+    "storeNoSync": "Henüz senkron yapılmadı",
+    "orgSettingsLabel": "{name} ayarları",
+    "multiOrgIndicator": "+{count}"
   },
   "userMenu": {
     "open": "Kullanıcı menüsünü aç",
