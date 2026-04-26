@@ -20,6 +20,7 @@ import {
   type Organization,
   type Store,
 } from '@/components/patterns/org-store-switcher';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { render, screen } from '@/../tests/helpers/render';
 
 const messages = {
@@ -97,15 +98,21 @@ function renderSwitcher(props: RenderProps = {}) {
   const onSelectStore = props.onSelectStore ?? vi.fn();
   const utils = render(
     <NextIntlClientProvider locale="tr" messages={messages}>
-      <OrgStoreSwitcher
-        orgs={props.orgs ?? mockOrgs}
-        stores={props.stores ?? mockStores}
-        activeOrgId={props.activeOrgId === undefined ? 'org-a' : props.activeOrgId}
-        activeStoreId={props.activeStoreId === undefined ? 'store-1' : props.activeStoreId}
-        onSelectOrg={onSelectOrg}
-        onSelectStore={onSelectStore}
-        collapsed={props.collapsed}
-      />
+      {/* Real-world usage nests the switcher inside SidebarProvider's
+          TooltipProvider; mirror that here so collapsed-mode tooltips
+          can mount without throwing "Tooltip must be used within
+          TooltipProvider". */}
+      <TooltipProvider>
+        <OrgStoreSwitcher
+          orgs={props.orgs ?? mockOrgs}
+          stores={props.stores ?? mockStores}
+          activeOrgId={props.activeOrgId === undefined ? 'org-a' : props.activeOrgId}
+          activeStoreId={props.activeStoreId === undefined ? 'store-1' : props.activeStoreId}
+          onSelectOrg={onSelectOrg}
+          onSelectStore={onSelectStore}
+          collapsed={props.collapsed}
+        />
+      </TooltipProvider>
     </NextIntlClientProvider>,
   );
   return { ...utils, onSelectOrg, onSelectStore };
