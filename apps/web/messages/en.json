@@ -273,6 +273,7 @@
     "roleOwner": "Owner",
     "roleAdmin": "Admin",
     "roleMember": "Member",
+    "roleViewer": "Viewer",
     "syncStateFresh": "In sync",
     "syncStateStale": "Refresh",
     "syncStateFailed": "Sync failed",

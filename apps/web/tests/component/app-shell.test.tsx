@@ -170,6 +170,7 @@ const mockOrgs: Organization[] = [
     role: 'OWNER',
     storeCount: 2,
     lastSyncedAt: '2026-04-25T11:55:00Z',
+    lastAccessedAt: '2026-04-25T12:00:00Z',
   },
 ];
 

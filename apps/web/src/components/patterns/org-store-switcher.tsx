@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 
 import { OrgStoreSwitcherEmpty, OrgStoreSwitcherList } from './org-store-switcher-list';
 
-export type OrgRole = 'OWNER' | 'ADMIN' | 'MEMBER';
+export type OrgRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
 export type SyncState = 'fresh' | 'stale' | 'failed';
 
 export interface Organization {
@@ -21,6 +21,10 @@ export interface Organization {
   role: OrgRole;
   storeCount: number;
   lastSyncedAt: string | null;
+  /** ISO timestamp of when the caller last switched into this org;
+   * `null` means never accessed. Powers the "Son Kullanılan" section
+   * when the user belongs to 5+ orgs. */
+  lastAccessedAt: string | null;
 }
 
 export interface Store {

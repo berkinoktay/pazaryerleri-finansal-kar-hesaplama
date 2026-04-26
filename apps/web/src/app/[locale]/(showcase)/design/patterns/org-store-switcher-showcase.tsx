@@ -15,6 +15,7 @@ const SHOWCASE_ORGS: Organization[] = [
     role: 'OWNER',
     storeCount: 2,
     lastSyncedAt: '2026-04-25T11:55:00Z',
+    lastAccessedAt: '2026-04-26T10:00:00Z',
   },
   {
     id: 'org-beta',
@@ -22,6 +23,7 @@ const SHOWCASE_ORGS: Organization[] = [
     role: 'ADMIN',
     storeCount: 5,
     lastSyncedAt: '2026-04-25T11:00:00Z',
+    lastAccessedAt: '2026-04-25T18:00:00Z',
   },
   {
     id: 'org-gamma',
@@ -29,6 +31,7 @@ const SHOWCASE_ORGS: Organization[] = [
     role: 'MEMBER',
     storeCount: 1,
     lastSyncedAt: '2026-04-25T08:00:00Z',
+    lastAccessedAt: null,
   },
 ];
 

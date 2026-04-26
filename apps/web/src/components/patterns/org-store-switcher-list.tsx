@@ -50,16 +50,18 @@ const SYNC_BG: Record<SyncState, string> = {
   failed: 'bg-destructive',
 };
 
-const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember'> = {
+const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember' | 'roleViewer'> = {
   OWNER: 'roleOwner',
   ADMIN: 'roleAdmin',
   MEMBER: 'roleMember',
+  VIEWER: 'roleViewer',
 };
 
 const ROLE_TONE: Record<OrgRole, NonNullable<BadgeProps['tone']>> = {
   OWNER: 'primary',
   ADMIN: 'neutral',
   MEMBER: 'outline',
+  VIEWER: 'outline',
 };
 
 /**

@@ -273,6 +273,7 @@
     "roleOwner": "Owner",
     "roleAdmin": "Admin",
     "roleMember": "Member",
+    "roleViewer": "Viewer",
     "syncStateFresh": "Senkron",
     "syncStateStale": "Yenile",
     "syncStateFailed": "Senkron başarısız",
