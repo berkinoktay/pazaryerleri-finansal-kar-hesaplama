@@ -28,6 +28,7 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { UserMenu } from '@/features/auth/components/user-menu';
 import { Link, usePathname } from '@/i18n/navigation';
@@ -145,15 +146,17 @@ function AppSidebar({
 }: AppSidebarProps): React.ReactElement {
   const t = useTranslations();
   const pathname = usePathname();
+  const { state } = useSidebar();
+  const collapsed = state === 'collapsed';
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-xs">
-        <div className="gap-xs px-xs py-3xs flex items-center">
-          <Wordmark withText />
-          <SidebarTrigger className="ml-auto" />
+        <div className="gap-xs px-xs py-3xs flex items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <Wordmark withText className="group-data-[collapsible=icon]:hidden" />
+          <SidebarTrigger className="ml-auto group-data-[collapsible=icon]:ml-0" />
         </div>
-        <div className="px-xs">
+        <div className="px-xs group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
           <OrgStoreSwitcher
             orgs={orgs}
             stores={stores}
@@ -161,6 +164,7 @@ function AppSidebar({
             activeStoreId={activeStoreId ?? null}
             onSelectOrg={onSelectOrg}
             onSelectStore={onSelectStore}
+            collapsed={collapsed}
           />
         </div>
       </SidebarHeader>
@@ -170,7 +174,7 @@ function AppSidebar({
             {NAV_ENTRIES.map((entry) => {
               if (isNavDivider(entry)) {
                 return (
-                  <SidebarMenuItem key={entry.key}>
+                  <SidebarMenuItem key={entry.key} className="group-data-[collapsible=icon]:hidden">
                     <hr
                       className="border-border mx-xs my-xs border-t border-dashed"
                       role="separator"
@@ -187,6 +191,8 @@ function AppSidebar({
                       label={t(entry.labelKey)}
                       icon={<Icon className="size-icon-sm" />}
                       badge={entry.badge}
+                      href={entry.href}
+                      isActive={isActive}
                       defaultExpanded={isActive}
                     >
                       {entry.sections.flatMap((section) =>
