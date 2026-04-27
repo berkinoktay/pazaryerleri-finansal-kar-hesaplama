@@ -9,24 +9,49 @@ import { cn } from '@/lib/utils';
 
 export type SyncState = 'fresh' | 'stale' | 'failed' | 'syncing';
 
-export interface SyncBadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+export interface SyncProgress {
+  /** Current item count processed in the live sync. */
+  current: number;
+  /** Total expected items. Null until first batch arrives. */
+  total: number | null;
+}
+
+export interface SyncBadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'onClick'> {
   /** When the last successful sync landed. */
   lastSyncedAt: Date | string | null;
   /** Semantic state derived upstream from time-since-sync + error flags. */
   state: SyncState;
   /** Which marketplace this sync belongs to. */
   source?: string;
+  /**
+   * Live progress for an ongoing sync. When provided alongside
+   * `state="syncing"`, the badge renders `current / total (%)`
+   * instead of the time label.
+   */
+  progress?: SyncProgress;
+  /**
+   * When supplied, the badge renders as an interactive button that
+   * opens the SyncCenter sheet. Existing static usages (no onClick)
+   * keep rendering as a span.
+   */
+  onClick?: () => void;
+  /** Optional aria-label override when the badge is interactive. */
+  ariaLabel?: string;
 }
 
 /**
  * Signals the trustworthiness of the data on screen. Financial dashboards
  * must never be ambiguous about staleness — this badge answers "is the
- * number I'm looking at up to date?" with a single glance.
+ * number I'm looking at up to date?" with a single glance. When `onClick`
+ * is provided it becomes the entry point to the SyncCenter sheet.
  */
 export function SyncBadge({
   lastSyncedAt,
   state,
   source,
+  progress,
+  onClick,
+  ariaLabel,
   className,
   ...props
 }: SyncBadgeProps): React.ReactElement {
@@ -62,14 +87,30 @@ export function SyncBadge({
       : formatter.dateTime(new Date(lastSyncedAt), 'short')
     : '—';
 
-  return (
-    <span
-      className={cn('gap-3xs text-2xs inline-flex items-center tabular-nums', toneClass, className)}
-      {...props}
-    >
+  const showProgress = state === 'syncing' && progress !== undefined;
+  const percent =
+    progress !== undefined && progress.total !== null && progress.total > 0
+      ? Math.min(100, Math.round((progress.current / progress.total) * 100))
+      : null;
+
+  const inner = (
+    <>
       <Icon className={cn('size-icon-xs', state === 'syncing' && 'animate-spin')} />
-      <span className="text-muted-foreground">{t('lastSynced')}</span>
-      <span>{timeLabel}</span>
+      {showProgress && progress !== undefined ? (
+        <>
+          <span className="text-muted-foreground">{t('lastSynced')}</span>
+          <span>
+            {formatter.number(progress.current, 'integer')}
+            {progress.total !== null ? ` / ${formatter.number(progress.total, 'integer')}` : ''}
+            {percent !== null ? ` (${percent.toString()}%)` : ''}
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="text-muted-foreground">{t('lastSynced')}</span>
+          <span>{timeLabel}</span>
+        </>
+      )}
       {source ? (
         <>
           <span aria-hidden className="text-muted-foreground">
@@ -82,6 +123,36 @@ export function SyncBadge({
         ·
       </span>
       <span className="text-muted-foreground">{t('gmtOffset')}</span>
+    </>
+  );
+
+  const baseClassName = cn(
+    'gap-3xs text-2xs inline-flex items-center tabular-nums',
+    toneClass,
+    className,
+  );
+
+  if (onClick !== undefined) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={ariaLabel}
+        className={cn(
+          baseClassName,
+          'duration-fast cursor-pointer rounded-full px-2 py-1 transition-colors',
+          'hover:bg-muted focus-visible:bg-muted',
+          'focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-1 focus-visible:outline-none',
+        )}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <span className={baseClassName} {...props}>
+      {inner}
     </span>
   );
 }

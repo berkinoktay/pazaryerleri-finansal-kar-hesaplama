@@ -13,6 +13,7 @@ import {
   ListProductsResponseSchema,
   ProductFacetsResponseSchema,
   StartSyncResponseSchema,
+  SyncLogListResponseSchema,
   SyncLogResponseSchema,
   toSyncLogResponse,
 } from '../validators/product.validator';
@@ -147,6 +148,51 @@ const getSyncLogRoute = createRoute({
     },
     429: Common429Response,
   },
+});
+
+// ─── GET /sync-logs (active + recent) — hydrate SyncCenter ────────────
+
+const listActiveSyncLogsRoute = createRoute({
+  method: 'get',
+  path: '/organizations/{orgId}/stores/{storeId}/sync-logs',
+  tags: ['Sync'],
+  summary: 'List active + recent sync logs',
+  description:
+    'Returns every RUNNING sync log for the store plus the last 5 completed/failed runs. ' +
+    'Generic across SyncType (PRODUCTS today, ORDERS / SETTLEMENTS later). Used by the ' +
+    'SyncCenter UI to hydrate before the Supabase Realtime channel takes over — and as ' +
+    'the polling fallback when the WebSocket drops.',
+  security: [{ bearerAuth: [] }],
+  request: { params: storeIdParams },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: SyncLogListResponseSchema } },
+      description: 'Active + recent sync logs',
+      headers: RateLimitHeaders,
+    },
+    401: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Missing or invalid auth token',
+    },
+    403: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Not a member of this organization',
+    },
+    404: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Store not found',
+    },
+    429: Common429Response,
+  },
+});
+
+app.openapi(listActiveSyncLogsRoute, async (c) => {
+  const userId = c.get('userId');
+  const { orgId, storeId } = c.req.valid('param');
+  const organizationId = await ensureOrgMember(userId, orgId);
+  await storeService.requireOwnedStore(organizationId, storeId);
+  const logs = await syncLogService.listActiveAndRecent(organizationId, storeId);
+  return c.json({ data: logs.map(toSyncLogResponse) }, 200);
 });
 
 app.openapi(getSyncLogRoute, async (c) => {

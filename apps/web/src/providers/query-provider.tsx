@@ -33,6 +33,7 @@ type KnownErrorKey =
   | 'MARKETPLACE_AUTH_FAILED'
   | 'MARKETPLACE_ACCESS_DENIED'
   | 'MARKETPLACE_UNREACHABLE'
+  | 'SYNC_IN_PROGRESS'
   | 'generic';
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<KnownErrorKey>([
@@ -47,6 +48,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<KnownErrorKey>([
   'MARKETPLACE_AUTH_FAILED',
   'MARKETPLACE_ACCESS_DENIED',
   'MARKETPLACE_UNREACHABLE',
+  'SYNC_IN_PROGRESS',
 ]);
 
 /**

@@ -42,6 +42,17 @@ export const SyncLogResponseSchema = z
       'live progress for any active sync (PRODUCTS today, ORDERS / SETTLEMENTS later).',
   });
 
+export const SyncLogListResponseSchema = z
+  .object({
+    data: z.array(SyncLogResponseSchema),
+  })
+  .openapi('SyncLogListResponse', {
+    description:
+      'Active + recent sync logs for a store, ordered: every RUNNING row first, then ' +
+      'the most-recent N completed/failed rows. Used to hydrate the SyncCenter UI ' +
+      'before the Realtime channel takes over.',
+  });
+
 // ─── Product list query + response ─────────────────────────────────────
 // Search across product title + productMainId + variant.barcode +
 // variant.stockCode (Plain ILIKE for v1; pg_trgm if seller datasets ever

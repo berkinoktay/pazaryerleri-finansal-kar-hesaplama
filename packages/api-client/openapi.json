@@ -506,6 +506,21 @@
           "startedAt"
         ]
       },
+      "SyncLogListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncLogResponse"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "description": "Active + recent sync logs for a store, ordered: every RUNNING row first, then the most-recent N completed/failed rows. Used to hydrate the SyncCenter UI before the Realtime channel takes over."
+      },
       "SyncLogResponse": {
         "type": "object",
         "properties": {
@@ -1887,6 +1902,128 @@
           },
           "409": {
             "description": "A product sync is already running for this store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/sync-logs": {
+      "get": {
+        "tags": [
+          "Sync"
+        ],
+        "summary": "List active + recent sync logs",
+        "description": "Returns every RUNNING sync log for the store plus the last 5 completed/failed runs. Generic across SyncType (PRODUCTS today, ORDERS / SETTLEMENTS later). Used by the SyncCenter UI to hydrate before the Supabase Realtime channel takes over — and as the polling fallback when the WebSocket drops.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active + recent sync logs",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncLogListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
             "content": {
               "application/json": {
                 "schema": {
