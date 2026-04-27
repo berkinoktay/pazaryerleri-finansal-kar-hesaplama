@@ -125,6 +125,42 @@ export async function acquireSlot(storeId: string, syncType: SyncType): Promise<
 }
 
 /**
+ * Hydrate the SyncCenter UI: every active (RUNNING) sync log + the most
+ * recent N completed/failed runs for `(orgId, storeId)`. Sorted newest
+ * first within each group; active rows always come first regardless of
+ * timestamp so the live progress is at the top of the panel.
+ *
+ * Generic across SyncType — orders/settlements syncs reuse this when
+ * those features land.
+ */
+export async function listActiveAndRecent(
+  organizationId: string,
+  storeId: string,
+  recentLimit = 5,
+): Promise<SyncLog[]> {
+  const [active, recent] = await Promise.all([
+    prisma.syncLog.findMany({
+      where: {
+        storeId,
+        status: 'RUNNING',
+        store: { organizationId },
+      },
+      orderBy: { startedAt: 'desc' },
+    }),
+    prisma.syncLog.findMany({
+      where: {
+        storeId,
+        status: { in: ['COMPLETED', 'FAILED'] },
+        store: { organizationId },
+      },
+      orderBy: { startedAt: 'desc' },
+      take: recentLimit,
+    }),
+  ]);
+  return [...active, ...recent];
+}
+
+/**
  * Read a single SyncLog row scoped to (org, store). Returns 404 (non-
  * disclosure) on cross-tenant or missing rows. Used by the polling
  * endpoint and SyncCenter hydration query.
