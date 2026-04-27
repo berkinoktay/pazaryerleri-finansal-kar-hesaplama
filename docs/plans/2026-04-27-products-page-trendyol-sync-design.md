@@ -110,6 +110,225 @@ This is the first feature that exercises four foundational pieces the rest of th
    - RLS: policies on `products`, `product_variants`, `product_images` use the existing `is_org_member(uuid)` SECURITY DEFINER helper, with denormalized `organization_id` columns to avoid the 42P17 recursion problem.
 5. **Multi-tenancy isolation tests + RLS tests are mandatory in the same PR as the feature.**
 
+## Decision log
+
+Each architectural choice with the alternatives that were considered and the user-confirmed direction. Captured here so a fresh reader (or a fresh agent in a new session) can see _why_ each path was chosen, not just _what_ shipped. Decisions are listed in the order they were made during brainstorming.
+
+### D1 — Data strategy: cache in our DB vs proxy through to Trendyol
+
+**Question:** how should the Products page get its data?
+
+**Considered:**
+
+- **Proxy to Trendyol live.** Backend forwards filter+page params to Trendyol's `/products/approved`. No DB writes, ships fastest, always fresh. Trade-offs: ~300–800 ms upstream latency stacks on every page; bound to Trendyol's filter set; can't filter by `costPrice` / desi (those exist only in our DB); awkward around the 10k page×size cap; the existing sidebar nav (`?filter=no-cost`, `?filter=low-stock`) becomes unsupportable.
+- **Sync into DB, read locally** _(chosen, recommended in brainstorm)_. Background sync upserts into Product/ProductVariant/ProductImage; all reads from our DB. Aligns with `docs/ARCHITECTURE.md` (pg_cron-backed cache); unlocks the existing nav links; fast indexed reads; freshness shown via `SyncBadge`. ~2-3× more code than proxy.
+- **Sync first, proxy fallback.** Same as cache plus a "Refresh now" button that does on-demand sync. Most polished, most code.
+
+**Decision:** sync-into-DB. The sidebar nav already references our-DB-only filters, so the alternatives would either defer those filters indefinitely or require maintaining two read paths.
+
+### D2 — Row identity: parent + expandable variants vs flat per-variant rows
+
+**Question:** what is one row in the Products table?
+
+**Considered:**
+
+- **Parent product, expandable to variants** _(chosen, recommended)_. Mirrors Trendyol's seller-panel UI exactly. One row per `contentId` / `productMainId`. Multi-variant products show a `3 Varyant` chip + expand chevron; single-variant products render flat (no chevron). Color shows on parent (content-level shared attribute), size shows on each variant child. Schema: `Product` (parent) + `ProductVariant` (child).
+- **Flat per-variant rows.** Each Trendyol variant = one row. Parent fields (title, brand, category, image, productMainId) repeated per row. Multi-variant products render as N rows. Simpler implementation, but the same product appears across multiple table rows visually.
+- **Parent rows with side-sheet variant detail.** Main table shows aggregated parent rows; clicking a row opens a right-side sheet listing the variants. Cleanest main-table density but requires two views to see SKU-level data.
+
+**Decision:** parent + expandable. Confirmed against the user's two staging Postman screenshots (single-variant "dfsf"; multi-variant "Beyaz Keten Gömlek 17189" with L/S/M sizes). Captures both shared content and per-SKU fields without lossy denormalization.
+
+### D3 — Sync trigger: manual-only vs manual + scheduled cron
+
+**Question:** how should sync run?
+
+**Considered:**
+
+- **Manual button only, defer cron.** Ship a "Sync now" button in v1.0; add scheduled cron in a follow-up. No new infra (no pg_cron, no Edge Function). Estimated ~700 LOC; faster ship.
+- **Manual + scheduled cron** _(chosen)_. Both in scope. Adds: edge-function code + cron job SQL + edge-function deployment + scheduled-sync auth (service-role token). Heavier v1 ship but matches the architecture vision in `docs/ARCHITECTURE.md` and sets the pattern that orders/settlements syncs will reuse.
+- **Sync triggered on every page load.** No button, just check `lastSyncAt` and refresh if stale. Slow first paint, multi-tab spam, rate-limit risk under reload.
+
+**Decision:** manual + scheduled. User explicitly chose the "full architecture" option. Shipped as v1.0 (PRs 1–5: manual sync + UI) and v1.1 (PR 6: cron + edge function) so the two halves can be reviewed and shipped independently while sharing the same `ProductSyncService.run` core.
+
+### D4 — Filter set scope for v1
+
+**Question:** what's the v1 filter set? (everything else slides to a follow-up PR)
+
+**Considered:**
+
+- **Search + status only** (smallest v1).
+- **Search + status + brand + category** _(chosen, recommended)_. Adds brand/category dropdowns alongside search and status. Brand/category lists computed via cheap `groupBy` queries on synced data. Server-side params: `?q=…&status=onSale&brandId=123&categoryId=456&page=0&size=25`. Facets fetched once on page load via `GET /products/facets`.
+- **All Trendyol-side filters.** Adds delivery type, price range, date range, and the variant-level statuses (archived, blacklisted, locked, hasViolation). 3× toolbar code; full Trendyol-panel parity.
+- **Recommended set + sidebar warnings** (`?filter=no-cost`, `?filter=low-stock`). Wires existing nav links to behavior. Needs costPrice editing + low-stock threshold config + desi field on variant.
+
+**Decision:** the recommended four filters (search + status + brand + category). costPrice / desi / low-stock filters are explicitly deferred to follow-ups, since the user said costPrice + volume editing comes after this iteration ships.
+
+### D5 — Progress feed mechanism: polling vs Supabase Realtime
+
+**Question:** how should sync progress reach the browser?
+
+**Considered:**
+
+- **Supabase Realtime + polling fallback** _(chosen, recommended)_. Browser subscribes to `postgres_changes` on `sync_logs` filtered by `store_id=eq.{storeId}`. RLS gates visibility (only the org's syncs come through). React Query still does the initial hydrate via REST and serves as a fallback if the WebSocket drops. Background syncs from cron broadcast to anyone with the panel open. ~50 ms perceived lag, multi-tab consistent.
+- **Polling only** (simpler ship). React Query polls `GET /sync-logs?active=true` every 2 s while panel is open, every 10 s otherwise. Zero new infra. ~1–2 s lag.
+- **Status-only** (no progress bar). Chip pulses while RUNNING, no count. Smallest footprint but no "how much longer" affordance — doesn't satisfy the user's "track from within the panel" goal.
+
+**Decision:** Realtime + polling fallback. The codebase already uses Supabase, the multi-tab consistency wins are real, and the polling fallback keeps the experience robust if the WebSocket drops. Adds: supabase-js Realtime client wiring, RLS audit on `sync_logs` (already needed regardless), channel lifecycle in the SyncCenter component.
+
+### D6 — Async vs synchronous sync trigger
+
+**Considered:** the manual sync route could either block the HTTP request until sync completes, or return immediately with a `syncLogId` for the client to poll/subscribe.
+
+- Synchronous would work for stores with a few hundred variants. With ~1k+ variants the full pull approaches 30–90 s, exceeding most browser/proxy timeouts.
+- **Async** _(chosen)_. POST returns 202 immediately; `ProductSyncService.run` continues in the background of the Hono process; client polls `GET /sync-logs/{id}` (or, with D5, subscribes via Realtime). Same shape works for the scheduled cron path — Edge Function POSTs to the BFF internal endpoint, BFF runs the same async service.
+
+**Decision:** async with polling/Realtime status. Single sync service, two trigger surfaces (manual route, internal cron-triggered route), one client-side state machine.
+
+### D7 — Dev DB sync strategy for PR 1
+
+**When asked:** while running `pnpm db:push`, 5 stale rows in `products` blocked the schema push (the rows used `platform_product_id` / `barcode` / `cost_price` columns that the new shape removes/moves).
+
+**Considered:**
+
+- **Truncate only the affected tables** _(chosen, recommended)_. `TRUNCATE products + order_items + orders CASCADE`. Preserves `auth.users` (memory note: never wipe seed users) and orgs/stores/user_profiles. Smallest data loss.
+- **Force reset** (`prisma db push --force-reset`). Drops the entire public schema and recreates from the new Prisma schema. Wipes ALL public tables but preserves `auth.users`.
+- **Skip DB sync — code-only progress.** Defers integration tests until DB is synced.
+
+**Decision:** truncate. Then `pnpm db:push --accept-data-loss` (the new unique constraint `(storeId, platformContentId)` triggers Prisma's data-loss warning even though the table is empty — flag is safe under that condition).
+
+### D8 — Migration history baseline
+
+**Discovered during PR 1:** `packages/db/prisma/migrations/` only contains `20260425151617_add_org_member_last_accessed_at`; the rest of the schema (Product/Order/OrderItem/Settlement/SyncLog/etc.) was bootstrapped via `db:push` historically. PR 1 also went through `db:push --accept-data-loss`.
+
+**Decision:** flagged as a separate follow-up under "Open follow-ups" in the Progress section. Production deploy of any of this work needs a baseline migration first; doing the baseline inline would expand PR 1 indefinitely.
+
+### D9 — Stock quantity in the same response (no separate inventory endpoint)
+
+**Initial assumption** (from a docs-extraction agent): `/products/approved` returns no stock — a separate inventory endpoint must be called per page to merge in `quantity`.
+
+**Verified against the user's two staging Postman samples:** every variant in the response carries `stock: { quantity: <number>, lastModifiedDate: 0|<ms> }`. Stock is in the response.
+
+**Decision:** drop the separate inventory endpoint plan. The fetcher pulls a single endpoint per page; the mapper reads `variant.stock.quantity` directly into `ProductVariant.quantity`. Removed `inventoryLastSyncedAt` from the schema (would have been added otherwise).
+
+### D10 — Color is content-level (parent), not variant-level (child)
+
+**Verified against the user's staging samples:** color appears in the **content-level** `attributes[]` (`Renk: Beyaz` for sample A, `Renk: Mavi` for sample B). Variant-level `attributes[]` carries size only (`Beden: 210 cm`, `Beden: 115`).
+
+**Quirk surfaced by the samples:** color appears **twice** in content `attributes[]` — once with `attributeId: 47` (no `attributeValueId`), once with `attributeId: 295` (with `attributeValueId`). Both entries say the same thing in real data, but the duplication is structural.
+
+**Decision:** `color: String?` lives on `Product` (parent), not `ProductVariant`. Mapper picks the first `attributeName === 'Renk'` entry and `console.warn`s if duplicates disagree. Raw `attributes[]` Json is preserved on both Product and ProductVariant for forward-compat (sample B carries Cinsiyet / Kol / Yaş Grubu at content level too — keeping the array means we don't lose attributes that we don't model yet).
+
+### D11 — Existing error vocab covers most marketplace cases
+
+**Initial plan:** add a new `MarketplaceUnavailableError` (502) for Trendyol 5xx.
+
+**Discovered while reading the codebase:** `apps/api/src/lib/errors.ts` already has `MarketplaceUnreachable` (503), `MarketplaceAccessError` (422 — for missing User-Agent / missing IP whitelist), and `MarketplaceAuthError` (422). Plus `mapTrendyolResponseToDomainError` already maps 401/403/429/503/5xx to the right ones.
+
+**Decision:** reuse the existing error classes and the existing mapper. Only `SyncInProgressError` (409 + meta `{ syncType, storeId }`) is genuinely new — added in PR 1 alongside its `problemDetailsForError` branch and unit tests, per the same-PR rule in `apps/api/CLAUDE.md`.
+
+### D12 — Frontend convention: file shape mirrors `features/stores/`
+
+**Considered:** is the new `features/products/` folder its own shape, or does it mirror an existing feature?
+
+**Decision:** mirror `features/stores/` exactly:
+
+```
+features/<name>/
+├── api/         (one .api.ts per request, all using throwApiError)
+├── hooks/       (React Query wrappers, query keys from query-keys.ts)
+├── components/  (feature-local composites)
+├── lib/         (pure utilities, formatting, parsers)
+├── query-keys.ts  (factory pattern: featureKeys.list(orgId), .detail(...))
+└── types.ts     (re-exports from @pazarsync/api-client)
+```
+
+Cross-feature composites get promoted to `apps/web/src/components/patterns/` from the start, not later. `SyncCenter` is the first such promotion (orders/settlements syncs will reuse it).
+
+## Verified against staging
+
+Two Postman responses captured by the user from the Trendyol stage environment (April 2026), used as ground truth for the mapper.
+
+### Sample A — single-variant "dfsf"
+
+```jsonc
+{
+  "contentId": 1122684425,
+  "productMainId": "sdfsdfs",
+  "brand": { "id": 2032, "name": "Modline" },
+  "category": { "id": 2122, "name": "Dolap ve Gardrop" },
+  "title": "dfsf",
+  "description": "dfsdfd",
+  "creationDate": 1777246115403,
+  "lastModifiedDate": 1777246115403,
+  "images": [{ "url": "https://cdn.dsmcdn.com/mediacenter-stage8/.../1_org_zoom.jpg" }],
+  "attributes": [
+    { "attributeId": 47,  "attributeName": "Renk", "attributeValue": "Beyaz" },
+    { "attributeId": 295, "attributeName": "Renk", "attributeValueId": 2882, "attributeValue": "Beyaz" }
+  ],
+  "variants": [
+    {
+      "variantId": 1565552107, "supplierId": 2738,
+      "barcode": "1231231231", "stockCode": "122",
+      "attributes": [{ "attributeId": 293, "attributeName": "Beden", "attributeValueId": 18346, "attributeValue": "210 cm" }],
+      "onSale": true,
+      "deliveryOptions": { "deliveryDuration": null, "isRushDelivery": false, "fastDeliveryOptions": [] },
+      "stock": { "quantity": 12312, "lastModifiedDate": 0 },
+      "price": { "salePrice": 131231, "listPrice": 131231 },
+      "vatRate": 10, "locked": false, "archived": false, "blacklisted": false,
+      "locationBasedDelivery": "DISABLED"
+      /* … plus seller dates, lockReason: null, archivedDate: null, docNeeded, hasViolation … */
+    }
+  ]
+}
+```
+
+### Sample B — single-variant "Test-Corevent-001"
+
+```jsonc
+{
+  "contentId": 1122684363,
+  "productMainId": "SKU-1777147597554-2SAVM",
+  "brand": { "id": 3226, "name": "BZN Gömlek" },
+  "category": { "id": 597, "name": "Gömlek" },
+  "title": "Test-Corevent-001",
+  "description": "<div id=\"rich-content-wrapper\">\n <p>Test-Corevent-001</p>\n</div>",
+  "images": [/* 3 absolute cdn.dsmcdn.com URLs */],
+  "attributes": [
+    { "attributeId": 47,  "attributeName": "Renk",     "attributeValue": "Mavi" },
+    { "attributeId": 295, "attributeName": "Renk",     "attributeValueId": 2888, "attributeValue": "Mavi" },
+    { "attributeId": 296, "attributeName": "Cinsiyet", "attributeValueId": 2873, "attributeValue": "Erkek" },
+    { "attributeId": 12,  "attributeName": "Kol",      "attributeValueId": 69,   "attributeValue": "Uzun Kol" },
+    { "attributeId": 294, "attributeName": "Yaş Grubu","attributeValueId": 2877, "attributeValue": "Çocuk" }
+  ],
+  "variants": [
+    {
+      "variantId": 1565552027, "supplierId": 2738,
+      "barcode": "Test-Corevent-001", "stockCode": "Test-Corevent-001",
+      "attributes": [{ "attributeId": 293, "attributeName": "Beden", "attributeValueId": 19569, "attributeValue": "115" }],
+      "onSale": true,
+      "deliveryOptions": { "deliveryDuration": 2, "isRushDelivery": false, "fastDeliveryOptions": [] },
+      "stock": { "quantity": 12, "lastModifiedDate": 0 },
+      "price": { "salePrice": 123, "listPrice": 1233 },
+      "vatRate": 20, "locked": false, "archived": false, "blacklisted": false,
+      "locationBasedDelivery": "DISABLED"
+    }
+  ]
+}
+```
+
+### What these samples confirmed
+
+1. **Color is content-level** (not variant-level). → `color: String?` on `Product`. (See D10.)
+2. **Color often duplicates** in `attributes[]` with the same value across two `attributeId`s (47 and 295). Mapper picks the first `Renk` entry and warns on disagreement.
+3. **Stock is in the same response** (`variant.stock.quantity`). → no separate inventory endpoint. (See D9.)
+4. **`deliveryDuration` can be `null`** (sample A has it). Mapper keeps the field as `Int?`; UI badge falls back to "Standart".
+5. **Image URLs are already absolute** on `cdn.dsmcdn.com` — no rewrite.
+6. **`description` carries raw HTML** (`<div id="rich-content-wrapper">…`). Stored verbatim, sanitized at render with DOMPurify.
+7. **Content-level `attributes[]` carries more than color** (sample B has Cinsiyet, Kol, Yaş Grubu) — kept in `Product.attributes` Json column for forward-compat.
+8. **`locationBasedDelivery`** is a documented enum-like string at variant level (`"DISABLED"` observed; `"ENABLED"` plausible) — kept as `String?` for forward-compat without modeling the enum.
+
+These details are hard-coded as fixtures in `apps/api/tests/unit/integrations/marketplace/trendyol/mapper.test.ts` so any future change to the mapper has a real-data check.
+
 ## Schema
 
 Single fresh migration (the current `Product` model has no migration applied yet — restructuring is safe).
@@ -441,3 +660,145 @@ For v1.1 additionally:
 
 11. Manually trigger the cron: `select cron.run_job('trendyol-product-sync')`. Confirm SyncLog rows appear for all active stores; confirm Realtime broadcasts the runs to any open browser session.
 12. Service-token rejection: `curl -X POST /v1/internal/sync-jobs/products/{id}` with no/wrong token → 401.
+
+## Appendix A — End-to-end data flow
+
+```
+                    ┌──────────────────────────────┐
+                    │   apigw.trendyol.com         │
+                    │   /products/approved (v2)    │
+                    └──────────────┬───────────────┘
+                                   │ Basic auth + User-Agent
+                                   │ rate-limit aware (50/10s)
+                                   ▼
+        ┌──────────────────────────────────────────────────┐
+        │  Hono BFF: TrendyolProductFetcher                │
+        │  • paginates (size=100, page x size ≤ 10k →      │
+        │    nextPageToken)                                │
+        │  • maps Trendyol shape → MappedProduct DTO       │
+        │  • stock comes from same response (D9)           │
+        └──────────────────────┬───────────────────────────┘
+                               ▼
+        ┌──────────────────────────────────────────────────┐
+        │  ProductSyncService.run(orgId, storeId)          │
+        │  • acquires advisory-lock on (storeId, 'PRODUCTS')│
+        │  • upserts Product (parent)                      │
+        │  • upserts ProductVariant (children)             │
+        │  • replaces ProductImage rows                    │
+        │  • soft-marks stale variants archived=true       │
+        │  • writes SyncLog row (RUNNING → COMPLETED)      │
+        │  • cleans stale RUNNING rows >10min before start │
+        └─────┬───────────────────────────────────┬────────┘
+              │ called by                         │ called by
+              │                                   │
+   ┌──────────▼─────────────┐        ┌────────────▼───────────┐
+   │ POST /…/products/sync  │        │ Supabase Edge Function │
+   │ (manual button)        │        │ trendyol-product-sync  │
+   │ → 202 + syncLogId      │        │ + pg_cron every 6h     │
+   └──────────┬─────────────┘        │ → POST /v1/internal/…  │
+              │                      └────────────────────────┘
+              ▼
+   ┌───────────────────────────────────────────────┐
+   │ Postgres: products + product_variants         │
+   │           + product_images + sync_logs        │
+   │ RLS: is_org_member(organization_id)           │
+   └──────────────────────┬────────────────────────┘
+                          │
+            ┌─────────────┴───────────────┐
+            ▼                             ▼
+   ┌────────────────────┐    ┌───────────────────────────┐
+   │ GET /…/products    │    │ Supabase Realtime         │
+   │ (filtered, paged)  │    │ postgres_changes on       │
+   └─────────┬──────────┘    │ sync_logs (store_id-     │
+             │               │ scoped)                   │
+             │               └───────────┬───────────────┘
+             ▼                           ▼
+   ┌────────────────────────────────────────────────────┐
+   │ Next.js /[locale]/(dashboard)/products/page.tsx    │
+   │ • DataTable with row-expand for variants           │
+   │ • DataTableToolbar with 4 filter facets            │
+   │ • nuqs binds toolbar ↔ URL ↔ React Query queryKey  │
+   │ • SyncCenter shows live progress + history         │
+   └────────────────────────────────────────────────────┘
+```
+
+## Appendix B — Table layout sketches
+
+### Parent rows (multi-variant collapsed, single-variant flat)
+
+```
+│ ▸ │ 🖼 Beyaz Keten Gömlek 17189  • VS2517189 • 3 Varyant • Beyaz │ ₺120 – ₺200 │ 42 │ Karışık │ 2 satışta · 1 arşiv │
+│   │ 🖼 dfsf                       • sdfsdfs   • single      • Beyaz │ ₺131 231    │ 12 312 │ Standart │ Satışta │
+                  ↑ no chevron when getRowCanExpand returns false
+```
+
+### Expanded — sub-table of variants
+
+```
+│ ▾ │ 🖼 Beyaz Keten Gömlek 17189 …                                                           │
+│   │   ┌──────────────────────────────────────────────────────────────────────────────────┐ │
+│   │   │ Beden  │ Stok Kodu        │ Barkod           │ Fiyat │ Stok │ Teslimat   │ Durum │ │
+│   │   │ L      │ 7887800432124    │ 7887800432124    │ ₺200  │  14  │ Bugün      │ Sat'ta│ │
+│   │   │ S      │ 7887800432148    │ 7887800432148    │ ₺200  │  19  │ Bugün      │ Sat'ta│ │
+│   │   │ M      │ 7887800432131    │ 7887800432131    │ ₺120  │   9  │ Yarın      │ Arşiv │ │
+│   │   └──────────────────────────────────────────────────────────────────────────────────┘ │
+```
+
+### SyncCenter sheet
+
+```
+PageHeader
+┌──────────────────────────────────────────────────────────────────┐
+│ Ürünler                          [● Senkronize • 234/1,200 19%]  │ ← clickable chip (extended SyncBadge)
+└──────────────────────────────────────────────────────────────────┘
+                                                          │ click
+                                                          ▼
+                                                   ┌────────────────┐
+                                                   │ Senkronizasyon │  Sheet
+                                                   ├────────────────┤
+                                                   │ Çalışıyor      │
+                                                   │ ▰▰▰▰▰▱▱▱ 19%  │
+                                                   │ Ürünler        │
+                                                   │ 234 / 1,200    │
+                                                   │ ~45 sn          │
+                                                   ├────────────────┤
+                                                   │ Geçmiş         │
+                                                   │ ✓ 12dk önce    │
+                                                   │   Ürünler 1.2k │
+                                                   │ ✓ 6sa önce     │
+                                                   │   Ürünler 1.2k │
+                                                   │ ✗ 12sa önce    │
+                                                   │   Pazaryeri ek │
+                                                   ├────────────────┤
+                                                   │ [Şimdi senk.]  │
+                                                   └────────────────┘
+```
+
+### Toolbar (PR 4)
+
+```
+[🔍 Ara: ad / stok kodu / barkod / model kodu …]   [Durum ▾]   [Marka ▾]   [Kategori ▾]
+                                                                                          [Sütunlar ▾] [⬇ Dışa aktar]
+```
+
+URL ↔ state binding example: `/products?q=keten&status=onSale&brandId=3226&categoryId=597&page=2&perPage=50`.
+
+## Appendix C — PR phasing diagram
+
+```
+       v1.0 (manual sync, listing, live progress)                v1.1 (scheduled cron)
+       ┌─────────────────────────────────────────────────┐       ┌─────────────────────┐
+PR 1 ──┤                                                 │       │                     │
+       │ ── PR 2 ──┐                                     │       │                     │
+       │           ├── PR 4 ─── PR 5                     │       │                     │
+       │ ── PR 3 ──┘                                     │       │ ── PR 6             │
+       └─────────────────────────────────────────────────┘       └─────────────────────┘
+```
+
+- **PR 1** ships first (foundation).
+- **PR 2** and **PR 3** can run in parallel after PR 1 (one writes the sync route, the other the list route; both depend on the schema).
+- **PR 4** depends on PR 3 (frontend reads the list endpoint).
+- **PR 5** depends on PR 2 + PR 4 (Realtime overlay on the existing UI).
+- **v1.0 ships after PR 5.**
+- **PR 6** depends on PR 2 (reuses the sync service via the internal endpoint).
+- **v1.1 ships after PR 6.**
