@@ -78,9 +78,11 @@ enum SyncType {
 }
 
 enum SyncStatus {
+  PENDING
   RUNNING
   COMPLETED
   FAILED
+  FAILED_RETRYABLE
 }
 
 // ─── Models ──────────────────────────────────────────
@@ -362,11 +364,19 @@ model SyncLog {
   progressStage    String?    @map("progress_stage")
   errorCode        String?    @map("error_code")
   errorMessage     String?    @map("error_message")
+  // ─── New columns (PR 2) ────────────────────────────────────
+  claimedAt        DateTime?  @map("claimed_at")
+  claimedBy        String?    @map("claimed_by")
+  lastTickAt       DateTime?  @map("last_tick_at")
+  pageCursor       Json?      @map("page_cursor")
+  attemptCount     Int        @default(0) @map("attempt_count")
+  nextAttemptAt    DateTime?  @map("next_attempt_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([storeId, startedAt])
+  @@index([status, nextAttemptAt])
   @@map("sync_logs")
 }

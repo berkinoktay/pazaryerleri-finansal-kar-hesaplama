@@ -287,7 +287,7 @@ describe('syncLogService.acquireSlot — concurrent prevention', () => {
     await truncateAll();
   });
 
-  it('a second concurrent caller throws SyncInProgressError and marks itself FAILED', async () => {
+  it('a second concurrent caller throws SyncInProgressError; the partial unique index rejects the INSERT atomically', async () => {
     const userA = await createUserProfile();
     const orgA = await createOrganization();
     await createMembership(orgA.id, userA.id);
@@ -300,16 +300,13 @@ describe('syncLogService.acquireSlot — concurrent prevention', () => {
       SyncInProgressError,
     );
 
-    // The losing row is marked FAILED with errorCode SYNC_IN_PROGRESS.
-    const failedRow = await prisma.syncLog.findFirst({
-      where: { storeId, errorCode: 'SYNC_IN_PROGRESS' },
-    });
-    expect(failedRow).not.toBeNull();
-    expect(failedRow?.status).toBe('FAILED');
-
-    // The winner is still RUNNING.
-    const winner = await prisma.syncLog.findUniqueOrThrow({ where: { id: first.id } });
-    expect(winner.status).toBe('RUNNING');
+    // With sync_logs_active_slot_uniq, the second INSERT is rejected by
+    // Postgres before any row hits the table — so exactly one sync_log
+    // row exists for the slot and it is the winner, still RUNNING.
+    const allRows = await prisma.syncLog.findMany({ where: { storeId, syncType: 'PRODUCTS' } });
+    expect(allRows).toHaveLength(1);
+    expect(allRows[0]?.id).toBe(first.id);
+    expect(allRows[0]?.status).toBe('RUNNING');
   });
 
   it('reaps stale RUNNING rows older than 10 minutes before acquiring a new slot', async () => {

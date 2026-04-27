@@ -183,3 +183,13 @@ DROP POLICY IF EXISTS sync_logs_org_member_read ON sync_logs;
 CREATE POLICY sync_logs_org_member_read ON sync_logs
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
+
+-- ─── sync_logs active-slot uniqueness ────────────────────────
+-- Atomically guarantees one active sync per (store_id, sync_type).
+-- Concurrent enqueue requests → one INSERT wins, the other gets
+-- 23505 unique-violation, mapped to SyncInProgressError(409). The
+-- "active" predicate covers PENDING / RUNNING / FAILED_RETRYABLE
+-- states; terminal states (COMPLETED, FAILED) are not constrained.
+CREATE UNIQUE INDEX IF NOT EXISTS sync_logs_active_slot_uniq
+  ON sync_logs (store_id, sync_type)
+  WHERE status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE');

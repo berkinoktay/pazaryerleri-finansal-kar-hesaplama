@@ -11,6 +11,18 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Changed
+
+- `SyncLogResponse.status` enum widened from `'RUNNING' | 'COMPLETED' | 'FAILED'`
+  to `'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'FAILED_RETRYABLE'`.
+  Schema-only — `PENDING` and `FAILED_RETRYABLE` are reserved for the
+  worker-based pipeline (see
+  `docs/plans/2026-04-27-sync-engine-architecture-implementation.md`)
+  and never appear on the wire today; existing flows continue to emit
+  `RUNNING` / `COMPLETED` / `FAILED`. **Backwards compatible** — clients
+  that switch on the legacy three values keep working; new values land in
+  PR 4 of the sync-engine migration.
+
 ### Added
 
 - `GET /v1/organizations` response is enriched with **four caller-scoped
