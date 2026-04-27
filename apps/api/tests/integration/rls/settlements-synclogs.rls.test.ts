@@ -98,10 +98,11 @@ describe('RLS — settlements/sync_logs', () => {
   });
 
   it('sync_logs: member sees only own store logs', async () => {
-    const { client, storeA, storeB } = await twoTenantsSetup();
+    const { client, orgA, orgB, storeA, storeB } = await twoTenantsSetup();
     const [logA] = await Promise.all([
       prisma.syncLog.create({
         data: {
+          organizationId: orgA.id,
           storeId: storeA.id,
           syncType: 'ORDERS',
           status: 'COMPLETED',
@@ -110,6 +111,7 @@ describe('RLS — settlements/sync_logs', () => {
       }),
       prisma.syncLog.create({
         data: {
+          organizationId: orgB.id,
           storeId: storeB.id,
           syncType: 'ORDERS',
           status: 'COMPLETED',

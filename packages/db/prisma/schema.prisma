@@ -112,6 +112,7 @@ model Organization {
   members  OrganizationMember[]
   stores   Store[]
   expenses Expense[]
+  syncLogs SyncLog[]
 
   @@map("organizations")
 }
@@ -349,6 +350,7 @@ model Expense {
 
 model SyncLog {
   id               String     @id @default(uuid()) @db.Uuid
+  organizationId   String     @map("organization_id") @db.Uuid
   storeId          String     @map("store_id") @db.Uuid
   syncType         SyncType   @map("sync_type")
   status           SyncStatus
@@ -361,8 +363,10 @@ model SyncLog {
   errorCode        String?    @map("error_code")
   errorMessage     String?    @map("error_message")
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@index([storeId, startedAt])
   @@map("sync_logs")
 }

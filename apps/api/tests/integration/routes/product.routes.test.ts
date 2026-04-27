@@ -177,6 +177,7 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/products/sync', () => {
     // Pre-seed a RUNNING SyncLog newer than the 10-minute reap threshold.
     await prisma.syncLog.create({
       data: {
+        organizationId: orgId,
         storeId,
         syncType: 'PRODUCTS',
         status: 'RUNNING',
@@ -210,6 +211,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId', ()
     const { user, orgId, storeId } = await setupOrgWithStore();
     const log = await prisma.syncLog.create({
       data: {
+        organizationId: orgId,
         storeId,
         syncType: 'PRODUCTS',
         status: 'RUNNING',
@@ -255,6 +257,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId', ()
     });
     const otherLog = await prisma.syncLog.create({
       data: {
+        organizationId: otherOrg.id,
         storeId: otherStore.id,
         syncType: 'PRODUCTS',
         status: 'COMPLETED',

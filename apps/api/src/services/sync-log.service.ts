@@ -10,9 +10,14 @@ import { NotFoundError, SyncInProgressError } from '../lib/errors';
 
 const STALE_RUNNING_THRESHOLD_MS = 10 * 60 * 1000;
 
-export async function start(input: { storeId: string; syncType: SyncType }): Promise<SyncLog> {
+export async function start(input: {
+  organizationId: string;
+  storeId: string;
+  syncType: SyncType;
+}): Promise<SyncLog> {
   return prisma.syncLog.create({
     data: {
+      organizationId: input.organizationId,
       storeId: input.storeId,
       syncType: input.syncType,
       status: 'RUNNING',
@@ -106,9 +111,13 @@ export async function cleanupStaleRunning(storeId: string, syncType: SyncType): 
  *
  * Returns the SyncLog row the caller will write progress to.
  */
-export async function acquireSlot(storeId: string, syncType: SyncType): Promise<SyncLog> {
+export async function acquireSlot(
+  organizationId: string,
+  storeId: string,
+  syncType: SyncType,
+): Promise<SyncLog> {
   await cleanupStaleRunning(storeId, syncType);
-  const log = await start({ storeId, syncType });
+  const log = await start({ organizationId, storeId, syncType });
 
   const allRunning = await prisma.syncLog.findMany({
     where: { storeId, syncType, status: 'RUNNING' },
