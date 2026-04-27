@@ -9,12 +9,15 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test:unit": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^6"
+    "dotenv": "^16.4.0",
+    "typescript": "^6",
+    "vitest": "^4"
   }
 }
