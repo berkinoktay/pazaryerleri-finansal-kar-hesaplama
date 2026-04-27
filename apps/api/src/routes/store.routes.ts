@@ -1,8 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
-import { prisma } from '@pazarsync/db';
 
 import { createSubApp } from '../lib/create-hono-app';
-import { ForbiddenError } from '../lib/errors';
+import { ensureOrgMember } from '../lib/ensure-org-member';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as storeService from '../services/store.service';
@@ -19,30 +18,6 @@ const app = createSubApp<{
     memberRole: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
   };
 }>();
-
-/**
- * Inline org membership check. Historically this would ride on
- * `orgContextMiddleware` applied via `app.use(path, ...)`, but Hono's
- * sub-app `.use()` semantics did not compose cleanly with typed
- * Variables set by parent middleware — the parent's `c.set('userId')`
- * did not always reach a path-matched sub-app `.use()` callback for
- * POST requests. Doing the check inline in each handler keeps every
- * read of `c.get('userId')` on the same Context that parent auth set.
- *
- * Returns the org id the handler should filter by. Never 404 — cross-
- * tenant access returns 403 at this boundary (SECURITY.md §3 — existence
- * non-disclosure happens at the next layer, the store-scoped lookup).
- */
-async function ensureOrgMember(userId: string, orgIdFromPath: string): Promise<string> {
-  const membership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: orgIdFromPath, userId } },
-    select: { role: true },
-  });
-  if (membership === null) {
-    throw new ForbiddenError('Not a member of this organization');
-  }
-  return orgIdFromPath;
-}
 
 // D7 — connect-store rate limit: 5 attempts per minute per user.
 // Applied only to POST via method check inside the middleware wrapper.
