@@ -23,7 +23,7 @@ export function ProductsEmptyState({ variant }: ProductsEmptyStateProps): React.
         description={t('noStore.description')}
         action={
           <Button asChild>
-            <Link href="/stores">{t('noStore.cta')}</Link>
+            <Link href="/settings/stores">{t('noStore.cta')}</Link>
           </Button>
         }
       />
