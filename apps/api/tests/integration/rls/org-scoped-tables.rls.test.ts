@@ -70,7 +70,8 @@ describe('RLS — org-scoped tables', () => {
         data: {
           organizationId: orgA.id,
           storeId: storeA.id,
-          platformProductId: 'p-a',
+          platformContentId: BigInt(1001),
+          productMainId: 'pm-a',
           title: 'Product A',
         },
       }),
@@ -78,7 +79,8 @@ describe('RLS — org-scoped tables', () => {
         data: {
           organizationId: orgB.id,
           storeId: storeB.id,
-          platformProductId: 'p-b',
+          platformContentId: BigInt(1002),
+          productMainId: 'pm-b',
           title: 'Product B',
         },
       }),
@@ -88,6 +90,108 @@ describe('RLS — org-scoped tables', () => {
 
     expect(error).toBeNull();
     expect(data?.map((p) => p.id)).toEqual([productA.id]);
+  });
+
+  it('product_variants: member sees only own org variants', async () => {
+    const { client, orgA, orgB, storeA, storeB } = await twoTenantsSetup();
+    const [productA, productB] = await Promise.all([
+      prisma.product.create({
+        data: {
+          organizationId: orgA.id,
+          storeId: storeA.id,
+          platformContentId: BigInt(2001),
+          productMainId: 'pm-a',
+          title: 'Product A',
+        },
+      }),
+      prisma.product.create({
+        data: {
+          organizationId: orgB.id,
+          storeId: storeB.id,
+          platformContentId: BigInt(2002),
+          productMainId: 'pm-b',
+          title: 'Product B',
+        },
+      }),
+    ]);
+    const [variantA] = await Promise.all([
+      prisma.productVariant.create({
+        data: {
+          organizationId: orgA.id,
+          storeId: storeA.id,
+          productId: productA.id,
+          platformVariantId: BigInt(20010),
+          barcode: 'bc-a',
+          stockCode: 'sk-a',
+          salePrice: '100.00',
+          listPrice: '100.00',
+        },
+      }),
+      prisma.productVariant.create({
+        data: {
+          organizationId: orgB.id,
+          storeId: storeB.id,
+          productId: productB.id,
+          platformVariantId: BigInt(20020),
+          barcode: 'bc-b',
+          stockCode: 'sk-b',
+          salePrice: '100.00',
+          listPrice: '100.00',
+        },
+      }),
+    ]);
+
+    const { data, error } = await client.from('product_variants').select('id,barcode');
+
+    expect(error).toBeNull();
+    expect(data?.map((v) => v.id)).toEqual([variantA.id]);
+  });
+
+  it('product_images: member sees only own org images', async () => {
+    const { client, orgA, orgB, storeA, storeB } = await twoTenantsSetup();
+    const [productA, productB] = await Promise.all([
+      prisma.product.create({
+        data: {
+          organizationId: orgA.id,
+          storeId: storeA.id,
+          platformContentId: BigInt(3001),
+          productMainId: 'pm-a',
+          title: 'Product A',
+        },
+      }),
+      prisma.product.create({
+        data: {
+          organizationId: orgB.id,
+          storeId: storeB.id,
+          platformContentId: BigInt(3002),
+          productMainId: 'pm-b',
+          title: 'Product B',
+        },
+      }),
+    ]);
+    const [imageA] = await Promise.all([
+      prisma.productImage.create({
+        data: {
+          organizationId: orgA.id,
+          productId: productA.id,
+          url: 'https://cdn.example.com/a.jpg',
+          position: 0,
+        },
+      }),
+      prisma.productImage.create({
+        data: {
+          organizationId: orgB.id,
+          productId: productB.id,
+          url: 'https://cdn.example.com/b.jpg',
+          position: 0,
+        },
+      }),
+    ]);
+
+    const { data, error } = await client.from('product_images').select('id,url');
+
+    expect(error).toBeNull();
+    expect(data?.map((i) => i.id)).toEqual([imageA.id]);
   });
 
   it('order_items: member sees only items of orders in own org', async () => {

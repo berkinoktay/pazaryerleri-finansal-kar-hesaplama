@@ -6,6 +6,7 @@ import {
   InvalidReferenceError,
   NotFoundError,
   RateLimitedError,
+  SyncInProgressError,
   UnauthorizedError,
   ValidationError,
 } from '@/lib/errors';
@@ -89,5 +90,16 @@ describe('RateLimitedError', () => {
     expect(err.status).toBe(429);
     expect(err.code).toBe('RATE_LIMITED');
     expect(err.retryAfterSeconds).toBe(30);
+  });
+});
+
+describe('SyncInProgressError', () => {
+  it('has status 409 and stable code SYNC_IN_PROGRESS with meta', () => {
+    const err = new SyncInProgressError({ syncType: 'PRODUCTS', storeId: 'abc' });
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('SYNC_IN_PROGRESS');
+    expect(err.meta).toEqual({ syncType: 'PRODUCTS', storeId: 'abc' });
+    expect(err.message).toContain('PRODUCTS');
+    expect(err.message).toContain('abc');
   });
 });

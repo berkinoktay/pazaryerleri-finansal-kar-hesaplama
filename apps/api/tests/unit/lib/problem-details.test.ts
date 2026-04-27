@@ -10,6 +10,7 @@ import {
   MarketplaceUnreachable,
   NotFoundError,
   RateLimitedError,
+  SyncInProgressError,
   UnauthorizedError,
   ValidationError,
 } from '@/lib/errors';
@@ -64,6 +65,15 @@ describe('problemDetailsForError — extended error classes', () => {
     const { body, status } = problemDetailsForError(new ConflictError('slug taken'));
     expect(status).toBe(409);
     expect(body.code).toBe('CONFLICT');
+  });
+
+  it('maps SyncInProgressError to 409 SYNC_IN_PROGRESS with syncType + storeId meta', () => {
+    const { body, status } = problemDetailsForError(
+      new SyncInProgressError({ syncType: 'PRODUCTS', storeId: 'store-123' }),
+    );
+    expect(status).toBe(409);
+    expect(body.code).toBe('SYNC_IN_PROGRESS');
+    expect(body.meta).toMatchObject({ syncType: 'PRODUCTS', storeId: 'store-123' });
   });
 
   it('maps ValidationError to 422 with field-level errors[]', () => {

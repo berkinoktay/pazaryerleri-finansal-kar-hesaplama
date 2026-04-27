@@ -249,13 +249,27 @@ async function seedStoresProductsOrders(orgs: {
     },
   ];
   for (const [i, p] of products.entries()) {
-    await prisma.product.create({
+    const product = await prisma.product.create({
       data: {
         organizationId: p.orgId,
         storeId: p.storeId,
-        platformProductId: `seed-product-${(i + 1).toString()}`,
-        barcode: p.barcode,
+        platformContentId: BigInt(900000 + i + 1),
+        productMainId: `seed-product-${(i + 1).toString()}`,
         title: p.title,
+      },
+    });
+    // Each seed product gets one default variant carrying the barcode and
+    // cost. Multi-variant fixtures live in test factories, not the seed.
+    await prisma.productVariant.create({
+      data: {
+        organizationId: p.orgId,
+        storeId: p.storeId,
+        productId: product.id,
+        platformVariantId: BigInt(910000 + i + 1),
+        barcode: p.barcode,
+        stockCode: `seed-sku-${(i + 1).toString()}`,
+        salePrice: p.cost,
+        listPrice: p.cost,
         costPrice: p.cost,
       },
     });

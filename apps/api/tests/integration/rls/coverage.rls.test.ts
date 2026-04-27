@@ -15,6 +15,8 @@ const TENANT_TABLES = [
   'organization_members',
   'stores',
   'products',
+  'product_variants',
+  'product_images',
   'orders',
   'order_items',
   'expenses',

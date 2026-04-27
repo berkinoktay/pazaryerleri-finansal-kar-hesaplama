@@ -8,6 +8,7 @@ import {
   MarketplaceUnreachable,
   NotFoundError,
   RateLimitedError,
+  SyncInProgressError,
   UnauthorizedError,
   ValidationError,
   type ValidationIssue,
@@ -124,6 +125,19 @@ function classify(err: unknown): ProblemDetailsResult {
         status: 409,
         code: 'CONFLICT',
         detail: err.message,
+      },
+    };
+  }
+  if (err instanceof SyncInProgressError) {
+    return {
+      status: 409,
+      body: {
+        type: `${TYPE_BASE}/sync-in-progress`,
+        title: 'Sync already running',
+        status: 409,
+        code: 'SYNC_IN_PROGRESS',
+        detail: err.message,
+        meta: { ...err.meta },
       },
     };
   }
