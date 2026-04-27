@@ -394,6 +394,9 @@ importers:
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../db
+      zod:
+        specifier: ^4.3.0
+        version: 4.3.6
     devDependencies:
       dotenv:
         specifier: ^16.4.0
