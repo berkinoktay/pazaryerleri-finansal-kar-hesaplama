@@ -38,6 +38,8 @@ export async function truncateAll(): Promise<void> {
        settlements,
        order_items,
        orders,
+       product_images,
+       product_variants,
        products,
        expenses,
        stores,

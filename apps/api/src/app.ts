@@ -11,6 +11,7 @@ import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
 import meRoutes from './routes/me.routes';
 import organizationRoutes from './routes/organization.routes';
+import productRoutes from './routes/product.routes';
 import storeRoutes from './routes/store.routes';
 
 /**
@@ -118,6 +119,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', meRoutes);
   app.route('/', organizationRoutes);
   app.route('/', storeRoutes);
+  app.route('/', productRoutes);
 
   return app;
 }
