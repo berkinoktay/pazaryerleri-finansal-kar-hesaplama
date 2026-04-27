@@ -131,7 +131,7 @@ describe('ProductSyncService.run', () => {
     );
 
     const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-    const log = await syncLogService.acquireSlot(store.id, 'PRODUCTS');
+    const log = await syncLogService.acquireSlot(orgA.id, store.id, 'PRODUCTS');
     await productSyncService.run({ store, syncLogId: log.id });
 
     const refetchedLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: log.id } });
@@ -186,13 +186,13 @@ describe('ProductSyncService.run', () => {
 
     const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
 
-    const firstLog = await syncLogService.acquireSlot(store.id, 'PRODUCTS');
+    const firstLog = await syncLogService.acquireSlot(orgA.id, store.id, 'PRODUCTS');
     await productSyncService.run({ store, syncLogId: firstLog.id });
 
     const firstCount = await prisma.product.count({ where: { storeId } });
     expect(firstCount).toBe(1);
 
-    const secondLog = await syncLogService.acquireSlot(store.id, 'PRODUCTS');
+    const secondLog = await syncLogService.acquireSlot(orgA.id, store.id, 'PRODUCTS');
     await productSyncService.run({ store, syncLogId: secondLog.id });
 
     const secondCount = await prisma.product.count({ where: { storeId } });
@@ -251,7 +251,7 @@ describe('ProductSyncService.run', () => {
     );
 
     const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-    const log = await syncLogService.acquireSlot(store.id, 'PRODUCTS');
+    const log = await syncLogService.acquireSlot(orgA.id, store.id, 'PRODUCTS');
     await productSyncService.run({ store, syncLogId: log.id });
 
     const staleVariant = await prisma.productVariant.findFirstOrThrow({
@@ -269,7 +269,7 @@ describe('ProductSyncService.run', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 401 }));
 
     const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-    const log = await syncLogService.acquireSlot(store.id, 'PRODUCTS');
+    const log = await syncLogService.acquireSlot(orgA.id, store.id, 'PRODUCTS');
     await productSyncService.run({ store, syncLogId: log.id });
 
     const refetched = await prisma.syncLog.findUniqueOrThrow({ where: { id: log.id } });
@@ -293,10 +293,10 @@ describe('syncLogService.acquireSlot — concurrent prevention', () => {
     await createMembership(orgA.id, userA.id);
     const { storeId } = await createTestStore(orgA.id);
 
-    const first = await syncLogService.acquireSlot(storeId, 'PRODUCTS');
+    const first = await syncLogService.acquireSlot(orgA.id, storeId, 'PRODUCTS');
     expect(first.status).toBe('RUNNING');
 
-    await expect(syncLogService.acquireSlot(storeId, 'PRODUCTS')).rejects.toBeInstanceOf(
+    await expect(syncLogService.acquireSlot(orgA.id, storeId, 'PRODUCTS')).rejects.toBeInstanceOf(
       SyncInProgressError,
     );
 
@@ -321,6 +321,7 @@ describe('syncLogService.acquireSlot — concurrent prevention', () => {
     const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000);
     const stale = await prisma.syncLog.create({
       data: {
+        organizationId: orgA.id,
         storeId,
         syncType: 'PRODUCTS',
         status: 'RUNNING',
@@ -328,7 +329,7 @@ describe('syncLogService.acquireSlot — concurrent prevention', () => {
       },
     });
 
-    const fresh = await syncLogService.acquireSlot(storeId, 'PRODUCTS');
+    const fresh = await syncLogService.acquireSlot(orgA.id, storeId, 'PRODUCTS');
     expect(fresh.status).toBe('RUNNING');
 
     const reaped = await prisma.syncLog.findUniqueOrThrow({ where: { id: stale.id } });

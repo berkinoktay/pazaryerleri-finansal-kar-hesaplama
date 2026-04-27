@@ -169,16 +169,17 @@ CREATE POLICY settlement_items_org_member_read ON settlement_items
     )
   );
 
--- ─── sync_logs — reach via parent store ────────────────────────────────
--- sync_logs has only store_id; walk to stores to get the tenant context.
+-- ─── sync_logs — direct check via denormalized organization_id ────────
+-- Originally walked to stores via EXISTS; that worked for REST reads
+-- (Prisma bypasses RLS as superuser) but Supabase Realtime's
+-- postgres_changes evaluator can't reliably handle cross-table EXISTS,
+-- so subscriptions crashed with "Unable to subscribe to changes with
+-- given parameters". We denormalize organization_id onto sync_logs
+-- (kept in sync by syncLogService at insert time) so the policy is a
+-- flat is_org_member() check — same pattern as products / variants /
+-- images.
 ALTER TABLE sync_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS sync_logs_org_member_read ON sync_logs;
 CREATE POLICY sync_logs_org_member_read ON sync_logs
   FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM stores
-      WHERE stores.id = sync_logs.store_id
-        AND is_org_member(stores.organization_id)
-    )
-  );
+  USING (is_org_member(organization_id));

@@ -68,6 +68,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs', () => {
     const now = Date.now();
     await prisma.syncLog.create({
       data: {
+        organizationId: orgId,
         storeId,
         syncType: 'PRODUCTS',
         status: 'RUNNING',
@@ -79,6 +80,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs', () => {
     for (let i = 0; i < 5; i++) {
       await prisma.syncLog.create({
         data: {
+          organizationId: orgId,
           storeId,
           syncType: 'PRODUCTS',
           status: 'COMPLETED',
@@ -90,6 +92,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs', () => {
     }
     await prisma.syncLog.create({
       data: {
+        organizationId: orgId,
         storeId,
         syncType: 'PRODUCTS',
         status: 'FAILED',
@@ -136,6 +139,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs', () => {
     });
     await prisma.syncLog.create({
       data: {
+        organizationId: otherOrg.id,
         storeId: otherStore.id,
         syncType: 'PRODUCTS',
         status: 'RUNNING',
@@ -165,6 +169,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs', () => {
     // Org B has a RUNNING log; org A has none. Org A's user must see [].
     await prisma.syncLog.create({
       data: {
+        organizationId: orgB.id,
         storeId: storeB.id,
         syncType: 'PRODUCTS',
         status: 'RUNNING',

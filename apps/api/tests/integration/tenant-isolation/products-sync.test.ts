@@ -44,6 +44,7 @@ async function makeTenant(): Promise<TenantSetup> {
   });
   const syncLog = await prisma.syncLog.create({
     data: {
+      organizationId: org.id,
       storeId: store.id,
       syncType: 'PRODUCTS',
       status: 'COMPLETED',

@@ -96,7 +96,7 @@ app.openapi(startSyncRoute, async (c) => {
   const organizationId = await ensureOrgMember(userId, orgId);
   const store = await storeService.requireOwnedStore(organizationId, storeId);
 
-  const log = await syncLogService.acquireSlot(store.id, 'PRODUCTS');
+  const log = await syncLogService.acquireSlot(organizationId, store.id, 'PRODUCTS');
 
   // Fire-and-forget. The service updates the SyncLog row as it progresses
   // and writes errorCode/errorMessage on failure — we never rethrow past
