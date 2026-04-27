@@ -1,5 +1,5 @@
 import { prisma } from '@pazarsync/db';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -9,41 +9,6 @@ import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization } from '../../helpers/factories';
 
 const app = createApp();
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
-function emptyPage(): Response {
-  return jsonResponse({
-    totalElements: 0,
-    totalPages: 0,
-    page: 0,
-    size: 100,
-    nextPageToken: null,
-    content: [],
-  });
-}
-
-/**
- * Replace `fetch` for Trendyol URLs only — Supabase auth verification
- * also goes through `globalThis.fetch`, and a blanket mock would cause
- * the auth middleware to reject every Bearer token.
- */
-function mockTrendyolFetch(response: () => Response): void {
-  const realFetch = globalThis.fetch.bind(globalThis);
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const url =
-      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    if (url.includes('trendyol')) {
-      return response();
-    }
-    return realFetch(input as RequestInfo, init);
-  });
-}
 
 async function setupOrgWithStore(): Promise<{
   user: { id: string; email: string; accessToken: string };
@@ -77,10 +42,6 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/products/sync', () => {
 
   beforeEach(async () => {
     await truncateAll();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it('returns 401 without an auth token', async () => {
@@ -146,12 +107,8 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/products/sync', () => {
     expect(body.code).toBe('NOT_FOUND');
   });
 
-  it('returns 202 with syncLogId for a valid request and inserts a RUNNING SyncLog row', async () => {
+  it('returns 202 with syncLogId for a valid request and inserts a PENDING SyncLog row', async () => {
     const { user, orgId, storeId } = await setupOrgWithStore();
-    // Stub Trendyol response so the background sync completes promptly,
-    // but let the Supabase auth call pass through (auth middleware uses
-    // the same globalThis.fetch).
-    mockTrendyolFetch(emptyPage);
 
     const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/products/sync`, {
       method: 'POST',
@@ -162,25 +119,28 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/products/sync', () => {
     const body = (await res.json()) as {
       syncLogId: string;
       status: string;
-      startedAt: string;
+      enqueuedAt: string;
     };
-    expect(body.status).toBe('RUNNING');
+    expect(body.status).toBe('PENDING');
     expect(body.syncLogId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.enqueuedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
 
     const logRow = await prisma.syncLog.findUniqueOrThrow({ where: { id: body.syncLogId } });
     expect(logRow.storeId).toBe(storeId);
     expect(logRow.syncType).toBe('PRODUCTS');
+    expect(logRow.status).toBe('PENDING');
   });
 
-  it('returns 409 SYNC_IN_PROGRESS when a sync is already RUNNING for the store', async () => {
+  it('returns 409 SYNC_IN_PROGRESS with existingSyncLogId when an active sync exists', async () => {
     const { user, orgId, storeId } = await setupOrgWithStore();
-    // Pre-seed a RUNNING SyncLog newer than the 10-minute reap threshold.
-    await prisma.syncLog.create({
+    // Pre-seed a PENDING SyncLog — the partial unique index treats
+    // PENDING / RUNNING / FAILED_RETRYABLE all as "active slot taken".
+    const existing = await prisma.syncLog.create({
       data: {
         organizationId: orgId,
         storeId,
         syncType: 'PRODUCTS',
-        status: 'RUNNING',
+        status: 'PENDING',
         startedAt: new Date(),
       },
     });
@@ -195,6 +155,7 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/products/sync', () => {
     expect(body.code).toBe('SYNC_IN_PROGRESS');
     expect(body.meta?.['syncType']).toBe('PRODUCTS');
     expect(body.meta?.['storeId']).toBe(storeId);
+    expect(body.meta?.['existingSyncLogId']).toBe(existing.id);
   });
 });
 

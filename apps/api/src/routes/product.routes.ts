@@ -3,9 +3,7 @@ import { syncLogService } from '@pazarsync/sync-core';
 
 import { createSubApp } from '../lib/create-hono-app';
 import { ensureOrgMember } from '../lib/ensure-org-member';
-import { runInBackground } from '../lib/run-in-background';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
-import * as productSyncService from '../services/product-sync.service';
 import * as productsListService from '../services/products-list.service';
 import * as storeService from '../services/store.service';
 import {
@@ -54,14 +52,15 @@ const startSyncRoute = createRoute({
   method: 'post',
   path: '/organizations/{orgId}/stores/{storeId}/products/sync',
   tags: ['Products'],
-  summary: 'Start a Trendyol product sync',
+  summary: 'Enqueue a Trendyol product sync',
   description:
-    'Acquires the sync slot (sync_log row + race detection), kicks off the ' +
-    'background sync, and returns 202 with the new syncLogId. The actual fetch + ' +
-    'upsert runs in the background of the Hono process; clients poll ' +
-    '`GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` (or, with ' +
-    'PR 5, subscribe to Supabase Realtime postgres_changes on the same row) to ' +
-    'track progress. Concurrent sync attempts return 409 SYNC_IN_PROGRESS.',
+    'Inserts a PENDING SyncLog row and returns 202 with the new syncLogId. The ' +
+    'dedicated worker process (apps/sync-worker) claims the row and runs the sync ' +
+    'in the background; clients poll ' +
+    '`GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe ' +
+    'to Supabase Realtime postgres_changes on the same row to track progress. ' +
+    'Concurrent sync attempts return 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId` ' +
+    'pointing at the live run.',
   security: [{ bearerAuth: [] }],
   request: { params: storeIdParams },
   responses: {
@@ -96,19 +95,17 @@ app.openapi(startSyncRoute, async (c) => {
   const organizationId = await ensureOrgMember(userId, orgId);
   const store = await storeService.requireOwnedStore(organizationId, storeId);
 
+  // Pure enqueue: INSERT a PENDING SyncLog row and return. The worker
+  // process picks it up via tryClaimNext within ~1 s. P2002 from the
+  // partial unique index is mapped to SyncInProgressError(409) with
+  // meta.existingSyncLogId by acquireSlot itself.
   const log = await syncLogService.acquireSlot(organizationId, store.id, 'PRODUCTS');
-
-  // Fire-and-forget. The service updates the SyncLog row as it progresses
-  // and writes errorCode/errorMessage on failure — we never rethrow past
-  // the service's own catch. runInBackground keeps a strong ref so V8
-  // doesn't GC the promise mid-flight.
-  runInBackground(productSyncService.run({ store, syncLogId: log.id }));
 
   return c.json(
     {
       syncLogId: log.id,
-      status: 'RUNNING' as const,
-      startedAt: log.startedAt.toISOString(),
+      status: 'PENDING' as const,
+      enqueuedAt: log.startedAt.toISOString(),
     },
     202,
   );

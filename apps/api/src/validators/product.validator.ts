@@ -6,14 +6,16 @@ import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
 
 // ─── Sync trigger response ─────────────────────────────────────────────
 // Returned from POST /v1/organizations/:orgId/stores/:storeId/products/sync
-// immediately after the SyncLog row is inserted. The actual sync runs in
-// the background; the client polls the SyncLog endpoint to track progress.
+// immediately after the PENDING SyncLog row is inserted. The dedicated
+// sync-worker process picks the row up via tryClaimNext (typically within
+// ~1 s) and transitions it to RUNNING; clients track progress via polling
+// the SyncLog endpoint or via Supabase Realtime postgres_changes.
 
 export const StartSyncResponseSchema = z
   .object({
     syncLogId: z.string().uuid().openapi({ example: '7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f' }),
-    status: z.literal('RUNNING').openapi({ example: 'RUNNING' }),
-    startedAt: z.string().datetime().openapi({ example: '2026-04-27T14:23:11.482Z' }),
+    status: z.literal('PENDING').openapi({ example: 'PENDING' }),
+    enqueuedAt: z.string().datetime().openapi({ example: '2026-04-27T14:23:11.482Z' }),
   })
   .openapi('StartSyncResponse');
 

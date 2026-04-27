@@ -8,24 +8,6 @@ import type { SyncLog, SyncType } from '@pazarsync/db';
 
 import { NotFoundError, SyncInProgressError } from './errors';
 
-const STALE_RUNNING_THRESHOLD_MS = 10 * 60 * 1000;
-
-export async function start(input: {
-  organizationId: string;
-  storeId: string;
-  syncType: SyncType;
-}): Promise<SyncLog> {
-  return prisma.syncLog.create({
-    data: {
-      organizationId: input.organizationId,
-      storeId: input.storeId,
-      syncType: input.syncType,
-      status: 'RUNNING',
-      startedAt: new Date(),
-    },
-  });
-}
-
 export async function advance(
   id: string,
   progressCurrent: number,
@@ -67,87 +49,53 @@ export async function fail(id: string, errorCode: string, errorMessage: string):
 }
 
 /**
- * Mark any RUNNING SyncLog rows for `(storeId, syncType)` older than the
- * 10-minute threshold as FAILED with `errorCode: 'SYNC_TIMEOUT'`. Run on
- * every sync start so a previous crashed/orphaned run is reaped before
- * the new one acquires the advisory lock — otherwise the SyncCenter UI
- * would show a permanent "syncing…" state.
+ * Acquire a sync slot for `(organizationId, storeId, syncType)` by
+ * inserting a PENDING SyncLog row. The partial unique index
+ * `sync_logs_active_slot_uniq` (see supabase/sql/rls-policies.sql)
+ * atomically rejects a second active row for the same slot — Postgres
+ * returns 23505 / Prisma `P2002`, which we map to `SyncInProgressError`
+ * with the existing run's id in `meta.existingSyncLogId` so the UI can
+ * navigate to the live progress.
  *
- * Returns the number of rows reaped (useful for tests + ops logs).
- */
-export async function cleanupStaleRunning(storeId: string, syncType: SyncType): Promise<number> {
-  const cutoff = new Date(Date.now() - STALE_RUNNING_THRESHOLD_MS);
-  const { count } = await prisma.syncLog.updateMany({
-    where: {
-      storeId,
-      syncType,
-      status: 'RUNNING',
-      startedAt: { lt: cutoff },
-    },
-    data: {
-      status: 'FAILED',
-      completedAt: new Date(),
-      errorCode: 'SYNC_TIMEOUT',
-      errorMessage: 'Sync did not complete within the timeout window',
-    },
-  });
-  return count;
-}
-
-/**
- * Atomically acquire the sync "slot" for a `(storeId, syncType)`.
- *
- * The partial unique index `sync_logs_active_slot_uniq` (see
- * `supabase/sql/rls-policies.sql`) atomically guarantees one active sync
- * per slot at the database level: concurrent INSERTs of an active row
- * (PENDING / RUNNING / FAILED_RETRYABLE) for the same `(storeId, syncType)`
- * trigger Postgres `23505` (unique violation), which Prisma surfaces as
- * `P2002`. The flow:
- *
- *   1. Reap any stale RUNNING rows (>10 min) for this slot — frees the
- *      slot when the previous worker crashed without a terminal write.
- *   2. INSERT a fresh RUNNING row. If the partial index rejects it, we
- *      lost the race: throw `SyncInProgressError`.
- *   3. Defensive re-check (legacy): if for any reason two RUNNING rows
- *      coexist (e.g. a row pre-dating the unique index), the oldest wins
- *      and the loser marks itself FAILED with code `SYNC_IN_PROGRESS`.
- *
- * PR 4 of the sync-engine architecture migration replaces this entirely
- * with a PENDING-row enqueue + worker claim flow; the legacy re-check
- * fallback is unreachable in practice once the unique index is in place
- * but kept here until that migration lands.
- *
- * Returns the SyncLog row the caller will write progress to.
+ * Returns the new PENDING SyncLog row. The worker (`apps/sync-worker`)
+ * picks it up via `tryClaimNext` typically within ~1 s of insertion;
+ * stale runs are recovered by the worker's stale-claim watchdog (90 s
+ * heartbeat threshold) — there is no longer a need to reap from the
+ * acquire path.
  */
 export async function acquireSlot(
   organizationId: string,
   storeId: string,
   syncType: SyncType,
 ): Promise<SyncLog> {
-  await cleanupStaleRunning(storeId, syncType);
-
-  let log: SyncLog;
   try {
-    log = await start({ organizationId, storeId, syncType });
+    return await prisma.syncLog.create({
+      data: {
+        organizationId,
+        storeId,
+        syncType,
+        status: 'PENDING',
+        startedAt: new Date(),
+      },
+    });
   } catch (err) {
     if (isUniqueViolation(err)) {
-      throw new SyncInProgressError({ syncType, storeId });
+      const existing = await prisma.syncLog.findFirst({
+        where: {
+          storeId,
+          syncType,
+          status: { in: ['PENDING', 'RUNNING', 'FAILED_RETRYABLE'] },
+        },
+        select: { id: true },
+      });
+      throw new SyncInProgressError({
+        syncType,
+        storeId,
+        existingSyncLogId: existing?.id,
+      });
     }
     throw err;
   }
-
-  const allRunning = await prisma.syncLog.findMany({
-    where: { storeId, syncType, status: 'RUNNING' },
-    orderBy: { startedAt: 'asc' },
-    select: { id: true },
-  });
-
-  if (allRunning.length > 1 && allRunning[0]?.id !== log.id) {
-    await fail(log.id, 'SYNC_IN_PROGRESS', 'Another sync acquired the slot first');
-    throw new SyncInProgressError({ syncType, storeId });
-  }
-
-  return log;
 }
 
 /**
