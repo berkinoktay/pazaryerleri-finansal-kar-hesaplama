@@ -63,24 +63,29 @@ export interface TrendyolVariant {
   variantId: number;
   supplierId: number;
   barcode: string;
-  attributes: TrendyolAttribute[];
+  attributes?: TrendyolAttribute[];
   productUrl?: string;
-  onSale: boolean;
-  deliveryOptions: TrendyolDeliveryOptions;
-  stock: TrendyolStock;
-  price: TrendyolPrice;
-  stockCode: string;
-  vatRate: number;
+  onSale?: boolean;
+  // The "approved" endpoint sometimes returns variants where Trendyol
+  // has not yet populated price / stock / deliveryOptions — typically
+  // freshly-listed variants between approval and pricing-pipeline
+  // completion. The mapper handles undefined defensively rather than
+  // forcing the sync to crash.
+  deliveryOptions?: TrendyolDeliveryOptions;
+  stock?: TrendyolStock;
+  price?: TrendyolPrice;
+  stockCode?: string;
+  vatRate?: number;
   sellerCreatedDate?: number;
   sellerModifiedDate?: number;
-  locked: boolean;
+  locked?: boolean;
   lockReason?: string | null;
   lockDate?: number | null;
-  archived: boolean;
+  archived?: boolean;
   archivedDate?: number | null;
   docNeeded?: boolean;
   hasViolation?: boolean;
-  blacklisted: boolean;
+  blacklisted?: boolean;
   locationBasedDelivery?: string;
 }
 
@@ -99,14 +104,14 @@ export interface TrendyolContent {
   productMainId: string;
   brand?: TrendyolBrand;
   category?: TrendyolCategory;
-  creationDate: number;
-  lastModifiedDate: number;
+  creationDate?: number;
+  lastModifiedDate?: number;
   lastModifiedBy?: string;
   title: string;
   description?: string;
-  images: TrendyolImage[];
-  attributes: TrendyolAttribute[];
-  variants: TrendyolVariant[];
+  images?: TrendyolImage[];
+  attributes?: TrendyolAttribute[];
+  variants?: TrendyolVariant[];
 }
 
 export interface TrendyolApprovedProductsResponse {
