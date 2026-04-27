@@ -148,35 +148,113 @@ model Store {
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  products     Product[]
-  orders       Order[]
-  settlements  Settlement[]
-  syncLogs     SyncLog[]
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products        Product[]
+  productVariants ProductVariant[]
+  orders          Order[]
+  settlements     Settlement[]
+  syncLogs        SyncLog[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
   @@map("stores")
 }
 
+// Parent — one row per Trendyol contentId. Shared content fields
+// (title, description, brand, category, color, images) live here. SKU-level
+// fields (barcode, stockCode, price, stock, delivery, size) live on
+// ProductVariant. The split mirrors how the marketplace itself models
+// products and avoids lossy denormalization across N variants.
 model Product {
-  id                String   @id @default(uuid()) @db.Uuid
-  organizationId    String   @map("organization_id") @db.Uuid
-  storeId           String   @map("store_id") @db.Uuid
-  platformProductId String   @map("platform_product_id")
-  barcode           String?
-  title             String
-  category          String?
-  costPrice         Decimal? @map("cost_price") @db.Decimal(12, 2)
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                 String    @id @default(uuid()) @db.Uuid
+  organizationId     String    @map("organization_id") @db.Uuid
+  storeId            String    @map("store_id") @db.Uuid
+  platformContentId  BigInt    @map("platform_content_id")
+  productMainId      String    @map("product_main_id")
+  title              String
+  description        String?   @db.Text
+  brandId            BigInt?   @map("brand_id")
+  brandName          String?   @map("brand_name")
+  categoryId         BigInt?   @map("category_id")
+  categoryName       String?   @map("category_name")
+  color              String?
+  attributes         Json      @default("[]")
+  approved           Boolean   @default(true)
+  platformCreatedAt  DateTime? @map("platform_created_at")
+  platformModifiedAt DateTime? @map("platform_modified_at")
+  lastSyncedAt       DateTime  @default(now()) @map("last_synced_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
+  store    Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  variants ProductVariant[]
+  images   ProductImage[]
+
+  @@unique([storeId, platformContentId])
+  @@index([organizationId])
+  @@index([storeId, productMainId])
+  @@index([storeId, brandId])
+  @@index([storeId, categoryId])
+  @@map("products")
+}
+
+// Child — one row per Trendyol variantId (SKU). organizationId is denormalized
+// here so the RLS policy can be a flat `is_org_member(organization_id)` USING
+// clause without recursing through Product (avoids the 42P17 trap, see
+// supabase/sql/rls-policies.sql for the full rationale).
+model ProductVariant {
+  id                    String   @id @default(uuid()) @db.Uuid
+  organizationId        String   @map("organization_id") @db.Uuid
+  storeId               String   @map("store_id") @db.Uuid
+  productId             String   @map("product_id") @db.Uuid
+  platformVariantId     BigInt   @map("platform_variant_id")
+  barcode               String
+  stockCode             String   @map("stock_code")
+  salePrice             Decimal  @map("sale_price") @db.Decimal(12, 2)
+  listPrice             Decimal  @map("list_price") @db.Decimal(12, 2)
+  vatRate               Int?     @map("vat_rate")
+  costPrice             Decimal? @map("cost_price") @db.Decimal(12, 2)
+  quantity              Int      @default(0)
+  deliveryDuration      Int?     @map("delivery_duration")
+  isRushDelivery        Boolean  @default(false) @map("is_rush_delivery")
+  fastDeliveryOptions   Json     @default("[]") @map("fast_delivery_options")
+  productUrl            String?  @map("product_url") @db.Text
+  locationBasedDelivery String?  @map("location_based_delivery")
+  onSale                Boolean  @default(true) @map("on_sale")
+  archived              Boolean  @default(false)
+  blacklisted           Boolean  @default(false)
+  locked                Boolean  @default(false)
+  size                  String?
+  attributes            Json     @default("[]")
+  lastSyncedAt          DateTime @default(now()) @map("last_synced_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   store      Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
 
-  @@unique([storeId, platformProductId])
+  @@unique([storeId, platformVariantId])
+  @@unique([storeId, barcode])
   @@index([organizationId])
-  @@map("products")
+  @@index([productId])
+  @@index([storeId, stockCode])
+  @@index([storeId, onSale, archived])
+  @@map("product_variants")
+}
+
+model ProductImage {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  productId      String   @map("product_id") @db.Uuid
+  url            String   @db.Text
+  position       Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
+  @@map("product_images")
 }
 
 model Order {
@@ -207,14 +285,14 @@ model Order {
 model OrderItem {
   id               String  @id @default(uuid()) @db.Uuid
   orderId          String  @map("order_id") @db.Uuid
-  productId        String? @map("product_id") @db.Uuid
+  productVariantId String? @map("product_variant_id") @db.Uuid
   quantity         Int
   unitPrice        Decimal @map("unit_price") @db.Decimal(12, 2)
   commissionRate   Decimal @map("commission_rate") @db.Decimal(5, 2)
   commissionAmount Decimal @map("commission_amount") @db.Decimal(12, 2)
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
 
   @@map("order_items")
 }
@@ -277,6 +355,10 @@ model SyncLog {
   startedAt        DateTime   @map("started_at")
   completedAt      DateTime?  @map("completed_at")
   recordsProcessed Int        @default(0) @map("records_processed")
+  progressCurrent  Int        @default(0) @map("progress_current")
+  progressTotal    Int?       @map("progress_total")
+  progressStage    String?    @map("progress_stage")
+  errorCode        String?    @map("error_code")
   errorMessage     String?    @map("error_message")
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
