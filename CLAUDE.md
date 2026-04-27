@@ -490,6 +490,49 @@ export function formatCurrency(value: Decimal | string | number): string { ... }
 // Used in both apps via: import { formatCurrency } from '@pazarsync/utils';
 ```
 
+## Feature Boundaries & Promotion Rules
+
+`apps/web/src/features/<X>/` is a **vertical slice**: it owns its own `api/`, `components/`, `hooks/`, `lib/`, and `validation/`. The entire slice is feature-private. **No file inside `features/<X>/` may import from `features/<Y>/`.** When two features need the same symbol, the symbol does not belong to either feature — it belongs to the shared layer.
+
+### The location decision
+
+| Symbol used by                              | Lives in                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------ |
+| One feature only                            | `apps/web/src/features/<X>/<lib\|components\|hooks>/`                                |
+| 2+ features (web only)                      | `apps/web/src/lib/` (utils/hooks) · `apps/web/src/components/patterns/` (composites) |
+| 2+ features (web AND api)                   | `packages/utils/` (utils) · `packages/types/` (cross-app types)                      |
+| Domain enums (Platform, OrderStatus, …)     | `@pazarsync/db` (Prisma 7 emits them during `pnpm db:generate`) — never duplicate    |
+| Marketplace/business config (rates, limits) | `apps/api/src/config/` or DB tables — never inline in feature code                   |
+
+### When to promote
+
+Promote the moment a second feature needs the symbol — not earlier, not later.
+
+- **Earlier (premature)** is also wrong: two similar functions in two features may not actually be the same abstraction yet. Write twice, then promote on the third use, OR when both call sites genuinely behave identically. WET (Write Everything Twice) is fine; WET+1 is the promotion trigger.
+- **Later (rotting)** is what audit catches: any cross-feature import is a violation, period. Either the symbol belongs in shared, or the second feature is reaching into the wrong place.
+
+### Cross-feature types
+
+Type-only imports across features are softer than runtime imports — no bundle dependency, only a compile-time shape — but still a smell. If feature A and feature B both depend on the same `Organization` shape, that shape is a **shared contract**, not feature-A's private detail. Move it to:
+
+- `packages/types/` if both web and api consume it
+- `apps/web/src/lib/` (or a dedicated `apps/web/src/types/` later) if only web consumes it
+
+The audit downgrades type-only edges to `warn` by default; treat the warn list as a backlog, not as "no problem".
+
+### Enforcement: the audit script
+
+Run on every push (`pre-push` via `pnpm check:all`) and in CI:
+
+```bash
+pnpm audit:boundaries          # human-readable report
+pnpm audit:boundaries --json   # machine-readable
+```
+
+The script lives at `scripts/audit-feature-boundaries.ts`. The policy (what counts as `error` vs `warn` vs `allow`) is in `scripts/audit-feature-boundaries.config.ts` — **policy lives in one file, edit there to tune strictness or add aggregator exemptions**. Do not silence by editing the script itself.
+
+If you genuinely need a cross-feature edge (e.g. a `dashboard` feature that aggregates domains by design), express it in the config with an explicit `'allow'` decision and a comment naming the reason. An audited exception in code beats an unaudited one in someone's head.
+
 ## Shared Packages
 
 - `@pazarsync/db` — Prisma 7 client (generated to `../generated/prisma`), driver adapter (`@prisma/adapter-pg`), migration scripts
