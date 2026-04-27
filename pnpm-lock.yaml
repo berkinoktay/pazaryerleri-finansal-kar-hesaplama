@@ -43,13 +43,13 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^1.19.14
-        version: 1.19.14(hono@4.12.14)
+        version: 1.19.14(hono@4.12.15)
       '@hono/zod-openapi':
         specifier: ^1.3.0
-        version: 1.3.0(hono@4.12.14)(zod@4.3.6)
+        version: 1.3.0(hono@4.12.15)(zod@4.3.6)
       '@hono/zod-validator':
         specifier: ^0.7.6
-        version: 0.7.6(hono@4.12.14)(zod@4.3.6)
+        version: 0.7.6(hono@4.12.15)(zod@4.3.6)
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -57,17 +57,17 @@ importers:
         specifier: workspace:*
         version: link:../../packages/utils
       '@scalar/hono-api-reference':
-        specifier: ^0.10.9
-        version: 0.10.9(hono@4.12.14)
+        specifier: ^0.10.10
+        version: 0.10.10(hono@4.12.15)
       '@supabase/supabase-js':
-        specifier: ^2.103.3
-        version: 2.103.3
+        specifier: ^2.104.1
+        version: 2.104.1
       decimal.js:
         specifier: ^10.5.0
         version: 10.6.0
       hono:
-        specifier: ^4.12.0
-        version: 4.12.14
+        specifier: ^4.12.15
+        version: 4.12.15
       zod:
         specifier: ^4.3.0
         version: 4.3.6
@@ -89,7 +89,7 @@ importers:
         version: 9.39.4(jiti@2.6.1)
       tsup:
         specifier: ^8.4.0
-        version: 8.5.1(@swc/core@1.15.26)(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.3)
+        version: 8.5.1(@swc/core@1.15.26)(jiti@2.6.1)(postcss@8.5.12)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.3)
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
@@ -107,7 +107,7 @@ importers:
     dependencies:
       '@hookform/resolvers':
         specifier: ^5.0.0
-        version: 5.2.2(react-hook-form@7.72.1(react@19.2.5))
+        version: 5.2.2(react-hook-form@7.74.0(react@19.2.5))
       '@pazarsync/api-client':
         specifier: workspace:^
         version: link:../../packages/api-client
@@ -194,13 +194,13 @@ importers:
         version: 1.2.8(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@supabase/ssr':
         specifier: ^0.10.2
-        version: 0.10.2(@supabase/supabase-js@2.103.3)
+        version: 0.10.2(@supabase/supabase-js@2.104.1)
       '@supabase/supabase-js':
-        specifier: ^2.103.3
-        version: 2.103.3
+        specifier: ^2.104.1
+        version: 2.104.1
       '@tanstack/react-query':
-        specifier: ^5.99.2
-        version: 5.99.2(react@19.2.5)
+        specifier: ^5.100.5
+        version: 5.100.5(react@19.2.5)
       '@tanstack/react-table':
         specifier: ^8.21.3
         version: 8.21.3(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -253,8 +253,8 @@ importers:
         specifier: 19.2.5
         version: 19.2.5(react@19.2.5)
       react-hook-form:
-        specifier: ^7.55.0
-        version: 7.72.1(react@19.2.5)
+        specifier: ^7.74.0
+        version: 7.74.0(react@19.2.5)
       recharts:
         specifier: ^3.8.1
         version: 3.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react-is@17.0.2)(react@19.2.5)(redux@5.0.1)
@@ -342,11 +342,11 @@ importers:
   packages/db:
     dependencies:
       '@prisma/adapter-pg':
-        specifier: ^7.7.0
-        version: 7.7.0
+        specifier: ^7.8.0
+        version: 7.8.0
       '@supabase/supabase-js':
-        specifier: ^2.103.3
-        version: 2.103.3
+        specifier: ^2.104.1
+        version: 2.104.1
       pg:
         specifier: ^8.13.0
         version: 8.20.0
@@ -1326,8 +1326,8 @@ packages:
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
 
-  '@prisma/adapter-pg@7.7.0':
-    resolution: {integrity: sha512-q33Ta8sKbgzEpAy0lx45tAq//yMv0qcb+8nj+TCA3P4wiAY+OBFEFk/NDkZncAfHaNJeGo5WJpJdpbL+ijYx8g==}
+  '@prisma/adapter-pg@7.8.0':
+    resolution: {integrity: sha512-ygb3UkerK3v8MDpXVgCISdRNDozpxh6+JVJgiIGbSr5KBgz10LLf5ejUskPGoXlsIjxsOu6nuy1JVQr2EKGSlg==}
 
   '@prisma/client-runtime-utils@7.7.0':
     resolution: {integrity: sha512-BLyd0UpFYOtyJFTHm7jS9vesHW7P83abibodQMiIofqjBKzDHQ1VAsQkdfvXyYDkPlONPfOTz7/rv3x/+CQqvQ==}
@@ -1353,11 +1353,14 @@ packages:
   '@prisma/debug@7.7.0':
     resolution: {integrity: sha512-12J62XdqCmpiwJHhHdQxZeY3ckVCWIFmcJP8hg5dPTceeiQ0wiojXGFYTluKqFQfu46fRLgb/rLALZMAx3+dTA==}
 
+  '@prisma/debug@7.8.0':
+    resolution: {integrity: sha512-p+QZReysDUqXC+mk17q9a+Y/qzh4c2KYliDK30buYUyfrGeTGSyfmc0AIrJRhZJrLHhRiJa9Au/J72h3C+szvA==}
+
   '@prisma/dev@0.24.3':
     resolution: {integrity: sha512-ffHlQuKXZiaDt9Go0OnCTdJZrHxK0k7omJKNV86/VjpsXu5EIHZLK0T7JSWgvNlJwh56kW9JFu9v0qJciFzepg==}
 
-  '@prisma/driver-adapter-utils@7.7.0':
-    resolution: {integrity: sha512-gZXREeu6mOk7zXfGFJgh86p7Vhj0sXNKp+4Cg1tWYo7V2dfncP2qxS2BiTmbIIha8xPqItkl0WSw38RuSq1HoQ==}
+  '@prisma/driver-adapter-utils@7.8.0':
+    resolution: {integrity: sha512-/Q13o0ZT0rjc1Xk0Q9KhZYwuq2EW/vSbWUBKfgEKkaCuB/Sg6bqnjmTZqC5cD4d6y1vfFAEwBRzfzoSMIVJ55A==}
 
   '@prisma/engines-version@7.6.0-1.75cbdc1eb7150937890ad5465d861175c6624711':
     resolution: {integrity: sha512-r51DLcJ8bDRSrBEJF3J4cinoWyGA7rfP2mG6lD90VqIbGNOkbfcLcXalSVjq5Y6brQS3vcjrq4GbyUb1Cb7vkw==}
@@ -2438,22 +2441,22 @@ packages:
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
 
-  '@scalar/client-side-rendering@0.1.2':
-    resolution: {integrity: sha512-gX2QIc+lpErO9RWkJmt02sBZoCOjyZ7EiLLEyGj7x9UKkk7E4zj6Wbk1eUPo6i3oIwhtZ+Vybj/xzexCK2bxwA==}
+  '@scalar/client-side-rendering@0.1.3':
+    resolution: {integrity: sha512-rUI5EQA8y0xivzqc/AwExZYW8HRfQSFxPxvvuLjHTCATpKz0xcQBGVJQIPOmp78NJyO8mnQmltE1AxIdtvdPGg==}
     engines: {node: '>=22'}
 
-  '@scalar/helpers@0.5.1':
-    resolution: {integrity: sha512-9VvPfv8b+YZVIFwR3SWeq4Y8ij/kU3/kf2M6NKcbf2iVyh63d8s0ssap5m/nOhiz/Puidv/29MAJlJCA0LRssA==}
+  '@scalar/helpers@0.5.2':
+    resolution: {integrity: sha512-Pi1GAl8jO6ungmGj2sjDfCfqiBNrKW6HXDZmminV94ybGU/KtRLOqHwd0n9FIhY3j0RYGpGC0VCuniCICfQPHg==}
     engines: {node: '>=22'}
 
-  '@scalar/hono-api-reference@0.10.9':
-    resolution: {integrity: sha512-XLsdXGp8ta7fjYgcwD8xyopsF5KfO5h1qJMoNTjb4Tm1giu+TEkH+m+aBS3cv5FN9LA91Uym8SLWJm8yhgkdOA==}
+  '@scalar/hono-api-reference@0.10.10':
+    resolution: {integrity: sha512-fAd+9UeCdF73O7kFFABNkBmpnrDRjX1wW94kgt+OHjqB5Uca4l0HvJTkh1O4k7afjsZx8VavA0x0FQ4Qgu9ZnQ==}
     engines: {node: '>=22'}
     peerDependencies:
       hono: ^4.12.5
 
-  '@scalar/types@0.9.1':
-    resolution: {integrity: sha512-3EbkhtQc+XuDE8Ur1MPosM3YTACFIFNba4M3vGulqv8jcvhMXT+KWPvGUJxq0CDvySqjGa8cE6w85v8T+MjDng==}
+  '@scalar/types@0.9.2':
+    resolution: {integrity: sha512-aLn7QTHafpjrN/whup7U5/CHaoPPaYMNtz4L/2yfN5GDSy3AbDM7kV1q8s3nMQIhvC1uscxfriV+KhEND+xHvA==}
     engines: {node: '>=22'}
 
   '@schummar/icu-type-parser@1.21.5':
@@ -2476,23 +2479,23 @@ packages:
   '@standard-schema/utils@0.3.0':
     resolution: {integrity: sha512-e7Mew686owMaPJVNNLs55PUvgz371nKgwsc4vxE49zsODpJEnxgxRo2y/OKrqueavXgZNMDVj3DdHFlaSAeU8g==}
 
-  '@supabase/auth-js@2.103.3':
-    resolution: {integrity: sha512-SMDJ4vg5jLXNEHdhN4J4ujSb203WangbDw1n3VaARH0ZqM51E6lJnoUAHlpQU9N7SzP0hfgghA9IvT8c7tGRfg==}
+  '@supabase/auth-js@2.104.1':
+    resolution: {integrity: sha512-pqFnDKekq1isqlqnzqzyJ3mzmho+o+FjfVTqhKY3PFlwj2anx3OPznO1kbo1ZEwD8zg1r4EAFf/7pplLyX0ocQ==}
     engines: {node: '>=20.0.0'}
 
-  '@supabase/functions-js@2.103.3':
-    resolution: {integrity: sha512-A2ZHi95GIRRlN9LGOSa/zGEIPg9taR1giDI9Gkfkgrcz0YmKV8ShiAplIrKsHQFdkzKxtsO3maJF0efL+i31mg==}
+  '@supabase/functions-js@2.104.1':
+    resolution: {integrity: sha512-JjAH4JN9rZzxh4plQnILPrQZXAG6ccoRS6z9hQAGmXpRSwJA+7CWbsDV2R82I8MROlGDsjqj1Ot/cWpTfdf6xg==}
     engines: {node: '>=20.0.0'}
 
   '@supabase/phoenix@0.4.0':
     resolution: {integrity: sha512-RHSx8bHS02xwfHdAbX5Lpbo6PXbgyf7lTaXTlwtFDPwOIw64NnVRwFAXGojHhjtVYI+PEPNSWwkL90f4agN3bw==}
 
-  '@supabase/postgrest-js@2.103.3':
-    resolution: {integrity: sha512-S0k/9FJVXDeejNfQLCJwRlm4IH8Wet/HEEdBTBpX6/G2o1eU/6CjQop/hJPZIwlQkI6D/zbHH8KymuCsBgy6jA==}
+  '@supabase/postgrest-js@2.104.1':
+    resolution: {integrity: sha512-RqlLpvgXsjcc27fLyHNGm3zN0KDWXbkdTdaFtaEdX83RsTEqH7BAmshH7zoUMml5lL04naUeRjS3B81O6jZcJw==}
     engines: {node: '>=20.0.0'}
 
-  '@supabase/realtime-js@2.103.3':
-    resolution: {integrity: sha512-fUvKtSXMUk1BkApVwAurWtHF4Vzbb0UB9aC/fQXrRBek7Ta3Kaora+wHf/fGwFNQs7uRz+mvjIVpzLfpR32VXA==}
+  '@supabase/realtime-js@2.104.1':
+    resolution: {integrity: sha512-dVJHhFB2ErBd0/2qE9G8CedCrGoAtBfL9Q4zbSMXO7b1Cpld916ljSiX21mURUqijPf1WoPQG4Bp/averUzk/g==}
     engines: {node: '>=20.0.0'}
 
   '@supabase/ssr@0.10.2':
@@ -2500,12 +2503,12 @@ packages:
     peerDependencies:
       '@supabase/supabase-js': ^2.102.1
 
-  '@supabase/storage-js@2.103.3':
-    resolution: {integrity: sha512-5bAIEubrw5keHcdKR2RTois0O1M2Ilx4UYuzOzc07G6mLGCPS/8t1nbC6Vq451pnxR3sK+rmtFHWb9CY/OPjAw==}
+  '@supabase/storage-js@2.104.1':
+    resolution: {integrity: sha512-2bQaLbkRshctkUVuqamwYZDEd+0cGSc9DY9sjh92DcA5hu1F/1AP8p6gxGr76sgdK9Ngi0rh+2Kdh+uC4hcnGA==}
     engines: {node: '>=20.0.0'}
 
-  '@supabase/supabase-js@2.103.3':
-    resolution: {integrity: sha512-DuPiAz5pIJsTAQCt7B6bDZrnLzlq9+/5bta/GWTsgpLn6AkuZQcmYsQHYplv4skQ8U2raKY5HASQOu4KtYq9Qw==}
+  '@supabase/supabase-js@2.104.1':
+    resolution: {integrity: sha512-E0H/CtVmaGjiAy+ieZ5ZB/1EqxXcGdaFaAc23AE5zaYfz6NtCNDcmaEdoGPYMPFH5pE6drGG6e3ljPmkFoGVxQ==}
     engines: {node: '>=20.0.0'}
 
   '@swc/core-darwin-arm64@1.15.26':
@@ -2700,11 +2703,11 @@ packages:
   '@tailwindcss/postcss@4.2.2':
     resolution: {integrity: sha512-n4goKQbW8RVXIbNKRB/45LzyUqN451deQK0nzIeauVEqjlI49slUlgKYJM2QyUzap/PcpnS7kzSUmPb1sCRvYQ==}
 
-  '@tanstack/query-core@5.99.2':
-    resolution: {integrity: sha512-1HunU0bXVsR1ZJMZbcOPE6VtaBJxsW809RE9xPe4Gz7MlB0GWwQvuTPhMoEmQ/hIzFKJ/DWAuttIe7BOaWx0tA==}
+  '@tanstack/query-core@5.100.5':
+    resolution: {integrity: sha512-t20KrhKkf0HXzqQkPbJ5erhFesup68BAbwFgYmTrS7bxMF7O5MdmL8jUkik4thsG7Hg00fblz30h6yF1d5TxGg==}
 
-  '@tanstack/react-query@5.99.2':
-    resolution: {integrity: sha512-vM91UEe45QUS9ED6OklsVL15i8qKcRqNwpWzPTVWvRPRSEgDudDgHpvyTjcdlwHcrKNa80T+xXYcchT2noPnZA==}
+  '@tanstack/react-query@5.100.5':
+    resolution: {integrity: sha512-aNwj1mi2v2bQ9IxkyR1grLOUkv3BYWoykHy9KDyLNbjC3tsahbOHJibK+Wjtr1wRhG59/AvJhiJG5OlthaCgJA==}
     peerDependencies:
       react: ^18 || ^19
 
@@ -4028,8 +4031,8 @@ packages:
   hermes-parser@0.25.1:
     resolution: {integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==}
 
-  hono@4.12.14:
-    resolution: {integrity: sha512-am5zfg3yu6sqn5yjKBNqhnTX7Cv+m00ox+7jbaKkrLMRJ4rAdldd1xPd/JzbBWspqaQv6RSTrgFN95EsfhC+7w==}
+  hono@4.12.15:
+    resolution: {integrity: sha512-qM0jDhFEaCBb4TxoW7f53Qrpv9RBiayUHo0S52JudprkhvpjIrGoU1mnnr29Fvd1U335ZFPZQY1wlkqgfGXyLg==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -4867,6 +4870,10 @@ packages:
     resolution: {integrity: sha512-pMMHxBOZKFU6HgAZ4eyGnwXF/EvPGGqUr0MnZ5+99485wwW41kW91A4LOGxSHhgugZmSChL5AlElNdwlNgcnLQ==}
     engines: {node: ^10 || ^12 || >=14}
 
+  postcss@8.5.12:
+    resolution: {integrity: sha512-W62t/Se6rA0Az3DfCL0AqJwXuKwBeYg6nOaIgzP+xZ7N5BFCI7DYi1qs6ygUYT6rvfi6t9k65UMLJC+PHZpDAA==}
+    engines: {node: ^10 || ^12 || >=14}
+
   postgres-array@2.0.0:
     resolution: {integrity: sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA==}
     engines: {node: '>=4'}
@@ -5015,8 +5022,8 @@ packages:
     peerDependencies:
       react: ^19.2.5
 
-  react-hook-form@7.72.1:
-    resolution: {integrity: sha512-RhwBoy2ygeVZje+C+bwJ8g0NjTdBmDlJvAUHTxRjTmSUKPYsKfMphkS2sgEMotsY03bP358yEYlnUeZy//D9Ig==}
+  react-hook-form@7.74.0:
+    resolution: {integrity: sha512-yR6wHr99p9wFv686jhRWVSFhUvDvNbdUf2dKlbno8/VKOCuoNobDGC6S+M2dua9A9Yo8vpcrp8assIYbsZCQ9g==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       react: ^16.8.0 || ^17 || ^18 || ^19
@@ -6336,31 +6343,31 @@ snapshots:
     dependencies:
       '@formatjs/fast-memoize': 3.1.2
 
-  '@hono/node-server@1.19.11(hono@4.12.14)':
+  '@hono/node-server@1.19.11(hono@4.12.15)':
     dependencies:
-      hono: 4.12.14
+      hono: 4.12.15
 
-  '@hono/node-server@1.19.14(hono@4.12.14)':
+  '@hono/node-server@1.19.14(hono@4.12.15)':
     dependencies:
-      hono: 4.12.14
+      hono: 4.12.15
 
-  '@hono/zod-openapi@1.3.0(hono@4.12.14)(zod@4.3.6)':
+  '@hono/zod-openapi@1.3.0(hono@4.12.15)(zod@4.3.6)':
     dependencies:
       '@asteasolutions/zod-to-openapi': 8.5.0(zod@4.3.6)
-      '@hono/zod-validator': 0.7.6(hono@4.12.14)(zod@4.3.6)
-      hono: 4.12.14
+      '@hono/zod-validator': 0.7.6(hono@4.12.15)(zod@4.3.6)
+      hono: 4.12.15
       openapi3-ts: 4.5.0
       zod: 4.3.6
 
-  '@hono/zod-validator@0.7.6(hono@4.12.14)(zod@4.3.6)':
+  '@hono/zod-validator@0.7.6(hono@4.12.15)(zod@4.3.6)':
     dependencies:
-      hono: 4.12.14
+      hono: 4.12.15
       zod: 4.3.6
 
-  '@hookform/resolvers@5.2.2(react-hook-form@7.72.1(react@19.2.5))':
+  '@hookform/resolvers@5.2.2(react-hook-form@7.74.0(react@19.2.5))':
     dependencies:
       '@standard-schema/utils': 0.3.0
-      react-hook-form: 7.72.1(react@19.2.5)
+      react-hook-form: 7.74.0(react@19.2.5)
 
   '@hugeicons/core-free-icons@3.3.0': {}
 
@@ -6718,9 +6725,9 @@ snapshots:
 
   '@polka/url@1.0.0-next.29': {}
 
-  '@prisma/adapter-pg@7.7.0':
+  '@prisma/adapter-pg@7.8.0':
     dependencies:
-      '@prisma/driver-adapter-utils': 7.7.0
+      '@prisma/driver-adapter-utils': 7.8.0
       '@types/pg': 8.20.0
       pg: 8.20.0
       postgres-array: 3.0.4
@@ -6749,18 +6756,20 @@ snapshots:
 
   '@prisma/debug@7.7.0': {}
 
+  '@prisma/debug@7.8.0': {}
+
   '@prisma/dev@0.24.3(typescript@6.0.3)':
     dependencies:
       '@electric-sql/pglite': 0.4.1
       '@electric-sql/pglite-socket': 0.1.1(@electric-sql/pglite@0.4.1)
       '@electric-sql/pglite-tools': 0.3.1(@electric-sql/pglite@0.4.1)
-      '@hono/node-server': 1.19.11(hono@4.12.14)
+      '@hono/node-server': 1.19.11(hono@4.12.15)
       '@prisma/get-platform': 7.2.0
       '@prisma/query-plan-executor': 7.2.0
       '@prisma/streams-local': 0.1.2
       foreground-child: 3.3.1
       get-port-please: 3.2.0
-      hono: 4.12.14
+      hono: 4.12.15
       http-status-codes: 2.3.0
       pathe: 2.0.3
       proper-lockfile: 4.1.2
@@ -6771,9 +6780,9 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@prisma/driver-adapter-utils@7.7.0':
+  '@prisma/driver-adapter-utils@7.8.0':
     dependencies:
-      '@prisma/debug': 7.7.0
+      '@prisma/debug': 7.8.0
 
   '@prisma/engines-version@7.6.0-1.75cbdc1eb7150937890ad5465d861175c6624711': {}
 
@@ -7801,20 +7810,20 @@ snapshots:
 
   '@rtsao/scc@1.1.0': {}
 
-  '@scalar/client-side-rendering@0.1.2':
+  '@scalar/client-side-rendering@0.1.3':
     dependencies:
-      '@scalar/types': 0.9.1
+      '@scalar/types': 0.9.2
 
-  '@scalar/helpers@0.5.1': {}
+  '@scalar/helpers@0.5.2': {}
 
-  '@scalar/hono-api-reference@0.10.9(hono@4.12.14)':
+  '@scalar/hono-api-reference@0.10.10(hono@4.12.15)':
     dependencies:
-      '@scalar/client-side-rendering': 0.1.2
-      hono: 4.12.14
+      '@scalar/client-side-rendering': 0.1.3
+      hono: 4.12.15
 
-  '@scalar/types@0.9.1':
+  '@scalar/types@0.9.2':
     dependencies:
-      '@scalar/helpers': 0.5.1
+      '@scalar/helpers': 0.5.2
       nanoid: 5.1.9
       type-fest: 5.6.0
       zod: 4.3.6
@@ -7833,21 +7842,21 @@ snapshots:
 
   '@standard-schema/utils@0.3.0': {}
 
-  '@supabase/auth-js@2.103.3':
+  '@supabase/auth-js@2.104.1':
     dependencies:
       tslib: 2.8.1
 
-  '@supabase/functions-js@2.103.3':
+  '@supabase/functions-js@2.104.1':
     dependencies:
       tslib: 2.8.1
 
   '@supabase/phoenix@0.4.0': {}
 
-  '@supabase/postgrest-js@2.103.3':
+  '@supabase/postgrest-js@2.104.1':
     dependencies:
       tslib: 2.8.1
 
-  '@supabase/realtime-js@2.103.3':
+  '@supabase/realtime-js@2.104.1':
     dependencies:
       '@supabase/phoenix': 0.4.0
       '@types/ws': 8.18.1
@@ -7857,23 +7866,23 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@supabase/ssr@0.10.2(@supabase/supabase-js@2.103.3)':
+  '@supabase/ssr@0.10.2(@supabase/supabase-js@2.104.1)':
     dependencies:
-      '@supabase/supabase-js': 2.103.3
+      '@supabase/supabase-js': 2.104.1
       cookie: 1.1.1
 
-  '@supabase/storage-js@2.103.3':
+  '@supabase/storage-js@2.104.1':
     dependencies:
       iceberg-js: 0.8.1
       tslib: 2.8.1
 
-  '@supabase/supabase-js@2.103.3':
+  '@supabase/supabase-js@2.104.1':
     dependencies:
-      '@supabase/auth-js': 2.103.3
-      '@supabase/functions-js': 2.103.3
-      '@supabase/postgrest-js': 2.103.3
-      '@supabase/realtime-js': 2.103.3
-      '@supabase/storage-js': 2.103.3
+      '@supabase/auth-js': 2.104.1
+      '@supabase/functions-js': 2.104.1
+      '@supabase/postgrest-js': 2.104.1
+      '@supabase/realtime-js': 2.104.1
+      '@supabase/storage-js': 2.104.1
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -8013,11 +8022,11 @@ snapshots:
       postcss: 8.5.10
       tailwindcss: 4.2.2
 
-  '@tanstack/query-core@5.99.2': {}
+  '@tanstack/query-core@5.100.5': {}
 
-  '@tanstack/react-query@5.99.2(react@19.2.5)':
+  '@tanstack/react-query@5.100.5(react@19.2.5)':
     dependencies:
-      '@tanstack/query-core': 5.99.2
+      '@tanstack/query-core': 5.100.5
       react: 19.2.5
 
   '@tanstack/react-table@8.21.3(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
@@ -9070,7 +9079,7 @@ snapshots:
       eslint: 9.39.4(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.10
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1))
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.4(jiti@2.6.1))
       eslint-plugin-react: 7.37.5(eslint@9.39.4(jiti@2.6.1))
       eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.6.1))
@@ -9103,7 +9112,7 @@ snapshots:
       tinyglobby: 0.2.16
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
@@ -9117,7 +9126,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)))(eslint@9.39.4(jiti@2.6.1)):
+  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.6.1)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9
@@ -9504,7 +9513,7 @@ snapshots:
     dependencies:
       hermes-estree: 0.25.1
 
-  hono@4.12.14: {}
+  hono@4.12.15: {}
 
   html-encoding-sniffer@6.0.0:
     dependencies:
@@ -10346,12 +10355,12 @@ snapshots:
 
   possible-typed-array-names@1.1.0: {}
 
-  postcss-load-config@6.0.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(yaml@2.8.3):
+  postcss-load-config@6.0.1(jiti@2.6.1)(postcss@8.5.12)(tsx@4.21.0)(yaml@2.8.3):
     dependencies:
       lilconfig: 3.1.3
     optionalDependencies:
       jiti: 2.6.1
-      postcss: 8.5.10
+      postcss: 8.5.12
       tsx: 4.21.0
       yaml: 2.8.3
 
@@ -10362,6 +10371,12 @@ snapshots:
       source-map-js: 1.2.1
 
   postcss@8.5.10:
+    dependencies:
+      nanoid: 3.3.11
+      picocolors: 1.1.1
+      source-map-js: 1.2.1
+
+  postcss@8.5.12:
     dependencies:
       nanoid: 3.3.11
       picocolors: 1.1.1
@@ -10511,7 +10526,7 @@ snapshots:
       react: 19.2.5
       scheduler: 0.27.0
 
-  react-hook-form@7.72.1(react@19.2.5):
+  react-hook-form@7.74.0(react@19.2.5):
     dependencies:
       react: 19.2.5
 
@@ -11060,7 +11075,7 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  tsup@8.5.1(@swc/core@1.15.26)(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.3):
+  tsup@8.5.1(@swc/core@1.15.26)(jiti@2.6.1)(postcss@8.5.12)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.3):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.27.7)
       cac: 6.7.14
@@ -11071,7 +11086,7 @@ snapshots:
       fix-dts-default-cjs-exports: 1.0.1
       joycon: 3.1.1
       picocolors: 1.1.1
-      postcss-load-config: 6.0.1(jiti@2.6.1)(postcss@8.5.10)(tsx@4.21.0)(yaml@2.8.3)
+      postcss-load-config: 6.0.1(jiti@2.6.1)(postcss@8.5.12)(tsx@4.21.0)(yaml@2.8.3)
       resolve-from: 5.0.0
       rollup: 4.60.1
       source-map: 0.7.6
@@ -11081,7 +11096,7 @@ snapshots:
       tree-kill: 1.2.2
     optionalDependencies:
       '@swc/core': 1.15.26
-      postcss: 8.5.10
+      postcss: 8.5.12
       typescript: 6.0.3
     transitivePeerDependencies:
       - jiti
@@ -11282,7 +11297,7 @@ snapshots:
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
-      postcss: 8.5.10
+      postcss: 8.5.12
       rolldown: 1.0.0-rc.15
       tinyglobby: 0.2.16
     optionalDependencies:
@@ -11297,7 +11312,7 @@ snapshots:
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
-      postcss: 8.5.10
+      postcss: 8.5.12
       rolldown: 1.0.0-rc.15
       tinyglobby: 0.2.16
     optionalDependencies:
@@ -11312,7 +11327,7 @@ snapshots:
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
-      postcss: 8.5.10
+      postcss: 8.5.12
       rolldown: 1.0.0-rc.15
       tinyglobby: 0.2.16
     optionalDependencies:
