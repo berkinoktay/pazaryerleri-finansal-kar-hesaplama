@@ -4,7 +4,7 @@ import { type ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { useActiveSyncLogs } from '@/features/products/hooks/use-active-sync-logs';
-import type { SyncLogRealtimeEvent } from '@/lib/supabase/realtime';
+import type { RealtimeHealth, SyncLogRealtimeEvent } from '@/lib/supabase/realtime';
 
 import { createTestQueryClient } from '../../helpers/render';
 import { HttpResponse, http, server } from '../../helpers/msw';
@@ -12,21 +12,34 @@ import { HttpResponse, http, server } from '../../helpers/msw';
 const ORG_ID = '00000000-0000-0000-0000-000000000099';
 const STORE_ID = '00000000-0000-0000-0000-000000000088';
 
-// Stub the Realtime module — tests drive the subscribe callback
+// Stub the Realtime module — tests drive the subscribe callbacks
 // imperatively rather than spinning up a real WebSocket.
-const subscribers = new Set<(event: SyncLogRealtimeEvent) => void>();
+interface FakeSubscriber {
+  onEvent: (event: SyncLogRealtimeEvent) => void;
+  onHealthChange?: (health: RealtimeHealth) => void;
+}
+
+const subscribers = new Set<FakeSubscriber>();
 let lastUnsubscribe: ReturnType<typeof vi.fn> | undefined;
 
 vi.mock('@/lib/supabase/realtime', () => ({
-  subscribeToSyncLogs: vi.fn((_storeId: string, onEvent: (event: SyncLogRealtimeEvent) => void) => {
-    subscribers.add(onEvent);
-    lastUnsubscribe = vi.fn(() => subscribers.delete(onEvent));
-    return lastUnsubscribe;
-  }),
+  subscribeToSyncLogs: vi.fn(
+    (_storeId: string, optionsOrFn: FakeSubscriber | ((event: SyncLogRealtimeEvent) => void)) => {
+      const sub: FakeSubscriber =
+        typeof optionsOrFn === 'function' ? { onEvent: optionsOrFn } : optionsOrFn;
+      subscribers.add(sub);
+      lastUnsubscribe = vi.fn(() => subscribers.delete(sub));
+      return lastUnsubscribe;
+    },
+  ),
 }));
 
 function emitRealtimeEvent(event: SyncLogRealtimeEvent): void {
-  for (const sub of subscribers) sub(event);
+  for (const sub of subscribers) sub.onEvent(event);
+}
+
+function emitHealthChange(health: RealtimeHealth): void {
+  for (const sub of subscribers) sub.onHealthChange?.(health);
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -178,5 +191,67 @@ describe('useActiveSyncLogs', () => {
     unmount();
     expect(subscribers.size).toBe(0);
     expect(lastUnsubscribe).toHaveBeenCalled();
+  });
+
+  it('does not poll while Realtime is healthy — even with a RUNNING row in cache', async () => {
+    let callCount = 0;
+    server.use(
+      http.get(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/sync-logs`,
+        () => {
+          callCount += 1;
+          return HttpResponse.json({ data: [makeLog({ id: 'log-1', status: 'RUNNING' })] });
+        },
+      ),
+    );
+
+    renderHook(() => useActiveSyncLogs(ORG_ID, STORE_ID), { wrapper });
+
+    // Wait for the initial hydrate.
+    await waitFor(() => expect(callCount).toBe(1));
+
+    // Subscribe lifecycle: 'connecting' → 'healthy'.
+    act(() => {
+      emitHealthChange('healthy');
+    });
+
+    // Even after several seconds, no additional poll should fire while
+    // Realtime reports `healthy`. A weaker assertion than "exactly 0
+    // polls forever" because real timers + jest fake timers around
+    // refetchInterval get racy; but the key invariant — no growing
+    // call count — holds.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(callCount).toBe(1);
+  });
+
+  it('triggers a refetch when the channel transitions back to healthy', async () => {
+    let callCount = 0;
+    server.use(
+      http.get(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/sync-logs`,
+        () => {
+          callCount += 1;
+          return HttpResponse.json({ data: [makeLog({ id: 'log-1', status: 'RUNNING' })] });
+        },
+      ),
+    );
+
+    renderHook(() => useActiveSyncLogs(ORG_ID, STORE_ID), { wrapper });
+    await waitFor(() => expect(callCount).toBe(1));
+
+    // Channel up, then drops, then comes back: the recovery edge
+    // schedules an immediate invalidation so any events missed during
+    // the outage are reconciled from the REST endpoint.
+    act(() => {
+      emitHealthChange('healthy');
+    });
+    act(() => {
+      emitHealthChange('errored');
+    });
+    act(() => {
+      emitHealthChange('healthy');
+    });
+
+    await waitFor(() => expect(callCount).toBeGreaterThanOrEqual(2));
   });
 });

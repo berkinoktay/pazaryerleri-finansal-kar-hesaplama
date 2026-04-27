@@ -3,12 +3,20 @@
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import * as React from 'react';
 
-import { subscribeToSyncLogs, type SyncLogRealtimeEvent } from '@/lib/supabase/realtime';
+import {
+  subscribeToSyncLogs,
+  type RealtimeHealth,
+  type SyncLogRealtimeEvent,
+} from '@/lib/supabase/realtime';
 
 import { listActiveSyncLogs, type SyncLog } from '../api/list-active-sync-logs.api';
 import { productKeys } from '../query-keys';
 
-const POLLING_INTERVAL_MS = 2_000;
+// Polling fires only when the Realtime channel is NOT healthy — see the
+// gate logic in refetchInterval below. 10 s is generous; while polling,
+// the user already saw "you're live" go away (the channel dropped), so
+// a slightly slower update tempo is fine.
+const POLLING_INTERVAL_MS = 10_000;
 const RECENT_LIMIT = 5;
 
 /**
@@ -18,12 +26,14 @@ const RECENT_LIMIT = 5;
  *   1. **Supabase Realtime** — postgres_changes on `sync_logs`
  *      filtered by `store_id`. Sub-second latency on cache updates;
  *      RLS gates which rows arrive.
- *   2. **Polling fallback** — `refetchInterval` of 2s while any
- *      RUNNING row is in the cache. Catches dropped WebSockets and
- *      makes the UI eventually-consistent even if Realtime is
- *      misbehaving.
- *   3. **Initial hydration** — REST GET on mount to seed the cache
- *      so first paint isn't blocked on a Realtime handshake.
+ *   2. **Polling fallback** — `refetchInterval` of 10s while a RUNNING
+ *      row is in cache AND the Realtime channel is NOT healthy. While
+ *      the channel is `healthy`, polling stays off entirely — Realtime
+ *      carries the load. This eliminates the redundant per-merchant
+ *      poll burst that would otherwise hit the API every 2 s during
+ *      every active sync.
+ *   3. **Initial hydration** — REST GET on mount to seed the cache so
+ *      first paint isn't blocked on a Realtime handshake.
  *
  * The Realtime overlay mutates the React Query cache directly via
  * `setQueryData` so changes propagate to consumers without a refetch.
@@ -39,6 +49,11 @@ export function useActiveSyncLogs(
     typeof storeId === 'string' &&
     storeId.length > 0;
 
+  // We use a ref rather than React state so flipping the polling gate
+  // doesn't cost a render. React Query re-evaluates `refetchInterval`
+  // on every tick anyway and reads the ref each time.
+  const realtimeHealthRef = React.useRef<RealtimeHealth>('connecting');
+
   const query = useQuery<SyncLog[]>({
     queryKey:
       isEnabled && orgId !== null && storeId !== null
@@ -52,6 +67,9 @@ export function useActiveSyncLogs(
     },
     enabled: isEnabled,
     refetchInterval: (q) => {
+      // Belt-and-suspenders only when the belt is broken: while the
+      // Realtime channel is delivering events, polling is pure waste.
+      if (realtimeHealthRef.current === 'healthy') return false;
       const data = q.state.data;
       if (data === undefined) return false;
       const hasRunning = data.some((log) => log.status === 'RUNNING');
@@ -62,10 +80,24 @@ export function useActiveSyncLogs(
   React.useEffect(() => {
     if (!isEnabled || orgId === null || storeId === null) return;
     const queryKey = productKeys.syncLogs(orgId, storeId);
-    const unsubscribe = subscribeToSyncLogs(storeId, (event: SyncLogRealtimeEvent) => {
-      queryClient.setQueryData<SyncLog[] | undefined>(queryKey, (existing) =>
-        applyEvent(existing ?? [], event),
-      );
+    const unsubscribe = subscribeToSyncLogs(storeId, {
+      onEvent: (event: SyncLogRealtimeEvent) => {
+        queryClient.setQueryData<SyncLog[] | undefined>(queryKey, (existing) =>
+          applyEvent(existing ?? [], event),
+        );
+      },
+      onHealthChange: (next) => {
+        // Only treat 'errored' / 'paused' → 'healthy' as a recovery
+        // edge. The initial 'connecting' → 'healthy' transition is
+        // not a recovery — the REST hydrate just ran, the cache is
+        // already correct, and a redundant refetch wastes a request.
+        const wasOutage =
+          realtimeHealthRef.current === 'errored' || realtimeHealthRef.current === 'paused';
+        realtimeHealthRef.current = next;
+        if (next === 'healthy' && wasOutage) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
+      },
     });
     return unsubscribe;
   }, [isEnabled, orgId, storeId, queryClient]);
