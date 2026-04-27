@@ -3,12 +3,15 @@
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type ExpandedState,
+  type Row,
   type RowData,
   type SortingState,
   type Table as TanstackTable,
   type VisibilityState,
   flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   getFilteredRowModel,
   getSortedRowModel,
   getPaginationRowModel,
@@ -42,6 +45,19 @@ export interface DataTableProps<TData, TValue> {
   enableRowSelection?: boolean;
   /** Row id accessor for stable selection state across re-renders. */
   getRowId?: (row: TData, index: number) => string;
+  /**
+   * Per-row predicate that decides whether a row can be expanded. When
+   * supplied alongside `renderSubComponent`, expandable rows render an
+   * inline sub-row below themselves. Defaults to off — existing tables
+   * unaffected.
+   */
+  getRowCanExpand?: (row: Row<TData>) => boolean;
+  /**
+   * Renders the expanded sub-row content. Receives the parent row so
+   * the sub-component can render related data (e.g. variant rows under
+   * a parent product).
+   */
+  renderSubComponent?: (row: Row<TData>) => React.ReactNode;
 }
 
 /**
@@ -63,26 +79,32 @@ export function DataTable<TData, TValue>({
   empty,
   enableRowSelection = false,
   getRowId,
+  getRowCanExpand,
+  renderSubComponent,
 }: DataTableProps<TData, TValue>): React.ReactElement {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
+  const [expanded, setExpanded] = React.useState<ExpandedState>({});
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnFilters, columnVisibility, rowSelection },
+    state: { sorting, columnFilters, columnVisibility, rowSelection, expanded },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     enableRowSelection,
     getRowId,
+    getRowCanExpand,
   });
 
   return (
@@ -157,20 +179,29 @@ export function DataTable<TData, TValue>({
               </TableRow>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} data-state={row.getIsSelected() ? 'selected' : undefined}>
-                  {row.getVisibleCells().map((cell) => {
-                    const isNumeric = cell.column.columnDef.meta?.numeric === true;
-                    return (
-                      <TableCell
-                        key={cell.id}
-                        data-numeric={isNumeric || undefined}
-                        className={cn(isNumeric && 'text-right')}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                <React.Fragment key={row.id}>
+                  <TableRow data-state={row.getIsSelected() ? 'selected' : undefined}>
+                    {row.getVisibleCells().map((cell) => {
+                      const isNumeric = cell.column.columnDef.meta?.numeric === true;
+                      return (
+                        <TableCell
+                          key={cell.id}
+                          data-numeric={isNumeric || undefined}
+                          className={cn(isNumeric && 'text-right')}
+                        >
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                  {row.getIsExpanded() && renderSubComponent !== undefined ? (
+                    <TableRow data-expanded-content="true" className="hover:bg-transparent">
+                      <TableCell colSpan={row.getVisibleCells().length} className="bg-muted p-0">
+                        {renderSubComponent(row)}
                       </TableCell>
-                    );
-                  })}
-                </TableRow>
+                    </TableRow>
+                  ) : null}
+                </React.Fragment>
               ))
             )}
           </TableBody>
