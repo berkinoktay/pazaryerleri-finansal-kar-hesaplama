@@ -25,10 +25,10 @@
     "@pazarsync/marketplace": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",
-    "@scalar/hono-api-reference": "^0.10.9",
-    "@supabase/supabase-js": "^2.103.3",
+    "@scalar/hono-api-reference": "^0.10.10",
+    "@supabase/supabase-js": "^2.105.0",
     "decimal.js": "^10.5.0",
-    "hono": "^4.12.0",
+    "hono": "^4.12.15",
     "zod": "^4.3.0"
   },
   "devDependencies": {
