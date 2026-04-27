@@ -17,15 +17,16 @@ Track each PR off `main`. Tick when merged. Each PR ships its own tests in the s
   - [x] Unit tests for mapper and fetcher (uses real staging Postman samples; covers 401/429/502/empty/pagination/nextPageToken switchover)
   - [x] Seed script updated for the new schema
   - [x] `pnpm check:full` green (193 tests)
-- [ ] **PR 2 — Sync service + manual sync route + sync-log polling endpoint**
-  - [ ] `ProductSyncService.run({ store, syncLogId })` — pg advisory lock, transaction-per-page upserts, progress updates, stale-RUNNING-SyncLog cleanup, stale-variant archive sweep
-  - [ ] `POST /v1/organizations/{orgId}/stores/{storeId}/products/sync` — returns 202 + syncLogId
-  - [ ] `GET /v1/organizations/{orgId}/stores/{storeId}/sync-logs/{syncLogId}` — generic across SyncType
-  - [ ] `storeService.requireOwnedStore(orgId, storeId)` helper
-  - [ ] Multi-tenancy isolation test
-  - [ ] Integration tests: happy path, 429 backoff, 401 → MARKETPLACE_AUTH_FAILED in SyncLog, concurrent sync → 409 SYNC_IN_PROGRESS
-  - [ ] `pnpm api:sync` regenerated and committed
-- [ ] **PR 3 — Products list + facets routes** (parallel with PR 2; both depend on PR 1)
+- [x] **PR 2 — Sync service + manual sync route + sync-log polling endpoint** — `feature/products-sync-pr2-sync-service`, merged via #53 (squash) on 2026-04-27
+  - [x] `ProductSyncService.run({ store, syncLogId })` — replaced pg advisory lock with SyncLog-row + race-detection slot acquisition (Prisma's connection pool makes session-scoped advisory locks awkward — see commit body of `feat(api): ProductSyncService …`); transaction-per-content upserts; progress updates; stale-RUNNING-SyncLog cleanup; stale-variant archive sweep
+  - [x] `POST /v1/organizations/{orgId}/stores/{storeId}/products/sync` — returns 202 + syncLogId
+  - [x] `GET /v1/organizations/{orgId}/stores/{storeId}/sync-logs/{syncLogId}` — generic across SyncType
+  - [x] `storeService.requireOwnedStore(orgId, storeId)` helper
+  - [x] `runInBackground` util + `ensureOrgMember` extracted to `lib/`
+  - [x] Multi-tenancy isolation test (three path arrangements)
+  - [x] Integration tests: happy path, idempotent rerun, stale-variant archival, 401 → MARKETPLACE_AUTH_FAILED in SyncLog, concurrent sync → 409 SYNC_IN_PROGRESS, stale RUNNING reaped as SYNC_TIMEOUT
+  - [x] `pnpm api:sync` regenerated and committed
+- [ ] **PR 3 — Products list + facets routes** (depends on PR 1; in progress)
   - [ ] `ProductsListService` with single-query include + variant filter + parent-level pagination
   - [ ] `GET /v1/organizations/{orgId}/stores/{storeId}/products` — `q | status | brandId | categoryId | page | perPage | sort`
   - [ ] `GET /v1/organizations/{orgId}/stores/{storeId}/products/facets` — `groupBy` brand + category with counts

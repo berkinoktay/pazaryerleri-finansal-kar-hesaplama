@@ -5,9 +5,13 @@ import { ensureOrgMember } from '../lib/ensure-org-member';
 import { runInBackground } from '../lib/run-in-background';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as productSyncService from '../services/product-sync.service';
+import * as productsListService from '../services/products-list.service';
 import * as storeService from '../services/store.service';
 import * as syncLogService from '../services/sync-log.service';
 import {
+  ListProductsQuerySchema,
+  ListProductsResponseSchema,
+  ProductFacetsResponseSchema,
   StartSyncResponseSchema,
   SyncLogResponseSchema,
   toSyncLogResponse,
@@ -154,6 +158,105 @@ app.openapi(getSyncLogRoute, async (c) => {
   await storeService.requireOwnedStore(organizationId, storeId);
   const log = await syncLogService.getById(organizationId, storeId, syncLogId);
   return c.json(toSyncLogResponse(log), 200);
+});
+
+// ─── GET /products — paginated, filterable list ────────────────────────
+
+const listProductsRoute = createRoute({
+  method: 'get',
+  path: '/organizations/{orgId}/stores/{storeId}/products',
+  tags: ['Products'],
+  summary: 'List synced products with filters and pagination',
+  description:
+    'Returns parent products from our local cache (synced from Trendyol). The `variants[]` ' +
+    'in each product is filtered to those matching the `status` query param when one is ' +
+    'supplied; the parent is included whenever at least one of its variants matches. Search ' +
+    '(`q`) hits Product.title, Product.productMainId, and ProductVariant.barcode / .stockCode ' +
+    '(case-insensitive substring match). Pagination is offset-based and 1-indexed; perPage ' +
+    'is locked to {10, 25, 50, 100}.',
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: storeIdParams,
+    query: ListProductsQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ListProductsResponseSchema } },
+      description: 'Paginated product list',
+      headers: RateLimitHeaders,
+    },
+    401: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Missing or invalid auth token',
+    },
+    403: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Not a member of this organization',
+    },
+    404: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Store not found',
+    },
+    422: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Invalid query params',
+    },
+    429: Common429Response,
+  },
+});
+
+app.openapi(listProductsRoute, async (c) => {
+  const userId = c.get('userId');
+  const { orgId, storeId } = c.req.valid('param');
+  const filters = c.req.valid('query');
+  const organizationId = await ensureOrgMember(userId, orgId);
+  await storeService.requireOwnedStore(organizationId, storeId);
+  const result = await productsListService.list({ organizationId, storeId, filters });
+  return c.json(result, 200);
+});
+
+// ─── GET /products/facets — brand + category dropdowns ─────────────────
+
+const productFacetsRoute = createRoute({
+  method: 'get',
+  path: '/organizations/{orgId}/stores/{storeId}/products/facets',
+  tags: ['Products'],
+  summary: 'Distinct brands and categories with row counts',
+  description:
+    'Two cheap GROUP BY queries over the synced products table — used to populate the ' +
+    'product list toolbar dropdowns (brand, category) without a separate paginated read. ' +
+    'Each entry includes the count of products in that bucket. Sorted by count descending.',
+  security: [{ bearerAuth: [] }],
+  request: { params: storeIdParams },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ProductFacetsResponseSchema } },
+      description: 'Brand + category facets',
+      headers: RateLimitHeaders,
+    },
+    401: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Missing or invalid auth token',
+    },
+    403: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Not a member of this organization',
+    },
+    404: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Store not found',
+    },
+    429: Common429Response,
+  },
+});
+
+app.openapi(productFacetsRoute, async (c) => {
+  const userId = c.get('userId');
+  const { orgId, storeId } = c.req.valid('param');
+  const organizationId = await ensureOrgMember(userId, orgId);
+  await storeService.requireOwnedStore(organizationId, storeId);
+  const result = await productsListService.facets({ organizationId, storeId });
+  return c.json(result, 200);
 });
 
 export default app;

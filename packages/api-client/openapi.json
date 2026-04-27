@@ -599,6 +599,381 @@
           "errorMessage"
         ],
         "description": "Generic sync_logs row representation. Used by the SyncCenter UI to render live progress for any active sync (PRODUCTS today, ORDERS / SETTLEMENTS later)."
+      },
+      "ListProductsResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductWithVariants"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/TableMeta"
+          }
+        },
+        "required": [
+          "data",
+          "pagination"
+        ]
+      },
+      "ProductWithVariants": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productMainId": {
+            "type": "string"
+          },
+          "platformContentId": {
+            "type": "string",
+            "description": "Trendyol contentId, serialized as string (BigInt).",
+            "example": "12715815"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "brand": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "example": "2032"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "example": "Modline"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "category": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "example": "2122"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "example": "Dolap ve Gardrop"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductImage"
+            }
+          },
+          "variantCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VariantSummary"
+            },
+            "description": "Filtered to variants matching the `status` query param when one is supplied."
+          },
+          "lastSyncedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "platformModifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "productMainId",
+          "platformContentId",
+          "title",
+          "description",
+          "brand",
+          "category",
+          "color",
+          "images",
+          "variantCount",
+          "variants",
+          "lastSyncedAt",
+          "platformModifiedAt"
+        ]
+      },
+      "ProductImage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "position"
+        ]
+      },
+      "VariantSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platformVariantId": {
+            "type": "string",
+            "description": "Trendyol variantId, serialized as string (BigInt).",
+            "example": "70228905"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "stockCode": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "salePrice": {
+            "type": "string",
+            "description": "Decimal string",
+            "example": "199.90"
+          },
+          "listPrice": {
+            "type": "string",
+            "description": "Decimal string",
+            "example": "249.90"
+          },
+          "vatRate": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "costPrice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Decimal string, user-entered"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deliveryDuration": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "isRushDelivery": {
+            "type": "boolean"
+          },
+          "fastDeliveryOptions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "deliveryOptionType": {
+                  "type": "string"
+                },
+                "deliveryDailyCutOffHour": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "deliveryOptionType",
+                "deliveryDailyCutOffHour"
+              ]
+            }
+          },
+          "productUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "locationBasedDelivery": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "onSale",
+              "archived",
+              "locked",
+              "blacklisted",
+              "inactive"
+            ],
+            "description": "Computed status from variant flags. Order of precedence: archived → blacklisted → locked → onSale → inactive."
+          }
+        },
+        "required": [
+          "id",
+          "platformVariantId",
+          "barcode",
+          "stockCode",
+          "size",
+          "salePrice",
+          "listPrice",
+          "vatRate",
+          "costPrice",
+          "quantity",
+          "deliveryDuration",
+          "isRushDelivery",
+          "fastDeliveryOptions",
+          "productUrl",
+          "locationBasedDelivery",
+          "status"
+        ]
+      },
+      "TableMeta": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "example": 1
+          },
+          "perPage": {
+            "type": "integer",
+            "example": 25
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 137
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 6
+          }
+        },
+        "required": [
+          "page",
+          "perPage",
+          "total",
+          "totalPages"
+        ]
+      },
+      "ProductFacetsResponse": {
+        "type": "object",
+        "properties": {
+          "brands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "BigInt as string",
+                  "example": "2032"
+                },
+                "name": {
+                  "type": "string",
+                  "example": "Modline"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "example": 47
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "count"
+              ]
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "BigInt as string",
+                  "example": "2032"
+                },
+                "name": {
+                  "type": "string",
+                  "example": "Modline"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "example": 47
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "count"
+              ]
+            }
+          }
+        },
+        "required": [
+          "brands",
+          "categories"
+        ]
       }
     },
     "parameters": {}
@@ -1643,6 +2018,357 @@
           },
           "404": {
             "description": "Store or sync log not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/products": {
+      "get": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "List synced products with filters and pagination",
+        "description": "Returns parent products from our local cache (synced from Trendyol). The `variants[]` in each product is filtered to those matching the `status` query param when one is supplied; the parent is included whenever at least one of its variants matches. Search (`q`) hits Product.title, Product.productMainId, and ProductVariant.barcode / .stockCode (case-insensitive substring match). Pagination is offset-based and 1-indexed; perPage is locked to {10, 25, 50, 100}.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "1-indexed page number",
+              "example": 1
+            },
+            "required": false,
+            "description": "1-indexed page number",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "description": "Items per page. Locked to {10, 25, 50, 100}.",
+              "example": 25
+            },
+            "required": false,
+            "description": "Items per page. Locked to {10, 25, 50, 100}.",
+            "name": "perPage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "Search across Product.title, Product.productMainId, ProductVariant.barcode, and ProductVariant.stockCode (case-insensitive substring match).",
+              "example": "keten"
+            },
+            "required": false,
+            "description": "Search across Product.title, Product.productMainId, ProductVariant.barcode, and ProductVariant.stockCode (case-insensitive substring match).",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "onSale",
+                "archived",
+                "locked",
+                "blacklisted"
+              ],
+              "description": "Variant-level status filter. The parent is included if at least one variant matches; the variants[] array in the response is filtered to only matching variants.",
+              "example": "onSale"
+            },
+            "required": false,
+            "description": "Variant-level status filter. The parent is included if at least one variant matches; the variants[] array in the response is filtered to only matching variants.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^d+$",
+              "description": "Trendyol brand id (BigInt) — exact match against Product.brandId.",
+              "example": "2032"
+            },
+            "required": false,
+            "description": "Trendyol brand id (BigInt) — exact match against Product.brandId.",
+            "name": "brandId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^d+$",
+              "description": "Trendyol category id (BigInt) — exact match against Product.categoryId.",
+              "example": "2122"
+            },
+            "required": false,
+            "description": "Trendyol category id (BigInt) — exact match against Product.categoryId.",
+            "name": "categoryId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "-platformModifiedAt",
+                "platformModifiedAt",
+                "title",
+                "-title"
+              ],
+              "default": "-platformModifiedAt",
+              "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first.",
+              "example": "-platformModifiedAt"
+            },
+            "required": false,
+            "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first.",
+            "name": "sort",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated product list",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListProductsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/products/facets": {
+      "get": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "Distinct brands and categories with row counts",
+        "description": "Two cheap GROUP BY queries over the synced products table — used to populate the product list toolbar dropdowns (brand, category) without a separate paginated read. Each entry includes the count of products in that bucket. Sorted by count descending.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brand + category facets",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductFacetsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
             "content": {
               "application/json": {
                 "schema": {
