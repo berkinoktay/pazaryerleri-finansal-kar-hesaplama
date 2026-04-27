@@ -589,5 +589,81 @@
       "title": "Bildirim merkezi yakında",
       "description": "Senkronizasyon olayları, yeni sipariş bildirimleri ve uyarı geçmişi burada listelenecek."
     }
+  },
+  "products": {
+    "page": {
+      "title": "Ürünler",
+      "description": "Mağazanın onaylı ürünleri ve varyantları",
+      "intent": "Trendyol mağazandan senkronize edilen onaylı ürünler"
+    },
+    "filters": {
+      "searchPlaceholder": "Ürün adı, model kodu, stok kodu, barkod ile ara…",
+      "status": "Durum",
+      "brand": "Marka",
+      "category": "Kategori",
+      "allBrands": "Tüm markalar",
+      "allCategories": "Tüm kategoriler",
+      "clear": "Filtreleri temizle",
+      "statusOptions": {
+        "onSale": "Satışta",
+        "archived": "Arşivde",
+        "locked": "Kilitli",
+        "blacklisted": "Engelli"
+      }
+    },
+    "columns": {
+      "image": "Görsel",
+      "title": "Ürün",
+      "brand": "Marka",
+      "category": "Kategori",
+      "productMainId": "Model Kodu",
+      "stockCode": "Stok Kodu",
+      "barcode": "Barkod",
+      "color": "Renk",
+      "size": "Beden",
+      "variants": "Varyant",
+      "delivery": "Teslimat",
+      "salePrice": "Fiyat",
+      "stock": "Stok",
+      "status": "Durum"
+    },
+    "delivery": {
+      "sameDay": "Bugün kargoda",
+      "nextDay": "Yarın kargoda",
+      "days": "{n} gün",
+      "standard": "Standart",
+      "mixed": "Karışık"
+    },
+    "multiVariantPlaceholder": "{n} varyant",
+    "empty": {
+      "noStore": {
+        "title": "Önce bir mağaza bağla",
+        "description": "Ürünleri görmek için Trendyol mağazanı bağla.",
+        "cta": "Mağaza bağla"
+      },
+      "noProducts": {
+        "title": "Henüz senkronize edilmiş ürün yok",
+        "description": "İlk ürünleri senkronize ederek başla.",
+        "cta": "Şimdi senkronize et"
+      },
+      "filtered": "Filtreyle eşleşen ürün yok."
+    },
+    "pagination": {
+      "showing": "{from}–{to} arası, {total} üründen",
+      "perPage": "Sayfa başına",
+      "previous": "Önceki",
+      "next": "Sonraki"
+    },
+    "sync": {
+      "now": "Şimdi senkronize et",
+      "running": "Senkronize ediliyor",
+      "lastSyncedAgo": "Son senk. {time}",
+      "syncedCount": "{n} ürün"
+    },
+    "a11y": {
+      "expandRow": "Varyantları göster",
+      "collapseRow": "Varyantları gizle",
+      "openFilter": "Filtreyi aç"
+    }
   }
 }
