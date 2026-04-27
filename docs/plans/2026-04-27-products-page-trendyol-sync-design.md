@@ -26,7 +26,7 @@ Track each PR off `main`. Tick when merged. Each PR ships its own tests in the s
   - [x] Multi-tenancy isolation test (three path arrangements)
   - [x] Integration tests: happy path, idempotent rerun, stale-variant archival, 401 → MARKETPLACE_AUTH_FAILED in SyncLog, concurrent sync → 409 SYNC_IN_PROGRESS, stale RUNNING reaped as SYNC_TIMEOUT
   - [x] `pnpm api:sync` regenerated and committed
-- [ ] **PR 3 — Products list + facets routes** (depends on PR 1; in progress)
+- [x] **PR 3 — Products list + facets routes** — `feature/products-sync-pr3-list-routes`, merged via #54 on 2026-04-27
   - [ ] `ProductsListService` with single-query include + variant filter + parent-level pagination
   - [ ] `GET /v1/organizations/{orgId}/stores/{storeId}/products` — `q | status | brandId | categoryId | page | perPage | sort`
   - [ ] `GET /v1/organizations/{orgId}/stores/{storeId}/products/facets` — `groupBy` brand + category with counts
@@ -34,7 +34,7 @@ Track each PR off `main`. Tick when merged. Each PR ships its own tests in the s
   - [ ] Integration tests per filter independently, pagination boundaries, sort directions
   - [ ] Multi-tenancy isolation test
   - [ ] `pnpm api:sync` regenerated and committed
-- [ ] **PR 4 — Frontend feature (page, table, filter bar, URL state, i18n)**
+- [x] **PR 4 — Frontend feature (page, table, filter bar, URL state, i18n)** — `feature/products-sync-pr4-frontend-products-page`, merged via #55 on 2026-04-27
   - [ ] `apps/web/src/features/products/` full tree
   - [ ] `DataTable` extended with optional `getRowCanExpand` + `renderSubComponent` (additive)
   - [ ] `useProductsFilters` (nuqs `useQueryStates`) + 300ms debounced search + page reset on filter change
