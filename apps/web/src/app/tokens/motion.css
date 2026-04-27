@@ -31,6 +31,27 @@
   --duration-entrance: 480ms;
 }
 
+/**
+ * Sync-state pulse — gentle "alive" indicator for sync-status dots in the
+ * org/store switcher. Opacity-only (no scale, no halo) so it works for any
+ * underlying color (success/warning/destructive) without requiring per-tone
+ * shadow tuning. Slow 2.4s cycle stays calm in peripheral vision; the
+ * `prefers-reduced-motion` rule below collapses it to effectively nothing.
+ */
+@keyframes sync-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.animate-sync-pulse {
+  animation: sync-pulse 2.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

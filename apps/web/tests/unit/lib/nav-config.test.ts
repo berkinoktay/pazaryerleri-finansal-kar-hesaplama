@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { NAV_ENTRIES, NAV_ITEMS, isNavDivider } from '@/components/layout/nav-config';
+import {
+  AUX_NAV_ITEMS,
+  NAV_ENTRIES,
+  NAV_ITEMS,
+  isNavDivider,
+} from '@/components/layout/nav-config';
 
 describe('nav-config', () => {
   it('mevcut tüm primary nav itemlarını içerir', () => {
@@ -40,10 +45,13 @@ describe('nav-config', () => {
     }
   });
 
-  it('NAV_ENTRIES contains a divider before whats-new', () => {
-    const dividerIdx = NAV_ENTRIES.findIndex(isNavDivider);
-    expect(dividerIdx).toBeGreaterThanOrEqual(0);
-    const next = NAV_ENTRIES[dividerIdx + 1];
-    expect(next && 'key' in next ? next.key : null).toBe('whats-new');
+  it('NAV_ENTRIES no longer carries whats-new — it moved to AUX_NAV_ITEMS', () => {
+    const keys = NAV_ENTRIES.flatMap((entry) => ('key' in entry ? [entry.key] : []));
+    expect(keys).not.toContain('whats-new');
+  });
+
+  it('AUX_NAV_ITEMS groups whats-new and support together for the footer shelf', () => {
+    const keys = AUX_NAV_ITEMS.map((item) => item.key);
+    expect(keys).toEqual(['whats-new', 'support']);
   });
 });

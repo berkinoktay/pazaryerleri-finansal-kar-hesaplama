@@ -1,6 +1,7 @@
 'use client';
 
-import { Settings02Icon, Tick01Icon } from 'hugeicons-react';
+import { useCommandState } from 'cmdk';
+import { Settings02Icon, ShoppingBag01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -8,6 +9,7 @@ import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Command,
   CommandEmpty,
@@ -23,6 +25,24 @@ import { getOrgAvatarPalette, type OrgAvatarPalette } from '@/lib/org-avatar-col
 import { cn } from '@/lib/utils';
 
 import type { Organization, OrgRole, Store, SyncState } from './org-store-switcher';
+
+type Platform = Store['platform'];
+
+const PLATFORM_KEY: Record<Platform, 'platformTRENDYOL' | 'platformHEPSIBURADA'> = {
+  TRENDYOL: 'platformTRENDYOL',
+  HEPSIBURADA: 'platformHEPSIBURADA',
+};
+
+/** Escape regex metacharacters so user input can be embedded in `new RegExp`
+ * for substring highlighting without crashing on `.`, `*`, `(`, etc. */
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Below this combined item count the search input is hidden — for a
+ * single org + single store the input is pure noise. Threshold matches
+ * the HTML reference spec's "minimal mode" rule. */
+const SEARCH_VISIBLE_THRESHOLD = 3;
 
 interface OrgStoreSwitcherListProps {
   orgs: Organization[];
@@ -126,13 +146,28 @@ export function OrgStoreSwitcherList({
   const split = React.useMemo(() => splitRecent(orgs), [orgs]);
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null;
 
+  const showSearch = orgs.length + stores.length >= SEARCH_VISIBLE_THRESHOLD;
+
   return (
     <div className="flex flex-col">
       <Command className="rounded-none">
-        <CommandInput
-          placeholder={t('search')}
-          className="placeholder:text-muted-foreground h-8 text-xs"
-        />
+        {showSearch ? (
+          <CommandInput
+            placeholder={t('search')}
+            // Inner input loses h-11 (full-page command palette default)
+            // and bg/padding so the wrapper's geometry drives layout.
+            // Mirrors `<Input size="sm" leadingIcon={...}>` from the
+            // primitives showcase: h-8 wrapper, gap-xs, px-sm, full
+            // border + focus-within ring change.
+            className="h-full px-0 py-0 text-xs"
+            wrapperClassName={cn(
+              'm-2xs h-8 gap-xs px-sm border-b-0',
+              'border border-border rounded-sm bg-background shadow-xs',
+              'hover:border-border-strong focus-within:border-ring',
+              'duration-fast transition-colors',
+            )}
+          />
+        ) : null}
         <CommandList className="max-h-80">
           <CommandEmpty className="py-md text-muted-foreground text-2xs text-center">
             {t('emptyDescription')}
@@ -143,8 +178,15 @@ export function OrgStoreSwitcherList({
               <SectionHeading
                 label={t('recentSection')}
                 count={split.recent.length}
-                actionHref="/onboarding/create-organization"
-                actionLabel={t('newOrgInline')}
+                createAction={{
+                  href: '/onboarding/create-organization',
+                  label: t('newOrgInline'),
+                }}
+                manageAction={{
+                  href: '/settings/organization',
+                  label: t('footerOrgSettings'),
+                  icon: Settings02Icon,
+                }}
               />
               <CommandGroup heading="" className="px-2xs pb-2xs pt-0">
                 {split.recent.map((org) => (
@@ -168,8 +210,26 @@ export function OrgStoreSwitcherList({
               <SectionHeading
                 label={split.recent.length > 0 ? t('allOrgsSection') : t('sectionOrgs')}
                 count={split.rest.length}
-                actionHref={split.recent.length === 0 ? '/onboarding/create-organization' : null}
-                actionLabel={split.recent.length === 0 ? t('newOrgInline') : null}
+                // When the recent section is rendered above, it already
+                // surfaces both create + manage actions — repeating them
+                // on the "all orgs" header would be visual noise.
+                createAction={
+                  split.recent.length === 0
+                    ? {
+                        href: '/onboarding/create-organization',
+                        label: t('newOrgInline'),
+                      }
+                    : null
+                }
+                manageAction={
+                  split.recent.length === 0
+                    ? {
+                        href: '/settings/organization',
+                        label: t('footerOrgSettings'),
+                        icon: Settings02Icon,
+                      }
+                    : null
+                }
               />
               <CommandGroup heading="" className="px-2xs pb-2xs pt-0">
                 {split.rest.map((org) => (
@@ -193,8 +253,18 @@ export function OrgStoreSwitcherList({
               <SectionHeading
                 label={activeOrg ? `${t('sectionStores')} — ${activeOrg.name}` : t('sectionStores')}
                 count={stores.length}
-                actionHref={activeOrg ? '/settings/stores' : null}
-                actionLabel={activeOrg ? t('connectStore') : null}
+                createAction={
+                  activeOrg ? { href: '/settings/stores', label: t('connectStore') } : null
+                }
+                manageAction={
+                  activeOrg
+                    ? {
+                        href: '/settings/stores',
+                        label: t('footerStoreManagement'),
+                        icon: ShoppingBag01Icon,
+                      }
+                    : null
+                }
               />
               <CommandGroup heading="" className="px-2xs pb-2xs pt-0">
                 {stores.map((store) => (
@@ -213,58 +283,116 @@ export function OrgStoreSwitcherList({
           ) : null}
         </CommandList>
       </Command>
-
-      <div className="border-border gap-2xs p-2xs flex items-center border-t">
-        <Button asChild variant="ghost" size="sm" className="flex-1">
-          <Link href="/settings/organization">{t('footerOrgSettings')}</Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm" className="flex-1">
-          <Link href="/settings/stores">{t('footerStoreManagement')}</Link>
-        </Button>
-        <Button asChild variant="default" size="sm" className="flex-1">
-          <Link href="/onboarding/create-organization">{t('footerNewOrg')}</Link>
-        </Button>
-      </div>
     </div>
   );
+}
+
+interface SectionAction {
+  href: string;
+  label: string;
+}
+
+interface SectionManageAction extends SectionAction {
+  icon: React.ComponentType<{ className?: string }>;
 }
 
 interface SectionHeadingProps {
   label: string;
   count: number;
-  actionHref: string | null;
-  actionLabel: string | null;
+  /** Quiet text-link CTA on the right (e.g. "+ Yeni Organizasyon"). */
+  createAction: SectionAction | null;
+  /** Icon-only secondary action (e.g. ⚙ org settings) with tooltip. */
+  manageAction: SectionManageAction | null;
 }
 
 /**
  * Section heading mirroring cmdk's auto-rendered group heading typography
- * but with a quiet inline CTA on the right (e.g. "+ Yeni" / "+ Bağla").
- * cmdk's `CommandGroup heading` prop only takes a string — to render a
- * link next to the label we hide cmdk's heading slot (pass empty string)
- * and render this row above the group. Inline CTA is text-only with the
- * primary color, NOT a button — this is a quiet affordance, not an
- * action that should compete with the footer's primary CTA.
+ * with up to two inline actions on the right: a primary text link for
+ * creation ("+ Yeni X") and a secondary icon link for management (⚙).
+ * Both live inside the section so each group carries its own affordances —
+ * the dropdown no longer needs a separate footer (Image #8 follow-up).
  */
 function SectionHeading({
   label,
   count,
-  actionHref,
-  actionLabel,
+  createAction,
+  manageAction,
 }: SectionHeadingProps): React.ReactElement {
   return (
     <div className="text-muted-foreground gap-xs px-sm pt-sm pb-2xs text-2xs flex items-center justify-between font-medium tracking-wide uppercase">
       <span className="truncate">
         {label} <span className="text-muted-foreground/70 normal-case">({count})</span>
       </span>
-      {actionHref && actionLabel ? (
-        <Link
-          href={actionHref}
-          className="text-primary hover:text-primary-hover px-3xs py-3xs text-2xs rounded-xs font-medium tracking-normal normal-case"
-        >
-          {actionLabel}
-        </Link>
-      ) : null}
+      <div className="gap-2xs flex items-center">
+        {createAction ? (
+          <Link
+            href={createAction.href}
+            className="text-primary hover:text-primary-hover px-2xs py-3xs text-2xs rounded-xs font-medium tracking-normal normal-case"
+          >
+            {createAction.label}
+          </Link>
+        ) : null}
+        {manageAction ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Link
+                href={manageAction.href}
+                aria-label={manageAction.label}
+                className="text-muted-foreground hover:text-foreground hover:bg-muted p-2xs duration-fast flex items-center justify-center rounded-sm transition-colors"
+              >
+                <manageAction.icon className="size-icon-xs" />
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent side="top">{manageAction.label}</TooltipContent>
+          </Tooltip>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+/**
+ * Active-row indicator. Renders as a radio-button-style dot (outer ring +
+ * inner filled dot) instead of a check icon — radio semantics are a
+ * better fit for the switcher's "exactly one selected at a time" model.
+ */
+function ActiveDot(): React.ReactElement {
+  return (
+    <span
+      aria-hidden
+      className="border-primary size-icon-sm flex shrink-0 items-center justify-center rounded-full border-2"
+    >
+      <span className="bg-primary size-1.5 rounded-full" />
+    </span>
+  );
+}
+
+/**
+ * Highlight matched substrings of `text` against the current cmdk search
+ * query. Reads `state.search` via `useCommandState` so any row can render
+ * its own highlight without prop-drilling the query down from the list.
+ *
+ * Splits on a case-insensitive regex of the escaped query, wraps matched
+ * fragments in <mark> with a warning-tinted bg. When the query is empty
+ * the original text is returned verbatim — no DOM cost.
+ */
+function HighlightedText({ text }: { text: string }): React.ReactElement {
+  const query = useCommandState((state) => state.search) as string;
+  if (!query) return <>{text}</>;
+  const re = new RegExp(`(${escapeRegExp(query)})`, 'ig');
+  const parts = text.split(re);
+  return (
+    <>
+      {parts.map((part, i) =>
+        part && re.test(part) && part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="bg-warning/25 text-foreground px-3xs rounded-xs">
+            {part}
+          </mark>
+        ) : (
+          <React.Fragment key={i}>{part}</React.Fragment>
+        ),
+      )}
+    </>
   );
 }
 
@@ -304,14 +432,16 @@ function OrgRow({
         </AvatarFallback>
       </Avatar>
       <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="text-foreground truncate text-xs font-medium">{org.name}</span>
+        <span className="text-foreground truncate text-xs font-medium">
+          <HighlightedText text={org.name} />
+        </span>
         {meta ? <span className="text-muted-foreground text-2xs truncate">{meta}</span> : null}
       </span>
       <Badge tone={ROLE_TONE[org.role]} size="sm" radius="sm" className="shrink-0">
         {t(ROLE_KEY[org.role])}
       </Badge>
       {isActive ? (
-        <Tick01Icon className="size-icon-xs text-primary shrink-0" aria-hidden />
+        <ActiveDot />
       ) : (
         <Link
           href={{ pathname: '/settings/organization' }}
@@ -347,7 +477,7 @@ function StoreRow({
 
   return (
     <CommandItem
-      value={`${store.name} ${store.id}`}
+      value={`${store.name} ${store.id} ${t(PLATFORM_KEY[store.platform])}`}
       onSelect={() => onSelect(store.id)}
       className={cn(
         'group/row gap-xs px-2xs py-2xs items-center rounded-sm',
@@ -361,16 +491,21 @@ function StoreRow({
         <MarketplaceLogo platform={store.platform} size="xs" alt="" />
       </span>
       <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="text-foreground truncate text-xs font-medium">{store.name}</span>
+        <span className="text-foreground truncate text-xs font-medium">
+          <HighlightedText text={store.name} />
+        </span>
         <span className="text-muted-foreground gap-3xs text-2xs flex items-center truncate">
           <span
             aria-hidden
-            className={cn('size-2 shrink-0 rounded-full', SYNC_BG[store.syncState])}
+            className={cn(
+              'animate-sync-pulse size-2 shrink-0 rounded-full',
+              SYNC_BG[store.syncState],
+            )}
           />
           <span className="truncate">{meta}</span>
         </span>
       </span>
-      {isActive ? <Tick01Icon className="size-icon-xs text-primary shrink-0" aria-hidden /> : null}
+      {isActive ? <ActiveDot /> : null}
     </CommandItem>
   );
 }
@@ -395,10 +530,16 @@ function formatStoreSyncMeta(
   mounted: boolean,
   t: ReturnType<typeof useTranslations<'orgStoreSwitcher'>>,
 ): string {
-  if (store.lastSyncedAt === null) return t('storeNoSync');
-  const date = new Date(store.lastSyncedAt);
-  const time = mounted ? formatter.relativeTime(date) : formatter.dateTime(date, 'date');
-  return t('storeSyncRelative', { time });
+  const platform = t(PLATFORM_KEY[store.platform]);
+  const sync =
+    store.lastSyncedAt === null
+      ? t('storeNoSync')
+      : t('storeSyncRelative', {
+          time: mounted
+            ? formatter.relativeTime(new Date(store.lastSyncedAt))
+            : formatter.dateTime(new Date(store.lastSyncedAt), 'date'),
+        });
+  return t('storeMetaWithPlatform', { platform, sync });
 }
 
 /**

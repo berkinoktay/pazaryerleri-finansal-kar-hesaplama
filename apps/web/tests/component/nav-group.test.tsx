@@ -65,35 +65,33 @@ describe('NavGroup', () => {
     expect(link).toHaveAttribute('href', '/karlilik');
   });
 
-  it('default-collapses the sub-items via aria-expanded on the toggle button', () => {
+  it('default-collapses the sub-items via aria-expanded on the parent link', () => {
     renderInSidebar(
       <NavGroup label="Karlılık Analizi" icon={<span aria-hidden>📈</span>} href="/karlilik">
         <button>Sipariş Karlılığı</button>
       </NavGroup>,
     );
-    const toggle = screen.getByRole('button', { name: /karlılık analizi alt menüsünü aç/i });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const link = screen.getByRole('link', { name: /karlılık analizi/i });
+    expect(link).toHaveAttribute('aria-expanded', 'false');
     // Sub-items remain in the DOM (the grid wrapper clips them to 0fr); we
     // assert presence rather than visibility because happy-dom does not
     // fully compute the overflow-hidden clip.
     expect(screen.getByText('Sipariş Karlılığı')).toBeInTheDocument();
   });
 
-  it('toggles aria-expanded when the toggle button is clicked', async () => {
+  it('toggles aria-expanded when the parent link is clicked', async () => {
     const { user } = renderInSidebar(
       <NavGroup label="Karlılık Analizi" icon={<span aria-hidden>📈</span>} href="/karlilik">
         <button>Sipariş Karlılığı</button>
       </NavGroup>,
     );
-    const toggle = screen.getByRole('button', { name: /karlılık analizi alt menüsünü aç/i });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await user.click(toggle);
-    expect(
-      screen.getByRole('button', { name: /karlılık analizi alt menüsünü kapat/i }),
-    ).toHaveAttribute('aria-expanded', 'true');
+    const link = screen.getByRole('link', { name: /karlılık analizi/i });
+    expect(link).toHaveAttribute('aria-expanded', 'false');
+    await user.click(link);
+    expect(link).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('honors defaultExpanded so the toggle starts expanded', () => {
+  it('honors defaultExpanded so the parent link starts expanded', () => {
     renderInSidebar(
       <NavGroup
         label="Karlılık Analizi"
@@ -104,8 +102,8 @@ describe('NavGroup', () => {
         <button>Sipariş Karlılığı</button>
       </NavGroup>,
     );
-    const toggle = screen.getByRole('button', { name: /karlılık analizi alt menüsünü kapat/i });
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const link = screen.getByRole('link', { name: /karlılık analizi/i });
+    expect(link).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Sipariş Karlılığı')).toBeVisible();
   });
 

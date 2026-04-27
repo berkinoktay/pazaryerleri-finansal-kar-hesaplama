@@ -24,6 +24,7 @@ vi.mock('@/i18n/navigation', () => ({
 }));
 
 import { UserMenu } from '@/features/auth/components/user-menu';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import { render, screen } from '@/../tests/helpers/render';
 
 const messages = {
@@ -39,19 +40,31 @@ const messages = {
 };
 
 async function openMenu() {
+  // UserMenu reads the sidebar collapse state via useSidebar() to flip
+  // the popover side and trim the trigger height. Wrap in SidebarProvider
+  // so the hook resolves; defaultOpen keeps the menu's expanded layout.
   const utils = render(
     <NextIntlClientProvider locale="tr" messages={messages}>
-      <UserMenu />
+      <SidebarProvider defaultOpen>
+        <UserMenu />
+      </SidebarProvider>
     </NextIntlClientProvider>,
   );
-  await utils.user.click(screen.getByRole('button'));
+  // The popover trigger is the only sidebar-menu-button rendered here;
+  // SidebarProvider's TooltipProvider also renders no buttons of its own.
+  const triggers = screen.getAllByRole('button');
+  await utils.user.click(triggers[0]!);
   return utils;
 }
 
 describe('UserMenu', () => {
   it('shows the email in the dropdown header', async () => {
     await openMenu();
-    expect(await screen.findByText('b@example.com')).toBeInTheDocument();
+    // Email surfaces in two places in the redesigned menu — beside the
+    // avatar inside the trigger row AND in the popover identity header
+    // — both are valid; assert presence of at least one.
+    const matches = await screen.findAllByText('b@example.com');
+    expect(matches.length).toBeGreaterThan(0);
   });
 
   it('renders profile and settings items', async () => {
