@@ -13,16 +13,15 @@
 
 import { prisma } from '@pazarsync/db';
 import type { Store } from '@pazarsync/db';
-
-import { fetchApprovedProducts } from '../integrations/marketplace/trendyol/products';
 import {
+  fetchApprovedProducts,
   isTrendyolCredentials,
   type MappedProduct,
-} from '../integrations/marketplace/trendyol/types';
-import { decryptCredentials } from '../lib/crypto';
-import { ValidationError } from '../lib/errors';
+  type TrendyolCredentials,
+} from '@pazarsync/marketplace';
+import { decryptCredentials, syncLogService } from '@pazarsync/sync-core';
 
-import * as syncLogService from './sync-log.service';
+import { ValidationError } from '../lib/errors';
 
 interface RunOptions {
   store: Store;
@@ -77,9 +76,7 @@ export async function run({ store, syncLogId }: RunOptions): Promise<void> {
   }
 }
 
-function decryptStoreCredentials(
-  store: Store,
-): import('../integrations/marketplace/trendyol/types').TrendyolCredentials {
+function decryptStoreCredentials(store: Store): TrendyolCredentials {
   const decrypted = decryptCredentials(store.credentials as string);
   if (!isTrendyolCredentials(decrypted)) {
     // Persisted credentials don't match the expected shape — data

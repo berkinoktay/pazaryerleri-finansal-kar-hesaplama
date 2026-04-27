@@ -2,7 +2,7 @@ import { prisma } from '@pazarsync/db';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '@/app';
-import { encryptCredentials } from '@/lib/crypto';
+import { encryptCredentials } from '@pazarsync/sync-core';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';

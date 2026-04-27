@@ -6,7 +6,7 @@
 import { prisma } from '@pazarsync/db';
 import type { SyncLog, SyncType } from '@pazarsync/db';
 
-import { NotFoundError, SyncInProgressError } from '../lib/errors';
+import { NotFoundError, SyncInProgressError } from './errors';
 
 const STALE_RUNNING_THRESHOLD_MS = 10 * 60 * 1000;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EncryptionKeyError } from '@/lib/crypto';
+import { EncryptionKeyError } from '@pazarsync/sync-core';
 import {
   ConflictError,
   ForbiddenError,

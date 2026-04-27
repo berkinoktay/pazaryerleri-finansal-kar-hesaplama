@@ -1,4 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi';
+import { syncLogService } from '@pazarsync/sync-core';
 
 import { createSubApp } from '../lib/create-hono-app';
 import { ensureOrgMember } from '../lib/ensure-org-member';
@@ -7,7 +8,6 @@ import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../op
 import * as productSyncService from '../services/product-sync.service';
 import * as productsListService from '../services/products-list.service';
 import * as storeService from '../services/store.service';
-import * as syncLogService from '../services/sync-log.service';
 import {
   ListProductsQuerySchema,
   ListProductsResponseSchema,

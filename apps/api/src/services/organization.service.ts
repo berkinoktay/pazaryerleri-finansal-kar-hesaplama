@@ -1,6 +1,6 @@
 import { prisma } from '@pazarsync/db';
+import { mapPrismaError } from '@pazarsync/sync-core';
 
-import { mapPrismaError } from '../lib/map-prisma-error';
 import { generateUniqueOrganizationSlug } from '../lib/slugify';
 import type { CreateOrganizationInput } from '../validators/organization.validator';
 

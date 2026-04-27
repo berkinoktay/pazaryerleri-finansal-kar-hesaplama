@@ -1,5 +1,5 @@
 import type { Platform, StoreEnvironment } from '@pazarsync/db';
-import { ValidationError } from '../../lib/errors';
+import { ValidationError } from '@pazarsync/sync-core';
 
 import { trendyolFactory } from './trendyol/adapter';
 import type { MarketplaceAdapter, MarketplaceAdapterFactory } from './types';
