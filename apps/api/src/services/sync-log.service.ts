@@ -95,19 +95,27 @@ export async function cleanupStaleRunning(storeId: string, syncType: SyncType): 
 }
 
 /**
- * Atomically acquire the sync "slot" for a `(storeId, syncType)`. Replaces
- * a pg advisory lock — Prisma's connection pool makes session-scoped
- * advisory locks awkward (lock acquired on connection X, attempted release
- * on connection Y is a no-op). Instead we use the SyncLog row itself:
+ * Atomically acquire the sync "slot" for a `(storeId, syncType)`.
  *
- *   1. Reap any stale RUNNING rows (>10 min) for this slot.
- *   2. INSERT a fresh RUNNING row.
- *   3. Re-check: if multiple RUNNING rows exist for this slot, the oldest
- *      wins; everyone else marks themselves FAILED with code
- *      `SYNC_IN_PROGRESS` and throws `SyncInProgressError`.
+ * The partial unique index `sync_logs_active_slot_uniq` (see
+ * `supabase/sql/rls-policies.sql`) atomically guarantees one active sync
+ * per slot at the database level: concurrent INSERTs of an active row
+ * (PENDING / RUNNING / FAILED_RETRYABLE) for the same `(storeId, syncType)`
+ * trigger Postgres `23505` (unique violation), which Prisma surfaces as
+ * `P2002`. The flow:
  *
- * Concurrent inserts: every loser sees the same set of RUNNING rows and
- * picks the same winner (oldest by `startedAt`), so exactly one survives.
+ *   1. Reap any stale RUNNING rows (>10 min) for this slot — frees the
+ *      slot when the previous worker crashed without a terminal write.
+ *   2. INSERT a fresh RUNNING row. If the partial index rejects it, we
+ *      lost the race: throw `SyncInProgressError`.
+ *   3. Defensive re-check (legacy): if for any reason two RUNNING rows
+ *      coexist (e.g. a row pre-dating the unique index), the oldest wins
+ *      and the loser marks itself FAILED with code `SYNC_IN_PROGRESS`.
+ *
+ * PR 4 of the sync-engine architecture migration replaces this entirely
+ * with a PENDING-row enqueue + worker claim flow; the legacy re-check
+ * fallback is unreachable in practice once the unique index is in place
+ * but kept here until that migration lands.
  *
  * Returns the SyncLog row the caller will write progress to.
  */
@@ -117,7 +125,16 @@ export async function acquireSlot(
   syncType: SyncType,
 ): Promise<SyncLog> {
   await cleanupStaleRunning(storeId, syncType);
-  const log = await start({ organizationId, storeId, syncType });
+
+  let log: SyncLog;
+  try {
+    log = await start({ organizationId, storeId, syncType });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new SyncInProgressError({ syncType, storeId });
+    }
+    throw err;
+  }
 
   const allRunning = await prisma.syncLog.findMany({
     where: { storeId, syncType, status: 'RUNNING' },
@@ -131,6 +148,16 @@ export async function acquireSlot(
   }
 
   return log;
+}
+
+/**
+ * Narrow an unknown caught value to a Prisma P2002 unique-violation error.
+ * Avoids importing the generated `Prisma` namespace here — duck-types on
+ * the public shape Prisma documents. The `'code' in err` check narrows
+ * `err` to `{ code: unknown }`, so no type assertion is needed.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2002';
 }
 
 /**

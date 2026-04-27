@@ -541,11 +541,14 @@
           "status": {
             "type": "string",
             "enum": [
+              "PENDING",
               "RUNNING",
               "COMPLETED",
-              "FAILED"
+              "FAILED",
+              "FAILED_RETRYABLE"
             ],
-            "example": "RUNNING"
+            "example": "RUNNING",
+            "description": "SyncLog state. PENDING and FAILED_RETRYABLE are reserved for the worker-based pipeline (see docs/plans/2026-04-27-sync-engine-architecture-implementation.md) and never appear on the wire today; existing flows emit RUNNING / COMPLETED / FAILED."
           },
           "startedAt": {
             "type": "string",

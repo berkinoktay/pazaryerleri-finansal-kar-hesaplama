@@ -26,7 +26,13 @@ export const SyncLogResponseSchema = z
   .object({
     id: z.string().uuid().openapi({ example: '7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f' }),
     syncType: z.enum(['ORDERS', 'PRODUCTS', 'SETTLEMENTS']).openapi({ example: 'PRODUCTS' }),
-    status: z.enum(['RUNNING', 'COMPLETED', 'FAILED']).openapi({ example: 'RUNNING' }),
+    status: z.enum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'FAILED_RETRYABLE']).openapi({
+      example: 'RUNNING',
+      description:
+        'SyncLog state. PENDING and FAILED_RETRYABLE are reserved for the worker-based ' +
+        'pipeline (see docs/plans/2026-04-27-sync-engine-architecture-implementation.md) ' +
+        'and never appear on the wire today; existing flows emit RUNNING / COMPLETED / FAILED.',
+    }),
     startedAt: z.string().datetime().openapi({ example: '2026-04-27T14:23:11.482Z' }),
     completedAt: z.string().datetime().nullable().openapi({ example: null }),
     recordsProcessed: z.number().int().nonnegative().openapi({ example: 234 }),
