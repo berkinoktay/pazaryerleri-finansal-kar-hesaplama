@@ -1,11 +1,10 @@
 'use client';
 
-import { HelpCircleIcon, Settings02Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Wordmark } from '@/components/brand/wordmark';
-import { isNavDivider, NAV_ENTRIES } from '@/components/layout/nav-config';
+import { AUX_NAV_ITEMS, isNavDivider, NAV_ENTRIES } from '@/components/layout/nav-config';
 import { BottomDock } from '@/components/patterns/bottom-dock';
 import { NavGroup } from '@/components/patterns/nav-group';
 import { NotificationBell, type NotificationEntry } from '@/components/patterns/notification-bell';
@@ -14,7 +13,6 @@ import {
   type Organization,
   type Store,
 } from '@/components/patterns/org-store-switcher';
-import { ThemeToggleInline } from '@/components/patterns/theme-toggle-inline';
 import {
   Sidebar,
   SidebarContent,
@@ -27,7 +25,9 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
+  SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { UserMenu } from '@/features/auth/components/user-menu';
 import { Link, usePathname } from '@/i18n/navigation';
@@ -42,6 +42,79 @@ const MOCK_NOTIFICATIONS: NotificationEntry[] = [
   { id: '1', icon: 'success', title: 'Sipariş senkronizasyonu tamam', timestamp: '3 dk' },
   { id: '2', icon: 'warning', title: '2 iade incelemeyi bekliyor', timestamp: '15 dk' },
 ];
+
+/**
+ * Consumer-level overrides for primary sidebar nav buttons.
+ *
+ * Three concerns layered into a single class string so every nav row
+ * (NAV_ENTRIES + Help in the footer) stays visually identical:
+ *
+ *   1. Active-state fill — the Sidebar primitive's default
+ *      `data-[active=true]:bg-sidebar-accent` resolves to muted, which is
+ *      indistinguishable from hover. We replace it with `bg-primary`
+ *      + `text-primary-foreground`; the SVG icon inherits via
+ *      `currentColor`. The `data-[active=true]:hover:*` pair keeps the
+ *      primary fill stable on hover of an already-active row — without
+ *      it the row would flicker back to muted on mouse-over.
+ *
+ *   2. Bigger icons — the primitive's CVA pins `[&>svg]:size-4` (16px)
+ *      via a descendant selector that out-specifies a class on the SVG
+ *      itself. We override with `[&>svg]:size-icon-lg!` (20px) for
+ *      better glanceability in both modes.
+ *
+ *   3. Collapsed-mode sizing — the primitive forces
+ *      `group-data-[collapsible=icon]:size-8!` (32px button, 8px
+ *      padding). With our 56px-wide collapsed rail (set on
+ *      SidebarProvider via `--sidebar-width-icon`), 40px buttons with
+ *      6px padding sit centered with 8px gutter on each side and
+ *      comfortably fit 20px icons. Expanded rows bump from h-8 to h-9
+ *      so 20px icons keep ~2px vertical breathing room.
+ */
+const NAV_ITEM_CLASSES = cn(
+  // bg-primary/90 (slight alpha) softens the loud full-fill of the
+  // active nav row — still glanceable as "selected" but less aggressive
+  // against the surrounding muted nav. Token-stable across light/dark.
+  'data-[active=true]:bg-primary data-[active=true]:text-primary-foreground',
+  'data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground',
+  'h-9 [&>svg]:size-icon-lg!',
+  'group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-1.5!',
+  // Collapsed-mode label hide + center. Without justify-center the icon
+  // sits flex-start (left-aligned) because the now-hidden label span no
+  // longer pushes it; with the label hidden, gap-2 has no effect (only
+  // one child). The org-switcher chip uses the same justify-center +
+  // hidden-label combo, keeping every collapsed element centered in its
+  // 40px box.
+  'group-data-[collapsible=icon]:justify-center',
+  'group-data-[collapsible=icon]:[&>span]:hidden',
+);
+
+/**
+ * Submenu link styling — used by NavGroup children in the AppShell
+ * mapper. Bumped from `text-2xs` to `text-xs` (13px) and from
+ * `py-3xs` to `py-2xs` (4px) for readability per the design refresh.
+ * Active state is a primary-tinted surface (`bg-primary/10`) with
+ * `text-primary` to align with the parent active row's primary fill,
+ * but at lower intensity so the parent stays the dominant signal.
+ * The alpha lives on the primary token (theme-aware in both light and
+ * dark), not on a flat color.
+ */
+const SUB_NAV_LINK_CLASSES = cn(
+  'duration-fast px-xs py-2xs text-xs rounded-sm transition-colors',
+  'text-muted-foreground hover:bg-muted hover:text-foreground',
+);
+const SUB_NAV_LINK_ACTIVE_CLASSES =
+  'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary font-medium';
+
+/**
+ * Collapsed-rail width override. The shadcn primitive's default 48px
+ * leaves no room for a 40px button + 8px gutter, forcing icons to
+ * 32px / 16px. Bumping to 56px gives every collapsed element (org
+ * chip, nav buttons, user avatar) the same 40px hit target with even
+ * margins — addressing the "all icons aligned and centered" ask.
+ */
+const COLLAPSED_RAIL_STYLE = {
+  '--sidebar-width-icon': '56px',
+} as React.CSSProperties;
 
 export interface AppShellProps {
   /** All organizations the current user is a member of. */
@@ -90,7 +163,7 @@ export function AppShell({
   children,
 }: AppShellProps): React.ReactElement {
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen style={COLLAPSED_RAIL_STYLE}>
       <AppSidebar
         orgs={orgs}
         stores={stores}
@@ -145,15 +218,17 @@ function AppSidebar({
 }: AppSidebarProps): React.ReactElement {
   const t = useTranslations();
   const pathname = usePathname();
+  const { state } = useSidebar();
+  const collapsed = state === 'collapsed';
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-xs">
-        <div className="gap-xs px-xs py-3xs flex items-center">
-          <Wordmark withText />
-          <SidebarTrigger className="ml-auto" />
+        <div className="gap-xs px-xs py-3xs flex items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <Wordmark withText className="group-data-[collapsible=icon]:hidden" />
+          <SidebarTrigger className="[&>svg]:size-icon-lg ml-auto size-9 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:size-10" />
         </div>
-        <div className="px-xs">
+        <div className="px-xs group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
           <OrgStoreSwitcher
             orgs={orgs}
             stores={stores}
@@ -161,8 +236,17 @@ function AppSidebar({
             activeStoreId={activeStoreId ?? null}
             onSelectOrg={onSelectOrg}
             onSelectStore={onSelectStore}
+            collapsed={collapsed}
           />
         </div>
+        {/*
+          Zone divider — visually closes the "context selector" header
+          and opens the navigation list below. Without it the switcher
+          chip risks reading as just another nav row; with it, the
+          information architecture is explicit (header zone vs. nav zone),
+          matching Linear/Stripe/Vercel sidebar patterns.
+        */}
+        <SidebarSeparator className="bg-border/60 mt-2xs mx-0" />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -170,12 +254,9 @@ function AppSidebar({
             {NAV_ENTRIES.map((entry) => {
               if (isNavDivider(entry)) {
                 return (
-                  <SidebarMenuItem key={entry.key}>
-                    <hr
-                      className="border-border mx-xs my-xs border-t border-dashed"
-                      role="separator"
-                    />
-                  </SidebarMenuItem>
+                  <li key={entry.key} className="my-2xs px-xs group-data-[collapsible=icon]:hidden">
+                    <SidebarSeparator className="bg-border/60 mx-0" />
+                  </li>
                 );
               }
               const isActive = pathname === entry.href || pathname.startsWith(`${entry.href}/`);
@@ -185,23 +266,29 @@ function AppSidebar({
                   <SidebarMenuItem key={entry.key}>
                     <NavGroup
                       label={t(entry.labelKey)}
-                      icon={<Icon className="size-icon-sm" />}
+                      icon={<Icon />}
                       badge={entry.badge}
+                      href={entry.href}
+                      isActive={isActive}
                       defaultExpanded={isActive}
+                      buttonClassName={NAV_ITEM_CLASSES}
                     >
                       {entry.sections.flatMap((section) =>
-                        section.items.map((item) => (
-                          <Link
-                            key={item.key}
-                            href={item.href}
-                            className={cn(
-                              'hover:bg-muted text-muted-foreground hover:text-foreground px-xs py-3xs text-2xs rounded-sm',
-                              pathname.startsWith(item.href) && 'bg-accent text-accent-foreground',
-                            )}
-                          >
-                            {t(item.labelKey)}
-                          </Link>
-                        )),
+                        section.items.map((item) => {
+                          const subActive = pathname.startsWith(item.href);
+                          return (
+                            <Link
+                              key={item.key}
+                              href={item.href}
+                              className={cn(
+                                SUB_NAV_LINK_CLASSES,
+                                subActive && SUB_NAV_LINK_ACTIVE_CLASSES,
+                              )}
+                            >
+                              {t(item.labelKey)}
+                            </Link>
+                          );
+                        }),
                       )}
                     </NavGroup>
                   </SidebarMenuItem>
@@ -209,9 +296,14 @@ function AppSidebar({
               }
               return (
                 <SidebarMenuItem key={entry.key}>
-                  <SidebarMenuButton asChild isActive={isActive} tooltip={t(entry.labelKey)}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive}
+                    tooltip={t(entry.labelKey)}
+                    className={NAV_ITEM_CLASSES}
+                  >
                     <Link href={entry.href}>
-                      <Icon className="size-icon-sm" />
+                      <Icon />
                       <span>{t(entry.labelKey)}</span>
                     </Link>
                   </SidebarMenuButton>
@@ -223,26 +315,33 @@ function AppSidebar({
       </SidebarContent>
       <SidebarFooter>
         <BottomDock>
+          {/*
+            Auxiliary nav cluster — "Yenilikler" + "Destek" share the
+            same bottom shelf as utility links (matches the Linear /
+            Vercel pattern of grouping non-feature pages with the user
+            menu, separate from the main nav scroll).
+          */}
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip={t('nav.support')}>
-                <Link href="/support">
-                  <HelpCircleIcon className="size-icon-sm" />
-                  <span>{t('nav.support')}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip={t('nav.settings')}>
-                <Link href="/settings/profile">
-                  <Settings02Icon className="size-icon-sm" />
-                  <span>{t('nav.settings')}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {AUX_NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <SidebarMenuItem key={item.key}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive}
+                    tooltip={t(item.labelKey)}
+                    className={NAV_ITEM_CLASSES}
+                  >
+                    <Link href={item.href}>
+                      <Icon />
+                      <span>{t(item.labelKey)}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
-          <ThemeToggleInline />
-          <BottomDock.Divider />
           <UserMenu />
         </BottomDock>
       </SidebarFooter>

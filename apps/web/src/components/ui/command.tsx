@@ -40,14 +40,23 @@ export function CommandDialog({ children, ...props }: CommandDialogProps): React
 
 export const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
->(({ className, ...props }, ref) => (
-  <div className="gap-xs border-border px-sm flex items-center border-b" cmdk-input-wrapper="">
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> & {
+    /** Override classes on the outer wrapper (icon + input shell). The
+     * default is a flush row with a bottom border for full-page command
+     * palettes; consumers in compact dropdowns can swap to a fully
+     * bordered "input field" look without forking the primitive. */
+    wrapperClassName?: string;
+  }
+>(({ className, wrapperClassName, ...props }, ref) => (
+  <div
+    className={cn('gap-xs border-border px-sm flex items-center border-b', wrapperClassName)}
+    cmdk-input-wrapper=""
+  >
     <Search01Icon className="size-icon-sm shrink-0 opacity-50" />
     <CommandPrimitive.Input
       ref={ref}
       className={cn(
-        'py-xs placeholder:text-muted-foreground flex h-11 w-full rounded-md bg-transparent text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50',
+        'py-xs placeholder:text-muted-foreground flex h-11 w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       {...props}

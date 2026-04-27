@@ -3,6 +3,7 @@ import {
   Calculator01Icon,
   ChartLineData01Icon,
   DashboardSquare02Icon,
+  HelpCircleIcon,
   InvoiceIcon,
   Megaphone01Icon,
   Notification03Icon,
@@ -342,20 +343,36 @@ export const NAV_ITEMS = [
 ] as const satisfies readonly NavItem[];
 
 /**
- * Renderable nav surface — primary items from NAV_ITEMS plus the
- * trailing "Yenilikler" leaf preceded by a dashed section divider.
- * Sidebar renderer consumes this; tests that exercise just primary
- * nav still import NAV_ITEMS directly.
+ * Renderable primary nav surface — currently equals NAV_ITEMS but kept
+ * as a separate export so future divider blocks can be re-introduced
+ * without re-wiring the sidebar renderer. `NavEntry` already widens
+ * to `NavItem | NavDivider`.
  */
-export const NAV_ENTRIES: readonly NavEntry[] = [
-  ...NAV_ITEMS,
-  { type: 'divider', key: 'before-whats-new' },
+export const NAV_ENTRIES: readonly NavEntry[] = [...NAV_ITEMS];
+
+/**
+ * Auxiliary nav links rendered in the sidebar footer (BottomDock) — the
+ * "utility shelf" for pages that aren't core feature navigation:
+ *   - Yenilikler (product news / changelog)
+ *   - Destek (support / help)
+ *
+ * Both share the same render shape as NAV_ITEMS so the AppShell can
+ * map them with the exact same SidebarMenuButton + NAV_ITEM_CLASSES
+ * pattern, keeping visual treatment identical to primary nav rows.
+ */
+export const AUX_NAV_ITEMS = [
   {
     key: 'whats-new',
     labelKey: 'nav.whatsNew',
     href: '/whats-new',
     icon: Megaphone01Icon,
   },
-];
+  {
+    key: 'support',
+    labelKey: 'nav.support',
+    href: '/support',
+    icon: HelpCircleIcon,
+  },
+] as const satisfies readonly NavItem[];
 
 export type NavIconComponent = NavItem['icon'];

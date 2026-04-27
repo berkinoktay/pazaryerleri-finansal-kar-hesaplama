@@ -24,19 +24,18 @@ export interface DashboardStoreLauncherProps {
 
 /**
  * Adapter — API Organization → switcher's Organization shape. The
- * switcher needs role, storeCount, lastSyncedAt; GET /v1/organizations
- * doesn't carry any of these today, so we use static fallbacks.
- *
- * When the endpoint evolves to include membership role + per-org store
- * count + lastSyncedAt summary, swap the constants for real fields.
+ * switcher needs role, storeCount, lastSyncedAt, lastAccessedAt; the
+ * `GET /v1/organizations` endpoint now carries all four directly so
+ * this is a flat passthrough.
  */
 function toSwitcherOrg(org: OrgApiData): SwitcherOrg {
   return {
     id: org.id,
     name: org.name,
-    role: 'MEMBER',
-    storeCount: 0,
-    lastSyncedAt: null,
+    role: org.role,
+    storeCount: org.storeCount,
+    lastSyncedAt: org.lastSyncedAt,
+    lastAccessedAt: org.lastAccessedAt,
   };
 }
 

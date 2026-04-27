@@ -27,6 +27,10 @@ const ORGS: Organization[] = [
     timezone: 'Europe/Istanbul',
     createdAt: '2026-04-20T10:00:00Z',
     updatedAt: '2026-04-20T10:00:00Z',
+    role: 'OWNER',
+    storeCount: 1,
+    lastSyncedAt: null,
+    lastAccessedAt: null,
   },
   {
     id: 'org-2',
@@ -36,6 +40,10 @@ const ORGS: Organization[] = [
     timezone: 'Europe/Istanbul',
     createdAt: '2026-04-20T11:00:00Z',
     updatedAt: '2026-04-20T11:00:00Z',
+    role: 'MEMBER',
+    storeCount: 0,
+    lastSyncedAt: null,
+    lastAccessedAt: null,
   },
 ];
 

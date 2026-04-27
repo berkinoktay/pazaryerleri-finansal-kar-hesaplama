@@ -88,6 +88,21 @@
      "transparency is a signal, not a style" intact. */
   --warning-border: oklch(70% 0.13 75);
   --destructive-border: oklch(70% 0.18 27);
+
+  /* Sidebar surface contract — required by the shadcn Sidebar primitive
+     (`bg-sidebar`, `bg-sidebar-accent`, `text-sidebar-foreground`, …).
+     Without these bindings the primitive's default + hover + active
+     classes silently produce no styles. We bind to existing tokens —
+     no new palette: sidebar surface = page background, hover/accent =
+     muted, foreground = foreground. The "active" state is overridden
+     at the consumer level (app-shell.tsx + nav-group.tsx) to use
+     `bg-primary` for a strong glanceable selection cue. */
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
 .dark {
@@ -147,4 +162,14 @@
 
   --warning-border: oklch(50% 0.1 75);
   --destructive-border: oklch(48% 0.14 27);
+
+  /* Sidebar surface contract — see :root for full rationale. Dark
+     mode uses the same chain (sidebar = background, accent = muted)
+     so the relationship holds in both themes. */
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }

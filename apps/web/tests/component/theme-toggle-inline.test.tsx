@@ -1,8 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { NextIntlClientProvider } from 'next-intl';
-import { ThemeProvider } from 'next-themes';
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/dashboard',
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 import { ThemeToggleInline } from '@/components/patterns/theme-toggle-inline';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarProvider,
+} from '@/components/ui/sidebar';
 import { render, screen } from '@/../tests/helpers/render';
 
 const messages = {
@@ -13,12 +25,34 @@ const messages = {
   },
 };
 
+const setThemeMock = vi.fn();
+let resolvedTheme = 'light';
+
+vi.mock('@/providers/theme-provider', () => ({
+  useTheme: () => ({
+    theme: resolvedTheme,
+    resolvedTheme,
+    setTheme: (next: string) => {
+      resolvedTheme = next;
+      setThemeMock(next);
+    },
+  }),
+}));
+
 function renderToggle() {
   return render(
     <NextIntlClientProvider locale="tr" messages={messages}>
-      <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-        <ThemeToggleInline />
-      </ThemeProvider>
+      <SidebarProvider defaultOpen>
+        <Sidebar collapsible="icon">
+          <SidebarContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <ThemeToggleInline />
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarContent>
+        </Sidebar>
+      </SidebarProvider>
     </NextIntlClientProvider>,
   );
 }
@@ -32,14 +66,17 @@ describe('ThemeToggleInline', () => {
 
   it('shows the localized Turkish label', () => {
     renderToggle();
-    expect(screen.getByText('Tema')).toBeInTheDocument();
+    // Multiple "Tema" copies exist (visible label span + sr-only tooltip
+    // mirror), so use getAllByText and assert at least one is rendered.
+    expect(screen.getAllByText('Tema').length).toBeGreaterThan(0);
   });
 
-  it('toggles state when the switch is clicked', async () => {
+  it('calls setTheme when the row is clicked', async () => {
+    setThemeMock.mockReset();
+    resolvedTheme = 'light';
     const { user } = renderToggle();
-    const switchEl = screen.getByRole('switch', { name: 'Tema' });
-    expect(switchEl).toHaveAttribute('aria-checked', 'false');
-    await user.click(switchEl);
-    expect(switchEl).toHaveAttribute('aria-checked', 'true');
+    const button = screen.getByRole('button', { name: /tema/i });
+    await user.click(button);
+    expect(setThemeMock).toHaveBeenCalledWith('dark');
   });
 });

@@ -20,6 +20,7 @@ import {
   type Organization,
   type Store,
 } from '@/components/patterns/org-store-switcher';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { render, screen } from '@/../tests/helpers/render';
 
 const messages = {
@@ -27,11 +28,13 @@ const messages = {
     search: 'Org veya mağaza ara…',
     sectionOrgs: 'Organizasyonlar',
     sectionStores: 'Mağazalar',
-    addOrg: '+ Yeni',
-    connectStore: '+ Bağla',
+    addOrg: '+ Yeni Organizasyon',
+    connectStore: '+ Yeni Mağaza',
     footerOrgSettings: 'Org ayarları',
     footerStoreManagement: 'Mağaza yönetimi',
-    footerNewOrg: '+ Yeni Org',
+    footerNewOrg: 'Yeni Organizasyon',
+    platformTRENDYOL: 'Trendyol',
+    platformHEPSIBURADA: 'Hepsiburada',
     emptyTitle: 'Henüz bir organizasyona sahip değilsin',
     emptyDescription: "PazarSync'e başlamak için bir organizasyon oluştur ya da bir davete katıl.",
     emptyCreate: '+ Yeni Organizasyon Oluştur',
@@ -43,6 +46,17 @@ const messages = {
     syncStateStale: 'Yenile',
     syncStateFailed: 'Senkron başarısız',
     openShortcut: '⌘O ile değiştir',
+    recentSection: 'Son Kullanılan',
+    allOrgsSection: 'Tüm Organizasyonlar',
+    newOrgInline: '+ Yeni Organizasyon',
+    orgMetaStores: '{count} mağaza',
+    orgMetaNoStores: 'henüz mağaza yok',
+    orgMetaWithSync: '{stores} · son senkron {time}',
+    storeSyncRelative: 'Senkron {time}',
+    storeNoSync: 'Henüz senkron yapılmadı',
+    storeMetaWithPlatform: '{platform} · {sync}',
+    orgSettingsLabel: '{name} ayarları',
+    multiOrgIndicator: '+{count}',
   },
 };
 
@@ -53,6 +67,7 @@ const mockOrgs: Organization[] = [
     role: 'OWNER',
     storeCount: 2,
     lastSyncedAt: '2026-04-25T11:55:00Z',
+    lastAccessedAt: '2026-04-25T12:00:00Z',
   },
   {
     id: 'org-b',
@@ -60,6 +75,7 @@ const mockOrgs: Organization[] = [
     role: 'ADMIN',
     storeCount: 5,
     lastSyncedAt: '2026-04-25T11:00:00Z',
+    lastAccessedAt: '2026-04-24T18:00:00Z',
   },
 ];
 
@@ -95,15 +111,21 @@ function renderSwitcher(props: RenderProps = {}) {
   const onSelectStore = props.onSelectStore ?? vi.fn();
   const utils = render(
     <NextIntlClientProvider locale="tr" messages={messages}>
-      <OrgStoreSwitcher
-        orgs={props.orgs ?? mockOrgs}
-        stores={props.stores ?? mockStores}
-        activeOrgId={props.activeOrgId === undefined ? 'org-a' : props.activeOrgId}
-        activeStoreId={props.activeStoreId === undefined ? 'store-1' : props.activeStoreId}
-        onSelectOrg={onSelectOrg}
-        onSelectStore={onSelectStore}
-        collapsed={props.collapsed}
-      />
+      {/* Real-world usage nests the switcher inside SidebarProvider's
+          TooltipProvider; mirror that here so collapsed-mode tooltips
+          can mount without throwing "Tooltip must be used within
+          TooltipProvider". */}
+      <TooltipProvider>
+        <OrgStoreSwitcher
+          orgs={props.orgs ?? mockOrgs}
+          stores={props.stores ?? mockStores}
+          activeOrgId={props.activeOrgId === undefined ? 'org-a' : props.activeOrgId}
+          activeStoreId={props.activeStoreId === undefined ? 'store-1' : props.activeStoreId}
+          onSelectOrg={onSelectOrg}
+          onSelectStore={onSelectStore}
+          collapsed={props.collapsed}
+        />
+      </TooltipProvider>
     </NextIntlClientProvider>,
   );
   return { ...utils, onSelectOrg, onSelectStore };

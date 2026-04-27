@@ -35,6 +35,7 @@ const MOCK_ORGS: Organization[] = [
     role: 'OWNER',
     storeCount: 3,
     lastSyncedAt: '2026-04-20T21:00:00Z',
+    lastAccessedAt: '2026-04-20T21:30:00Z',
   },
   {
     id: 'org-secondary',
@@ -42,6 +43,7 @@ const MOCK_ORGS: Organization[] = [
     role: 'ADMIN',
     storeCount: 1,
     lastSyncedAt: '2026-04-19T15:00:00Z',
+    lastAccessedAt: '2026-04-18T09:00:00Z',
   },
 ];
 
