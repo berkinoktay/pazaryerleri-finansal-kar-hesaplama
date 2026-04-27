@@ -478,6 +478,127 @@
           "name",
           "credentials"
         ]
+      },
+      "StartSyncResponse": {
+        "type": "object",
+        "properties": {
+          "syncLogId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "RUNNING"
+            ],
+            "example": "RUNNING"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-27T14:23:11.482Z"
+          }
+        },
+        "required": [
+          "syncLogId",
+          "status",
+          "startedAt"
+        ]
+      },
+      "SyncLogResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f"
+          },
+          "syncType": {
+            "type": "string",
+            "enum": [
+              "ORDERS",
+              "PRODUCTS",
+              "SETTLEMENTS"
+            ],
+            "example": "PRODUCTS"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "RUNNING",
+              "COMPLETED",
+              "FAILED"
+            ],
+            "example": "RUNNING"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-27T14:23:11.482Z"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "example": null
+          },
+          "recordsProcessed": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 234
+          },
+          "progressCurrent": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 234
+          },
+          "progressTotal": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "example": 1200
+          },
+          "progressStage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "upserting"
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": null
+          },
+          "errorMessage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": null
+          }
+        },
+        "required": [
+          "id",
+          "syncType",
+          "status",
+          "startedAt",
+          "completedAt",
+          "recordsProcessed",
+          "progressCurrent",
+          "progressTotal",
+          "progressStage",
+          "errorCode",
+          "errorMessage"
+        ],
+        "description": "Generic sync_logs row representation. Used by the SyncCenter UI to render live progress for any active sync (PRODUCTS today, ORDERS / SETTLEMENTS later)."
       }
     },
     "parameters": {}
@@ -1259,6 +1380,269 @@
           },
           "404": {
             "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/products/sync": {
+      "post": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "Start a Trendyol product sync",
+        "description": "Acquires the sync slot (sync_log row + race detection), kicks off the background sync, and returns 202 with the new syncLogId. The actual fetch + upsert runs in the background of the Hono process; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` (or, with PR 5, subscribe to Supabase Realtime postgres_changes on the same row) to track progress. Concurrent sync attempts return 409 SYNC_IN_PROGRESS.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Sync queued",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSyncResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A product sync is already running for this store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/sync-logs/{syncLogId}": {
+      "get": {
+        "tags": [
+          "Sync"
+        ],
+        "summary": "Read a sync log row",
+        "description": "Generic across SyncType (PRODUCTS / ORDERS / SETTLEMENTS). Returns the row with `progressCurrent` / `progressTotal` / `progressStage` so the SyncCenter UI can render a progress bar without a Realtime subscription. Polling fallback when the WebSocket drops in PR 5.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "syncLogId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sync log row",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncLogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store or sync log not found",
             "content": {
               "application/json": {
                 "schema": {
