@@ -1,8 +1,8 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { prisma } from '@pazarsync/db';
+import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { createSubApp } from '../lib/create-hono-app';
-import { mapPrismaError } from '../lib/map-prisma-error';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as organizationService from '../services/organization.service';
 import {

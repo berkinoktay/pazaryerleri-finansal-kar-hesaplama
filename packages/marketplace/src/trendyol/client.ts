@@ -1,5 +1,5 @@
 import type { StoreEnvironment } from '@pazarsync/db';
-import { MarketplaceUnreachable } from '../../../lib/errors';
+import { MarketplaceUnreachable } from '@pazarsync/sync-core';
 
 import { mapTrendyolResponseToDomainError } from './errors';
 import type { TrendyolCredentials } from './types';

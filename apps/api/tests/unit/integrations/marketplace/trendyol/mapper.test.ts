@@ -3,11 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   mapTrendyolApprovedResponse,
   mapTrendyolContent,
-} from '../../../../../src/integrations/marketplace/trendyol/mapper';
-import type {
-  TrendyolApprovedProductsResponse,
-  TrendyolContent,
-} from '../../../../../src/integrations/marketplace/trendyol/types';
+  type TrendyolApprovedProductsResponse,
+  type TrendyolContent,
+} from '@pazarsync/marketplace';
 
 // First staging Postman sample provided by the user (April 2026):
 // single-variant product "dfsf" with one Beden attribute on the variant

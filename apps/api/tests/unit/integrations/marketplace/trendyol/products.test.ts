@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  fetchApprovedProducts,
+  type TrendyolApprovedProductsResponse,
+  type TrendyolContent,
+  type TrendyolCredentials,
+} from '@pazarsync/marketplace';
+import {
   MarketplaceAuthError,
   MarketplaceUnreachable,
   RateLimitedError,
-} from '../../../../../src/lib/errors';
-import { fetchApprovedProducts } from '../../../../../src/integrations/marketplace/trendyol/products';
-import type {
-  TrendyolApprovedProductsResponse,
-  TrendyolContent,
-  TrendyolCredentials,
-} from '../../../../../src/integrations/marketplace/trendyol/types';
+} from '@pazarsync/sync-core';
 
 const BASE_URL = 'https://stage.trendyol.test';
 const SUPPLIER_ID = '2738';

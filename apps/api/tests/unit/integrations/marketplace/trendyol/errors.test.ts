@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { mapTrendyolResponseToDomainError } from '@pazarsync/marketplace';
 import {
   MarketplaceAccessError,
   MarketplaceAuthError,
   MarketplaceUnreachable,
   RateLimitedError,
-} from '../../../../../src/lib/errors';
-import { mapTrendyolResponseToDomainError } from '../../../../../src/integrations/marketplace/trendyol/errors';
+} from '@pazarsync/sync-core';
 
 function response(status: number, headers: Record<string, string> = {}): Response {
   return new Response(null, { status, headers });

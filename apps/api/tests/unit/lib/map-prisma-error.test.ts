@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ConflictError, InvalidReferenceError, NotFoundError } from '@/lib/errors';
-import { mapPrismaError } from '@/lib/map-prisma-error';
+import { mapPrismaError } from '@pazarsync/sync-core';
 
 function fakePrismaError(code: string, meta?: Record<string, unknown>): Error {
   const err = Object.assign(new Error(`Prisma ${code}`), {

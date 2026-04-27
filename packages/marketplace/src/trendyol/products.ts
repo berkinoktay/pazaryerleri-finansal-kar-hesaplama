@@ -8,8 +8,7 @@
 //     urun-entegrasyonlari-v2.md
 
 import type { StoreEnvironment } from '@pazarsync/db';
-
-import { MarketplaceUnreachable, RateLimitedError } from '../../../lib/errors';
+import { MarketplaceUnreachable, RateLimitedError } from '@pazarsync/sync-core';
 
 import { mapTrendyolResponseToDomainError } from './errors';
 import { mapTrendyolApprovedResponse, type MappedProductsPage } from './mapper';

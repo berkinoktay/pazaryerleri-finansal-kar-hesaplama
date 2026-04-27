@@ -53,6 +53,12 @@ importers:
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@pazarsync/marketplace':
+        specifier: workspace:*
+        version: link:../../packages/marketplace
+      '@pazarsync/sync-core':
+        specifier: workspace:*
+        version: link:../../packages/sync-core
       '@pazarsync/utils':
         specifier: workspace:*
         version: link:../../packages/utils
@@ -366,6 +372,29 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
+      typescript:
+        specifier: ^6
+        version: 6.0.3
+
+  packages/marketplace:
+    dependencies:
+      '@pazarsync/db':
+        specifier: workspace:*
+        version: link:../db
+      '@pazarsync/sync-core':
+        specifier: workspace:*
+        version: link:../sync-core
+    devDependencies:
+      typescript:
+        specifier: ^6
+        version: 6.0.3
+
+  packages/sync-core:
+    dependencies:
+      '@pazarsync/db':
+        specifier: workspace:*
+        version: link:../db
+    devDependencies:
       typescript:
         specifier: ^6
         version: 6.0.3

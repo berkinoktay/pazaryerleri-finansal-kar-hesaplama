@@ -1,4 +1,5 @@
-import { EncryptionKeyError } from './crypto';
+import { EncryptionKeyError } from '@pazarsync/sync-core';
+
 import {
   ConflictError,
   ForbiddenError,

@@ -3,7 +3,7 @@ import {
   MarketplaceAuthError,
   MarketplaceUnreachable,
   RateLimitedError,
-} from '../../../lib/errors';
+} from '@pazarsync/sync-core';
 
 const PLATFORM = 'TRENDYOL';
 const DEFAULT_RETRY_AFTER_SECONDS = 10;

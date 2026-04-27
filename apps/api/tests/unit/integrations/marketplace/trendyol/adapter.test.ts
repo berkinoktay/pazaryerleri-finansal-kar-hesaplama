@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MarketplaceAuthError, ValidationError } from '../../../../../src/lib/errors';
-import { trendyolFactory } from '../../../../../src/integrations/marketplace/trendyol/adapter';
+import { trendyolFactory } from '@pazarsync/marketplace';
+import { MarketplaceAuthError, ValidationError } from '@pazarsync/sync-core';
 
 const VALID_CREDS = {
   supplierId: '99999',

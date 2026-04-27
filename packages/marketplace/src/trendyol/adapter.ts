@@ -1,4 +1,5 @@
-import { ValidationError } from '../../../lib/errors';
+import { ValidationError } from '@pazarsync/sync-core';
+
 import type { MarketplaceAdapter, MarketplaceAdapterFactory } from '../types';
 
 import { probeTrendyolCredentials } from './client';

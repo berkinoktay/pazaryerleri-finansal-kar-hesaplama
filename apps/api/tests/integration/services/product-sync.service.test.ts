@@ -1,11 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { encryptCredentials, syncLogService } from '@pazarsync/sync-core';
 
-import { encryptCredentials } from '@/lib/crypto';
 import { SyncInProgressError } from '@/lib/errors';
 import * as productSyncService from '@/services/product-sync.service';
-import * as syncLogService from '@/services/sync-log.service';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
