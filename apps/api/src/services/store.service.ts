@@ -46,6 +46,29 @@ export async function getById(organizationId: string, storeId: string): Promise<
 }
 
 /**
+ * Internal-use store lookup that returns the FULL Prisma row including
+ * the encrypted credentials column. Used by the sync service and any
+ * other code that needs to act on the store (e.g. decrypt credentials
+ * for a marketplace API call). Never expose this row directly in an
+ * HTTP response — use `getById` for that, which strips credentials.
+ *
+ * Throws `NotFoundError` on cross-tenant access — same non-disclosure
+ * contract as `getById`.
+ */
+export async function requireOwnedStore(
+  organizationId: string,
+  storeId: string,
+): Promise<PrismaStore> {
+  const row = await prisma.store.findFirst({
+    where: { id: storeId, organizationId },
+  });
+  if (row === null) {
+    throw new NotFoundError('Store', storeId);
+  }
+  return row;
+}
+
+/**
  * Connect + validate credentials atomically:
  *
  * 1. Gate SANDBOX via env flag (D4) — fail BEFORE any adapter work.
