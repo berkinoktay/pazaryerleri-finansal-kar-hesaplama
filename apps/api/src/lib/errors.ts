@@ -126,6 +126,26 @@ export class MarketplaceAccessError extends Error {
 }
 
 /**
+ * A sync (PRODUCTS / ORDERS / SETTLEMENTS) is already RUNNING for the
+ * same store. The pg advisory lock acquired by ProductSyncService is the
+ * source of truth — this error is thrown when `pg_try_advisory_lock`
+ * returns false. Distinct from generic ConflictError so the frontend
+ * can show "Senkronizasyon zaten çalışıyor" rather than a generic message,
+ * and so the meta carries the running sync's id for the UI to surface.
+ */
+export class SyncInProgressError extends Error {
+  readonly status = 409 as const;
+  readonly code = 'SYNC_IN_PROGRESS' as const;
+  readonly meta: { syncType: string; storeId: string };
+
+  constructor(meta: { syncType: string; storeId: string }) {
+    super(`A ${meta.syncType} sync is already running for store ${meta.storeId}`);
+    this.name = 'SyncInProgressError';
+    this.meta = meta;
+  }
+}
+
+/**
  * Marketplace itself is down / timed out / 5xx. 503 tells the client to
  * retry later; the underlying issue is upstream, not our data.
  */
