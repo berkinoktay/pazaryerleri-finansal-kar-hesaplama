@@ -82,16 +82,35 @@ interface FetcherDeps {
   signal?: AbortSignal;
 }
 
-// One HTTP call with rate-limit-aware retry. 429 → backoff (using
-// Retry-After when present, otherwise exponential). Other 4xx/5xx →
-// mapTrendyolResponseToDomainError, which throws a typed domain error.
+/**
+ * One HTTP call with retry-aware error handling.
+ *
+ * Retry policy:
+ *   - **429** (rate limit) — backoff using `Retry-After` header when
+ *     present, otherwise exponential. Up to MAX_BACKOFF_RETRIES.
+ *   - **5xx** (transient upstream — except 503 which Trendyol uses for
+ *     "stage IP not whitelisted," a permanent config issue, not a
+ *     blip) — same exponential backoff. A single Trendyol gateway
+ *     hiccup mid-sync used to kill the whole run; the retry path
+ *     covers the common case where the next request 200s.
+ *   - **Network error / timeout** (fetch threw) — same backoff. We
+ *     can't read a status code, so we treat it like a 5xx.
+ *   - Anything else (401/403/4xx other than 429) — no retry; the
+ *     condition is permanent (bad credentials, missing User-Agent).
+ *
+ * Once retries are exhausted, falls through to
+ * `mapTrendyolResponseToDomainError` which throws a typed domain
+ * error (RateLimitedError for 429, MarketplaceAccessError for 503,
+ * MarketplaceUnreachable for other 5xx).
+ */
 async function fetchOnce(
   url: string,
   deps: FetcherDeps,
 ): Promise<TrendyolApprovedProductsResponse> {
   let attempt = 0;
   for (;;) {
-    let res: Response;
+    let res: Response | undefined;
+    let networkError = false;
     try {
       res = await fetch(url, {
         headers: {
@@ -103,37 +122,44 @@ async function fetchOnce(
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
-      throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0 });
+      networkError = true;
     }
 
-    if (res.ok) {
+    if (res !== undefined && res.ok) {
       return (await res.json()) as TrendyolApprovedProductsResponse;
     }
 
-    if (res.status === 429 && attempt < MAX_BACKOFF_RETRIES) {
-      const headerRaw = res.headers.get('Retry-After');
-      const headerSeconds = headerRaw !== null ? Number.parseInt(headerRaw, 10) : NaN;
+    const isTransient =
+      networkError ||
+      (res !== undefined && (res.status === 429 || (res.status >= 500 && res.status !== 503)));
+
+    if (isTransient && attempt < MAX_BACKOFF_RETRIES) {
+      const headerSeconds =
+        res !== undefined ? parseRetryAfterSeconds(res.headers.get('Retry-After')) : null;
       const waitMs =
-        Number.isFinite(headerSeconds) && headerSeconds > 0
-          ? headerSeconds * 1000
-          : INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+        headerSeconds !== null ? headerSeconds * 1000 : INITIAL_BACKOFF_MS * Math.pow(2, attempt);
       attempt += 1;
       await sleep(waitMs, deps.signal);
       continue;
     }
 
-    // 429 with attempts exhausted falls through here too — the mapper
-    // turns it into a RateLimitedError which the caller (sync service)
-    // surfaces via SyncLog.errorCode.
-    if (res.status === 429) {
-      const headerRaw = res.headers.get('Retry-After');
-      const headerSeconds = headerRaw !== null ? Number.parseInt(headerRaw, 10) : NaN;
-      const retryAfter = Number.isFinite(headerSeconds) && headerSeconds > 0 ? headerSeconds : 30;
-      throw new RateLimitedError(retryAfter, 'Trendyol rate limit hit (retries exhausted)');
+    // Retries exhausted — surface a typed domain error so the caller
+    // (sync service) records something actionable in SyncLog.errorCode.
+    if (networkError || res === undefined) {
+      throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0 });
     }
-
+    if (res.status === 429) {
+      const seconds = parseRetryAfterSeconds(res.headers.get('Retry-After')) ?? 30;
+      throw new RateLimitedError(seconds, 'Trendyol rate limit hit (retries exhausted)');
+    }
     mapTrendyolResponseToDomainError(res);
   }
+}
+
+function parseRetryAfterSeconds(header: string | null): number | null {
+  if (header === null) return null;
+  const parsed = Number.parseInt(header, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 export interface FetchApprovedProductsOpts {
