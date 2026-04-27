@@ -27,6 +27,7 @@
       "NETWORK_ERROR": "Network error. Check your connection.",
       "UNKNOWN_ERROR": "Something went wrong. Please try again.",
       "MARKETPLACE_AUTH_FAILED": "The marketplace rejected these credentials. Please verify and try again.",
+      "SYNC_IN_PROGRESS": "A sync is already running for this store. Wait for it to finish.",
       "MARKETPLACE_ACCESS_DENIED": "Marketplace access blocked. Sandbox may require IP allowlisting.",
       "MARKETPLACE_UNREACHABLE": "The marketplace is currently unreachable. Please try again in a few minutes.",
       "generic": "Something went wrong. Please try again."
@@ -589,6 +590,28 @@
       "title": "Notification center coming soon",
       "description": "Sync events, new order notifications, and alert history will appear here."
     }
+  },
+  "syncCenter": {
+    "title": "Sync center",
+    "description": "Active and recent syncs",
+    "openLabel": "Open sync center",
+    "sections": {
+      "active": "Running",
+      "recent": "Recent"
+    },
+    "status": {
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "triggers": {
+      "PRODUCTS": "Sync products now",
+      "ORDERS": "Sync orders now",
+      "SETTLEMENTS": "Sync settlements now"
+    },
+    "completedSummary": "{n} records processed",
+    "failedSummary": "Error",
+    "empty": "No syncs yet."
   },
   "products": {
     "page": {
