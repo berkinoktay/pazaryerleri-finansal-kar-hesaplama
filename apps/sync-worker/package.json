@@ -17,6 +17,7 @@
     "@pazarsync/sync-core": "workspace:*"
   },
   "devDependencies": {
+    "dotenv": "^16.4.0",
     "tsx": "^4.19.0",
     "typescript": "^6",
     "vitest": "^4"
