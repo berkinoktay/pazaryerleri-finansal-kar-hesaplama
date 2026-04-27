@@ -92,121 +92,136 @@ function decryptStoreCredentials(
 
 async function upsertBatch(store: Store, batch: MappedProduct[]): Promise<void> {
   // One transaction per content (parent + its variants + image replace).
-  // Keeping transactions per-content rather than per-page bounds rollback
-  // scope: a malformed single product won't roll back its 99 page-mates.
+  // Each content also runs inside a try/catch — a single malformed
+  // product (rare, but real Trendyol data has shipped duplicate
+  // barcodes within a store, missing required fields, etc.) gets
+  // logged and skipped so the sync completes for every other product
+  // in the page. The aggregate count of failures becomes a follow-up
+  // observability concern; for now `[product-sync] content-upsert
+  // failed` shows up in the ops logs with the contentId.
   for (const mapped of batch) {
-    await prisma.$transaction(async (tx) => {
-      const product = await tx.product.upsert({
-        where: {
-          storeId_platformContentId: {
-            storeId: store.id,
-            platformContentId: mapped.platformContentId,
-          },
-        },
-        create: {
-          organizationId: store.organizationId,
-          storeId: store.id,
-          platformContentId: mapped.platformContentId,
-          productMainId: mapped.productMainId,
-          title: mapped.title,
-          description: mapped.description,
-          brandId: mapped.brandId,
-          brandName: mapped.brandName,
-          categoryId: mapped.categoryId,
-          categoryName: mapped.categoryName,
-          color: mapped.color,
-          attributes: mapped.attributes as never,
-          platformCreatedAt: mapped.platformCreatedAt,
-          platformModifiedAt: mapped.platformModifiedAt,
-          lastSyncedAt: new Date(),
-        },
-        update: {
-          productMainId: mapped.productMainId,
-          title: mapped.title,
-          description: mapped.description,
-          brandId: mapped.brandId,
-          brandName: mapped.brandName,
-          categoryId: mapped.categoryId,
-          categoryName: mapped.categoryName,
-          color: mapped.color,
-          attributes: mapped.attributes as never,
-          platformCreatedAt: mapped.platformCreatedAt,
-          platformModifiedAt: mapped.platformModifiedAt,
-          lastSyncedAt: new Date(),
-        },
-      });
-
-      for (const variant of mapped.variants) {
-        await tx.productVariant.upsert({
+    try {
+      await prisma.$transaction(async (tx) => {
+        const product = await tx.product.upsert({
           where: {
-            storeId_platformVariantId: {
+            storeId_platformContentId: {
               storeId: store.id,
-              platformVariantId: variant.platformVariantId,
+              platformContentId: mapped.platformContentId,
             },
           },
           create: {
             organizationId: store.organizationId,
             storeId: store.id,
-            productId: product.id,
-            platformVariantId: variant.platformVariantId,
-            barcode: variant.barcode,
-            stockCode: variant.stockCode,
-            salePrice: variant.salePrice,
-            listPrice: variant.listPrice,
-            vatRate: variant.vatRate,
-            quantity: variant.quantity,
-            deliveryDuration: variant.deliveryDuration,
-            isRushDelivery: variant.isRushDelivery,
-            fastDeliveryOptions: variant.fastDeliveryOptions as never,
-            productUrl: variant.productUrl,
-            locationBasedDelivery: variant.locationBasedDelivery,
-            onSale: variant.onSale,
-            archived: variant.archived,
-            blacklisted: variant.blacklisted,
-            locked: variant.locked,
-            size: variant.size,
-            attributes: variant.attributes as never,
+            platformContentId: mapped.platformContentId,
+            productMainId: mapped.productMainId,
+            title: mapped.title,
+            description: mapped.description,
+            brandId: mapped.brandId,
+            brandName: mapped.brandName,
+            categoryId: mapped.categoryId,
+            categoryName: mapped.categoryName,
+            color: mapped.color,
+            attributes: mapped.attributes as never,
+            platformCreatedAt: mapped.platformCreatedAt,
+            platformModifiedAt: mapped.platformModifiedAt,
             lastSyncedAt: new Date(),
           },
           update: {
-            barcode: variant.barcode,
-            stockCode: variant.stockCode,
-            salePrice: variant.salePrice,
-            listPrice: variant.listPrice,
-            vatRate: variant.vatRate,
-            quantity: variant.quantity,
-            deliveryDuration: variant.deliveryDuration,
-            isRushDelivery: variant.isRushDelivery,
-            fastDeliveryOptions: variant.fastDeliveryOptions as never,
-            productUrl: variant.productUrl,
-            locationBasedDelivery: variant.locationBasedDelivery,
-            onSale: variant.onSale,
-            archived: variant.archived,
-            blacklisted: variant.blacklisted,
-            locked: variant.locked,
-            size: variant.size,
-            attributes: variant.attributes as never,
+            productMainId: mapped.productMainId,
+            title: mapped.title,
+            description: mapped.description,
+            brandId: mapped.brandId,
+            brandName: mapped.brandName,
+            categoryId: mapped.categoryId,
+            categoryName: mapped.categoryName,
+            color: mapped.color,
+            attributes: mapped.attributes as never,
+            platformCreatedAt: mapped.platformCreatedAt,
+            platformModifiedAt: mapped.platformModifiedAt,
             lastSyncedAt: new Date(),
           },
         });
-      }
 
-      // Replace images for this product. ProductImage rows have no
-      // per-image identifier we can match against (Trendyol gives an
-      // ordered URL list), so the cleanest semantic is "this is the
-      // new ordered set, drop the previous set".
-      await tx.productImage.deleteMany({ where: { productId: product.id } });
-      if (mapped.images.length > 0) {
-        await tx.productImage.createMany({
-          data: mapped.images.map((img) => ({
-            organizationId: store.organizationId,
-            productId: product.id,
-            url: img.url,
-            position: img.position,
-          })),
-        });
-      }
-    });
+        for (const variant of mapped.variants) {
+          await tx.productVariant.upsert({
+            where: {
+              storeId_platformVariantId: {
+                storeId: store.id,
+                platformVariantId: variant.platformVariantId,
+              },
+            },
+            create: {
+              organizationId: store.organizationId,
+              storeId: store.id,
+              productId: product.id,
+              platformVariantId: variant.platformVariantId,
+              barcode: variant.barcode,
+              stockCode: variant.stockCode,
+              salePrice: variant.salePrice,
+              listPrice: variant.listPrice,
+              vatRate: variant.vatRate,
+              quantity: variant.quantity,
+              deliveryDuration: variant.deliveryDuration,
+              isRushDelivery: variant.isRushDelivery,
+              fastDeliveryOptions: variant.fastDeliveryOptions as never,
+              productUrl: variant.productUrl,
+              locationBasedDelivery: variant.locationBasedDelivery,
+              onSale: variant.onSale,
+              archived: variant.archived,
+              blacklisted: variant.blacklisted,
+              locked: variant.locked,
+              size: variant.size,
+              attributes: variant.attributes as never,
+              lastSyncedAt: new Date(),
+            },
+            update: {
+              barcode: variant.barcode,
+              stockCode: variant.stockCode,
+              salePrice: variant.salePrice,
+              listPrice: variant.listPrice,
+              vatRate: variant.vatRate,
+              quantity: variant.quantity,
+              deliveryDuration: variant.deliveryDuration,
+              isRushDelivery: variant.isRushDelivery,
+              fastDeliveryOptions: variant.fastDeliveryOptions as never,
+              productUrl: variant.productUrl,
+              locationBasedDelivery: variant.locationBasedDelivery,
+              onSale: variant.onSale,
+              archived: variant.archived,
+              blacklisted: variant.blacklisted,
+              locked: variant.locked,
+              size: variant.size,
+              attributes: variant.attributes as never,
+              lastSyncedAt: new Date(),
+            },
+          });
+        }
+
+        // Replace images for this product. ProductImage rows have no
+        // per-image identifier we can match against (Trendyol gives an
+        // ordered URL list), so the cleanest semantic is "this is the
+        // new ordered set, drop the previous set".
+        await tx.productImage.deleteMany({ where: { productId: product.id } });
+        if (mapped.images.length > 0) {
+          await tx.productImage.createMany({
+            data: mapped.images.map((img) => ({
+              organizationId: store.organizationId,
+              productId: product.id,
+              url: img.url,
+              position: img.position,
+            })),
+          });
+        }
+      });
+    } catch (err) {
+      console.error('[product-sync] content-upsert failed', {
+        storeId: store.id,
+        platformContentId: mapped.platformContentId.toString(),
+        productMainId: mapped.productMainId,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+      // Skip and continue — one bad content cannot abort the run.
+    }
   }
 }
 

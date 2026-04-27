@@ -138,7 +138,7 @@ describe('mapTrendyolContent', () => {
   });
 
   it('returns null size when no Beden attribute is present on the variant', () => {
-    const variant = STAGING_SAMPLE_DFSF.variants[0];
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
     if (variant === undefined) throw new Error('fixture variant missing');
     const out = mapTrendyolContent({
       ...STAGING_SAMPLE_DFSF,
@@ -160,7 +160,7 @@ describe('mapTrendyolContent', () => {
   });
 
   it('formats prices to fixed two-decimal strings', () => {
-    const variant = STAGING_SAMPLE_DFSF.variants[0];
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
     if (variant === undefined) throw new Error('fixture variant missing');
     const out = mapTrendyolContent({
       ...STAGING_SAMPLE_DFSF,
@@ -178,6 +178,62 @@ describe('mapTrendyolContent', () => {
     });
     expect(out.platformCreatedAt).toBeNull();
     expect(out.platformModifiedAt).toBeNull();
+  });
+
+  it('defaults to ₺0,00 when a variant arrives without a price block', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const { price: _droppedPrice, ...variantWithoutPrice } = variant;
+    void _droppedPrice;
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [variantWithoutPrice],
+    });
+    expect(out.variants[0]?.salePrice).toBe('0.00');
+    expect(out.variants[0]?.listPrice).toBe('0.00');
+  });
+
+  it('defaults to 0 quantity when a variant arrives without a stock block', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const { stock: _droppedStock, ...variantWithoutStock } = variant;
+    void _droppedStock;
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [variantWithoutStock],
+    });
+    expect(out.variants[0]?.quantity).toBe(0);
+  });
+
+  it('defaults delivery to null/false/[] when deliveryOptions is missing', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const { deliveryOptions: _droppedDelivery, ...variantWithoutDelivery } = variant;
+    void _droppedDelivery;
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [variantWithoutDelivery],
+    });
+    expect(out.variants[0]?.deliveryDuration).toBeNull();
+    expect(out.variants[0]?.isRushDelivery).toBe(false);
+    expect(out.variants[0]?.fastDeliveryOptions).toEqual([]);
+  });
+
+  it('handles missing content-level images and attributes with empty defaults', () => {
+    const { images: _i, attributes: _a, ...stripped } = STAGING_SAMPLE_DFSF;
+    void _i;
+    void _a;
+    const out = mapTrendyolContent(stripped);
+    expect(out.images).toEqual([]);
+    expect(out.attributes).toEqual([]);
+    expect(out.color).toBeNull();
+  });
+
+  it('handles a content with no variants array (defaults to [])', () => {
+    const { variants: _v, ...stripped } = STAGING_SAMPLE_DFSF;
+    void _v;
+    const out = mapTrendyolContent(stripped);
+    expect(out.variants).toEqual([]);
   });
 });
 
