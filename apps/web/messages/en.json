@@ -589,5 +589,81 @@
       "title": "Notification center coming soon",
       "description": "Sync events, new order notifications, and alert history will appear here."
     }
+  },
+  "products": {
+    "page": {
+      "title": "Products",
+      "description": "Approved products and variants from your store",
+      "intent": "Approved products synced from your Trendyol store"
+    },
+    "filters": {
+      "searchPlaceholder": "Search by product name, model code, stock code, barcode…",
+      "status": "Status",
+      "brand": "Brand",
+      "category": "Category",
+      "allBrands": "All brands",
+      "allCategories": "All categories",
+      "clear": "Clear filters",
+      "statusOptions": {
+        "onSale": "On sale",
+        "archived": "Archived",
+        "locked": "Locked",
+        "blacklisted": "Blacklisted"
+      }
+    },
+    "columns": {
+      "image": "Image",
+      "title": "Product",
+      "brand": "Brand",
+      "category": "Category",
+      "productMainId": "Model code",
+      "stockCode": "Stock code",
+      "barcode": "Barcode",
+      "color": "Color",
+      "size": "Size",
+      "variants": "Variants",
+      "delivery": "Delivery",
+      "salePrice": "Price",
+      "stock": "Stock",
+      "status": "Status"
+    },
+    "delivery": {
+      "sameDay": "Same-day shipping",
+      "nextDay": "Next-day shipping",
+      "days": "{n} days",
+      "standard": "Standard",
+      "mixed": "Mixed"
+    },
+    "multiVariantPlaceholder": "{n} variants",
+    "empty": {
+      "noStore": {
+        "title": "Connect a store first",
+        "description": "Connect your Trendyol store to see products.",
+        "cta": "Connect a store"
+      },
+      "noProducts": {
+        "title": "No products synced yet",
+        "description": "Run the first sync to get started.",
+        "cta": "Sync now"
+      },
+      "filtered": "No products match the filters."
+    },
+    "pagination": {
+      "showing": "{from}–{to} of {total} products",
+      "perPage": "Per page",
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "sync": {
+      "now": "Sync now",
+      "running": "Syncing",
+      "lastSyncedAgo": "Last synced {time}",
+      "syncedCount": "{n} products"
+    },
+    "a11y": {
+      "expandRow": "Show variants",
+      "collapseRow": "Hide variants",
+      "openFilter": "Open filter"
+    }
   }
 }
