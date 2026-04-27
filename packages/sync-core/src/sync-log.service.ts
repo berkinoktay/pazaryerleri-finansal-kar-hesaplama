@@ -218,3 +218,90 @@ export async function getById(
   }
   return row;
 }
+
+// ─── Worker chunk-loop helpers (PR 4) ─────────────────────────────────
+//
+// These are called by `apps/sync-worker` between chunks of a claimed
+// SyncLog. They live here (not in the worker app) so the API can also
+// surface their semantics in tests / future replay tooling without a
+// reverse dependency on sync-worker.
+
+export interface TickInput {
+  cursor: unknown;
+  progress: number;
+  total: number | null;
+  stage: string;
+}
+
+/**
+ * Persist progress between chunks. Stamps `lastTickAt` so the stale-
+ * claim reaper (PR 4f) can tell a live worker from a crashed one, and
+ * stores the cursor / progress / stage so the SyncCenter UI sees motion
+ * and a redeploy mid-sync resumes from the right place.
+ */
+export async function tick(syncLogId: string, input: TickInput): Promise<void> {
+  await prisma.syncLog.update({
+    where: { id: syncLogId },
+    data: {
+      lastTickAt: new Date(),
+      pageCursor: input.cursor as never,
+      progressCurrent: input.progress,
+      progressTotal: input.total,
+      progressStage: input.stage,
+    },
+  });
+}
+
+/**
+ * Hand a claimed row back to PENDING so another worker can pick it up.
+ * Used by the graceful-shutdown path: the worker is going down, the
+ * cursor is already persisted from the last tick, so dropping the
+ * claim (claimedAt/claimedBy → null) is enough — `pageCursor` is
+ * intentionally NOT cleared so the next claimer resumes mid-run.
+ */
+export async function releaseToPending(syncLogId: string): Promise<void> {
+  await prisma.syncLog.update({
+    where: { id: syncLogId },
+    data: {
+      status: 'PENDING',
+      claimedAt: null,
+      claimedBy: null,
+    },
+  });
+}
+
+/**
+ * Mark a chunk failure as retryable with exponential backoff.
+ *
+ * Backoff schedule: 30s × 2^(attemptCount-1), capped at 30 min.
+ *   attempt 1 →  30s
+ *   attempt 2 →  60s
+ *   attempt 3 →  2 min
+ *   attempt 4 →  4 min
+ *   attempt 5 →  8 min
+ *   attempt 6 → 16 min
+ *   attempt 7+ → 30 min (cap)
+ *
+ * The claim helper (`tryClaimNext`) skips FAILED_RETRYABLE rows whose
+ * `nextAttemptAt` is in the future, so the row stays untouched until
+ * the backoff elapses.
+ */
+export async function markRetryable(
+  syncLogId: string,
+  attemptCount: number,
+  errorCode: string,
+  errorMessage: string,
+): Promise<void> {
+  const backoffMs = Math.min(30_000 * Math.pow(2, attemptCount - 1), 30 * 60_000);
+  await prisma.syncLog.update({
+    where: { id: syncLogId },
+    data: {
+      status: 'FAILED_RETRYABLE',
+      errorCode,
+      errorMessage,
+      nextAttemptAt: new Date(Date.now() + backoffMs),
+      claimedAt: null,
+      claimedBy: null,
+    },
+  });
+}
