@@ -185,3 +185,89 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/sync-logs', () => {
     expect(body.data).toEqual([]);
   });
 });
+
+describe('GET /v1/organizations/:orgId/sync-logs (org-scoped)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('returns active + recent syncs across every store in the org', async () => {
+    const { user, orgId, storeId: storeAId } = await setupOrgWithStore();
+    const storeB = await prisma.store.create({
+      data: {
+        organizationId: orgId,
+        name: 'Store B',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'xb',
+        credentials: 'opaque',
+      },
+    });
+
+    await prisma.syncLog.create({
+      data: {
+        organizationId: orgId,
+        storeId: storeAId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+      },
+    });
+    await prisma.syncLog.create({
+      data: {
+        organizationId: orgId,
+        storeId: storeB.id,
+        syncType: 'ORDERS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/sync-logs?active=true`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Array<{ storeId: string; status: string }> };
+    expect(body.data).toHaveLength(2);
+    for (const log of body.data) {
+      expect(log.status).toBe('RUNNING');
+    }
+    const returnedStoreIds = body.data.map((log) => log.storeId).sort();
+    expect(returnedStoreIds).toEqual([storeAId, storeB.id].sort());
+  });
+
+  it('does not leak syncs from a different org', async () => {
+    const { user, orgId } = await setupOrgWithStore();
+    const otherOrg = await createOrganization();
+    const otherStore = await prisma.store.create({
+      data: {
+        organizationId: otherOrg.id,
+        name: 'Other',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'xx',
+        credentials: 'opaque',
+      },
+    });
+    await prisma.syncLog.create({
+      data: {
+        organizationId: otherOrg.id,
+        storeId: otherStore.id,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/sync-logs?active=true`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: unknown[] };
+    expect(body.data).toEqual([]);
+  });
+});

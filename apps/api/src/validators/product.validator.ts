@@ -27,6 +27,16 @@ export const StartSyncResponseSchema = z
 export const SyncLogResponseSchema = z
   .object({
     id: z.string().uuid().openapi({ example: '7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f' }),
+    storeId: z
+      .string()
+      .uuid()
+      .openapi({
+        example: '1c1b9b3a-4f2d-49a8-9c5e-3a2f1d8b9c0e',
+        description:
+          'Store the sync belongs to. Required by the org-scoped sync-logs endpoint so the ' +
+          'dashboard SyncCenter can group rows by store; redundant on store-scoped endpoints ' +
+          'where the caller already knows the storeId from the URL.',
+      }),
     syncType: z.enum(['ORDERS', 'PRODUCTS', 'SETTLEMENTS']).openapi({ example: 'PRODUCTS' }),
     status: z.enum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'FAILED_RETRYABLE']).openapi({
       example: 'RUNNING',
@@ -298,6 +308,7 @@ export function toProductWithVariantsResponse(
 
 export function toSyncLogResponse(row: SyncLog): {
   id: string;
+  storeId: string;
   syncType: SyncLog['syncType'];
   status: SyncLog['status'];
   startedAt: string;
@@ -311,6 +322,7 @@ export function toSyncLogResponse(row: SyncLog): {
 } {
   return {
     id: row.id,
+    storeId: row.storeId,
     syncType: row.syncType,
     status: row.status,
     startedAt: row.startedAt.toISOString(),

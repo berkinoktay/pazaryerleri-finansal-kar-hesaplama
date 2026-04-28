@@ -87,6 +87,7 @@ function applyEvent(existing: SyncLog[], event: SyncLogRealtimeEvent): SyncLog[]
 
   const incoming: SyncLog = {
     id: event.row.id,
+    storeId: event.row.storeId,
     syncType: event.row.syncType,
     status: event.row.status,
     startedAt: event.row.startedAt,

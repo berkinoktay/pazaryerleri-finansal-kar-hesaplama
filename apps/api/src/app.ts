@@ -13,6 +13,7 @@ import meRoutes from './routes/me.routes';
 import organizationRoutes from './routes/organization.routes';
 import productRoutes from './routes/product.routes';
 import storeRoutes from './routes/store.routes';
+import syncLogRoutes from './routes/sync-log.routes';
 
 /**
  * Builds the Hono application without side effects.
@@ -120,6 +121,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', organizationRoutes);
   app.route('/', storeRoutes);
   app.route('/', productRoutes);
+  app.route('/', syncLogRoutes);
 
   return app;
 }

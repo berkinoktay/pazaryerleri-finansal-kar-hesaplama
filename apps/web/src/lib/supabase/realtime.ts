@@ -27,6 +27,7 @@ interface SyncLogsRowWire {
 
 export interface SyncLogRealtimeShape {
   id: string;
+  storeId: SyncLogsRowWire['store_id'];
   syncType: SyncLogsRowWire['sync_type'];
   status: SyncLogsRowWire['status'];
   startedAt: string;
@@ -50,6 +51,7 @@ export interface SyncLogRealtimeEvent {
 function snakeToCamel(row: SyncLogsRowWire): SyncLogRealtimeShape {
   return {
     id: row.id,
+    storeId: row.store_id,
     syncType: row.sync_type,
     status: row.status,
     startedAt: row.started_at,

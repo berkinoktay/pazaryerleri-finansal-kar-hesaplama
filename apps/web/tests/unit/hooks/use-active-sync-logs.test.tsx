@@ -44,6 +44,7 @@ function makeLog(
 ) {
   return {
     id: overrides.id ?? 'log-1',
+    storeId: STORE_ID,
     syncType: 'PRODUCTS' as const,
     status: overrides.status ?? 'RUNNING',
     startedAt: overrides.startedAt ?? '2026-04-27T12:00:00Z',
@@ -77,6 +78,7 @@ describe('useActiveSyncLogs', () => {
         id: 'log-1',
         row: {
           id: 'log-1',
+          storeId: STORE_ID,
           syncType: 'PRODUCTS',
           status: 'RUNNING',
           startedAt: '2026-04-27T12:00:00Z',
@@ -120,6 +122,7 @@ describe('useActiveSyncLogs', () => {
         id: 'log-new',
         row: {
           id: 'log-new',
+          storeId: STORE_ID,
           syncType: 'PRODUCTS',
           status: 'RUNNING',
           startedAt: '2026-04-27T12:00:00Z',
