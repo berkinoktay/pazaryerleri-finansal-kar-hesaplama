@@ -19,7 +19,12 @@ import {
   type MappedProduct,
   type TrendyolCredentials,
 } from '@pazarsync/marketplace';
-import { decryptCredentials, parseProductsCursor, type ProductsCursor } from '@pazarsync/sync-core';
+import {
+  decryptCredentials,
+  parseProductsCursor,
+  syncLog,
+  type ProductsCursor,
+} from '@pazarsync/sync-core';
 
 import type { ChunkResult, ModuleHandler } from './types';
 
@@ -27,9 +32,15 @@ export async function processProductsChunk(input: {
   syncLog: SyncLog;
   cursor: unknown | null;
 }): Promise<ChunkResult> {
-  const { syncLog } = input;
+  const { syncLog: log } = input;
   const cursor = parseProductsCursor(input.cursor);
-  const store = await prisma.store.findUniqueOrThrow({ where: { id: syncLog.storeId } });
+  syncLog.info('chunk.start', {
+    syncLogId: log.id,
+    storeId: log.storeId,
+    cursor: input.cursor,
+    progressCurrent: log.progressCurrent,
+  });
+  const store = await prisma.store.findUniqueOrThrow({ where: { id: log.storeId } });
   const credentials = decryptStoreCredentials(store);
 
   // Generator yields the FIRST page, then we return — the dispatcher loops
@@ -43,18 +54,18 @@ export async function processProductsChunk(input: {
 
   // Trendyol returned no more content (empty content[]) — sync is complete.
   if (done === true || value === undefined) {
-    return { kind: 'done', finalCount: syncLog.progressCurrent };
+    return { kind: 'done', finalCount: log.progressCurrent };
   }
 
   const { batch, pageMeta } = value;
 
   if (batch.length === 0) {
-    return { kind: 'done', finalCount: syncLog.progressCurrent };
+    return { kind: 'done', finalCount: log.progressCurrent };
   }
 
-  await upsertBatch(store, batch);
+  await upsertBatch(store, batch, log.id);
 
-  const newProgress = syncLog.progressCurrent + batch.length;
+  const newProgress = log.progressCurrent + batch.length;
 
   // Cursor advances: prefer Trendyol's own nextPageToken when present
   // (it returns one past the 10k page-cap, and may for non-cap'd pages
@@ -70,6 +81,14 @@ export async function processProductsChunk(input: {
   if (newProgress >= pageMeta.totalElements) {
     return { kind: 'done', finalCount: newProgress };
   }
+
+  syncLog.info('chunk.complete', {
+    syncLogId: log.id,
+    pageBatchSize: batch.length,
+    newProgress,
+    totalElements: pageMeta.totalElements,
+    nextCursor,
+  });
 
   return {
     kind: 'continue',
@@ -94,7 +113,7 @@ function decryptStoreCredentials(store: Store): TrendyolCredentials {
   return decrypted;
 }
 
-async function upsertBatch(store: Store, batch: MappedProduct[]): Promise<void> {
+async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: string): Promise<void> {
   // ─── PORTED VERBATIM from apps/api/src/services/product-sync.service.ts ──
   // One transaction per content (parent + its variants + image replace).
   // Each content also runs inside a try/catch — a single malformed
@@ -219,7 +238,8 @@ async function upsertBatch(store: Store, batch: MappedProduct[]): Promise<void> 
         }
       });
     } catch (err) {
-      console.error('[product-sync] content-upsert failed', {
+      syncLog.error('content.upsert.failed', {
+        syncLogId,
         storeId: store.id,
         platformContentId: mapped.platformContentId.toString(),
         productMainId: mapped.productMainId,
