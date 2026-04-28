@@ -1,10 +1,13 @@
 'use client';
 
+import type { StoreEnvironment as DbStoreEnvironment } from '@pazarsync/db/enums';
 import { useTranslations } from 'next-intl';
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-export type StoreEnvironment = 'PRODUCTION' | 'SANDBOX';
+// Re-export the DB enum under the local name so feature code keeps its
+// existing import; the values live exactly once, in the schema.
+export type StoreEnvironment = DbStoreEnvironment;
 
 export interface EnvironmentTabsProps {
   value: StoreEnvironment;

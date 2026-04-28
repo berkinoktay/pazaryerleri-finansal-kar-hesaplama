@@ -1,9 +1,8 @@
 import { prisma } from '@pazarsync/db';
+import type { MemberRole } from '@pazarsync/db';
 import { createMiddleware } from 'hono/factory';
 
 import { ForbiddenError, UnauthorizedError } from '../lib/errors';
-
-type MemberRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
 
 /**
  * Reads `:orgId` from the request path, verifies the authenticated user

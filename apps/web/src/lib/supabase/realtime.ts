@@ -1,5 +1,6 @@
 'use client';
 
+import type { SyncStatus, SyncType } from '@pazarsync/db/enums';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 import { createClient } from './client';
@@ -20,14 +21,14 @@ interface SyncLogsRowWire {
    */
   organization_id: string;
   store_id: string;
-  sync_type: 'PRODUCTS' | 'ORDERS' | 'SETTLEMENTS';
+  sync_type: SyncType;
   /**
    * Full worker-pipeline lifecycle. PENDING + FAILED_RETRYABLE are
    * emitted by the worker (apps/sync-worker) — `tryClaimNext` writes
    * RUNNING; `markRetryable` writes FAILED_RETRYABLE; `acquireSlot`
    * inserts PENDING. Logical decoding sees all five over the channel.
    */
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'FAILED_RETRYABLE';
+  status: SyncStatus;
   started_at: string;
   completed_at: string | null;
   records_processed: number;

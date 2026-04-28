@@ -142,6 +142,9 @@ importers:
       '@pazarsync/api-client':
         specifier: workspace:^
         version: link:../../packages/api-client
+      '@pazarsync/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@pazarsync/utils':
         specifier: workspace:*
         version: link:../../packages/utils

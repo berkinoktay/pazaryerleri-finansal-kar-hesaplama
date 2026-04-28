@@ -1,5 +1,20 @@
 import { randomUUID } from 'node:crypto';
+
+import type {
+  MemberRole,
+  OrderStatus,
+  Platform,
+  StoreEnvironment,
+  StoreStatus,
+} from '@pazarsync/db';
+
 import { prisma } from './db';
+
+// Re-exported so test files can write `import type { MemberRole } from
+// '../helpers/factories'` without reaching into @pazarsync/db directly —
+// the helpers module is the canonical seam for tests, and this avoids
+// every test file growing a second package import.
+export type { MemberRole } from '@pazarsync/db';
 
 export interface CreateUserProfileOverrides {
   id?: string;
@@ -34,8 +49,6 @@ export async function createOrganization(overrides: CreateOrganizationOverrides 
   });
 }
 
-export type MemberRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
-
 export async function createMembership(
   organizationId: string,
   userId: string,
@@ -48,10 +61,10 @@ export async function createMembership(
 
 export interface CreateStoreOverrides {
   name?: string;
-  platform?: 'TRENDYOL' | 'HEPSIBURADA';
-  environment?: 'PRODUCTION' | 'SANDBOX';
+  platform?: Platform;
+  environment?: StoreEnvironment;
   externalAccountId?: string;
-  status?: 'ACTIVE' | 'CONNECTION_ERROR' | 'DISABLED';
+  status?: StoreStatus;
 }
 
 export async function createStore(organizationId: string, overrides: CreateStoreOverrides = {}) {
@@ -77,7 +90,7 @@ export interface CreateOrderOverrides {
   totalAmount?: string;
   commissionAmount?: string;
   shippingCost?: string;
-  status?: 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
+  status?: OrderStatus;
 }
 
 export async function createOrder(

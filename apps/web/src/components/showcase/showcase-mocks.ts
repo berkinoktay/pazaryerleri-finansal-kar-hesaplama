@@ -1,3 +1,4 @@
+import type { Platform } from '@pazarsync/db/enums';
 import Decimal from 'decimal.js';
 
 /**
@@ -48,7 +49,7 @@ export const MOCK_ACTIVITY: ActivityEntry[] = [
 export interface MockOrder {
   id: string;
   orderNumber: string;
-  platform: 'TRENDYOL' | 'HEPSIBURADA';
+  platform: Platform;
   status: 'pending' | 'shipped' | 'delivered' | 'returned';
   customer: string;
   orderDate: string;

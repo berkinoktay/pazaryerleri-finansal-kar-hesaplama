@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi';
+import { Platform, StoreEnvironment, StoreStatus } from '@pazarsync/db';
 
 /**
  * Public Store representation — the shape returned on every store
@@ -9,15 +10,15 @@ export const StoreSchema = z
   .object({
     id: z.string().uuid().openapi({ example: '3f5c7b2a-0e4d-4a8b-8f2e-9c1a5b7d0f11' }),
     name: z.string().openapi({ example: 'Akyıldız Trendyol' }),
-    platform: z.enum(['TRENDYOL', 'HEPSIBURADA']).openapi({ example: 'TRENDYOL' }),
-    environment: z.enum(['PRODUCTION', 'SANDBOX']).openapi({ example: 'PRODUCTION' }),
+    platform: z.enum(Platform).openapi({ example: 'TRENDYOL' }),
+    environment: z.enum(StoreEnvironment).openapi({ example: 'PRODUCTION' }),
     externalAccountId: z.string().openapi({
       description:
         'Publicly visible seller/merchant ID — stored unencrypted so the uniqueness ' +
         'constraint (one account per org) can be enforced without decrypt.',
       example: '99999',
     }),
-    status: z.enum(['ACTIVE', 'CONNECTION_ERROR', 'DISABLED']).openapi({ example: 'ACTIVE' }),
+    status: z.enum(StoreStatus).openapi({ example: 'ACTIVE' }),
     lastConnectedAt: z.string().datetime().nullable().openapi({ example: '2026-04-21T10:30:00Z' }),
     lastSyncAt: z.string().datetime().nullable().openapi({ example: null }),
     createdAt: z.string().datetime().openapi({ example: '2026-04-21T10:30:00Z' }),
@@ -75,10 +76,7 @@ export const ConnectStoreInputSchema = z
       .min(2, 'INVALID_NAME_TOO_SHORT')
       .max(80, 'INVALID_NAME_TOO_LONG')
       .openapi({ example: 'Ana Mağaza' }),
-    environment: z
-      .enum(['PRODUCTION', 'SANDBOX'])
-      .default('PRODUCTION')
-      .openapi({ example: 'PRODUCTION' }),
+    environment: z.enum(StoreEnvironment).default('PRODUCTION').openapi({ example: 'PRODUCTION' }),
     credentials: z
       .discriminatedUnion('platform', [TrendyolCredentialsSchema])
       .openapi({ description: 'Platform-specific credentials. Never echoed back.' }),

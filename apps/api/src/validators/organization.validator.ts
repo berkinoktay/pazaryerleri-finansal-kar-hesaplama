@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi';
+import { MemberRole } from '@pazarsync/db';
 
 import { slugify } from '../lib/slugify';
 
@@ -114,7 +115,7 @@ export const CreateOrganizationInputSchema = z
 export const OrganizationCreatedResponseSchema = OrganizationSchema.extend({
   membership: z
     .object({
-      role: z.enum(['OWNER', 'ADMIN', 'MEMBER', 'VIEWER']).openapi({ example: 'OWNER' }),
+      role: z.enum(MemberRole).openapi({ example: 'OWNER' }),
     })
     .openapi('MembershipSummary'),
 }).openapi('OrganizationCreatedResponse', {

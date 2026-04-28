@@ -1,5 +1,6 @@
 'use client';
 
+import type { SyncStatus, SyncType } from '@pazarsync/db/enums';
 import {
   AlertCircleIcon,
   CheckmarkCircle02Icon,
@@ -37,7 +38,7 @@ import { cn } from '@/lib/utils';
 export interface SyncCenterLog {
   id: string;
   storeId?: string;
-  syncType: 'PRODUCTS' | 'ORDERS' | 'SETTLEMENTS';
+  syncType: SyncType;
   /**
    * Worker-pipeline lifecycle. `PENDING` is briefly visible between
    * trigger and worker claim (~1s); `RUNNING` is active; `FAILED_RETRYABLE`
@@ -46,7 +47,7 @@ export interface SyncCenterLog {
    * to re-claim — surfaced as the third "Yeniden deneniyor" section.
    * `COMPLETED` / `FAILED` are terminal.
    */
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'FAILED_RETRYABLE';
+  status: SyncStatus;
   startedAt: string;
   completedAt: string | null;
   recordsProcessed: number;
