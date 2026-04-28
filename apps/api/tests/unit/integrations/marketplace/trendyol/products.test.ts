@@ -236,25 +236,87 @@ describe('fetchApprovedProducts — happy path & pagination', () => {
 });
 
 describe('fetchApprovedProducts — error paths', () => {
-  it('throws MarketplaceAuthError on 401', async () => {
+  it('throws MarketplaceAuthError on 401 — no retry, auth issues are permanent', async () => {
     fetchSpy.mockResolvedValueOnce(new Response(null, { status: 401 }));
 
     const gen = fetchApprovedProducts({ baseUrl: BASE_URL, credentials: CREDENTIALS });
     await expect(gen.next()).rejects.toBeInstanceOf(MarketplaceAuthError);
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
+});
 
-  it('throws MarketplaceUnreachable on 502', async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 502 }));
+describe('fetchApprovedProducts — 5xx + network retry', () => {
+  it('retries 502 with backoff and succeeds when the next call 200s', async () => {
+    vi.useFakeTimers();
+    fetchSpy
+      .mockResolvedValueOnce(new Response(null, { status: 502 }))
+      .mockResolvedValueOnce(
+        jsonResponse(makePage({ page: 0, size: 100, totalElements: 1, content: [makeContent(1)] })),
+      );
 
     const gen = fetchApprovedProducts({ baseUrl: BASE_URL, credentials: CREDENTIALS });
-    await expect(gen.next()).rejects.toBeInstanceOf(MarketplaceUnreachable);
+    const promise = gen.next();
+    // First retry uses INITIAL_BACKOFF_MS = 1000ms (no Retry-After on 5xx).
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await promise;
+
+    expect(result.done).toBe(false);
+    expect(result.value?.batch).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('treats fetch network error as MarketplaceUnreachable', async () => {
-    fetchSpy.mockRejectedValueOnce(new TypeError('network down'));
+  it('retries network errors with backoff and succeeds when the next call 200s', async () => {
+    vi.useFakeTimers();
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('network down'))
+      .mockResolvedValueOnce(
+        jsonResponse(makePage({ page: 0, size: 100, totalElements: 1, content: [makeContent(1)] })),
+      );
 
     const gen = fetchApprovedProducts({ baseUrl: BASE_URL, credentials: CREDENTIALS });
-    await expect(gen.next()).rejects.toBeInstanceOf(MarketplaceUnreachable);
+    const promise = gen.next();
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await promise;
+
+    expect(result.done).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws MarketplaceUnreachable after exhausting 5xx retries', async () => {
+    vi.useFakeTimers();
+    // 4 backoff retries + 1 final = 5 total 502s.
+    for (let i = 0; i < 5; i++) {
+      fetchSpy.mockResolvedValueOnce(new Response(null, { status: 502 }));
+    }
+
+    const gen = fetchApprovedProducts({ baseUrl: BASE_URL, credentials: CREDENTIALS });
+    const rejection = expect(gen.next()).rejects.toBeInstanceOf(MarketplaceUnreachable);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejection;
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+  });
+
+  it('throws MarketplaceUnreachable after exhausting network-error retries', async () => {
+    vi.useFakeTimers();
+    for (let i = 0; i < 5; i++) {
+      fetchSpy.mockRejectedValueOnce(new TypeError('connection reset'));
+    }
+
+    const gen = fetchApprovedProducts({ baseUrl: BASE_URL, credentials: CREDENTIALS });
+    const rejection = expect(gen.next()).rejects.toBeInstanceOf(MarketplaceUnreachable);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejection;
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+  });
+
+  it('does NOT retry 503 — Trendyol uses it for permanent IP-whitelist issues', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 503 }));
+
+    const gen = fetchApprovedProducts({ baseUrl: BASE_URL, credentials: CREDENTIALS });
+    // mapTrendyolResponseToDomainError treats 503 as MarketplaceAccessError
+    // (sandbox IP whitelist); retrying wouldn't help.
+    await expect(gen.next()).rejects.toThrow();
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 });
 

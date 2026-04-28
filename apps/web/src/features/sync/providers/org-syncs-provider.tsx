@@ -3,12 +3,21 @@
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import * as React from 'react';
 
-import { subscribeToOrgSyncs, type SyncLogRealtimeEvent } from '@/lib/supabase/realtime';
+import {
+  subscribeToOrgSyncs,
+  type RealtimeHealth,
+  type SyncLogRealtimeEvent,
+} from '@/lib/supabase/realtime';
 
 import { listOrgSyncLogs, type SyncLog } from '../api/list-org-sync-logs.api';
 import { orgSyncKeys } from '../query-keys';
 
-const POLLING_INTERVAL_MS = 2_000;
+// 10s, not 2s — polling is now a true fallback (only fires when the
+// Realtime channel is unhealthy), so the slower tempo is fine. The
+// 2s polling we used pre-PR-#59 burnt ~30 redundant DB queries per
+// minute per active merchant during a sync; almost all of those
+// duplicated work the WebSocket already did.
+const POLLING_INTERVAL_MS = 10_000;
 const RECENT_LIMIT = 5;
 
 function isActive(status: SyncLog['status']): boolean {
@@ -33,9 +42,13 @@ const ctx = React.createContext<OrgSyncsContextValue | null>(null);
  *   1. REST hydration on mount via listOrgSyncLogs
  *   2. Realtime postgres_changes (subscribeToOrgSyncs) — sub-second
  *      cache updates via setQueryData
- *   3. Polling fallback — refetchInterval of 2 s while ANY active sync
- *      exists; catches dropped WebSockets without explicit health
- *      detection
+ *   3. Polling fallback — fires only when the Realtime channel is NOT
+ *      healthy (errored / paused / connecting). Health is reported by
+ *      `subscribeToOrgSyncs` via `onHealthChange`. While the channel
+ *      is healthy, refetchInterval returns false and we save the DB
+ *      the redundant query. On `errored`/`paused` → `healthy` we fire
+ *      one `invalidateQueries` to reconcile any events missed during
+ *      the outage.
  */
 export function OrgSyncsProvider({
   orgId,
@@ -46,6 +59,10 @@ export function OrgSyncsProvider({
 }): React.ReactElement {
   const queryClient = useQueryClient();
   const isEnabled = typeof orgId === 'string' && orgId.length > 0;
+  // Health is state, not a ref, so transitions trigger a re-render and
+  // React Query re-evaluates `refetchInterval` immediately (a ref would
+  // let one stale poll fire on the originally-scheduled tick).
+  const [realtimeHealth, setRealtimeHealth] = React.useState<RealtimeHealth>('connecting');
 
   const query: UseQueryResult<SyncLog[]> = useQuery<SyncLog[]>({
     queryKey: isEnabled && orgId !== null ? orgSyncKeys.list(orgId) : ['org-syncs', '__disabled__'],
@@ -57,6 +74,11 @@ export function OrgSyncsProvider({
     },
     enabled: isEnabled,
     refetchInterval: (q) => {
+      // Polling is a fallback for an unhealthy channel — when Realtime
+      // is delivering events we don't need it. `paused` (tab hidden)
+      // also returns false because nobody is watching anyway.
+      if (realtimeHealth === 'healthy') return false;
+      if (realtimeHealth === 'paused') return false;
       const data = q.state.data;
       if (data === undefined) return false;
       return data.some((log) => isActive(log.status)) ? POLLING_INTERVAL_MS : false;
@@ -66,12 +88,27 @@ export function OrgSyncsProvider({
   React.useEffect(() => {
     if (!isEnabled || orgId === null) return;
     const queryKey = orgSyncKeys.list(orgId);
-    const unsubscribe = subscribeToOrgSyncs(orgId, (event: SyncLogRealtimeEvent) => {
-      queryClient.setQueryData<SyncLog[] | undefined>(queryKey, (existing) =>
-        applyEvent(existing ?? [], event),
-      );
+    return subscribeToOrgSyncs(orgId, {
+      onEvent: (event: SyncLogRealtimeEvent) => {
+        queryClient.setQueryData<SyncLog[] | undefined>(queryKey, (existing) =>
+          applyEvent(existing ?? [], event),
+        );
+      },
+      onHealthChange: (next) => {
+        setRealtimeHealth((prev) => {
+          // Recovery edge: when health flips from a real outage back to
+          // healthy, refetch once so any events emitted during the
+          // outage window get reconciled. The initial `connecting` →
+          // `healthy` does NOT trigger this — REST hydrate already ran
+          // on mount.
+          const wasOutage = prev === 'errored' || prev === 'paused';
+          if (next === 'healthy' && wasOutage) {
+            void queryClient.invalidateQueries({ queryKey });
+          }
+          return next;
+        });
+      },
     });
-    return unsubscribe;
   }, [isEnabled, orgId, queryClient]);
 
   const value = React.useMemo<OrgSyncsContextValue>(() => {

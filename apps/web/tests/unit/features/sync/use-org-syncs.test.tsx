@@ -4,7 +4,7 @@ import { type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { OrgSyncsProvider, useOrgSyncs } from '@/features/sync/providers/org-syncs-provider';
-import type { SyncLogRealtimeEvent } from '@/lib/supabase/realtime';
+import type { RealtimeHealth, SyncLogRealtimeEvent } from '@/lib/supabase/realtime';
 
 import { createTestQueryClient } from '../../../helpers/render';
 import { HttpResponse, http, server } from '../../../helpers/msw';
@@ -12,21 +12,26 @@ import { HttpResponse, http, server } from '../../../helpers/msw';
 const ORG_ID = '00000000-0000-0000-0000-000000000099';
 const STORE_ID = '00000000-0000-0000-0000-000000000088';
 
-// Capture the onEvent callback so each test can drive Realtime events
-// imperatively. The unsubscribeMock lets us assert cleanup on unmount.
+// Capture the provider's callbacks so each test can drive Realtime
+// events and channel-health transitions imperatively. The
+// unsubscribeMock lets us assert cleanup on unmount.
 let emitRealtimeEvent: (event: SyncLogRealtimeEvent) => void = () => {};
+let emitHealthChange: (health: RealtimeHealth) => void = () => {};
 const unsubscribeMock = vi.fn();
+
+interface MockOptions {
+  onEvent: (event: SyncLogRealtimeEvent) => void;
+  onHealthChange?: (health: RealtimeHealth) => void;
+}
 
 vi.mock('@/lib/supabase/realtime', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/supabase/realtime')>('@/lib/supabase/realtime');
   return {
     ...actual,
-    subscribeToOrgSyncs: (
-      _orgId: string,
-      onEvent: (event: SyncLogRealtimeEvent) => void,
-    ): (() => void) => {
-      emitRealtimeEvent = onEvent;
+    subscribeToOrgSyncs: (_orgId: string, options: MockOptions): (() => void) => {
+      emitRealtimeEvent = options.onEvent;
+      emitHealthChange = options.onHealthChange ?? (() => {});
       return unsubscribeMock;
     },
   };
@@ -69,6 +74,7 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   unsubscribeMock.mockClear();
   emitRealtimeEvent = () => {};
+  emitHealthChange = () => {};
 });
 
 afterEach(() => {
@@ -138,7 +144,7 @@ describe('useOrgSyncs', () => {
     expect(getCount).toBe(1);
   });
 
-  it('polls while a RUNNING sync exists in the cache', async () => {
+  it('polls while a RUNNING sync exists AND the Realtime channel is unhealthy', async () => {
     let getCount = 0;
     server.use(
       http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/sync-logs`, () => {
@@ -153,12 +159,80 @@ describe('useOrgSyncs', () => {
     await waitFor(() => expect(result.current.activeSyncs).toHaveLength(1));
     expect(getCount).toBe(1);
 
-    // Wait past two polling intervals (>=4s); each interval should
-    // trigger a refetch because the cache contains a RUNNING row.
-    await waitFor(() => expect(getCount).toBeGreaterThanOrEqual(2), {
-      timeout: 5_000,
-      interval: 200,
+    // Drive the channel into `errored` — without a healthy gate, polling
+    // is the only thing keeping the cache fresh.
+    act(() => {
+      emitHealthChange('errored');
     });
+
+    // POLLING_INTERVAL_MS is 10 s; wait ~12 s for at least one poll.
+    await waitFor(() => expect(getCount).toBeGreaterThanOrEqual(2), {
+      timeout: 12_000,
+      interval: 250,
+    });
+  }, 15_000);
+
+  it('does NOT poll while the Realtime channel is healthy even if a sync is active', async () => {
+    let getCount = 0;
+    server.use(
+      http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/sync-logs`, () => {
+        getCount += 1;
+        return HttpResponse.json({
+          data: [makeLog({ id: 'log-running', status: 'RUNNING' })],
+        });
+      }),
+    );
+
+    const { result } = renderHook(() => useOrgSyncs(), { wrapper });
+    await waitFor(() => expect(result.current.activeSyncs).toHaveLength(1));
+    expect(getCount).toBe(1);
+
+    // Channel reports healthy — Realtime is delivering events directly,
+    // so the polling fallback should be off.
+    act(() => {
+      emitHealthChange('healthy');
+    });
+
+    // Wait noticeably longer than the polling interval (10 s); handler
+    // must NOT be hit again. Sub-interval wait would prove nothing.
+    await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
+    expect(getCount).toBe(1);
+  }, 15_000);
+
+  it('fires invalidateQueries on `errored` → `healthy` recovery to reconcile missed events', async () => {
+    let getCount = 0;
+    server.use(
+      http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/sync-logs`, () => {
+        getCount += 1;
+        return HttpResponse.json({
+          data: [makeLog({ id: 'log-running', status: 'RUNNING' })],
+        });
+      }),
+    );
+
+    const { result } = renderHook(() => useOrgSyncs(), { wrapper });
+    await waitFor(() => expect(result.current.activeSyncs).toHaveLength(1));
+    expect(getCount).toBe(1);
+
+    // Initial connecting → healthy must NOT fire a refetch (REST hydrate
+    // already ran on mount).
+    act(() => {
+      emitHealthChange('healthy');
+    });
+    // Brief wait — invalidate would have fired immediately.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    expect(getCount).toBe(1);
+
+    // Now simulate an outage and recovery.
+    act(() => {
+      emitHealthChange('errored');
+    });
+    act(() => {
+      emitHealthChange('healthy');
+    });
+
+    // Recovery edge SHOULD fire one invalidate, which triggers a refetch.
+    await waitFor(() => expect(getCount).toBe(2), { timeout: 2_000 });
   });
 
   it('cleans up the Realtime subscription on unmount', async () => {
