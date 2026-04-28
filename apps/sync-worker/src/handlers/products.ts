@@ -28,16 +28,56 @@ import {
 
 import type { ChunkResult, ModuleHandler } from './types';
 
+// Trendyol getApprovedProducts pagination contract (per
+// docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md §3):
+//
+//   - Default: request?page=N&size=100 — works while page * size ≤ 10,000.
+//   - nextPageToken: required ONLY past the 10k cap.
+//
+// Trendyol's API has been observed to return 500 deterministically on
+// specific nextPageToken values mid-stream (real upstream issue, sample
+// repro: token "eyJzb3J0IjpbMTc2MDk2MTM2NzAwMF19" on a 5,624-product
+// catalog at the page-24 boundary). Page-based pagination walks past
+// the bad token. Token cursors are kept in reserve for catalogs > 10k
+// where they're actually required.
+const TRENDYOL_PRODUCTS_PAGE_SIZE = 100;
+const TRENDYOL_APPROVED_PAGE_CAP_ITEMS = 10_000;
+
 export async function processProductsChunk(input: {
   syncLog: SyncLog;
   cursor: unknown | null;
 }): Promise<ChunkResult> {
   const { syncLog: log } = input;
-  const cursor = parseProductsCursor(input.cursor);
+  const rawCursor = parseProductsCursor(input.cursor);
+
+  // Recovery path for token-stuck rows. If we receive a saved token
+  // cursor and progress is still under the 10k cap (where token is
+  // optional per Trendyol docs), substitute a page-based cursor at
+  // the index that matches our current progress. Idempotent upsert
+  // means re-fetching the page that produced progressCurrent doesn't
+  // corrupt anything; in practice progressCurrent always lands on a
+  // page boundary so no products are re-fetched.
+  let cursor = rawCursor;
+  if (
+    rawCursor !== null &&
+    rawCursor.kind === 'token' &&
+    log.progressCurrent < TRENDYOL_APPROVED_PAGE_CAP_ITEMS
+  ) {
+    const fallbackPage = Math.floor(log.progressCurrent / TRENDYOL_PRODUCTS_PAGE_SIZE);
+    syncLog.warn('chunk.cursor-token-fallback', {
+      syncLogId: log.id,
+      storeId: log.storeId,
+      fromToken: rawCursor.token,
+      toPage: fallbackPage,
+      progressCurrent: log.progressCurrent,
+    });
+    cursor = { kind: 'page', n: fallbackPage };
+  }
+
   syncLog.info('chunk.start', {
     syncLogId: log.id,
     storeId: log.storeId,
-    cursor: input.cursor,
+    cursor,
     progressCurrent: log.progressCurrent,
   });
   const store = await prisma.store.findUniqueOrThrow({ where: { id: log.storeId } });
@@ -67,19 +107,33 @@ export async function processProductsChunk(input: {
 
   const newProgress = log.progressCurrent + batch.length;
 
-  // Cursor advances: prefer Trendyol's own nextPageToken when present
-  // (it returns one past the 10k page-cap, and may for non-cap'd pages
-  // too — using it is always correct). Otherwise increment the page index.
-  let nextCursor: ProductsCursor;
-  if (pageMeta.nextPageToken !== null && pageMeta.nextPageToken !== undefined) {
-    nextCursor = { kind: 'token', token: pageMeta.nextPageToken };
-  } else {
-    const currentN = cursor === null ? 0 : cursor.kind === 'page' ? cursor.n : 0;
-    nextCursor = { kind: 'page', n: currentN + 1 };
-  }
-
   if (newProgress >= pageMeta.totalElements) {
     return { kind: 'done', finalCount: newProgress };
+  }
+
+  // Advance to the next page. Per Trendyol's documented contract,
+  // page-based pagination is the default below the 10k cap and
+  // nextPageToken is reserved for past-cap walks. Compute next page
+  // index from the cursor we just consumed; switch to token only when
+  // the next page would cross the 10k boundary AND Trendyol gave us
+  // a token to continue with.
+  const currentPageN = cursor === null ? 0 : cursor.kind === 'page' ? cursor.n : 0;
+  const nextPageN = currentPageN + 1;
+  const nextWouldCrossCap =
+    nextPageN * TRENDYOL_PRODUCTS_PAGE_SIZE >= TRENDYOL_APPROVED_PAGE_CAP_ITEMS;
+
+  let nextCursor: ProductsCursor;
+  if (nextWouldCrossCap) {
+    if (pageMeta.nextPageToken !== null && pageMeta.nextPageToken !== undefined) {
+      nextCursor = { kind: 'token', token: pageMeta.nextPageToken };
+    } else {
+      // Past the 10k cap and no token — Trendyol gave us no way
+      // forward. Treat as done; the catalog beyond 10k is unreachable
+      // through this endpoint without a token.
+      return { kind: 'done', finalCount: newProgress };
+    }
+  } else {
+    nextCursor = { kind: 'page', n: nextPageN };
   }
 
   syncLog.info('chunk.complete', {

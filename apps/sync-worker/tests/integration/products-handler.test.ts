@@ -201,4 +201,74 @@ describe('processProductsChunk', () => {
 
     expect(result.kind).toBe('done');
   });
+
+  it('falls back from a saved token cursor to page-based when below the 10k cap', async () => {
+    // The chunk handler converts a saved token cursor to a page cursor
+    // when progressCurrent is under the 10k cap, because that's where
+    // page-based pagination is the documented contract and tokens have
+    // been observed to 500 deterministically. progressCurrent=2400 →
+    // page index 24; the next request should hit page=24, NOT use the
+    // saved (potentially poisoned) token.
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 5624,
+        totalPages: 57,
+        page: 24,
+        size: 100,
+        // Trendyol still returns a token; the handler should ignore it
+        // because we're below the cap.
+        nextPageToken: 'eyJzb3J0IjpbMTc2MDk2MTM2NzAwMF19',
+        content: [
+          buildContent({
+            contentId: 24001,
+            productMainId: 'pm-24001',
+            title: 'Recovered Product',
+            variants: [{ variantId: 240010, barcode: 'rb-1', stockCode: 'rs-1', size: 'M' }],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 2,
+        progressCurrent: 2400,
+        progressTotal: 5624,
+        pageCursor: { kind: 'token', token: 'poisoned-token' } as never,
+      },
+    });
+
+    const result = await processProductsChunk({
+      syncLog: log,
+      // Simulate the dispatcher reading SyncLog.pageCursor.
+      cursor: { kind: 'token', token: 'poisoned-token' },
+    });
+
+    // The fetch URL must be page-based at index 24 (= 2400 / 100), not
+    // a request carrying the poisoned token.
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const url = fetchSpy.mock.calls[0]?.[0] as string;
+    expect(url).toContain('page=24');
+    expect(url).not.toContain('nextPageToken');
+
+    // Result advances to page=25 — also page-based, because the next
+    // page (2500–2599) still sits well below the cap.
+    expect(result.kind).toBe('continue');
+    if (result.kind !== 'continue') return;
+    expect(result.cursor).toEqual({ kind: 'page', n: 25 });
+    expect(result.progress).toBe(2401);
+  });
 });
