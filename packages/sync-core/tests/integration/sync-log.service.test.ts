@@ -1,0 +1,85 @@
+// Backoff schedule integration test for markRetryable (spec §12 T4).
+//
+// The schedule is defined inline in markRetryable as
+//   nextAttemptAt = now() + min(30s × 2^(attemptCount - 1), 30 min).
+// Locking it with a parameterized test ensures a future tweak (e.g.
+// switching to base-3, or raising the ceiling) shows up as a test
+// failure rather than a silent SLA change.
+
+import { prisma } from '@pazarsync/db';
+import { syncLogService } from '@pazarsync/sync-core';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  createMembership,
+  createOrganization,
+  createStore,
+  createUserProfile,
+} from '../../../../apps/api/tests/helpers/factories';
+import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+
+describe('syncLogService.markRetryable backoff schedule', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  async function setupRunningRow(attemptCount: number): Promise<string> {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    const row = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        attemptCount,
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+      },
+    });
+    return row.id;
+  }
+
+  it.each([
+    { attempt: 1, expectedBackoffSec: 30 },
+    { attempt: 2, expectedBackoffSec: 60 },
+    { attempt: 3, expectedBackoffSec: 120 },
+    { attempt: 4, expectedBackoffSec: 240 },
+    { attempt: 5, expectedBackoffSec: 480 },
+    { attempt: 6, expectedBackoffSec: 960 },
+    { attempt: 10, expectedBackoffSec: 1800 }, // capped at 30 min
+  ])(
+    'attempt $attempt → next attempt in ~$expectedBackoffSec s',
+    async ({ attempt, expectedBackoffSec }) => {
+      const id = await setupRunningRow(attempt);
+      const before = Date.now();
+
+      await syncLogService.markRetryable(id, attempt, 'TEST_TRANSIENT', 'simulated transient');
+
+      const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
+
+      // Status, error, and claim ownership must be reset so the next
+      // tryClaimNext can pick the row up after the backoff.
+      expect(after.status).toBe('FAILED_RETRYABLE');
+      expect(after.errorCode).toBe('TEST_TRANSIENT');
+      expect(after.errorMessage).toBe('simulated transient');
+      expect(after.claimedAt).toBeNull();
+      expect(after.claimedBy).toBeNull();
+      expect(after.nextAttemptAt).not.toBeNull();
+
+      // ±2s tolerance — the difference between Date.now() captured here
+      // and the wall clock inside markRetryable is well under that, but
+      // wider would mask a real bug. Widen only if CI proves flaky.
+      const actualSec = (after.nextAttemptAt!.getTime() - before) / 1000;
+      expect(actualSec).toBeGreaterThan(expectedBackoffSec - 2);
+      expect(actualSec).toBeLessThan(expectedBackoffSec + 2);
+    },
+  );
+});
