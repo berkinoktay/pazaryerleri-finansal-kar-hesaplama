@@ -34,8 +34,10 @@ export interface SyncBadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElemen
    * Number of active syncs across the org. When omitted, the badge
    * renders the single-sync surface using `state` / `lastSyncedAt` /
    * `progress` (legacy callers keep working unchanged). When supplied:
-   *   - `0` → returns null (no badge to show; caller doesn't need a guard)
-   *   - `1` → identical to the single-sync surface
+   *   - `0` or `1` → single-sync surface (fresh / stale / failed when
+   *     idle, syncing-with-progress when running). `0` is NOT a hide
+   *     signal — the badge is also the entry point to the SyncCenter,
+   *     so it stays visible even when nothing is currently running.
    *   - `>= 2` → compact "N syncs running" pill, surfaces the count to
    *     the SyncCenter without flooding the header with per-store rows
    */
@@ -70,11 +72,12 @@ export function SyncBadge({
   ariaLabel,
   className,
   ...props
-}: SyncBadgeProps): React.ReactElement | null {
-  if (activeCount !== undefined && activeCount === 0) {
-    return null;
-  }
-
+}: SyncBadgeProps): React.ReactElement {
+  // Only the multi-sync (N≥2) variant short-circuits the single-sync
+  // rendering. N=0 / N=1 / undefined all fall through to SingleSyncBadge
+  // — N=0 means "no sync running right now" which is still a meaningful
+  // single-sync surface (shows last-synced-at or `—` for never-synced)
+  // AND it's the entry point to SyncCenter, so we must keep it visible.
   if (activeCount !== undefined && activeCount >= 2) {
     return (
       <MultiSyncBadge
