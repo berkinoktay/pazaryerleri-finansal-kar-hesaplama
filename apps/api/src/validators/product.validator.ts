@@ -27,6 +27,18 @@ export const StartSyncResponseSchema = z
 export const SyncLogResponseSchema = z
   .object({
     id: z.string().uuid().openapi({ example: '7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f' }),
+    organizationId: z
+      .string()
+      .uuid()
+      .openapi({
+        example: 'b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b',
+        description:
+          "Organization the sync belongs to. Surfaced so the web client's in-memory " +
+          'reconstruction of a SyncLog from a Realtime event keeps tenant identity intact ' +
+          '(defense-in-depth — the Realtime channel filter already enforces it server-side, but ' +
+          'the field on the wire prevents silent loss in any future refactor that changes the ' +
+          'channel filter).',
+      }),
     storeId: z
       .string()
       .uuid()
@@ -330,6 +342,7 @@ export function toProductWithVariantsResponse(
 
 export function toSyncLogResponse(row: SyncLog): {
   id: string;
+  organizationId: string;
   storeId: string;
   syncType: SyncLog['syncType'];
   status: SyncLog['status'];
@@ -346,6 +359,7 @@ export function toSyncLogResponse(row: SyncLog): {
 } {
   return {
     id: row.id,
+    organizationId: row.organizationId,
     storeId: row.storeId,
     syncType: row.syncType,
     status: row.status,

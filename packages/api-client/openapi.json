@@ -529,6 +529,12 @@
             "format": "uuid",
             "example": "7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f"
           },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b",
+            "description": "Organization the sync belongs to. Surfaced so the web client's in-memory reconstruction of a SyncLog from a Realtime event keeps tenant identity intact (defense-in-depth — the Realtime channel filter already enforces it server-side, but the field on the wire prevents silent loss in any future refactor that changes the channel filter)."
+          },
           "storeId": {
             "type": "string",
             "format": "uuid",
@@ -626,6 +632,7 @@
         },
         "required": [
           "id",
+          "organizationId",
           "storeId",
           "syncType",
           "status",

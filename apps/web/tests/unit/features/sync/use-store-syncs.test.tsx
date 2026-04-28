@@ -11,6 +11,7 @@ vi.mock('@/features/sync/providers/org-syncs-provider', () => ({
   useOrgSyncs: () => mockUseOrgSyncs(),
 }));
 
+const ORG_ID = '00000000-0000-0000-0000-000000000099';
 const STORE_A = '00000000-0000-0000-0000-0000000000aa';
 const STORE_B = '00000000-0000-0000-0000-0000000000bb';
 
@@ -24,6 +25,7 @@ interface MakeLogOverrides {
 function makeLog(overrides: MakeLogOverrides = {}): SyncLog {
   return {
     id: overrides.id ?? 'log-1',
+    organizationId: ORG_ID,
     storeId: overrides.storeId ?? STORE_A,
     syncType: 'PRODUCTS',
     status: overrides.status ?? 'RUNNING',

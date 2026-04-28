@@ -49,6 +49,7 @@ interface MakeLogOverrides {
 function makeLog(overrides: MakeLogOverrides = {}) {
   return {
     id: overrides.id ?? 'log-1',
+    organizationId: ORG_ID,
     storeId: overrides.storeId ?? STORE_ID,
     syncType: 'PRODUCTS' as const,
     status: overrides.status ?? 'RUNNING',
@@ -60,6 +61,8 @@ function makeLog(overrides: MakeLogOverrides = {}) {
     progressStage: 'upserting',
     errorCode: null,
     errorMessage: null,
+    attemptCount: 0,
+    nextAttemptAt: null,
   };
 }
 
@@ -99,6 +102,7 @@ describe('useOrgSyncs', () => {
         id: 'log-1',
         row: {
           id: 'log-1',
+          organizationId: ORG_ID,
           storeId: STORE_ID,
           syncType: 'PRODUCTS',
           status: 'RUNNING',
@@ -117,6 +121,10 @@ describe('useOrgSyncs', () => {
     });
 
     await waitFor(() => expect(result.current.activeSyncs[0]?.progressCurrent).toBe(250));
+    // Tenant identity must survive the Realtime → cache round-trip.
+    // Channel filter gates rows server-side; the explicit field is
+    // defense-in-depth against a future refactor that drops the filter.
+    expect(result.current.activeSyncs[0]?.organizationId).toBe(ORG_ID);
   });
 
   it('does not poll while no active syncs exist in the cache', async () => {
