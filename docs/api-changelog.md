@@ -39,6 +39,13 @@ startedAt }`. The endpoint became a thin enqueue (INSERT `PENDING` + 202) once t
   rows by store across the organization; redundant on store-scoped
   endpoints where the caller already knows the storeId from the URL.
   **Backwards compatible** — additive field, no existing field changed.
+- `SyncLogResponse` gains `attemptCount` (int, default 0) and
+  `nextAttemptAt` (ISO8601 datetime, null on non-FAILED_RETRYABLE rows).
+  Both already exist on the DB column set (PR #61) but weren't on the
+  wire. Required by the SyncCenter "Yeniden deneniyor" section so users
+  can see when a row in retry backoff will next be claimed and which
+  attempt the worker is on (max 5 before terminal FAIL). **Backwards
+  compatible** — additive fields, no existing field changed.
 
 ### Added
 

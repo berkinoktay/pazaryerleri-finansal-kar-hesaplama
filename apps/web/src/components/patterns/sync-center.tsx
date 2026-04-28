@@ -38,13 +38,30 @@ export interface SyncCenterLog {
   id: string;
   storeId?: string;
   syncType: 'PRODUCTS' | 'ORDERS' | 'SETTLEMENTS';
-  status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+  /**
+   * Worker-pipeline lifecycle. `PENDING` is briefly visible between
+   * trigger and worker claim (~1s); `RUNNING` is active; `FAILED_RETRYABLE`
+   * means the run hit a transient error (auth-OK, marketplace 5xx /
+   * network blip) and is waiting in exponential backoff for the worker
+   * to re-claim — surfaced as the third "Yeniden deneniyor" section.
+   * `COMPLETED` / `FAILED` are terminal.
+   */
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'FAILED_RETRYABLE';
   startedAt: string;
   completedAt: string | null;
   recordsProcessed: number;
   progressCurrent: number;
   progressTotal: number | null;
   errorCode: string | null;
+  /** Error detail. Set on FAILED and FAILED_RETRYABLE rows. */
+  errorMessage?: string | null;
+  /** How many claim attempts have run. >0 once at least one has fired. */
+  attemptCount?: number;
+  /**
+   * When the next retry will fire (for FAILED_RETRYABLE rows). Null on
+   * any other status. Drives the "Yeniden denenecek HH:MM" countdown.
+   */
+  nextAttemptAt?: string | null;
 }
 
 export interface SyncCenterTriggerSpec {
@@ -109,8 +126,13 @@ export function SyncCenter({
 }: SyncCenterProps): React.ReactElement {
   const t = useTranslations('syncCenter');
 
-  const active = logs.filter((log) => log.status === 'RUNNING');
-  const recent = logs.filter((log) => log.status !== 'RUNNING');
+  // Three buckets: actively running (RUNNING/PENDING — worker either
+  // claimed and processing, or queued and about to be claimed), retrying
+  // (FAILED_RETRYABLE — hit a transient error and waiting for the next
+  // attempt), and recent (terminal COMPLETED/FAILED, capped server-side).
+  const active = logs.filter((log) => log.status === 'RUNNING' || log.status === 'PENDING');
+  const retrying = logs.filter((log) => log.status === 'FAILED_RETRYABLE');
+  const recent = logs.filter((log) => log.status === 'COMPLETED' || log.status === 'FAILED');
 
   // Group only when the visible logs reference 2+ distinct storeIds —
   // otherwise we'd add a single redundant header above the only group.
@@ -139,8 +161,14 @@ export function SyncCenter({
                   key={trigger.syncType}
                   type="button"
                   onClick={trigger.onClick}
+                  // Disable while ANY active-slot row exists for this
+                  // syncType (active OR retrying — both occupy the
+                  // partial unique index slot, so a manual retrigger
+                  // would 409 with SYNC_IN_PROGRESS).
                   disabled={
-                    trigger.isPending || active.some((l) => l.syncType === trigger.syncType)
+                    trigger.isPending ||
+                    active.some((l) => l.syncType === trigger.syncType) ||
+                    retrying.some((l) => l.syncType === trigger.syncType)
                   }
                   className="gap-xs justify-start"
                 >
@@ -170,9 +198,26 @@ export function SyncCenter({
             </section>
           ) : null}
 
-          {(active.length > 0 || recent.length > 0) && active.length > 0 && recent.length > 0 ? (
-            <Separator />
+          {active.length > 0 && retrying.length > 0 ? <Separator /> : null}
+
+          {retrying.length > 0 ? (
+            <section className="gap-sm flex flex-col">
+              <h3 className="text-foreground text-xs font-semibold tracking-wide uppercase">
+                {t('sections.retrying')}
+              </h3>
+              {showStoreGroups ? (
+                <SyncLogsByStore
+                  logs={retrying}
+                  storeLookup={storeLookup}
+                  renderRow={(log) => <RetryingSyncItem key={log.id} log={log} />}
+                />
+              ) : (
+                retrying.map((log) => <RetryingSyncItem key={log.id} log={log} />)
+              )}
+            </section>
           ) : null}
+
+          {(active.length > 0 || retrying.length > 0) && recent.length > 0 ? <Separator /> : null}
 
           {recent.length > 0 ? (
             <section className="gap-sm flex flex-col">
@@ -274,6 +319,7 @@ function ActiveSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
     log.progressTotal !== null && log.progressTotal > 0
       ? Math.min(100, Math.round((log.progressCurrent / log.progressTotal) * 100))
       : null;
+  const statusKey = log.status === 'PENDING' ? 'status.pending' : 'status.running';
 
   return (
     <div className="border-border bg-card gap-xs flex flex-col rounded-md border p-3">
@@ -281,7 +327,7 @@ function ActiveSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
         <Time04Icon className="size-icon-sm text-info animate-spin" />
         <span className="text-foreground text-sm font-medium">{t(`triggers.${log.syncType}`)}</span>
         <Badge tone="info" size="sm" className="ml-auto">
-          {t('status.running')}
+          {t(statusKey)}
         </Badge>
       </div>
       <Progress value={percent ?? 0} />
@@ -290,6 +336,60 @@ function ActiveSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
         {log.progressTotal !== null ? ` / ${formatter.number(log.progressTotal, 'integer')}` : ''}
         {percent !== null ? ` (${percent.toString()}%)` : ''}
       </p>
+    </div>
+  );
+}
+
+function RetryingSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
+  const t = useTranslations('syncCenter');
+  const formatter = useFormatter();
+  const mounted = useIsMounted();
+  const percent =
+    log.progressTotal !== null && log.progressTotal > 0
+      ? Math.min(100, Math.round((log.progressCurrent / log.progressTotal) * 100))
+      : null;
+
+  // SSR-safe retry-time label — same hydration pattern as SyncBadge /
+  // RecentSyncItem. Until mounted, render an absolute timestamp; once
+  // mounted, swap to a relative label that auto-updates.
+  const retryLabel =
+    log.nextAttemptAt !== null && log.nextAttemptAt !== undefined
+      ? mounted
+        ? formatter.relativeTime(new Date(log.nextAttemptAt), new Date())
+        : formatter.dateTime(new Date(log.nextAttemptAt), 'short')
+      : null;
+
+  return (
+    <div className="border-warning/40 bg-warning-surface gap-xs flex flex-col rounded-md border p-3">
+      <div className="gap-sm flex items-center">
+        <AlertCircleIcon className="size-icon-sm text-warning" />
+        <span className="text-foreground text-sm font-medium">{t(`triggers.${log.syncType}`)}</span>
+        <Badge tone="warning" size="sm" className="ml-auto">
+          {t('status.retrying')}
+        </Badge>
+      </div>
+      <Progress value={percent ?? 0} />
+      <p className="text-muted-foreground text-2xs tabular-nums">
+        {formatter.number(log.progressCurrent, 'integer')}
+        {log.progressTotal !== null ? ` / ${formatter.number(log.progressTotal, 'integer')}` : ''}
+        {percent !== null ? ` (${percent.toString()}%)` : ''}
+      </p>
+      <div className="gap-3xs flex flex-col">
+        {log.errorCode !== null ? (
+          <p className="text-warning text-2xs">
+            <span className="font-mono">{log.errorCode}</span>
+            {log.errorMessage !== null && log.errorMessage !== undefined ? (
+              <span className="text-muted-foreground"> · {log.errorMessage}</span>
+            ) : null}
+          </p>
+        ) : null}
+        <p className="text-muted-foreground text-2xs">
+          {retryLabel !== null ? t('willRetry', { when: retryLabel }) : t('willRetryUnknown')}
+          {log.attemptCount !== undefined && log.attemptCount > 0
+            ? ` · ${t('attempt', { n: formatter.number(log.attemptCount, 'integer') })}`
+            : ''}
+        </p>
+      </div>
     </div>
   );
 }

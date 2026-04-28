@@ -8,7 +8,21 @@ import { Badge } from '@/components/ui/badge';
 import { useIsMounted } from '@/lib/use-is-mounted';
 import { cn } from '@/lib/utils';
 
-export type SyncState = 'fresh' | 'stale' | 'failed' | 'syncing';
+/**
+ * Visual state derived from the SyncLog row's lifecycle.
+ *
+ * - `fresh`     — last run completed cleanly, recently
+ * - `stale`     — last run completed cleanly, but a while ago (caller decides)
+ * - `failed`    — last run reached terminal FAILED status
+ * - `syncing`   — currently RUNNING (or PENDING — about to be claimed)
+ * - `retrying`  — FAILED_RETRYABLE: hit a transient error mid-run, in
+ *                 backoff waiting for the worker to re-claim. Distinct
+ *                 from `failed` (which is terminal) and `syncing`
+ *                 (which is actively progressing) because the user
+ *                 needs to know "this isn't dead, but it isn't moving
+ *                 right now either."
+ */
+export type SyncState = 'fresh' | 'stale' | 'failed' | 'syncing' | 'retrying';
 
 export interface SyncProgress {
   /** Current item count processed in the live sync. */
@@ -118,7 +132,7 @@ function SingleSyncBadge({
   const mounted = useIsMounted();
 
   const Icon =
-    state === 'failed'
+    state === 'failed' || state === 'retrying'
       ? AlertCircleIcon
       : state === 'syncing' || state === 'stale'
         ? Time04Icon
@@ -127,7 +141,7 @@ function SingleSyncBadge({
   const toneClass =
     state === 'failed'
       ? 'text-destructive'
-      : state === 'stale'
+      : state === 'retrying' || state === 'stale'
         ? 'text-warning'
         : state === 'syncing'
           ? 'text-info'
@@ -145,7 +159,10 @@ function SingleSyncBadge({
       : formatter.dateTime(new Date(lastSyncedAt), 'short')
     : '—';
 
-  const showProgress = state === 'syncing' && progress !== undefined;
+  // Both `syncing` and `retrying` carry meaningful progress: the run
+  // got somewhere before stalling. Show the count + percent so the user
+  // knows how far it got; SyncCenter has the error detail + retry time.
+  const showProgress = (state === 'syncing' || state === 'retrying') && progress !== undefined;
   const percent =
     progress !== undefined && progress.total !== null && progress.total > 0
       ? Math.min(100, Math.round((progress.current / progress.total) * 100))

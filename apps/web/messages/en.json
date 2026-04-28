@@ -598,10 +598,13 @@
     "openLabel": "Open sync center",
     "sections": {
       "active": "Running",
+      "retrying": "Retrying",
       "recent": "Recent"
     },
     "status": {
+      "pending": "Queued",
       "running": "Running",
+      "retrying": "Retrying",
       "completed": "Completed",
       "failed": "Failed"
     },
@@ -612,6 +615,9 @@
     },
     "completedSummary": "{n} records processed",
     "failedSummary": "Error",
+    "willRetry": "Retrying {when}",
+    "willRetryUnknown": "Retrying soon",
+    "attempt": "Attempt {n}",
     "empty": "No syncs yet.",
     "unknownStore": "Unknown store"
   },
