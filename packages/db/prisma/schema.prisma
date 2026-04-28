@@ -356,8 +356,15 @@ model SyncLog {
   storeId          String     @map("store_id") @db.Uuid
   syncType         SyncType   @map("sync_type")
   status           SyncStatus
-  startedAt        DateTime   @map("started_at")
-  completedAt      DateTime?  @map("completed_at")
+  // Timestamp columns are @db.Timestamptz(3) so node-postgres reads
+  // them as UTC instants (its default for plain TIMESTAMP is the
+  // CLIENT'S local timezone, which silently shifted next_attempt_at
+  // by the user's TZ offset and made the SyncCenter "Yeniden
+  // denenecek" countdown lie by N hours). PG-internal SQL comparisons
+  // worked either way (session TZ is UTC), but the wire shape is the
+  // problem. timestamptz fixes both — see fix(sync) PR.
+  startedAt        DateTime   @map("started_at") @db.Timestamptz(3)
+  completedAt      DateTime?  @map("completed_at") @db.Timestamptz(3)
   recordsProcessed Int        @default(0) @map("records_processed")
   progressCurrent  Int        @default(0) @map("progress_current")
   progressTotal    Int?       @map("progress_total")
@@ -365,12 +372,12 @@ model SyncLog {
   errorCode        String?    @map("error_code")
   errorMessage     String?    @map("error_message")
   // ─── New columns (PR 2) ────────────────────────────────────
-  claimedAt        DateTime?  @map("claimed_at")
+  claimedAt        DateTime?  @map("claimed_at") @db.Timestamptz(3)
   claimedBy        String?    @map("claimed_by")
-  lastTickAt       DateTime?  @map("last_tick_at")
+  lastTickAt       DateTime?  @map("last_tick_at") @db.Timestamptz(3)
   pageCursor       Json?      @map("page_cursor")
   attemptCount     Int        @default(0) @map("attempt_count")
-  nextAttemptAt    DateTime?  @map("next_attempt_at")
+  nextAttemptAt    DateTime?  @map("next_attempt_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)

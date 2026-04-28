@@ -17,6 +17,13 @@ import type { TrendyolApprovedProductsResponse, TrendyolCredentials } from './ty
 const PLATFORM = 'TRENDYOL';
 const REQUEST_TIMEOUT_MS = 30_000;
 const PAGE_SIZE = 100; // Trendyol's documented max
+// Trendyol getApprovedProducts pagination cap (urun-entegrasyonlari-v2.md §3):
+// "Page x size maksimum 10.000 değerini alabilir." — items 0–9999 are
+// reachable via page=N; item 10000+ requires nextPageToken. Below the cap
+// nextPageToken is documented as optional, and Trendyol has been observed
+// to 500 deterministically on certain token values mid-stream — page-based
+// pagination walks past those tokens unaffected.
+const APPROVED_PAGE_CAP_ITEMS = 10_000;
 const MAX_BACKOFF_RETRIES = 4; // 1s + 2s + 4s + 8s = 15s — under any reasonable Trendyol Retry-After
 const INITIAL_BACKOFF_MS = 1_000;
 
@@ -233,14 +240,25 @@ export async function* fetchApprovedProducts(
 
     if (totalElements !== null && processedSoFar >= totalElements) return;
 
-    // Prefer Trendyol's own next-page directive when it returns one. It
-    // does past the 10k page-cap, and may also for non-cap'd pages on
-    // some endpoints — using it is always correct.
-    if (mapped.pageMeta.nextPageToken !== null) {
-      pendingToken = mapped.pageMeta.nextPageToken;
+    // Default to page-based pagination — that's the documented contract
+    // below the 10k cap and avoids the deterministic 500s observed on
+    // some nextPageToken values. Switch to nextPageToken ONLY when the
+    // next page would cross the cap and Trendyol gave us a token.
+    const nextPage = page + 1;
+    const nextWouldCrossCap = nextPage * PAGE_SIZE >= APPROVED_PAGE_CAP_ITEMS;
+
+    if (nextWouldCrossCap) {
+      if (mapped.pageMeta.nextPageToken !== null) {
+        pendingToken = mapped.pageMeta.nextPageToken;
+      } else {
+        // Past the 10k cap with no token — Trendyol gave us no way
+        // forward. Stop iteration; this catalog's tail beyond 10k is
+        // unreachable through this endpoint without a token.
+        return;
+      }
     } else {
       pendingToken = undefined;
-      page += 1;
+      page = nextPage;
     }
   }
 }

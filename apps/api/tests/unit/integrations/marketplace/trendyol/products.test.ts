@@ -178,7 +178,11 @@ describe('fetchApprovedProducts — happy path & pagination', () => {
     expect(secondUrl).not.toContain('nextPageToken');
   });
 
-  it('switches to nextPageToken once Trendyol returns one', async () => {
+  it('ignores nextPageToken below the 10k cap and stays on page-based pagination', async () => {
+    // Trendyol returns nextPageToken on every response now (even below
+    // the documented 10k cap). The generator should NOT switch to it
+    // — page-based is the documented contract while page * size ≤ 10k
+    // and avoids the deterministic 500s observed on some token values.
     fetchSpy
       .mockResolvedValueOnce(
         jsonResponse(
@@ -194,11 +198,11 @@ describe('fetchApprovedProducts — happy path & pagination', () => {
       .mockResolvedValueOnce(
         jsonResponse(
           makePage({
-            page: 0,
+            page: 1,
             size: 100,
             totalElements: 200,
             content: Array.from({ length: 100 }, (_, i) => makeContent(i + 101)),
-            nextPageToken: null,
+            nextPageToken: 'cursor-def',
           }),
         ),
       );
@@ -213,8 +217,56 @@ describe('fetchApprovedProducts — happy path & pagination', () => {
 
     expect(total).toBe(200);
     const secondUrl = fetchSpy.mock.calls[1]?.[0] as string;
-    expect(secondUrl).toContain('nextPageToken=cursor-abc');
-    expect(secondUrl).not.toContain('page=');
+    expect(secondUrl).toContain('page=1');
+    expect(secondUrl).not.toContain('nextPageToken');
+  });
+
+  it('switches to nextPageToken when the next page would cross the 10k cap', async () => {
+    // page=99 fetches items 9900–9999 (last page-based page). The next
+    // request would be for items 10000+, which Trendyol requires via
+    // nextPageToken. The generator must switch over at exactly that
+    // boundary and use the token Trendyol returned with page 99.
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(
+          makePage({
+            page: 99,
+            size: 100,
+            totalElements: 10_100,
+            content: Array.from({ length: 100 }, (_, i) => makeContent(i + 9900)),
+            nextPageToken: 'past-cap-token',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          makePage({
+            page: 100,
+            size: 100,
+            totalElements: 10_100,
+            content: Array.from({ length: 100 }, (_, i) => makeContent(i + 10_000)),
+            nextPageToken: null,
+          }),
+        ),
+      );
+
+    let total = 0;
+    for await (const page of fetchApprovedProducts({
+      baseUrl: BASE_URL,
+      credentials: CREDENTIALS,
+      // Resume at page=99 so the test fires exactly two requests
+      // instead of paging through all 99 prior pages.
+      initialCursor: { kind: 'page', n: 99 },
+    })) {
+      total += page.batch.length;
+    }
+
+    expect(total).toBe(200);
+    const firstUrl = fetchSpy.mock.calls[0]?.[0] as string;
+    const secondUrl = fetchSpy.mock.calls[1]?.[0] as string;
+    expect(firstUrl).toContain('page=99');
+    expect(secondUrl).toContain('nextPageToken=past-cap-token');
+    expect(secondUrl).not.toMatch(/[?&]page=/);
   });
 
   it('stops when content[] comes back empty', async () => {
