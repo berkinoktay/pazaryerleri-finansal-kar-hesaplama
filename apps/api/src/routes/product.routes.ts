@@ -1,5 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi';
-import { syncLogService } from '@pazarsync/sync-core';
+import { syncLog, syncLogService } from '@pazarsync/sync-core';
 
 import { createSubApp } from '../lib/create-hono-app';
 import { ensureOrgMember } from '../lib/ensure-org-member';
@@ -100,6 +100,15 @@ app.openapi(startSyncRoute, async (c) => {
   // partial unique index is mapped to SyncInProgressError(409) with
   // meta.existingSyncLogId by acquireSlot itself.
   const log = await syncLogService.acquireSlot(organizationId, store.id, 'PRODUCTS');
+
+  syncLog.info('trigger.enqueued', {
+    syncLogId: log.id,
+    organizationId,
+    storeId: store.id,
+    syncType: 'PRODUCTS',
+    userId,
+    requestId: c.req.header('X-Request-Id'),
+  });
 
   return c.json(
     {
