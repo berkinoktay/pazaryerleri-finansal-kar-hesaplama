@@ -1,7 +1,7 @@
 import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { tryClaimNext } from './claim';
+import { tryClaimNext } from '../../src/claim';
 
 // Reuses apps/api test helpers — packages/sync-core does not yet have its own DB factories.
 import {
@@ -9,8 +9,8 @@ import {
   createOrganization,
   createStore,
   createUserProfile,
-} from '../../../apps/api/tests/helpers/factories';
-import { ensureDbReachable, truncateAll } from '../../../apps/api/tests/helpers/db';
+} from '../../../../apps/api/tests/helpers/factories';
+import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 
 describe('tryClaimNext', () => {
   beforeAll(async () => {
