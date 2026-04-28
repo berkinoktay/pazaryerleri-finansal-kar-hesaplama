@@ -1,4 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi';
+import type { MemberRole } from '@pazarsync/db';
 
 import { createSubApp } from '../lib/create-hono-app';
 import { ensureOrgMember } from '../lib/ensure-org-member';
@@ -15,7 +16,7 @@ const app = createSubApp<{
   Variables: {
     userId: string;
     organizationId: string;
-    memberRole: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+    memberRole: MemberRole;
   };
 }>();
 

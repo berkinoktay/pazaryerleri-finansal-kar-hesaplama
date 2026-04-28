@@ -1,5 +1,6 @@
 import { z } from '@hono/zod-openapi';
 
+import { SyncStatus, SyncType } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
 
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
@@ -49,8 +50,8 @@ export const SyncLogResponseSchema = z
           'dashboard SyncCenter can group rows by store; redundant on store-scoped endpoints ' +
           'where the caller already knows the storeId from the URL.',
       }),
-    syncType: z.enum(['ORDERS', 'PRODUCTS', 'SETTLEMENTS']).openapi({ example: 'PRODUCTS' }),
-    status: z.enum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'FAILED_RETRYABLE']).openapi({
+    syncType: z.enum(SyncType).openapi({ example: 'PRODUCTS' }),
+    status: z.enum(SyncStatus).openapi({
       example: 'RUNNING',
       description:
         'SyncLog state. PENDING and FAILED_RETRYABLE are reserved for the worker-based ' +

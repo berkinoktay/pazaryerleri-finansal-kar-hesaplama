@@ -1,3 +1,4 @@
+import type { Platform } from '@pazarsync/db/enums';
 import Image from 'next/image';
 
 import { cn } from '@/lib/utils';
@@ -17,7 +18,10 @@ import { cn } from '@/lib/utils';
  *   (2) next/image refuses to optimize SVG by default for security;
  *   (3) the files live under /public so cache-control is browser-managed.
  */
-export type MarketplacePlatform = 'TRENDYOL' | 'HEPSIBURADA';
+// Domain alias for the DB Platform enum — single source of truth in
+// @pazarsync/db. Keeps the existing import name in feature code while
+// removing the string-literal duplicate.
+export type MarketplacePlatform = Platform;
 
 const PLATFORM_SRC: Record<MarketplacePlatform, string> = {
   TRENDYOL: '/brands/trendyol.svg',

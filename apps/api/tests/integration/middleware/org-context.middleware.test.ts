@@ -1,3 +1,4 @@
+import type { MemberRole } from '@pazarsync/db';
 import { Hono } from 'hono';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -14,7 +15,7 @@ function makeApp() {
       userId: string;
       email: string | undefined;
       organizationId: string;
-      memberRole: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+      memberRole: MemberRole;
     };
   }>();
 

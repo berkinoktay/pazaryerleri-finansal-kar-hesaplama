@@ -1,3 +1,4 @@
+import { StoreEnvironment } from '@pazarsync/db/enums';
 import { z } from 'zod';
 
 /**
@@ -8,7 +9,7 @@ import { z } from 'zod';
  */
 export const ConnectStoreFormSchema = z.object({
   name: z.string().trim().min(2, 'INVALID_NAME_TOO_SHORT').max(80, 'INVALID_NAME_TOO_LONG'),
-  environment: z.enum(['PRODUCTION', 'SANDBOX']),
+  environment: z.enum(StoreEnvironment),
   credentials: z.object({
     platform: z.literal('TRENDYOL'),
     supplierId: z

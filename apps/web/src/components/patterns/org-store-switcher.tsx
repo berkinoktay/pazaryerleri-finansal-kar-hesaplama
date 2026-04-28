@@ -1,5 +1,6 @@
 'use client';
 
+import type { MemberRole, Platform } from '@pazarsync/db/enums';
 import { ArrowDown01Icon, PlusSignIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -13,7 +14,8 @@ import { cn } from '@/lib/utils';
 
 import { OrgStoreSwitcherEmpty, OrgStoreSwitcherList } from './org-store-switcher-list';
 
-export type OrgRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+// Domain alias for the DB MemberRole enum.
+export type OrgRole = MemberRole;
 export type SyncState = 'fresh' | 'stale' | 'failed';
 
 export interface Organization {
@@ -31,7 +33,7 @@ export interface Organization {
 export interface Store {
   id: string;
   name: string;
-  platform: 'TRENDYOL' | 'HEPSIBURADA';
+  platform: Platform;
   syncState: SyncState;
   lastSyncedAt: string | null;
 }

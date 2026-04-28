@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { SyncStatus } from '@pazarsync/db/enums';
+
 import { OrgSyncsProvider, useOrgSyncs } from '@/features/sync/providers/org-syncs-provider';
 import type { RealtimeHealth, SyncLogRealtimeEvent } from '@/lib/supabase/realtime';
 
@@ -40,7 +42,7 @@ vi.mock('@/lib/supabase/realtime', async () => {
 interface MakeLogOverrides {
   id?: string;
   storeId?: string;
-  status?: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'FAILED_RETRYABLE';
+  status?: SyncStatus;
   progressCurrent?: number;
   progressTotal?: number | null;
   startedAt?: string;

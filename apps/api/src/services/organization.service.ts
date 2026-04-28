@@ -1,10 +1,13 @@
 import { prisma } from '@pazarsync/db';
+import type { MemberRole } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { generateUniqueOrganizationSlug } from '../lib/slugify';
 import type { CreateOrganizationInput } from '../validators/organization.validator';
 
-export type OrganizationListItemRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+// Domain alias for callers that want a name rooted in the org-list
+// concept. Single source of truth in @pazarsync/db.
+export type OrganizationListItemRole = MemberRole;
 
 export interface OrganizationListItem {
   id: string;
