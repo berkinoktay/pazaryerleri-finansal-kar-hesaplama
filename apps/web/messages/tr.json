@@ -12,6 +12,7 @@
     "dismiss": "Kapat",
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3",
+    "activeSyncCount": "{n} senkronizasyon çalışıyor",
     "networkStatus": {
       "offline": "İnternet bağlantın yok. Değişikliklerin kaydedilmeyebilir."
     },
@@ -611,7 +612,8 @@
     },
     "completedSummary": "{n} kayıt işlendi",
     "failedSummary": "Hata",
-    "empty": "Henüz senkronizasyon yok."
+    "empty": "Henüz senkronizasyon yok.",
+    "unknownStore": "Bilinmeyen mağaza"
   },
   "products": {
     "page": {

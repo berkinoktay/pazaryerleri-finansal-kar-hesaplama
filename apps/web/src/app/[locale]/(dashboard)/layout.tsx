@@ -3,6 +3,7 @@ import * as React from 'react';
 import type { Organization } from '@/features/organization/api/organizations.api';
 import type { Store as ApiStore } from '@/features/stores/api/list-stores.api';
 import { DashboardStoreLauncher } from '@/features/stores/components/dashboard-store-launcher';
+import { OrgSyncsProvider } from '@/features/sync/providers/org-syncs-provider';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
 import { getServerApiClient } from '@/lib/api-client/server';
@@ -35,14 +36,16 @@ export default async function DashboardLayout({
 
   return (
     <div className="h-screen">
-      <DashboardStoreLauncher
-        orgs={orgs}
-        activeOrgId={activeOrgId}
-        initialStores={stores}
-        initialActiveStoreId={activeStoreId}
-      >
-        {children}
-      </DashboardStoreLauncher>
+      <OrgSyncsProvider orgId={activeOrgId ?? null}>
+        <DashboardStoreLauncher
+          orgs={orgs}
+          activeOrgId={activeOrgId}
+          initialStores={stores}
+          initialActiveStoreId={activeStoreId}
+        >
+          {children}
+        </DashboardStoreLauncher>
+      </OrgSyncsProvider>
     </div>
   );
 }

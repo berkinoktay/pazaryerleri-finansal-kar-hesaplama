@@ -19,8 +19,4 @@ export const productKeys = {
     [...productKeys.lists(orgId, storeId), filters] as const,
   facets: (orgId: string, storeId: string) =>
     [...productKeys.all, 'facets', orgId, storeId] as const,
-  syncLogs: (orgId: string, storeId: string) =>
-    [...productKeys.all, 'sync-logs', orgId, storeId] as const,
-  syncLog: (orgId: string, storeId: string, syncLogId: string) =>
-    [...productKeys.syncLogs(orgId, storeId), syncLogId] as const,
 };

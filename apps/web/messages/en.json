@@ -12,6 +12,7 @@
     "dismiss": "Dismiss",
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3",
+    "activeSyncCount": "{n} syncs running",
     "networkStatus": {
       "offline": "No internet connection. Your changes may not be saved."
     },
@@ -611,7 +612,8 @@
     },
     "completedSummary": "{n} records processed",
     "failedSummary": "Error",
-    "empty": "No syncs yet."
+    "empty": "No syncs yet.",
+    "unknownStore": "Unknown store"
   },
   "products": {
     "page": {

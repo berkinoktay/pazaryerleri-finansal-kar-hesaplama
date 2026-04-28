@@ -71,7 +71,7 @@ function snakeToCamel(row: SyncLogsRowWire): SyncLogRealtimeShape {
  * a user with no membership in the store's org receives nothing.
  *
  * Returns an unsubscribe function. Caller is responsible for calling
- * it on unmount; `useActiveSyncLogs` does this in its cleanup.
+ * it on unmount.
  *
  * Reconnection is handled by the Supabase Realtime client out of the
  * box — when the WebSocket drops the channel automatically retries
@@ -107,6 +107,58 @@ export function subscribeToSyncLogs(
           return;
         }
         // INSERT / UPDATE — `new` is the full row.
+        const newRow = payload.new as SyncLogsRowWire;
+        onEvent({
+          eventType,
+          id: newRow.id,
+          row: snakeToCamel(newRow),
+        });
+      },
+    )
+    .subscribe();
+
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Subscribe to postgres_changes on `public.sync_logs` filtered by
+ * `organization_id`. Org-wide variant of subscribeToSyncLogs — used by
+ * the dashboard-shell OrgSyncsProvider so a single channel surfaces every
+ * sync across every store the user can see in the active org.
+ *
+ * The flat `is_org_member(organization_id)` RLS policy on sync_logs
+ * (PR #60 — denormalized organization_id) lets Realtime's
+ * postgres_changes evaluator gate rows by membership without a
+ * cross-table walk.
+ *
+ * Returns an unsubscribe function. Caller calls on unmount;
+ * OrgSyncsProvider does this in its cleanup.
+ */
+export function subscribeToOrgSyncs(
+  orgId: string,
+  onEvent: (event: SyncLogRealtimeEvent) => void,
+): () => void {
+  const supabase = createClient();
+  const channel: RealtimeChannel = supabase
+    .channel(`sync_logs:org:${orgId}`)
+    .on<SyncLogsRowWire>(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'sync_logs',
+        filter: `organization_id=eq.${orgId}`,
+      },
+      (payload: RealtimePostgresChangesPayload<SyncLogsRowWire>) => {
+        const eventType = payload.eventType;
+        if (eventType === 'DELETE') {
+          const oldRow = payload.old as Partial<SyncLogsRowWire>;
+          if (oldRow.id === undefined) return;
+          onEvent({ eventType: 'DELETE', id: oldRow.id, row: null });
+          return;
+        }
         const newRow = payload.new as SyncLogsRowWire;
         onEvent({
           eventType,

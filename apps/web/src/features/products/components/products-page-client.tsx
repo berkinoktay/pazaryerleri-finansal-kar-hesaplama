@@ -6,9 +6,9 @@ import * as React from 'react';
 import { PageHeader } from '@/components/patterns/page-header';
 import { SyncBadge, type SyncState } from '@/components/patterns/sync-badge';
 import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-center';
+import type { SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
+import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 
-import type { SyncLog } from '../api/list-active-sync-logs.api';
-import { useActiveSyncLogs } from '../hooks/use-active-sync-logs';
 import { useProductFacets } from '../hooks/use-product-facets';
 import { useProducts } from '../hooks/use-products';
 import { useProductsFilters } from '../hooks/use-products-filters';
@@ -62,7 +62,7 @@ export function ProductsPageClient({
         },
   );
   const facetsQuery = useProductFacets(orgId, storeId);
-  const syncLogsQuery = useActiveSyncLogs(orgId, storeId);
+  const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
   const startSync = useStartProductSync(orgId, storeId);
 
   if (noStoreSelected) {
@@ -90,8 +90,8 @@ export function ProductsPageClient({
     filters.brandId.length > 0 ||
     filters.categoryId.length > 0;
 
-  const syncLogs = syncLogsQuery.data ?? [];
-  const productSyncSnapshot = derivedSyncSnapshot(syncLogs);
+  const productSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
+  const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
   return (
     <>
@@ -104,6 +104,7 @@ export function ProductsPageClient({
               state={productSyncSnapshot.state}
               lastSyncedAt={productSyncSnapshot.lastSyncedAt}
               progress={productSyncSnapshot.progress}
+              activeCount={activeSyncs.length}
               source="Trendyol"
               onClick={() => setSyncCenterOpen(true)}
               ariaLabel={tSync('openLabel')}
@@ -157,7 +158,7 @@ export function ProductsPageClient({
       <SyncCenter
         open={syncCenterOpen}
         onOpenChange={setSyncCenterOpen}
-        logs={syncLogs as SyncCenterLog[]}
+        logs={syncCenterLogs}
         triggers={[
           {
             syncType: 'PRODUCTS',
@@ -180,26 +181,68 @@ interface SyncSnapshot {
 
 /**
  * Derive the SyncBadge's display state from the active+recent sync
- * logs for the PRODUCTS sync type. The newest matching log dictates
- * the badge — newest RUNNING wins; otherwise the latest finished run
+ * logs for the PRODUCTS sync type. The provider already classified
+ * rows into active (PENDING / RUNNING / FAILED_RETRYABLE) vs recent
+ * (COMPLETED / FAILED), so this is a thin "first PRODUCTS log per
+ * bucket wins" projection: an active product sync drives the
+ * `syncing` state with progress; otherwise the latest finished run
  * sets `lastSyncedAt` and tone.
  */
-function derivedSyncSnapshot(logs: SyncLog[]): SyncSnapshot {
-  const productLogs = logs.filter((l) => l.syncType === 'PRODUCTS');
-  const running = productLogs.find((l) => l.status === 'RUNNING');
-  if (running !== undefined) {
+function derivedSyncSnapshot(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncSnapshot {
+  const active = activeSyncs.find((l) => l.syncType === 'PRODUCTS');
+  if (active !== undefined) {
     return {
       state: 'syncing',
-      lastSyncedAt: running.startedAt,
-      progress: { current: running.progressCurrent, total: running.progressTotal },
+      lastSyncedAt: active.startedAt,
+      progress: { current: active.progressCurrent, total: active.progressTotal },
     };
   }
-  const finished = productLogs.find((l) => l.status === 'COMPLETED' || l.status === 'FAILED');
-  if (finished === undefined) {
+  const recent = recentSyncs.find((l) => l.syncType === 'PRODUCTS');
+  if (recent === undefined) {
     return { state: 'fresh', lastSyncedAt: null };
   }
-  if (finished.status === 'FAILED') {
-    return { state: 'failed', lastSyncedAt: finished.completedAt ?? finished.startedAt };
+  if (recent.status === 'FAILED') {
+    return { state: 'failed', lastSyncedAt: recent.completedAt ?? recent.startedAt };
   }
-  return { state: 'fresh', lastSyncedAt: finished.completedAt ?? finished.startedAt };
+  return { state: 'fresh', lastSyncedAt: recent.completedAt ?? recent.startedAt };
+}
+
+/**
+ * Project SyncLog rows from the org-wide provider onto the narrower
+ * SyncCenterLog shape that the pattern accepts. PENDING and
+ * FAILED_RETRYABLE are reserved for the future worker pipeline and
+ * never appear on the wire today (see SyncLogResponse openapi note);
+ * the type guard keeps this projection sound rather than asserting it
+ * with `as`. If/when the worker emits those statuses, SyncCenter's
+ * status type will widen alongside this projection.
+ */
+function toSyncCenterLogs(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncCenterLog[] {
+  const out: SyncCenterLog[] = [];
+  for (const log of activeSyncs) {
+    const projected = projectSyncLog(log);
+    if (projected !== null) out.push(projected);
+  }
+  for (const log of recentSyncs) {
+    const projected = projectSyncLog(log);
+    if (projected !== null) out.push(projected);
+  }
+  return out;
+}
+
+function projectSyncLog(log: SyncLog): SyncCenterLog | null {
+  if (log.status !== 'RUNNING' && log.status !== 'COMPLETED' && log.status !== 'FAILED') {
+    return null;
+  }
+  return {
+    id: log.id,
+    storeId: log.storeId,
+    syncType: log.syncType,
+    status: log.status,
+    startedAt: log.startedAt,
+    completedAt: log.completedAt,
+    recordsProcessed: log.recordsProcessed,
+    progressCurrent: log.progressCurrent,
+    progressTotal: log.progressTotal,
+    errorCode: log.errorCode,
+  };
 }

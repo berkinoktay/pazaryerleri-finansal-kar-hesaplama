@@ -10,6 +10,7 @@ import {
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { MarketplaceLogo, type MarketplacePlatform } from '@/components/patterns/marketplace-logo';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -28,9 +29,14 @@ import { cn } from '@/lib/utils';
  * Generic SyncLog shape consumed by SyncCenter. Matches the API
  * response (and the Realtime event payload after camelCasing) so the
  * pattern doesn't need to import from a specific feature folder.
+ *
+ * `storeId` is optional for backwards-compat with the original
+ * single-store callers — when omitted, every row collapses into one
+ * unnamed group and SyncCenter renders identically to the v1.0 surface.
  */
 export interface SyncCenterLog {
   id: string;
+  storeId?: string;
   syncType: 'PRODUCTS' | 'ORDERS' | 'SETTLEMENTS';
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
   startedAt: string;
@@ -50,12 +56,33 @@ export interface SyncCenterTriggerSpec {
   isPending: boolean;
 }
 
+/**
+ * Lookup metadata for cross-store grouping. Pass the org's stores so
+ * SyncCenter can label each group with its store name and marketplace
+ * logo. Decoupled from the stores feature so the pattern stays
+ * cross-feature; callers (which already have the stores in scope via
+ * their dashboard layout / launcher context) feed it in.
+ */
+export interface SyncCenterStore {
+  id: string;
+  name: string;
+  platform?: MarketplacePlatform;
+}
+
 export interface SyncCenterProps {
   open: boolean;
   onOpenChange: (next: boolean) => void;
   logs: SyncCenterLog[];
   /** Per-type manual sync triggers — only PRODUCTS in v1.0. */
   triggers: SyncCenterTriggerSpec[];
+  /**
+   * Optional store metadata for cross-store grouping. When the visible
+   * logs span more than one `storeId`, each store's rows are preceded
+   * by a small header (name + marketplace logo). When all logs share a
+   * single store (or omit `storeId` entirely — legacy callers), no
+   * group chrome is rendered.
+   */
+  stores?: SyncCenterStore[];
 }
 
 /**
@@ -67,6 +94,9 @@ export interface SyncCenterProps {
  *   2. Recent — last N completed/failed runs, newest first
  *   3. Triggers — "Şimdi senkronize et" buttons per sync type
  *
+ * Cross-store grouping kicks in only when the visible logs span more
+ * than one store; single-store callers see the v1.0 surface unchanged.
+ *
  * Cross-feature (orders/settlements will reuse) so it lives in
  * components/patterns/ rather than features/products/components/.
  */
@@ -75,11 +105,23 @@ export function SyncCenter({
   onOpenChange,
   logs,
   triggers,
+  stores,
 }: SyncCenterProps): React.ReactElement {
   const t = useTranslations('syncCenter');
 
   const active = logs.filter((log) => log.status === 'RUNNING');
   const recent = logs.filter((log) => log.status !== 'RUNNING');
+
+  // Group only when the visible logs reference 2+ distinct storeIds —
+  // otherwise we'd add a single redundant header above the only group.
+  const distinctStoreIds = new Set<string>();
+  for (const log of logs) {
+    if (log.storeId !== undefined) distinctStoreIds.add(log.storeId);
+  }
+  const showStoreGroups = distinctStoreIds.size >= 2;
+
+  const storeLookup = new Map<string, SyncCenterStore>();
+  for (const store of stores ?? []) storeLookup.set(store.id, store);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -116,9 +158,15 @@ export function SyncCenter({
               <h3 className="text-foreground text-xs font-semibold tracking-wide uppercase">
                 {t('sections.active')}
               </h3>
-              {active.map((log) => (
-                <ActiveSyncItem key={log.id} log={log} />
-              ))}
+              {showStoreGroups ? (
+                <SyncLogsByStore
+                  logs={active}
+                  storeLookup={storeLookup}
+                  renderRow={(log) => <ActiveSyncItem key={log.id} log={log} />}
+                />
+              ) : (
+                active.map((log) => <ActiveSyncItem key={log.id} log={log} />)
+              )}
             </section>
           ) : null}
 
@@ -131,9 +179,15 @@ export function SyncCenter({
               <h3 className="text-foreground text-xs font-semibold tracking-wide uppercase">
                 {t('sections.recent')}
               </h3>
-              {recent.map((log) => (
-                <RecentSyncItem key={log.id} log={log} />
-              ))}
+              {showStoreGroups ? (
+                <SyncLogsByStore
+                  logs={recent}
+                  storeLookup={storeLookup}
+                  renderRow={(log) => <RecentSyncItem key={log.id} log={log} />}
+                />
+              ) : (
+                recent.map((log) => <RecentSyncItem key={log.id} log={log} />)
+              )}
             </section>
           ) : null}
 
@@ -144,6 +198,73 @@ export function SyncCenter({
       </SheetContent>
     </Sheet>
   );
+}
+
+/**
+ * Groups sync logs by `storeId` and renders each group with a small
+ * store header (marketplace logo + name) above its rows. Stable order:
+ * groups appear in the order their first log appears in the input, so
+ * the active section's "newest first" sort propagates through the
+ * grouping unchanged.
+ */
+function SyncLogsByStore({
+  logs,
+  storeLookup,
+  renderRow,
+}: {
+  logs: SyncCenterLog[];
+  storeLookup: Map<string, SyncCenterStore>;
+  renderRow: (log: SyncCenterLog) => React.ReactElement;
+}): React.ReactElement {
+  const groups = groupLogsByStore(logs);
+
+  return (
+    <>
+      {groups.map((group) => {
+        const store = group.storeId !== undefined ? storeLookup.get(group.storeId) : undefined;
+        return (
+          <div key={group.storeId ?? '__unknown__'} className="gap-xs flex flex-col">
+            <StoreGroupHeader store={store} />
+            {group.logs.map((log) => renderRow(log))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function StoreGroupHeader({ store }: { store: SyncCenterStore | undefined }): React.ReactElement {
+  const t = useTranslations('syncCenter');
+  const name = store?.name ?? t('unknownStore');
+  return (
+    <div className="gap-xs text-muted-foreground flex items-center text-xs font-medium">
+      {store?.platform !== undefined ? (
+        <MarketplaceLogo platform={store.platform} size="xs" alt="" />
+      ) : null}
+      <span className="truncate">{name}</span>
+    </div>
+  );
+}
+
+interface SyncLogStoreGroup {
+  storeId: string | undefined;
+  logs: SyncCenterLog[];
+}
+
+function groupLogsByStore(logs: SyncCenterLog[]): SyncLogStoreGroup[] {
+  const groups: SyncLogStoreGroup[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const log of logs) {
+    const key = log.storeId ?? '__unknown__';
+    const existing = indexByKey.get(key);
+    if (existing === undefined) {
+      indexByKey.set(key, groups.length);
+      groups.push({ storeId: log.storeId, logs: [log] });
+    } else {
+      groups[existing]?.logs.push(log);
+    }
+  }
+  return groups;
 }
 
 function ActiveSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
