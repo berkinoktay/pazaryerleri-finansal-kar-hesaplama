@@ -31,7 +31,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { markRetryable, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
+import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
 
 import type { Registry } from './dispatcher';
 import { productsHandler } from './handlers/products';
@@ -43,6 +43,7 @@ const POLL_BACKOFF_INITIAL_MS = 100;
 const POLL_BACKOFF_MAX_MS = 5_000;
 const POLL_BACKOFF_MULTIPLIER = 1.5;
 const WATCHDOG_INTERVAL_MS = 30_000;
+const IDLE_LOG_THROTTLE_MS = 30_000;
 const MAX_ATTEMPTS = 5;
 
 // Permanent failure codes — markFailed terminally, never markRetryable.
@@ -65,52 +66,88 @@ function isShuttingDown(): boolean {
 }
 
 async function main(): Promise<void> {
-  console.log(`[${WORKER_ID}] sync-worker starting`);
+  syncLog.info('worker.starting', { workerId: WORKER_ID });
 
   process.on('SIGTERM', () => {
     shuttingDown = true;
-    console.log(`[${WORKER_ID}] SIGTERM received`);
+    syncLog.info('worker.shutdown.requested', { workerId: WORKER_ID, signal: 'SIGTERM' });
   });
   process.on('SIGINT', () => {
     shuttingDown = true;
-    console.log(`[${WORKER_ID}] SIGINT received`);
+    syncLog.info('worker.shutdown.requested', { workerId: WORKER_ID, signal: 'SIGINT' });
   });
 
   const watchdogTimer = setInterval(() => {
-    sweepStaleClaims().catch((err: unknown) => {
-      console.error(`[${WORKER_ID}] watchdog error`, err);
-    });
+    sweepStaleClaims()
+      .then((reapedCount) => {
+        if (reapedCount > 0) {
+          syncLog.info('watchdog.reaped', { workerId: WORKER_ID, count: reapedCount });
+        }
+      })
+      .catch((err: unknown) => {
+        syncLog.error('watchdog.error', {
+          workerId: WORKER_ID,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+      });
   }, WATCHDOG_INTERVAL_MS);
 
   let backoff = POLL_BACKOFF_INITIAL_MS;
+  let lastIdleLogAt = 0;
 
   while (!shuttingDown) {
     try {
       const claimed = await tryClaimNext(WORKER_ID);
       if (claimed === null) {
+        const now = Date.now();
+        if (now - lastIdleLogAt >= IDLE_LOG_THROTTLE_MS) {
+          syncLog.info('worker.poll.idle', { workerId: WORKER_ID });
+          lastIdleLogAt = now;
+        }
         await sleep(backoff);
         backoff = Math.min(backoff * POLL_BACKOFF_MULTIPLIER, POLL_BACKOFF_MAX_MS);
         continue;
       }
       backoff = POLL_BACKOFF_INITIAL_MS;
-      console.log(`[${WORKER_ID}] claimed sync_log ${claimed.id} (${claimed.syncType})`);
+      lastIdleLogAt = 0;
+      syncLog.info('worker.claim.acquired', {
+        workerId: WORKER_ID,
+        syncLogId: claimed.id,
+        syncType: claimed.syncType,
+        attemptCount: claimed.attemptCount,
+      });
 
       try {
+        syncLog.info('worker.run.start', {
+          workerId: WORKER_ID,
+          syncLogId: claimed.id,
+          syncType: claimed.syncType,
+        });
         await runSyncToCompletion(claimed, REGISTRY, isShuttingDown);
+        syncLog.info('worker.run.complete', { workerId: WORKER_ID, syncLogId: claimed.id });
       } catch (err) {
+        syncLog.error('worker.run.error', {
+          workerId: WORKER_ID,
+          syncLogId: claimed.id,
+          errorCode: errorCodeOf(err),
+          errorMessage: errorMessageOf(err),
+        });
         await handleRunError(claimed.id, claimed.attemptCount, err);
       }
     } catch (loopErr) {
       // Outer catch protects against systemic failures (DB connection
       // dropped, malformed claim row, etc.). Back off the full max
       // window so we do not hot-spin while the underlying issue resolves.
-      console.error(`[${WORKER_ID}] outer loop error`, loopErr);
+      syncLog.error('worker.outer.error', {
+        workerId: WORKER_ID,
+        errorMessage: loopErr instanceof Error ? loopErr.message : String(loopErr),
+      });
       await sleep(POLL_BACKOFF_MAX_MS);
     }
   }
 
   clearInterval(watchdogTimer);
-  console.log(`[${WORKER_ID}] sync-worker stopped`);
+  syncLog.info('worker.stopped', { workerId: WORKER_ID });
 }
 
 async function handleRunError(
@@ -162,6 +199,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 main().catch((fatal: unknown) => {
-  console.error('[sync-worker] fatal error', fatal);
+  syncLog.error('worker.fatal', {
+    errorMessage: fatal instanceof Error ? fatal.message : String(fatal),
+  });
   process.exit(1);
 });
