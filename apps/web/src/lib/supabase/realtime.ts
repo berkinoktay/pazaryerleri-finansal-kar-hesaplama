@@ -12,6 +12,13 @@ import { createClient } from './client';
  */
 interface SyncLogsRowWire {
   id: string;
+  /**
+   * Tenant id. Postgres logical decoding emits it because the column was
+   * denormalized onto sync_logs in PR #60 — keeping it on the wire shape
+   * lets the in-memory SyncLog we hand React Query carry tenant identity
+   * even though the channel filter already gates the row server-side.
+   */
+  organization_id: string;
   store_id: string;
   sync_type: 'PRODUCTS' | 'ORDERS' | 'SETTLEMENTS';
   /**
@@ -40,6 +47,7 @@ interface SyncLogsRowWire {
 
 export interface SyncLogRealtimeShape {
   id: string;
+  organizationId: SyncLogsRowWire['organization_id'];
   storeId: SyncLogsRowWire['store_id'];
   syncType: SyncLogsRowWire['sync_type'];
   status: SyncLogsRowWire['status'];
@@ -74,6 +82,7 @@ export type RealtimeHealth = 'healthy' | 'connecting' | 'errored' | 'paused';
 function snakeToCamel(row: SyncLogsRowWire): SyncLogRealtimeShape {
   return {
     id: row.id,
+    organizationId: row.organization_id,
     storeId: row.store_id,
     syncType: row.sync_type,
     status: row.status,

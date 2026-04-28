@@ -11,6 +11,19 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Added
+
+- **`SyncLogResponse.organizationId`** (uuid, required) — the tenant id is
+  now surfaced on every sync-log row returned by the org-scoped and
+  store-scoped sync endpoints. Lets the web client's in-memory
+  reconstruction of a `SyncLog` from a Realtime `postgres_changes` event
+  carry tenant identity through the cache. Defense-in-depth: the
+  Realtime channel's `organization_id=eq.<orgId>` filter still gates
+  rows server-side, so this is purely additive — no client behavior
+  depends on it today, but a future refactor that drops the filter
+  would silently lose tenant identity without it. Additive,
+  non-breaking.
+
 ### Changed
 
 - **`POST /v1/organizations/:orgId/stores/:storeId/products/sync` response
