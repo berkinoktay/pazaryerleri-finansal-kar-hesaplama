@@ -53,6 +53,28 @@ export const SyncLogResponseSchema = z
     progressStage: z.string().nullable().openapi({ example: 'upserting' }),
     errorCode: z.string().nullable().openapi({ example: null }),
     errorMessage: z.string().nullable().openapi({ example: null }),
+    attemptCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({
+        example: 0,
+        description:
+          'Number of worker claim attempts so far. 0 until the worker first claims; ' +
+          'incremented on every (re)claim. Surfaced so the SyncCenter can show ' +
+          '"Deneme N." for FAILED_RETRYABLE rows in backoff.',
+      }),
+    nextAttemptAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .openapi({
+        example: null,
+        description:
+          'When the next worker re-claim will fire for FAILED_RETRYABLE rows. ' +
+          'Null on every other status. Drives the "Yeniden denenecek HH:MM" countdown ' +
+          'in the SyncCenter retry section.',
+      }),
   })
   .openapi('SyncLogResponse', {
     description:
@@ -319,6 +341,8 @@ export function toSyncLogResponse(row: SyncLog): {
   progressStage: string | null;
   errorCode: string | null;
   errorMessage: string | null;
+  attemptCount: number;
+  nextAttemptAt: string | null;
 } {
   return {
     id: row.id,
@@ -333,5 +357,7 @@ export function toSyncLogResponse(row: SyncLog): {
     progressStage: row.progressStage,
     errorCode: row.errorCode,
     errorMessage: row.errorMessage,
+    attemptCount: row.attemptCount,
+    nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null,
   };
 }

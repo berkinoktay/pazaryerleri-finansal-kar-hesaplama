@@ -156,6 +156,8 @@ function applyEvent(existing: SyncLog[], event: SyncLogRealtimeEvent): SyncLog[]
     progressStage: event.row.progressStage,
     errorCode: event.row.errorCode,
     errorMessage: event.row.errorMessage,
+    attemptCount: event.row.attemptCount,
+    nextAttemptAt: event.row.nextAttemptAt,
   };
 
   const next = [...filtered, incoming];

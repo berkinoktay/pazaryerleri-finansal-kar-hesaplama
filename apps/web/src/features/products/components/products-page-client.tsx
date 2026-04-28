@@ -184,15 +184,20 @@ interface SyncSnapshot {
  * logs for the PRODUCTS sync type. The provider already classified
  * rows into active (PENDING / RUNNING / FAILED_RETRYABLE) vs recent
  * (COMPLETED / FAILED), so this is a thin "first PRODUCTS log per
- * bucket wins" projection: an active product sync drives the
- * `syncing` state with progress; otherwise the latest finished run
- * sets `lastSyncedAt` and tone.
+ * bucket wins" projection:
+ *
+ * - FAILED_RETRYABLE active row → `retrying` state with progress
+ *   (sync hit a transient error and is in backoff; user can open
+ *   SyncCenter for the error code + retry time)
+ * - RUNNING / PENDING active row → `syncing` state with progress
+ * - Otherwise: latest finished run sets `lastSyncedAt` and tone
+ *   (`failed` for terminal FAILED, `fresh` for COMPLETED or no history).
  */
 function derivedSyncSnapshot(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncSnapshot {
   const active = activeSyncs.find((l) => l.syncType === 'PRODUCTS');
   if (active !== undefined) {
     return {
-      state: 'syncing',
+      state: active.status === 'FAILED_RETRYABLE' ? 'retrying' : 'syncing',
       lastSyncedAt: active.startedAt,
       progress: { current: active.progressCurrent, total: active.progressTotal },
     };
@@ -208,31 +213,19 @@ function derivedSyncSnapshot(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): Sy
 }
 
 /**
- * Project SyncLog rows from the org-wide provider onto the narrower
- * SyncCenterLog shape that the pattern accepts. PENDING and
- * FAILED_RETRYABLE are reserved for the future worker pipeline and
- * never appear on the wire today (see SyncLogResponse openapi note);
- * the type guard keeps this projection sound rather than asserting it
- * with `as`. If/when the worker emits those statuses, SyncCenter's
- * status type will widen alongside this projection.
+ * Project SyncLog rows from the org-wide provider onto the SyncCenterLog
+ * shape. SyncCenter and the underlying type now span the full worker
+ * pipeline lifecycle (PENDING → RUNNING → FAILED_RETRYABLE → COMPLETED
+ * /FAILED), so this is a straightforward field-level mapping with no
+ * status filtering. Pulls through `errorMessage`, `attemptCount`, and
+ * `nextAttemptAt` so the FAILED_RETRYABLE rendering can show the user
+ * what's happening + when the next retry will fire.
  */
 function toSyncCenterLogs(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncCenterLog[] {
-  const out: SyncCenterLog[] = [];
-  for (const log of activeSyncs) {
-    const projected = projectSyncLog(log);
-    if (projected !== null) out.push(projected);
-  }
-  for (const log of recentSyncs) {
-    const projected = projectSyncLog(log);
-    if (projected !== null) out.push(projected);
-  }
-  return out;
+  return [...activeSyncs, ...recentSyncs].map(projectSyncLog);
 }
 
-function projectSyncLog(log: SyncLog): SyncCenterLog | null {
-  if (log.status !== 'RUNNING' && log.status !== 'COMPLETED' && log.status !== 'FAILED') {
-    return null;
-  }
+function projectSyncLog(log: SyncLog): SyncCenterLog {
   return {
     id: log.id,
     storeId: log.storeId,
@@ -244,5 +237,8 @@ function projectSyncLog(log: SyncLog): SyncCenterLog | null {
     progressCurrent: log.progressCurrent,
     progressTotal: log.progressTotal,
     errorCode: log.errorCode,
+    errorMessage: log.errorMessage,
+    attemptCount: log.attemptCount,
+    nextAttemptAt: log.nextAttemptAt,
   };
 }

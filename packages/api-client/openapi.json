@@ -607,6 +607,21 @@
               "null"
             ],
             "example": null
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 0,
+            "description": "Number of worker claim attempts so far. 0 until the worker first claims; incremented on every (re)claim. Surfaced so the SyncCenter can show \"Deneme N.\" for FAILED_RETRYABLE rows in backoff."
+          },
+          "nextAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "example": null,
+            "description": "When the next worker re-claim will fire for FAILED_RETRYABLE rows. Null on every other status. Drives the \"Yeniden denenecek HH:MM\" countdown in the SyncCenter retry section."
           }
         },
         "required": [
@@ -621,7 +636,9 @@
           "progressTotal",
           "progressStage",
           "errorCode",
-          "errorMessage"
+          "errorMessage",
+          "attemptCount",
+          "nextAttemptAt"
         ],
         "description": "Generic sync_logs row representation. Used by the SyncCenter UI to render live progress for any active sync (PRODUCTS today, ORDERS / SETTLEMENTS later)."
       },

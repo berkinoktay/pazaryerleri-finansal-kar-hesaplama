@@ -14,7 +14,13 @@ interface SyncLogsRowWire {
   id: string;
   store_id: string;
   sync_type: 'PRODUCTS' | 'ORDERS' | 'SETTLEMENTS';
-  status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+  /**
+   * Full worker-pipeline lifecycle. PENDING + FAILED_RETRYABLE are
+   * emitted by the worker (apps/sync-worker) — `tryClaimNext` writes
+   * RUNNING; `markRetryable` writes FAILED_RETRYABLE; `acquireSlot`
+   * inserts PENDING. Logical decoding sees all five over the channel.
+   */
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'FAILED_RETRYABLE';
   started_at: string;
   completed_at: string | null;
   records_processed: number;
@@ -23,6 +29,13 @@ interface SyncLogsRowWire {
   progress_stage: string | null;
   error_code: string | null;
   error_message: string | null;
+  /** Worker (re)claim count. Bumped in tryClaimNext. */
+  attempt_count: number;
+  /**
+   * Set by markRetryable when a chunk fails transiently. Drives the
+   * "Yeniden denenecek HH:MM" countdown in the SyncCenter retry section.
+   */
+  next_attempt_at: string | null;
 }
 
 export interface SyncLogRealtimeShape {
@@ -38,6 +51,8 @@ export interface SyncLogRealtimeShape {
   progressStage: string | null;
   errorCode: string | null;
   errorMessage: string | null;
+  attemptCount: SyncLogsRowWire['attempt_count'];
+  nextAttemptAt: string | null;
 }
 
 export interface SyncLogRealtimeEvent {
@@ -70,6 +85,8 @@ function snakeToCamel(row: SyncLogsRowWire): SyncLogRealtimeShape {
     progressStage: row.progress_stage,
     errorCode: row.error_code,
     errorMessage: row.error_message,
+    attemptCount: row.attempt_count,
+    nextAttemptAt: row.next_attempt_at,
   };
 }
 

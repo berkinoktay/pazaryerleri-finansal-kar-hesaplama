@@ -35,6 +35,8 @@ function makeLog(overrides: MakeLogOverrides = {}): SyncLog {
     progressStage: 'upserting',
     errorCode: null,
     errorMessage: null,
+    attemptCount: 1,
+    nextAttemptAt: null,
   };
 }
 

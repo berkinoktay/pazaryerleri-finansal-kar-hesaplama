@@ -598,10 +598,13 @@
     "openLabel": "Senkronizasyon merkezini aç",
     "sections": {
       "active": "Çalışıyor",
+      "retrying": "Yeniden deneniyor",
       "recent": "Geçmiş"
     },
     "status": {
+      "pending": "Kuyrukta",
       "running": "Çalışıyor",
+      "retrying": "Yeniden deneniyor",
       "completed": "Tamamlandı",
       "failed": "Başarısız"
     },
@@ -612,6 +615,9 @@
     },
     "completedSummary": "{n} kayıt işlendi",
     "failedSummary": "Hata",
+    "willRetry": "Yeniden denenecek {when}",
+    "willRetryUnknown": "Yeniden denenecek",
+    "attempt": "Deneme {n}",
     "empty": "Henüz senkronizasyon yok.",
     "unknownStore": "Bilinmeyen mağaza"
   },
