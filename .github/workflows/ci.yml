@@ -163,8 +163,18 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
+      # `--concurrency=1` is load-bearing: every package's integration
+      # tests share the same local Supabase DB and call `truncateAll()`
+      # in `beforeEach`. With turbo's default parallelism (numCpus),
+      # multiple packages' suites race on the shared DB and intermittently
+      # fail with P2003 ForeignKeyConstraintViolation when one suite's
+      # `truncateAll` wipes another suite's setup mid-test. Serializing
+      # across packages keeps each suite's transactional isolation
+      # intact. Local devs typically run a single package's tests at a
+      # time so the package.json alias stays parallel-friendly; we only
+      # serialize in CI where every package runs together.
       - name: Run integration tests
-        run: pnpm test:integration
+        run: pnpm turbo run test:integration --concurrency=1
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
