@@ -7,6 +7,7 @@ import { prisma } from '@pazarsync/db';
 import type { SyncLog, SyncType } from '@pazarsync/db';
 
 import { NotFoundError, SyncInProgressError } from './errors';
+import { syncLog } from './logger';
 
 export async function advance(
   id: string,
@@ -25,6 +26,7 @@ export async function advance(
 }
 
 export async function complete(id: string, syncedCount: number): Promise<void> {
+  syncLog.info('sync.completed', { syncLogId: id, finalCount: syncedCount });
   await prisma.syncLog.update({
     where: { id },
     data: {
@@ -37,6 +39,7 @@ export async function complete(id: string, syncedCount: number): Promise<void> {
 }
 
 export async function fail(id: string, errorCode: string, errorMessage: string): Promise<void> {
+  syncLog.error('sync.failed', { syncLogId: id, errorCode, errorMessage });
   await prisma.syncLog.update({
     where: { id },
     data: {
@@ -68,8 +71,9 @@ export async function acquireSlot(
   storeId: string,
   syncType: SyncType,
 ): Promise<SyncLog> {
+  syncLog.info('slot.acquire.attempt', { organizationId, storeId, syncType });
   try {
-    return await prisma.syncLog.create({
+    const created = await prisma.syncLog.create({
       data: {
         organizationId,
         storeId,
@@ -78,6 +82,13 @@ export async function acquireSlot(
         startedAt: new Date(),
       },
     });
+    syncLog.info('slot.acquired', {
+      organizationId,
+      storeId,
+      syncType,
+      syncLogId: created.id,
+    });
+    return created;
   } catch (err) {
     if (isUniqueViolation(err)) {
       const existing = await prisma.syncLog.findFirst({
@@ -87,6 +98,12 @@ export async function acquireSlot(
           status: { in: ['PENDING', 'RUNNING', 'FAILED_RETRYABLE'] },
         },
         select: { id: true },
+      });
+      syncLog.warn('slot.conflict', {
+        organizationId,
+        storeId,
+        syncType,
+        existingSyncLogId: existing?.id,
       });
       throw new SyncInProgressError({
         syncType,
@@ -222,6 +239,13 @@ export interface TickInput {
  * and a redeploy mid-sync resumes from the right place.
  */
 export async function tick(syncLogId: string, input: TickInput): Promise<void> {
+  syncLog.info('chunk.tick', {
+    syncLogId,
+    progress: input.progress,
+    total: input.total,
+    stage: input.stage,
+    cursor: input.cursor,
+  });
   await prisma.syncLog.update({
     where: { id: syncLogId },
     data: {
@@ -242,6 +266,7 @@ export async function tick(syncLogId: string, input: TickInput): Promise<void> {
  * intentionally NOT cleared so the next claimer resumes mid-run.
  */
 export async function releaseToPending(syncLogId: string): Promise<void> {
+  syncLog.info('sync.released', { syncLogId });
   await prisma.syncLog.update({
     where: { id: syncLogId },
     data: {
@@ -275,13 +300,20 @@ export async function markRetryable(
   errorMessage: string,
 ): Promise<void> {
   const backoffMs = Math.min(30_000 * Math.pow(2, attemptCount - 1), 30 * 60_000);
+  const nextAttemptAt = new Date(Date.now() + backoffMs);
+  syncLog.warn('sync.retryable', {
+    syncLogId,
+    attemptCount,
+    errorCode,
+    nextAttemptAt: nextAttemptAt.toISOString(),
+  });
   await prisma.syncLog.update({
     where: { id: syncLogId },
     data: {
       status: 'FAILED_RETRYABLE',
       errorCode,
       errorMessage,
-      nextAttemptAt: new Date(Date.now() + backoffMs),
+      nextAttemptAt,
       claimedAt: null,
       claimedBy: null,
     },
