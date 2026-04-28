@@ -109,6 +109,31 @@ importers:
         specifier: ^4.1.4
         version: 4.1.4(@types/node@22.19.17)(@vitest/ui@4.1.4)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@22.19.17)(typescript@6.0.3))(vite@8.0.8(@types/node@22.19.17)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
+  apps/sync-worker:
+    dependencies:
+      '@pazarsync/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@pazarsync/marketplace':
+        specifier: workspace:*
+        version: link:../../packages/marketplace
+      '@pazarsync/sync-core':
+        specifier: workspace:*
+        version: link:../../packages/sync-core
+    devDependencies:
+      dotenv:
+        specifier: ^16.4.0
+        version: 16.6.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^6
+        version: 6.0.3
+      vitest:
+        specifier: ^4
+        version: 4.1.4(@types/node@25.6.0)(@vitest/ui@4.1.4)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@6.0.3))(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+
   apps/web:
     dependencies:
       '@hookform/resolvers':
@@ -394,10 +419,19 @@ importers:
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../db
+      zod:
+        specifier: ^4.3.0
+        version: 4.3.6
     devDependencies:
+      dotenv:
+        specifier: ^16.4.0
+        version: 16.6.1
       typescript:
         specifier: ^6
         version: 6.0.3
+      vitest:
+        specifier: ^4
+        version: 4.1.4(@types/node@25.6.0)(@vitest/ui@4.1.4)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@6.0.3))(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   packages/utils:
     dependencies:

@@ -490,11 +490,11 @@
           "status": {
             "type": "string",
             "enum": [
-              "RUNNING"
+              "PENDING"
             ],
-            "example": "RUNNING"
+            "example": "PENDING"
           },
-          "startedAt": {
+          "enqueuedAt": {
             "type": "string",
             "format": "date-time",
             "example": "2026-04-27T14:23:11.482Z"
@@ -503,7 +503,7 @@
         "required": [
           "syncLogId",
           "status",
-          "startedAt"
+          "enqueuedAt"
         ]
       },
       "SyncLogListResponse": {
@@ -1809,8 +1809,8 @@
         "tags": [
           "Products"
         ],
-        "summary": "Start a Trendyol product sync",
-        "description": "Acquires the sync slot (sync_log row + race detection), kicks off the background sync, and returns 202 with the new syncLogId. The actual fetch + upsert runs in the background of the Hono process; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` (or, with PR 5, subscribe to Supabase Realtime postgres_changes on the same row) to track progress. Concurrent sync attempts return 409 SYNC_IN_PROGRESS.",
+        "summary": "Enqueue a Trendyol product sync",
+        "description": "Inserts a PENDING SyncLog row and returns 202 with the new syncLogId. The dedicated worker process (apps/sync-worker) claims the row and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime postgres_changes on the same row to track progress. Concurrent sync attempts return 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId` pointing at the live run.",
         "security": [
           {
             "bearerAuth": []

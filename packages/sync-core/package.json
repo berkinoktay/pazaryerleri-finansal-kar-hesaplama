@@ -9,12 +9,17 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test:unit": "vitest run src --passWithNoTests",
+    "test:integration": "vitest run tests/integration --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pazarsync/db": "workspace:*"
+    "@pazarsync/db": "workspace:*",
+    "zod": "^4.3.0"
   },
   "devDependencies": {
-    "typescript": "^6"
+    "dotenv": "^16.4.0",
+    "typescript": "^6",
+    "vitest": "^4"
   }
 }

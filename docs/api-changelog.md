@@ -13,6 +13,18 @@ section "Versioning" for details.
 
 ### Changed
 
+- **`POST /v1/organizations/:orgId/stores/:storeId/products/sync` response
+  shape** — sync trigger now returns `{ syncLogId, status: 'PENDING',
+enqueuedAt }` instead of the prior `{ syncLogId, status: 'RUNNING',
+startedAt }`. The endpoint became a thin enqueue (INSERT `PENDING` + 202) once the worker process took over execution; `status` reflects
+  the row's actual state at insertion time, and the timestamp field was
+  renamed to match. The 409 `SYNC_IN_PROGRESS` body now includes
+  `meta.existingSyncLogId` so the UI can navigate to the live run when a
+  duplicate trigger is rejected. **Wire-level breaking change**, but the
+  PazarSync frontend already treats `PENDING` and `RUNNING` as
+  interchangeable "active" states, so no UX regression. Released as part
+  of the sync-engine v2 architecture migration (see
+  `docs/plans/2026-04-27-sync-engine-architecture-implementation.md`).
 - `SyncLogResponse.status` enum widened from `'RUNNING' | 'COMPLETED' | 'FAILED'`
   to `'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'FAILED_RETRYABLE'`.
   Schema-only — `PENDING` and `FAILED_RETRYABLE` are reserved for the

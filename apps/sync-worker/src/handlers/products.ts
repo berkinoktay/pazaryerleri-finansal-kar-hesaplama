@@ -1,93 +1,101 @@
-// Orchestrates one Trendyol product sync from start to finish:
+// Trendyol products module handler — one chunk = one Trendyol page.
 //
-//   • acquires a sync slot (sync_log row + race detection)
-//   • iterates fetchApprovedProducts and upserts each batch in its own
-//     transaction (so a crash mid-sync leaves earlier pages durable)
-//   • marks variants that vanished from Trendyol's view as archived
-//   • updates Store.lastSyncAt and SyncLog status when done
+// Compared to the legacy `apps/api/src/services/product-sync.service.ts` which
+// streams every page of a sync inside a single async-but-not-awaited function,
+// this handler processes ONE page per invocation and returns a cursor the
+// dispatcher writes to `SyncLog.pageCursor`. The next chunk picks up exactly
+// where this one stopped, so a crash or a redeploy mid-sync loses at most one
+// page of work and never re-runs already-upserted pages.
 //
-// The function is async-but-not-awaited by the route handler — it runs
-// in the background of the Hono process via runInBackground(). The
-// SyncLog row is the user-visible record of progress / outcome; this
-// function never throws past its catch (errors live in the SyncLog).
+// `upsertBatch` is ported verbatim from the legacy service (per-content
+// transaction + try/catch + image replace semantics) — PR 4h will delete the
+// original; this port preserves behavior bit-for-bit.
 
 import { prisma } from '@pazarsync/db';
-import type { Store } from '@pazarsync/db';
+import type { Store, SyncLog } from '@pazarsync/db';
 import {
   fetchApprovedProducts,
   isTrendyolCredentials,
   type MappedProduct,
   type TrendyolCredentials,
 } from '@pazarsync/marketplace';
-import { decryptCredentials, syncLogService } from '@pazarsync/sync-core';
+import { decryptCredentials, parseProductsCursor, type ProductsCursor } from '@pazarsync/sync-core';
 
-import { ValidationError } from '../lib/errors';
+import type { ChunkResult, ModuleHandler } from './types';
 
-interface RunOptions {
-  store: Store;
-  syncLogId: string;
-}
+export async function processProductsChunk(input: {
+  syncLog: SyncLog;
+  cursor: unknown | null;
+}): Promise<ChunkResult> {
+  const { syncLog } = input;
+  const cursor = parseProductsCursor(input.cursor);
+  const store = await prisma.store.findUniqueOrThrow({ where: { id: syncLog.storeId } });
+  const credentials = decryptStoreCredentials(store);
 
-export async function run({ store, syncLogId }: RunOptions): Promise<void> {
-  const runStartedAt = new Date();
-  let totalProcessed = 0;
+  // Generator yields the FIRST page, then we return — the dispatcher loops
+  // back through the queue with our cursor for the next page.
+  const generator = fetchApprovedProducts({
+    environment: store.environment,
+    credentials,
+    initialCursor: cursor,
+  });
+  const { value, done } = await generator.next();
 
-  try {
-    const credentials = decryptStoreCredentials(store);
-    await syncLogService.advance(syncLogId, 0, null, 'fetching');
-
-    for await (const { batch, pageMeta } of fetchApprovedProducts({
-      environment: store.environment,
-      credentials,
-    })) {
-      await upsertBatch(store, batch);
-      totalProcessed += batch.length;
-      await syncLogService.advance(syncLogId, totalProcessed, pageMeta.totalElements, 'upserting');
-    }
-
-    // Anything our DB has but the latest fetch didn't include is no
-    // longer in Trendyol's approved set — soft-mark archived rather
-    // than DELETE so OrderItem.productVariantId FKs remain valid.
-    await prisma.productVariant.updateMany({
-      where: {
-        storeId: store.id,
-        archived: false,
-        lastSyncedAt: { lt: runStartedAt },
-      },
-      data: { archived: true },
-    });
-
-    await prisma.store.update({
-      where: { id: store.id },
-      data: { lastSyncAt: new Date() },
-    });
-
-    await syncLogService.complete(syncLogId, totalProcessed);
-  } catch (err) {
-    const errorCode = mapErrorToCode(err);
-    const errorMessage = errorMessageFor(err);
-    await syncLogService.fail(syncLogId, errorCode, errorMessage);
-    console.error('[product-sync] failed', {
-      storeId: store.id,
-      syncLogId,
-      errorCode,
-      errorMessage,
-    });
+  // Trendyol returned no more content (empty content[]) — sync is complete.
+  if (done === true || value === undefined) {
+    return { kind: 'done', finalCount: syncLog.progressCurrent };
   }
+
+  const { batch, pageMeta } = value;
+
+  if (batch.length === 0) {
+    return { kind: 'done', finalCount: syncLog.progressCurrent };
+  }
+
+  await upsertBatch(store, batch);
+
+  const newProgress = syncLog.progressCurrent + batch.length;
+
+  // Cursor advances: prefer Trendyol's own nextPageToken when present
+  // (it returns one past the 10k page-cap, and may for non-cap'd pages
+  // too — using it is always correct). Otherwise increment the page index.
+  let nextCursor: ProductsCursor;
+  if (pageMeta.nextPageToken !== null && pageMeta.nextPageToken !== undefined) {
+    nextCursor = { kind: 'token', token: pageMeta.nextPageToken };
+  } else {
+    const currentN = cursor === null ? 0 : cursor.kind === 'page' ? cursor.n : 0;
+    nextCursor = { kind: 'page', n: currentN + 1 };
+  }
+
+  if (newProgress >= pageMeta.totalElements) {
+    return { kind: 'done', finalCount: newProgress };
+  }
+
+  return {
+    kind: 'continue',
+    cursor: nextCursor,
+    progress: newProgress,
+    total: pageMeta.totalElements,
+    stage: 'upserting',
+  };
 }
+
+export const productsHandler: ModuleHandler = { processChunk: processProductsChunk };
 
 function decryptStoreCredentials(store: Store): TrendyolCredentials {
+  // Prisma's Json column type is `JsonValue`, not `string`; the actual
+  // runtime value here is the AES-256-GCM ciphertext base64 blob. The
+  // `as string` matches the existing pattern in the legacy service —
+  // the documented Prisma JSON exception to the no-`as` rule.
   const decrypted = decryptCredentials(store.credentials as string);
   if (!isTrendyolCredentials(decrypted)) {
-    // Persisted credentials don't match the expected shape — data
-    // corruption or a schema drift. Surface as a domain error so the
-    // SyncLog records something actionable for ops.
-    throw new ValidationError([{ field: 'credentials', code: 'INVALID_CREDENTIALS_SHAPE' }]);
+    throw new Error('Invalid Trendyol credentials shape on store');
   }
   return decrypted;
 }
 
 async function upsertBatch(store: Store, batch: MappedProduct[]): Promise<void> {
+  // ─── PORTED VERBATIM from apps/api/src/services/product-sync.service.ts ──
   // One transaction per content (parent + its variants + image replace).
   // Each content also runs inside a try/catch — a single malformed
   // product (rare, but real Trendyol data has shipped duplicate
@@ -220,24 +228,4 @@ async function upsertBatch(store: Store, batch: MappedProduct[]): Promise<void> 
       // Skip and continue — one bad content cannot abort the run.
     }
   }
-}
-
-// Domain errors carry their stable code on the instance. Anything else
-// collapses to INTERNAL_ERROR so we don't leak unhandled-error details
-// into a SyncLog row that the frontend will surface to a seller.
-function mapErrorToCode(err: unknown): string {
-  if (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    typeof (err as { code: unknown }).code === 'string'
-  ) {
-    return (err as { code: string }).code;
-  }
-  return 'INTERNAL_ERROR';
-}
-
-function errorMessageFor(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return 'Unknown error';
 }

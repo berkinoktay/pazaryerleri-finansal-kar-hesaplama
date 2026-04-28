@@ -110,19 +110,20 @@ export class MarketplaceAccessError extends Error {
 }
 
 /**
- * A sync (PRODUCTS / ORDERS / SETTLEMENTS) is already RUNNING for the
- * same store. The pg advisory lock acquired by ProductSyncService is the
- * source of truth — this error is thrown when `pg_try_advisory_lock`
- * returns false. Distinct from generic ConflictError so the frontend
- * can show "Senkronizasyon zaten çalışıyor" rather than a generic message,
- * and so the meta carries the running sync's id for the UI to surface.
+ * A sync (PRODUCTS / ORDERS / SETTLEMENTS) is already active for the
+ * same store. Active = status in {PENDING, RUNNING, FAILED_RETRYABLE};
+ * the partial unique index `sync_logs_active_slot_uniq` atomically
+ * enforces one active row per (storeId, syncType) at the database
+ * level. `acquireSlot` catches the resulting Prisma P2002 and throws
+ * this error with `meta.existingSyncLogId` set so the UI can navigate
+ * to the live run.
  */
 export class SyncInProgressError extends Error {
   readonly status = 409 as const;
   readonly code = 'SYNC_IN_PROGRESS' as const;
-  readonly meta: { syncType: string; storeId: string };
+  readonly meta: { syncType: string; storeId: string; existingSyncLogId?: string };
 
-  constructor(meta: { syncType: string; storeId: string }) {
+  constructor(meta: { syncType: string; storeId: string; existingSyncLogId?: string }) {
     super(`A ${meta.syncType} sync is already running for store ${meta.storeId}`);
     this.name = 'SyncInProgressError';
     this.meta = meta;

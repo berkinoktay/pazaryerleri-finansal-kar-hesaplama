@@ -1,0 +1,25 @@
+{
+  "name": "@pazarsync/sync-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration"
+  },
+  "dependencies": {
+    "@pazarsync/db": "workspace:*",
+    "@pazarsync/marketplace": "workspace:*",
+    "@pazarsync/sync-core": "workspace:*"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^6",
+    "vitest": "^4"
+  }
+}

@@ -13,6 +13,7 @@
     "migrate:dev": "prisma migrate dev",
     "push": "prisma db push && pnpm apply-policies",
     "apply-policies": "tsx --env-file-if-exists=../../.env scripts/apply-policies.ts",
+    "cutover:v2": "tsx --env-file-if-exists=../../.env scripts/cutover-stale-running.ts",
     "seed": "tsx prisma/seed.ts",
     "studio": "prisma studio",
     "typecheck": "tsc --noEmit"

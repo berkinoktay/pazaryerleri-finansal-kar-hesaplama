@@ -140,6 +140,13 @@ export interface FetchApprovedProductsOpts {
   environment?: StoreEnvironment;
   credentials: TrendyolCredentials;
   signal?: AbortSignal;
+  /**
+   * Resume from a previously-saved cursor. Existing callers pass `undefined`
+   * (or omit) to start from page 0. The sync-worker's chunked dispatcher
+   * passes the parsed cursor decoded from `SyncLog.pageCursor` so each
+   * invocation processes exactly one page and yields back to the queue.
+   */
+  initialCursor?: { kind: 'page'; n: number } | { kind: 'token'; token: string } | null;
 }
 
 /**
@@ -164,8 +171,12 @@ export async function* fetchApprovedProducts(
 
   let processedSoFar = 0;
   let totalElements: number | null = null;
-  let page = 0;
-  let pendingToken: string | undefined;
+  // Resume support: when an `initialCursor` is supplied, start at that
+  // page index OR carry the saved nextPageToken into the first request.
+  // No cursor → fresh sync from page 0 (existing behavior).
+  let page = opts.initialCursor?.kind === 'page' ? opts.initialCursor.n : 0;
+  let pendingToken: string | undefined =
+    opts.initialCursor?.kind === 'token' ? opts.initialCursor.token : undefined;
 
   for (;;) {
     if (deps.signal?.aborted === true) {
