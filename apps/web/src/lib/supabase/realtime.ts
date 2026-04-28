@@ -48,6 +48,14 @@ export interface SyncLogRealtimeEvent {
   id: string;
 }
 
+/**
+ * Channel health, surfaced to consumers so they can gate a polling
+ * fallback on it. `healthy` is true only while we believe the WebSocket
+ * is delivering events; everything else (connecting, dropped, errored,
+ * tab hidden) is unhealthy and the consumer should poll.
+ */
+export type RealtimeHealth = 'healthy' | 'connecting' | 'errored' | 'paused';
+
 function snakeToCamel(row: SyncLogsRowWire): SyncLogRealtimeShape {
   return {
     id: row.id,
@@ -65,111 +73,139 @@ function snakeToCamel(row: SyncLogsRowWire): SyncLogRealtimeShape {
   };
 }
 
-/**
- * Subscribe to postgres_changes on `public.sync_logs` filtered by
- * `store_id`. RLS policies on the table apply to the subscription —
- * a user with no membership in the store's org receives nothing.
- *
- * Returns an unsubscribe function. Caller is responsible for calling
- * it on unmount.
- *
- * Reconnection is handled by the Supabase Realtime client out of the
- * box — when the WebSocket drops the channel automatically retries
- * with exponential backoff. While disconnected, the consuming hook's
- * polling fallback (React Query `refetchInterval`) keeps progress
- * updated; once the channel comes back, the next event reconciles
- * the cache.
- */
-export function subscribeToSyncLogs(
-  storeId: string,
-  onEvent: (event: SyncLogRealtimeEvent) => void,
-): () => void {
-  const supabase = createClient();
-  const channel: RealtimeChannel = supabase
-    .channel(`sync_logs:${storeId}`)
-    .on<SyncLogsRowWire>(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'sync_logs',
-        filter: `store_id=eq.${storeId}`,
-      },
-      (payload: RealtimePostgresChangesPayload<SyncLogsRowWire>) => {
-        const eventType = payload.eventType;
-        // Postgres logical decoding sends `new` on INSERT/UPDATE and
-        // `old` on DELETE. We always need an id; it lives on whichever
-        // record is present.
-        if (eventType === 'DELETE') {
-          const oldRow = payload.old as Partial<SyncLogsRowWire>;
-          if (oldRow.id === undefined) return; // malformed — skip
-          onEvent({ eventType: 'DELETE', id: oldRow.id, row: null });
-          return;
-        }
-        // INSERT / UPDATE — `new` is the full row.
-        const newRow = payload.new as SyncLogsRowWire;
-        onEvent({
-          eventType,
-          id: newRow.id,
-          row: snakeToCamel(newRow),
-        });
-      },
-    )
-    .subscribe();
-
-  return () => {
-    void supabase.removeChannel(channel);
-  };
+export interface SubscribeToOrgSyncsOptions {
+  /** Per-event handler. Fires once per Realtime postgres_changes payload. */
+  onEvent: (event: SyncLogRealtimeEvent) => void;
+  /**
+   * Channel health changed. Consumers use this to gate a polling
+   * fallback: poll only when health is not `'healthy'`. Called
+   * synchronously with `'connecting'` immediately after subscribe(),
+   * then again on each transition (SUBSCRIBED → `'healthy'`,
+   * CHANNEL_ERROR / TIMED_OUT / CLOSED → `'errored'`, visibilitychange
+   * `hidden` → `'paused'`).
+   */
+  onHealthChange?: (health: RealtimeHealth) => void;
 }
 
 /**
  * Subscribe to postgres_changes on `public.sync_logs` filtered by
- * `organization_id`. Org-wide variant of subscribeToSyncLogs — used by
- * the dashboard-shell OrgSyncsProvider so a single channel surfaces every
- * sync across every store the user can see in the active org.
+ * `organization_id`. Org-wide subscription — used by the dashboard-shell
+ * OrgSyncsProvider so a single channel surfaces every sync across every
+ * store the user can see in the active org.
  *
  * The flat `is_org_member(organization_id)` RLS policy on sync_logs
  * (PR #60 — denormalized organization_id) lets Realtime's
  * postgres_changes evaluator gate rows by membership without a
  * cross-table walk.
  *
+ * **Connection lifecycle.** Supabase's Realtime client retries the
+ * underlying WebSocket on its own, but the per-channel subscription
+ * status drives the consumer's polling-fallback decision. We translate
+ * the four meaningful states into a `RealtimeHealth` union and push
+ * them through `onHealthChange`:
+ *
+ *   - `connecting` — initial state until SUBSCRIBED arrives.
+ *   - `healthy`    — the channel is live and delivering events. Polling
+ *                    should be off.
+ *   - `errored`    — CHANNEL_ERROR / TIMED_OUT / CLOSED. Polling fills
+ *                    in until the next SUBSCRIBED.
+ *   - `paused`     — we explicitly removed the channel because the tab
+ *                    is hidden (see visibility handling below). Polling
+ *                    is also off because nobody is watching.
+ *
+ * **Tab visibility.** Browsers throttle background tabs aggressively;
+ * we go further and tear the channel down entirely on `visibilitychange`
+ * (`hidden`), then re-subscribe on `visible`. Saves WebSocket overhead
+ * for the common case of a merchant leaving the dashboard in a
+ * background tab — and frees the consumer's polling-gate logic from
+ * trying to distinguish "channel is up but tab is dormant" from
+ * "channel is up and we're watching."
+ *
  * Returns an unsubscribe function. Caller calls on unmount;
  * OrgSyncsProvider does this in its cleanup.
  */
 export function subscribeToOrgSyncs(
   orgId: string,
-  onEvent: (event: SyncLogRealtimeEvent) => void,
+  options: SubscribeToOrgSyncsOptions,
 ): () => void {
+  const { onEvent, onHealthChange } = options;
   const supabase = createClient();
-  const channel: RealtimeChannel = supabase
-    .channel(`sync_logs:org:${orgId}`)
-    .on<SyncLogsRowWire>(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'sync_logs',
-        filter: `organization_id=eq.${orgId}`,
-      },
-      (payload: RealtimePostgresChangesPayload<SyncLogsRowWire>) => {
-        const eventType = payload.eventType;
-        if (eventType === 'DELETE') {
-          const oldRow = payload.old as Partial<SyncLogsRowWire>;
-          if (oldRow.id === undefined) return;
-          onEvent({ eventType: 'DELETE', id: oldRow.id, row: null });
-          return;
+  let channel: RealtimeChannel | null = null;
+  let unsubscribed = false;
+
+  const reportHealth = (next: RealtimeHealth): void => {
+    if (onHealthChange !== undefined) onHealthChange(next);
+  };
+
+  const buildChannel = (): RealtimeChannel => {
+    reportHealth('connecting');
+    return supabase
+      .channel(`sync_logs:org:${orgId}`)
+      .on<SyncLogsRowWire>(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sync_logs',
+          filter: `organization_id=eq.${orgId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<SyncLogsRowWire>) => {
+          const eventType = payload.eventType;
+          if (eventType === 'DELETE') {
+            const oldRow = payload.old as Partial<SyncLogsRowWire>;
+            if (oldRow.id === undefined) return;
+            onEvent({ eventType: 'DELETE', id: oldRow.id, row: null });
+            return;
+          }
+          const newRow = payload.new as SyncLogsRowWire;
+          onEvent({
+            eventType,
+            id: newRow.id,
+            row: snakeToCamel(newRow),
+          });
+        },
+      )
+      .subscribe((status) => {
+        if (unsubscribed) return;
+        // Status values: SUBSCRIBED | TIMED_OUT | CLOSED | CHANNEL_ERROR | (transient others)
+        if (status === 'SUBSCRIBED') reportHealth('healthy');
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          reportHealth('errored');
         }
-        const newRow = payload.new as SyncLogsRowWire;
-        onEvent({
-          eventType,
-          id: newRow.id,
-          row: snakeToCamel(newRow),
-        });
-      },
-    )
-    .subscribe();
+      });
+  };
+
+  const teardown = async (): Promise<void> => {
+    if (channel === null) return;
+    const c = channel;
+    channel = null;
+    await supabase.removeChannel(c);
+  };
+
+  // Visibility handler — only wired in real browsers. SSR / vitest-happy-dom
+  // both expose `document` so the typeof check is enough to keep node-only
+  // test contexts safe.
+  const handleVisibility = (): void => {
+    if (typeof document === 'undefined') return;
+    if (document.visibilityState === 'hidden') {
+      reportHealth('paused');
+      void teardown();
+    } else if (channel === null) {
+      channel = buildChannel();
+    }
+  };
+
+  channel = buildChannel();
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibility);
+  }
 
   return () => {
-    void supabase.removeChannel(channel);
+    unsubscribed = true;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    }
+    void teardown();
   };
 }
