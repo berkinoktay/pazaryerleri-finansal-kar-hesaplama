@@ -34,9 +34,21 @@ startedAt }`. The endpoint became a thin enqueue (INSERT `PENDING` + 202) once t
   `RUNNING` / `COMPLETED` / `FAILED`. **Backwards compatible** — clients
   that switch on the legacy three values keep working; new values land in
   PR 4 of the sync-engine migration.
+- `SyncLogResponse` gains a `storeId` field (UUID). Required by the new
+  org-scoped sync-logs endpoint so the dashboard SyncCenter can group
+  rows by store across the organization; redundant on store-scoped
+  endpoints where the caller already knows the storeId from the URL.
+  **Backwards compatible** — additive field, no existing field changed.
 
 ### Added
 
+- `GET /v1/organizations/:orgId/sync-logs` — org-scoped twin of the
+  store-scoped sync-logs endpoint. Returns RUNNING / PENDING /
+  FAILED_RETRYABLE active + last 5 finished across every store the
+  caller can see. Powers the dashboard-shell SyncBadge so any active
+  sync surfaces to every authenticated org member regardless of which
+  page they're on. Optional `?active=true` query param omits recent
+  finished rows. Backwards compatible — additive endpoint.
 - `GET /v1/organizations` response is enriched with **four caller-scoped
   fields** per organization: `role` (caller's `MemberRole` on this org),
   `storeCount` (every status counted — ACTIVE, CONNECTION_ERROR, DISABLED),

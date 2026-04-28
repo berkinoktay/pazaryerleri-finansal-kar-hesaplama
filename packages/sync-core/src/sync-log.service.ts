@@ -145,6 +145,40 @@ export async function listActiveAndRecent(
 }
 
 /**
+ * Org-wide twin of `listActiveAndRecent`. Returns every active sync log
+ * (PENDING / RUNNING / FAILED_RETRYABLE) across every store the
+ * organization owns, plus the most recent N completed/failed runs (also
+ * org-wide). Active rows come first, sorted newest first.
+ *
+ * Powers the dashboard-shell SyncBadge so any active sync surfaces to
+ * every authenticated org member regardless of which page they're on.
+ *
+ * Set `opts.activeOnly = true` to skip the recent-finished query when
+ * the caller only cares about live work — the SyncBadge polls in active-
+ * only mode to keep the response tiny.
+ */
+export async function listOrgActiveAndRecent(
+  organizationId: string,
+  opts: { activeOnly: boolean; recentLimit?: number } = { activeOnly: false },
+): Promise<SyncLog[]> {
+  const recentLimit = opts.recentLimit ?? 5;
+  const [active, recent] = await Promise.all([
+    prisma.syncLog.findMany({
+      where: { organizationId, status: { in: ['PENDING', 'RUNNING', 'FAILED_RETRYABLE'] } },
+      orderBy: { startedAt: 'desc' },
+    }),
+    opts.activeOnly
+      ? Promise.resolve<SyncLog[]>([])
+      : prisma.syncLog.findMany({
+          where: { organizationId, status: { in: ['COMPLETED', 'FAILED'] } },
+          orderBy: { startedAt: 'desc' },
+          take: recentLimit,
+        }),
+  ]);
+  return [...active, ...recent];
+}
+
+/**
  * Read a single SyncLog row scoped to (org, store). Returns 404 (non-
  * disclosure) on cross-tenant or missing rows. Used by the polling
  * endpoint and SyncCenter hydration query.

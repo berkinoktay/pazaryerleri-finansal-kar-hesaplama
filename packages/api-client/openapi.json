@@ -529,6 +529,12 @@
             "format": "uuid",
             "example": "7f3a9b2e-4d6c-48a1-9f0e-2b5c8d1a4e6f"
           },
+          "storeId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "1c1b9b3a-4f2d-49a8-9c5e-3a2f1d8b9c0e",
+            "description": "Store the sync belongs to. Required by the org-scoped sync-logs endpoint so the dashboard SyncCenter can group rows by store; redundant on store-scoped endpoints where the caller already knows the storeId from the URL."
+          },
           "syncType": {
             "type": "string",
             "enum": [
@@ -605,6 +611,7 @@
         },
         "required": [
           "id",
+          "storeId",
           "syncType",
           "status",
           "startedAt",
@@ -2509,6 +2516,123 @@
           },
           "404": {
             "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/sync-logs": {
+      "get": {
+        "tags": [
+          "Sync"
+        ],
+        "summary": "List active + recent sync logs across the organization",
+        "description": "Returns every active sync (PENDING / RUNNING / FAILED_RETRYABLE) plus the last 5 completed/failed runs across every store the user can see. Drives the org-wide SyncBadge in the dashboard header (PR 5c). Active rows come first, sorted newest first.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "When `true`, omit recent COMPLETED/FAILED rows and return only active syncs."
+            },
+            "required": false,
+            "description": "When `true`, omit recent COMPLETED/FAILED rows and return only active syncs.",
+            "name": "active",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active + recent sync logs for the org",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncLogListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
             "content": {
               "application/json": {
                 "schema": {

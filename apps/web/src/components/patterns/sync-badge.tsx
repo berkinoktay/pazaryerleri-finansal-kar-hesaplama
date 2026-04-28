@@ -1,9 +1,10 @@
 'use client';
 
-import { CheckmarkCircle02Icon, AlertCircleIcon, Time04Icon } from 'hugeicons-react';
+import { CheckmarkCircle02Icon, AlertCircleIcon, RefreshIcon, Time04Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { Badge } from '@/components/ui/badge';
 import { useIsMounted } from '@/lib/use-is-mounted';
 import { cn } from '@/lib/utils';
 
@@ -30,6 +31,16 @@ export interface SyncBadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElemen
    */
   progress?: SyncProgress;
   /**
+   * Number of active syncs across the org. When omitted, the badge
+   * renders the single-sync surface using `state` / `lastSyncedAt` /
+   * `progress` (legacy callers keep working unchanged). When supplied:
+   *   - `0` → returns null (no badge to show; caller doesn't need a guard)
+   *   - `1` → identical to the single-sync surface
+   *   - `>= 2` → compact "N syncs running" pill, surfaces the count to
+   *     the SyncCenter without flooding the header with per-store rows
+   */
+  activeCount?: number;
+  /**
    * When supplied, the badge renders as an interactive button that
    * opens the SyncCenter sheet. Existing static usages (no onClick)
    * keep rendering as a span.
@@ -44,8 +55,52 @@ export interface SyncBadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElemen
  * must never be ambiguous about staleness — this badge answers "is the
  * number I'm looking at up to date?" with a single glance. When `onClick`
  * is provided it becomes the entry point to the SyncCenter sheet.
+ *
+ * Org-wide multi-sync mode is opt-in via `activeCount`: omit it for the
+ * legacy single-sync surface; pass it when the caller is aggregating
+ * across stores (e.g. dashboard SyncBadge fed by `useOrgSyncs()`).
  */
 export function SyncBadge({
+  lastSyncedAt,
+  state,
+  source,
+  progress,
+  activeCount,
+  onClick,
+  ariaLabel,
+  className,
+  ...props
+}: SyncBadgeProps): React.ReactElement | null {
+  if (activeCount !== undefined && activeCount === 0) {
+    return null;
+  }
+
+  if (activeCount !== undefined && activeCount >= 2) {
+    return (
+      <MultiSyncBadge
+        activeCount={activeCount}
+        onClick={onClick}
+        ariaLabel={ariaLabel}
+        className={className}
+      />
+    );
+  }
+
+  return (
+    <SingleSyncBadge
+      lastSyncedAt={lastSyncedAt}
+      state={state}
+      source={source}
+      progress={progress}
+      onClick={onClick}
+      ariaLabel={ariaLabel}
+      className={className}
+      {...props}
+    />
+  );
+}
+
+function SingleSyncBadge({
   lastSyncedAt,
   state,
   source,
@@ -54,7 +109,7 @@ export function SyncBadge({
   ariaLabel,
   className,
   ...props
-}: SyncBadgeProps): React.ReactElement {
+}: Omit<SyncBadgeProps, 'activeCount'>): React.ReactElement {
   const formatter = useFormatter();
   const t = useTranslations('common');
   const mounted = useIsMounted();
@@ -155,4 +210,62 @@ export function SyncBadge({
       {inner}
     </span>
   );
+}
+
+interface MultiSyncBadgeProps {
+  activeCount: number;
+  onClick?: () => void;
+  ariaLabel?: string;
+  className?: string;
+}
+
+/**
+ * Compact pill rendered when two or more syncs are running across the
+ * org. Composes the shared `Badge` primitive with the `info` tone so
+ * the visual language stays consistent with the SyncCenter's per-row
+ * "Çalışıyor" chip — only the count label changes.
+ *
+ * When interactive, the Badge is wrapped in a transparent button so the
+ * shape, padding, and tone come straight from the primitive (no forking)
+ * and only the cursor + focus ring are added on top.
+ */
+function MultiSyncBadge({
+  activeCount,
+  onClick,
+  ariaLabel,
+  className,
+}: MultiSyncBadgeProps): React.ReactElement {
+  const t = useTranslations('common');
+  const formatter = useFormatter();
+
+  const badge = (
+    <Badge
+      tone="info"
+      size="sm"
+      leadingIcon={<RefreshIcon className="animate-spin" />}
+      className={cn('tabular-nums', onClick === undefined ? className : undefined)}
+    >
+      {t('activeSyncCount', { n: formatter.number(activeCount, 'integer') })}
+    </Badge>
+  );
+
+  if (onClick !== undefined) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={ariaLabel}
+        className={cn(
+          'duration-fast inline-flex cursor-pointer items-center rounded-full transition-opacity',
+          'hover:opacity-90 focus-visible:opacity-90',
+          'focus-visible:ring-info focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none',
+          className,
+        )}
+      >
+        {badge}
+      </button>
+    );
+  }
+
+  return badge;
 }

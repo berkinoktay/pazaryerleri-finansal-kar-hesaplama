@@ -36,6 +36,23 @@
 import type { CrossFeatureImport, ViolationDecision } from './audit-feature-boundaries.types';
 
 export function evaluateCrossFeatureImport(imp: CrossFeatureImport): ViolationDecision {
+  // The `sync` feature is an audited cross-feature provider, by design.
+  // OrgSyncsProvider is mounted once at the dashboard layout and every
+  // domain page (products today, orders / settlements next) consumes
+  // `useStoreSyncs(storeId)` to project the org-wide subscription onto
+  // its surface. Promoting these to `lib/` would dilute the feature
+  // boundary the other way (the api layer + provider + hooks belong
+  // together as one slice). The shared `SyncLog` type is sourced from
+  // `@pazarsync/api-client` schemas inside the feature; downstream
+  // consumers re-export rather than reach into the api file directly.
+  // See docs/plans/2026-04-27-sync-engine-architecture-design.md.
+  if (imp.targetFeature === 'sync') {
+    return {
+      severity: 'allow',
+      message: `Cross-feature consumption of the "sync" feature is permitted by design (org-wide subscription provider mounted at the dashboard layout)`,
+    };
+  }
+
   if (imp.isTypeOnly) {
     return {
       severity: 'warn',
