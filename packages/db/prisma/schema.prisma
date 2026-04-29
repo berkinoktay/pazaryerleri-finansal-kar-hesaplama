@@ -378,6 +378,13 @@ model SyncLog {
   pageCursor       Json?      @map("page_cursor")
   attemptCount     Int        @default(0) @map("attempt_count")
   nextAttemptAt    DateTime?  @map("next_attempt_at") @db.Timestamptz(3)
+  // Bozuk sayfalar (Trendyol upstream 5xx, MAX_ATTEMPTS dolan transient
+  // hatalar). Worker bu durumda sync'i terminal FAIL etmek yerine cursor'u
+  // bir ileri alır ve atlanan sayfayı buraya kaydeder. Şema:
+  // Array<{ page, attemptedAt, errorCode, httpStatus, xRequestId?, responseBodySnippet? }>
+  // UI bu array'i okuyup COMPLETED satırının yanında "X sayfa atlandı"
+  // uyarısı gösterir.
+  skippedPages     Json?      @map("skipped_pages")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)

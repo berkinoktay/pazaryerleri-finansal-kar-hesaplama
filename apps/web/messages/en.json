@@ -614,6 +614,8 @@
       "SETTLEMENTS": "Sync settlements now"
     },
     "completedSummary": "{n} records processed",
+    "completedWithSkipsSummary": "{n} records processed · {skipped} pages skipped (Trendyol upstream)",
+    "skippedChip": "{n} pages skipped",
     "failedSummary": "Error",
     "willRetry": "Retrying {when}",
     "willRetryUnknown": "Retrying soon",

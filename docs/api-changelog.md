@@ -13,6 +13,17 @@ section "Versioning" for details.
 
 ### Added
 
+- **`SyncLogResponse.skippedPages`** (array | null) — pages the worker
+  skipped after exhausting MAX_ATTEMPTS on a `MARKETPLACE_UNREACHABLE`
+  error. Each entry: `{ page, attemptedAt, errorCode, httpStatus,
+xRequestId?, responseBodySnippet? }`. Surfaces deterministic upstream
+  5xx-on-a-single-page failures (real-world: a corrupted seller record
+  at a specific Trendyol catalog offset that crashes their serializer
+  every time we hit it). Worker now advances past the bad page instead
+  of terminally failing the whole sync; the SyncCenter UI shows a
+  "X sayfa atlandı" warning chip on `COMPLETED` rows when the array is
+  non-empty. `null` when no pages were skipped (the typical case).
+  Additive, non-breaking.
 - **`SyncLogResponse.organizationId`** (uuid, required) — the tenant id is
   now surfaced on every sync-log row returned by the org-scoped and
   store-scoped sync endpoints. Lets the web client's in-memory

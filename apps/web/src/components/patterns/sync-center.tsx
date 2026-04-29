@@ -63,6 +63,22 @@ export interface SyncCenterLog {
    * any other status. Drives the "Yeniden denenecek HH:MM" countdown.
    */
   nextAttemptAt?: string | null;
+  /**
+   * Pages the worker skipped after exhausting MAX_ATTEMPTS on a
+   * MARKETPLACE_UNREACHABLE error. Each entry: page index + diagnostic
+   * surface. Drives the "X sayfa atlandı" warning chip on COMPLETED rows
+   * (the merchant needs to know not the entire catalog made it across).
+   */
+  skippedPages?:
+    | {
+        page: number;
+        attemptedAt: string;
+        errorCode: string;
+        httpStatus: number;
+        xRequestId?: string;
+        responseBodySnippet?: string;
+      }[]
+    | null;
 }
 
 export interface SyncCenterTriggerSpec {
@@ -400,8 +416,25 @@ function RecentSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
   const formatter = useFormatter();
   const mounted = useIsMounted();
 
-  const Icon = log.status === 'FAILED' ? AlertCircleIcon : CheckmarkCircle02Icon;
-  const toneClass = log.status === 'FAILED' ? 'text-destructive' : 'text-success';
+  const skippedCount = log.skippedPages?.length ?? 0;
+  const completedWithSkips = log.status === 'COMPLETED' && skippedCount > 0;
+
+  // Completed sync that has skipped pages reads as a soft warning, not a
+  // clean success — Trendyol gave us a partial catalog. Still uses the
+  // warning surface (not destructive) because the work that did succeed
+  // is durable; the user just needs to know some pages didn't.
+  const Icon =
+    log.status === 'FAILED'
+      ? AlertCircleIcon
+      : completedWithSkips
+        ? AlertCircleIcon
+        : CheckmarkCircle02Icon;
+  const toneClass =
+    log.status === 'FAILED'
+      ? 'text-destructive'
+      : completedWithSkips
+        ? 'text-warning'
+        : 'text-success';
 
   // SSR-safe time label — same pattern as SyncBadge.
   const reference = log.completedAt ?? log.startedAt;
@@ -418,11 +451,23 @@ function RecentSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
             {t(`triggers.${log.syncType}`)}
           </span>
           <span className="text-muted-foreground text-2xs">{timeLabel}</span>
+          {completedWithSkips ? (
+            <Badge tone="warning" size="sm">
+              {t('skippedChip', { n: formatter.number(skippedCount, 'integer') })}
+            </Badge>
+          ) : null}
         </div>
-        {log.status === 'COMPLETED' ? (
+        {log.status === 'COMPLETED' && !completedWithSkips ? (
           <span className="text-muted-foreground text-2xs tabular-nums">
             {t('completedSummary', {
               n: formatter.number(log.recordsProcessed, 'integer'),
+            })}
+          </span>
+        ) : completedWithSkips ? (
+          <span className="text-warning text-2xs">
+            {t('completedWithSkipsSummary', {
+              n: formatter.number(log.recordsProcessed, 'integer'),
+              skipped: formatter.number(skippedCount, 'integer'),
             })}
           </span>
         ) : log.errorCode !== null ? (

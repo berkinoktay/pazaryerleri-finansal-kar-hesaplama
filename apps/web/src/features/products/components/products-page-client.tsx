@@ -240,5 +240,6 @@ function projectSyncLog(log: SyncLog): SyncCenterLog {
     errorMessage: log.errorMessage,
     attemptCount: log.attemptCount,
     nextAttemptAt: log.nextAttemptAt,
+    skippedPages: log.skippedPages,
   };
 }

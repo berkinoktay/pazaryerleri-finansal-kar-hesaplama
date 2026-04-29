@@ -88,6 +88,28 @@ export const SyncLogResponseSchema = z
           'Null on every other status. Drives the "Yeniden denenecek HH:MM" countdown ' +
           'in the SyncCenter retry section.',
       }),
+    skippedPages: z
+      .array(
+        z.object({
+          page: z.number().int().nonnegative(),
+          attemptedAt: z.string().datetime(),
+          errorCode: z.string(),
+          httpStatus: z.number().int(),
+          xRequestId: z.string().optional(),
+          responseBodySnippet: z.string().optional(),
+        }),
+      )
+      .nullable()
+      .openapi({
+        example: null,
+        description:
+          'Pages the worker skipped after exhausting MAX_ATTEMPTS on a transient ' +
+          'marketplace error (deterministic upstream 5xx on a single page). Each ' +
+          'entry records the offset + diagnostic surface (X-Request-ID, body snippet) ' +
+          'for support correlation. Surfaced in the SyncCenter as a "X sayfa atlandı" ' +
+          'warning chip on COMPLETED rows so merchants know not all of the catalog ' +
+          'made it through. Null when no pages were skipped (typical case).',
+      }),
   })
   .openapi('SyncLogResponse', {
     description:
@@ -341,6 +363,15 @@ export function toProductWithVariantsResponse(
 // Keeps the ISO-8601 conversions in one place — services return Prisma
 // rows, route handlers serialize via this helper.
 
+interface SkippedPageWire {
+  page: number;
+  attemptedAt: string;
+  errorCode: string;
+  httpStatus: number;
+  xRequestId?: string;
+  responseBodySnippet?: string;
+}
+
 export function toSyncLogResponse(row: SyncLog): {
   id: string;
   organizationId: string;
@@ -357,6 +388,7 @@ export function toSyncLogResponse(row: SyncLog): {
   errorMessage: string | null;
   attemptCount: number;
   nextAttemptAt: string | null;
+  skippedPages: SkippedPageWire[] | null;
 } {
   return {
     id: row.id,
@@ -374,5 +406,42 @@ export function toSyncLogResponse(row: SyncLog): {
     errorMessage: row.errorMessage,
     attemptCount: row.attemptCount,
     nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null,
+    skippedPages: normalizeSkippedPages(row.skippedPages),
   };
+}
+
+/**
+ * Normalize the raw Prisma JSON column into the wire shape. Validator
+ * (`SyncLogResponseSchema`) is the single source of truth for what's
+ * acceptable; we just shape-check here. Malformed payload (shouldn't
+ * happen — only the worker writes this column) is treated as null so a
+ * single bad row doesn't poison the whole sync-logs list response.
+ */
+function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] | null {
+  if (raw === null || raw === undefined) return null;
+  if (!Array.isArray(raw)) return null;
+  const out: SkippedPageWire[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const o = item as Record<string, unknown>;
+    if (
+      typeof o['page'] !== 'number' ||
+      typeof o['attemptedAt'] !== 'string' ||
+      typeof o['errorCode'] !== 'string' ||
+      typeof o['httpStatus'] !== 'number'
+    ) {
+      continue;
+    }
+    out.push({
+      page: o['page'],
+      attemptedAt: o['attemptedAt'],
+      errorCode: o['errorCode'],
+      httpStatus: o['httpStatus'],
+      ...(typeof o['xRequestId'] === 'string' ? { xRequestId: o['xRequestId'] } : {}),
+      ...(typeof o['responseBodySnippet'] === 'string'
+        ? { responseBodySnippet: o['responseBodySnippet'] }
+        : {}),
+    });
+  }
+  return out.length > 0 ? out : null;
 }

@@ -133,14 +133,39 @@ export class SyncInProgressError extends Error {
 /**
  * Marketplace itself is down / timed out / 5xx. 503 tells the client to
  * retry later; the underlying issue is upstream, not our data.
+ *
+ * `meta.url`, `meta.xRequestId` and `meta.responseBodySnippet` are
+ * captured by the marketplace HTTP layer when retries are exhausted.
+ * They are not used by the API surface (we never leak upstream details
+ * to end users), but the worker stores them in `SyncLog.skippedPages`
+ * so that:
+ *   - operators can correlate failures with Trendyol via X-Request-ID,
+ *   - the diagnostic record survives across sync runs,
+ *   - support can identify which exact URL / payload tripped the bug.
+ *
+ * Snippet is bounded to 1KB at capture-time — see `safeReadBody` in
+ * the marketplace package.
  */
 export class MarketplaceUnreachable extends Error {
   readonly status = 503 as const;
   readonly code = 'MARKETPLACE_UNREACHABLE' as const;
   readonly platform: string;
-  readonly meta: { httpStatus: number };
+  readonly meta: {
+    httpStatus: number;
+    url?: string;
+    xRequestId?: string;
+    responseBodySnippet?: string;
+  };
 
-  constructor(platform: string, meta: { httpStatus: number }) {
+  constructor(
+    platform: string,
+    meta: {
+      httpStatus: number;
+      url?: string;
+      xRequestId?: string;
+      responseBodySnippet?: string;
+    },
+  ) {
     super(`Marketplace unreachable (${meta.httpStatus.toString()}) — upstream issue`);
     this.name = 'MarketplaceUnreachable';
     this.platform = platform;

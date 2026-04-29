@@ -39,6 +39,7 @@ function makeLog(overrides: MakeLogOverrides = {}): SyncLog {
     errorMessage: null,
     attemptCount: 1,
     nextAttemptAt: null,
+    skippedPages: null,
   };
 }
 

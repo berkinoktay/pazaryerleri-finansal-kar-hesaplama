@@ -118,6 +118,7 @@ describe('useOrgSyncs', () => {
           errorMessage: null,
           attemptCount: 1,
           nextAttemptAt: null,
+          skippedPages: null,
         },
       });
     });
