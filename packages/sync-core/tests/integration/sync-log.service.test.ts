@@ -7,6 +7,7 @@
 // failure rather than a silent SLA change.
 
 import { prisma } from '@pazarsync/db';
+import { SyncErrorCode } from '@pazarsync/db/enums';
 import { syncLogService } from '@pazarsync/sync-core';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -61,14 +62,19 @@ describe('syncLogService.markRetryable backoff schedule', () => {
       const id = await setupRunningRow(attempt);
       const before = Date.now();
 
-      await syncLogService.markRetryable(id, attempt, 'TEST_TRANSIENT', 'simulated transient');
+      await syncLogService.markRetryable(
+        id,
+        attempt,
+        SyncErrorCode.MARKETPLACE_UNREACHABLE,
+        'simulated transient',
+      );
 
       const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
 
       // Status, error, and claim ownership must be reset so the next
       // tryClaimNext can pick the row up after the backoff.
       expect(after.status).toBe('FAILED_RETRYABLE');
-      expect(after.errorCode).toBe('TEST_TRANSIENT');
+      expect(after.errorCode).toBe(SyncErrorCode.MARKETPLACE_UNREACHABLE);
       expect(after.errorMessage).toBe('simulated transient');
       expect(after.claimedAt).toBeNull();
       expect(after.claimedBy).toBeNull();

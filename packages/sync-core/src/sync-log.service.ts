@@ -5,6 +5,7 @@
 
 import { prisma } from '@pazarsync/db';
 import type { SyncLog, SyncType } from '@pazarsync/db';
+import { SyncErrorCode } from '@pazarsync/db/enums';
 
 import { parseSkippedPages, type ProductsCursor, type SkippedPageEntry } from './checkpoint';
 import { NotFoundError, SyncInProgressError } from './errors';
@@ -39,7 +40,11 @@ export async function complete(id: string, syncedCount: number): Promise<void> {
   });
 }
 
-export async function fail(id: string, errorCode: string, errorMessage: string): Promise<void> {
+export async function fail(
+  id: string,
+  errorCode: SyncErrorCode,
+  errorMessage: string,
+): Promise<void> {
   syncLog.error('sync.failed', { syncLogId: id, errorCode, errorMessage });
   await prisma.syncLog.update({
     where: { id },
@@ -297,7 +302,7 @@ export async function releaseToPending(syncLogId: string): Promise<void> {
 export async function markRetryable(
   syncLogId: string,
   attemptCount: number,
-  errorCode: string,
+  errorCode: SyncErrorCode,
   errorMessage: string,
 ): Promise<void> {
   const backoffMs = Math.min(30_000 * Math.pow(2, attemptCount - 1), 30 * 60_000);
