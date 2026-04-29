@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   mapTrendyolApprovedResponse,
@@ -6,7 +6,6 @@ import {
   type TrendyolApprovedProductsResponse,
   type TrendyolContent,
 } from '@pazarsync/marketplace';
-import { syncLog } from '@pazarsync/sync-core';
 
 // First staging Postman sample provided by the user (April 2026):
 // single-variant product "dfsf" with one Beden attribute on the variant
@@ -78,7 +77,7 @@ describe('mapTrendyolContent', () => {
     expect(out.brandName).toBe('Modline');
     expect(out.categoryId).toBe(BigInt(2122));
     expect(out.categoryName).toBe('Dolap ve Gardrop');
-    expect(out.color).toBe('Beyaz');
+    expect(out.color).toBe('Beyaz Beyaz');
     expect(out.images).toEqual([
       {
         url: 'https://cdn.dsmcdn.com/mediacenter-stage8/stage/QC_PREP/20260427/02/de9bebd6-e781-3d1d-9f76-10765a8c3b3c/1_org_zoom.jpg',
@@ -92,7 +91,7 @@ describe('mapTrendyolContent', () => {
     expect(variant?.platformVariantId).toBe(BigInt(1565552107));
     expect(variant?.barcode).toBe('1231231231');
     expect(variant?.stockCode).toBe('122');
-    expect(variant?.size).toBe('210 cm');
+    expect(variant?.size).toBe('210 cm Beden');
     expect(variant?.salePrice).toBe('131231.00');
     expect(variant?.listPrice).toBe('131231.00');
     expect(variant?.quantity).toBe(12312);
@@ -107,37 +106,51 @@ describe('mapTrendyolContent', () => {
     expect(variant?.locked).toBe(false);
   });
 
-  it('extracts color from the first Renk attribute even when duplicated', () => {
-    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => {});
-    const out = mapTrendyolContent(STAGING_SAMPLE_DFSF);
-    expect(out.color).toBe('Beyaz');
-    // both Renk attrs say "Beyaz" — no warn expected
-    expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it('warns on disagreeing duplicate Renk values but still picks the first', () => {
-    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => {});
+  it('joins multiple Renk attribute values with a space', () => {
+    // Trendyol panel concatenates attrId 47 + 295 (both name "Renk") as
+    // "Red Haki". Picking only the first dropped the second token.
     const out = mapTrendyolContent({
       ...STAGING_SAMPLE_DFSF,
       attributes: [
-        { attributeId: 47, attributeName: 'Renk', attributeValue: 'Beyaz' },
-        { attributeId: 295, attributeName: 'Renk', attributeValueId: 2882, attributeValue: 'Mavi' },
+        { attributeId: 47, attributeName: 'Renk', attributeValue: 'Red' },
+        {
+          attributeId: 295,
+          attributeName: 'Renk',
+          attributeValueId: 68678,
+          attributeValue: 'Haki',
+        },
       ],
     });
-    expect(out.color).toBe('Beyaz');
-    expect(warn).toHaveBeenCalledOnce();
-    // Mapper now emits a structured event via syncLog instead of a raw
-    // console.warn. Assert on the event name + the diagnostic fields
-    // that downstream operators would grep for.
-    const [event, ctx] = warn.mock.calls[0] ?? [];
-    expect(event).toBe('mapper.color.disagreement');
-    expect(ctx).toMatchObject({
-      attrCount: 2,
-      distinct: ['Beyaz', 'Mavi'],
-      chosen: 'Beyaz',
+    expect(out.color).toBe('Red Haki');
+  });
+
+  it('preserves duplicate Renk values to mirror the Trendyol panel ("Mavi Mavi")', () => {
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      attributes: [
+        { attributeId: 47, attributeName: 'Renk', attributeValue: 'Mavi' },
+        { attributeId: 295, attributeName: 'Renk', attributeValueId: 1, attributeValue: 'Mavi' },
+      ],
     });
-    warn.mockRestore();
+    expect(out.color).toBe('Mavi Mavi');
+  });
+
+  it('captures prefixed Renk attribute names from staging or category overrides', () => {
+    // Staging environment and some category configs emit "[STG] Renk" or
+    // "[A-TDG]_Renk" instead of plain "Renk". endsWith catches both shapes.
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      attributes: [
+        { attributeId: 47, attributeName: '[A-TDG]_Renk', attributeValue: 'Male' },
+        {
+          attributeId: 295,
+          attributeName: '[A-TDG]_Renk',
+          attributeValueId: 1,
+          attributeValue: '[A-TDG]_Siyah',
+        },
+      ],
+    });
+    expect(out.color).toBe('Male [A-TDG]_Siyah');
   });
 
   it('returns null color when no Renk attribute is present', () => {
@@ -145,7 +158,7 @@ describe('mapTrendyolContent', () => {
     expect(out.color).toBeNull();
   });
 
-  it('returns null size when no Beden attribute is present on the variant', () => {
+  it('returns null variant label when the variant has no attributes', () => {
     const variant = STAGING_SAMPLE_DFSF.variants?.[0];
     if (variant === undefined) throw new Error('fixture variant missing');
     const out = mapTrendyolContent({
@@ -153,6 +166,54 @@ describe('mapTrendyolContent', () => {
       variants: [{ ...variant, attributes: [] }],
     });
     expect(out.variants[0]?.size).toBeNull();
+  });
+
+  it('captures non-Beden variant attributes (Boyut/Ebat, Kullanım Alanı, …)', () => {
+    // Real failure mode from staging: textile variants come through with
+    // attributeName "Boyut/Ebat" (attrId 92) — filtering on "Beden" silently
+    // dropped the entire variant label. Panel shows "20 Boyut/Ebat".
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [
+        {
+          ...variant,
+          attributes: [
+            {
+              attributeId: 92,
+              attributeName: 'Boyut/Ebat',
+              attributeValueId: 20337,
+              attributeValue: '20',
+            },
+          ],
+        },
+      ],
+    });
+    expect(out.variants[0]?.size).toBe('20 Boyut/Ebat');
+  });
+
+  it('joins multiple variant attributes when a category emits more than one', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [
+        {
+          ...variant,
+          attributes: [
+            { attributeId: 293, attributeName: 'Beden', attributeValueId: 1, attributeValue: 'XS' },
+            {
+              attributeId: 196,
+              attributeName: 'Kullanım Alanı',
+              attributeValueId: 2,
+              attributeValue: 'Günlük',
+            },
+          ],
+        },
+      ],
+    });
+    expect(out.variants[0]?.size).toBe('XS Beden Günlük Kullanım Alanı');
   });
 
   it('handles missing brand and category gracefully', () => {
@@ -279,12 +340,4 @@ describe('mapTrendyolApprovedResponse', () => {
     const { pageMeta } = mapTrendyolApprovedResponse(wire);
     expect(pageMeta.nextPageToken).toBe('abc-token');
   });
-});
-
-// Reset mocks left behind by tests using vi.spyOn to be safe.
-beforeEach(() => {
-  vi.restoreAllMocks();
-});
-afterEach(() => {
-  vi.restoreAllMocks();
 });

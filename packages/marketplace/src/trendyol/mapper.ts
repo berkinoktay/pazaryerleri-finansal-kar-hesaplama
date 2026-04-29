@@ -2,8 +2,6 @@
 // shape and our internal MappedProduct DTO. No I/O, no DB. Tested in
 // isolation with the staging Postman samples.
 
-import { syncLog } from '@pazarsync/sync-core';
-
 import type {
   MappedProduct,
   MappedProductFastDeliveryOption,
@@ -17,7 +15,6 @@ import type {
 } from './types';
 
 const COLOR_ATTRIBUTE_NAME = 'Renk';
-const SIZE_ATTRIBUTE_NAME = 'Beden';
 
 function epochMsToDate(ms: number | null | undefined): Date | null {
   if (ms === null || ms === undefined || ms === 0) return null;
@@ -38,36 +35,25 @@ function priceToDecimalString(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
-// Trendyol's content-level attributes[] frequently has the same color
-// twice (different attributeId, same attributeValue). Pick the first
-// `Renk` entry; warn if multiple disagree.
-//
-// This is a Trendyol seller-data-quality issue, not our bug. Real
-// observed values: same color in different casing ("sarı" + "Sarı"),
-// or stale test data alongside the real value ("sasas" + "Lacivert").
-// Routing through syncLog so the line gets a yellow ⚠ glyph in dev
-// instead of blending into the rest of the run output.
+// Trendyol's panel concatenates every "Renk" attribute with a space — categories
+// often emit two entries (attrId 47 + 295 for cottons, both as attributeName
+// "Renk") that the seller sees as e.g. "Red Haki" or "Black Siyah". Picking just
+// the first dropped the second token. endsWith catches prefixed names like
+// "[A-TDG]_Renk" or "[STG] Renk" that staging or category-specific configs
+// sometimes emit; the production "Renk" case is the suffix.
 function extractColor(attributes: TrendyolAttribute[]): string | null {
-  const matches = attributes.filter((a) => a.attributeName === COLOR_ATTRIBUTE_NAME);
+  const matches = attributes.filter((a) => a.attributeName.endsWith(COLOR_ATTRIBUTE_NAME));
   if (matches.length === 0) return null;
-  const first = matches[0];
-  if (first === undefined) return null;
-  if (matches.length > 1) {
-    const distinct = [...new Set(matches.map((a) => a.attributeValue))];
-    if (distinct.length > 1) {
-      syncLog.warn('mapper.color.disagreement', {
-        attrCount: matches.length,
-        distinct,
-        chosen: first.attributeValue,
-      });
-    }
-  }
-  return first.attributeValue;
+  return matches.map((a) => a.attributeValue).join(' ');
 }
 
-function extractSize(attributes: TrendyolAttribute[]): string | null {
-  const match = attributes.find((a) => a.attributeName === SIZE_ATTRIBUTE_NAME);
-  return match !== undefined ? match.attributeValue : null;
+// Variant-level attribute name varies by category — clothing uses "Beden",
+// textiles "Boyut/Ebat", footwear "Kullanım Alanı", etc. Filtering by name
+// silently dropped any variant using a non-Beden attribute. Take everything;
+// format "{value} {name}" to mirror the panel's "XS Beden" / "20 Boyut/Ebat".
+function extractVariantLabel(attributes: TrendyolAttribute[]): string | null {
+  if (attributes.length === 0) return null;
+  return attributes.map((a) => `${a.attributeValue} ${a.attributeName}`).join(' ');
 }
 
 function mapImages(images: { url: string }[]): MappedProductImage[] {
@@ -107,7 +93,7 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     archived: variant.archived ?? false,
     blacklisted: variant.blacklisted ?? false,
     locked: variant.locked ?? false,
-    size: extractSize(variantAttrs),
+    size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
   };
 }
