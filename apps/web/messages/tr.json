@@ -25,6 +25,7 @@
       "INVALID_REFERENCE": "Geçersiz bir referans gönderdin.",
       "RATE_LIMITED": "Çok fazla istek gönderdin. Biraz sonra tekrar dene.",
       "INTERNAL_ERROR": "Beklenmeyen bir hata oluştu. Lütfen tekrar dene.",
+      "SERVER_CONFIG_ERROR": "Sunucu yapılandırma hatası. Lütfen destek ekibimize ulaş.",
       "NETWORK_ERROR": "Bağlantı hatası. İnternetini kontrol et.",
       "UNKNOWN_ERROR": "Bir şeyler ters gitti. Lütfen tekrar dene.",
       "MARKETPLACE_AUTH_FAILED": "Girilen bilgiler pazar yeri tarafından reddedildi. Lütfen kontrol edip tekrar dene.",

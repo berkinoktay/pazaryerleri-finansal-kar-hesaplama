@@ -19,14 +19,15 @@
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
     "test:watch": "turbo run test:watch --parallel",
-    "check:all": "turbo run typecheck lint test:unit && pnpm format:check && pnpm audit:boundaries",
-    "check:full": "turbo run typecheck lint test && pnpm format:check && pnpm audit:boundaries",
+    "check:all": "turbo run typecheck lint test:unit && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors",
+    "check:full": "turbo run typecheck lint test && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors",
     "clean": "turbo run clean",
     "api:openapi": "pnpm --filter @pazarsync/api openapi:dump",
     "api:codegen": "pnpm --filter @pazarsync/api-client codegen",
     "api:sync": "pnpm api:openapi && pnpm api:codegen",
     "gen:encryption-key": "pnpm --filter @pazarsync/api gen:encryption-key",
     "audit:boundaries": "tsx scripts/audit-feature-boundaries.ts",
+    "audit:errors": "tsx scripts/audit-error-codes.ts",
     "prepare": "husky"
   },
   "devDependencies": {

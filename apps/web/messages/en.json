@@ -25,6 +25,7 @@
       "INVALID_REFERENCE": "The reference you provided doesn't exist.",
       "RATE_LIMITED": "Too many requests. Please try again shortly.",
       "INTERNAL_ERROR": "An unexpected error occurred. Please try again.",
+      "SERVER_CONFIG_ERROR": "Server configuration error. Please contact our support team.",
       "NETWORK_ERROR": "Network error. Check your connection.",
       "UNKNOWN_ERROR": "Something went wrong. Please try again.",
       "MARKETPLACE_AUTH_FAILED": "The marketplace rejected these credentials. Please verify and try again.",
