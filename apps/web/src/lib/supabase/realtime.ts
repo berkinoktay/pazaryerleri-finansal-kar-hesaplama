@@ -44,6 +44,24 @@ interface SyncLogsRowWire {
    * "Yeniden denenecek HH:MM" countdown in the SyncCenter retry section.
    */
   next_attempt_at: string | null;
+  /**
+   * Diagnostic record of pages the worker advanced past after exhausting
+   * MAX_ATTEMPTS on a `MARKETPLACE_UNREACHABLE` (a deterministic upstream
+   * 5xx on a single Trendyol page). Drives the "X sayfa atlandı" chip on
+   * COMPLETED rows. Logical decoding emits the jsonb column; we leave the
+   * shape loose here (`unknown`) and validate the wire shape in the API
+   * layer's normalizer.
+   */
+  skipped_pages: unknown | null;
+}
+
+export interface SkippedPageWireShape {
+  page: number;
+  attemptedAt: string;
+  errorCode: string;
+  httpStatus: number;
+  xRequestId?: string;
+  responseBodySnippet?: string;
 }
 
 export interface SyncLogRealtimeShape {
@@ -62,6 +80,7 @@ export interface SyncLogRealtimeShape {
   errorMessage: string | null;
   attemptCount: SyncLogsRowWire['attempt_count'];
   nextAttemptAt: string | null;
+  skippedPages: SkippedPageWireShape[] | null;
 }
 
 export interface SyncLogRealtimeEvent {
@@ -97,7 +116,43 @@ function snakeToCamel(row: SyncLogsRowWire): SyncLogRealtimeShape {
     errorMessage: row.error_message,
     attemptCount: row.attempt_count,
     nextAttemptAt: row.next_attempt_at,
+    skippedPages: normalizeSkippedPages(row.skipped_pages),
   };
+}
+
+/**
+ * Loose validation of the jsonb skipped_pages column as it arrives over
+ * postgres_changes. The worker is the only writer; the API layer applies
+ * the same shape contract. We do a structural check here so a single bad
+ * row from a future schema drift can't crash the SyncCenter.
+ */
+function normalizeSkippedPages(raw: unknown): SkippedPageWireShape[] | null {
+  if (raw === null || raw === undefined) return null;
+  if (!Array.isArray(raw)) return null;
+  const out: SkippedPageWireShape[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const o = item as Record<string, unknown>;
+    if (
+      typeof o['page'] !== 'number' ||
+      typeof o['attemptedAt'] !== 'string' ||
+      typeof o['errorCode'] !== 'string' ||
+      typeof o['httpStatus'] !== 'number'
+    ) {
+      continue;
+    }
+    out.push({
+      page: o['page'],
+      attemptedAt: o['attemptedAt'],
+      errorCode: o['errorCode'],
+      httpStatus: o['httpStatus'],
+      ...(typeof o['xRequestId'] === 'string' ? { xRequestId: o['xRequestId'] } : {}),
+      ...(typeof o['responseBodySnippet'] === 'string'
+        ? { responseBodySnippet: o['responseBodySnippet'] }
+        : {}),
+    });
+  }
+  return out.length > 0 ? out : null;
 }
 
 export interface SubscribeToOrgSyncsOptions {

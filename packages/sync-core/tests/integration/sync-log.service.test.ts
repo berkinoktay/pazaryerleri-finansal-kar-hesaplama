@@ -83,3 +83,91 @@ describe('syncLogService.markRetryable backoff schedule', () => {
     },
   );
 });
+
+describe('syncLogService.recordSkippedPageAndContinue', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  async function setupExhaustedRow(): Promise<string> {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    const row = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        syncType: 'PRODUCTS',
+        status: 'FAILED_RETRYABLE',
+        startedAt: new Date(),
+        attemptCount: 5,
+        progressCurrent: 2500,
+        progressTotal: 5624,
+        pageCursor: { kind: 'page', n: 25 },
+        errorCode: 'MARKETPLACE_UNREACHABLE',
+        errorMessage: 'Marketplace unreachable (500) — upstream issue (max retries reached)',
+        nextAttemptAt: new Date(Date.now() + 30_000),
+      },
+    });
+    return row.id;
+  }
+
+  it('records the skipped page, advances cursor, resets attempt count, and returns row to PENDING', async () => {
+    const id = await setupExhaustedRow();
+    const skipEntry = {
+      page: 25,
+      attemptedAt: new Date('2026-04-29T08:53:55Z').toISOString(),
+      errorCode: 'MARKETPLACE_UNREACHABLE',
+      httpStatus: 500,
+      xRequestId: 'test-req-abc',
+      responseBodySnippet: '{"error":"INTERNAL"}',
+    };
+
+    await syncLogService.recordSkippedPageAndContinue(id, skipEntry, { kind: 'page', n: 26 }, 2600);
+
+    const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
+    expect(after.status).toBe('PENDING');
+    expect(after.attemptCount).toBe(0);
+    expect(after.progressCurrent).toBe(2600);
+    expect(after.pageCursor).toEqual({ kind: 'page', n: 26 });
+    expect(after.skippedPages).toEqual([skipEntry]);
+    expect(after.claimedAt).toBeNull();
+    expect(after.claimedBy).toBeNull();
+    expect(after.errorCode).toBeNull();
+    expect(after.errorMessage).toBeNull();
+    expect(after.nextAttemptAt).toBeNull();
+  });
+
+  it('appends to an existing skippedPages array — two consecutive skips both end up recorded', async () => {
+    const id = await setupExhaustedRow();
+    const firstSkip = {
+      page: 25,
+      attemptedAt: new Date('2026-04-29T08:53:55Z').toISOString(),
+      errorCode: 'MARKETPLACE_UNREACHABLE',
+      httpStatus: 500,
+    };
+    const secondSkip = {
+      page: 47,
+      attemptedAt: new Date('2026-04-29T09:11:08Z').toISOString(),
+      errorCode: 'MARKETPLACE_UNREACHABLE',
+      httpStatus: 502,
+    };
+
+    await syncLogService.recordSkippedPageAndContinue(id, firstSkip, { kind: 'page', n: 26 }, 2600);
+    await syncLogService.recordSkippedPageAndContinue(
+      id,
+      secondSkip,
+      { kind: 'page', n: 48 },
+      4800,
+    );
+
+    const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
+    expect(after.skippedPages).toEqual([firstSkip, secondSkip]);
+    expect(after.pageCursor).toEqual({ kind: 'page', n: 48 });
+    expect(after.progressCurrent).toBe(4800);
+  });
+});

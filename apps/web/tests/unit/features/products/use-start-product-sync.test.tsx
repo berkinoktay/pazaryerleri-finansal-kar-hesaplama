@@ -119,6 +119,7 @@ describe('useStartProductSync', () => {
       errorMessage: null,
       attemptCount: 1,
       nextAttemptAt: null,
+      skippedPages: null,
     };
     const racingDup: SyncLog = { ...existingCompleted, id: SYNC_LOG_ID, status: 'RUNNING' };
     queryClient.setQueryData<SyncLog[]>(queryKey, [existingCompleted, racingDup]);

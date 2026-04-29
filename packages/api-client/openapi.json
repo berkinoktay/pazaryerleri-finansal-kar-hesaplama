@@ -628,6 +628,45 @@
             "format": "date-time",
             "example": null,
             "description": "When the next worker re-claim will fire for FAILED_RETRYABLE rows. Null on every other status. Drives the \"Yeniden denenecek HH:MM\" countdown in the SyncCenter retry section."
+          },
+          "skippedPages": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "attemptedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "errorCode": {
+                  "type": "string"
+                },
+                "httpStatus": {
+                  "type": "integer"
+                },
+                "xRequestId": {
+                  "type": "string"
+                },
+                "responseBodySnippet": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "page",
+                "attemptedAt",
+                "errorCode",
+                "httpStatus"
+              ]
+            },
+            "example": null,
+            "description": "Pages the worker skipped after exhausting MAX_ATTEMPTS on a transient marketplace error (deterministic upstream 5xx on a single page). Each entry records the offset + diagnostic surface (X-Request-ID, body snippet) for support correlation. Surfaced in the SyncCenter as a \"X sayfa atlandı\" warning chip on COMPLETED rows so merchants know not all of the catalog made it through. Null when no pages were skipped (typical case)."
           }
         },
         "required": [
@@ -645,7 +684,8 @@
           "errorCode",
           "errorMessage",
           "attemptCount",
-          "nextAttemptAt"
+          "nextAttemptAt",
+          "skippedPages"
         ],
         "description": "Generic sync_logs row representation. Used by the SyncCenter UI to render live progress for any active sync (PRODUCTS today, ORDERS / SETTLEMENTS later)."
       },

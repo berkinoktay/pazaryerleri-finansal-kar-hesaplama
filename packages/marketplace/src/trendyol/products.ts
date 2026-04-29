@@ -158,13 +158,44 @@ async function fetchOnce(
     // Retries exhausted — surface a typed domain error so the caller
     // (sync service) records something actionable in SyncLog.errorCode.
     if (networkError || res === undefined) {
-      throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0 });
+      throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0, url });
     }
     if (res.status === 429) {
       const seconds = parseRetryAfterSeconds(res.headers.get('Retry-After')) ?? 30;
       throw new RateLimitedError(seconds, 'Trendyol rate limit hit (retries exhausted)');
     }
+    // 5xx (other than 503) — capture diagnostic surface BEFORE throwing so
+    // the worker's skip-bad-page recovery has the X-Request-ID + body
+    // snippet to record against the skipped sayfa. We only do this for
+    // the unreachable case; 503 (sandbox IP whitelist) is a config issue
+    // and gets a separate domain error with no skip path.
+    if (res.status >= 500 && res.status !== 503) {
+      const snippet = await safeReadBody(res);
+      const xRequestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new MarketplaceUnreachable(PLATFORM, {
+        httpStatus: res.status,
+        url,
+        xRequestId,
+        responseBodySnippet: snippet,
+      });
+    }
     mapTrendyolResponseToDomainError(res);
+  }
+}
+
+/**
+ * Best-effort capture of a failed Response body for diagnostics. Bounded
+ * to 1 KB to keep the SyncLog row reasonable; never throws (a body that
+ * has already been consumed or one that's binary garbage just yields
+ * undefined). Plain text — Trendyol's 5xx surface is JSON or short HTML
+ * and we want it readable in the logs.
+ */
+async function safeReadBody(res: Response): Promise<string | undefined> {
+  try {
+    const text = await res.text();
+    return text.slice(0, 1024);
+  } catch {
+    return undefined;
   }
 }
 

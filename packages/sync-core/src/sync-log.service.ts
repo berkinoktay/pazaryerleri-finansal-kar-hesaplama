@@ -6,6 +6,7 @@
 import { prisma } from '@pazarsync/db';
 import type { SyncLog, SyncType } from '@pazarsync/db';
 
+import { parseSkippedPages, type ProductsCursor, type SkippedPageEntry } from './checkpoint';
 import { NotFoundError, SyncInProgressError } from './errors';
 import { syncLog } from './logger';
 
@@ -317,5 +318,65 @@ export async function markRetryable(
       claimedAt: null,
       claimedBy: null,
     },
+  });
+}
+
+/**
+ * Skip the currently-stuck page and continue the sync from the next
+ * page. Used when MAX_ATTEMPTS is exhausted on a transient marketplace
+ * error (deterministic upstream 5xx on a specific page) — terminating
+ * the whole sync for one bad sayfa was leaving merchants with half-
+ * synced catalogs.
+ *
+ * Atomically:
+ *   - Re-reads the current `skippedPages` array (Prisma JSON columns
+ *     are not safe to splice via raw SQL with optimistic locking; the
+ *     transaction also serializes against any concurrent worker).
+ *   - Appends the new entry.
+ *   - Resets attemptCount to 0 so the next claim starts fresh.
+ *   - Advances the cursor and progress to the next page.
+ *   - Returns the row to PENDING with claimedAt/claimedBy/error fields
+ *     cleared, so the worker's poll-and-claim loop picks it up
+ *     immediately (next tick).
+ *
+ * Caller (sync-worker `handleRunError`) is responsible for choosing
+ * the next cursor — usually `{ kind: 'page', n: currentN + 1 }` — and
+ * for the progress estimate. A successful tick on the next chunk will
+ * overwrite progressCurrent with the real count.
+ */
+export async function recordSkippedPageAndContinue(
+  syncLogId: string,
+  skipEntry: SkippedPageEntry,
+  nextCursor: ProductsCursor | null,
+  newProgress: number,
+): Promise<void> {
+  syncLog.warn('sync.page-skipped', {
+    syncLogId,
+    page: skipEntry.page,
+    errorCode: skipEntry.errorCode,
+    httpStatus: skipEntry.httpStatus,
+    xRequestId: skipEntry.xRequestId,
+  });
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.syncLog.findUniqueOrThrow({
+      where: { id: syncLogId },
+      select: { skippedPages: true },
+    });
+    const existing = parseSkippedPages(current.skippedPages);
+    await tx.syncLog.update({
+      where: { id: syncLogId },
+      data: {
+        status: 'PENDING',
+        attemptCount: 0,
+        pageCursor: nextCursor as never,
+        progressCurrent: newProgress,
+        skippedPages: [...existing, skipEntry] as never,
+        claimedAt: null,
+        claimedBy: null,
+        errorCode: null,
+        errorMessage: null,
+        nextAttemptAt: null,
+      },
+    });
   });
 }

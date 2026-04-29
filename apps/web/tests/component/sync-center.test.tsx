@@ -41,6 +41,9 @@ const messages = {
       SETTLEMENTS: 'Hakedişleri şimdi senkronize et',
     },
     completedSummary: '{n} kayıt işlendi',
+    completedWithSkipsSummary:
+      '{n} kayıt işlendi · {skipped} sayfa Trendyol tarafından sağlanamadı',
+    skippedChip: '{n} sayfa atlandı',
     failedSummary: 'Hata',
     willRetry: 'Yeniden denenecek {when}',
     willRetryUnknown: 'Yeniden denenecek',
@@ -147,5 +150,58 @@ describe('SyncCenter — FAILED_RETRYABLE rendering (§D.4 regression lock)', ()
     renderCenter({ logs: [completed] });
     const button = screen.getByRole('button', { name: 'Ürünleri şimdi senkronize et' });
     expect(button).toBeEnabled();
+  });
+});
+
+describe('SyncCenter — completed-with-skipped-pages chip', () => {
+  function makeCompletedWithSkippedLog(skipCount: number): SyncCenterLog {
+    return {
+      ...makeRetryableLog({ id: 'log-done-with-skips' }),
+      status: 'COMPLETED',
+      errorCode: null,
+      errorMessage: null,
+      attemptCount: 1,
+      nextAttemptAt: null,
+      completedAt: '2026-04-28T09:00:00.000Z',
+      recordsProcessed: 5524,
+      skippedPages: Array.from({ length: skipCount }, (_, i) => ({
+        page: 25 + i,
+        attemptedAt: '2026-04-28T09:00:00.000Z',
+        errorCode: 'MARKETPLACE_UNREACHABLE',
+        httpStatus: 500,
+      })),
+    };
+  }
+
+  it('renders a "X sayfa atlandı" warning chip on a COMPLETED row that has skippedPages', () => {
+    renderCenter({ logs: [makeCompletedWithSkippedLog(1)] });
+    expect(screen.getByText('1 sayfa atlandı')).toBeInTheDocument();
+    // Detail line with the partial-completion summary, not the clean
+    // "n kayıt işlendi" line — communicates that not the entire catalog
+    // made it across.
+    expect(
+      screen.getByText(/5\.524 kayıt işlendi · 1 sayfa Trendyol tarafından sağlanamadı/),
+    ).toBeInTheDocument();
+  });
+
+  it('counts multiple skipped pages correctly', () => {
+    renderCenter({ logs: [makeCompletedWithSkippedLog(3)] });
+    expect(screen.getByText('3 sayfa atlandı')).toBeInTheDocument();
+  });
+
+  it('does NOT render the chip on a clean COMPLETED row (no skippedPages)', () => {
+    const cleanCompleted: SyncCenterLog = {
+      ...makeRetryableLog({ id: 'log-clean-done' }),
+      status: 'COMPLETED',
+      errorCode: null,
+      errorMessage: null,
+      completedAt: '2026-04-28T09:00:00.000Z',
+      recordsProcessed: 5624,
+      skippedPages: null,
+    };
+    renderCenter({ logs: [cleanCompleted] });
+    expect(screen.queryByText(/sayfa atlandı/)).not.toBeInTheDocument();
+    // Clean summary line still renders.
+    expect(screen.getByText(/5\.624 kayıt işlendi/)).toBeInTheDocument();
   });
 });

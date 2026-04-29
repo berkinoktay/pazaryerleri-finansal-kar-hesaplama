@@ -159,6 +159,7 @@ function applyEvent(existing: SyncLog[], event: SyncLogRealtimeEvent): SyncLog[]
     errorMessage: event.row.errorMessage,
     attemptCount: event.row.attemptCount,
     nextAttemptAt: event.row.nextAttemptAt,
+    skippedPages: event.row.skippedPages,
   };
 
   const next = [...filtered, incoming];

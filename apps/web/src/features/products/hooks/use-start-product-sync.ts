@@ -61,6 +61,7 @@ export function useStartProductSync(
           errorMessage: null,
           attemptCount: 0,
           nextAttemptAt: null,
+          skippedPages: null,
         };
         const withoutDup = (existing ?? []).filter((s) => s.id !== data.syncLogId);
         return [optimistic, ...withoutDup];

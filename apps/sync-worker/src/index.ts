@@ -36,6 +36,7 @@ import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync
 import type { Registry } from './dispatcher';
 import { productsHandler } from './handlers/products';
 import { runSyncToCompletion } from './loop';
+import { advanceCursorPastBadPage } from './skip-bad-page';
 import { sweepStaleClaims } from './watchdog';
 
 const WORKER_ID = `worker-${randomBytes(4).toString('hex')}`;
@@ -164,6 +165,17 @@ async function handleRunError(
   }
 
   if (attemptCount >= MAX_ATTEMPTS) {
+    // Skip-bad-page recovery: a single deterministic upstream 5xx on
+    // one Trendyol page (real-world: a corrupted seller record at a
+    // specific catalog offset) used to terminate the whole sync at
+    // ~50% completion. Now we advance the cursor past the offending
+    // page and let the rest of the catalog finish; the skipped page
+    // is recorded on `SyncLog.skippedPages` and surfaced in the UI so
+    // the merchant sees what didn't sync.
+    if (code === 'MARKETPLACE_UNREACHABLE') {
+      const advanced = await advanceCursorPastBadPage(syncLogId, err);
+      if (advanced) return;
+    }
     await syncLogService.fail(syncLogId, code, `${message} (max retries reached)`);
     return;
   }

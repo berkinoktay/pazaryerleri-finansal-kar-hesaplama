@@ -614,6 +614,8 @@
       "SETTLEMENTS": "Hakedişleri şimdi senkronize et"
     },
     "completedSummary": "{n} kayıt işlendi",
+    "completedWithSkipsSummary": "{n} kayıt işlendi · {skipped} sayfa Trendyol tarafından sağlanamadı",
+    "skippedChip": "{n} sayfa atlandı",
     "failedSummary": "Hata",
     "willRetry": "Yeniden denenecek {when}",
     "willRetryUnknown": "Yeniden denenecek",
