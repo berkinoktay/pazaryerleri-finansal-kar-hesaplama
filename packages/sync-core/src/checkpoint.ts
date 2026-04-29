@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { SyncErrorCode } from '@pazarsync/db/enums';
+
 /** Cursor shape for page-index pagination (Trendyol fallback). */
 export const PageIndexCursorSchema = z.object({
   kind: z.literal('page'),
@@ -24,8 +26,10 @@ export type ProductsCursor = z.infer<typeof ProductsCursorSchema>;
 /**
  * Parse a SyncLog.pageCursor (jsonb, possibly null) for the products
  * module. Returns null when the row has no cursor yet (fresh sync).
- * Throws ZodError if the column holds malformed data — that's a sync
- * the worker should mark FAILED ('CORRUPT_CHECKPOINT').
+ * Throws ZodError if the column holds malformed data — the worker's
+ * `errorCodeOf` coerces this to `SyncErrorCode.INTERNAL_ERROR` (the
+ * ZodError carries no `.code` field), so the row goes through the
+ * retryable path and is terminally FAILED only after MAX_ATTEMPTS.
  */
 export function parseProductsCursor(raw: unknown): ProductsCursor | null {
   if (raw === null || raw === undefined) return null;
@@ -45,7 +49,7 @@ export function parseProductsCursor(raw: unknown): ProductsCursor | null {
 export const SkippedPageEntrySchema = z.object({
   page: z.number().int().min(0),
   attemptedAt: z.string(),
-  errorCode: z.string(),
+  errorCode: z.enum(SyncErrorCode),
   httpStatus: z.number().int(),
   xRequestId: z.string().optional(),
   responseBodySnippet: z.string().optional(),

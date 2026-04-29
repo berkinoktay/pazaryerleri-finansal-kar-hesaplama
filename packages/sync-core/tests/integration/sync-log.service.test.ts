@@ -7,6 +7,7 @@
 // failure rather than a silent SLA change.
 
 import { prisma } from '@pazarsync/db';
+import { SyncErrorCode } from '@pazarsync/db/enums';
 import { syncLogService } from '@pazarsync/sync-core';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -61,14 +62,19 @@ describe('syncLogService.markRetryable backoff schedule', () => {
       const id = await setupRunningRow(attempt);
       const before = Date.now();
 
-      await syncLogService.markRetryable(id, attempt, 'TEST_TRANSIENT', 'simulated transient');
+      await syncLogService.markRetryable(
+        id,
+        attempt,
+        SyncErrorCode.MARKETPLACE_UNREACHABLE,
+        'simulated transient',
+      );
 
       const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
 
       // Status, error, and claim ownership must be reset so the next
       // tryClaimNext can pick the row up after the backoff.
       expect(after.status).toBe('FAILED_RETRYABLE');
-      expect(after.errorCode).toBe('TEST_TRANSIENT');
+      expect(after.errorCode).toBe(SyncErrorCode.MARKETPLACE_UNREACHABLE);
       expect(after.errorMessage).toBe('simulated transient');
       expect(after.claimedAt).toBeNull();
       expect(after.claimedBy).toBeNull();
@@ -108,7 +114,7 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
         progressCurrent: 2500,
         progressTotal: 5624,
         pageCursor: { kind: 'page', n: 25 },
-        errorCode: 'MARKETPLACE_UNREACHABLE',
+        errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
         errorMessage: 'Marketplace unreachable (500) — upstream issue (max retries reached)',
         nextAttemptAt: new Date(Date.now() + 30_000),
       },
@@ -121,7 +127,7 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
     const skipEntry = {
       page: 25,
       attemptedAt: new Date('2026-04-29T08:53:55Z').toISOString(),
-      errorCode: 'MARKETPLACE_UNREACHABLE',
+      errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
       httpStatus: 500,
       xRequestId: 'test-req-abc',
       responseBodySnippet: '{"error":"INTERNAL"}',
@@ -151,13 +157,13 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
     const firstSkip = {
       page: 25,
       attemptedAt: new Date('2026-04-29T08:53:55Z').toISOString(),
-      errorCode: 'MARKETPLACE_UNREACHABLE',
+      errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
       httpStatus: 500,
     };
     const secondSkip = {
       page: 47,
       attemptedAt: new Date('2026-04-29T09:11:08Z').toISOString(),
-      errorCode: 'MARKETPLACE_UNREACHABLE',
+      errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
       httpStatus: 502,
     };
 

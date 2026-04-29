@@ -605,6 +605,16 @@
               "string",
               "null"
             ],
+            "enum": [
+              "MARKETPLACE_AUTH_FAILED",
+              "MARKETPLACE_ACCESS_DENIED",
+              "MARKETPLACE_UNREACHABLE",
+              "SYNC_IN_PROGRESS",
+              "RATE_LIMITED",
+              "VALIDATION_ERROR",
+              "INTERNAL_ERROR",
+              null
+            ],
             "example": null
           },
           "errorMessage": {
@@ -646,7 +656,16 @@
                   "format": "date-time"
                 },
                 "errorCode": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "MARKETPLACE_AUTH_FAILED",
+                    "MARKETPLACE_ACCESS_DENIED",
+                    "MARKETPLACE_UNREACHABLE",
+                    "SYNC_IN_PROGRESS",
+                    "RATE_LIMITED",
+                    "VALIDATION_ERROR",
+                    "INTERNAL_ERROR"
+                  ]
                 },
                 "httpStatus": {
                   "type": "integer"

@@ -1,6 +1,11 @@
 'use client';
 
-import type { SyncStatus, SyncType } from '@pazarsync/db/enums';
+import {
+  isSyncErrorCode,
+  type SyncErrorCode,
+  type SyncStatus,
+  type SyncType,
+} from '@pazarsync/db/enums';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 import { createClient } from './client';
@@ -35,7 +40,7 @@ interface SyncLogsRowWire {
   progress_current: number;
   progress_total: number | null;
   progress_stage: string | null;
-  error_code: string | null;
+  error_code: SyncErrorCode | null;
   error_message: string | null;
   /** Worker (re)claim count. Bumped in tryClaimNext. */
   attempt_count: number;
@@ -58,7 +63,7 @@ interface SyncLogsRowWire {
 export interface SkippedPageWireShape {
   page: number;
   attemptedAt: string;
-  errorCode: string;
+  errorCode: SyncErrorCode;
   httpStatus: number;
   xRequestId?: string;
   responseBodySnippet?: string;
@@ -76,7 +81,7 @@ export interface SyncLogRealtimeShape {
   progressCurrent: number;
   progressTotal: number | null;
   progressStage: string | null;
-  errorCode: string | null;
+  errorCode: SyncErrorCode | null;
   errorMessage: string | null;
   attemptCount: SyncLogsRowWire['attempt_count'];
   nextAttemptAt: string | null;
@@ -136,7 +141,7 @@ function normalizeSkippedPages(raw: unknown): SkippedPageWireShape[] | null {
     if (
       typeof o['page'] !== 'number' ||
       typeof o['attemptedAt'] !== 'string' ||
-      typeof o['errorCode'] !== 'string' ||
+      !isSyncErrorCode(o['errorCode']) ||
       typeof o['httpStatus'] !== 'number'
     ) {
       continue;

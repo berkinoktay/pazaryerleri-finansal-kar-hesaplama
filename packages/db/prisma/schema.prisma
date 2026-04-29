@@ -85,6 +85,16 @@ enum SyncStatus {
   FAILED_RETRYABLE
 }
 
+enum SyncErrorCode {
+  MARKETPLACE_AUTH_FAILED
+  MARKETPLACE_ACCESS_DENIED
+  MARKETPLACE_UNREACHABLE
+  SYNC_IN_PROGRESS
+  RATE_LIMITED
+  VALIDATION_ERROR
+  INTERNAL_ERROR
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -369,7 +379,7 @@ model SyncLog {
   progressCurrent  Int        @default(0) @map("progress_current")
   progressTotal    Int?       @map("progress_total")
   progressStage    String?    @map("progress_stage")
-  errorCode        String?    @map("error_code")
+  errorCode        SyncErrorCode? @map("error_code")
   errorMessage     String?    @map("error_message")
   // ─── New columns (PR 2) ────────────────────────────────────
   claimedAt        DateTime?  @map("claimed_at") @db.Timestamptz(3)

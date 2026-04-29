@@ -21,19 +21,20 @@
 //   - MARKETPLACE_AUTH_FAILED / MARKETPLACE_ACCESS_DENIED → user must
 //     fix credentials/whitelist; retrying does not help. Mark FAILED so
 //     the SyncCenter UI shows a terminal error and the user takes action.
-//   - CORRUPT_CHECKPOINT → the row's pageCursor is unparseable; future
-//     claims would crash on the same data. Terminal FAIL.
 //   - All other errors → transient (network blip, marketplace 5xx,
-//     transient DB failure). markRetryable bumps the row to
-//     FAILED_RETRYABLE with `nextAttemptAt` set by the backoff schedule
-//     in syncLogService.markRetryable. Once attemptCount reaches
-//     MAX_ATTEMPTS we give up and mark the row terminally FAILED.
+//     transient DB failure, malformed checkpoint that produced a
+//     ZodError → coerced to INTERNAL_ERROR by errorCodeOf). markRetryable
+//     bumps the row to FAILED_RETRYABLE with `nextAttemptAt` set by the
+//     backoff schedule in syncLogService.markRetryable. Once attemptCount
+//     reaches MAX_ATTEMPTS we give up and mark the row terminally FAILED.
 
 import { randomBytes } from 'node:crypto';
 
+import { SyncErrorCode } from '@pazarsync/db/enums';
 import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
 
 import type { Registry } from './dispatcher';
+import { errorCodeOf } from './error-code';
 import { productsHandler } from './handlers/products';
 import { runSyncToCompletion } from './loop';
 import { advanceCursorPastBadPage } from './skip-bad-page';
@@ -50,10 +51,12 @@ const MAX_ATTEMPTS = 5;
 // Permanent failure codes — markFailed terminally, never markRetryable.
 // Adding a new permanent code? Update this set + add a comment in the
 // handler that throws it explaining why retry would not help.
-const PERMANENT_FAILURE_CODES: ReadonlySet<string> = new Set([
-  'MARKETPLACE_AUTH_FAILED',
-  'MARKETPLACE_ACCESS_DENIED',
-  'CORRUPT_CHECKPOINT',
+// Note: CORRUPT_CHECKPOINT is not in SyncErrorCode; errorCodeOf() coerces
+// unknown codes to INTERNAL_ERROR, so a corrupt-checkpoint throw reaches
+// the markRetryable path (transient) rather than this set.
+const PERMANENT_FAILURE_CODES: ReadonlySet<SyncErrorCode> = new Set<SyncErrorCode>([
+  SyncErrorCode.MARKETPLACE_AUTH_FAILED,
+  SyncErrorCode.MARKETPLACE_ACCESS_DENIED,
 ]);
 
 const REGISTRY: Registry = {
@@ -172,7 +175,7 @@ async function handleRunError(
     // page and let the rest of the catalog finish; the skipped page
     // is recorded on `SyncLog.skippedPages` and surfaced in the UI so
     // the merchant sees what didn't sync.
-    if (code === 'MARKETPLACE_UNREACHABLE') {
+    if (code === SyncErrorCode.MARKETPLACE_UNREACHABLE) {
       const advanced = await advanceCursorPastBadPage(syncLogId, err);
       if (advanced) return;
     }
@@ -181,25 +184,6 @@ async function handleRunError(
   }
 
   await markRetryable(syncLogId, attemptCount, code, message);
-}
-
-/**
- * Narrow an unknown caught value to extract its `code` string, if any.
- * Mirrors the structural-narrowing pattern used in
- * `apps/api/src/lib/map-prisma-error.ts` and `sync-log.service.ts`'s
- * `isUniqueViolation` — the documented exception in CLAUDE.md for
- * runtime structural type guards on third-party / unknown shapes.
- */
-function errorCodeOf(err: unknown): string {
-  if (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    typeof (err as { code: unknown }).code === 'string'
-  ) {
-    return (err as { code: string }).code;
-  }
-  return 'INTERNAL_ERROR';
 }
 
 function errorMessageOf(err: unknown): string {

@@ -1,3 +1,4 @@
+import { SyncErrorCode } from '@pazarsync/db/enums';
 import { EncryptionKeyError } from '@pazarsync/sync-core';
 
 import {
@@ -136,7 +137,7 @@ function classify(err: unknown): ProblemDetailsResult {
         type: `${TYPE_BASE}/sync-in-progress`,
         title: 'Sync already running',
         status: 409,
-        code: 'SYNC_IN_PROGRESS',
+        code: SyncErrorCode.SYNC_IN_PROGRESS,
         detail: err.message,
         meta: { ...err.meta },
       },
@@ -149,7 +150,7 @@ function classify(err: unknown): ProblemDetailsResult {
         type: `${TYPE_BASE}/validation`,
         title: 'Validation error',
         status: 422,
-        code: 'VALIDATION_ERROR',
+        code: SyncErrorCode.VALIDATION_ERROR,
         detail: err.message,
         errors: err.issues,
       },
@@ -178,7 +179,7 @@ function classify(err: unknown): ProblemDetailsResult {
         type: `${TYPE_BASE}/rate-limited`,
         title: 'Too many requests',
         status: 429,
-        code: 'RATE_LIMITED',
+        code: SyncErrorCode.RATE_LIMITED,
         detail: err.message,
       },
     };
@@ -202,7 +203,7 @@ function classify(err: unknown): ProblemDetailsResult {
         type: `${TYPE_BASE}/marketplace-auth-failed`,
         title: 'Marketplace authentication failed',
         status: 422,
-        code: 'MARKETPLACE_AUTH_FAILED',
+        code: SyncErrorCode.MARKETPLACE_AUTH_FAILED,
         detail: err.message,
         meta: { platform: err.platform },
       },
@@ -215,7 +216,7 @@ function classify(err: unknown): ProblemDetailsResult {
         type: `${TYPE_BASE}/marketplace-access-denied`,
         title: 'Marketplace access denied',
         status: 422,
-        code: 'MARKETPLACE_ACCESS_DENIED',
+        code: SyncErrorCode.MARKETPLACE_ACCESS_DENIED,
         detail: err.message,
         meta: { platform: err.platform, ...err.meta },
       },
@@ -228,7 +229,7 @@ function classify(err: unknown): ProblemDetailsResult {
         type: `${TYPE_BASE}/marketplace-unreachable`,
         title: 'Marketplace unreachable',
         status: 503,
-        code: 'MARKETPLACE_UNREACHABLE',
+        code: SyncErrorCode.MARKETPLACE_UNREACHABLE,
         detail: err.message,
         meta: { platform: err.platform, ...err.meta },
       },
@@ -240,7 +241,7 @@ function classify(err: unknown): ProblemDetailsResult {
       type: `${TYPE_BASE}/internal`,
       title: 'Internal server error',
       status: 500,
-      code: 'INTERNAL_ERROR',
+      code: SyncErrorCode.INTERNAL_ERROR,
       detail: 'An unexpected error occurred',
     },
   };
