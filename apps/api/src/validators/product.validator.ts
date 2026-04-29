@@ -2,7 +2,7 @@ import { z } from '@hono/zod-openapi';
 
 import { SyncStatus, SyncType } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
-import { SyncErrorCode } from '@pazarsync/db/enums';
+import { SyncErrorCode, isSyncErrorCode } from '@pazarsync/db/enums';
 
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
 
@@ -418,12 +418,6 @@ export function toSyncLogResponse(row: SyncLog): {
  * happen — only the worker writes this column) is treated as null so a
  * single bad row doesn't poison the whole sync-logs list response.
  */
-const SYNC_ERROR_CODE_SET: ReadonlySet<string> = new Set(Object.values(SyncErrorCode));
-
-function isSyncErrorCode(value: unknown): value is SyncErrorCode {
-  return typeof value === 'string' && SYNC_ERROR_CODE_SET.has(value);
-}
-
 function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] | null {
   if (raw === null || raw === undefined) return null;
   if (!Array.isArray(raw)) return null;

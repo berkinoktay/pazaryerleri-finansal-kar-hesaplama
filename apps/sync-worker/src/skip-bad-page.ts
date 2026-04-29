@@ -36,7 +36,7 @@ const TRENDYOL_APPROVED_PAGE_CAP_ITEMS = 10_000;
  * through to `fail` so the row terminates).
  *
  * No recovery cases:
- *   - Cursor is malformed (CORRUPT_CHECKPOINT path applies, not this).
+ *   - Cursor is malformed (parse error → INTERNAL_ERROR coercion → retryable path, not this).
  *   - Next page would cross the 10k Trendyol cap and we have no
  *     nextPageToken to substitute. The catalog tail past 10k is
  *     unreachable without a token, so terminating is correct.

@@ -1,10 +1,4 @@
-import { SyncErrorCode } from '@pazarsync/db/enums';
-
-const SYNC_ERROR_CODE_VALUES: ReadonlySet<string> = new Set(Object.values(SyncErrorCode));
-
-function isSyncErrorCode(value: string): value is SyncErrorCode {
-  return SYNC_ERROR_CODE_VALUES.has(value);
-}
+import { SyncErrorCode, isSyncErrorCode } from '@pazarsync/db/enums';
 
 /**
  * Narrow an unknown caught value to a `SyncErrorCode` for `sync_log.error_code`.
@@ -16,9 +10,7 @@ function isSyncErrorCode(value: string): value is SyncErrorCode {
 export function errorCodeOf(err: unknown): SyncErrorCode {
   if (typeof err === 'object' && err !== null && 'code' in err) {
     const code = (err as { code: unknown }).code;
-    if (typeof code === 'string' && isSyncErrorCode(code)) {
-      return code;
-    }
+    if (isSyncErrorCode(code)) return code;
   }
   return SyncErrorCode.INTERNAL_ERROR;
 }
