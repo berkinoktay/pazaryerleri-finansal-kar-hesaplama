@@ -3,6 +3,7 @@
 import type { SyncStatus, SyncType } from '@pazarsync/db/enums';
 import {
   AlertCircleIcon,
+  CancelCircleIcon,
   CheckmarkCircle02Icon,
   PackageIcon,
   RefreshIcon,
@@ -442,7 +443,7 @@ function RecentSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
   // is durable; the user just needs to know some pages didn't.
   const Icon =
     log.status === 'FAILED'
-      ? AlertCircleIcon
+      ? CancelCircleIcon
       : completedWithSkips
         ? AlertCircleIcon
         : CheckmarkCircle02Icon;
