@@ -626,7 +626,41 @@
     "willRetryUnknown": "Retrying soon",
     "attempt": "Attempt {n}",
     "empty": "No syncs yet.",
-    "unknownStore": "Unknown store"
+    "unknownStore": "Unknown store",
+    "errors": {
+      "MARKETPLACE_AUTH_FAILED": {
+        "title": "Authentication failed",
+        "description": "The marketplace rejected your API credentials. Check the keys in your store settings."
+      },
+      "MARKETPLACE_ACCESS_DENIED": {
+        "title": "Access denied",
+        "description": "The marketplace blocked your connection. If you're on sandbox, verify IP allowlisting."
+      },
+      "MARKETPLACE_UNREACHABLE": {
+        "title": "Marketplace unreachable",
+        "description": "The marketplace servers are temporarily not responding."
+      },
+      "SYNC_IN_PROGRESS": {
+        "title": "Sync already running",
+        "description": "A sync of this type is already in progress. Wait for it to finish."
+      },
+      "RATE_LIMITED": {
+        "title": "Rate limit exceeded",
+        "description": "The marketplace received too many requests in a short window. We'll retry shortly."
+      },
+      "VALIDATION_ERROR": {
+        "title": "Invalid data",
+        "description": "The data being synced doesn't match the marketplace's expected shape."
+      },
+      "INTERNAL_ERROR": {
+        "title": "Unexpected error",
+        "description": "Something went wrong. If the issue persists, please contact support."
+      },
+      "fallback": {
+        "title": "Unknown error",
+        "description": "Something went wrong. If the issue persists, please contact support."
+      }
+    }
   },
   "products": {
     "page": {

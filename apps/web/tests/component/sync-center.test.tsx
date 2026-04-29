@@ -55,6 +55,21 @@ const messages = {
     attempt: 'Deneme {n}',
     empty: 'Henüz senkronizasyon yok.',
     unknownStore: 'Bilinmeyen mağaza',
+    errors: {
+      MARKETPLACE_UNREACHABLE: {
+        title: 'Pazar yerine ulaşılamıyor',
+        description: 'Pazar yerinin sunucuları geçici olarak yanıt vermiyor.',
+      },
+      MARKETPLACE_AUTH_FAILED: {
+        title: 'Kimlik doğrulama başarısız',
+        description:
+          'API bilgileri pazar yeri tarafından reddedildi. Mağaza ayarlarındaki anahtarları kontrol et.',
+      },
+      fallback: {
+        title: 'Bilinmeyen hata',
+        description: 'Bir aksaklık oldu. Sorun devam ederse destek ekibimize ulaş.',
+      },
+    },
   },
 };
 
@@ -93,7 +108,7 @@ function makeRetryableLog(overrides: Partial<SyncCenterLog> = {}): SyncCenterLog
   };
 }
 
-describe('SyncCenter — FAILED_RETRYABLE rendering (§D.4 regression lock)', () => {
+describe('SyncCenter — FAILED_RETRYABLE rendering', () => {
   it('renders a FAILED_RETRYABLE row inside the "Yeniden deneniyor" section', () => {
     renderCenter({ logs: [makeRetryableLog()] });
 
@@ -107,12 +122,34 @@ describe('SyncCenter — FAILED_RETRYABLE rendering (§D.4 regression lock)', ()
     expect(screen.queryByRole('heading', { name: 'Geçmiş' })).not.toBeInTheDocument();
   });
 
-  it('surfaces the errorCode and errorMessage on the row', () => {
+  it('renders the localized error title + description, never the raw enum or English detail', () => {
+    // The fixture seeds `errorCode: 'MARKETPLACE_UNREACHABLE'` and
+    // `errorMessage: 'Marketplace unreachable (500) — upstream issue'`.
+    // The retry banner MUST translate the enum to user-facing copy and
+    // MUST NOT leak either the enum identifier or the RFC 7807 `detail`
+    // string (which is dev-facing log diagnostic, not user copy).
     renderCenter({ logs: [makeRetryableLog()] });
-    expect(screen.getByText('MARKETPLACE_UNREACHABLE')).toBeInTheDocument();
+
+    expect(screen.getByText('Pazar yerine ulaşılamıyor')).toBeInTheDocument();
     expect(
-      screen.getByText(/Marketplace unreachable \(500\) — upstream issue/),
+      screen.getByText('Pazar yerinin sunucuları geçici olarak yanıt vermiyor.'),
     ).toBeInTheDocument();
+
+    expect(screen.queryByText('MARKETPLACE_UNREACHABLE')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Marketplace unreachable \(500\) — upstream issue/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('falls back to localized "unknown error" copy when the errorCode is not in the known list', () => {
+    // Defends against a freshly-shipped backend code that doesn't have a
+    // translation yet — the user must never see the raw enum identifier.
+    renderCenter({
+      logs: [makeRetryableLog({ errorCode: 'BRAND_NEW_UNKNOWN_CODE' })],
+    });
+
+    expect(screen.getByText('Bilinmeyen hata')).toBeInTheDocument();
+    expect(screen.queryByText('BRAND_NEW_UNKNOWN_CODE')).not.toBeInTheDocument();
   });
 
   it('shows the "Yeniden denenecek" countdown with the formatted time', () => {
@@ -208,5 +245,46 @@ describe('SyncCenter — completed-with-skipped-pages chip', () => {
     expect(screen.queryByText(/sayfa atlandı/)).not.toBeInTheDocument();
     // Clean summary line still renders.
     expect(screen.getByText(/5\.624 kayıt işlendi/)).toBeInTheDocument();
+  });
+});
+
+describe('SyncCenter — terminal FAILED row in Recent section', () => {
+  function makeFailedLog(overrides: Partial<SyncCenterLog> = {}): SyncCenterLog {
+    return {
+      id: 'log-failed-1',
+      storeId: 'store-1',
+      syncType: 'PRODUCTS',
+      status: 'FAILED',
+      startedAt: '2026-04-28T08:00:00.000Z',
+      completedAt: '2026-04-28T08:01:00.000Z',
+      recordsProcessed: 0,
+      progressCurrent: 0,
+      progressTotal: null,
+      errorCode: 'MARKETPLACE_AUTH_FAILED',
+      errorMessage: 'Trendyol returned 401 — invalid credentials',
+      attemptCount: 1,
+      nextAttemptAt: null,
+      ...overrides,
+    };
+  }
+
+  it('renders "Hata · <localized title>" — never the raw enum or English errorMessage', () => {
+    renderCenter({ logs: [makeFailedLog()] });
+
+    // The list row is intentionally compact — only the title carries
+    // the error meaning. Description copy lives on the wider retry
+    // banner, not in the recent-syncs list.
+    expect(screen.getByText(/Hata · Kimlik doğrulama başarısız/)).toBeInTheDocument();
+    expect(screen.queryByText('MARKETPLACE_AUTH_FAILED')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Trendyol returned 401 — invalid credentials/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('uses the localized fallback when the errorCode is unknown', () => {
+    renderCenter({ logs: [makeFailedLog({ errorCode: 'BRAND_NEW_UNKNOWN_CODE' })] });
+
+    expect(screen.getByText(/Hata · Bilinmeyen hata/)).toBeInTheDocument();
+    expect(screen.queryByText('BRAND_NEW_UNKNOWN_CODE')).not.toBeInTheDocument();
   });
 });
