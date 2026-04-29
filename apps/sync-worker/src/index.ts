@@ -21,13 +21,12 @@
 //   - MARKETPLACE_AUTH_FAILED / MARKETPLACE_ACCESS_DENIED → user must
 //     fix credentials/whitelist; retrying does not help. Mark FAILED so
 //     the SyncCenter UI shows a terminal error and the user takes action.
-//   - CORRUPT_CHECKPOINT → the row's pageCursor is unparseable; future
-//     claims would crash on the same data. Terminal FAIL.
 //   - All other errors → transient (network blip, marketplace 5xx,
-//     transient DB failure). markRetryable bumps the row to
-//     FAILED_RETRYABLE with `nextAttemptAt` set by the backoff schedule
-//     in syncLogService.markRetryable. Once attemptCount reaches
-//     MAX_ATTEMPTS we give up and mark the row terminally FAILED.
+//     transient DB failure, malformed checkpoint that produced a
+//     ZodError → coerced to INTERNAL_ERROR by errorCodeOf). markRetryable
+//     bumps the row to FAILED_RETRYABLE with `nextAttemptAt` set by the
+//     backoff schedule in syncLogService.markRetryable. Once attemptCount
+//     reaches MAX_ATTEMPTS we give up and mark the row terminally FAILED.
 
 import { randomBytes } from 'node:crypto';
 
