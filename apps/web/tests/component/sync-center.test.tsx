@@ -40,6 +40,11 @@ const messages = {
       ORDERS: 'Siparişleri şimdi senkronize et',
       SETTLEMENTS: 'Hakedişleri şimdi senkronize et',
     },
+    syncTypeLabel: {
+      PRODUCTS: 'Ürün senkronu',
+      ORDERS: 'Sipariş senkronu',
+      SETTLEMENTS: 'Hakediş senkronu',
+    },
     completedSummary: '{n} kayıt işlendi',
     completedWithSkipsSummary:
       '{n} kayıt işlendi · {skipped} sayfa Trendyol tarafından sağlanamadı',

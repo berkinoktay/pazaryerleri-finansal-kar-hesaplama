@@ -613,6 +613,11 @@
       "ORDERS": "Sync orders now",
       "SETTLEMENTS": "Sync settlements now"
     },
+    "syncTypeLabel": {
+      "PRODUCTS": "Product sync",
+      "ORDERS": "Order sync",
+      "SETTLEMENTS": "Settlement sync"
+    },
     "completedSummary": "{n} records processed",
     "completedWithSkipsSummary": "{n} records processed · {skipped} pages skipped (Trendyol upstream)",
     "skippedChip": "{n} pages skipped",
