@@ -23,6 +23,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { useFormatSyncError } from '@/features/sync/lib/format-sync-error';
 import { useIsMounted } from '@/lib/use-is-mounted';
 import { useNow } from '@/lib/use-now';
 import { cn } from '@/lib/utils';
@@ -363,6 +364,7 @@ function ActiveSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
 function RetryingSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
   const t = useTranslations('syncCenter');
   const formatter = useFormatter();
+  const formatSyncError = useFormatSyncError();
   // `useNow` returns null on SSR + first paint, then ticks every 1s
   // (auto-paused while the tab is hidden). Drives a live countdown:
   // "5 saniye sonra" → "4 saniye sonra" → ... so the user can see the
@@ -384,6 +386,11 @@ function RetryingSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
         : formatter.dateTime(new Date(log.nextAttemptAt), 'short')
       : null;
 
+  // Localized error copy. The raw `errorCode` enum and the English
+  // `errorMessage` (RFC 7807 `detail`, dev-facing) are intentionally
+  // never rendered — `detail` exists for logs only.
+  const errorCopy = formatSyncError(log.errorCode);
+
   return (
     <div className="border-warning/40 bg-warning-surface gap-xs flex flex-col rounded-md border p-3">
       <div className="gap-sm flex items-center">
@@ -402,13 +409,11 @@ function RetryingSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
         {percent !== null ? ` (${percent.toString()}%)` : ''}
       </p>
       <div className="gap-3xs flex flex-col">
-        {log.errorCode !== null ? (
-          <p className="text-warning text-2xs">
-            <span className="font-mono">{log.errorCode}</span>
-            {log.errorMessage !== null && log.errorMessage !== undefined ? (
-              <span className="text-muted-foreground"> · {log.errorMessage}</span>
-            ) : null}
-          </p>
+        {errorCopy !== null ? (
+          <>
+            <p className="text-warning text-2xs font-medium">{errorCopy.title}</p>
+            <p className="text-muted-foreground text-2xs">{errorCopy.description}</p>
+          </>
         ) : null}
         <p className="text-muted-foreground text-2xs">
           {retryLabel !== null ? t('willRetry', { when: retryLabel }) : t('willRetryUnknown')}
@@ -425,9 +430,11 @@ function RecentSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
   const t = useTranslations('syncCenter');
   const formatter = useFormatter();
   const mounted = useIsMounted();
+  const formatSyncError = useFormatSyncError();
 
   const skippedCount = log.skippedPages?.length ?? 0;
   const completedWithSkips = log.status === 'COMPLETED' && skippedCount > 0;
+  const errorCopy = formatSyncError(log.errorCode);
 
   // Completed sync that has skipped pages reads as a soft warning, not a
   // clean success — Trendyol gave us a partial catalog. Still uses the
@@ -480,11 +487,11 @@ function RecentSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
               skipped: formatter.number(skippedCount, 'integer'),
             })}
           </span>
-        ) : log.errorCode !== null ? (
+        ) : errorCopy !== null ? (
           <span className="text-destructive text-2xs">
             {t('failedSummary')}
             {' · '}
-            <span className="font-mono">{log.errorCode}</span>
+            {errorCopy.title}
           </span>
         ) : null}
       </div>

@@ -626,7 +626,41 @@
     "willRetryUnknown": "Yeniden denenecek",
     "attempt": "Deneme {n}",
     "empty": "Henüz senkronizasyon yok.",
-    "unknownStore": "Bilinmeyen mağaza"
+    "unknownStore": "Bilinmeyen mağaza",
+    "errors": {
+      "MARKETPLACE_AUTH_FAILED": {
+        "title": "Kimlik doğrulama başarısız",
+        "description": "API bilgileri pazar yeri tarafından reddedildi. Mağaza ayarlarındaki anahtarları kontrol et."
+      },
+      "MARKETPLACE_ACCESS_DENIED": {
+        "title": "Erişim engellendi",
+        "description": "Pazar yeri bağlantını engelledi. Sandbox kullanıyorsan IP yetkilendirmesini kontrol et."
+      },
+      "MARKETPLACE_UNREACHABLE": {
+        "title": "Pazar yerine ulaşılamıyor",
+        "description": "Pazar yerinin sunucuları geçici olarak yanıt vermiyor."
+      },
+      "SYNC_IN_PROGRESS": {
+        "title": "Senkronizasyon zaten çalışıyor",
+        "description": "Aynı tip için bir senkronizasyon çoktan başlatılmış. Tamamlanmasını bekle."
+      },
+      "RATE_LIMITED": {
+        "title": "İstek sınırı aşıldı",
+        "description": "Pazar yeri kısa sürede çok fazla istek aldı. Birazdan otomatik denenecek."
+      },
+      "VALIDATION_ERROR": {
+        "title": "Geçersiz veri",
+        "description": "Senkronize edilen veri pazar yerinin beklediği biçimde değil."
+      },
+      "INTERNAL_ERROR": {
+        "title": "Beklenmeyen hata",
+        "description": "Bir aksaklık oldu. Sorun devam ederse destek ekibimize ulaş."
+      },
+      "fallback": {
+        "title": "Bilinmeyen hata",
+        "description": "Bir aksaklık oldu. Sorun devam ederse destek ekibimize ulaş."
+      }
+    }
   },
   "products": {
     "page": {
