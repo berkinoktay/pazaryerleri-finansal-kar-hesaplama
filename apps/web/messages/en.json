@@ -658,7 +658,7 @@
       "stockCode": "Stock code",
       "barcode": "Barcode",
       "color": "Color",
-      "size": "Size",
+      "size": "Variant",
       "variants": "Variants",
       "delivery": "Delivery",
       "salePrice": "Price",

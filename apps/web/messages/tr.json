@@ -658,7 +658,7 @@
       "stockCode": "Stok Kodu",
       "barcode": "Barkod",
       "color": "Renk",
-      "size": "Beden",
+      "size": "Varyant",
       "variants": "Varyant",
       "delivery": "Teslimat",
       "salePrice": "Fiyat",
