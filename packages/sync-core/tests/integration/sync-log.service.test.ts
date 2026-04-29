@@ -114,7 +114,7 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
         progressCurrent: 2500,
         progressTotal: 5624,
         pageCursor: { kind: 'page', n: 25 },
-        errorCode: 'MARKETPLACE_UNREACHABLE',
+        errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
         errorMessage: 'Marketplace unreachable (500) — upstream issue (max retries reached)',
         nextAttemptAt: new Date(Date.now() + 30_000),
       },
@@ -127,7 +127,7 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
     const skipEntry = {
       page: 25,
       attemptedAt: new Date('2026-04-29T08:53:55Z').toISOString(),
-      errorCode: 'MARKETPLACE_UNREACHABLE',
+      errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
       httpStatus: 500,
       xRequestId: 'test-req-abc',
       responseBodySnippet: '{"error":"INTERNAL"}',
@@ -157,13 +157,13 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
     const firstSkip = {
       page: 25,
       attemptedAt: new Date('2026-04-29T08:53:55Z').toISOString(),
-      errorCode: 'MARKETPLACE_UNREACHABLE',
+      errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
       httpStatus: 500,
     };
     const secondSkip = {
       page: 47,
       attemptedAt: new Date('2026-04-29T09:11:08Z').toISOString(),
-      errorCode: 'MARKETPLACE_UNREACHABLE',
+      errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
       httpStatus: 502,
     };
 

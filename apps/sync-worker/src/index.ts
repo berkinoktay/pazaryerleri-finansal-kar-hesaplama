@@ -31,6 +31,7 @@
 
 import { randomBytes } from 'node:crypto';
 
+import { SyncErrorCode } from '@pazarsync/db/enums';
 import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
 
 import type { Registry } from './dispatcher';
@@ -51,10 +52,12 @@ const MAX_ATTEMPTS = 5;
 // Permanent failure codes — markFailed terminally, never markRetryable.
 // Adding a new permanent code? Update this set + add a comment in the
 // handler that throws it explaining why retry would not help.
-const PERMANENT_FAILURE_CODES: ReadonlySet<string> = new Set([
-  'MARKETPLACE_AUTH_FAILED',
-  'MARKETPLACE_ACCESS_DENIED',
-  'CORRUPT_CHECKPOINT',
+// Note: CORRUPT_CHECKPOINT is not in SyncErrorCode; errorCodeOf() coerces
+// unknown codes to INTERNAL_ERROR, so a corrupt-checkpoint throw reaches
+// the markRetryable path (transient) rather than this set.
+const PERMANENT_FAILURE_CODES: ReadonlySet<SyncErrorCode> = new Set<SyncErrorCode>([
+  SyncErrorCode.MARKETPLACE_AUTH_FAILED,
+  SyncErrorCode.MARKETPLACE_ACCESS_DENIED,
 ]);
 
 const REGISTRY: Registry = {
@@ -173,7 +176,7 @@ async function handleRunError(
     // page and let the rest of the catalog finish; the skipped page
     // is recorded on `SyncLog.skippedPages` and surfaced in the UI so
     // the merchant sees what didn't sync.
-    if (code === 'MARKETPLACE_UNREACHABLE') {
+    if (code === SyncErrorCode.MARKETPLACE_UNREACHABLE) {
       const advanced = await advanceCursorPastBadPage(syncLogId, err);
       if (advanced) return;
     }

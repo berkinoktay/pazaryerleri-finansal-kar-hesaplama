@@ -2,6 +2,7 @@ import { z } from '@hono/zod-openapi';
 
 import { SyncStatus, SyncType } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
+import { SyncErrorCode } from '@pazarsync/db/enums';
 
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
 
@@ -64,7 +65,7 @@ export const SyncLogResponseSchema = z
     progressCurrent: z.number().int().nonnegative().openapi({ example: 234 }),
     progressTotal: z.number().int().nonnegative().nullable().openapi({ example: 1200 }),
     progressStage: z.string().nullable().openapi({ example: 'upserting' }),
-    errorCode: z.string().nullable().openapi({ example: null }),
+    errorCode: z.enum(SyncErrorCode).nullable().openapi({ example: null }),
     errorMessage: z.string().nullable().openapi({ example: null }),
     attemptCount: z
       .number()
@@ -93,7 +94,7 @@ export const SyncLogResponseSchema = z
         z.object({
           page: z.number().int().nonnegative(),
           attemptedAt: z.string().datetime(),
-          errorCode: z.string(),
+          errorCode: z.enum(SyncErrorCode),
           httpStatus: z.number().int(),
           xRequestId: z.string().optional(),
           responseBodySnippet: z.string().optional(),
@@ -366,7 +367,7 @@ export function toProductWithVariantsResponse(
 interface SkippedPageWire {
   page: number;
   attemptedAt: string;
-  errorCode: string;
+  errorCode: SyncErrorCode;
   httpStatus: number;
   xRequestId?: string;
   responseBodySnippet?: string;
@@ -384,7 +385,7 @@ export function toSyncLogResponse(row: SyncLog): {
   progressCurrent: number;
   progressTotal: number | null;
   progressStage: string | null;
-  errorCode: string | null;
+  errorCode: SyncErrorCode | null;
   errorMessage: string | null;
   attemptCount: number;
   nextAttemptAt: string | null;
@@ -417,6 +418,12 @@ export function toSyncLogResponse(row: SyncLog): {
  * happen — only the worker writes this column) is treated as null so a
  * single bad row doesn't poison the whole sync-logs list response.
  */
+const SYNC_ERROR_CODE_SET: ReadonlySet<string> = new Set(Object.values(SyncErrorCode));
+
+function isSyncErrorCode(value: unknown): value is SyncErrorCode {
+  return typeof value === 'string' && SYNC_ERROR_CODE_SET.has(value);
+}
+
 function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] | null {
   if (raw === null || raw === undefined) return null;
   if (!Array.isArray(raw)) return null;
@@ -427,7 +434,7 @@ function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] 
     if (
       typeof o['page'] !== 'number' ||
       typeof o['attemptedAt'] !== 'string' ||
-      typeof o['errorCode'] !== 'string' ||
+      !isSyncErrorCode(o['errorCode']) ||
       typeof o['httpStatus'] !== 'number'
     ) {
       continue;

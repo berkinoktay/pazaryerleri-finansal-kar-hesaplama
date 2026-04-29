@@ -17,6 +17,7 @@
 //     state transition.
 
 import { prisma } from '@pazarsync/db';
+import { SyncErrorCode } from '@pazarsync/db/enums';
 import {
   parseProductsCursor,
   syncLog,
@@ -95,7 +96,7 @@ export async function advanceCursorPastBadPage(syncLogId: string, err: unknown):
   const skipEntry: SkippedPageEntry = {
     page: currentPageN,
     attemptedAt: new Date().toISOString(),
-    errorCode: 'MARKETPLACE_UNREACHABLE',
+    errorCode: SyncErrorCode.MARKETPLACE_UNREACHABLE,
     httpStatus: extractHttpStatus(err),
     xRequestId: extractXRequestId(err),
     responseBodySnippet: extractBodySnippet(err),

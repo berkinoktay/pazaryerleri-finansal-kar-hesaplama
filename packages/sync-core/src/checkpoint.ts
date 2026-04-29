@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { SyncErrorCode } from '@pazarsync/db/enums';
+
 /** Cursor shape for page-index pagination (Trendyol fallback). */
 export const PageIndexCursorSchema = z.object({
   kind: z.literal('page'),
@@ -45,7 +47,7 @@ export function parseProductsCursor(raw: unknown): ProductsCursor | null {
 export const SkippedPageEntrySchema = z.object({
   page: z.number().int().min(0),
   attemptedAt: z.string(),
-  errorCode: z.string(),
+  errorCode: z.enum(SyncErrorCode),
   httpStatus: z.number().int(),
   xRequestId: z.string().optional(),
   responseBodySnippet: z.string().optional(),
