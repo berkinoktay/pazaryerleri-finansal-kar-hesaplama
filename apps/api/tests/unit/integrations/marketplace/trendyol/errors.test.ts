@@ -54,9 +54,22 @@ describe('mapTrendyolResponseToDomainError', () => {
     }
   });
 
-  it('throws MarketplaceAuthError on generic 4xx (400, 404)', () => {
-    expect(() => mapTrendyolResponseToDomainError(response(400))).toThrow(MarketplaceAuthError);
-    expect(() => mapTrendyolResponseToDomainError(response(404))).toThrow(MarketplaceAuthError);
+  it('throws MarketplaceUnreachable on generic 4xx (400, 404, 405, 409, 414, 415)', () => {
+    // Per docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/hata-kodlari.md
+    // 4xx taxonomy: only 401 is "credentials rejected"; 400/404/405/409/414/415
+    // are request-shape / state / endpoint issues, NOT auth. Surfacing them as
+    // MarketplaceAuthError would mislead users with "credentials rejected" copy
+    // AND short-circuit the worker's retry path (auth is permanent-failure code).
+    for (const status of [400, 404, 405, 409, 414, 415] as const) {
+      expect(() => mapTrendyolResponseToDomainError(response(status))).toThrow(
+        MarketplaceUnreachable,
+      );
+    }
+    try {
+      mapTrendyolResponseToDomainError(response(404));
+    } catch (err) {
+      expect((err as MarketplaceUnreachable).meta.httpStatus).toBe(404);
+    }
   });
 
   it('throws MarketplaceUnreachable on 500/502 (not 503)', () => {
