@@ -2,6 +2,8 @@
 // shape and our internal MappedProduct DTO. No I/O, no DB. Tested in
 // isolation with the staging Postman samples.
 
+import { syncLog } from '@pazarsync/sync-core';
+
 import type {
   MappedProduct,
   MappedProductFastDeliveryOption,
@@ -39,17 +41,25 @@ function priceToDecimalString(value: number | null | undefined): string {
 // Trendyol's content-level attributes[] frequently has the same color
 // twice (different attributeId, same attributeValue). Pick the first
 // `Renk` entry; warn if multiple disagree.
+//
+// This is a Trendyol seller-data-quality issue, not our bug. Real
+// observed values: same color in different casing ("sarı" + "Sarı"),
+// or stale test data alongside the real value ("sasas" + "Lacivert").
+// Routing through syncLog so the line gets a yellow ⚠ glyph in dev
+// instead of blending into the rest of the run output.
 function extractColor(attributes: TrendyolAttribute[]): string | null {
   const matches = attributes.filter((a) => a.attributeName === COLOR_ATTRIBUTE_NAME);
   if (matches.length === 0) return null;
   const first = matches[0];
   if (first === undefined) return null;
   if (matches.length > 1) {
-    const distinct = new Set(matches.map((a) => a.attributeValue));
-    if (distinct.size > 1) {
-      console.warn(
-        `[trendyol-mapper] content has ${matches.length.toString()} Renk attrs that disagree: ${[...distinct].join(' | ')}`,
-      );
+    const distinct = [...new Set(matches.map((a) => a.attributeValue))];
+    if (distinct.length > 1) {
+      syncLog.warn('mapper.color.disagreement', {
+        attrCount: matches.length,
+        distinct,
+        chosen: first.attributeValue,
+      });
     }
   }
   return first.attributeValue;
