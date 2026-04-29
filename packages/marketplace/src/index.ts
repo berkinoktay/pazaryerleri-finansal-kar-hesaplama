@@ -26,6 +26,11 @@ export {
   mapTrendyolContent,
   type MappedProductsPage,
 } from './trendyol/mapper';
-export { fetchApprovedProducts, type FetchApprovedProductsOpts } from './trendyol/products';
+export {
+  APPROVED_PAGE_CAP_ITEMS,
+  PRODUCTS_PAGE_SIZE,
+  fetchApprovedProducts,
+  type FetchApprovedProductsOpts,
+} from './trendyol/products';
 export { probeTrendyolCredentials } from './trendyol/client';
 export { trendyolFactory } from './trendyol/adapter';

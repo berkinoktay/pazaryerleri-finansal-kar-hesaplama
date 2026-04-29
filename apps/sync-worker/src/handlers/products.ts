@@ -14,8 +14,10 @@
 import { prisma } from '@pazarsync/db';
 import type { Store, SyncLog } from '@pazarsync/db';
 import {
+  APPROVED_PAGE_CAP_ITEMS,
   fetchApprovedProducts,
   isTrendyolCredentials,
+  PRODUCTS_PAGE_SIZE,
   type MappedProduct,
   type TrendyolCredentials,
 } from '@pazarsync/marketplace';
@@ -31,17 +33,20 @@ import type { ChunkResult, ModuleHandler } from './types';
 // Trendyol getApprovedProducts pagination contract (per
 // docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md §3):
 //
-//   - Default: request?page=N&size=100 — works while page * size ≤ 10,000.
-//   - nextPageToken: required ONLY past the 10k cap.
+//   - Default: request?page=N&size=PRODUCTS_PAGE_SIZE — works while
+//     page * size ≤ 10,000 (APPROVED_PAGE_CAP_ITEMS).
+//   - nextPageToken: required ONLY past the cap.
 //
 // Trendyol's API has been observed to return 500 deterministically on
 // specific nextPageToken values mid-stream (real upstream issue, sample
 // repro: token "eyJzb3J0IjpbMTc2MDk2MTM2NzAwMF19" on a 5,624-product
-// catalog at the page-24 boundary). Page-based pagination walks past
-// the bad token. Token cursors are kept in reserve for catalogs > 10k
-// where they're actually required.
-const TRENDYOL_PRODUCTS_PAGE_SIZE = 100;
-const TRENDYOL_APPROVED_PAGE_CAP_ITEMS = 10_000;
+// catalog). Page-based pagination walks past the bad token. Token
+// cursors are kept in reserve for catalogs > 10k where they're
+// actually required.
+//
+// PRODUCTS_PAGE_SIZE / APPROVED_PAGE_CAP_ITEMS imported from the
+// marketplace package — single source of truth so the worker's
+// token→page fallback math stays consistent with the fetcher.
 
 export async function processProductsChunk(input: {
   syncLog: SyncLog;
@@ -61,9 +66,9 @@ export async function processProductsChunk(input: {
   if (
     rawCursor !== null &&
     rawCursor.kind === 'token' &&
-    log.progressCurrent < TRENDYOL_APPROVED_PAGE_CAP_ITEMS
+    log.progressCurrent < APPROVED_PAGE_CAP_ITEMS
   ) {
-    const fallbackPage = Math.floor(log.progressCurrent / TRENDYOL_PRODUCTS_PAGE_SIZE);
+    const fallbackPage = Math.floor(log.progressCurrent / PRODUCTS_PAGE_SIZE);
     syncLog.warn('chunk.cursor-token-fallback', {
       syncLogId: log.id,
       storeId: log.storeId,
@@ -119,8 +124,7 @@ export async function processProductsChunk(input: {
   // a token to continue with.
   const currentPageN = cursor === null ? 0 : cursor.kind === 'page' ? cursor.n : 0;
   const nextPageN = currentPageN + 1;
-  const nextWouldCrossCap =
-    nextPageN * TRENDYOL_PRODUCTS_PAGE_SIZE >= TRENDYOL_APPROVED_PAGE_CAP_ITEMS;
+  const nextWouldCrossCap = nextPageN * PRODUCTS_PAGE_SIZE >= APPROVED_PAGE_CAP_ITEMS;
 
   let nextCursor: ProductsCursor;
   if (nextWouldCrossCap) {

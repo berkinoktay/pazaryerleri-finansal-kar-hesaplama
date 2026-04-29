@@ -361,14 +361,37 @@ describe('fetchApprovedProducts — 5xx + network retry', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(5);
   });
 
-  it('does NOT retry 503 — Trendyol uses it for permanent IP-whitelist issues', async () => {
+  it('does NOT retry 503 in SANDBOX — terminal IP-whitelist config issue', async () => {
     fetchSpy.mockResolvedValueOnce(new Response(null, { status: 503 }));
 
-    const gen = fetchApprovedProducts({ baseUrl: BASE_URL, credentials: CREDENTIALS });
-    // mapTrendyolResponseToDomainError treats 503 as MarketplaceAccessError
-    // (sandbox IP whitelist); retrying wouldn't help.
+    const gen = fetchApprovedProducts({
+      baseUrl: BASE_URL,
+      environment: 'SANDBOX',
+      credentials: CREDENTIALS,
+    });
+    // 503 in SANDBOX maps to MarketplaceAccessError (stage IP whitelist
+    // missing — terminal config issue per Trendyol's documented sandbox
+    // behavior); retrying wouldn't help.
     await expect(gen.next()).rejects.toThrow();
     expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it('DOES retry 503 in PRODUCTION — transient upstream unavailability', async () => {
+    vi.useFakeTimers();
+    // 4 backoff retries + 1 final = 5 calls all returning 503
+    for (let i = 0; i < 5; i++) {
+      fetchSpy.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    }
+
+    const gen = fetchApprovedProducts({
+      baseUrl: BASE_URL,
+      environment: 'PRODUCTION',
+      credentials: CREDENTIALS,
+    });
+    const rejection = expect(gen.next()).rejects.toBeInstanceOf(MarketplaceUnreachable);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejection;
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -427,7 +450,7 @@ describe('fetchApprovedProducts — request URL composition', () => {
 
     const url = fetchSpy.mock.calls[0]?.[0] as string;
     expect(url).toBe(
-      `${BASE_URL}/integration/product/sellers/${SUPPLIER_ID}/products/approved?size=100&page=0`,
+      `${BASE_URL}/integration/product/sellers/${SUPPLIER_ID}/products/approved?size=1000&page=0`,
     );
   });
 });

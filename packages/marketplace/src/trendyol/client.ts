@@ -2,31 +2,11 @@ import type { StoreEnvironment } from '@pazarsync/db';
 import { MarketplaceUnreachable } from '@pazarsync/sync-core';
 
 import { mapTrendyolResponseToDomainError } from './errors';
+import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
 import type { TrendyolCredentials } from './types';
 
 const TIMEOUT_MS = 10_000;
 const PLATFORM = 'TRENDYOL';
-
-function baseUrlFor(env: StoreEnvironment): string {
-  const url =
-    env === 'PRODUCTION'
-      ? process.env['TRENDYOL_PROD_BASE_URL']
-      : process.env['TRENDYOL_SANDBOX_BASE_URL'];
-  if (url === undefined || url.length === 0) {
-    throw new Error(`Trendyol base URL not configured for environment ${env}`);
-  }
-  return url;
-}
-
-function buildAuthHeader(cred: TrendyolCredentials): string {
-  const token = Buffer.from(`${cred.apiKey}:${cred.apiSecret}`).toString('base64');
-  return `Basic ${token}`;
-}
-
-function buildUserAgent(cred: TrendyolCredentials): string {
-  const suffix = process.env['TRENDYOL_INTEGRATOR_UA_SUFFIX'] ?? 'SelfIntegration';
-  return `${cred.supplierId} - ${suffix}`;
-}
 
 /**
  * Cheapest credentials-proof probe for Trendyol: the product-filter
@@ -60,5 +40,5 @@ export async function probeTrendyolCredentials(
     // We do NOT leak err.message (may contain IP / hostname) to callers.
     throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0 });
   }
-  if (!res.ok) mapTrendyolResponseToDomainError(res);
+  if (!res.ok) mapTrendyolResponseToDomainError(res, env);
 }
