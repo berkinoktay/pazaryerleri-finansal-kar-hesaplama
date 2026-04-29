@@ -206,9 +206,9 @@ describe('processProductsChunk', () => {
     // The chunk handler converts a saved token cursor to a page cursor
     // when progressCurrent is under the 10k cap, because that's where
     // page-based pagination is the documented contract and tokens have
-    // been observed to 500 deterministically. progressCurrent=2400 →
-    // page index 24; the next request should hit page=24, NOT use the
-    // saved (potentially poisoned) token.
+    // been observed to 500 deterministically. With PRODUCTS_PAGE_SIZE=1000:
+    // progressCurrent=2000 → page index 2; the next request should hit
+    // page=2, NOT use the saved (potentially poisoned) token.
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -217,9 +217,9 @@ describe('processProductsChunk', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse({
         totalElements: 5624,
-        totalPages: 57,
-        page: 24,
-        size: 100,
+        totalPages: 6,
+        page: 2,
+        size: 1000,
         // Trendyol still returns a token; the handler should ignore it
         // because we're below the cap.
         nextPageToken: 'eyJzb3J0IjpbMTc2MDk2MTM2NzAwMF19',
@@ -245,7 +245,7 @@ describe('processProductsChunk', () => {
         claimedBy: 'worker-test',
         lastTickAt: new Date(),
         attemptCount: 2,
-        progressCurrent: 2400,
+        progressCurrent: 2000,
         progressTotal: 5624,
         pageCursor: { kind: 'token', token: 'poisoned-token' } as never,
       },
@@ -257,18 +257,18 @@ describe('processProductsChunk', () => {
       cursor: { kind: 'token', token: 'poisoned-token' },
     });
 
-    // The fetch URL must be page-based at index 24 (= 2400 / 100), not
+    // The fetch URL must be page-based at index 2 (= 2000 / 1000), not
     // a request carrying the poisoned token.
     expect(fetchSpy).toHaveBeenCalledOnce();
     const url = fetchSpy.mock.calls[0]?.[0] as string;
-    expect(url).toContain('page=24');
+    expect(url).toContain('page=2');
     expect(url).not.toContain('nextPageToken');
 
-    // Result advances to page=25 — also page-based, because the next
-    // page (2500–2599) still sits well below the cap.
+    // Result advances to page=3 — also page-based, because the next
+    // page (3000–3999) still sits well below the 10k cap.
     expect(result.kind).toBe('continue');
     if (result.kind !== 'continue') return;
-    expect(result.cursor).toEqual({ kind: 'page', n: 25 });
-    expect(result.progress).toBe(2401);
+    expect(result.cursor).toEqual({ kind: 'page', n: 3 });
+    expect(result.progress).toBe(2001);
   });
 });
