@@ -248,7 +248,17 @@ model ProductVariant {
   orderItems OrderItem[]
 
   @@unique([storeId, platformVariantId])
-  @@unique([storeId, barcode])
+  // Intentionally NOT unique on (storeId, barcode): marketplaces enforce
+  // barcode uniqueness on their side at listing time, but their sandbox
+  // and certain real-world catalogs ship variants with duplicate
+  // barcodes (different platformVariantId, same printed barcode — e.g.
+  // multi-pack vs single-unit variants of the same SKU). Treating
+  // barcode as unique at our layer caused 3 product upserts to fail per
+  // sync against the dev/sandbox account; the products were silently
+  // dropped via skip-on-error in apps/sync-worker/src/handlers/products.ts.
+  // Lookups by barcode (e.g. order item resolution) are non-unique in
+  // principle anyway — we resolve via platformVariantId.
+  @@index([storeId, barcode])
   @@index([organizationId])
   @@index([productId])
   @@index([storeId, stockCode])
