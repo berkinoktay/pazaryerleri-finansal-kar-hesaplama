@@ -24,6 +24,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { useIsMounted } from '@/lib/use-is-mounted';
+import { useNow } from '@/lib/use-now';
 import { cn } from '@/lib/utils';
 
 /**
@@ -362,19 +363,24 @@ function ActiveSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
 function RetryingSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
   const t = useTranslations('syncCenter');
   const formatter = useFormatter();
-  const mounted = useIsMounted();
+  // `useNow` returns null on SSR + first paint, then ticks every 1s
+  // (auto-paused while the tab is hidden). Drives a live countdown:
+  // "5 saniye sonra" → "4 saniye sonra" → ... so the user can see the
+  // retry approaching without re-opening the SyncCenter sheet.
+  const now = useNow();
   const percent =
     log.progressTotal !== null && log.progressTotal > 0
       ? Math.min(100, Math.round((log.progressCurrent / log.progressTotal) * 100))
       : null;
 
   // SSR-safe retry-time label — same hydration pattern as SyncBadge /
-  // RecentSyncItem. Until mounted, render an absolute timestamp; once
-  // mounted, swap to a relative label that auto-updates.
+  // RecentSyncItem. While `now` is null (SSR + pre-mount), render an
+  // absolute timestamp so server and client markup match. Once non-null,
+  // swap to a relative label that ticks down each second.
   const retryLabel =
     log.nextAttemptAt !== null && log.nextAttemptAt !== undefined
-      ? mounted
-        ? formatter.relativeTime(new Date(log.nextAttemptAt), new Date())
+      ? now !== null
+        ? formatter.relativeTime(new Date(log.nextAttemptAt), now)
         : formatter.dateTime(new Date(log.nextAttemptAt), 'short')
       : null;
 

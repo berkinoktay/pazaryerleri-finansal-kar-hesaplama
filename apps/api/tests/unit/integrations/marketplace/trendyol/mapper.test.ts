@@ -6,6 +6,7 @@ import {
   type TrendyolApprovedProductsResponse,
   type TrendyolContent,
 } from '@pazarsync/marketplace';
+import { syncLog } from '@pazarsync/sync-core';
 
 // First staging Postman sample provided by the user (April 2026):
 // single-variant product "dfsf" with one Beden attribute on the variant
@@ -107,7 +108,7 @@ describe('mapTrendyolContent', () => {
   });
 
   it('extracts color from the first Renk attribute even when duplicated', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => {});
     const out = mapTrendyolContent(STAGING_SAMPLE_DFSF);
     expect(out.color).toBe('Beyaz');
     // both Renk attrs say "Beyaz" — no warn expected
@@ -116,7 +117,7 @@ describe('mapTrendyolContent', () => {
   });
 
   it('warns on disagreeing duplicate Renk values but still picks the first', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => {});
     const out = mapTrendyolContent({
       ...STAGING_SAMPLE_DFSF,
       attributes: [
@@ -126,7 +127,16 @@ describe('mapTrendyolContent', () => {
     });
     expect(out.color).toBe('Beyaz');
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]?.[0]).toMatch(/Renk attrs that disagree/);
+    // Mapper now emits a structured event via syncLog instead of a raw
+    // console.warn. Assert on the event name + the diagnostic fields
+    // that downstream operators would grep for.
+    const [event, ctx] = warn.mock.calls[0] ?? [];
+    expect(event).toBe('mapper.color.disagreement');
+    expect(ctx).toMatchObject({
+      attrCount: 2,
+      distinct: ['Beyaz', 'Mavi'],
+      chosen: 'Beyaz',
+    });
     warn.mockRestore();
   });
 
