@@ -11,42 +11,34 @@ import type { StoreEnvironment } from '@pazarsync/db';
 import { MarketplaceUnreachable, RateLimitedError } from '@pazarsync/sync-core';
 
 import { mapTrendyolResponseToDomainError } from './errors';
+import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
 import { mapTrendyolApprovedResponse, type MappedProductsPage } from './mapper';
 import type { TrendyolApprovedProductsResponse, TrendyolCredentials } from './types';
 
 const PLATFORM = 'TRENDYOL';
 const REQUEST_TIMEOUT_MS = 30_000;
-const PAGE_SIZE = 100; // Trendyol's documented max
-// Trendyol getApprovedProducts pagination cap (urun-entegrasyonlari-v2.md §3):
-// "Page x size maksimum 10.000 değerini alabilir." — items 0–9999 are
-// reachable via page=N; item 10000+ requires nextPageToken. Below the cap
-// nextPageToken is documented as optional, and Trendyol has been observed
-// to 500 deterministically on certain token values mid-stream — page-based
-// pagination walks past those tokens unaffected.
-const APPROVED_PAGE_CAP_ITEMS = 10_000;
+/**
+ * Trendyol getApprovedProducts page size. Per
+ * docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md §3:
+ *   "Page x size maksimum 10.000 değerini alabilir."
+ * → at size=1000, the page-based contract reaches items 0–9999
+ *   in 10 requests instead of 100. Past 10k, switches to nextPageToken.
+ *
+ * Exported because the sync-worker computes a token→page fallback that
+ * needs to use the same constant. Single source of truth.
+ */
+export const PRODUCTS_PAGE_SIZE = 1000;
+/**
+ * Trendyol's documented page-based pagination cap (same doc as above).
+ * Items 0–9999 are reachable via `page=N`; item 10000+ requires
+ * `nextPageToken`.
+ *
+ * Exported for the same reason as PRODUCTS_PAGE_SIZE — the worker's
+ * token-fallback recomputation references this cap.
+ */
+export const APPROVED_PAGE_CAP_ITEMS = 10_000;
 const MAX_BACKOFF_RETRIES = 4; // 1s + 2s + 4s + 8s = 15s — under any reasonable Trendyol Retry-After
 const INITIAL_BACKOFF_MS = 1_000;
-
-function baseUrlFor(env: StoreEnvironment): string {
-  const url =
-    env === 'PRODUCTION'
-      ? process.env['TRENDYOL_PROD_BASE_URL']
-      : process.env['TRENDYOL_SANDBOX_BASE_URL'];
-  if (url === undefined || url.length === 0) {
-    throw new Error(`Trendyol base URL not configured for environment ${env}`);
-  }
-  return url;
-}
-
-function buildAuthHeader(cred: TrendyolCredentials): string {
-  const token = Buffer.from(`${cred.apiKey}:${cred.apiSecret}`).toString('base64');
-  return `Basic ${token}`;
-}
-
-function buildUserAgent(cred: TrendyolCredentials): string {
-  const suffix = process.env['TRENDYOL_INTEGRATOR_UA_SUFFIX'] ?? 'SelfIntegration';
-  return `${cred.supplierId} - ${suffix}`;
-}
 
 interface PageRequest {
   size: number;
@@ -85,6 +77,7 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 interface FetcherDeps {
   baseUrl: string;
   credentials: TrendyolCredentials;
+  env: StoreEnvironment;
   signal?: AbortSignal;
 }
 
@@ -94,20 +87,25 @@ interface FetcherDeps {
  * Retry policy:
  *   - **429** (rate limit) — backoff using `Retry-After` header when
  *     present, otherwise exponential. Up to MAX_BACKOFF_RETRIES.
- *   - **5xx** (transient upstream — except 503 which Trendyol uses for
- *     "stage IP not whitelisted," a permanent config issue, not a
- *     blip) — same exponential backoff. A single Trendyol gateway
- *     hiccup mid-sync used to kill the whole run; the retry path
- *     covers the common case where the next request 200s.
+ *   - **5xx (other than sandbox 503)** — same exponential backoff. A
+ *     single Trendyol gateway hiccup mid-sync used to kill the whole
+ *     run; the retry path covers the common case where the next
+ *     request 200s. Sandbox 503 is excluded because Trendyol uses it
+ *     for "stage IP not whitelisted" — a permanent config issue, not
+ *     a blip. Production 503 IS transient per Trendyol's official
+ *     error-codes doc and gets retried.
  *   - **Network error / timeout** (fetch threw) — same backoff. We
  *     can't read a status code, so we treat it like a 5xx.
- *   - Anything else (401/403/4xx other than 429) — no retry; the
- *     condition is permanent (bad credentials, missing User-Agent).
+ *   - Anything else (401/403/4xx other than 429, sandbox 503) — no
+ *     retry; the condition is permanent (bad credentials, missing
+ *     User-Agent, IP allowlist).
  *
- * Once retries are exhausted, falls through to
- * `mapTrendyolResponseToDomainError` which throws a typed domain
- * error (RateLimitedError for 429, MarketplaceAccessError for 503,
- * MarketplaceUnreachable for other 5xx).
+ * Once retries are exhausted, all 4xx and most 5xx (i.e. anything
+ * other than networkError + 429) read the response body for diagnostic
+ * capture, then delegate to `mapTrendyolResponseToDomainError(res, env,
+ * diagnostics)` which routes by env (sandbox 503 → AccessError; prod
+ * 503 → Unreachable+snippet) and status (401 → AuthError, 403 →
+ * AccessError, generic 4xx + 5xx → Unreachable+snippet).
  *
  * Note: this fetch-level retry is complementary to the sync-worker's
  * chunk-level retry (`handleRunError` → `markRetryable` with longer
@@ -141,9 +139,13 @@ async function fetchOnce(
       return (await res.json()) as TrendyolApprovedProductsResponse;
     }
 
+    // 503 in sandbox is the documented "stage IP not whitelisted" config
+    // issue — terminal, retrying won't help. 503 in production is generic
+    // upstream unavailability per Trendyol's error-codes doc — transient.
+    const sandbox503 = res !== undefined && res.status === 503 && deps.env === 'SANDBOX';
     const isTransient =
       networkError ||
-      (res !== undefined && (res.status === 429 || (res.status >= 500 && res.status !== 503)));
+      (res !== undefined && (res.status === 429 || (res.status >= 500 && !sandbox503)));
 
     if (isTransient && attempt < MAX_BACKOFF_RETRIES) {
       const headerSeconds =
@@ -164,22 +166,17 @@ async function fetchOnce(
       const seconds = parseRetryAfterSeconds(res.headers.get('Retry-After')) ?? 30;
       throw new RateLimitedError(seconds, 'Trendyol rate limit hit (retries exhausted)');
     }
-    // 5xx (other than 503) — capture diagnostic surface BEFORE throwing so
-    // the worker's skip-bad-page recovery has the X-Request-ID + body
-    // snippet to record against the skipped sayfa. We only do this for
-    // the unreachable case; 503 (sandbox IP whitelist) is a config issue
-    // and gets a separate domain error with no skip path.
-    if (res.status >= 500 && res.status !== 503) {
-      const snippet = await safeReadBody(res);
-      const xRequestId = res.headers.get('X-Request-ID') ?? undefined;
-      throw new MarketplaceUnreachable(PLATFORM, {
-        httpStatus: res.status,
-        url,
-        xRequestId,
-        responseBodySnippet: snippet,
-      });
-    }
-    mapTrendyolResponseToDomainError(res);
+    // All remaining 4xx + 5xx — read body for diagnostic capture so the
+    // worker's skip-bad-page recovery (and admin debugging) has the
+    // X-Request-ID + body snippet to record against the failure. The
+    // env-aware mapper decides the final domain error class.
+    const snippet = await safeReadBody(res);
+    const xRequestId = res.headers.get('X-Request-ID') ?? undefined;
+    mapTrendyolResponseToDomainError(res, deps.env, {
+      url,
+      xRequestId,
+      responseBodySnippet: snippet,
+    });
   }
 }
 
@@ -236,8 +233,14 @@ export interface FetchApprovedProductsOpts {
 export async function* fetchApprovedProducts(
   opts: FetchApprovedProductsOpts,
 ): AsyncGenerator<MappedProductsPage, void> {
-  const base = opts.baseUrl ?? baseUrlFor(opts.environment ?? 'PRODUCTION');
-  const deps: FetcherDeps = { baseUrl: base, credentials: opts.credentials, signal: opts.signal };
+  const env = opts.environment ?? 'PRODUCTION';
+  const base = opts.baseUrl ?? baseUrlFor(env);
+  const deps: FetcherDeps = {
+    baseUrl: base,
+    credentials: opts.credentials,
+    env,
+    signal: opts.signal,
+  };
 
   let processedSoFar = 0;
   let totalElements: number | null = null;
@@ -254,7 +257,7 @@ export async function* fetchApprovedProducts(
     }
 
     const url = buildUrl(base, opts.credentials.supplierId, {
-      size: PAGE_SIZE,
+      size: PRODUCTS_PAGE_SIZE,
       page: pendingToken === undefined ? page : undefined,
       nextPageToken: pendingToken,
     });
@@ -276,7 +279,7 @@ export async function* fetchApprovedProducts(
     // some nextPageToken values. Switch to nextPageToken ONLY when the
     // next page would cross the cap and Trendyol gave us a token.
     const nextPage = page + 1;
-    const nextWouldCrossCap = nextPage * PAGE_SIZE >= APPROVED_PAGE_CAP_ITEMS;
+    const nextWouldCrossCap = nextPage * PRODUCTS_PAGE_SIZE >= APPROVED_PAGE_CAP_ITEMS;
 
     if (nextWouldCrossCap) {
       if (mapped.pageMeta.nextPageToken !== null) {
