@@ -39,6 +39,16 @@ const TRENDYOL_APPROVED_PAGE_CAP_ITEMS = 10_000;
  *   - Next page would cross the 10k Trendyol cap and we have no
  *     nextPageToken to substitute. The catalog tail past 10k is
  *     unreachable without a token, so terminating is correct.
+ *
+ * Note on progress: we deliberately do NOT bump `progressCurrent` here.
+ * The handler computes `newProgress = log.progressCurrent + batch.length`
+ * on the next chunk, so any bump made here would be DOUBLE-COUNTED
+ * (the bumped offset becomes the base for `+ batch.length`). Leaving
+ * `progressCurrent` untouched means the eventual `complete(finalCount)`
+ * matches the real number of upserted records — so the SyncCenter's
+ * "5.524 kayıt işlendi · 1 sayfa Trendyol tarafından sağlanamadı"
+ * line reads consistently. Visual cost: the progress bar pauses at
+ * the pre-skip value for one chunk before page 26 ticks.
  */
 export async function advanceCursorPastBadPage(syncLogId: string, err: unknown): Promise<boolean> {
   const row = await prisma.syncLog.findUnique({
@@ -81,7 +91,6 @@ export async function advanceCursorPastBadPage(syncLogId: string, err: unknown):
   }
 
   const nextCursor: ProductsCursor = { kind: 'page', n: nextPageN };
-  const newProgress = nextPageN * TRENDYOL_PRODUCTS_PAGE_SIZE;
 
   const skipEntry: SkippedPageEntry = {
     page: currentPageN,
@@ -92,7 +101,7 @@ export async function advanceCursorPastBadPage(syncLogId: string, err: unknown):
     responseBodySnippet: extractBodySnippet(err),
   };
 
-  await syncLogService.recordSkippedPageAndContinue(syncLogId, skipEntry, nextCursor, newProgress);
+  await syncLogService.recordSkippedPageAndContinue(syncLogId, skipEntry, nextCursor);
   return true;
 }
 

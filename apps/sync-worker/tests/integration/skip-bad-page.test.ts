@@ -94,10 +94,11 @@ describe('advanceCursorPastBadPage', () => {
     expect(after.status).toBe('PENDING');
     expect(after.attemptCount).toBe(0);
     expect(after.pageCursor).toEqual({ kind: 'page', n: 26 });
-    // Worker projects the next page's start as a progress estimate; the
-    // first successful tick on page 26 will overwrite this with the
-    // ground-truth count from Trendyol.
-    expect(after.progressCurrent).toBe(2600);
+    // progressCurrent stays at the pre-skip value. The next successful
+    // chunk will tick it via `progressCurrent + batch.length`, so any
+    // bump here would double-count and inflate `recordsProcessed` at
+    // the end of the run past the real upsert count.
+    expect(after.progressCurrent).toBe(2500);
     expect(after.errorCode).toBeNull();
     expect(after.claimedAt).toBeNull();
 

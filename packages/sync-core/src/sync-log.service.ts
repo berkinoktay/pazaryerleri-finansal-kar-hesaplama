@@ -334,21 +334,25 @@ export async function markRetryable(
  *     transaction also serializes against any concurrent worker).
  *   - Appends the new entry.
  *   - Resets attemptCount to 0 so the next claim starts fresh.
- *   - Advances the cursor and progress to the next page.
+ *   - Advances the cursor (NOT progressCurrent) to the next page.
  *   - Returns the row to PENDING with claimedAt/claimedBy/error fields
  *     cleared, so the worker's poll-and-claim loop picks it up
  *     immediately (next tick).
  *
- * Caller (sync-worker `handleRunError`) is responsible for choosing
- * the next cursor — usually `{ kind: 'page', n: currentN + 1 }` — and
- * for the progress estimate. A successful tick on the next chunk will
- * overwrite progressCurrent with the real count.
+ * Why progressCurrent is NOT bumped: the products handler computes the
+ * next progress as `log.progressCurrent + batch.length`. If we bumped
+ * progressCurrent here by an estimated 100 (the page size), the next
+ * chunk's progress would double-count — and `complete(finalCount)` at
+ * the end of the run would write a recordsProcessed that doesn't match
+ * the real number of upserts (real = count seen by Trendyol minus the
+ * skipped page). The visual cost is one chunk's worth of "no progress
+ * bar movement" right after the skip — strictly correct numbers beat
+ * smooth-looking-but-lying ones.
  */
 export async function recordSkippedPageAndContinue(
   syncLogId: string,
   skipEntry: SkippedPageEntry,
   nextCursor: ProductsCursor | null,
-  newProgress: number,
 ): Promise<void> {
   syncLog.warn('sync.page-skipped', {
     syncLogId,
@@ -369,7 +373,6 @@ export async function recordSkippedPageAndContinue(
         status: 'PENDING',
         attemptCount: 0,
         pageCursor: nextCursor as never,
-        progressCurrent: newProgress,
         skippedPages: [...existing, skipEntry] as never,
         claimedAt: null,
         claimedBy: null,

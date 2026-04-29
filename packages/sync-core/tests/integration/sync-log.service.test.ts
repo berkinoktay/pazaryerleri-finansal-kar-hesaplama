@@ -116,7 +116,7 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
     return row.id;
   }
 
-  it('records the skipped page, advances cursor, resets attempt count, and returns row to PENDING', async () => {
+  it('records the skipped page, advances cursor, resets attempt count, and returns row to PENDING — progressCurrent left untouched', async () => {
     const id = await setupExhaustedRow();
     const skipEntry = {
       page: 25,
@@ -127,12 +127,16 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
       responseBodySnippet: '{"error":"INTERNAL"}',
     };
 
-    await syncLogService.recordSkippedPageAndContinue(id, skipEntry, { kind: 'page', n: 26 }, 2600);
+    await syncLogService.recordSkippedPageAndContinue(id, skipEntry, { kind: 'page', n: 26 });
 
     const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
     expect(after.status).toBe('PENDING');
     expect(after.attemptCount).toBe(0);
-    expect(after.progressCurrent).toBe(2600);
+    // progressCurrent MUST NOT be bumped here. The next chunk reads this
+    // value and computes `progressCurrent + batch.length` — bumping
+    // would double-count and inflate the final `recordsProcessed` past
+    // the real upsert count.
+    expect(after.progressCurrent).toBe(2500);
     expect(after.pageCursor).toEqual({ kind: 'page', n: 26 });
     expect(after.skippedPages).toEqual([skipEntry]);
     expect(after.claimedAt).toBeNull();
@@ -157,17 +161,13 @@ describe('syncLogService.recordSkippedPageAndContinue', () => {
       httpStatus: 502,
     };
 
-    await syncLogService.recordSkippedPageAndContinue(id, firstSkip, { kind: 'page', n: 26 }, 2600);
-    await syncLogService.recordSkippedPageAndContinue(
-      id,
-      secondSkip,
-      { kind: 'page', n: 48 },
-      4800,
-    );
+    await syncLogService.recordSkippedPageAndContinue(id, firstSkip, { kind: 'page', n: 26 });
+    await syncLogService.recordSkippedPageAndContinue(id, secondSkip, { kind: 'page', n: 48 });
 
     const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
     expect(after.skippedPages).toEqual([firstSkip, secondSkip]);
     expect(after.pageCursor).toEqual({ kind: 'page', n: 48 });
-    expect(after.progressCurrent).toBe(4800);
+    // Both skips left progressCurrent untouched (still the seed value).
+    expect(after.progressCurrent).toBe(2500);
   });
 });

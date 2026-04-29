@@ -342,7 +342,9 @@ function ActiveSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
     <div className="border-border bg-card gap-xs flex flex-col rounded-md border p-3">
       <div className="gap-sm flex items-center">
         <Time04Icon className="size-icon-sm text-info animate-spin" />
-        <span className="text-foreground text-sm font-medium">{t(`triggers.${log.syncType}`)}</span>
+        <span className="text-foreground text-sm font-medium">
+          {t(`syncTypeLabel.${log.syncType}`)}
+        </span>
         <Badge tone="info" size="sm" className="ml-auto">
           {t(statusKey)}
         </Badge>
@@ -380,7 +382,9 @@ function RetryingSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
     <div className="border-warning/40 bg-warning-surface gap-xs flex flex-col rounded-md border p-3">
       <div className="gap-sm flex items-center">
         <AlertCircleIcon className="size-icon-sm text-warning" />
-        <span className="text-foreground text-sm font-medium">{t(`triggers.${log.syncType}`)}</span>
+        <span className="text-foreground text-sm font-medium">
+          {t(`syncTypeLabel.${log.syncType}`)}
+        </span>
         <Badge tone="warning" size="sm" className="ml-auto">
           {t('status.retrying')}
         </Badge>
@@ -448,7 +452,7 @@ function RecentSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
       <div className="gap-3xs flex flex-1 flex-col">
         <div className="gap-xs flex flex-wrap items-baseline">
           <span className="text-foreground text-sm font-medium">
-            {t(`triggers.${log.syncType}`)}
+            {t(`syncTypeLabel.${log.syncType}`)}
           </span>
           <span className="text-muted-foreground text-2xs">{timeLabel}</span>
           {completedWithSkips ? (
