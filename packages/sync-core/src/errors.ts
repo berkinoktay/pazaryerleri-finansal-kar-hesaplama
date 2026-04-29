@@ -8,6 +8,8 @@
  * continue to import from `../lib/errors` unchanged.
  */
 
+import { SyncErrorCode } from '@pazarsync/db/enums';
+
 export interface ValidationIssue {
   field: string;
   code: string;
@@ -16,7 +18,7 @@ export interface ValidationIssue {
 
 export class ValidationError extends Error {
   readonly status = 422 as const;
-  readonly code = 'VALIDATION_ERROR' as const;
+  readonly code = SyncErrorCode.VALIDATION_ERROR;
   readonly issues: ValidationIssue[];
 
   constructor(issues: ValidationIssue[]) {
@@ -60,7 +62,7 @@ export class InvalidReferenceError extends Error {
 
 export class RateLimitedError extends Error {
   readonly status = 429 as const;
-  readonly code = 'RATE_LIMITED' as const;
+  readonly code = SyncErrorCode.RATE_LIMITED;
   readonly retryAfterSeconds: number;
 
   constructor(retryAfterSeconds: number, message = 'Too many requests') {
@@ -77,7 +79,7 @@ export class RateLimitedError extends Error {
  */
 export class MarketplaceAuthError extends Error {
   readonly status = 422 as const;
-  readonly code = 'MARKETPLACE_AUTH_FAILED' as const;
+  readonly code = SyncErrorCode.MARKETPLACE_AUTH_FAILED;
   readonly platform: string;
 
   constructor(platform: string, message = 'Marketplace rejected the provided credentials') {
@@ -95,7 +97,7 @@ export class MarketplaceAuthError extends Error {
  */
 export class MarketplaceAccessError extends Error {
   readonly status = 422 as const;
-  readonly code = 'MARKETPLACE_ACCESS_DENIED' as const;
+  readonly code = SyncErrorCode.MARKETPLACE_ACCESS_DENIED;
   readonly platform: string;
   readonly meta: { httpStatus: number };
 
@@ -120,7 +122,7 @@ export class MarketplaceAccessError extends Error {
  */
 export class SyncInProgressError extends Error {
   readonly status = 409 as const;
-  readonly code = 'SYNC_IN_PROGRESS' as const;
+  readonly code = SyncErrorCode.SYNC_IN_PROGRESS;
   readonly meta: { syncType: string; storeId: string; existingSyncLogId?: string };
 
   constructor(meta: { syncType: string; storeId: string; existingSyncLogId?: string }) {
@@ -148,7 +150,7 @@ export class SyncInProgressError extends Error {
  */
 export class MarketplaceUnreachable extends Error {
   readonly status = 503 as const;
-  readonly code = 'MARKETPLACE_UNREACHABLE' as const;
+  readonly code = SyncErrorCode.MARKETPLACE_UNREACHABLE;
   readonly platform: string;
   readonly meta: {
     httpStatus: number;
