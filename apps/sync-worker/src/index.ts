@@ -34,6 +34,7 @@ import { randomBytes } from 'node:crypto';
 import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
 
 import type { Registry } from './dispatcher';
+import { errorCodeOf } from './error-code';
 import { productsHandler } from './handlers/products';
 import { runSyncToCompletion } from './loop';
 import { advanceCursorPastBadPage } from './skip-bad-page';
@@ -181,25 +182,6 @@ async function handleRunError(
   }
 
   await markRetryable(syncLogId, attemptCount, code, message);
-}
-
-/**
- * Narrow an unknown caught value to extract its `code` string, if any.
- * Mirrors the structural-narrowing pattern used in
- * `apps/api/src/lib/map-prisma-error.ts` and `sync-log.service.ts`'s
- * `isUniqueViolation` — the documented exception in CLAUDE.md for
- * runtime structural type guards on third-party / unknown shapes.
- */
-function errorCodeOf(err: unknown): string {
-  if (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    typeof (err as { code: unknown }).code === 'string'
-  ) {
-    return (err as { code: string }).code;
-  }
-  return 'INTERNAL_ERROR';
 }
 
 function errorMessageOf(err: unknown): string {
