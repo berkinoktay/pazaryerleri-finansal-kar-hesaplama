@@ -7,6 +7,21 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Modal interruption that traps focus and dimms the page until the user
+ * dismisses it. Use sparingly — modals are heavyweight: they break flow,
+ * hide context, and frustrate users comparing data. For most "show
+ * detail" cases prefer Sheet (preserves context as slide-over) or an
+ * inline panel. Reserve Dialog for irreversible actions, focused tasks
+ * that require the page to "stop", and confirmation of destructive
+ * operations (use AlertDialog for the destructive variant).
+ *
+ * The close button label reads from `t('common.close')`, so the primitive
+ * requires NextIntlClientProvider to be mounted upstream.
+ *
+ * @useWhen interrupting flow with a focused task or confirmation that requires the page to stop (use AlertDialog for destructive confirmations, Sheet to preserve context)
+ */
+
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;

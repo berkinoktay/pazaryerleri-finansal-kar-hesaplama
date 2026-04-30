@@ -5,6 +5,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Short hover/focus hint, single line of text or a key chord. Skipped
+ * on touch devices (no hover) — never put critical information in a
+ * tooltip alone. Mount `TooltipProvider` once at the app root with a
+ * shared `delayDuration` so all tooltips feel consistent. For rich
+ * preview content use HoverCard; for click-triggered panels use Popover.
+ *
+ * @useWhen surfacing short hint text on hover or focus (use HoverCard for rich preview content, never put critical info in a tooltip)
+ */
+
 export const TooltipProvider = TooltipPrimitive.Provider;
 export const Tooltip = TooltipPrimitive.Root;
 export const TooltipTrigger = TooltipPrimitive.Trigger;

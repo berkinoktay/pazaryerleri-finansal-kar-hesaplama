@@ -5,6 +5,17 @@ import { Drawer as DrawerPrimitive } from 'vaul';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Bottom-anchored sheet with a draggable handle, optimized for touch
+ * (powered by vaul). The body scales slightly behind it on open for
+ * depth — set `shouldScaleBackground={false}` if your page layout
+ * conflicts with the scale transform. Use Drawer over Sheet when the
+ * primary input is touch and the dismiss gesture (swipe down) is part
+ * of the UX. On desktop pointer-fine devices Sheet usually reads better.
+ *
+ * @useWhen presenting a touch-first bottom-anchored panel with swipe-to-dismiss (use Sheet for desktop-first slide-overs, Dialog for focused tasks)
+ */
+
 export const Drawer = ({
   shouldScaleBackground = true,
   ...props

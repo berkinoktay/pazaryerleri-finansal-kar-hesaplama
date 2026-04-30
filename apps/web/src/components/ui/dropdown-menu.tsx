@@ -6,6 +6,17 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Anchored menu opened from a button (kebab, chevron, "More actions").
+ * Composes `DropdownMenuItem`, `DropdownMenuCheckboxItem`,
+ * `DropdownMenuRadioItem`, `DropdownMenuLabel`, `DropdownMenuSeparator`,
+ * and `DropdownMenuShortcut`. For right-click contextual menus use
+ * ContextMenu; for desktop top-bar menus use Menubar; for searchable
+ * pickers use Command (or the future Combobox).
+ *
+ * @useWhen rendering an anchored menu opened from a button (use ContextMenu for right-click, Menubar for desktop top bar, Command for searchable)
+ */
+
 export const DropdownMenu = DropdownMenuPrimitive.Root;
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export const DropdownMenuGroup = DropdownMenuPrimitive.Group;

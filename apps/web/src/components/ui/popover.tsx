@@ -5,6 +5,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Anchored panel that opens on click and closes on outside click or
+ * Escape. Use for short interactions that don't deserve a full Sheet
+ * or Dialog — date pickers, color swatches, filter editors, "more
+ * options" panels. For hover-triggered previews use HoverCard; for
+ * short text hints use Tooltip.
+ *
+ * @useWhen presenting a click-triggered anchored panel for a short interaction (use HoverCard for hover previews, Tooltip for hint text, Sheet for full panels)
+ */
+
 export const Popover = PopoverPrimitive.Root;
 export const PopoverTrigger = PopoverPrimitive.Trigger;
 export const PopoverAnchor = PopoverPrimitive.Anchor;

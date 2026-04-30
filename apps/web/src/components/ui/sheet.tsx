@@ -8,6 +8,20 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Slide-over panel anchored to a screen edge (left / right / top / bottom).
+ * Preserves the underlying page context — the user can see what's behind
+ * the sheet and dismiss it without losing their place. Preferred over
+ * Dialog when the user might want to compare the panel content with the
+ * page beneath, or when the panel content is read-only detail rather
+ * than a focused task.
+ *
+ * Width is capped by `--size-sheet` (24rem) on mobile and `--size-sheet-wide`
+ * (28rem) at sm+; override with className when needed.
+ *
+ * @useWhen presenting detail or actions in a slide-over panel that preserves the underlying page context (use Dialog for focused tasks that need full attention)
+ */
+
 export const Sheet = SheetPrimitive.Root;
 export const SheetTrigger = SheetPrimitive.Trigger;
 export const SheetClose = SheetPrimitive.Close;
