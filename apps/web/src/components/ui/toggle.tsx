@@ -6,6 +6,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Single two-state press-and-hold control (e.g. Bold in a text editor,
+ * pinned/unpinned on a row). Use Switch for an immediately-actioned
+ * settings toggle, Checkbox for a form-submit boolean. For 2+ mutually
+ * exclusive press states, compose into a `ToggleGroup` so Radix
+ * coordinates the single-active invariant.
+ *
+ * @useWhen rendering a single press-and-hold two-state control (use Switch for settings, ToggleGroup for mutually exclusive picks)
+ */
+
 const toggleVariants = cva(
   'inline-flex items-center justify-center gap-xs rounded-md text-sm font-medium transition-colors duration-fast [&_svg]:size-icon-sm [&_svg]:shrink-0 hover:bg-muted hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground',
   {

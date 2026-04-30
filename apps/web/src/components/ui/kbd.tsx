@@ -1,5 +1,20 @@
 import { cn } from '@/lib/utils';
 
+/**
+ * Display a single keyboard key or shortcut hint (`⌘K`, `Esc`, `?`).
+ * The styling adapts when nested inside a Tooltip content slot so the
+ * hint stays legible against the tooltip's inverted surface. Compose
+ * multi-chord shortcuts (e.g. `⌘ + K`) inside a `KbdGroup` so the
+ * separator characters get consistent spacing.
+ *
+ * NOTE: the tooltip-context override currently uses `bg-background/20`
+ * + `dark:bg-background/10` alpha shortcuts. These are CLAUDE.md rule
+ * violations that need a tokenized fix paired with Tooltip's surface
+ * contract — left for a focused Kbd / Tooltip follow-up rather than
+ * touched in this Phase 1 annotation pass.
+ *
+ * @useWhen displaying a keyboard key or chord hint inline (use KbdGroup to compose multi-key shortcuts with consistent spacing)
+ */
 function Kbd({ className, ...props }: React.ComponentProps<'kbd'>) {
   return (
     <kbd

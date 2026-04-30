@@ -61,7 +61,8 @@
       "name": "Button",
       "path": "apps/web/src/components/ui/button.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering an interactive trigger that may need a loading state, leading or trailing icon, or asChild composition into a link"
     },
     {
       "name": "Calendar",
@@ -184,7 +185,8 @@
       "name": "Kbd",
       "path": "apps/web/src/components/ui/kbd.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "displaying a keyboard key or chord hint inline (use KbdGroup to compose multi-key shortcuts with consistent spacing)"
     },
     {
       "name": "KpiTile",
@@ -394,13 +396,15 @@
       "name": "Toggle",
       "path": "apps/web/src/components/ui/toggle.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a single press-and-hold two-state control (use Switch for settings, ToggleGroup for mutually exclusive picks)"
     },
     {
       "name": "ToggleGroup",
       "path": "apps/web/src/components/ui/toggle-group.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a small set of related Toggles that should look unified and share a single-or-multiple selection rule"
     },
     {
       "name": "Tooltip",
