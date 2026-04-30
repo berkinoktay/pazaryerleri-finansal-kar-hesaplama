@@ -10,7 +10,13 @@ import { cn } from '@/lib/utils';
  *
  * Exposes chart colors as CSS custom properties on the container via
  * inline style (no <style> injection), so Recharts children can reference
- * them via `var(--color-<key>)` without hardcoding hex values.
+ * them via `var(--color-<key>)` without hardcoding hex values. This is
+ * what keeps charts theme-correct in dark mode without per-series
+ * conditional logic — see `apps/web/CLAUDE.md` "Dark-mode discipline"
+ * rule #3 for the rationale (raw `--chart-N` values are dark-mode traps;
+ * always wire through ChartConfig + `--color-<key>`).
+ *
+ * @useWhen rendering a recharts chart whose series colors must swap correctly in dark mode (always pair with ChartConfig keyed by series name)
  */
 
 export type ChartConfig = Record<

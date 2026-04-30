@@ -3,6 +3,21 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Surfaced container for a distinct, actionable region. Don't wrap
+ * everything in a Card — natural grouping comes from spacing and
+ * alignment first; cards earn their place when the region is genuinely
+ * separate (a settings panel, a KPI tile, an action card on a dashboard).
+ * Don't nest cards inside cards either — flatten with a divider or
+ * subtle background tint.
+ *
+ * `CardHeader` accepts `leadingIcon` (auto-sized to `size-icon-lg`)
+ * and `actions` slots so consumers compose the icon + title + actions
+ * row without per-feature layout drift.
+ *
+ * @useWhen wrapping a distinct, actionable region with its own surface and shadow (don't reach for Card as a default container — use spacing first)
+ */
+
 const cardVariants = cva('border border-border bg-card text-card-foreground shadow-xs', {
   variants: {
     radius: {

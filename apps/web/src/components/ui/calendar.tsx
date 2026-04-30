@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowLeft01Icon, ArrowRight01Icon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { DayPicker, useDayPicker, type CalendarMonth } from 'react-day-picker';
 import { format } from 'date-fns';
@@ -11,7 +12,12 @@ import { cn } from '@/lib/utils';
 export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
 /**
- * Localized calendar built on react-day-picker.
+ * Localized calendar built on react-day-picker. The date-fns locale is
+ * hard-bound to Turkish (`tr`) per PRODUCT_VISION.md ("Turkish-only for
+ * now") — month names + first-day-of-week + ordinal capitalization all
+ * follow Turkish convention. The aria-labels for prev/next month read
+ * from `t('common.calendar.*')` so screen readers announce the right
+ * language regardless of the visible month label format.
  *
  * Layout override: react-day-picker v9's default layout renders Nav as a
  * sibling of the month column, so prev/next float at the top-left of the
@@ -22,10 +28,13 @@ export type CalendarProps = React.ComponentProps<typeof DayPicker>;
  *
  * Range-middle day cells reuse the primary radius tokens so a selected
  * range reads as a continuous pill with rounded caps.
+ *
+ * @useWhen rendering an inline month grid for date or date-range selection (use DateRangePicker pattern for the popover-anchored variant)
  */
 
 function MonthCaption({ calendarMonth }: { calendarMonth: CalendarMonth }): React.ReactElement {
   const { goToMonth, previousMonth, nextMonth } = useDayPicker();
+  const t = useTranslations('common.calendar');
   const label = format(calendarMonth.date, 'LLLL yyyy', { locale: tr });
   const capitalized = label.charAt(0).toLocaleUpperCase('tr') + label.slice(1);
   return (
@@ -34,7 +43,7 @@ function MonthCaption({ calendarMonth }: { calendarMonth: CalendarMonth }): Reac
         type="button"
         disabled={!previousMonth}
         onClick={() => previousMonth && goToMonth(previousMonth)}
-        aria-label="Önceki ay"
+        aria-label={t('previousMonth')}
         className="border-border bg-background text-foreground duration-fast hover:bg-muted inline-flex size-8 items-center justify-center rounded-md border transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
       >
         <ArrowLeft01Icon className="size-icon-sm" />
@@ -46,7 +55,7 @@ function MonthCaption({ calendarMonth }: { calendarMonth: CalendarMonth }): Reac
         type="button"
         disabled={!nextMonth}
         onClick={() => nextMonth && goToMonth(nextMonth)}
-        aria-label="Sonraki ay"
+        aria-label={t('nextMonth')}
         className="border-border bg-background text-foreground duration-fast hover:bg-muted inline-flex size-8 items-center justify-center rounded-md border transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40"
       >
         <ArrowRight01Icon className="size-icon-sm" />

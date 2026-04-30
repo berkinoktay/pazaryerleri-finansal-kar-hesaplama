@@ -27,7 +27,8 @@
       "name": "AspectRatio",
       "path": "apps/web/src/components/ui/aspect-ratio.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "reserving a fixed width:height box for image, video, or media content to prevent layout shift on load"
     },
     {
       "name": "Avatar",
@@ -74,19 +75,22 @@
       "name": "Calendar",
       "path": "apps/web/src/components/ui/calendar.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering an inline month grid for date or date-range selection (use DateRangePicker pattern for the popover-anchored variant)"
     },
     {
       "name": "Card",
       "path": "apps/web/src/components/ui/card.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "wrapping a distinct, actionable region with its own surface and shadow (don't reach for Card as a default container — use spacing first)"
     },
     {
       "name": "ChartContainer",
       "path": "apps/web/src/components/ui/chart.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a recharts chart whose series colors must swap correctly in dark mode (always pair with ChartConfig keyed by series name)"
     },
     {
       "name": "Checkbox",
@@ -171,7 +175,8 @@
       "name": "Form",
       "path": "apps/web/src/components/ui/form.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "building any react-hook-form + zod form so labels, descriptions, and errors auto-wire via aria-describedby across the product"
     },
     {
       "name": "HoverCard",
@@ -302,7 +307,8 @@
       "name": "ScrollArea",
       "path": "apps/web/src/components/ui/scroll-area.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a custom scrollbar for a constrained-height region inside an overlay or panel (not for the page body)"
     },
     {
       "name": "Select",
@@ -329,7 +335,8 @@
       "name": "Sidebar",
       "path": "apps/web/src/components/ui/sidebar.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "building primary dashboard navigation with collapsible icon-rail and mobile sheet fallback (use NavigationMenu for marketing-site top nav)"
     },
     {
       "name": "Skeleton",
@@ -387,7 +394,8 @@
       "name": "Table",
       "path": "apps/web/src/components/ui/table.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a static HTML table with no sorting or filtering needs (use the DataTable pattern from components/patterns for anything dynamic)"
     },
     {
       "name": "Tabs",
