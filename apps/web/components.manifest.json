@@ -19,7 +19,8 @@
       "name": "AlertDialog",
       "path": "apps/web/src/components/ui/alert-dialog.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "confirming a destructive or irreversible action where accidental dismissal must be impossible (use Dialog for non-destructive focused tasks)"
     },
     {
       "name": "AspectRatio",
@@ -102,13 +103,15 @@
       "name": "Command",
       "path": "apps/web/src/components/ui/command.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "building a searchable command palette or large typeahead-filtered picker (use Select for short fixed-option lists)"
     },
     {
       "name": "ContextMenu",
       "path": "apps/web/src/components/ui/context-menu.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "attaching a right-click contextual menu to a region (always pair with a DropdownMenu equivalent for touch users)"
     },
     {
       "name": "Currency",
@@ -138,19 +141,22 @@
       "name": "Dialog",
       "path": "apps/web/src/components/ui/dialog.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "interrupting flow with a focused task or confirmation that requires the page to stop (use AlertDialog for destructive confirmations, Sheet to preserve context)"
     },
     {
       "name": "Drawer",
       "path": "apps/web/src/components/ui/drawer.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "presenting a touch-first bottom-anchored panel with swipe-to-dismiss (use Sheet for desktop-first slide-overs, Dialog for focused tasks)"
     },
     {
       "name": "DropdownMenu",
       "path": "apps/web/src/components/ui/dropdown-menu.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering an anchored menu opened from a button (use ContextMenu for right-click, Menubar for desktop top bar, Command for searchable)"
     },
     {
       "name": "EmptyState",
@@ -168,7 +174,8 @@
       "name": "HoverCard",
       "path": "apps/web/src/components/ui/hover-card.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "showing a hover-triggered preview card with rich content (use Tooltip for short hint text, Popover for click-triggered panels)"
     },
     {
       "name": "Input",
@@ -214,7 +221,8 @@
       "name": "Menubar",
       "path": "apps/web/src/components/ui/menubar.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "building a document-style desktop top menu bar (rare in SaaS dashboards — prefer sidebar navigation + dropdown menus)"
     },
     {
       "name": "NavGroup",
@@ -226,7 +234,8 @@
       "name": "NavigationMenu",
       "path": "apps/web/src/components/ui/navigation-menu.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "building a marketing-site top navigation with hover mega-menus (dashboard navigation belongs in the Sidebar primitive)"
     },
     {
       "name": "NotificationBell",
@@ -262,7 +271,8 @@
       "name": "Popover",
       "path": "apps/web/src/components/ui/popover.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "presenting a click-triggered anchored panel for a short interaction (use HoverCard for hover previews, Tooltip for hint text, Sheet for full panels)"
     },
     {
       "name": "Progress",
@@ -308,7 +318,8 @@
       "name": "Sheet",
       "path": "apps/web/src/components/ui/sheet.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "presenting detail or actions in a slide-over panel that preserves the underlying page context (use Dialog for focused tasks that need full attention)"
     },
     {
       "name": "Sidebar",
@@ -418,7 +429,8 @@
       "name": "Tooltip",
       "path": "apps/web/src/components/ui/tooltip.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "surfacing short hint text on hover or focus (use HoverCard for rich preview content, never put critical info in a tooltip)"
     },
     {
       "name": "TrendDelta",

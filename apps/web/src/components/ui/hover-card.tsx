@@ -5,6 +5,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Hover-triggered preview card with rich content — avatar + bio, link
+ * URL preview, store summary on a row hover. Skipped on touch devices
+ * (no hover); always design a fallback (Popover, inline expand, or a
+ * dedicated detail page). For short text hints use Tooltip; for click-
+ * triggered anchored panels use Popover.
+ *
+ * @useWhen showing a hover-triggered preview card with rich content (use Tooltip for short hint text, Popover for click-triggered panels)
+ */
+
 export const HoverCard = HoverCardPrimitive.Root;
 export const HoverCardTrigger = HoverCardPrimitive.Trigger;
 

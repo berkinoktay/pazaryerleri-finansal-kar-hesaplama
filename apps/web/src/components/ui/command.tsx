@@ -7,6 +7,17 @@ import * as React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
+/**
+ * Searchable command palette built on cmdk — a list of typeahead-
+ * filtered items grouped into sections, with optional keyboard
+ * shortcuts. `CommandDialog` wraps it in a Dialog for the canonical
+ * `Cmd+K` palette pattern; bare `Command` composes inside any
+ * surface (Popover, Sheet, inline panel). Use for discoverable
+ * many-options pickers; for short fixed lists use Select instead.
+ *
+ * @useWhen building a searchable command palette or large typeahead-filtered picker (use Select for short fixed-option lists)
+ */
+
 export const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive>

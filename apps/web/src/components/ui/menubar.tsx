@@ -6,6 +6,17 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Desktop-style horizontal menu bar (File, Edit, View…) with auto-open
+ * sub-menus on hover once the first menu is opened. Almost never the
+ * right primitive for a SaaS dashboard — sidebar navigation and
+ * dropdown menus carry the same affordances with better mobile reach.
+ * Use only for genuine document-style apps where a menu bar matches
+ * user expectations (editors, IDEs, design tools).
+ *
+ * @useWhen building a document-style desktop top menu bar (rare in SaaS dashboards — prefer sidebar navigation + dropdown menus)
+ */
+
 export const MenubarMenu = MenubarPrimitive.Menu;
 export const MenubarGroup = MenubarPrimitive.Group;
 export const MenubarPortal = MenubarPrimitive.Portal;

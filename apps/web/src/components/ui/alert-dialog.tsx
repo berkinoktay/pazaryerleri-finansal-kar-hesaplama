@@ -6,6 +6,18 @@ import * as React from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+/**
+ * Destructive-confirmation modal — cannot be dismissed by clicking the
+ * scrim or pressing Escape (Radix enforces this). Always pairs an
+ * explicit `AlertDialogCancel` and `AlertDialogAction`, with the action
+ * pre-styled as `variant="destructive"`. Use this for "are you sure
+ * you want to disconnect this store / delete this organization / cancel
+ * this sync" — anywhere accidental dismissal would lead to data loss.
+ * For non-destructive focused tasks use Dialog instead.
+ *
+ * @useWhen confirming a destructive or irreversible action where accidental dismissal must be impossible (use Dialog for non-destructive focused tasks)
+ */
+
 export const AlertDialog = AlertDialogPrimitive.Root;
 export const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
 export const AlertDialogPortal = AlertDialogPrimitive.Portal;

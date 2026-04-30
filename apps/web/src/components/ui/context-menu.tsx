@@ -6,6 +6,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Right-click contextual menu attached to a region — table row, card,
+ * canvas. Discoverability is poor on touch devices (no right-click
+ * gesture); always provide an equivalent action surface (kebab button
+ * with DropdownMenu) so touch users can reach the same actions. For
+ * always-visible button-triggered menus use DropdownMenu instead.
+ *
+ * @useWhen attaching a right-click contextual menu to a region (always pair with a DropdownMenu equivalent for touch users)
+ */
+
 export const ContextMenu = ContextMenuPrimitive.Root;
 export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 export const ContextMenuGroup = ContextMenuPrimitive.Group;

@@ -7,6 +7,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Top navigation bar with hover-triggered mega-menu dropdowns — the
+ * canonical marketing-site / multi-product navigation pattern. Inside
+ * the dashboard, prefer Sidebar navigation (icon rail + context rail)
+ * which scales better with the depth of a multi-tenant SaaS. Use this
+ * for the marketing site (Phase 2) and only there.
+ *
+ * @useWhen building a marketing-site top navigation with hover mega-menus (dashboard navigation belongs in the Sidebar primitive)
+ */
+
 export const NavigationMenu = React.forwardRef<
   React.ElementRef<typeof NavigationMenuPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Root>
