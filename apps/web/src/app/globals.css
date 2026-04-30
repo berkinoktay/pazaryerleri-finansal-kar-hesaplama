@@ -43,6 +43,8 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-muted-foreground-dim: var(--muted-foreground-dim);
   --color-surface-subtle: var(--surface-subtle);
+  --color-surface-row-hover: var(--surface-row-hover);
+  --color-surface-trigger-hover: var(--surface-trigger-hover);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);

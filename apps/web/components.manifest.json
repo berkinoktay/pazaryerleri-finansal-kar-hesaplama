@@ -1,0 +1,409 @@
+{
+  "version": 1,
+  "count": 67,
+  "components": [
+    {
+      "name": "Accordion",
+      "path": "apps/web/src/components/ui/accordion.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Alert",
+      "path": "apps/web/src/components/ui/alert.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "AlertDialog",
+      "path": "apps/web/src/components/ui/alert-dialog.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "AspectRatio",
+      "path": "apps/web/src/components/ui/aspect-ratio.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Avatar",
+      "path": "apps/web/src/components/ui/avatar.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Badge",
+      "path": "apps/web/src/components/ui/badge.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "BadgeWithOverflow",
+      "path": "apps/web/src/components/patterns/badge-with-overflow.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a single status badge that may be paired with a \"+N\" overflow indicator"
+    },
+    {
+      "name": "BottomDock",
+      "path": "apps/web/src/components/patterns/bottom-dock.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Breadcrumb",
+      "path": "apps/web/src/components/ui/breadcrumb.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Button",
+      "path": "apps/web/src/components/ui/button.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Calendar",
+      "path": "apps/web/src/components/ui/calendar.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Card",
+      "path": "apps/web/src/components/ui/card.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "ChartContainer",
+      "path": "apps/web/src/components/ui/chart.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Checkbox",
+      "path": "apps/web/src/components/ui/checkbox.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Collapsible",
+      "path": "apps/web/src/components/ui/collapsible.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Command",
+      "path": "apps/web/src/components/ui/command.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "ContextMenu",
+      "path": "apps/web/src/components/ui/context-menu.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Currency",
+      "path": "apps/web/src/components/patterns/currency.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "DataTable",
+      "path": "apps/web/src/components/patterns/data-table.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "DataTableToolbar",
+      "path": "apps/web/src/components/patterns/data-table-toolbar.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "DateRangePicker",
+      "path": "apps/web/src/components/patterns/date-range-picker.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Dialog",
+      "path": "apps/web/src/components/ui/dialog.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Drawer",
+      "path": "apps/web/src/components/ui/drawer.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "DropdownMenu",
+      "path": "apps/web/src/components/ui/dropdown-menu.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "EmptyState",
+      "path": "apps/web/src/components/patterns/empty-state.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Form",
+      "path": "apps/web/src/components/ui/form.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "HoverCard",
+      "path": "apps/web/src/components/ui/hover-card.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Input",
+      "path": "apps/web/src/components/ui/input.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "InputOTP",
+      "path": "apps/web/src/components/ui/input-otp.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Kbd",
+      "path": "apps/web/src/components/ui/kbd.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "KpiTile",
+      "path": "apps/web/src/components/patterns/kpi-tile.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Label",
+      "path": "apps/web/src/components/ui/label.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "MarketplaceLogo",
+      "path": "apps/web/src/components/patterns/marketplace-logo.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Menubar",
+      "path": "apps/web/src/components/ui/menubar.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "NavGroup",
+      "path": "apps/web/src/components/patterns/nav-group.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "NavigationMenu",
+      "path": "apps/web/src/components/ui/navigation-menu.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "NotificationBell",
+      "path": "apps/web/src/components/patterns/notification-bell.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "OrgStoreSwitcher",
+      "path": "apps/web/src/components/patterns/org-store-switcher.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "OrgStoreSwitcherList",
+      "path": "apps/web/src/components/patterns/org-store-switcher-list.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "PageHeader",
+      "path": "apps/web/src/components/patterns/page-header.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Pagination",
+      "path": "apps/web/src/components/ui/pagination.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Popover",
+      "path": "apps/web/src/components/ui/popover.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Progress",
+      "path": "apps/web/src/components/ui/progress.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "RadioGroup",
+      "path": "apps/web/src/components/ui/radio-group.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "RailWarningCard",
+      "path": "apps/web/src/components/patterns/rail-warning-card.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "ScrollArea",
+      "path": "apps/web/src/components/ui/scroll-area.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Select",
+      "path": "apps/web/src/components/ui/select.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Separator",
+      "path": "apps/web/src/components/ui/separator.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Sheet",
+      "path": "apps/web/src/components/ui/sheet.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Sidebar",
+      "path": "apps/web/src/components/ui/sidebar.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Skeleton",
+      "path": "apps/web/src/components/ui/skeleton.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Slider",
+      "path": "apps/web/src/components/ui/slider.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Spinner",
+      "path": "apps/web/src/components/ui/spinner.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "StatGroup",
+      "path": "apps/web/src/components/patterns/stat-group.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "SubNavList",
+      "path": "apps/web/src/components/patterns/sub-nav-list.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Switch",
+      "path": "apps/web/src/components/ui/switch.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "SyncBadge",
+      "path": "apps/web/src/components/patterns/sync-badge.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "SyncCenter",
+      "path": "apps/web/src/components/patterns/sync-center.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Table",
+      "path": "apps/web/src/components/ui/table.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Tabs",
+      "path": "apps/web/src/components/ui/tabs.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Textarea",
+      "path": "apps/web/src/components/ui/textarea.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "ThemeToggleInline",
+      "path": "apps/web/src/components/patterns/theme-toggle-inline.tsx",
+      "category": "molecule",
+      "status": "stable"
+    },
+    {
+      "name": "Toaster",
+      "path": "apps/web/src/components/ui/sonner.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Toggle",
+      "path": "apps/web/src/components/ui/toggle.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "ToggleGroup",
+      "path": "apps/web/src/components/ui/toggle-group.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "Tooltip",
+      "path": "apps/web/src/components/ui/tooltip.tsx",
+      "category": "atom",
+      "status": "stable"
+    },
+    {
+      "name": "TrendDelta",
+      "path": "apps/web/src/components/patterns/trend-delta.tsx",
+      "category": "molecule",
+      "status": "stable"
+    }
+  ]
+}

@@ -10,6 +10,7 @@
     "clear": "Clear",
     "remove": "Remove",
     "dismiss": "Dismiss",
+    "close": "Close",
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} syncs running",

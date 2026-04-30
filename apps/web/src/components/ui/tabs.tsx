@@ -53,7 +53,7 @@ const tabsTriggerVariants = cva(
         pill: cn(
           'h-full rounded-md',
           'hover:text-foreground',
-          'data-[state=inactive]:hover:bg-background/50',
+          'data-[state=inactive]:hover:bg-surface-trigger-hover',
           'data-[state=active]:bg-card',
           'data-[state=active]:text-foreground',
           'data-[state=active]:shadow-sm',

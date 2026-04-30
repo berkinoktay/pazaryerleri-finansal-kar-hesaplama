@@ -7,7 +7,13 @@ import { updateSession } from './lib/supabase/middleware';
 const intl = createIntlMiddleware(routing);
 
 // Routes that DO require an authenticated session.
-const PROTECTED = ['/dashboard', '/onboarding', '/auth/verified'] as const;
+//
+// `/design` — the design system showcase. Auth-gated so end users can't
+// browse it via /tr/design or /en/design; it lives in the (showcase)
+// route group but the group itself doesn't gate access (route groups
+// are organizational, not authorization). Adding the path here makes
+// the gate explicit and uniform with /dashboard.
+const PROTECTED = ['/dashboard', '/onboarding', '/auth/verified', '/design'] as const;
 
 // Routes where an already-authenticated user should bounce back to
 // the dashboard (guests only).
