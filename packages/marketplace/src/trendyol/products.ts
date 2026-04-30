@@ -18,16 +18,25 @@ import type { TrendyolApprovedProductsResponse, TrendyolCredentials } from './ty
 const PLATFORM = 'TRENDYOL';
 const REQUEST_TIMEOUT_MS = 30_000;
 /**
- * Trendyol getApprovedProducts page size. Per
- * docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md §3:
- *   "Page x size maksimum 10.000 değerini alabilir."
- * → at size=1000, the page-based contract reaches items 0–9999
- *   in 10 requests instead of 100. Past 10k, switches to nextPageToken.
+ * Trendyol getApprovedProducts page size.
  *
- * Exported because the sync-worker computes a token→page fallback that
- * needs to use the same constant. Single source of truth.
+ * The cap formula in
+ * docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/urun-entegrasyonlari-v2.md §3
+ * says "Page x size maksimum 10.000 değerini alabilir." — this is the
+ * PAGINATION cap (after which nextPageToken is required), not the
+ * per-request size limit. The doc only shows `size=100` examples for
+ * the approved endpoint; PR #88 bumped to 1000 hoping the cap formula
+ * implied size=1000 was supported, but Trendyol's approved endpoint
+ * empirically returns 400 on size=1000 (per a real sandbox sync with
+ * a small catalog, immediate fail on page 0). 100 is the known-good
+ * max — confirmed by working dev syncs of 5,624-product catalogs
+ * across multiple sessions.
+ *
+ * Exported because the sync-worker's token→page fallback math
+ * (apps/sync-worker/src/handlers/products.ts) uses the same constant.
+ * Single source of truth.
  */
-export const PRODUCTS_PAGE_SIZE = 1000;
+export const PRODUCTS_PAGE_SIZE = 100;
 /**
  * Trendyol's documented page-based pagination cap (same doc as above).
  * Items 0–9999 are reachable via `page=N`; item 10000+ requires
