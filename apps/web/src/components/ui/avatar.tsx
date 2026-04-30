@@ -6,6 +6,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * User / organization avatar. Compose `AvatarImage` for the photo and
+ * `AvatarFallback` for initials or a placeholder icon — Radix swaps to
+ * the fallback automatically when the image fails to load. Sizes
+ * `sm | md | lg` (32px / 40px / 48px) align with the Button / Input
+ * size ladder so user rows stay rhythmically consistent.
+ *
+ * @useWhen rendering a single user or organization avatar with image + initials fallback (the fallback shows automatically on image load failure)
+ */
+
 // Avatar uses the shared size ladder (sm/md/lg) — same keys as Button/Input/Badge.
 // The default `md` (40px) is a comfortable target for profile chips and user rows;
 // 24px was an icon-scale holdover and too small for a recognizable avatar.

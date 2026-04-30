@@ -14,7 +14,11 @@ import { cn } from '@/lib/utils';
  *
  * `leadingIcon` / `trailingIcon` auto-size their SVG to `size-icon-xs`
  * so the chip stays compact. `onRemove` renders an accessible dismiss
- * button on the right — use for filter chips, tags, etc.
+ * button on the right — use for filter chips, tags, etc. For badges
+ * paired with a "+N others" overflow chip, use BadgeWithOverflow from
+ * patterns/ instead.
+ *
+ * @useWhen rendering a compact status, label, or filter chip with optional leading or trailing icon and optional dismiss button
  */
 
 const badgeVariants = cva(

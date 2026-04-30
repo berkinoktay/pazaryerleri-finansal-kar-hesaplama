@@ -9,6 +9,21 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Page- or section-level message that surfaces a state the user should
+ * notice (validation summary, sync result, partial-data notice). The
+ * `tone` prop carries semantic meaning AND auto-selects a default
+ * leading icon — pass `icon={null}` to opt out, or supply a custom
+ * one. The dismiss affordance (`onDismiss`) widens its hit area under
+ * `pointer-coarse:` so touch users still meet the 44px target.
+ *
+ * For app-level system messages (maintenance window, payment past due)
+ * use the future `Banner` molecule instead — banners are sticky / page-
+ * spanning, alerts are inline within content.
+ *
+ * @useWhen surfacing a page or section-level message in a semantic tone (info, success, warning, destructive); use the future Banner for app-spanning system messages
+ */
+
 const alertVariants = cva('relative flex w-full items-start gap-sm border [&_svg]:shrink-0', {
   variants: {
     tone: {

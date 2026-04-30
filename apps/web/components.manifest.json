@@ -12,7 +12,8 @@
       "name": "Alert",
       "path": "apps/web/src/components/ui/alert.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "surfacing a page or section-level message in a semantic tone (info, success, warning, destructive); use the future Banner for app-spanning system messages"
     },
     {
       "name": "AlertDialog",
@@ -30,13 +31,15 @@
       "name": "Avatar",
       "path": "apps/web/src/components/ui/avatar.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a single user or organization avatar with image + initials fallback (the fallback shows automatically on image load failure)"
     },
     {
       "name": "Badge",
       "path": "apps/web/src/components/ui/badge.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a compact status, label, or filter chip with optional leading or trailing icon and optional dismiss button"
     },
     {
       "name": "BadgeWithOverflow",
@@ -265,7 +268,8 @@
       "name": "Progress",
       "path": "apps/web/src/components/ui/progress.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "showing determinate 0-100 progress (use Spinner when the percentage is unknown)"
     },
     {
       "name": "RadioGroup",
@@ -297,7 +301,8 @@
       "name": "Separator",
       "path": "apps/web/src/components/ui/separator.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "drawing a thin horizontal or vertical line between sibling content groups that need a visible boundary beyond plain spacing"
     },
     {
       "name": "Sheet",
@@ -315,7 +320,8 @@
       "name": "Skeleton",
       "path": "apps/web/src/components/ui/skeleton.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "showing a per-region loading placeholder shaped like the content it will replace (prefer over a spinner for first-load views with multiple async tiles)"
     },
     {
       "name": "Slider",
@@ -328,7 +334,8 @@
       "name": "Spinner",
       "path": "apps/web/src/components/ui/spinner.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "indicating in-flight async work inline within a small UI region (use Skeleton for page or region-level loading where the eventual layout matters)"
     },
     {
       "name": "StatGroup",
@@ -390,7 +397,8 @@
       "name": "Toaster",
       "path": "apps/web/src/components/ui/sonner.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "mounting the global toast container at the app root (call the exported toast() from feature code to fire a toast)"
     },
     {
       "name": "Toggle",

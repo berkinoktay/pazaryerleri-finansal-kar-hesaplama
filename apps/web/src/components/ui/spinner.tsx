@@ -9,7 +9,11 @@ import { cn } from '@/lib/utils';
  *
  * Honors `prefers-reduced-motion` — rotation stops, `role="status"` keeps
  * the semantic signal intact so assistive tech still announces the busy
- * state.
+ * state. For page- or region-level loading prefer Skeleton (shapes the
+ * incoming content); reach for Spinner only when the loading region is
+ * smaller than a content shape, like inside Button or Input.
+ *
+ * @useWhen indicating in-flight async work inline within a small UI region (use Skeleton for page or region-level loading where the eventual layout matters)
  */
 export interface SpinnerProps extends React.HTMLAttributes<HTMLSpanElement> {
   /** Translated accessible label. Defaults to `'Loading'`. */
