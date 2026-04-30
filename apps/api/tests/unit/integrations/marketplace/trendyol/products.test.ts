@@ -450,7 +450,7 @@ describe('fetchApprovedProducts — request URL composition', () => {
 
     const url = fetchSpy.mock.calls[0]?.[0] as string;
     expect(url).toBe(
-      `${BASE_URL}/integration/product/sellers/${SUPPLIER_ID}/products/approved?size=1000&page=0`,
+      `${BASE_URL}/integration/product/sellers/${SUPPLIER_ID}/products/approved?size=100&page=0`,
     );
   });
 });
