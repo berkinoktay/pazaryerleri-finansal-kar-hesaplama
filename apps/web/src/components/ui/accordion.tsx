@@ -6,6 +6,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Vertical list of collapsible sections, with a chevron that rotates
+ * on expand. Use for FAQ-style content, advanced settings panels, or
+ * progressive disclosure of long detail blocks. For a single
+ * standalone collapsible region (no sibling sections, no shared
+ * "only one open at a time" logic), use Collapsible directly.
+ *
+ * @useWhen presenting a vertical list of related collapsible sections (use Collapsible for a single standalone toggle region)
+ */
+
 export const Accordion = AccordionPrimitive.Root;
 
 export const AccordionItem = React.forwardRef<

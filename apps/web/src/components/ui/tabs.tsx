@@ -7,6 +7,12 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
+ * Switch between sibling content panels at the same hierarchy level
+ * (e.g. Overview / Orders / Settings inside a single store page). Use
+ * Tabs only when the panels carry equivalent weight; if one panel is
+ * the default and the others are auxiliary, prefer Sidebar navigation
+ * or progressive disclosure.
+ *
  * Two visual variants cover the common dashboard needs:
  *
  *   - `pill` (default): segmented control inside a muted container. Used
@@ -18,6 +24,8 @@ import { cn } from '@/lib/utils';
  *     an active-state underline.
  *
  * Size scale is shared via the primitive size convention: sm / md / lg.
+ *
+ * @useWhen switching between sibling content panels at the same hierarchy level (use Sidebar navigation when one panel is primary and others are auxiliary)
  */
 
 // Size scale aligned with Button/Input (h-8/h-10/h-11) — one size key, one token across primitives.

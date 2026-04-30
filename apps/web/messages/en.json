@@ -11,6 +11,14 @@
     "remove": "Remove",
     "dismiss": "Dismiss",
     "close": "Close",
+    "more": "More",
+    "pagination": {
+      "label": "Pagination",
+      "previous": "Previous",
+      "previousPage": "Previous page",
+      "next": "Next",
+      "nextPage": "Next page"
+    },
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} syncs running",

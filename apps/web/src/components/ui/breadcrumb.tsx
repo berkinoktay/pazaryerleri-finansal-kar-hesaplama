@@ -1,8 +1,19 @@
 import { ArrowRight01Icon, MoreHorizontalCircle01Icon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Trail of links showing the user's location in the site hierarchy.
+ * Reach for it on detail pages where the back-path matters
+ * (Org → Store → Order #1234) — flat list pages don't need a
+ * breadcrumb. Use `BreadcrumbEllipsis` to collapse a long middle
+ * segment on narrow viewports; the sr-only label reads from
+ * `t('common.more')` so it requires NextIntlClientProvider upstream.
+ *
+ * @useWhen rendering a hierarchical location trail on a detail page where the parent context matters (skip on flat list or single-level pages)
+ */
 export const Breadcrumb = React.forwardRef<HTMLElement, React.ComponentPropsWithoutRef<'nav'>>(
   ({ className, ...props }, ref) => (
     <nav ref={ref} aria-label="breadcrumb" className={className} {...props} />
@@ -78,6 +89,7 @@ export function BreadcrumbEllipsis({
   className,
   ...props
 }: React.ComponentProps<'span'>): React.ReactElement {
+  const t = useTranslations('common');
   return (
     <span
       role="presentation"
@@ -86,7 +98,7 @@ export function BreadcrumbEllipsis({
       {...props}
     >
       <MoreHorizontalCircle01Icon className="size-icon-sm" />
-      <span className="sr-only">Daha fazla</span>
+      <span className="sr-only">{t('more')}</span>
     </span>
   );
 }

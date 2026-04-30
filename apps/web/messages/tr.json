@@ -11,6 +11,14 @@
     "remove": "Kaldır",
     "dismiss": "Kapat",
     "close": "Kapat",
+    "more": "Daha fazla",
+    "pagination": {
+      "label": "Sayfalama",
+      "previous": "Önceki",
+      "previousPage": "Önceki sayfa",
+      "next": "Sonraki",
+      "nextPage": "Sonraki sayfa"
+    },
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} senkronizasyon çalışıyor",

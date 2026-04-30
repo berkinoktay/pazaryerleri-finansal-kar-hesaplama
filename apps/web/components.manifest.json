@@ -6,7 +6,8 @@
       "name": "Accordion",
       "path": "apps/web/src/components/ui/accordion.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "presenting a vertical list of related collapsible sections (use Collapsible for a single standalone toggle region)"
     },
     {
       "name": "Alert",
@@ -59,7 +60,8 @@
       "name": "Breadcrumb",
       "path": "apps/web/src/components/ui/breadcrumb.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a hierarchical location trail on a detail page where the parent context matters (skip on flat list or single-level pages)"
     },
     {
       "name": "Button",
@@ -97,7 +99,8 @@
       "name": "Collapsible",
       "path": "apps/web/src/components/ui/collapsible.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "toggling a single show/hide region with no sibling sections (use Accordion for related multiple collapsibles)"
     },
     {
       "name": "Command",
@@ -265,7 +268,8 @@
       "name": "Pagination",
       "path": "apps/web/src/components/ui/pagination.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering page-by-page navigation for a paginated list (use cursor-based \"Load more\" for infinite feeds, virtual scrolling for huge tables)"
     },
     {
       "name": "Popover",
@@ -389,7 +393,8 @@
       "name": "Tabs",
       "path": "apps/web/src/components/ui/tabs.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "switching between sibling content panels at the same hierarchy level (use Sidebar navigation when one panel is primary and others are auxiliary)"
     },
     {
       "name": "Textarea",
