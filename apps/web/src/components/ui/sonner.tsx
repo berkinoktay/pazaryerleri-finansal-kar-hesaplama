@@ -7,6 +7,23 @@ import { useTheme } from '@/providers/theme-provider';
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
+/**
+ * Global toast container — mount once at the app root. Toasts are fired
+ * via the exported `toast` function from any component:
+ *
+ *   import { toast } from '@/components/ui/sonner';
+ *   toast.success('Saved.');
+ *
+ * The toaster is mount-gated (returns null on the server and during the
+ * first client render) because Sonner's portal carries a `theme` class
+ * that would otherwise produce a hydration mismatch — users never see a
+ * toast on first paint anyway, so the gate is invisible.
+ *
+ * For inline page-level messages use Alert; for app-spanning system
+ * messages (maintenance, billing past-due) use the future Banner.
+ *
+ * @useWhen mounting the global toast container at the app root (call the exported toast() from feature code to fire a toast)
+ */
 export function Toaster(props: ToasterProps): React.ReactElement | null {
   const { resolvedTheme } = useTheme();
   const mounted = useIsMounted();
