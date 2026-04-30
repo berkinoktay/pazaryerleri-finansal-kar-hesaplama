@@ -10,6 +10,7 @@
     "clear": "Temizle",
     "remove": "Kaldır",
     "dismiss": "Kapat",
+    "close": "Kapat",
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} senkronizasyon çalışıyor",

@@ -3,8 +3,8 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Badge, type BadgeProps } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { type BadgeProps } from '@/components/ui/badge';
+import { BadgeWithOverflow } from '@/components/patterns/badge-with-overflow';
 
 import type { VariantSummary } from '../api/list-products.api';
 
@@ -34,11 +34,12 @@ export function VariantStatusBadge({
   const label = status === 'inactive' ? t('archived') : t(status);
 
   return (
-    <span className={cn('gap-2xs inline-flex items-center', className)}>
-      <Badge tone={TONE_FOR_STATUS[status]}>{label}</Badge>
-      {overflowCount !== undefined && overflowCount > 0 ? (
-        <span className="text-muted-foreground text-2xs">+{overflowCount}</span>
-      ) : null}
-    </span>
+    <BadgeWithOverflow
+      tone={TONE_FOR_STATUS[status]}
+      overflowCount={overflowCount}
+      className={className}
+    >
+      {label}
+    </BadgeWithOverflow>
   );
 }

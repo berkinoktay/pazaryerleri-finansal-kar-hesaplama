@@ -28,6 +28,17 @@
      placeholders. Avoid reaching for `bg-muted/50`. */
   --surface-subtle: oklch(97.5% 0.005 265);
 
+  /* Interactive row hover on a `bg-card` (or equivalent raised) surface.
+     Used in tables, list rows. Drops slightly below --card in light, lifts
+     slightly above --card in dark — comparable perceived contrast in both
+     modes. Replaces `bg-muted/50` (a dark-mode trap). */
+  --surface-row-hover: oklch(97% 0.006 265);
+
+  /* Inactive trigger hover on a `bg-muted` container (segmented controls /
+     pill tabs). Lifts toward the active state without becoming active.
+     Replaces `bg-background/50` (a dark-mode trap). */
+  --surface-trigger-hover: oklch(98.5% 0.005 265);
+
   --card: oklch(100% 0 0);
   --card-foreground: var(--foreground);
 
@@ -114,6 +125,14 @@
   --muted-foreground-dim: oklch(48% 0.012 265);
 
   --surface-subtle: oklch(17% 0.01 265);
+
+  /* Dark: lifts above --card (17%) by ~3% — matches --muted (20%).
+     Comparable visual lift to the light-mode drop. */
+  --surface-row-hover: oklch(20% 0.012 265);
+
+  /* Dark: drops below --muted container (20%) toward --card (17%) by ~2%.
+     Matches the light-mode "lift toward active" semantics in reverse. */
+  --surface-trigger-hover: oklch(18% 0.012 265);
 
   --card: oklch(17% 0.012 265);
   --card-foreground: var(--foreground);

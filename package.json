@@ -29,6 +29,7 @@
     "gen:encryption-key": "pnpm --filter @pazarsync/api gen:encryption-key",
     "audit:boundaries": "tsx scripts/audit-feature-boundaries.ts",
     "audit:errors": "tsx scripts/audit-error-codes.ts",
+    "emit:components-manifest": "tsx scripts/emit-component-manifest.ts",
     "prepare": "husky"
   },
   "devDependencies": {
