@@ -6,6 +6,15 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Boolean toggle whose state commits with the surrounding form. Use Switch
+ * instead when the change should take effect immediately on toggle (e.g.
+ * a settings page preference). Pair with a `<Label htmlFor>` so the
+ * label provides the touch-target surface (16px box alone is too small
+ * for finger input).
+ *
+ * @useWhen rendering a single boolean choice that commits on form submit (use Switch for immediate-effect toggles)
+ */
 export const Checkbox = React.forwardRef<
   React.ElementRef<typeof CheckboxPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>

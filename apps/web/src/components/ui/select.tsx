@@ -8,6 +8,17 @@ import * as React from 'react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
+/**
+ * Single-choice dropdown picker. The trigger owns its own `loading`,
+ * `invalid`, `leadingIcon`, and `onClear` props. The clear affordance is a
+ * `<span role="button">` rather than a real button — the trigger itself is
+ * already a `<button>` and HTML forbids nested buttons (browsers silently
+ * re-parent them, breaking hydration). For a searchable / typeahead picker
+ * use Combobox instead (Phase 1, not yet built).
+ *
+ * @useWhen rendering a single-choice picker with a fixed list of options and no need for typeahead search
+ */
+
 export const Select = SelectPrimitive.Root;
 export const SelectGroup = SelectPrimitive.Group;
 export const SelectValue = SelectPrimitive.Value;

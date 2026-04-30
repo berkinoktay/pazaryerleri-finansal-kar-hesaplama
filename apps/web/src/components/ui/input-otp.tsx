@@ -6,6 +6,15 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * One-time-password / verification-code input split into discrete
+ * character slots. Tabular numerics, auto-advance focus, and paste
+ * support come from the underlying `input-otp` library. Use the
+ * `InputOTPSeparator` between slot groups to chunk long codes (e.g.
+ * `XXX-XXX` for a 6-digit code) for easier visual reading.
+ *
+ * @useWhen rendering a one-time-password or verification-code field split into per-character slots
+ */
 export const InputOTP = React.forwardRef<
   React.ElementRef<typeof OTPInput>,
   React.ComponentPropsWithoutRef<typeof OTPInput>

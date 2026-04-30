@@ -85,7 +85,8 @@
       "name": "Checkbox",
       "path": "apps/web/src/components/ui/checkbox.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a single boolean choice that commits on form submit (use Switch for immediate-effect toggles)"
     },
     {
       "name": "Collapsible",
@@ -169,13 +170,15 @@
       "name": "Input",
       "path": "apps/web/src/components/ui/input.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a single-line text input that may need a leading or trailing slot, clear button, password reveal toggle, or async loading indicator"
     },
     {
       "name": "InputOTP",
       "path": "apps/web/src/components/ui/input-otp.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a one-time-password or verification-code field split into per-character slots"
     },
     {
       "name": "Kbd",
@@ -193,7 +196,8 @@
       "name": "Label",
       "path": "apps/web/src/components/ui/label.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "attaching an accessible text caption to a form control via htmlFor (placeholders are not labels)"
     },
     {
       "name": "MarketplaceLogo",
@@ -265,7 +269,8 @@
       "name": "RadioGroup",
       "path": "apps/web/src/components/ui/radio-group.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering 2-7 mutually exclusive options that benefit from being all visible at once (use Select for longer lists)"
     },
     {
       "name": "RailWarningCard",
@@ -283,7 +288,8 @@
       "name": "Select",
       "path": "apps/web/src/components/ui/select.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a single-choice picker with a fixed list of options and no need for typeahead search"
     },
     {
       "name": "Separator",
@@ -313,7 +319,8 @@
       "name": "Slider",
       "path": "apps/web/src/components/ui/slider.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a single or range numeric input over a continuous scale where relative position matters more than exact value"
     },
     {
       "name": "Spinner",
@@ -337,7 +344,8 @@
       "name": "Switch",
       "path": "apps/web/src/components/ui/switch.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering an immediately-actioned on/off toggle (use Checkbox if the change should commit on form submit)"
     },
     {
       "name": "SyncBadge",
@@ -367,7 +375,8 @@
       "name": "Textarea",
       "path": "apps/web/src/components/ui/textarea.tsx",
       "category": "atom",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a multi-line text input that may need a character counter or autoresize behavior"
     },
     {
       "name": "ThemeToggleInline",

@@ -7,6 +7,16 @@ import * as React from 'react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
+/**
+ * Single-line text input. Owns its own state for adornments (`leadingIcon`,
+ * `trailingIcon`, free-form `leading` / `trailing` slots), `loading`,
+ * `invalid`, `onClear`, and password `reveal` toggle — consumers don't
+ * re-implement these UX patterns. Sizes `sm | md | lg` align with Button
+ * and SelectTrigger so form rows stay rhythmically consistent.
+ *
+ * @useWhen rendering a single-line text input that may need a leading or trailing slot, clear button, password reveal toggle, or async loading indicator
+ */
+
 const inputVariants = cva(
   [
     'flex w-full border border-border bg-background text-foreground shadow-xs transition-colors duration-fast',

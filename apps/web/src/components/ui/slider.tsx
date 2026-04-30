@@ -5,6 +5,15 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Numeric input over a continuous scale where relative position matters
+ * more than the exact value. Renders one thumb per entry in `value` /
+ * `defaultValue`, so a two-element array yields a range picker. For
+ * exact-value entry use Input `type="number"` — sliders are imprecise
+ * by design and pair best with a labelled live-value readout.
+ *
+ * @useWhen rendering a single or range numeric input over a continuous scale where relative position matters more than exact value
+ */
 export const Slider = React.forwardRef<
   React.ElementRef<typeof SliderPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root>
