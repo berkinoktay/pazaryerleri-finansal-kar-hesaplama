@@ -2,6 +2,18 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Raw HTML table primitives with shadcn defaults — sticky header,
+ * tokenized row hover (`bg-surface-row-hover` from Phase 0), selected-
+ * row state (`data-[state=selected]:bg-accent`), `data-numeric`
+ * attribute for right-aligned tabular columns. Use the DataTable
+ * pattern from `patterns/` for any non-trivial table — it composes
+ * Table with TanStack Table for sorting, filtering, selection,
+ * column visibility, pagination, loading skeleton, and empty state.
+ *
+ * @useWhen rendering a static HTML table with no sorting or filtering needs (use the DataTable pattern from components/patterns for anything dynamic)
+ */
+
 export const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
     <div className="relative w-full overflow-auto">

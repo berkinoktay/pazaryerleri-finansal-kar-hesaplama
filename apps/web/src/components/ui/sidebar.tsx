@@ -20,6 +20,25 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
+/**
+ * Collapsible sidebar shell — the workhorse for SaaS dashboard
+ * navigation. Provides offcanvas / icon-rail / inline collapse modes,
+ * cookie-persisted open state, mobile Sheet fallback, and a context
+ * provider for child components. The PazarSync app shell composes this
+ * primitive with NavGroup, SubNavList, BottomDock, and OrgStoreSwitcher
+ * patterns to build the three-column workspace layout. Use it for
+ * primary product navigation; use NavigationMenu for marketing-site
+ * top nav (Phase 2).
+ *
+ * NOTE: this primitive is the largest customization in the library —
+ * 24+ exports covering every part of the sidebar (Provider, Inset,
+ * Trigger, Rail, Header, Footer, Group, Menu, MenuButton, MenuAction,
+ * MenuBadge, MenuSkeleton, Sub*, …). Treat it as upstream-shadcn shape
+ * frozen — extend via patterns, not by editing this file.
+ *
+ * @useWhen building primary dashboard navigation with collapsible icon-rail and mobile sheet fallback (use NavigationMenu for marketing-site top nav)
+ */
+
 const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = '16rem';

@@ -19,6 +19,10 @@
       "next": "Sonraki",
       "nextPage": "Sonraki sayfa"
     },
+    "calendar": {
+      "previousMonth": "Önceki ay",
+      "nextMonth": "Sonraki ay"
+    },
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} senkronizasyon çalışıyor",

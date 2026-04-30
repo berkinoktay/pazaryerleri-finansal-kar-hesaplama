@@ -22,6 +22,16 @@ import { cn } from '@/lib/utils';
  * and behaviourally identical. Fields auto-wire their label, description,
  * and error message through `aria-describedby`, so accessibility never
  * diverges from one screen to the next.
+ *
+ * Compose `Form` (FormProvider) → `FormField` (Controller) → `FormItem`
+ * (id provider) → `FormLabel` + `FormControl` + `FormDescription` +
+ * `FormMessage`. Pair with the global VALIDATION_ERROR pipeline — when
+ * the backend rejects a payload, the form's useEffect calls
+ * `form.setError` per `error.problem.errors[]` so inline messages
+ * appear in Turkish via i18n (see apps/web/CLAUDE.md "Forms +
+ * VALIDATION_ERROR propagation").
+ *
+ * @useWhen building any react-hook-form + zod form so labels, descriptions, and errors auto-wire via aria-describedby across the product
  */
 
 export const Form = FormProvider;

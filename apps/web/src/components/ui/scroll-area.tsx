@@ -5,6 +5,18 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Cross-platform custom scrollbar for a constrained-height region.
+ * Native browser scrollbars look inconsistent across OSes and intrude
+ * into content; ScrollArea renders a thin OS-agnostic thumb that
+ * matches the design system. Reach for it inside Sheet, Dialog, Popover,
+ * or any container with a fixed max-height — don't apply it to the
+ * page body (the global scrollbar is already token-styled in
+ * globals.css).
+ *
+ * @useWhen rendering a custom scrollbar for a constrained-height region inside an overlay or panel (not for the page body)
+ */
+
 export const ScrollArea = React.forwardRef<
   React.ElementRef<typeof ScrollAreaPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>

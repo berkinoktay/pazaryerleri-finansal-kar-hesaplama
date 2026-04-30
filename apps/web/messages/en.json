@@ -19,6 +19,10 @@
       "next": "Next",
       "nextPage": "Next page"
     },
+    "calendar": {
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month"
+    },
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} syncs running",
