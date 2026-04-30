@@ -202,6 +202,69 @@ describe('processProductsChunk', () => {
     expect(result.kind).toBe('done');
   });
 
+  it('returns kind=done after the LAST documented page even if newProgress < totalElements (skipped-page case)', async () => {
+    // Real-world scenario from the dev sandbox sync (5,590-product
+    // catalog, 56 pages). The worker's skip-bad-page recovery dropped
+    // page 24 mid-stream, so newProgress lags totalElements by 100
+    // (the skipped page's items never landed). Without the
+    // totalPages-aware exit, the chunk handler returns `kind: 'continue'`
+    // after page 55, the dispatcher then walks pages 56, 57, 58, ...
+    // — Trendyol 404s every out-of-range request, skip-bad-page
+    // advances the cursor +1 each time, and the run never terminates.
+    //
+    // After this test's enforcing fix, processing page 55 (cursor.n=55,
+    // totalPages=56 → justProcessedPage === totalPages - 1) returns
+    // DONE even though newProgress (5490) is still under totalElements
+    // (5590).
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 5590,
+        totalPages: 56,
+        page: 55,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 55001,
+            productMainId: 'pm-55001',
+            title: 'Last Page Product',
+            variants: [{ variantId: 550010, barcode: 'lpb-1', stockCode: 'lps-1', size: 'M' }],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+        progressCurrent: 5489, // just under totalElements after a skipped page earlier
+        progressTotal: 5590,
+      },
+    });
+
+    const result = await processProductsChunk({
+      syncLog: log,
+      cursor: { kind: 'page', n: 55 },
+    });
+
+    expect(result.kind).toBe('done');
+    if (result.kind !== 'done') return;
+    expect(result.finalCount).toBe(5490); // 5489 + 1 from this last page's batch
+  });
+
   it('falls back from a saved token cursor to page-based when below the 10k cap', async () => {
     // The chunk handler converts a saved token cursor to a page cursor
     // when progressCurrent is under the 10k cap, because that's where
