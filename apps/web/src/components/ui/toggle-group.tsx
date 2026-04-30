@@ -7,6 +7,16 @@ import * as React from 'react';
 import { toggleVariants } from '@/components/ui/toggle';
 import { cn } from '@/lib/utils';
 
+/**
+ * Group of mutually exclusive (`type="single"`) or independent
+ * (`type="multiple"`) Toggles, sharing variant and size via context so
+ * children inherit the look without per-item duplication. Common uses:
+ * view-mode pickers (table / grid / list), text-alignment, day-of-week
+ * selectors. For more than ~5 options, consider Tabs or Select instead.
+ *
+ * @useWhen rendering a small set of related Toggles that should look unified and share a single-or-multiple selection rule
+ */
+
 type ToggleVariantProps = VariantProps<typeof toggleVariants>;
 
 const ToggleGroupContext = React.createContext<ToggleVariantProps>({

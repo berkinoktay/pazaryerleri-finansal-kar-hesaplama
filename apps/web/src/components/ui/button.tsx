@@ -5,6 +5,20 @@ import * as React from 'react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
+/**
+ * Button — the workhorse interactive primitive. Owns its own `loading`
+ * (renders a Spinner in place of the leading icon, sets `aria-busy`,
+ * and auto-disables to prevent double-submission), `leadingIcon` /
+ * `trailingIcon` slots (auto-sized to `size-icon-sm`), and `asChild`
+ * (renders into a Radix `Slot` so the styling applies to a custom
+ * element — typically `<a>` from next/link).
+ *
+ * Sizes `sm | md | lg` align with Input and SelectTrigger; `icon` and
+ * `icon-sm` are square dimensions for icon-only buttons.
+ *
+ * @useWhen rendering an interactive trigger that may need a loading state, leading or trailing icon, or asChild composition into a link
+ */
+
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-xs whitespace-nowrap font-medium transition-colors duration-fast focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-icon-sm [&_svg]:shrink-0',
   {
