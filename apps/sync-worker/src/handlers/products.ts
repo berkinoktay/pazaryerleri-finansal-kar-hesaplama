@@ -112,7 +112,27 @@ export async function processProductsChunk(input: {
 
   const newProgress = log.progressCurrent + batch.length;
 
-  if (newProgress >= pageMeta.totalElements) {
+  // Two exit conditions, EITHER suffices:
+  //   1. newProgress reached totalElements (Trendyol's claim of catalog size).
+  //   2. We just processed the last documented page on a page-based cursor.
+  //
+  // (2) is load-bearing for catalogs where the worker's skip-bad-page
+  // recovery dropped pages mid-stream — newProgress sits below
+  // totalElements (the dropped page's items never landed) but we ARE
+  // past the actual end of data. Without the totalPages check, the
+  // chunk handler returns `kind: 'continue'`, the dispatcher requests
+  // page totalPages+1, Trendyol responds 404 on out-of-range, the
+  // skip-bad-page recovery advances the cursor +1, and the loop
+  // never terminates (recovered seen at cursor=61+ on a 56-page
+  // catalog where page 24 was earlier skipped — the user reports it
+  // never reaches a terminal state, just churns forever).
+  const justProcessedPage = cursor === null ? 0 : cursor.kind === 'page' ? cursor.n : null;
+  const isLastDocumentedPage =
+    justProcessedPage !== null &&
+    pageMeta.totalPages > 0 &&
+    justProcessedPage >= pageMeta.totalPages - 1;
+
+  if (newProgress >= pageMeta.totalElements || isLastDocumentedPage) {
     return { kind: 'done', finalCount: newProgress };
   }
 
