@@ -5,6 +5,15 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Immediately-actioned on/off toggle (e.g. a settings preference that
+ * persists the moment the user flips it). Use Checkbox instead when the
+ * change is part of a form that commits on submit. The thumb transition
+ * uses `duration-base` + `ease-out-quart` — no bounce, matches the
+ * disciplined motion language documented in the design system.
+ *
+ * @useWhen rendering an immediately-actioned on/off toggle (use Checkbox if the change should commit on form submit)
+ */
 export const Switch = React.forwardRef<
   React.ElementRef<typeof SwitchPrimitives.Root>,
   React.ComponentPropsWithoutRef<typeof SwitchPrimitives.Root>

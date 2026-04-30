@@ -5,6 +5,15 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Multi-line text input with optional character counter (`showCount` /
+ * `maxLength`) and content-driven height growth (`autoResize` + `maxRows`).
+ * The auto-resize uses a hidden grid mirror so height is layout-driven —
+ * never animated — which keeps caret position stable as the field grows.
+ *
+ * @useWhen rendering a multi-line text input that may need a character counter or autoresize behavior
+ */
+
 const textareaVariants = cva(
   [
     'flex w-full border border-border bg-background text-foreground shadow-xs transition-colors duration-fast',

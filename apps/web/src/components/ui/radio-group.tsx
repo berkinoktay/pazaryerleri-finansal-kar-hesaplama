@@ -5,6 +5,14 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Single-choice picker among 2–7 mutually exclusive, fully-visible options.
+ * Beyond 7 options use Select (or Combobox once it lands) instead — a long
+ * radio list buries the choice in scroll. Each `RadioGroupItem` should be
+ * paired with a `<Label htmlFor>` for hit-area + screen-reader association.
+ *
+ * @useWhen rendering 2-7 mutually exclusive options that benefit from being all visible at once (use Select for longer lists)
+ */
 export const RadioGroup = React.forwardRef<
   React.ElementRef<typeof RadioGroupPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Root>
