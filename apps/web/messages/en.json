@@ -26,6 +26,9 @@
     "dateRangePicker": {
       "placeholder": "Pick a date range"
     },
+    "dateInput": {
+      "placeholder": "Pick a date"
+    },
     "dataTable": {
       "empty": {
         "title": "No records to display",

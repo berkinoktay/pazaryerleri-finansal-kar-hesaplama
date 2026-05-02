@@ -3,6 +3,7 @@
 import * as React from 'react';
 import type { DateRange } from 'react-day-picker';
 
+import { DateInput } from '@/components/patterns/date-input';
 import { DateRangePicker } from '@/components/patterns/date-range-picker';
 import { PageHeader } from '@/components/patterns/page-header';
 import { PatternNav } from '@/components/showcase/pattern-nav';
@@ -18,6 +19,10 @@ export default function FormsPatternsPage(): React.ReactElement {
     from: new Date('2026-04-01T00:00:00Z'),
     to: new Date('2026-04-30T00:00:00Z'),
   });
+  const [invoiceDate, setInvoiceDate] = React.useState<Date | null>(
+    new Date('2026-04-15T00:00:00Z'),
+  );
+  const [dueDate, setDueDate] = React.useState<Date | null>(null);
 
   return (
     <>
@@ -56,8 +61,30 @@ export default function FormsPatternsPage(): React.ReactElement {
       </Preview>
 
       <Preview
+        title="DateInput"
+        description="Tek tarih seçimi — DateRangePicker'ın kardeşi. Trigger geometry aynı (outline buton + Calendar01Icon + tr-TR formatlı label) ki yan yana kullanıldığında görsel tutarlılık bozulmasın. Tarih seçilince popover kendi kapanır."
+      >
+        <div className="gap-md grid sm:grid-cols-2">
+          <div className="gap-3xs flex flex-col">
+            <span className="text-2xs text-muted-foreground font-medium">Fatura tarihi</span>
+            <DateInput value={invoiceDate} onChange={setInvoiceDate} />
+            <span className="text-2xs text-muted-foreground tabular-nums">
+              ISO: {invoiceDate ? invoiceDate.toISOString().split('T')[0] : '— (boş)'}
+            </span>
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <span className="text-2xs text-muted-foreground font-medium">Vade tarihi (boş)</span>
+            <DateInput value={dueDate} onChange={setDueDate} />
+            <span className="text-2xs text-muted-foreground">
+              Boş başlatıldı; lokalize placeholder gösterilir.
+            </span>
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
         title="DateRangePicker"
-        description="Popover içinde Calendar (mode='range', tr-TR locale, 2 ay yan yana). Trigger outline buton — Input gibi durur. Range tamamlandığında popover kendi kapanır."
+        description="Popover içinde Calendar (mode='range', tr-TR locale, 2 ay yan yana). Trigger outline buton — Input gibi durur. Range tamamlandığında popover kendi kapanır. Tek tarih için DateInput kullan."
       >
         <div className="gap-3xs flex flex-col">
           <DateRangePicker value={range} onChange={setRange} />

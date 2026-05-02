@@ -35,10 +35,11 @@ const CATEGORIES: CategoryCard[] = [
     href: '/design/patterns/forms',
     icon: Pen01Icon,
     label: 'Form girdileri',
-    count: 5,
+    count: 6,
     description:
       'Veri girişi molekülleri. Hepsi Decimal / Date kontratı, locale-aware (tr-TR), display-buffer ile typing korunuyor.',
-    components: 'MoneyInput · PercentageInput · SearchInput · InlineEdit · DateRangePicker',
+    components:
+      'MoneyInput · PercentageInput · SearchInput · InlineEdit · DateInput · DateRangePicker',
   },
   {
     href: '/design/patterns/status',
