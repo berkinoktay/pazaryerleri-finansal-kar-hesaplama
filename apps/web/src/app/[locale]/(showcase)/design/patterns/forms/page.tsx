@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { PatternNav } from '@/components/showcase/pattern-nav';
 import { Preview } from '@/components/showcase/preview';
 
+import { ComboboxShowcase } from '../combobox-showcase';
 import { InlineEditShowcase } from '../inline-edit-showcase';
 import { MoneyInputShowcase } from '../money-input-showcase';
 import { PercentageInputShowcase } from '../percentage-input-showcase';
@@ -51,6 +52,13 @@ export default function FormsPatternsPage(): React.ReactElement {
         description="Konvansiyon wrapper'ı: Search ikonu + onClear butonu + lokalize placeholder ('Ara…'). Üç farklı feature elle aynı üçlüyü kuruyordu — WET+1 promotion. type='search', inputMode='search' otomatik."
       >
         <SearchInputShowcase />
+      </Preview>
+
+      <Preview
+        title="Combobox"
+        description="Searchable single-select. shadcn'in recipe'ini Popover + Command + Button olarak tek bir API'ye sarıyor — kategori, marka, mağaza picker'ları için. Opsiyon başına icon + description; disabled satır; loading spinner; invalid border. Kısa sabit liste için Select; 2-7 görünür opsiyon için RadioGroup."
+      >
+        <ComboboxShowcase />
       </Preview>
 
       <Preview

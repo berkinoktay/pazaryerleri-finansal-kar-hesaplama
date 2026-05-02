@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 74,
+  "count": 75,
   "components": [
     {
       "name": "Accordion",
@@ -113,6 +113,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "toggling a single show/hide region with no sibling sections (use Accordion for related multiple collapsibles)"
+    },
+    {
+      "name": "Combobox",
+      "path": "apps/web/src/components/patterns/combobox.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a searchable single-select picker over a finite list of options (use Select for short fixed lists, RadioGroup for 2-7 visible options, future MultiCombobox for multi-select)"
     },
     {
       "name": "Command",
