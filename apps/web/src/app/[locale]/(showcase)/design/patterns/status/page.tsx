@@ -13,6 +13,8 @@ import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 
+import { StepperShowcase } from '../stepper-showcase';
+
 const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
 const MOCK = {
   syncFresh: new Date(MOCK_SYNC_REF.getTime() - 2 * 60 * 1000),
@@ -200,6 +202,13 @@ export default function StatusPatternsPage(): React.ReactElement {
             onDismiss={() => undefined}
           />
         </div>
+      </Preview>
+
+      <Preview
+        title="Stepper"
+        description="Çok adımlı akışta nerede olduğunu gösterir. Per-step state — completed (yeşil tik), current (vurgulu numara), upcoming (muted), error (X). Yatay = wizard üstü; dikey = kontekst rail / sidebar. Wizard organism (henüz yok) bu Stepper'ı içerik panesi ile birleştirecek."
+      >
+        <StepperShowcase />
       </Preview>
 
       <Preview
