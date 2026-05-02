@@ -27,6 +27,8 @@ import { useTheme } from '@/providers/theme-provider';
  *   - `aria-pressed` reads `resolvedTheme` only after mount (via
  *     `useIsMounted` gate); pre-mount it falls back to `false`. Hydration
  *     stays byte-identical because the visible icon swap is CSS-only.
+ *
+ * @useWhen rendering the dark/light theme toggle inside the sidebar bottom dock (CSS-only icon swap, SSR-safe by construction)
  */
 export function ThemeToggleInline(): React.ReactElement {
   const t = useTranslations('themeToggle');

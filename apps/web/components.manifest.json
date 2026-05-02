@@ -55,7 +55,8 @@
       "name": "BottomDock",
       "path": "apps/web/src/components/patterns/bottom-dock.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "anchoring sticky utility links (support, settings, theme toggle, user row) to the bottom of the sidebar"
     },
     {
       "name": "Breadcrumb",
@@ -240,7 +241,8 @@
       "name": "NavGroup",
       "path": "apps/web/src/components/patterns/nav-group.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a primary sidebar nav row that has children (sub-routes) and should both navigate and reveal the sub-list on click"
     },
     {
       "name": "NavigationMenu",
@@ -253,7 +255,8 @@
       "name": "NotificationBell",
       "path": "apps/web/src/components/patterns/notification-bell.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "mounting a global notification surface in PageHeader.actions for high-frequency events (sync results, alerts) — full history lives at /notifications"
     },
     {
       "name": "OrgStoreSwitcher",
@@ -271,7 +274,8 @@
       "name": "PageHeader",
       "path": "apps/web/src/components/patterns/page-header.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb / store chip), trailing actions, and meta row (typically SyncBadge)"
     },
     {
       "name": "Pagination",
@@ -305,7 +309,8 @@
       "name": "RailWarningCard",
       "path": "apps/web/src/components/patterns/rail-warning-card.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "surfacing an actionable issue inline in the ContextRail (use Alert for page-width inline messages, future Banner for app-spanning system messages)"
     },
     {
       "name": "ScrollArea",
@@ -374,7 +379,8 @@
       "name": "SubNavList",
       "path": "apps/web/src/components/patterns/sub-nav-list.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a vertical secondary navigation list in the ContextRail (use NavGroup children for sub-routes nested under a primary sidebar row)"
     },
     {
       "name": "Switch",
@@ -387,7 +393,8 @@
       "name": "SyncBadge",
       "path": "apps/web/src/components/patterns/sync-badge.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "surfacing data freshness (last-synced-at + state) on a page where the data may be stale, with optional click-to-open SyncCenter"
     },
     {
       "name": "SyncCenter",
@@ -420,7 +427,8 @@
       "name": "ThemeToggleInline",
       "path": "apps/web/src/components/patterns/theme-toggle-inline.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering the dark/light theme toggle inside the sidebar bottom dock (CSS-only icon swap, SSR-safe by construction)"
     },
     {
       "name": "Toaster",
