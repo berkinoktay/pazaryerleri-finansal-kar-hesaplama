@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 67,
+  "count": 68,
   "components": [
     {
       "name": "Accordion",
@@ -379,6 +379,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "wrapping a row of KpiTile siblings that should self-tile responsively without breakpoint ladders"
+    },
+    {
+      "name": "StatusDot",
+      "path": "apps/web/src/components/ui/status-dot.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "marking inline status with just a colored dot (use Badge when the dot needs an inline label, SyncBadge for the canonical sync-state surface)"
     },
     {
       "name": "SubNavList",
