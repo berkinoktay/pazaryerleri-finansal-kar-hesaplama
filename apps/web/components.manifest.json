@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 73,
+  "count": 74,
   "components": [
     {
       "name": "Accordion",
@@ -148,6 +148,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "mounting the standard toolbar above a DataTable for search, faceted filters, column visibility, and import/export"
+    },
+    {
+      "name": "DateInput",
+      "path": "apps/web/src/components/patterns/date-input.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "accepting a single date as form input via a popover-anchored picker (use DateRangePicker for ranges, raw Calendar for inline grids)"
     },
     {
       "name": "DateRangePicker",

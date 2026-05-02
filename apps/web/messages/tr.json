@@ -26,6 +26,9 @@
     "dateRangePicker": {
       "placeholder": "Tarih aralığı seç"
     },
+    "dateInput": {
+      "placeholder": "Tarih seç"
+    },
     "dataTable": {
       "empty": {
         "title": "Gösterilecek kayıt yok",
