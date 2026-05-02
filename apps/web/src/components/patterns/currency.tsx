@@ -16,7 +16,10 @@ export interface CurrencyProps extends React.HTMLAttributes<HTMLSpanElement> {
  * Renders a Turkish Lira monetary value with tabular numerics so digits
  * line up vertically in tables and KPI rows. Delegates formatting to the
  * shared `@pazarsync/utils` formatter — single source of truth for ₺
- * display, thousand separators, and decimal places.
+ * display, thousand separators, and decimal places. For input use the
+ * future MoneyInput molecule; this is display-only.
+ *
+ * @useWhen displaying a TRY monetary value anywhere in the product (always pass Decimal when available, never compute money in floats)
  */
 export function Currency({
   value,

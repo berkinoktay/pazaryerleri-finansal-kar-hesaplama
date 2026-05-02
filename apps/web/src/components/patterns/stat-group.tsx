@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils';
  * wrap once they'd fall below the minimum tile size (280px by default).
  * Container-aware: the grid reacts to its parent, not the viewport, so
  * embedding in a narrow column Just Works.
+ *
+ * @useWhen wrapping a row of KpiTile siblings that should self-tile responsively without breakpoint ladders
  */
 export function StatGroup({
   className,

@@ -20,6 +20,11 @@ export interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
  * Empty state — shown in place of a table, chart, or list when there is
  * genuinely no data to display. Opinionated: an empty state always offers
  * a next step (import, sync, connect) rather than just announcing nothing.
+ * Use inside DataTable's `empty` slot, on first-load list pages before
+ * any data exists, and as the fallback when filters yield zero results
+ * (in which case the action should be "Clear filters", not "Import data").
+ *
+ * @useWhen filling a region that has genuinely no data with an icon, title, description, and a next-step action (always offer an action; empty without a next step is a dead end)
  */
 export function EmptyState({
   icon: Icon,
