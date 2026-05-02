@@ -164,4 +164,47 @@ describe('<FileUpload>', () => {
       expect(dropzone).toHaveAttribute('aria-disabled', 'true');
     });
   });
+
+  describe('progress prop', () => {
+    it('renders a progress bar with the rounded percentage label when set', () => {
+      const file = makeFile('upload.csv', 1024, 'text/csv');
+      render(<Harness initialValue={file} progress={62.4} progressLabel="Yükleme" />);
+
+      expect(screen.getByRole('progressbar', { name: 'Yükleme' })).toBeInTheDocument();
+      expect(screen.getByText('62%')).toBeInTheDocument();
+    });
+
+    it('clamps progress > 100 to 100% and < 0 to 0%', () => {
+      const file = makeFile('upload.csv', 1024, 'text/csv');
+      const { rerender } = render(<Harness initialValue={file} progress={150} />);
+      expect(screen.getByText('100%')).toBeInTheDocument();
+
+      rerender(<Harness initialValue={file} progress={-20} />);
+      expect(screen.getByText('0%')).toBeInTheDocument();
+    });
+
+    it('keeps the remove button visible when progress is set (loading is for the indeterminate case)', () => {
+      const file = makeFile('upload.csv', 1024, 'text/csv');
+      render(<Harness initialValue={file} progress={50} loading removeLabel="Kaldır" />);
+
+      // progress + loading both set — progress wins (the X stays so the user
+      // can cancel the upload mid-flight). Spinner renders only when loading
+      // is set without a known percentage.
+      expect(screen.getByRole('button', { name: 'Kaldır' })).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('image preview', () => {
+    it('renders an <img> thumbnail for image files instead of an icon', () => {
+      const file = makeFile('photo.png', 1024, 'image/png');
+      const { container } = render(<Harness initialValue={file} />);
+
+      const img = container.querySelector('img');
+      expect(img).not.toBeNull();
+      // Object URL surfaces happen via URL.createObjectURL — happy-dom returns
+      // a blob: protocol URL synchronously after the effect runs.
+      expect(img?.getAttribute('src')).toMatch(/^blob:/);
+    });
+  });
 });

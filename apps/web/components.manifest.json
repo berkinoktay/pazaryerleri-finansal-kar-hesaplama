@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 77,
+  "count": 78,
   "components": [
     {
       "name": "Accordion",
@@ -203,7 +203,7 @@
       "path": "apps/web/src/components/patterns/file-upload.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "accepting a single file via dropzone + browse button (CSV import, document upload) — for multi-file scenarios build a MultiFileUpload variant"
+      "useWhen": "accepting a single file via dropzone + browse button (CSV import, document upload, single image) — for multi-file scenarios use MultiFileUpload"
     },
     {
       "name": "Form",
@@ -281,6 +281,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "accepting a TRY monetary value as form input (use PercentageInput for %, Input type=\"number\" for raw integers, Currency for read-only display)"
+    },
+    {
+      "name": "MultiFileUpload",
+      "path": "apps/web/src/components/patterns/multi-file-upload.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "accepting multiple files (image batch upload, attachment set, multi-document import) — for one-shot single-file flows use FileUpload"
     },
     {
       "name": "NavGroup",

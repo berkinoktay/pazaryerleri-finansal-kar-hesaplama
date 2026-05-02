@@ -1,10 +1,12 @@
 'use client';
 
+import { ImageUpload01Icon } from 'hugeicons-react';
 import * as React from 'react';
 
 import { FileUpload } from '@/components/patterns/file-upload';
 
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Synthetic File for the "filled" demo state. Real upload flows pass
@@ -13,9 +15,21 @@ const MAX_CSV_BYTES = 5 * 1024 * 1024;
  * pick. ISO date in the filename keeps the showcase deterministic
  * across reloads (no Date.now() drift).
  */
-function makeMockFile(name: string, sizeBytes: number): File {
-  const blob = new Blob([new Uint8Array(sizeBytes)], { type: 'text/csv' });
-  return new File([blob], name, { type: 'text/csv' });
+function makeMockFile(name: string, sizeBytes: number, type: string = 'text/csv'): File {
+  const blob = new Blob([new Uint8Array(sizeBytes)], { type });
+  return new File([blob], name, { type });
+}
+
+/**
+ * Generate a visible solid-color SVG file for the image-preview demo.
+ * Real upload flows pass a File from the picker; for a showcase that
+ * needs to render a recognizable thumbnail without external assets,
+ * an inline SVG is the cheapest path that survives URL.createObjectURL.
+ */
+function makeMockImageFile(name: string, fillCss: string): File {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" fill="${fillCss}"/></svg>`;
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  return new File([blob], name, { type: 'image/svg+xml' });
 }
 
 export function FileUploadShowcase(): React.ReactElement {
@@ -26,6 +40,12 @@ export function FileUploadShowcase(): React.ReactElement {
   const [errored, setErrored] = React.useState<File | null>(null);
   const [loadingFile, setLoadingFile] = React.useState<File | null>(() =>
     makeMockFile('hakedis-2026-03-trendyol.csv', 98 * 1024),
+  );
+  const [imageFile, setImageFile] = React.useState<File | null>(() =>
+    makeMockImageFile('urun-foto-2026-04-12.svg', '#3b82f6'),
+  );
+  const [progressFile, setProgressFile] = React.useState<File | null>(() =>
+    makeMockFile('urunler-katalog.csv', 2.4 * 1024 * 1024),
   );
 
   return (
@@ -56,6 +76,47 @@ export function FileUploadShowcase(): React.ReactElement {
 
       <div className="gap-3xs flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+          Görsel yükleme — boş (ImageUpload icon)
+        </span>
+        <FileUpload
+          value={null}
+          onChange={() => undefined}
+          accept="image/*"
+          maxSize={MAX_IMAGE_BYTES}
+          prompt="Ürün görselini buraya bırak"
+          hint="JPG / PNG · max 5 MB"
+          ctaLabel="Görsel seç"
+          emptyIcon={<ImageUpload01Icon aria-hidden />}
+        />
+      </div>
+
+      <div className="gap-3xs flex flex-col">
+        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+          Görsel seçili — otomatik thumbnail önizlemesi
+        </span>
+        <FileUpload
+          value={imageFile}
+          onChange={setImageFile}
+          accept="image/*"
+          maxSize={MAX_IMAGE_BYTES}
+        />
+        <span className="text-2xs text-muted-foreground">
+          MIME {`image/*`} ise satır ikonu yerine canlı thumbnail (URL.createObjectURL).
+        </span>
+      </div>
+
+      <div className="gap-3xs flex flex-col">
+        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+          Progress — 0–100 belirli ilerleme barı
+        </span>
+        <FileUpload value={progressFile} onChange={setProgressFile} progress={62} />
+        <span className="text-2xs text-muted-foreground">
+          progress=62 → bar ve % yan yana; spinner gizlenir, kaldır butonu açık kalır.
+        </span>
+      </div>
+
+      <div className="gap-3xs flex flex-col">
+        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
           Hatalı (server-side error)
         </span>
         <FileUpload
@@ -71,11 +132,11 @@ export function FileUploadShowcase(): React.ReactElement {
 
       <div className="gap-3xs flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Yükleniyor (loading)
+          Yükleniyor (loading, progress yok)
         </span>
         <FileUpload value={loadingFile} onChange={setLoadingFile} loading />
         <span className="text-2xs text-muted-foreground">
-          Async upload — kaldır butonu spinner ile değişir.
+          progress yoksa loading=true → spinner. Belirli yüzde varsa progress kullan.
         </span>
       </div>
 
