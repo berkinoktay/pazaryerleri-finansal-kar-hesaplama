@@ -1,0 +1,64 @@
+'use client';
+
+import * as React from 'react';
+import type { DateRange } from 'react-day-picker';
+
+import { DateRangePicker } from '@/components/patterns/date-range-picker';
+import { PageHeader } from '@/components/patterns/page-header';
+import { PatternNav } from '@/components/showcase/pattern-nav';
+import { Preview } from '@/components/showcase/preview';
+
+import { MoneyInputShowcase } from '../money-input-showcase';
+import { PercentageInputShowcase } from '../percentage-input-showcase';
+import { SearchInputShowcase } from '../search-input-showcase';
+
+export default function FormsPatternsPage(): React.ReactElement {
+  const [range, setRange] = React.useState<DateRange | undefined>({
+    from: new Date('2026-04-01T00:00:00Z'),
+    to: new Date('2026-04-30T00:00:00Z'),
+  });
+
+  return (
+    <>
+      <PageHeader
+        title="Form girdisi pattern'ları"
+        intent="Veri girişi: TRY tutar, yüzde, arama, tarih aralığı. Hepsi Decimal / Date kontratıyla; locale-aware."
+      />
+      <PatternNav />
+
+      <Preview
+        title="MoneyInput"
+        description="₺ leading slot + tr-TR ayrıştırma. Yazarken serbest (ara giriş '1,' korunur), Decimal'a çevrilir, Currency display ile aynı kontratı paylaşır. nonNegative, invalid, custom symbol ve scale=0 (tam TRY) destekler."
+      >
+        <MoneyInputShowcase />
+      </Preview>
+
+      <Preview
+        title="PercentageInput"
+        description="MoneyInput'un kardeşi. % leading slot — Türkçe konvansiyonu '23,64%' değil '%23,64'. Aynı tr-TR parser, Decimal output. Komisyon, vergi, marj, indirim için. Sınır YOK varsayılan — komisyon %100'ü geçebilir, marj negatif olabilir."
+      >
+        <PercentageInputShowcase />
+      </Preview>
+
+      <Preview
+        title="SearchInput"
+        description="Konvansiyon wrapper'ı: Search ikonu + onClear butonu + lokalize placeholder ('Ara…'). Üç farklı feature elle aynı üçlüyü kuruyordu — WET+1 promotion. type='search', inputMode='search' otomatik."
+      >
+        <SearchInputShowcase />
+      </Preview>
+
+      <Preview
+        title="DateRangePicker"
+        description="Popover içinde Calendar (mode='range', tr-TR locale, 2 ay yan yana). Trigger outline buton — Input gibi durur. Range tamamlandığında popover kendi kapanır."
+      >
+        <div className="gap-3xs flex flex-col">
+          <DateRangePicker value={range} onChange={setRange} />
+          <span className="text-2xs text-muted-foreground">
+            Seçim: {range?.from?.toISOString().split('T')[0] ?? '—'} →{' '}
+            {range?.to?.toISOString().split('T')[0] ?? '—'}
+          </span>
+        </div>
+      </Preview>
+    </>
+  );
+}
