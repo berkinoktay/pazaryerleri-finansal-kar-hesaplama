@@ -35,10 +35,17 @@ export interface SearchInputProps extends Omit<
 export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
   function SearchInput({ placeholder, onClear, clearLabel, ...inputProps }, ref) {
     const t = useTranslations('common');
+    // NOTE: keep type="text", not type="search". Browsers render their
+    // own ::-webkit-search-cancel-button on type=search inputs, which
+    // would sit next to the project's onClear X — two clear buttons,
+    // visible only when the field has a value (caught in DevTools
+    // review of the SearchInput showcase). inputMode="search" alone is
+    // what triggers the search-affordance virtual keyboard on mobile;
+    // type="search" was redundant for that purpose anyway.
     return (
       <Input
         ref={ref}
-        type="search"
+        type="text"
         inputMode="search"
         leadingIcon={<Search01Icon />}
         onClear={onClear}
