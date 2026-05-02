@@ -13,6 +13,7 @@ import { ComboboxShowcase } from '../combobox-showcase';
 import { FileUploadShowcase } from '../file-upload-showcase';
 import { InlineEditShowcase } from '../inline-edit-showcase';
 import { MoneyInputShowcase } from '../money-input-showcase';
+import { MultiFileUploadShowcase } from '../multi-file-upload-showcase';
 import { PercentageInputShowcase } from '../percentage-input-showcase';
 import { SearchInputShowcase } from '../search-input-showcase';
 
@@ -93,9 +94,16 @@ export default function FormsPatternsPage(): React.ReactElement {
 
       <Preview
         title="FileUpload"
-        description="Tek dosya dropzone. Tıkla → file picker; sürükle-bırak → drop zone. accept (MIME / extension) + maxSize lokal validasyon; error prop server-side hata için. Dolu state'te kompakt dosya satırı (icon + isim + boyut + remove). Settlement CSV import'u için tasarlandı; multi-file için ayrı bir MultiFileUpload yaz."
+        description="Tek dosya dropzone. Tıkla → file picker; sürükle-bırak → drop zone. accept (MIME / extension) + maxSize lokal validasyon; error prop server-side hata için. Dolu state'te kompakt dosya satırı (MIME-aware icon: csv / image / audio / video / generic). image/* otomatik thumbnail önizlemesi (URL.createObjectURL, unmount'ta revoke). progress=0-100 belirli ilerleme barı; loading=true belirsiz spinner. Settlement CSV / ürün görseli için."
       >
         <FileUploadShowcase />
+      </Preview>
+
+      <Preview
+        title="MultiFileUpload"
+        description="Çoklu dosya — boş state aynı dropzone, dolu state üstte başlık satırı (Dosyalar (N) · Dosya ekle · Tümünü kaldır) ve per-file row listesi. Per-file progress bar Record<index, 0-100> ile callsite-driven. maxFiles cap'i + accept + maxSize her dosya için validate edilir. Ürün görseli batch upload, hakediş ek dosyaları için."
+      >
+        <MultiFileUploadShowcase />
       </Preview>
 
       <Preview
