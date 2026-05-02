@@ -10,6 +10,7 @@ import { PatternNav } from '@/components/showcase/pattern-nav';
 import { Preview } from '@/components/showcase/preview';
 
 import { ComboboxShowcase } from '../combobox-showcase';
+import { FileUploadShowcase } from '../file-upload-showcase';
 import { InlineEditShowcase } from '../inline-edit-showcase';
 import { MoneyInputShowcase } from '../money-input-showcase';
 import { PercentageInputShowcase } from '../percentage-input-showcase';
@@ -88,6 +89,13 @@ export default function FormsPatternsPage(): React.ReactElement {
             </span>
           </div>
         </div>
+      </Preview>
+
+      <Preview
+        title="FileUpload"
+        description="Tek dosya dropzone. Tıkla → file picker; sürükle-bırak → drop zone. accept (MIME / extension) + maxSize lokal validasyon; error prop server-side hata için. Dolu state'te kompakt dosya satırı (icon + isim + boyut + remove). Settlement CSV import'u için tasarlandı; multi-file için ayrı bir MultiFileUpload yaz."
+      >
+        <FileUploadShowcase />
       </Preview>
 
       <Preview

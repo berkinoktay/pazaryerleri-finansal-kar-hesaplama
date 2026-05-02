@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 76,
+  "count": 77,
   "components": [
     {
       "name": "Accordion",
@@ -197,6 +197,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "filling a region that has genuinely no data with an icon, title, description, and a next-step action (always offer an action; empty without a next step is a dead end)"
+    },
+    {
+      "name": "FileUpload",
+      "path": "apps/web/src/components/patterns/file-upload.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "accepting a single file via dropzone + browse button (CSV import, document upload) — for multi-file scenarios build a MultiFileUpload variant"
     },
     {
       "name": "Form",
