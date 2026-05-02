@@ -14,6 +14,7 @@ import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
 
 import { BottomDockShowcase } from './bottom-dock-showcase';
+import { MoneyInputShowcase } from './money-input-showcase';
 import { NavGroupShowcase } from './nav-group-showcase';
 import { OrgStoreSwitcherShowcase } from './org-store-switcher-showcase';
 import { ThemeToggleShowcase } from './theme-toggle-showcase';
@@ -111,6 +112,13 @@ export default function PatternsShowcasePage(): React.ReactElement {
             <Currency value={MOCK.negativeAmount} /> (negative)
           </div>
         </div>
+      </Preview>
+
+      <Preview
+        title="MoneyInput"
+        description="₺ leading slot + tr-TR ayrıştırma. Yazarken serbest (ara giriş '1,' korunur), Decimal'a çevrilir, Currency display ile aynı kontratı paylaşır. nonNegative, invalid, custom symbol ve scale=0 (tam TRY) destekler."
+      >
+        <MoneyInputShowcase />
       </Preview>
 
       <Preview

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 68,
+  "count": 69,
   "components": [
     {
       "name": "Accordion",
@@ -239,6 +239,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "building a document-style desktop top menu bar (rare in SaaS dashboards — prefer sidebar navigation + dropdown menus)"
+    },
+    {
+      "name": "MoneyInput",
+      "path": "apps/web/src/components/patterns/money-input.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "accepting a TRY monetary value as form input (use PercentageInput for %, Input type=\"number\" for raw integers, Currency for read-only display)"
     },
     {
       "name": "NavGroup",
