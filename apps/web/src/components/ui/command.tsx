@@ -41,7 +41,7 @@ export function CommandDialog({ children, ...props }: CommandDialogProps): React
   return (
     <Dialog {...props}>
       <DialogContent className="overflow-hidden p-0">
-        <Command className="[&_[cmdk-group-heading]]:px-xs [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-input]]:h-12">
+        <Command className="[&_[cmdk-group-heading]]:px-xs [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-xs [&_[cmdk-group-heading]]:font-medium">
           {children}
         </Command>
       </DialogContent>
@@ -52,22 +52,36 @@ export function CommandDialog({ children, ...props }: CommandDialogProps): React
 export const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> & {
-    /** Override classes on the outer wrapper (icon + input shell). The
-     * default is a flush row with a bottom border for full-page command
-     * palettes; consumers in compact dropdowns can swap to a fully
-     * bordered "input field" look without forking the primitive. */
+    /** Override classes on the outer wrapper (icon + input shell). */
     wrapperClassName?: string;
   }
 >(({ className, wrapperClassName, ...props }, ref) => (
+  // Wrapper mirrors Input's wrapperVariants (md size): bordered, rounded,
+  // shadow-xs, focus-within:border-ring. The previous flush border-b layout
+  // let the global :focus-visible rule (globals.css → box-shadow:
+  // var(--shadow-focus)) paint a 3px brand-blue glow around the inner input's
+  // full bounding box — visible in DevTools as a glowing rectangle inside
+  // the popover. Input's pattern (suppress shadow on the inner element,
+  // indicate focus via the wrapper's border) is the design-system convention
+  // and what consumers expect here too.
   <div
-    className={cn('gap-xs border-border px-sm flex items-center border-b', wrapperClassName)}
+    className={cn(
+      'gap-xs px-sm m-3xs h-10',
+      'border-border bg-background text-foreground flex items-center rounded-md border shadow-xs',
+      'duration-fast transition-colors',
+      'hover:border-border-strong focus-within:border-ring',
+      wrapperClassName,
+    )}
     cmdk-input-wrapper=""
   >
-    <Search01Icon className="size-icon-sm shrink-0 opacity-50" />
+    <Search01Icon className="size-icon-sm text-muted-foreground shrink-0" aria-hidden />
     <CommandPrimitive.Input
       ref={ref}
       className={cn(
-        'py-xs placeholder:text-muted-foreground flex h-11 w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50',
+        'min-w-0 flex-1 border-0 bg-transparent text-sm shadow-none ring-0 outline-none',
+        'focus:outline-none focus-visible:shadow-none focus-visible:ring-0 focus-visible:outline-none',
+        'placeholder:text-muted-foreground',
+        'disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       {...props}
