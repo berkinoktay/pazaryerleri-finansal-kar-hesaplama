@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 72,
+  "count": 73,
   "components": [
     {
       "name": "Accordion",
@@ -50,6 +50,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering a single status badge that may be paired with a \"+N\" overflow indicator"
+    },
+    {
+      "name": "Banner",
+      "path": "apps/web/src/components/patterns/banner.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "surfacing a system-wide event that affects every screen until resolved (use Alert for page-level inline messages, Toast for transient confirmations)"
     },
     {
       "name": "BottomDock",
