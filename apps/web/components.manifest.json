@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 69,
+  "count": 70,
   "components": [
     {
       "name": "Accordion",
@@ -295,6 +295,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "rendering page-by-page navigation for a paginated list (use cursor-based \"Load more\" for infinite feeds, virtual scrolling for huge tables)"
+    },
+    {
+      "name": "PercentageInput",
+      "path": "apps/web/src/components/patterns/percentage-input.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "accepting a percentage as form input — commission rate, tax rate, margin, discount (use MoneyInput for currency; use Input type=number for raw integers)"
     },
     {
       "name": "Popover",
