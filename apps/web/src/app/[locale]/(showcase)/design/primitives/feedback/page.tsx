@@ -11,6 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
+import { StatusDot } from '@/components/ui/status-dot';
 
 export default function FeedbackPrimitivePage(): React.ReactElement {
   const t = useTranslations('common');
@@ -132,6 +133,48 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
             >
               +10
             </Button>
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="StatusDot"
+        description="Sadece renkli nokta — etiket istemediğinde Badge'den hafif. Tonlar Alert / Badge / TrendDelta ile aynı kelimeye sahip; sm (6px) sıkı satırlar için, md (8px) varsayılan. Renk asla tek sinyal değildir; çevresinde her zaman bir etiket / ikon olmalı."
+      >
+        <div className="gap-md flex flex-col">
+          <div className="gap-xs flex items-center">
+            <StatusDot tone="success" />
+            <span className="text-foreground text-sm">Trendyol Ana Mağaza · senkronize</span>
+          </div>
+          <div className="gap-xs flex items-center">
+            <StatusDot tone="warning" />
+            <span className="text-foreground text-sm">Hepsiburada · 2 saat önce</span>
+          </div>
+          <div className="gap-xs flex items-center">
+            <StatusDot tone="destructive" />
+            <span className="text-foreground text-sm">
+              Trendyol Hediyelik · senkronizasyon başarısız
+            </span>
+          </div>
+          <div className="gap-xs flex items-center">
+            <StatusDot tone="info" />
+            <span className="text-foreground text-sm">Yeni özellik aktif</span>
+          </div>
+          <div className="gap-xs flex items-center">
+            <StatusDot tone="neutral" />
+            <span className="text-muted-foreground text-sm">Pasif mağaza</span>
+          </div>
+          <div className="gap-md pt-md flex items-center">
+            <span className="text-2xs text-muted-foreground font-mono">size = sm</span>
+            <StatusDot tone="success" size="sm" />
+            <StatusDot tone="warning" size="sm" />
+            <StatusDot tone="destructive" size="sm" />
+            <StatusDot tone="info" size="sm" />
+            <span className="text-2xs text-muted-foreground font-mono">size = md (default)</span>
+            <StatusDot tone="success" />
+            <StatusDot tone="warning" />
+            <StatusDot tone="destructive" />
+            <StatusDot tone="info" />
           </div>
         </div>
       </Preview>
