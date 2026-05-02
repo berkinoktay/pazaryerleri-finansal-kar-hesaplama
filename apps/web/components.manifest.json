@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 70,
+  "count": 71,
   "components": [
     {
       "name": "Accordion",
@@ -337,6 +337,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "rendering a custom scrollbar for a constrained-height region inside an overlay or panel (not for the page body)"
+    },
+    {
+      "name": "SearchInput",
+      "path": "apps/web/src/components/patterns/search-input.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a search field with leading icon + onClear + standard placeholder (use Command for typeahead command palettes)"
     },
     {
       "name": "Select",
