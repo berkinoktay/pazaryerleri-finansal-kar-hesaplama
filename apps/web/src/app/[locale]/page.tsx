@@ -40,12 +40,16 @@ export default async function HomePage({
         <div className="max-w-content-max px-lg py-md mx-auto flex items-center justify-between">
           <Wordmark />
           <nav className="gap-sm flex items-center">
-            <Link
-              href="/design"
-              className="px-sm py-3xs text-muted-foreground hover:text-foreground rounded-md text-sm font-medium transition-colors focus-visible:outline-none"
-            >
-              {tNav('designSystem')}
-            </Link>
+            {/*
+             * The "Design system" link previously rendered here was removed:
+             * Phase 0 auth-gated /design (it's an internal reference, not
+             * customer-facing content), so a public-marketing link to it is
+             * misleading — clicking it just funnels through the login wall.
+             * Devs/stakeholders who need it still reach it via direct URL.
+             * The `landing.nav.designSystem` translation key is intentionally
+             * kept in the messages file so it can come back as a conditional
+             * (e.g. dev-only badge) without re-translating.
+             */}
             <LanguageSwitcher variant="compact" />
             <Button asChild variant="outline" size="sm">
               <Link href="/login">{tNav('login')}</Link>

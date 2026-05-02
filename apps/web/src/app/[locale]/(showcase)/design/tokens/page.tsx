@@ -20,6 +20,16 @@ const NEUTRAL_SWATCHES = [
   { token: 'muted-foreground', label: 'Muted foreground', note: 'İkincil metin' },
   { token: 'muted-foreground-dim', label: 'Muted fg (dim)', note: 'Kapsam dışı metin' },
   { token: 'surface-subtle', label: 'Surface subtle', note: 'Footer / callout / kod bloku' },
+  {
+    token: 'surface-row-hover',
+    label: 'Surface row hover',
+    note: 'Tablo / liste satırı hover',
+  },
+  {
+    token: 'surface-trigger-hover',
+    label: 'Surface trigger hover',
+    note: 'Inactive tab / segment trigger hover',
+  },
   { token: 'card', label: 'Card', note: 'Kart zemini' },
   { token: 'border', label: 'Border', note: 'İnce çizgi' },
   { token: 'border-muted', label: 'Border muted', note: 'Hafif iç çizgi / aktif ring' },
