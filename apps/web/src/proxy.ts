@@ -42,6 +42,27 @@ function stripLocale(pathname: string): string {
   return pathname;
 }
 
+/**
+ * Pull the explicit locale prefix from a pathname, or `null` when the
+ * URL is unprefixed. We need this on the redirect path so that an
+ * explicit `/tr/...` or `/en/...` choice survives a server redirect to
+ * `/login` or `/dashboard`. Without it, next-intl re-negotiates the
+ * locale on the redirected request from the browser's `Accept-Language`
+ * header — which silently flips an explicit `/tr/dashboard` request
+ * onto `/en/login` for any user whose browser is set to English.
+ */
+function extractLocale(pathname: string): (typeof routing.locales)[number] | null {
+  const first = pathname.split('/').filter(Boolean)[0] as
+    | (typeof routing.locales)[number]
+    | undefined;
+  return first !== undefined && routing.locales.includes(first) ? first : null;
+}
+
+function withLocale(target: string, pathname: string): string {
+  const locale = extractLocale(pathname);
+  return locale !== null ? `/${locale}${target}` : target;
+}
+
 function isInGroup(path: string, group: readonly string[]): boolean {
   return group.some((p) => path === p || path.startsWith(p + '/'));
 }
@@ -53,14 +74,14 @@ export default async function proxy(request: NextRequest) {
 
   if (isInGroup(cleanPath, PROTECTED) && user === null) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = '/login';
+    redirectUrl.pathname = withLocale('/login', request.nextUrl.pathname);
     redirectUrl.searchParams.set('redirect', request.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
   }
 
   if (isInGroup(cleanPath, GUEST_ONLY) && user !== null) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = '/dashboard';
+    redirectUrl.pathname = withLocale('/dashboard', request.nextUrl.pathname);
     redirectUrl.search = '';
     return NextResponse.redirect(redirectUrl);
   }
