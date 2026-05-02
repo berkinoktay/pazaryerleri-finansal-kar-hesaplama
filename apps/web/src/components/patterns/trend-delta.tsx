@@ -23,6 +23,10 @@ export interface TrendDeltaProps extends React.HTMLAttributes<HTMLSpanElement> {
  * Displays a percentage delta with explicit sign, arrow icon, AND color —
  * all three channels so color-blind users still get the direction. Color
  * alone is never the sole signal of good/bad in a financial product.
+ * The `goodDirection` prop disambiguates the semantic meaning of "up":
+ * up is good for revenue/profit, down is good for refunds/cost.
+ *
+ * @useWhen labelling a period-over-period percent change next to a value (always set goodDirection so direction reads correctly for cost vs revenue metrics)
  */
 export function TrendDelta({
   value,

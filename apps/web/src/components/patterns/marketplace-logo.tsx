@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
  *   (1) SVGs are already smaller than any optimized raster would be;
  *   (2) next/image refuses to optimize SVG by default for security;
  *   (3) the files live under /public so cache-control is browser-managed.
+ *
+ * @useWhen rendering a marketplace brand wordmark (Trendyol, Hepsiburada) with vendor-correct color preserved through unoptimized SVG delivery
  */
 // Domain alias for the DB Platform enum — single source of truth in
 // @pazarsync/db. Keeps the existing import name in feature code while

@@ -124,7 +124,8 @@
       "name": "Currency",
       "path": "apps/web/src/components/patterns/currency.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "displaying a TRY monetary value anywhere in the product (always pass Decimal when available, never compute money in floats)"
     },
     {
       "name": "DataTable",
@@ -169,7 +170,8 @@
       "name": "EmptyState",
       "path": "apps/web/src/components/patterns/empty-state.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "filling a region that has genuinely no data with an icon, title, description, and a next-step action (always offer an action; empty without a next step is a dead end)"
     },
     {
       "name": "Form",
@@ -210,7 +212,8 @@
       "name": "KpiTile",
       "path": "apps/web/src/components/patterns/kpi-tile.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a single headline metric with optional period-delta and context line (compose into a StatGroup row for primary KPI strip)"
     },
     {
       "name": "Label",
@@ -223,7 +226,8 @@
       "name": "MarketplaceLogo",
       "path": "apps/web/src/components/patterns/marketplace-logo.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a marketplace brand wordmark (Trendyol, Hepsiburada) with vendor-correct color preserved through unoptimized SVG delivery"
     },
     {
       "name": "Menubar",
@@ -363,7 +367,8 @@
       "name": "StatGroup",
       "path": "apps/web/src/components/patterns/stat-group.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "wrapping a row of KpiTile siblings that should self-tile responsively without breakpoint ladders"
     },
     {
       "name": "SubNavList",
@@ -449,7 +454,8 @@
       "name": "TrendDelta",
       "path": "apps/web/src/components/patterns/trend-delta.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "labelling a period-over-period percent change next to a value (always set goodDirection so direction reads correctly for cost vs revenue metrics)"
     }
   ]
 }

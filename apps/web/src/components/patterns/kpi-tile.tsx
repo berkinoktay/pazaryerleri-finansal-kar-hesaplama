@@ -30,7 +30,10 @@ export interface KpiTileProps extends React.HTMLAttributes<HTMLDivElement> {
  * Canonical KPI tile. Value-first hierarchy: the number is the hero, label
  * reads as context above, delta + timestamp are quiet companions below.
  * Never painted in accent color — rare exception earns its color, not the
- * default. Use semantic chips (TrendDelta) for directional coloring.
+ * default. Use semantic chips (TrendDelta) for directional coloring. Pair
+ * with StatGroup for a row of equivalent metrics.
+ *
+ * @useWhen rendering a single headline metric with optional period-delta and context line (compose into a StatGroup row for primary KPI strip)
  */
 export function KpiTile({
   label,
