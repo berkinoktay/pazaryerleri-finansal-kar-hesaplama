@@ -17,6 +17,7 @@ import { BottomDockShowcase } from './bottom-dock-showcase';
 import { MoneyInputShowcase } from './money-input-showcase';
 import { NavGroupShowcase } from './nav-group-showcase';
 import { OrgStoreSwitcherShowcase } from './org-store-switcher-showcase';
+import { PercentageInputShowcase } from './percentage-input-showcase';
 import { ThemeToggleShowcase } from './theme-toggle-showcase';
 
 // Hoisted mock values — stable references so React Compiler doesn't complain
@@ -119,6 +120,13 @@ export default function PatternsShowcasePage(): React.ReactElement {
         description="₺ leading slot + tr-TR ayrıştırma. Yazarken serbest (ara giriş '1,' korunur), Decimal'a çevrilir, Currency display ile aynı kontratı paylaşır. nonNegative, invalid, custom symbol ve scale=0 (tam TRY) destekler."
       >
         <MoneyInputShowcase />
+      </Preview>
+
+      <Preview
+        title="PercentageInput"
+        description="MoneyInput'un kardeşi. % leading slot — Türkçe konvansiyonu '23,64%' değil '%23,64'. Aynı tr-TR parser, Decimal output. Komisyon, vergi, marj, indirim için. Sınır YOK varsayılan — komisyon %100'ü geçebilir, marj negatif olabilir."
+      >
+        <PercentageInputShowcase />
       </Preview>
 
       <Preview
