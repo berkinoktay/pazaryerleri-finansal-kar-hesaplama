@@ -1,221 +1,116 @@
-'use client';
+import {
+  ChartLineData01Icon,
+  DatabaseIcon,
+  Layout02Icon,
+  Pen01Icon,
+  Pulse01Icon,
+} from 'hugeicons-react';
 
-import Decimal from 'decimal.js';
-import { DatabaseIcon, ShoppingBag01Icon } from 'hugeicons-react';
-
-import { Currency } from '@/components/patterns/currency';
-import { EmptyState } from '@/components/patterns/empty-state';
-import { KpiTile } from '@/components/patterns/kpi-tile';
 import { PageHeader } from '@/components/patterns/page-header';
-import { StatGroup } from '@/components/patterns/stat-group';
-import { SyncBadge } from '@/components/patterns/sync-badge';
-import { TrendDelta } from '@/components/patterns/trend-delta';
-import { Preview } from '@/components/showcase/preview';
-import { Button } from '@/components/ui/button';
+import { PatternNav } from '@/components/showcase/pattern-nav';
+import { Link } from '@/i18n/navigation';
+import { cn } from '@/lib/utils';
 
-import { BottomDockShowcase } from './bottom-dock-showcase';
-import { MoneyInputShowcase } from './money-input-showcase';
-import { NavGroupShowcase } from './nav-group-showcase';
-import { OrgStoreSwitcherShowcase } from './org-store-switcher-showcase';
-import { PercentageInputShowcase } from './percentage-input-showcase';
-import { SearchInputShowcase } from './search-input-showcase';
-import { ThemeToggleShowcase } from './theme-toggle-showcase';
+interface CategoryCard {
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  count: number;
+  description: string;
+  components: string;
+}
 
-// Hoisted mock values — stable references so React Compiler doesn't complain
-// about `new Decimal(...)` / `new Date(...)` being called during render.
-// Use fixed ISO timestamps for sync dates: `Date.now()` at module scope
-// evaluates at different moments on server vs client in client components,
-// producing hydration mismatches when the absolute-time fallback straddles
-// a minute boundary. Relative labels computed after mount still read fine.
-const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
-const MOCK = {
-  revenue: new Decimal('284390.45'),
-  profit: new Decimal('48120.80'),
-  sampleAmount: new Decimal('1284.39'),
-  emphasisAmount: new Decimal('48120.80'),
-  negativeAmount: new Decimal('-248.15'),
-  headerAmount: new Decimal('120.00'),
-  syncFresh: new Date(MOCK_SYNC_REF.getTime() - 2 * 60 * 1000),
-  syncStale: new Date(MOCK_SYNC_REF.getTime() - 45 * 60 * 1000),
-  syncing: new Date(MOCK_SYNC_REF.getTime() - 30 * 1000),
-  syncFailed: new Date(MOCK_SYNC_REF.getTime() - 4 * 60 * 60 * 1000),
-  syncMeta: new Date(MOCK_SYNC_REF.getTime() - 4 * 60 * 1000),
-};
+const CATEGORIES: CategoryCard[] = [
+  {
+    href: '/design/patterns/display',
+    icon: ChartLineData01Icon,
+    label: 'Görsel & sayısal',
+    count: 7,
+    description:
+      'Veri-okuma yüzeyleri: KPI tile, sayı/yüzde delta, currency, badge stack, marketplace logosu, boş durum.',
+    components:
+      'KpiTile · StatGroup · TrendDelta · Currency · BadgeWithOverflow · MarketplaceLogo · EmptyState',
+  },
+  {
+    href: '/design/patterns/forms',
+    icon: Pen01Icon,
+    label: 'Form girdileri',
+    count: 4,
+    description:
+      'Veri girişi molekülleri. Hepsi Decimal / Date kontratı, locale-aware (tr-TR), display-buffer ile typing korunuyor.',
+    components: 'MoneyInput · PercentageInput · SearchInput · DateRangePicker',
+  },
+  {
+    href: '/design/patterns/status',
+    icon: Pulse01Icon,
+    label: 'Durum & sync',
+    count: 4,
+    description: 'Veri güncelliği, çalışan iş takibi, hata bildirimleri, ContextRail uyarıları.',
+    components: 'SyncBadge · SyncCenter · NotificationBell · RailWarningCard',
+  },
+  {
+    href: '/design/patterns/chrome',
+    icon: Layout02Icon,
+    label: 'Layout & gezinme',
+    count: 6,
+    description:
+      'Sayfa header, sidebar bileşenleri, switcher chip, tema anahtarı. Uygulama-seviyesi top bar yok.',
+    components:
+      'PageHeader · OrgStoreSwitcher · NavGroup · SubNavList · BottomDock · ThemeToggleInline',
+  },
+  {
+    href: '/design/data',
+    icon: DatabaseIcon,
+    label: 'Tablolar',
+    count: 2,
+    description:
+      'TanStack Table v8 wrapper + standart toolbar. Filtreleme, sıralama, seçim, kolon görünürlüğü, import/export, boş durum, yükleme iskeleti.',
+    components: 'DataTable · DataTableToolbar',
+  },
+];
 
-export default function PatternsShowcasePage(): React.ReactElement {
+export default function PatternsIndexPage(): React.ReactElement {
   return (
     <>
       <PageHeader
         title="Pattern katmanı"
-        intent="shadcn primitive'leri üstüne bindirilen PazarSync-özel finansal desenler. KPI, trend delta, currency, sync status gibi sıkça kullanılan yapılar."
+        intent="shadcn primitive'leri üstüne bindirilen PazarSync-özel finansal desenler. Kategoriye göre gruplandırılmış — her pattern'in tüm varyantları kendi sayfasında."
       />
+      <PatternNav />
 
-      <Preview
-        title="KPI Tile + StatGroup"
-        description="Değer-birinci hiyerarşi. Delta chip ikon + renk + işaret ile; renk asla tek sinyal değil."
-      >
-        <StatGroup>
-          <KpiTile
-            label="Ciro"
-            value={{ kind: 'currency', amount: MOCK.revenue }}
-            delta={{ percent: 12.4, goodDirection: 'up' }}
-            context="Dün: ₺252.980 · Trendyol Ana Mağaza"
-          />
-          <KpiTile
-            label="Net kar"
-            value={{ kind: 'currency', amount: MOCK.profit }}
-            delta={{ percent: 8.1, goodDirection: 'up' }}
-            context="Marj %16.9 · Nisan 2026"
-          />
-          <KpiTile
-            label="Sipariş"
-            value={{ kind: 'count', amount: 1472 }}
-            delta={{ percent: -3.2, goodDirection: 'up' }}
-            context="Nisan 1-17 · Bugün: 82"
-          />
-          <KpiTile
-            label="İade"
-            value={{ kind: 'count', amount: 38 }}
-            delta={{ percent: -14.2, goodDirection: 'down' }}
-            context="İade oranı %2.6"
-          />
-        </StatGroup>
-      </Preview>
-
-      <Preview
-        title="TrendDelta"
-        description="Ciro için yukarı iyi; iade için aşağı iyi. `goodDirection` ile anlamsal kontrol."
-      >
-        <div className="gap-md flex flex-wrap">
-          <TrendDelta value={12.4} goodDirection="up" />
-          <TrendDelta value={-3.2} goodDirection="up" />
-          <TrendDelta value={0} />
-          <TrendDelta value={14.2} goodDirection="down" />
-          <TrendDelta value={-6.1} goodDirection="down" />
-          <TrendDelta value={25} size="md" />
-        </div>
-      </Preview>
-
-      <Preview
-        title="Currency"
-        description="Decimal.js + Intl.NumberFormat tr-TR. Her zaman tabular-nums. Emphasis KPI hero için."
-      >
-        <div className="gap-sm text-muted-foreground flex flex-col font-mono text-sm">
-          <div>
-            <Currency value={MOCK.sampleAmount} /> (default)
-          </div>
-          <div>
-            <Currency value={MOCK.emphasisAmount} emphasis /> (emphasis)
-          </div>
-          <div>
-            <Currency value={0} dimWhenZero /> (zero — dimmed)
-          </div>
-          <div>
-            <Currency value={MOCK.negativeAmount} /> (negative)
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="MoneyInput"
-        description="₺ leading slot + tr-TR ayrıştırma. Yazarken serbest (ara giriş '1,' korunur), Decimal'a çevrilir, Currency display ile aynı kontratı paylaşır. nonNegative, invalid, custom symbol ve scale=0 (tam TRY) destekler."
-      >
-        <MoneyInputShowcase />
-      </Preview>
-
-      <Preview
-        title="PercentageInput"
-        description="MoneyInput'un kardeşi. % leading slot — Türkçe konvansiyonu '23,64%' değil '%23,64'. Aynı tr-TR parser, Decimal output. Komisyon, vergi, marj, indirim için. Sınır YOK varsayılan — komisyon %100'ü geçebilir, marj negatif olabilir."
-      >
-        <PercentageInputShowcase />
-      </Preview>
-
-      <Preview
-        title="SearchInput"
-        description="Konvansiyon wrapper'ı: Search ikonu + onClear butonu + lokalize placeholder ('Ara…'). Üç farklı feature elle aynı üçlüyü kuruyordu — WET+1 promotion. type='search', inputMode='search' otomatik."
-      >
-        <SearchInputShowcase />
-      </Preview>
-
-      <Preview
-        title="SyncBadge"
-        description="Verinin güncelliğini tek bakışta iletir. Timezone açık (GMT+3), kaynak pazaryeri görünür."
-      >
-        <div className="gap-xs flex flex-col">
-          <SyncBadge state="fresh" lastSyncedAt={MOCK.syncFresh} source="Trendyol" />
-          <SyncBadge state="stale" lastSyncedAt={MOCK.syncStale} source="Trendyol" />
-          <SyncBadge state="syncing" lastSyncedAt={MOCK.syncing} source="Trendyol" />
-          <SyncBadge state="failed" lastSyncedAt={MOCK.syncFailed} source="Hepsiburada" />
-        </div>
-      </Preview>
-
-      <Preview
-        title="PageHeader"
-        description="Sayfa başlık + intent + meta + aksiyonlar. Uygulama-seviyesi top bar yok."
-      >
-        <PageHeader
-          title="Sipariş mutabakatı"
-          intent="Nisan 2026 dönemi · Trendyol Ana Mağaza · Hakediş karşılığını sipariş bazında doğrula."
-          meta={<SyncBadge state="fresh" lastSyncedAt={MOCK.syncMeta} source="Trendyol" />}
-          actions={
-            <>
-              <Button variant="outline" size="sm">
-                Dışa aktar
-              </Button>
-              <Button size="sm">Mutabakatı başlat</Button>
-            </>
-          }
-        />
-      </Preview>
-
-      <Preview title="EmptyState">
-        <div className="gap-lg grid sm:grid-cols-2">
-          <EmptyState
-            icon={ShoppingBag01Icon}
-            title="Henüz sipariş yok"
-            description="Mağaza bağlandıktan sonra siparişler otomatik senkronize edilir."
-            action={<Button size="sm">Mağaza bağla</Button>}
-          />
-          <EmptyState
-            icon={DatabaseIcon}
-            title="Seçili döneme ait kayıt bulunamadı"
-            description="Tarih aralığını genişletmeyi veya filtreleri temizlemeyi dene."
-            action={
-              <Button variant="outline" size="sm">
-                Filtreleri temizle
-              </Button>
-            }
-          />
-        </div>
-      </Preview>
-
-      <Preview
-        title="BottomDock"
-        description="Tek-sidebar tasarımının altına oturan yardımcı küme. Destek / Ayarlar / Tema / Kullanıcı satırını barındırır. Yapısal olarak minimal — içeriği AppShell üzerinden enjekte edilir, pattern i18n-bağımsızdır."
-      >
-        <BottomDockShowcase />
-      </Preview>
-
-      <Preview
-        title="ThemeToggleInline"
-        description="Sidebar bottom dock için satır-içi tema anahtarı. Sun + Moon ikonları her iki render'da da DOM'da; `dark:` Tailwind varyantı görünürlüğü değiştirir. resolvedTheme yalnızca useIsMounted gate'inin arkasında okunur — SSR çıktısı ilk paint ile byte-eşit kalır."
-      >
-        <ThemeToggleShowcase />
-      </Preview>
-
-      <Preview
-        title="NavGroup"
-        description="Tek-sidebar tasarımında nested feature grupları için açılır-kapanır başlık. Animasyon `grid-template-rows: 0fr → 1fr` üzerinden — height transition'ları yasak (apps/web/CLAUDE.md motion guidance). İsteğe bağlı Yeni / Beta / count rozeti satır-içi."
-      >
-        <NavGroupShowcase />
-      </Preview>
-
-      <Preview
-        title="OrgStoreSwitcher"
-        description="Tek-sidebar başlığındaki birleşik org+mağaza chip'i. 32px renk paletli avatar + sağ-alt platform rozeti + sol-üst sync nabzı. Açılır panel cmdk fuzzy search, role badge'leri ve aktif duruma göre check işareti gösterir. orgs=[] olduğunda + Yeni Organizasyon Oluştur / Davet Kodum Var CTA'larıyla boş duruma düşer. Daraltılmış sidebar modunda yalnızca avatar + rozet kalır."
-      >
-        <OrgStoreSwitcherShowcase />
-      </Preview>
+      <div className="gap-md grid sm:grid-cols-2">
+        {CATEGORIES.map((cat) => (
+          <Link
+            key={cat.href}
+            href={cat.href}
+            className={cn(
+              'group border-border bg-card p-lg gap-md rounded-lg border shadow-xs',
+              'duration-fast hover:border-border-strong flex flex-col transition-all hover:shadow-sm',
+              'focus-visible:outline-none',
+            )}
+          >
+            <div className="gap-sm flex items-start">
+              <div className="size-icon-xl bg-muted text-foreground flex shrink-0 items-center justify-center rounded-md">
+                <cat.icon className="size-icon" />
+              </div>
+              <div className="gap-3xs flex flex-1 flex-col">
+                <div className="gap-xs flex items-baseline">
+                  <h3 className="text-foreground text-md font-semibold tracking-tight">
+                    {cat.label}
+                  </h3>
+                  <span className="text-2xs text-muted-foreground tabular-nums">
+                    {cat.count} pattern
+                  </span>
+                </div>
+                <p className="text-muted-foreground text-sm leading-snug">{cat.description}</p>
+              </div>
+            </div>
+            <p className="text-2xs text-muted-foreground border-border pt-sm border-t font-mono leading-relaxed">
+              {cat.components}
+            </p>
+          </Link>
+        ))}
+      </div>
     </>
   );
 }
