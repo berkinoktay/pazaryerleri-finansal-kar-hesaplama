@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 75,
+  "count": 76,
   "components": [
     {
       "name": "Accordion",
@@ -435,6 +435,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "marking inline status with just a colored dot (use Badge when the dot needs an inline label, SyncBadge for the canonical sync-state surface)"
+    },
+    {
+      "name": "Stepper",
+      "path": "apps/web/src/components/patterns/stepper.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing progress through a discrete multi-step flow where users benefit from a per-step status (use Progress for a single continuous bar, Tabs for non-sequential navigation between sibling sections)"
     },
     {
       "name": "SubNavList",
