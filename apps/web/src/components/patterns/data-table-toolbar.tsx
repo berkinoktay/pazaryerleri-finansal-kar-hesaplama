@@ -9,6 +9,7 @@ import {
   UploadSquare02Icon,
   ViewIcon,
 } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -26,10 +27,11 @@ export interface DataTableToolbarProps<TData> {
   table: Table<TData>;
   /** Column id to filter via the search input. */
   searchColumn?: string;
+  /** Override the localized default placeholder if a feature needs custom copy. */
   searchPlaceholder?: string;
-  /** Handler invoked when the user clicks "İçe aktar". */
+  /** Handler invoked when the user clicks the import button. */
   onImport?: () => void;
-  /** Handler invoked when the user clicks "Dışa aktar". */
+  /** Handler invoked when the user clicks the export button. */
   onExport?: (rows: TData[]) => void;
   /** Slot for faceted filter popovers (multi-select chips). */
   facets?: React.ReactNode;
@@ -39,16 +41,21 @@ export interface DataTableToolbarProps<TData> {
  * Standard toolbar mounted above a DataTable: search, faceted filters,
  * column visibility, and import/export controls. Emits handlers rather
  * than implementing CSV/XLSX serialization here — each feature page
- * decides what shape to serialize (order lines vs flat rows).
+ * decides what shape to serialize (order lines vs flat rows). All copy
+ * (search placeholder, clear / import / export labels, column-visibility
+ * menu) reads from `t('common.dataTable.toolbar.*')`.
+ *
+ * @useWhen mounting the standard toolbar above a DataTable for search, faceted filters, column visibility, and import/export
  */
 export function DataTableToolbar<TData>({
   table,
   searchColumn,
-  searchPlaceholder = 'Ara…',
+  searchPlaceholder,
   onImport,
   onExport,
   facets,
 }: DataTableToolbarProps<TData>): React.ReactElement {
+  const t = useTranslations('common.dataTable.toolbar');
   const isFiltered = table.getState().columnFilters.length > 0;
   const searchValue = searchColumn
     ? ((table.getColumn(searchColumn)?.getFilterValue() as string | undefined) ?? '')
@@ -65,7 +72,7 @@ export function DataTableToolbar<TData>({
               onChange={(event) =>
                 table.getColumn(searchColumn)?.setFilterValue(event.target.value)
               }
-              placeholder={searchPlaceholder}
+              placeholder={searchPlaceholder ?? t('searchPlaceholder')}
               className="pl-2xl"
             />
           </div>
@@ -73,7 +80,7 @@ export function DataTableToolbar<TData>({
         {facets}
         {isFiltered ? (
           <Button variant="ghost" size="sm" onClick={() => table.resetColumnFilters()}>
-            Temizle
+            {t('clear')}
             <Cancel01Icon className="ml-3xs size-icon-xs" />
           </Button>
         ) : null}
@@ -82,7 +89,7 @@ export function DataTableToolbar<TData>({
         {onImport ? (
           <Button variant="outline" size="sm" onClick={onImport}>
             <UploadSquare02Icon className="size-icon-sm" />
-            İçe aktar
+            {t('import')}
           </Button>
         ) : null}
         {onExport ? (
@@ -92,17 +99,17 @@ export function DataTableToolbar<TData>({
             onClick={() => onExport(table.getFilteredRowModel().rows.map((row) => row.original))}
           >
             <DownloadSquare02Icon className="size-icon-sm" />
-            Dışa aktar
+            {t('export')}
           </Button>
         ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon-sm" aria-label="Kolonları düzenle">
+            <Button variant="outline" size="icon-sm" aria-label={t('toggleColumns')}>
               <ViewIcon className="size-icon-sm" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Görünür kolonlar</DropdownMenuLabel>
+            <DropdownMenuLabel>{t('visibleColumns')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             {table
               .getAllColumns()

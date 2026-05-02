@@ -23,6 +23,23 @@
       "previousMonth": "Previous month",
       "nextMonth": "Next month"
     },
+    "dateRangePicker": {
+      "placeholder": "Pick a date range"
+    },
+    "dataTable": {
+      "empty": {
+        "title": "No records to display",
+        "description": "Clear the filters or refresh the sync."
+      },
+      "toolbar": {
+        "searchPlaceholder": "Search…",
+        "clear": "Clear",
+        "import": "Import",
+        "export": "Export",
+        "toggleColumns": "Toggle columns",
+        "visibleColumns": "Visible columns"
+      }
+    },
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} syncs running",

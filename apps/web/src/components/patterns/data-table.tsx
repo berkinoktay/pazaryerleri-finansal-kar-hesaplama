@@ -18,6 +18,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { ArrowDown01Icon, ArrowUp01Icon, SortingDownIcon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -64,12 +65,15 @@ export interface DataTableProps<TData, TValue> {
  * Thin wrapper over TanStack Table v8 with shadcn-style primitives and
  * PazarSync tokens. Opinionated defaults: sticky header, hover affordance,
  * sortable columns surface an icon, numeric columns (data-numeric=true on
- * header/cell) right-align via CSS.
+ * header/cell) right-align via CSS. Pair with DataTableToolbar above for
+ * the canonical search + filter + import/export + column-visibility row.
  *
  * Scope of this initial version: client-side sort/filter/select. Server-side
  * pagination + virtualization are implementation concerns wired per-feature
  * (orders page, settlements page) rather than baked in here — each feature
  * has different pagination semantics.
+ *
+ * @useWhen rendering a sortable, filterable, optionally selectable or expandable data table (pair with DataTableToolbar for the standard top row)
  */
 export function DataTable<TData, TValue>({
   columns,
@@ -82,6 +86,7 @@ export function DataTable<TData, TValue>({
   getRowCanExpand,
   renderSubComponent,
 }: DataTableProps<TData, TValue>): React.ReactElement {
+  const t = useTranslations('common.dataTable.empty');
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
@@ -170,8 +175,8 @@ export function DataTable<TData, TValue>({
                 <TableCell colSpan={columns.length} className="p-0">
                   {empty ?? (
                     <EmptyState
-                      title="Gösterilecek kayıt yok"
-                      description="Filtreleri temizleyin veya senkronizasyonu yenileyin."
+                      title={t('title')}
+                      description={t('description')}
                       className="border-0"
                     />
                   )}

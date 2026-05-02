@@ -131,6 +131,8 @@ function splitRecent(orgs: Organization[]): OrgListSplit {
  * header doesn't dominate the panel — the previous shadcn default
  * (h-11 text-sm) was sized for full-page command palettes, not this
  * compact 384px dropdown.
+ *
+ * @useWhen rendering the inner picker body for OrgStoreSwitcher (recent / all / stores sections, role badges, search, highlighting) — this is OrgStoreSwitcher's render delegate, not a standalone primitive
  */
 export function OrgStoreSwitcherList({
   orgs,
