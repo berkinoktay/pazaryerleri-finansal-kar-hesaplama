@@ -1,7 +1,5 @@
 'use client';
 
-import Decimal from 'decimal.js';
-
 import { PageHeader } from '@/components/patterns/page-header';
 import { SubNavList } from '@/components/patterns/sub-nav-list';
 import { SyncBadge } from '@/components/patterns/sync-badge';
@@ -13,8 +11,6 @@ import { BottomDockShowcase } from '../bottom-dock-showcase';
 import { NavGroupShowcase } from '../nav-group-showcase';
 import { OrgStoreSwitcherShowcase } from '../org-store-switcher-showcase';
 import { ThemeToggleShowcase } from '../theme-toggle-showcase';
-
-void Decimal; // (kept for future preview blocks that compose pricing)
 
 const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
 const MOCK = {
@@ -65,14 +61,14 @@ export default function ChromePatternsPage(): React.ReactElement {
 
       <Preview
         title="SubNavList"
-        description="ContextRail orta slot'u için ikincil gezinme listesi. Aktif satır `bg-accent text-primary` — IconRail nav active state'iyle eşleşir. Opsiyonel count badge tone-driven (warning / info)."
+        description="ContextRail orta slot'u için ikincil gezinme listesi. Aktif satır `bg-accent text-primary` — IconRail nav active state'iyle eşleşir. Opsiyonel count badge tone-driven (warning / info / default)."
       >
         <SubNavListPreview />
       </Preview>
 
       <Preview
         title="BottomDock"
-        description="Sidebar'ın altına oturan yardımcı küme. Destek / Ayarlar / Tema / Kullanıcı satırını barındırır. Yapısal olarak minimal — içeriği AppShell üzerinden enjekte edilir, pattern i18n-bağımsızdır."
+        description="Sidebar'ın altına oturan yardımcı küme. Yenilikler / Destek / Ayarlar yardımcı linkleri ve kullanıcı satırını barındırır. Yapısal olarak minimal — içeriği AppShell üzerinden enjekte edilir, pattern i18n-bağımsızdır."
       >
         <BottomDockShowcase />
       </Preview>
@@ -87,37 +83,43 @@ export default function ChromePatternsPage(): React.ReactElement {
   );
 }
 
+/**
+ * Use real `nav.*` message keys (the same ones the production AppShell
+ * consumes) so the labels read as actual app navigation rather than
+ * placeholder strings. Counts pulled from typical Acme A.Ş. dashboard
+ * snapshot — realistic order / pending / shipped / returns split.
+ */
 function SubNavListPreview(): React.ReactElement {
   return (
-    <div className="border-border bg-card rounded-md border p-3" style={{ width: 240 }}>
+    <div className="border-border bg-card p-sm w-rail-context rounded-md border">
       <SubNavList
-        currentHref="/dashboard/orders/pending"
+        currentHref="/dashboard/orders"
         items={[
           {
-            key: 'all',
-            labelKey: 'common.appName',
+            key: 'orders',
+            labelKey: 'nav.orders',
             href: '/dashboard/orders',
             count: 1472,
             tone: 'default',
           },
           {
-            key: 'pending',
-            labelKey: 'common.appName',
-            href: '/dashboard/orders/pending',
+            key: 'reconciliation',
+            labelKey: 'nav.reconciliation',
+            href: '/dashboard/reconciliation',
             count: 5,
             tone: 'warning',
           },
           {
-            key: 'shipped',
-            labelKey: 'common.appName',
-            href: '/dashboard/orders/shipped',
+            key: 'products',
+            labelKey: 'nav.products',
+            href: '/dashboard/products',
             count: 1320,
             tone: 'default',
           },
           {
-            key: 'returns',
-            labelKey: 'common.appName',
-            href: '/dashboard/orders/returns',
+            key: 'expenses',
+            labelKey: 'nav.expenses',
+            href: '/dashboard/expenses',
             count: 38,
             tone: 'info',
           },
