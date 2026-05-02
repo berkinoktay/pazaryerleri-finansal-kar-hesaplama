@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 
+import { Banner } from '@/components/patterns/banner';
 import { NotificationBell, type NotificationEntry } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
 import { RailWarningCard } from '@/components/patterns/rail-warning-card';
@@ -10,6 +11,7 @@ import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-cente
 import { PatternNav } from '@/components/showcase/pattern-nav';
 import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
+import { Link } from '@/i18n/navigation';
 
 const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
 const MOCK = {
@@ -143,6 +145,60 @@ export default function StatusPatternsPage(): React.ReactElement {
           <span className="text-2xs text-muted-foreground">
             Soldan: 3 unread · 12 (clamp 9+) · 0 (boş popover)
           </span>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Banner"
+        description="Uygulama-spanning sistem mesajı. AppShell'in en üstünde, Sidebar header'ının üstünde yaşar — bakım pencereleri, ödeme gecikmesi, planlı kesinti, çoklu-gün incident'lar. Alert (sayfa-içi) ve Toast (geçici) ile farkı: 'çözülene kadar her ekranı etkiler'. Az kullan — daima orada olan banner kör nokta haline gelir."
+      >
+        <div className="border-border gap-3xs flex flex-col overflow-hidden rounded-md border">
+          <Banner
+            tone="info"
+            title="Bakım penceresi"
+            description="2 Mayıs 03:00 – 03:30 UTC arası kısa kesinti olabilir."
+            action={
+              <Link
+                href="#"
+                className="text-info hover:bg-info-surface px-xs py-3xs text-2xs rounded-xs font-medium underline-offset-4 hover:underline"
+              >
+                Detay
+              </Link>
+            }
+            onDismiss={() => undefined}
+          />
+          <Banner
+            tone="warning"
+            title="Ödeme yöntemin yakında dolacak"
+            description="VISA •••• 4242 son kullanma 06/2026."
+            action={
+              <Link
+                href="#"
+                className="text-warning hover:bg-warning-surface px-xs py-3xs text-2xs rounded-xs font-medium underline-offset-4 hover:underline"
+              >
+                Faturalama ayarları
+              </Link>
+            }
+          />
+          <Banner
+            tone="destructive"
+            title="Trendyol API'sine ulaşılamıyor"
+            description="Sipariş senkronizasyonu duraklatıldı. Servis durumu güncellemeleri için status sayfasını izle."
+            action={
+              <Link
+                href="#"
+                className="text-destructive hover:bg-destructive-surface px-xs py-3xs text-2xs rounded-xs font-medium underline-offset-4 hover:underline"
+              >
+                Status sayfası
+              </Link>
+            }
+          />
+          <Banner
+            tone="success"
+            title="Aprilik faturalandırma tamamlandı"
+            description="Tüm mağazaların hakediş raporları hazır."
+            onDismiss={() => undefined}
+          />
         </div>
       </Preview>
 
