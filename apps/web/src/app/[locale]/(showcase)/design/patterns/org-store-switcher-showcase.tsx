@@ -69,10 +69,7 @@ export function OrgStoreSwitcherShowcase(): React.ReactElement {
         <span className="text-muted-foreground text-2xs font-semibold tracking-wide uppercase">
           Genişletilmiş (sidebar başlığı)
         </span>
-        <div
-          className="border-border bg-card p-md rounded-md border"
-          style={{ width: 240 /* runtime-dynamic: framing demo container width */ }}
-        >
+        <div className="border-border bg-card p-md w-rail-context rounded-md border">
           <OrgStoreSwitcher
             orgs={SHOWCASE_ORGS}
             stores={SHOWCASE_STORES}
@@ -88,9 +85,18 @@ export function OrgStoreSwitcherShowcase(): React.ReactElement {
         <span className="text-muted-foreground text-2xs font-semibold tracking-wide uppercase">
           Daraltılmış (collapsed sidebar)
         </span>
+        {/*
+          Frame width = collapsed sidebar inner column. The production
+          AppShell renders the IconRail at `--size-rail-icon` (48px) plus
+          a 4px outer padding on each side; 56px replicates that exact
+          framing so `collapsed` mode previews at its real dimensions.
+          Token would be over-specific (one consumer, one screen) — kept
+          inline with an explicit "showcase frame" comment.
+        */}
         <div
           className="border-border bg-card p-sm rounded-md border"
-          style={{ width: 56 /* runtime-dynamic: collapsed sidebar width frame */ }}
+          // showcase frame: 48px icon-rail + 4px×2 outer padding
+          style={{ width: '3.5rem' }}
         >
           <OrgStoreSwitcher
             orgs={SHOWCASE_ORGS}
@@ -108,10 +114,7 @@ export function OrgStoreSwitcherShowcase(): React.ReactElement {
         <span className="text-muted-foreground text-2xs font-semibold tracking-wide uppercase">
           Boş durum (henüz organizasyon yok)
         </span>
-        <div
-          className="border-border bg-card p-md rounded-md border"
-          style={{ width: 240 /* runtime-dynamic: framing demo container width */ }}
-        >
+        <div className="border-border bg-card p-md w-rail-context rounded-md border">
           <OrgStoreSwitcher
             orgs={[]}
             stores={[]}
