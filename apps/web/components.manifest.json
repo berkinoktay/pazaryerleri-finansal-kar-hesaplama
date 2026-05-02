@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 71,
+  "count": 72,
   "components": [
     {
       "name": "Accordion",
@@ -190,6 +190,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "showing a hover-triggered preview card with rich content (use Tooltip for short hint text, Popover for click-triggered panels)"
+    },
+    {
+      "name": "InlineEdit",
+      "path": "apps/web/src/components/patterns/inline-edit.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "letting the user edit a single value (cost, store name, commission rate) without leaving the row — preferred over a modal for one-off changes"
     },
     {
       "name": "Input",

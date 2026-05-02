@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { PatternNav } from '@/components/showcase/pattern-nav';
 import { Preview } from '@/components/showcase/preview';
 
+import { InlineEditShowcase } from '../inline-edit-showcase';
 import { MoneyInputShowcase } from '../money-input-showcase';
 import { PercentageInputShowcase } from '../percentage-input-showcase';
 import { SearchInputShowcase } from '../search-input-showcase';
@@ -45,6 +46,13 @@ export default function FormsPatternsPage(): React.ReactElement {
         description="Konvansiyon wrapper'ı: Search ikonu + onClear butonu + lokalize placeholder ('Ara…'). Üç farklı feature elle aynı üçlüyü kuruyordu — WET+1 promotion. type='search', inputMode='search' otomatik."
       >
         <SearchInputShowcase />
+      </Preview>
+
+      <Preview
+        title="InlineEdit"
+        description="Tıkla-düzenle pattern'ı. Modal yerine bağlam korunur. Generic value/onCommit + opsiyonel renderDisplay (Currency, formatted span) + renderEdit (MoneyInput, PercentageInput vs.). Enter commit, Esc iptal, blur=commit (commitOnBlur=false ile cancel)."
+      >
+        <InlineEditShowcase />
       </Preview>
 
       <Preview
