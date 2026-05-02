@@ -132,19 +132,22 @@
       "name": "DataTable",
       "path": "apps/web/src/components/patterns/data-table.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering a sortable, filterable, optionally selectable or expandable data table (pair with DataTableToolbar for the standard top row)"
     },
     {
       "name": "DataTableToolbar",
       "path": "apps/web/src/components/patterns/data-table-toolbar.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "mounting the standard toolbar above a DataTable for search, faceted filters, column visibility, and import/export"
     },
     {
       "name": "DateRangePicker",
       "path": "apps/web/src/components/patterns/date-range-picker.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "presenting a popover-anchored date-range input on screens that scope data to a period (use raw Calendar for inline grids, future DateInput for single-date selection)"
     },
     {
       "name": "Dialog",
@@ -262,13 +265,15 @@
       "name": "OrgStoreSwitcher",
       "path": "apps/web/src/components/patterns/org-store-switcher.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "mounting the primary tenant context chip in the sidebar (combined org + store identity, ⌘O hotkey, sync-warning border, popover with full picker)"
     },
     {
       "name": "OrgStoreSwitcherList",
       "path": "apps/web/src/components/patterns/org-store-switcher-list.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "rendering the inner picker body for OrgStoreSwitcher (recent / all / stores sections, role badges, search, highlighting) — this is OrgStoreSwitcher's render delegate, not a standalone primitive"
     },
     {
       "name": "PageHeader",
@@ -400,7 +405,8 @@
       "name": "SyncCenter",
       "path": "apps/web/src/components/patterns/sync-center.tsx",
       "category": "molecule",
-      "status": "stable"
+      "status": "stable",
+      "useWhen": "surfacing live sync progress and recent history in a right-side sheet, with cross-store grouping when the logs span 2+ stores (entry point is SyncBadge with onClick)"
     },
     {
       "name": "Table",

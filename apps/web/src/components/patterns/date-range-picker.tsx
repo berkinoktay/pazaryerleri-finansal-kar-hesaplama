@@ -1,6 +1,7 @@
 'use client';
 
 import { Calendar01Icon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import type { DateRange } from 'react-day-picker';
 import { format } from 'date-fns';
@@ -14,6 +15,7 @@ import { cn } from '@/lib/utils';
 export interface DateRangePickerProps {
   value?: DateRange;
   onChange?: (range: DateRange | undefined) => void;
+  /** Override the localized default placeholder when a screen needs custom copy. */
   placeholder?: string;
   align?: 'start' | 'center' | 'end';
   className?: string;
@@ -26,14 +28,18 @@ export interface DateRangePickerProps {
  * Formats with tr-TR locale, uses the shared Calendar primitive for
  * selection, and renders the trigger as a text-mode button so it looks
  * like an input. Selecting a complete range auto-closes the popover.
+ * Default placeholder reads from `t('common.dateRangePicker.placeholder')`.
+ *
+ * @useWhen presenting a popover-anchored date-range input on screens that scope data to a period (use raw Calendar for inline grids, future DateInput for single-date selection)
  */
 export function DateRangePicker({
   value,
   onChange,
-  placeholder = 'Tarih aralığı seç',
+  placeholder,
   align = 'start',
   className,
 }: DateRangePickerProps): React.ReactElement {
+  const t = useTranslations('common.dateRangePicker');
   const [open, setOpen] = React.useState(false);
   const label = formatRange(value);
 
@@ -50,7 +56,7 @@ export function DateRangePicker({
           )}
         >
           <Calendar01Icon className="size-icon-sm" />
-          {label ?? placeholder}
+          {label ?? placeholder ?? t('placeholder')}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align={align}>

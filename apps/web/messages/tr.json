@@ -23,6 +23,23 @@
       "previousMonth": "Önceki ay",
       "nextMonth": "Sonraki ay"
     },
+    "dateRangePicker": {
+      "placeholder": "Tarih aralığı seç"
+    },
+    "dataTable": {
+      "empty": {
+        "title": "Gösterilecek kayıt yok",
+        "description": "Filtreleri temizleyin veya senkronizasyonu yenileyin."
+      },
+      "toolbar": {
+        "searchPlaceholder": "Ara…",
+        "clear": "Temizle",
+        "import": "İçe aktar",
+        "export": "Dışa aktar",
+        "toggleColumns": "Kolonları düzenle",
+        "visibleColumns": "Görünür kolonlar"
+      }
+    },
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} senkronizasyon çalışıyor",

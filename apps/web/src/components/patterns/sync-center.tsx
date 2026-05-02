@@ -136,6 +136,8 @@ export interface SyncCenterProps {
  *
  * Cross-feature (orders/settlements will reuse) so it lives in
  * components/patterns/ rather than features/products/components/.
+ *
+ * @useWhen surfacing live sync progress and recent history in a right-side sheet, with cross-store grouping when the logs span 2+ stores (entry point is SyncBadge with onClick)
  */
 export function SyncCenter({
   open,

@@ -116,6 +116,8 @@ const MULTI_ORG_INDICATOR_THRESHOLD = 3;
  *     the warning at the sidebar level.
  *   - **Multi-org +N indicator** — collapsed avatar's bottom-left
  *     shows "+N" when the user belongs to 3+ orgs.
+ *
+ * @useWhen mounting the primary tenant context chip in the sidebar (combined org + store identity, ⌘O hotkey, sync-warning border, popover with full picker)
  */
 export function OrgStoreSwitcher({
   orgs,
