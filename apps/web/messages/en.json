@@ -29,6 +29,11 @@
     "dateInput": {
       "placeholder": "Pick a date"
     },
+    "combobox": {
+      "placeholder": "Select…",
+      "searchPlaceholder": "Search…",
+      "empty": "No results"
+    },
     "dataTable": {
       "empty": {
         "title": "No records to display",

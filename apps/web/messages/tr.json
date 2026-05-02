@@ -29,6 +29,11 @@
     "dateInput": {
       "placeholder": "Tarih seç"
     },
+    "combobox": {
+      "placeholder": "Seçim yap…",
+      "searchPlaceholder": "Ara…",
+      "empty": "Sonuç bulunamadı"
+    },
     "dataTable": {
       "empty": {
         "title": "Gösterilecek kayıt yok",
