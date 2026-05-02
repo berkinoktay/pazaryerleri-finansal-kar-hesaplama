@@ -75,6 +75,8 @@ export interface SyncBadgeProps extends Omit<React.HTMLAttributes<HTMLSpanElemen
  * Org-wide multi-sync mode is opt-in via `activeCount`: omit it for the
  * legacy single-sync surface; pass it when the caller is aggregating
  * across stores (e.g. dashboard SyncBadge fed by `useOrgSyncs()`).
+ *
+ * @useWhen surfacing data freshness (last-synced-at + state) on a page where the data may be stale, with optional click-to-open SyncCenter
  */
 export function SyncBadge({
   lastSyncedAt,

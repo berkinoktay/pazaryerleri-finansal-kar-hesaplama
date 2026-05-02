@@ -33,6 +33,10 @@ const TONE = {
  * Slim warning card for the ContextRail middle. Conditional —
  * only render when there's an actionable issue (eksik maliyet,
  * sync hatası, vb.). Optional CTA links to the page that resolves it.
+ * For full-width page-level alerts use Alert; for app-spanning system
+ * messages use the future Banner molecule.
+ *
+ * @useWhen surfacing an actionable issue inline in the ContextRail (use Alert for page-width inline messages, future Banner for app-spanning system messages)
  */
 export function RailWarningCard({
   title,

@@ -44,6 +44,11 @@ export interface NotificationBellProps {
 /**
  * Bell trigger + Popover with last entries. Lives in PageHeader.actions.
  * Replaces the deprecated ActivityRail. Full history is at /notifications.
+ * The unread count badge clamps to "9+" past 9 to keep the bell glyph
+ * legible; the popover shows the most recent 5 entries with a "see all"
+ * link to the full feed page.
+ *
+ * @useWhen mounting a global notification surface in PageHeader.actions for high-frequency events (sync results, alerts) — full history lives at /notifications
  */
 export function NotificationBell({
   entries,

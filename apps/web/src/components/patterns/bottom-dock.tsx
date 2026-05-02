@@ -17,6 +17,8 @@ export interface BottomDockProps {
  * SidebarMenuButtons sit flush in the 48px column. Inner items
  * already collapse via `group-data-[collapsible=icon]` on their own
  * primitives — the dock just provides the right outer chrome.
+ *
+ * @useWhen anchoring sticky utility links (support, settings, theme toggle, user row) to the bottom of the sidebar
  */
 export function BottomDock({ children, className }: BottomDockProps): React.ReactElement {
   return (

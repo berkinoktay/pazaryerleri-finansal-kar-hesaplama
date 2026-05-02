@@ -36,6 +36,10 @@ const TONE_CLASS: Record<SubNavTone, string> = {
  * Generic sub-navigation list with optional count badges and tone hints.
  * Designed for the ContextRail middle slot — slim, vertical, active item
  * painted in `bg-accent text-primary` (matches IconRail nav active state).
+ * For sub-routes nested under a primary sidebar nav row, use `NavGroup`
+ * children instead — this pattern is for the secondary rail context.
+ *
+ * @useWhen rendering a vertical secondary navigation list in the ContextRail (use NavGroup children for sub-routes nested under a primary sidebar row)
  */
 export function SubNavList({
   headingKey,

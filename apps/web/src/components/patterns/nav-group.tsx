@@ -58,6 +58,8 @@ const BADGE_TONE: Record<NavItemBadge['variant'], NonNullable<BadgeProps['tone']
  *
  * Tooltip in icon mode: `SidebarMenuButton` already wires Radix Tooltip
  * via its `tooltip` prop — no manual TooltipProvider needed.
+ *
+ * @useWhen rendering a primary sidebar nav row that has children (sub-routes) and should both navigate and reveal the sub-list on click
  */
 export function NavGroup({
   label,

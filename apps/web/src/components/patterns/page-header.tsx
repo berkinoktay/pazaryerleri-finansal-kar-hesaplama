@@ -19,7 +19,12 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
 /**
  * Inline page header — no separate app-wide header bar exists in the
  * three-column layout. Each page owns its own header so context (store,
- * period, last sync) lives next to the content it describes.
+ * period, last sync) lives next to the content it describes. The `intent`
+ * prop is for one-line context (period, scope, store) — never restate
+ * the title; sidebar already shows the current section. Slot the SyncBadge
+ * into `meta` so freshness sits inline with the header it describes.
+ *
+ * @useWhen anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb / store chip), trailing actions, and meta row (typically SyncBadge)
  */
 export function PageHeader({
   title,
