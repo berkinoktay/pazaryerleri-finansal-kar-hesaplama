@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { Preview } from '@/components/showcase/preview';
 
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
+import { DataTableExpandableRowsShowcase } from '../patterns/data-table-expandable-rows-showcase';
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
 import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
 import { DataTableRowClickShowcase } from '../patterns/data-table-row-click-showcase';
@@ -212,6 +213,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="`sorting` + `onSortingChange`, `columnFilters` + `onColumnFiltersChange`, `paginationState` + `onPaginationChange` + `pageCount` + `rowCount` props verildiğinde DataTable kendi tarafında compute etmeyi bırakır — manualSorting / manualFiltering / manualPagination otomatik aktif olur. Caller state'i lift eder, API'ye forward eder, gelen slice'ı `data` olarak besler. UI birebir aynı; sadece kim hesaplıyor değişiyor. PR 4'ün columnPinning idiomu üç axis'e daha yayıldı."
       >
         <DataTableServerModeShowcase />
+      </Preview>
+
+      <Preview
+        title="Genişleyebilen satırlar (expandable rows)"
+        description="`getRowCanExpand` koşulu sağlayan satırlar chevron buttonu render eder — tıklandığında `renderSubComponent` döner ve altında inline genişler. Tek kalemli siparişler chevron almaz; doldurucu boş slot ile dikey hizalama korunur. TanStack `getExpandedRowModel` zaten DataTable'da wired — yeni API yok, sadece propslar. Sipariş kalemleri, varyant satırları, log entry detayları için kanonik."
+      >
+        <DataTableExpandableRowsShowcase />
       </Preview>
     </>
   );
