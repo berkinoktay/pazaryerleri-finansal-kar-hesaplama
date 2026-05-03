@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 85,
+  "count": 86,
   "components": [
     {
       "name": "Accordion",
@@ -386,6 +386,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "presenting a click-triggered anchored panel for a short interaction (use HoverCard for hover previews, Tooltip for hint text, Sheet for full panels)"
+    },
+    {
+      "name": "ProfitCell",
+      "path": "apps/web/src/components/patterns/profit-cell.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a Currency value paired with a TrendDelta chip in a table cell or row summary (use KpiTile for the standalone hero, Currency alone when there is no trend)"
     },
     {
       "name": "Progress",
