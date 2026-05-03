@@ -182,6 +182,9 @@
   --spacing-modal: var(--size-modal);
   --spacing-dropdown-popover: var(--size-dropdown-popover);
   --spacing-pagesize-select: var(--size-pagesize-select);
+  --spacing-thumb-sm: var(--size-thumb-sm);
+  --spacing-thumb-md: var(--size-thumb-md);
+  --spacing-thumb-lg: var(--size-thumb-lg);
   --spacing-headline: var(--size-headline);
 
   /* Radius */

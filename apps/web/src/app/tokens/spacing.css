@@ -30,6 +30,14 @@
   --size-icon-lg: 20px;
   --size-icon-xl: 24px;
 
+  /* Thumbnail sizes for ImageCell — square footprints used inside table
+   * cells and list rows. sm fits dense tables (32px), md is the default
+   * for product / customer rows (40px), lg is for header avatars or
+   * spotlight cards (56px). */
+  --size-thumb-sm: 32px;
+  --size-thumb-md: 40px;
+  --size-thumb-lg: 56px;
+
   --size-rail-icon: 48px;
   --size-rail-context: 240px;
   --size-settings-aside: 200px;
