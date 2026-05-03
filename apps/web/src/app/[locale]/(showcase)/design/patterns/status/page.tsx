@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 
 import { StepperShowcase } from '../stepper-showcase';
+import { WizardShowcase } from '../wizard-showcase';
 
 const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
 const MOCK = {
@@ -206,9 +207,16 @@ export default function StatusPatternsPage(): React.ReactElement {
 
       <Preview
         title="Stepper"
-        description="Çok adımlı akışta nerede olduğunu gösterir. Per-step state — completed (yeşil tik), current (vurgulu numara), upcoming (muted), error (X). Yatay = wizard üstü; dikey = kontekst rail / sidebar. Wizard organism (henüz yok) bu Stepper'ı içerik panesi ile birleştirecek."
+        description="Çok adımlı akışta nerede olduğunu gösterir. Per-step state — completed (yeşil tik), current (vurgulu numara), upcoming (muted), error (X). Yatay = wizard üstü; dikey = kontekst rail / sidebar. Wizard organism bu Stepper'ı içerik panesi + Back/Next footer ile birleştirir."
       >
         <StepperShowcase />
+      </Preview>
+
+      <Preview
+        title="Wizard"
+        description="Çok-adımlı akış kabuğu. Stepper (üst) + içerik panesi + Back/Next footer. Controlled cursor — caller current'ı sahipler, URL/searchparam ile kalıcılaştırılabilir. Per-step canAdvance (Next disable), nextLabel (per-step copy), onAdvance (async — verify gibi) destekler. Mağaza bağlama, hakediş yükleme, onboarding redesign için."
+      >
+        <WizardShowcase />
       </Preview>
 
       <Preview
