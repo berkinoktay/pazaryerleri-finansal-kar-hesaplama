@@ -23,6 +23,14 @@
   --shadow-ring: inset 0 0 0 1px var(--border);
   --shadow-ring-strong: inset 0 0 0 1px var(--border-strong);
   --shadow-focus: 0 0 0 3px oklch(55% 0.14 265 / 0.35);
+
+  /* Pinned-column edge shadows for DataTable. The shadow falls on the
+   * "open" side of the pinned column, signalling that scrolling content
+   * slides under. Direction is encoded in the token name — left-edge
+   * means "edge of a left-pinned column where unpinned content scrolls";
+   * the visible shadow points to the right. Mirror for right-pinned. */
+  --shadow-pin-left-edge: 4px 0 6px -2px oklch(22% 0.02 265 / 0.08);
+  --shadow-pin-right-edge: -4px 0 6px -2px oklch(22% 0.02 265 / 0.08);
 }
 
 .dark {
@@ -47,4 +55,11 @@
     inset 0 1px 0 0 oklch(100% 0 0 / 0.07);
 
   --shadow-focus: 0 0 0 3px oklch(68% 0.12 265 / 0.45);
+
+  /* Dark-mode pin shadows: stronger black, no inset highlight (the
+   * shadow points sideways into scrolling content, not downward off
+   * the surface, so the "ambient light from above" recipe doesn't
+   * apply here). */
+  --shadow-pin-left-edge: 4px 0 8px -2px oklch(0% 0 0 / 0.4);
+  --shadow-pin-right-edge: -4px 0 8px -2px oklch(0% 0 0 / 0.4);
 }

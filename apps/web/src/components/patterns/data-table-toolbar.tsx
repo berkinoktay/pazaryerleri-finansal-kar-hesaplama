@@ -6,6 +6,8 @@ import {
   DownloadSquare02Icon,
   FilterIcon,
   Search01Icon,
+  SidebarLeftIcon,
+  SidebarRightIcon,
   UploadSquare02Icon,
   ViewIcon,
 } from 'hugeicons-react';
@@ -13,15 +15,17 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 export interface DataTableToolbarProps<TData> {
   table: Table<TData>;
@@ -113,16 +117,65 @@ export function DataTableToolbar<TData>({
             <DropdownMenuSeparator />
             {table
               .getAllColumns()
-              .filter((column) => column.getCanHide())
-              .map((column) => (
-                <DropdownMenuCheckboxItem
-                  key={column.id}
-                  checked={column.getIsVisible()}
-                  onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                >
-                  {column.id}
-                </DropdownMenuCheckboxItem>
-              ))}
+              .filter((column) => column.getCanHide() || column.getCanPin())
+              .map((column) => {
+                const pinned = column.getIsPinned();
+                const canHide = column.getCanHide();
+                const canPin = column.getCanPin();
+                return (
+                  <DropdownMenuItem
+                    key={column.id}
+                    // Keep the dropdown open when the user toggles visibility
+                    // or pinning — they often want to flip several at once.
+                    onSelect={(event) => event.preventDefault()}
+                    className="gap-sm"
+                  >
+                    <label className="gap-2xs flex flex-1 cursor-pointer items-center">
+                      <Checkbox
+                        checked={column.getIsVisible()}
+                        onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                        disabled={!canHide}
+                        aria-label={column.id}
+                      />
+                      <span className="truncate text-sm">{column.id}</span>
+                    </label>
+                    {canPin ? (
+                      <div className="gap-3xs flex items-center">
+                        <button
+                          type="button"
+                          aria-label={t('pinLeft')}
+                          aria-pressed={pinned === 'left'}
+                          onClick={() => column.pin(pinned === 'left' ? false : 'left')}
+                          className={cn(
+                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors',
+                            'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+                            pinned === 'left'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                          )}
+                        >
+                          <SidebarLeftIcon className="size-icon-xs" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={t('pinRight')}
+                          aria-pressed={pinned === 'right'}
+                          onClick={() => column.pin(pinned === 'right' ? false : 'right')}
+                          className={cn(
+                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors',
+                            'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+                            pinned === 'right'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                          )}
+                        >
+                          <SidebarRightIcon className="size-icon-xs" />
+                        </button>
+                      </div>
+                    ) : null}
+                  </DropdownMenuItem>
+                );
+              })}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

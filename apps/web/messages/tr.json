@@ -45,7 +45,9 @@
         "import": "İçe aktar",
         "export": "Dışa aktar",
         "toggleColumns": "Kolonları düzenle",
-        "visibleColumns": "Görünür kolonlar"
+        "visibleColumns": "Görünür kolonlar",
+        "pinLeft": "Sola sabitle",
+        "pinRight": "Sağa sabitle"
       },
       "pagination": {
         "rowsPerPage": "Sayfa başına",
