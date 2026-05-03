@@ -12,6 +12,7 @@ import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 
 import { DefinitionListShowcase } from '../definition-list-showcase';
 import { ProfitCellShowcase } from '../profit-cell-showcase';
+import { SparklineShowcase } from '../sparkline-showcase';
 import { TimeAgoShowcase } from '../time-ago-showcase';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
@@ -203,6 +204,13 @@ export default function DisplayPatternsPage(): React.ReactElement {
         description="Semantik <dl>/<dt>/<dd> ile düz key→value listesi. Sipariş detay, komisyon dağılımı, mağaza credentials, settlement özet için. Inline (term sol / desc sağ) varsayılan; stacked (term üst / desc alt) uzun açıklamalar ve sidebar için. dividers + alignRight + dense varyantları."
       >
         <DefinitionListShowcase />
+      </Preview>
+
+      <Preview
+        title="Sparkline"
+        description="KpiTile / tablo hücresi / row özeti içine sığan kompakt trend microchart. Recharts üstüne sarılmış area (default, gradient dolgulu) veya line variant. Tone-driven renk (success / warning / destructive / info / neutral) — TrendDelta ile aynı semantic vocabulary. Boş seri muted placeholder kutu döner."
+      >
+        <SparklineShowcase />
       </Preview>
 
       <Preview

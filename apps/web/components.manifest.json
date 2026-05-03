@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 87,
+  "count": 88,
   "components": [
     {
       "name": "Accordion",
@@ -477,6 +477,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "rendering a single or range numeric input over a continuous scale where relative position matters more than exact value"
+    },
+    {
+      "name": "Sparkline",
+      "path": "apps/web/src/components/patterns/sparkline.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing a tight inline trend microchart paired with a numeric value (use the full Chart primitive for axis-bearing dashboard charts; use TrendDelta for a single-period delta chip)"
     },
     {
       "name": "Spinner",
