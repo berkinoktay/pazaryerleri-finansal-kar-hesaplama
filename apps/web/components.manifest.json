@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 88,
+  "count": 89,
   "components": [
     {
       "name": "Accordion",
@@ -239,6 +239,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "surfacing applied filters above a list with per-chip remove and an optional clear-all (use Badge for non-removable status chips, DataTableToolbar for the filter-input UI)"
+    },
+    {
+      "name": "FilterTabs",
+      "path": "apps/web/src/components/patterns/filter-tabs.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a status-filter strip with per-option counts above a shared list / table (raw Tabs is right when each tab has its own distinct content panel; FilterChipGroup is right when filters are additive instead of mutually exclusive)"
     },
     {
       "name": "Form",

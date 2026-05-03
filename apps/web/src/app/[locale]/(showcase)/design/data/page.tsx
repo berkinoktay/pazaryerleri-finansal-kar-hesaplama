@@ -12,6 +12,7 @@ import { Preview } from '@/components/showcase/preview';
 
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
+import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -170,6 +171,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="Uygulanan filtreleri pill chip'leri olarak gösterir; her chip'in kendi X'i ve opsiyonel global &quot;Tümünü temizle&quot; linki var. group + label (Durum: Aktif) ya da sadece label varyantları. Per-chip leading icon (StatusDot, MarketplaceLogo). chips=[] ise null döner — caller visibility gating yapmaz."
       >
         <FilterChipGroupShowcase />
+      </Preview>
+
+      <Preview
+        title="FilterTabs"
+        description="Liste / tablo üstüne oturan durum-segmenter strip. Tabs primitive üstüne sarılmış; her seçenek için count slot, locale-aware sayı formatı, undefined-count fallback (label-only), explicit zero (trust signal), loading=true → her count Skeleton. Controlled-only (URL state + nuqs ile). Default underline; pill variant constrained kart için. FilterChipGroup additive filtreler için, FilterTabs mutually-exclusive durum segmenti için."
+      >
+        <FilterTabsShowcase />
       </Preview>
     </>
   );
