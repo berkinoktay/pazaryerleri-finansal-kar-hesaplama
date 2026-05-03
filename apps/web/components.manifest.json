@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 80,
+  "count": 81,
   "components": [
     {
       "name": "Accordion",
@@ -78,6 +78,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "rendering a hierarchical location trail on a detail page where the parent context matters (skip on flat list or single-level pages)"
+    },
+    {
+      "name": "BulkActionBar",
+      "path": "apps/web/src/components/patterns/bulk-action-bar.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "exposing batch operations on selected items (DataTable rows, multi-select grids) — for one-shot per-row actions stay in the row's actions cell"
     },
     {
       "name": "Button",
