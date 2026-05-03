@@ -9,6 +9,8 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { KpiTile } from '@/components/patterns/kpi-tile';
 import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
+
+import { DefinitionListShowcase } from '../definition-list-showcase';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { TrendDelta } from '@/components/patterns/trend-delta';
@@ -192,6 +194,13 @@ export default function DisplayPatternsPage(): React.ReactElement {
           <MarketplaceLogo platform="TRENDYOL" size="lg" alt="Trendyol" />
           <MarketplaceLogo platform="HEPSIBURADA" size="lg" alt="Hepsiburada" />
         </div>
+      </Preview>
+
+      <Preview
+        title="DefinitionList"
+        description="Semantik <dl>/<dt>/<dd> ile düz key→value listesi. Sipariş detay, komisyon dağılımı, mağaza credentials, settlement özet için. Inline (term sol / desc sağ) varsayılan; stacked (term üst / desc alt) uzun açıklamalar ve sidebar için. dividers + alignRight + dense varyantları."
+      >
+        <DefinitionListShowcase />
       </Preview>
 
       <Preview
