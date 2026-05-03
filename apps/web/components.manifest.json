@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 83,
+  "count": 84,
   "components": [
     {
       "name": "Accordion",
@@ -190,6 +190,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "presenting a popover-anchored date-range input on screens that scope data to a period (use raw Calendar for inline grids, future DateInput for single-date selection)"
+    },
+    {
+      "name": "DefinitionList",
+      "path": "apps/web/src/components/patterns/definition-list.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a flat list of label→value facts (use DataTable for multi-row tabular data; use Card with arbitrary children for non-list grouped content)"
     },
     {
       "name": "Dialog",
