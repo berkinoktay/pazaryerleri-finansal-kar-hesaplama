@@ -9,6 +9,8 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { PageHeader } from '@/components/patterns/page-header';
 import { Preview } from '@/components/showcase/preview';
+
+import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -153,6 +155,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="Filtre hiç satır eşleştirmezse DataTable otomatik empty state gösterir."
       >
         <DataTable columns={columns.slice(1, 6)} data={[]} />
+      </Preview>
+
+      <Preview
+        title="BulkActionBar"
+        description="Seçili satırlar üstünde çoklu aksiyon. Floating mod = viewport tabanına yapışır, seçim 0'dan büyükken görünür ve fade+slide ile girer (motion-reduce honored). Inline mod = kart içinde toolbar yerine durur. Per-action tone (default / destructive) ve disabled. Bar selection state'i sahiplenmez — caller selectedCount + onClear verir."
+      >
+        <BulkActionBarShowcase />
       </Preview>
     </>
   );
