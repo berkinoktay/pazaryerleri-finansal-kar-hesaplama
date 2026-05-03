@@ -11,6 +11,8 @@ const SHOWCASE_NAV = [
   { href: '/design/patterns', label: 'Pattern' },
   { href: '/design/data', label: 'Veri' },
   { href: '/design/layout-demo', label: 'Layout' },
+  { href: '/design/manifest', label: 'Manifest' },
+  { href: '/design/checklist', label: 'Checklist' },
 ];
 
 export default function ShowcaseLayout({
