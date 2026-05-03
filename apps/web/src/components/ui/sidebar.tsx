@@ -478,7 +478,13 @@ const sidebarMenuButtonVariants = cva(
       variant: {
         default: 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         outline:
-          'bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]',
+          // The shadcn upstream wraps these vars in hsl(), which is invalid
+          // here — PazarSync's --sidebar-border / --sidebar-accent alias to
+          // OKLCH tokens, so the hsl() wrapper rendered to nothing and the
+          // outline variant lost its 1px ring entirely. CSS box-shadow
+          // accepts any color value, so dropping the wrapper restores the
+          // ring with the correct OKLCH color.
+          'bg-background shadow-[0_0_0_1px_var(--sidebar-border)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_var(--sidebar-accent)]',
       },
       size: {
         default: 'h-8 text-sm',
