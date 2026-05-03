@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 86,
+  "count": 87,
   "components": [
     {
       "name": "Accordion",
@@ -232,6 +232,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "accepting a single file via dropzone + browse button (CSV import, document upload, single image) — for multi-file scenarios use MultiFileUpload"
+    },
+    {
+      "name": "FilterChipGroup",
+      "path": "apps/web/src/components/patterns/filter-chip-group.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "surfacing applied filters above a list with per-chip remove and an optional clear-all (use Badge for non-removable status chips, DataTableToolbar for the filter-input UI)"
     },
     {
       "name": "Form",

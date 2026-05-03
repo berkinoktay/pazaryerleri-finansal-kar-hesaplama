@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { Preview } from '@/components/showcase/preview';
 
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
+import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -162,6 +163,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="Seçili satırlar üstünde çoklu aksiyon. Floating mod = viewport tabanına yapışır, seçim 0'dan büyükken görünür ve fade+slide ile girer (motion-reduce honored). Inline mod = kart içinde toolbar yerine durur. Per-action tone (default / destructive) ve disabled. Bar selection state'i sahiplenmez — caller selectedCount + onClear verir."
       >
         <BulkActionBarShowcase />
+      </Preview>
+
+      <Preview
+        title="FilterChipGroup"
+        description="Uygulanan filtreleri pill chip'leri olarak gösterir; her chip'in kendi X'i ve opsiyonel global &quot;Tümünü temizle&quot; linki var. group + label (Durum: Aktif) ya da sadece label varyantları. Per-chip leading icon (StatusDot, MarketplaceLogo). chips=[] ise null döner — caller visibility gating yapmaz."
+      >
+        <FilterChipGroupShowcase />
       </Preview>
     </>
   );

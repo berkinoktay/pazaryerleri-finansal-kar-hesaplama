@@ -65,10 +65,10 @@ const CATEGORIES: CategoryCard[] = [
     href: '/design/data',
     icon: DatabaseIcon,
     label: 'Tablolar',
-    count: 3,
+    count: 4,
     description:
-      'TanStack Table v8 wrapper + standart toolbar + seçili satırlar için bulk action bar. Filtreleme, sıralama, seçim, kolon görünürlüğü, import/export, boş durum, yükleme iskeleti.',
-    components: 'DataTable · DataTableToolbar · BulkActionBar',
+      'TanStack Table v8 wrapper + standart toolbar + seçili satırlar için bulk action bar + uygulanan filtre chip grup. Filtreleme, sıralama, seçim, kolon görünürlüğü, import/export, boş durum, yükleme iskeleti.',
+    components: 'DataTable · DataTableToolbar · BulkActionBar · FilterChipGroup',
   },
 ];
 
