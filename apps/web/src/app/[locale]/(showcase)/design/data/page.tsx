@@ -15,6 +15,7 @@ import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
 import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
 import { DataTableRowClickShowcase } from '../patterns/data-table-row-click-showcase';
+import { DataTableServerModeShowcase } from '../patterns/data-table-server-mode-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
@@ -204,6 +205,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="Satıra tıkla → handler tetiklenir; ama checkbox / button / link / role-bearing alt öğelere tıklamak handler'ı yutmaz. button / a / input / label / select / textarea ve role=button|checkbox|menuitem|link|switch|tab|option otomatik atlanıyor. Custom interaktif span'lar için `data-row-action` opt-out attribute'ü. onRowClick atlanırsa satırlar pasif kalır — eski tüketicilerle backwards-compatible."
       >
         <DataTableRowClickShowcase />
+      </Preview>
+
+      <Preview
+        title="Server-side mode (controlled)"
+        description="`sorting` + `onSortingChange`, `columnFilters` + `onColumnFiltersChange`, `paginationState` + `onPaginationChange` + `pageCount` + `rowCount` props verildiğinde DataTable kendi tarafında compute etmeyi bırakır — manualSorting / manualFiltering / manualPagination otomatik aktif olur. Caller state'i lift eder, API'ye forward eder, gelen slice'ı `data` olarak besler. UI birebir aynı; sadece kim hesaplıyor değişiyor. PR 4'ün columnPinning idiomu üç axis'e daha yayıldı."
+      >
+        <DataTableServerModeShowcase />
       </Preview>
     </>
   );

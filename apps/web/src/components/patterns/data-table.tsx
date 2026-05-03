@@ -7,6 +7,7 @@ import {
   type ColumnPinningState,
   type ExpandedState,
   type OnChangeFn,
+  type PaginationState,
   type Row,
   type RowData,
   type SortingState,
@@ -103,6 +104,52 @@ export interface DataTableProps<TData, TValue> {
    * ring change).
    */
   onRowClick?: (row: TData, event: React.MouseEvent | React.KeyboardEvent) => void;
+  /**
+   * Controlled sorting state. When supplied alongside `onSortingChange`
+   * DataTable hands ownership to the parent and flips TanStack into
+   * `manualSorting: true` — the parent forwards the next sort to the
+   * server (e.g. via React Query) and feeds the response back as `data`.
+   * Omit both to keep the original client-side sorting behaviour.
+   */
+  sorting?: SortingState;
+  onSortingChange?: OnChangeFn<SortingState>;
+  /**
+   * Controlled column-filter state. Same controlled-when-supplied
+   * pattern as `sorting` — supplying both flips `manualFiltering: true`
+   * and the parent owns the filter pipeline (typically forwarded into
+   * the API request). DataTableToolbar's search input + faceted filters
+   * still emit through `setFilterValue`, which calls back here.
+   */
+  columnFilters?: ColumnFiltersState;
+  onColumnFiltersChange?: OnChangeFn<ColumnFiltersState>;
+  /**
+   * Controlled pagination state. Supplying it (together with
+   * `onPaginationChange` and a `pageCount` / `rowCount`) flips
+   * `manualPagination: true` — DataTable trusts that `data` is already
+   * the current page's slice and uses `pageCount` to size the page-nav
+   * controls. The matching `DataTablePagination` footer reads the same
+   * values from the table instance so it works unchanged.
+   *
+   * Note the suffix: `paginationState` (not `pagination`) avoids
+   * colliding with the existing `pagination` render-prop slot
+   * introduced in PR 1 of this series.
+   */
+  paginationState?: PaginationState;
+  onPaginationChange?: OnChangeFn<PaginationState>;
+  /**
+   * Total page count for server-paginated mode. Required when
+   * `paginationState` is controlled — used to compute "Sayfa X / Y"
+   * and to enable / disable the next + last buttons. Pass either
+   * this or `rowCount` (TanStack derives the other if you give it
+   * one); supplying both is fine and avoids a one-page rounding edge.
+   */
+  pageCount?: number;
+  /**
+   * Total row count for server-paginated mode. Drives the "X / N satır"
+   * summary in DataTablePagination and lets TanStack derive `pageCount`
+   * when it isn't supplied.
+   */
+  rowCount?: number;
 }
 
 /**
@@ -134,10 +181,27 @@ export function DataTable<TData, TValue>({
   columnPinning,
   onColumnPinningChange,
   onRowClick,
+  sorting,
+  onSortingChange,
+  columnFilters,
+  onColumnFiltersChange,
+  paginationState,
+  onPaginationChange,
+  pageCount,
+  rowCount,
 }: DataTableProps<TData, TValue>): React.ReactElement {
   const t = useTranslations('common.dataTable.empty');
-  const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+  // Each of these triples follows the same controlled-when-supplied
+  // contract: presence of the prop hands ownership to the parent and
+  // flips the matching `manualX` flag on TanStack so it stops doing
+  // client-side X work and trusts the values it's given. Absence keeps
+  // the original client-side behaviour byte-identical.
+  const [internalSorting, setInternalSorting] = React.useState<SortingState>([]);
+  const [internalColumnFilters, setInternalColumnFilters] = React.useState<ColumnFiltersState>([]);
+  const [internalPagination, setInternalPagination] = React.useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10,
+  });
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
   const [expanded, setExpanded] = React.useState<ExpandedState>({});
@@ -147,8 +211,12 @@ export function DataTable<TData, TValue>({
   const [internalPinning, setInternalPinning] = React.useState<ColumnPinningState>(
     () => initialColumnPinning ?? { left: [], right: [] },
   );
+
   const isPinningControlled = columnPinning !== undefined;
-  const pinningState = isPinningControlled ? columnPinning : internalPinning;
+  const isSortingControlled = sorting !== undefined;
+  const isFilteringControlled = columnFilters !== undefined;
+  const isPaginationControlled = paginationState !== undefined;
+
   const handlePinningChange: OnChangeFn<ColumnPinningState> = (updater) => {
     if (isPinningControlled) {
       onColumnPinningChange?.(updater);
@@ -156,29 +224,61 @@ export function DataTable<TData, TValue>({
       setInternalPinning(updater);
     }
   };
+  const handleSortingChange: OnChangeFn<SortingState> = (updater) => {
+    if (isSortingControlled) {
+      onSortingChange?.(updater);
+    } else {
+      setInternalSorting(updater);
+    }
+  };
+  const handleColumnFiltersChange: OnChangeFn<ColumnFiltersState> = (updater) => {
+    if (isFilteringControlled) {
+      onColumnFiltersChange?.(updater);
+    } else {
+      setInternalColumnFilters(updater);
+    }
+  };
+  const handlePaginationChange: OnChangeFn<PaginationState> = (updater) => {
+    if (isPaginationControlled) {
+      onPaginationChange?.(updater);
+    } else {
+      setInternalPagination(updater);
+    }
+  };
 
   const table = useReactTable({
     data,
     columns,
     state: {
-      sorting,
-      columnFilters,
+      sorting: isSortingControlled ? sorting : internalSorting,
+      columnFilters: isFilteringControlled ? columnFilters : internalColumnFilters,
+      pagination: isPaginationControlled ? paginationState : internalPagination,
       columnVisibility,
       rowSelection,
       expanded,
-      columnPinning: pinningState,
+      columnPinning: isPinningControlled ? columnPinning : internalPinning,
     },
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
+    onSortingChange: handleSortingChange,
+    onColumnFiltersChange: handleColumnFiltersChange,
+    onPaginationChange: handlePaginationChange,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     onExpandedChange: setExpanded,
     onColumnPinningChange: handlePinningChange,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+    // Drop the matching client-side row model when the caller is in
+    // controlled mode for that axis — TanStack expects to be the only
+    // source of truth in manual mode and will warn if a row model also
+    // tries to compute the slice.
+    getSortedRowModel: isSortingControlled ? undefined : getSortedRowModel(),
+    getFilteredRowModel: isFilteringControlled ? undefined : getFilteredRowModel(),
+    getPaginationRowModel: isPaginationControlled ? undefined : getPaginationRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
+    manualSorting: isSortingControlled,
+    manualFiltering: isFilteringControlled,
+    manualPagination: isPaginationControlled,
+    pageCount: isPaginationControlled ? pageCount : undefined,
+    rowCount: isPaginationControlled ? rowCount : undefined,
     enableRowSelection,
     getRowId,
     getRowCanExpand,
