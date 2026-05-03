@@ -11,6 +11,7 @@ import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 
 import { DefinitionListShowcase } from '../definition-list-showcase';
+import { TimeAgoShowcase } from '../time-ago-showcase';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { TrendDelta } from '@/components/patterns/trend-delta';
@@ -201,6 +202,13 @@ export default function DisplayPatternsPage(): React.ReactElement {
         description="Semantik <dl>/<dt>/<dd> ile düz key→value listesi. Sipariş detay, komisyon dağılımı, mağaza credentials, settlement özet için. Inline (term sol / desc sağ) varsayılan; stacked (term üst / desc alt) uzun açıklamalar ve sidebar için. dividers + alignRight + dense varyantları."
       >
         <DefinitionListShowcase />
+      </Preview>
+
+      <Preview
+        title="TimeAgo"
+        description="Geçmiş tarih için relative label (&quot;2 dk önce&quot;) + tooltip'te tam zaman + opsiyonel timezone. SSR-safe: ilk paint deterministic absolute date, mount sonrası relative'e döner. SyncBadge / NotificationBell / ActivityFeed bu atomu paylaşacak."
+      >
+        <TimeAgoShowcase />
       </Preview>
 
       <Preview

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 84,
+  "count": 85,
   "components": [
     {
       "name": "Accordion",
@@ -547,6 +547,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering the dark/light theme toggle inside the sidebar bottom dock (CSS-only icon swap, SSR-safe by construction)"
+    },
+    {
+      "name": "TimeAgo",
+      "path": "apps/web/src/components/patterns/time-ago.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a past timestamp as scannable relative text (\"2 dk önce\") with the absolute timestamp on hover (use Currency / DateRangePicker / Calendar for non-time scalar/range inputs)"
     },
     {
       "name": "Toaster",
