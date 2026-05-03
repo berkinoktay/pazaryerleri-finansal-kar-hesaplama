@@ -3,8 +3,8 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { type BadgeProps } from '@/components/ui/badge';
-import { BadgeWithOverflow } from '@/components/patterns/badge-with-overflow';
 
 import type { VariantSummary } from '../api/list-products.api';
 
@@ -29,17 +29,24 @@ export function VariantStatusBadge({
   className,
 }: VariantStatusBadgeProps): React.ReactElement {
   const t = useTranslations('products.filters.statusOptions');
-  // Map our VariantSummary status to a translated label. `inactive` is a
-  // computed catch-all not used as a filter, so reuse the closest filter label.
-  const label = status === 'inactive' ? t('archived') : t(status);
+  // `inactive` is a computed catch-all not used as a filter, so reuse the
+  // closest filter label. Building the label map fresh per render keeps
+  // the labels in sync with the active locale without a dedicated hook.
+  const labelMap: Record<VariantSummary['status'], React.ReactNode> = {
+    onSale: t('onSale'),
+    archived: t('archived'),
+    locked: t('locked'),
+    blacklisted: t('blacklisted'),
+    inactive: t('archived'),
+  };
 
   return (
-    <BadgeWithOverflow
-      tone={TONE_FOR_STATUS[status]}
+    <MappedBadge
+      value={status}
+      toneMap={TONE_FOR_STATUS}
+      labelMap={labelMap}
       overflowCount={overflowCount}
       className={className}
-    >
-      {label}
-    </BadgeWithOverflow>
+    />
   );
 }

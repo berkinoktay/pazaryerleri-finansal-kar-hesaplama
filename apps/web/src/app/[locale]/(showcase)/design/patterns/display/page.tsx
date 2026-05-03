@@ -7,6 +7,7 @@ import { BadgeWithOverflow } from '@/components/patterns/badge-with-overflow';
 import { Currency } from '@/components/patterns/currency';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { KpiTile } from '@/components/patterns/kpi-tile';
+import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
@@ -114,6 +115,64 @@ export default function DisplayPatternsPage(): React.ReactElement {
             Engellenmiş
           </BadgeWithOverflow>
           <BadgeWithOverflow tone="outline">Pasif</BadgeWithOverflow>
+        </div>
+      </Preview>
+
+      <Preview
+        title="MappedBadge"
+        description="Generic enum→tone+label badge. toneMap + labelMap Record'larıyla static mapping; overflowCount BadgeWithOverflow'a delege edilir. Variant status, payout durumu gibi static enum'lar için. Koşullu mapping (durationDays + isRush gibi) için BadgeWithOverflow'a doğrudan in."
+      >
+        <div className="gap-md flex flex-wrap">
+          <MappedBadge<'onSale' | 'archived' | 'locked' | 'blacklisted' | 'inactive'>
+            value="onSale"
+            toneMap={{
+              onSale: 'success',
+              archived: 'neutral',
+              locked: 'warning',
+              blacklisted: 'destructive',
+              inactive: 'outline',
+            }}
+            labelMap={{
+              onSale: 'Satışta',
+              archived: 'Arşiv',
+              locked: 'Kilitli',
+              blacklisted: 'Engellenmiş',
+              inactive: 'Pasif',
+            }}
+          />
+          <MappedBadge<'onSale' | 'archived' | 'locked' | 'blacklisted' | 'inactive'>
+            value="locked"
+            toneMap={{
+              onSale: 'success',
+              archived: 'neutral',
+              locked: 'warning',
+              blacklisted: 'destructive',
+              inactive: 'outline',
+            }}
+            labelMap={{
+              onSale: 'Satışta',
+              archived: 'Arşiv',
+              locked: 'Kilitli',
+              blacklisted: 'Engellenmiş',
+              inactive: 'Pasif',
+            }}
+            overflowCount={3}
+          />
+          <MappedBadge<'paid' | 'pending' | 'overdue' | 'failed'>
+            value="overdue"
+            toneMap={{
+              paid: 'success',
+              pending: 'info',
+              overdue: 'warning',
+              failed: 'destructive',
+            }}
+            labelMap={{
+              paid: 'Ödendi',
+              pending: 'Beklemede',
+              overdue: 'Gecikmiş',
+              failed: 'Başarısız',
+            }}
+          />
         </div>
       </Preview>
 
