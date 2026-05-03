@@ -202,6 +202,8 @@
   --shadow-ring: var(--shadow-ring);
   --shadow-ring-strong: var(--shadow-ring-strong);
   --shadow-focus: var(--shadow-focus);
+  --shadow-pin-left-edge: var(--shadow-pin-left-edge);
+  --shadow-pin-right-edge: var(--shadow-pin-right-edge);
 
   /* Motion */
   --ease-out-quart: var(--ease-out-quart);

@@ -67,7 +67,7 @@ const CATEGORIES: CategoryCard[] = [
     label: 'Tablolar',
     count: 6,
     description:
-      'TanStack Table v8 wrapper + standart toolbar + seçili satırlar için bulk action bar + uygulanan filtre chip grup + durum-segmenter tab strip + sayfalama altbiti. Filtreleme, sıralama, seçim, kolon görünürlüğü, import/export, sayfalama (perPage seçici + ilk/önceki/sonraki/son), boş durum, yükleme iskeleti.',
+      'TanStack Table v8 wrapper + standart toolbar (pin/unpin menüsü) + seçili satırlar için bulk action bar + uygulanan filtre chip grup + durum-segmenter tab strip + sayfalama altbiti. Filtreleme, sıralama, seçim, kolon görünürlüğü, sol+sağ kolon sabitleme (sticky CSS + edge gölgesi), import/export, sayfalama, boş durum, yükleme iskeleti.',
     components:
       'DataTable · DataTableToolbar · BulkActionBar · FilterChipGroup · FilterTabs · DataTablePagination',
   },

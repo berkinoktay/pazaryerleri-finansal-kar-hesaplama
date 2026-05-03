@@ -45,7 +45,9 @@
         "import": "Import",
         "export": "Export",
         "toggleColumns": "Toggle columns",
-        "visibleColumns": "Visible columns"
+        "visibleColumns": "Visible columns",
+        "pinLeft": "Pin left",
+        "pinRight": "Pin right"
       },
       "pagination": {
         "rowsPerPage": "Per page",

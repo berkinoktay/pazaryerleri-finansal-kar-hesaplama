@@ -1,9 +1,12 @@
 'use client';
 
 import {
+  type Column,
   type ColumnDef,
   type ColumnFiltersState,
+  type ColumnPinningState,
   type ExpandedState,
+  type OnChangeFn,
   type Row,
   type RowData,
   type SortingState,
@@ -66,6 +69,21 @@ export interface DataTableProps<TData, TValue> {
    * a parent product).
    */
   renderSubComponent?: (row: Row<TData>) => React.ReactNode;
+  /**
+   * Initial column pinning state — handy when the page wants a few
+   * columns pinned by default (e.g. the select-checkbox always on the
+   * left). Each entry is a column id. Ignored when `columnPinning` is
+   * supplied (controlled mode).
+   */
+  initialColumnPinning?: ColumnPinningState;
+  /**
+   * Controlled column-pinning state. When supplied alongside
+   * `onColumnPinningChange`, DataTable hands ownership to the parent
+   * (e.g. for nuqs / URL state). Otherwise pinning lives in local
+   * useState seeded from `initialColumnPinning`.
+   */
+  columnPinning?: ColumnPinningState;
+  onColumnPinningChange?: OnChangeFn<ColumnPinningState>;
 }
 
 /**
@@ -93,6 +111,9 @@ export function DataTable<TData, TValue>({
   getRowId,
   getRowCanExpand,
   renderSubComponent,
+  initialColumnPinning,
+  columnPinning,
+  onColumnPinningChange,
 }: DataTableProps<TData, TValue>): React.ReactElement {
   const t = useTranslations('common.dataTable.empty');
   const [sorting, setSorting] = React.useState<SortingState>([]);
@@ -100,16 +121,39 @@ export function DataTable<TData, TValue>({
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
   const [expanded, setExpanded] = React.useState<ExpandedState>({});
+  // Internal pinning state used only when caller didn't lift it. Seed
+  // from `initialColumnPinning` so a feature page can declare "select
+  // column starts pinned-left" once at mount.
+  const [internalPinning, setInternalPinning] = React.useState<ColumnPinningState>(
+    () => initialColumnPinning ?? { left: [], right: [] },
+  );
+  const isPinningControlled = columnPinning !== undefined;
+  const pinningState = isPinningControlled ? columnPinning : internalPinning;
+  const handlePinningChange: OnChangeFn<ColumnPinningState> = (updater) => {
+    if (isPinningControlled) {
+      onColumnPinningChange?.(updater);
+    } else {
+      setInternalPinning(updater);
+    }
+  };
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnFilters, columnVisibility, rowSelection, expanded },
+    state: {
+      sorting,
+      columnFilters,
+      columnVisibility,
+      rowSelection,
+      expanded,
+      columnPinning: pinningState,
+    },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     onExpandedChange: setExpanded,
+    onColumnPinningChange: handlePinningChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -132,11 +176,13 @@ export function DataTable<TData, TValue>({
                   const isNumeric = header.column.columnDef.meta?.numeric === true;
                   const canSort = header.column.getCanSort();
                   const sortDir = header.column.getIsSorted();
+                  const pinning = computePinningProps(header.column);
                   return (
                     <TableHead
                       key={header.id}
                       data-numeric={isNumeric || undefined}
                       className={cn(isNumeric && 'text-right')}
+                      {...pinning}
                     >
                       {header.isPlaceholder ? null : canSort ? (
                         <button
@@ -196,11 +242,13 @@ export function DataTable<TData, TValue>({
                   <TableRow data-state={row.getIsSelected() ? 'selected' : undefined}>
                     {row.getVisibleCells().map((cell) => {
                       const isNumeric = cell.column.columnDef.meta?.numeric === true;
+                      const pinning = computePinningProps(cell.column);
                       return (
                         <TableCell
                           key={cell.id}
                           data-numeric={isNumeric || undefined}
                           className={cn(isNumeric && 'text-right')}
+                          {...pinning}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </TableCell>
@@ -223,6 +271,39 @@ export function DataTable<TData, TValue>({
       {pagination ? pagination(table) : null}
     </div>
   );
+}
+
+/**
+ * Derives the data-attribute + inline-style props that turn a TableHead
+ * or TableCell into a sticky pinned column. Returns nothing when the
+ * column isn't pinned, so the spread is a no-op for unpinned cells.
+ *
+ * The offset (`left:` for left-pinned, `right:` for right-pinned) is
+ * runtime-dynamic — it depends on the cumulative width of pinned
+ * columns earlier in the stack — so it goes via inline style rather
+ * than a token. See CLAUDE.md "no one-off magic values" → "the one
+ * exception" for why this is the right place for inline style.
+ */
+function computePinningProps<TData, TValue>(
+  column: Column<TData, TValue>,
+): {
+  'data-pinned-side'?: 'left' | 'right';
+  'data-pinned-edge'?: 'last-left' | 'first-right';
+  style?: React.CSSProperties;
+} {
+  const side = column.getIsPinned();
+  if (side === false) return {};
+  const isLastLeft = side === 'left' && column.getIsLastColumn('left');
+  const isFirstRight = side === 'right' && column.getIsFirstColumn('right');
+  // runtime-dynamic: sticky offset comes from cumulative widths of
+  // earlier pinned columns; can't be tokenized.
+  const style: React.CSSProperties =
+    side === 'left' ? { left: column.getStart('left') } : { right: column.getAfter('right') };
+  return {
+    'data-pinned-side': side,
+    'data-pinned-edge': isLastLeft ? 'last-left' : isFirstRight ? 'first-right' : undefined,
+    style,
+  };
 }
 
 /**

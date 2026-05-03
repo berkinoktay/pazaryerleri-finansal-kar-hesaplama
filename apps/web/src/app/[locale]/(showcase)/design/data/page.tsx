@@ -13,6 +13,7 @@ import { Preview } from '@/components/showcase/preview';
 
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
+import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
@@ -188,6 +189,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="DataTable'ın altına oturan kanonik sayfalama altbiti. Solda &quot;1–10 / 50 satır&quot; özet, sağda perPage Select [10/25/50/100] + &quot;Sayfa X / Y&quot; caption + ilk/önceki/sonraki/son. Tüm sayılar useFormatter().number üstünden — tr-TR'de 1.472 olarak gruplanır. Server-side aware: manualPagination + pageCount/rowCount geçildiğinde aynı UI çalışır. Boş seride graceful fallback (Sayfa 1 / 1, tüm nav disabled). DataTable'ın `pagination` slot'una geçilir."
       >
         <DataTablePaginationShowcase />
+      </Preview>
+
+      <Preview
+        title="Kolon sabitleme (pinning)"
+        description="`initialColumnPinning` ile başlangıç durumu, ya da kontrollü `columnPinning` + `onColumnPinningChange` ile URL state. Toolbar'ın kolon yönetimi menüsünden her kolon sola / sağa pin'lenebilir. Sticky CSS + opaque arka plan + pin-edge gölgesi (--shadow-pin-left-edge / --shadow-pin-right-edge token'ları). Hover ve seçim durumu pinli hücrelere group/row CSS kontratı üstünden yansır."
+      >
+        <DataTablePinningShowcase />
       </Preview>
     </>
   );
