@@ -20,8 +20,13 @@ export interface KpiTileProps extends React.HTMLAttributes<HTMLDivElement> {
     | { kind: 'count'; amount: number };
   /** Period-over-period percent delta to display as a chip next to the value. */
   delta?: { percent: number; goodDirection?: 'up' | 'down' };
-  /** Subtext anchored under the value — comparison window, source, or caveat. */
-  context?: string;
+  /**
+   * Quiet companion below the value — comparison line, freshness
+   * timestamp, or a richer node like an inline Sparkline. Strings
+   * (the typical case) render as muted small text; pass a node for
+   * composed contexts (`<Sparkline /> + <span>...`).
+   */
+  context?: React.ReactNode;
   /** Stretch tile across 2 columns on larger screens when this metric is the headline. */
   wide?: boolean;
 }
