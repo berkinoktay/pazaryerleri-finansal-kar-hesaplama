@@ -14,6 +14,7 @@ import { Preview } from '@/components/showcase/preview';
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
 import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
+import { DataTableRowClickShowcase } from '../patterns/data-table-row-click-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
@@ -196,6 +197,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="`initialColumnPinning` ile başlangıç durumu, ya da kontrollü `columnPinning` + `onColumnPinningChange` ile URL state. Toolbar'ın kolon yönetimi menüsünden her kolon sola / sağa pin'lenebilir. Sticky CSS + opaque arka plan + pin-edge gölgesi (--shadow-pin-left-edge / --shadow-pin-right-edge token'ları). Hover ve seçim durumu pinli hücrelere group/row CSS kontratı üstünden yansır."
       >
         <DataTablePinningShowcase />
+      </Preview>
+
+      <Preview
+        title="Satır tıklama (onRowClick)"
+        description="Satıra tıkla → handler tetiklenir; ama checkbox / button / link / role-bearing alt öğelere tıklamak handler'ı yutmaz. button / a / input / label / select / textarea ve role=button|checkbox|menuitem|link|switch|tab|option otomatik atlanıyor. Custom interaktif span'lar için `data-row-action` opt-out attribute'ü. onRowClick atlanırsa satırlar pasif kalır — eski tüketicilerle backwards-compatible."
+      >
+        <DataTableRowClickShowcase />
       </Preview>
     </>
   );

@@ -84,6 +84,25 @@ export interface DataTableProps<TData, TValue> {
    */
   columnPinning?: ColumnPinningState;
   onColumnPinningChange?: OnChangeFn<ColumnPinningState>;
+  /**
+   * Fires when the user activates a row by mouse click or keyboard
+   * (Enter / Space). The handler receives the row's `original` data
+   * plus the source event. Activation deliberately ignores clicks
+   * that originate inside an interactive descendant — buttons,
+   * links, inputs, labels, and elements carrying ARIA roles like
+   * `button` / `checkbox` / `menuitem` / `link` / `switch` / `tab` /
+   * `option`, plus anything tagged `data-row-action`. Use the
+   * `data-row-action` opt-out on a custom interactive element if it
+   * doesn't fit the default rule (e.g. a hover-revealed quick-action
+   * that's just a styled `<span>`).
+   *
+   * When supplied, rows become tab-focusable with `role="button"`,
+   * gain a focus-visible ring + `cursor-pointer`, and respond to
+   * Enter / Space the same way they do to mouse clicks. Omitted →
+   * rows stay fully passive (no role, no cursor change, no focus
+   * ring change).
+   */
+  onRowClick?: (row: TData, event: React.MouseEvent | React.KeyboardEvent) => void;
 }
 
 /**
@@ -114,6 +133,7 @@ export function DataTable<TData, TValue>({
   initialColumnPinning,
   columnPinning,
   onColumnPinningChange,
+  onRowClick,
 }: DataTableProps<TData, TValue>): React.ReactElement {
   const t = useTranslations('common.dataTable.empty');
   const [sorting, setSorting] = React.useState<SortingState>([]);
@@ -237,33 +257,61 @@ export function DataTable<TData, TValue>({
                 </TableCell>
               </TableRow>
             ) : (
-              table.getRowModel().rows.map((row) => (
-                <React.Fragment key={row.id}>
-                  <TableRow data-state={row.getIsSelected() ? 'selected' : undefined}>
-                    {row.getVisibleCells().map((cell) => {
-                      const isNumeric = cell.column.columnDef.meta?.numeric === true;
-                      const pinning = computePinningProps(cell.column);
-                      return (
-                        <TableCell
-                          key={cell.id}
-                          data-numeric={isNumeric || undefined}
-                          className={cn(isNumeric && 'text-right')}
-                          {...pinning}
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                  {row.getIsExpanded() && renderSubComponent !== undefined ? (
-                    <TableRow data-expanded-content="true" className="hover:bg-transparent">
-                      <TableCell colSpan={row.getVisibleCells().length} className="bg-muted p-0">
-                        {renderSubComponent(row)}
-                      </TableCell>
+              table.getRowModel().rows.map((row) => {
+                const handleRowClick = onRowClick
+                  ? (event: React.MouseEvent<HTMLTableRowElement>) => {
+                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                      onRowClick(row.original, event);
+                    }
+                  : undefined;
+                const handleRowKeyDown = onRowClick
+                  ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                      // Stop Space from scrolling and Enter from re-activating
+                      // the focused row twice via bubbling.
+                      event.preventDefault();
+                      onRowClick(row.original, event);
+                    }
+                  : undefined;
+                return (
+                  <React.Fragment key={row.id}>
+                    <TableRow
+                      data-state={row.getIsSelected() ? 'selected' : undefined}
+                      role={onRowClick ? 'button' : undefined}
+                      tabIndex={onRowClick ? 0 : undefined}
+                      onClick={handleRowClick}
+                      onKeyDown={handleRowKeyDown}
+                      className={cn(
+                        onRowClick &&
+                          'focus-visible:ring-ring cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+                      )}
+                    >
+                      {row.getVisibleCells().map((cell) => {
+                        const isNumeric = cell.column.columnDef.meta?.numeric === true;
+                        const pinning = computePinningProps(cell.column);
+                        return (
+                          <TableCell
+                            key={cell.id}
+                            data-numeric={isNumeric || undefined}
+                            className={cn(isNumeric && 'text-right')}
+                            {...pinning}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
-                  ) : null}
-                </React.Fragment>
-              ))
+                    {row.getIsExpanded() && renderSubComponent !== undefined ? (
+                      <TableRow data-expanded-content="true" className="hover:bg-transparent">
+                        <TableCell colSpan={row.getVisibleCells().length} className="bg-muted p-0">
+                          {renderSubComponent(row)}
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -271,6 +319,41 @@ export function DataTable<TData, TValue>({
       {pagination ? pagination(table) : null}
     </div>
   );
+}
+
+/**
+ * Tags / roles whose presence in the click target's ancestor chain
+ * means the click was meant for a child control, not the row itself.
+ * Used by `onRowClick` so a click on a checkbox, sort-header button,
+ * inline action button, or `<a>` link doesn't double-fire as a row
+ * activation. Components needing a one-off opt-out (e.g. a styled
+ * `<span>` that's actually clickable) can set `data-row-action` on
+ * the element to participate in the same exclusion.
+ */
+const INTERACTIVE_ROW_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL']);
+const INTERACTIVE_ROW_ROLES = new Set([
+  'button',
+  'checkbox',
+  'menuitem',
+  'menuitemcheckbox',
+  'menuitemradio',
+  'link',
+  'switch',
+  'tab',
+  'option',
+]);
+
+function isInteractiveDescendant(target: EventTarget | null, rowEl: HTMLElement): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  let node: HTMLElement | null = target;
+  while (node !== null && node !== rowEl) {
+    if (INTERACTIVE_ROW_TAGS.has(node.tagName)) return true;
+    if (node.hasAttribute('data-row-action')) return true;
+    const role = node.getAttribute('role');
+    if (role !== null && INTERACTIVE_ROW_ROLES.has(role)) return true;
+    node = node.parentElement;
+  }
+  return false;
 }
 
 /**
