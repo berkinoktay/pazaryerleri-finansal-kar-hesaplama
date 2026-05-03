@@ -13,6 +13,7 @@ import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 
+import { ActivityFeedShowcase } from '../activity-feed-showcase';
 import { StepperShowcase } from '../stepper-showcase';
 import { WizardShowcase } from '../wizard-showcase';
 
@@ -217,6 +218,13 @@ export default function StatusPatternsPage(): React.ReactElement {
         description="Çok-adımlı akış kabuğu. Stepper (üst) + içerik panesi + Back/Next footer. Controlled cursor — caller current'ı sahipler, URL/searchparam ile kalıcılaştırılabilir. Per-step canAdvance (Next disable), nextLabel (per-step copy), onAdvance (async — verify gibi) destekler. Mağaza bağlama, hakediş yükleme, onboarding redesign için."
       >
         <WizardShowcase />
+      </Preview>
+
+      <Preview
+        title="ActivityFeed"
+        description="Kronolojik olay listesi — sync geçmişi, audit log, mutabakat olayları için. Per-entry tone (success/warning/destructive/info/neutral), opsiyonel icon-in-circle, opsiyonel detail paneli. Connector çizgisi entryler arası. compact varyantı sidebar/context-rail için. Boş durum slotu EmptyState ile birleşir."
+      >
+        <ActivityFeedShowcase />
       </Preview>
 
       <Preview
