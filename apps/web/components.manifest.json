@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 82,
+  "count": 83,
   "components": [
     {
       "name": "Accordion",
@@ -141,6 +141,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "building a searchable command palette or large typeahead-filtered picker (use Select for short fixed-option lists)"
+    },
+    {
+      "name": "ConfirmDialog",
+      "path": "apps/web/src/components/patterns/confirm-dialog.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "confirming a destructive or hard-to-undo action with a yes/no prompt (use Dialog for non-destructive multi-field inputs, Sonner for one-shot undo toasts)"
     },
     {
       "name": "ContextMenu",

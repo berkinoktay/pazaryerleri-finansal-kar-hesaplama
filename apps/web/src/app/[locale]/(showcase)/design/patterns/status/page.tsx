@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 
 import { ActivityFeedShowcase } from '../activity-feed-showcase';
+import { ConfirmDialogShowcase } from '../confirm-dialog-showcase';
 import { StepperShowcase } from '../stepper-showcase';
 import { WizardShowcase } from '../wizard-showcase';
 
@@ -225,6 +226,13 @@ export default function StatusPatternsPage(): React.ReactElement {
         description="Kronolojik olay listesi — sync geçmişi, audit log, mutabakat olayları için. Per-entry tone (success/warning/destructive/info/neutral), opsiyonel icon-in-circle, opsiyonel detail paneli. Connector çizgisi entryler arası. compact varyantı sidebar/context-rail için. Boş durum slotu EmptyState ile birleşir."
       >
         <ActivityFeedShowcase />
+      </Preview>
+
+      <Preview
+        title="ConfirmDialog"
+        description="AlertDialog üstüne canonical Cancel-sol / Confirm-sağ footer'ı sarıyor. Hem trigger-based (kendi state'i) hem controlled (caller open + onOpenChange) destekler. onConfirm async — promise pending iken iki buton disabled, confirm butonu spinner ile değişir; reject ise dialog açık kalır. tone='destructive' (default — silme, kapatma) ya da tone='default' (geri alınabilir aksiyon)."
+      >
+        <ConfirmDialogShowcase />
       </Preview>
 
       <Preview
