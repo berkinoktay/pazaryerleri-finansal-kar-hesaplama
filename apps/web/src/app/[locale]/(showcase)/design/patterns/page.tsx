@@ -25,11 +25,11 @@ const CATEGORIES: CategoryCard[] = [
     href: '/design/patterns/display',
     icon: ChartLineData01Icon,
     label: 'Görsel & sayısal',
-    count: 9,
+    count: 10,
     description:
-      'Veri-okuma yüzeyleri: KPI tile, sayı/yüzde delta, currency, badge stack, enum-mapping badge, marketplace logosu, key→value listesi, boş durum.',
+      'Veri-okuma yüzeyleri: KPI tile, sayı/yüzde delta, currency, badge stack, enum-mapping badge, marketplace logosu, key→value listesi, relative time, boş durum.',
     components:
-      'KpiTile · StatGroup · TrendDelta · Currency · BadgeWithOverflow · MappedBadge · MarketplaceLogo · DefinitionList · EmptyState',
+      'KpiTile · StatGroup · TrendDelta · Currency · BadgeWithOverflow · MappedBadge · MarketplaceLogo · DefinitionList · TimeAgo · EmptyState',
   },
   {
     href: '/design/patterns/forms',
