@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 79,
+  "count": 80,
   "components": [
     {
       "name": "Accordion",
@@ -8,6 +8,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "presenting a vertical list of related collapsible sections (use Collapsible for a single standalone toggle region)"
+    },
+    {
+      "name": "ActivityFeed",
+      "path": "apps/web/src/components/patterns/activity-feed.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a chronological list of events with per-entry tone, title, description, optional detail, and optional timestamp/source meta (use NotificationBell for the popover surface, SyncBadge for single-state freshness)"
     },
     {
       "name": "Alert",
