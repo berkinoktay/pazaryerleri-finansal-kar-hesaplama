@@ -11,6 +11,7 @@ import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 
 import { DefinitionListShowcase } from '../definition-list-showcase';
+import { ProfitCellShowcase } from '../profit-cell-showcase';
 import { TimeAgoShowcase } from '../time-ago-showcase';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatGroup } from '@/components/patterns/stat-group';
@@ -202,6 +203,13 @@ export default function DisplayPatternsPage(): React.ReactElement {
         description="Semantik <dl>/<dt>/<dd> ile düz key→value listesi. Sipariş detay, komisyon dağılımı, mağaza credentials, settlement özet için. Inline (term sol / desc sağ) varsayılan; stacked (term üst / desc alt) uzun açıklamalar ve sidebar için. dividers + alignRight + dense varyantları."
       >
         <DefinitionListShowcase />
+      </Preview>
+
+      <Preview
+        title="ProfitCell"
+        description="Currency + TrendDelta komposisyonu — tablo hücresi + sıkışık özet için. Stacked (default, sağ yaslı) finansal kolonlar; inline aynı satırda. delta atlanırsa düz Currency davranışı; emphasis + dimWhenZero forward edilir. KpiTile standalone hero için, Currency tek başına trend yokken; ProfitCell ikisi birlikte tekrar eden hücrelerde."
+      >
+        <ProfitCellShowcase />
       </Preview>
 
       <Preview
