@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 
 const inputVariants = cva(
   [
-    'flex w-full border border-border bg-background text-foreground shadow-xs transition-colors duration-fast',
+    'flex w-full border border-border bg-input text-foreground shadow-xs transition-colors duration-fast',
     'placeholder:text-muted-foreground',
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:outline-none',
@@ -51,7 +51,7 @@ const inputVariants = cva(
 
 const wrapperVariants = cva(
   [
-    'inline-flex w-full items-center gap-xs border border-border bg-background text-foreground shadow-xs transition-colors duration-fast',
+    'inline-flex w-full items-center gap-xs border border-border bg-input text-foreground shadow-xs transition-colors duration-fast',
     'hover:border-border-strong',
     'focus-within:border-ring',
     'data-[invalid=true]:border-destructive data-[invalid=true]:focus-within:border-destructive',

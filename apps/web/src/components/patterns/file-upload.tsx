@@ -218,7 +218,7 @@ export function FileRow({
   return (
     <div
       className={cn(
-        'gap-sm border-border bg-background p-sm flex items-center rounded-md border shadow-xs',
+        'gap-sm border-border bg-input p-sm flex items-center rounded-md border shadow-xs',
         hasError && 'border-destructive',
         disabled && 'opacity-60',
       )}
@@ -403,8 +403,8 @@ export function FileUpload({
           isDragging
             ? 'border-ring bg-info-surface'
             : effectiveError !== null && effectiveError !== undefined
-              ? 'border-destructive bg-background'
-              : 'border-border bg-background hover:border-border-strong',
+              ? 'border-destructive bg-input'
+              : 'border-border bg-input hover:border-border-strong',
           disabled && 'cursor-not-allowed opacity-60',
         )}
       >

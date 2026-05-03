@@ -25,7 +25,7 @@ export const SelectValue = SelectPrimitive.Value;
 
 const selectTriggerVariants = cva(
   [
-    'flex w-full items-center gap-xs border border-border bg-background text-foreground shadow-xs transition-colors duration-fast',
+    'flex w-full items-center gap-xs border border-border bg-input text-foreground shadow-xs transition-colors duration-fast',
     'placeholder:text-muted-foreground',
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:outline-none',
