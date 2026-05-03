@@ -45,11 +45,11 @@ const CATEGORIES: CategoryCard[] = [
     href: '/design/patterns/status',
     icon: Pulse01Icon,
     label: 'Durum & sync',
-    count: 8,
+    count: 9,
     description:
-      "Veri güncelliği, çalışan iş takibi, hata bildirimleri, ContextRail uyarıları, app-spanning sistem mesajları, çok-adımlı akış göstergesi + kabuğu, kronolojik olay timeline'ı.",
+      "Veri güncelliği, çalışan iş takibi, hata bildirimleri, ContextRail uyarıları, app-spanning sistem mesajları, çok-adımlı akış göstergesi + kabuğu, kronolojik olay timeline'ı, destructive aksiyon onayı.",
     components:
-      'SyncBadge · SyncCenter · NotificationBell · Banner · Stepper · Wizard · ActivityFeed · RailWarningCard',
+      'SyncBadge · SyncCenter · NotificationBell · Banner · Stepper · Wizard · ActivityFeed · ConfirmDialog · RailWarningCard',
   },
   {
     href: '/design/patterns/chrome',
