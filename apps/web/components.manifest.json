@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 78,
+  "count": 79,
   "components": [
     {
       "name": "Accordion",
@@ -547,6 +547,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "labelling a period-over-period percent change next to a value (always set goodDirection so direction reads correctly for cost vs revenue metrics)"
+    },
+    {
+      "name": "Wizard",
+      "path": "apps/web/src/components/patterns/wizard.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "building a multi-step flow with a visible progress"
     }
   ]
 }
