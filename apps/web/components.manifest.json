@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 81,
+  "count": 82,
   "components": [
     {
       "name": "Accordion",
@@ -274,6 +274,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "attaching an accessible text caption to a form control via htmlFor (placeholders are not labels)"
+    },
+    {
+      "name": "MappedBadge",
+      "path": "apps/web/src/components/patterns/mapped-badge.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a status badge driven by a string enum with a static tone+label mapping (use BadgeWithOverflow directly when the tone depends on conditional logic)"
     },
     {
       "name": "MarketplaceLogo",
