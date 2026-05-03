@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import {
@@ -72,7 +73,7 @@ export interface ConfirmDialogProps {
   tone?: 'destructive' | 'default';
   /** Localized confirm CTA label (e.g. "Mağazayı sil"). */
   confirmLabel: string;
-  /** Localized cancel CTA label. Defaults to `'İptal'`. */
+  /** Localized cancel CTA label. Defaults to the shared `common.cancel` translation. */
   cancelLabel?: string;
   /**
    * Confirmation handler. May return a promise — the dialog awaits
@@ -97,12 +98,14 @@ export function ConfirmDialog({
   children,
   tone = 'destructive',
   confirmLabel,
-  cancelLabel = 'İptal',
+  cancelLabel,
   onConfirm,
   loading = false,
 }: ConfirmDialogProps): React.ReactElement {
+  const t = useTranslations('common');
   const [isPending, setIsPending] = React.useState(false);
   const isBusy = loading || isPending;
+  const resolvedCancelLabel = cancelLabel ?? t('cancel');
 
   const handleConfirm = async (event: React.MouseEvent<HTMLButtonElement>): Promise<void> => {
     // Stop Radix from auto-closing the dialog so the caller can keep
@@ -134,7 +137,7 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         {children}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isBusy}>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel disabled={isBusy}>{resolvedCancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             onClick={(event) => {
               void handleConfirm(event);
