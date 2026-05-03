@@ -38,6 +38,13 @@ export interface DataTableProps<TData, TValue> {
   data: TData[];
   /** Optional toolbar receives the table instance for faceted filter controls. */
   toolbar?: (table: TanstackTable<TData>) => React.ReactNode;
+  /**
+   * Optional pagination footer slot. Mirrors the `toolbar` shape — receives
+   * the table instance and renders below the table wrapper. Pair with the
+   * shared `DataTablePagination` pattern for the canonical layout, or
+   * inline a custom one for feature-specific footers.
+   */
+  pagination?: (table: TanstackTable<TData>) => React.ReactNode;
   /** Show loading skeletons in place of rows. */
   loading?: boolean;
   /** Custom content when the table has zero rows post-filter. */
@@ -79,6 +86,7 @@ export function DataTable<TData, TValue>({
   columns,
   data,
   toolbar,
+  pagination,
   loading = false,
   empty,
   enableRowSelection = false,
@@ -212,6 +220,7 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
+      {pagination ? pagination(table) : null}
     </div>
   );
 }

@@ -6,11 +6,13 @@ import { toast } from 'sonner';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
+import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { PageHeader } from '@/components/patterns/page-header';
 import { Preview } from '@/components/showcase/preview';
 
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
+import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
@@ -115,7 +117,7 @@ export default function DataShowcasePage(): React.ReactElement {
 
       <Preview
         title="Canlı çalışan tablo"
-        description="50 satır mock sipariş. Başlıklara tıklayıp sırala, satırları seç, tümünü seç, kolonları gizle/göster."
+        description="50 satır mock sipariş. Başlıklara tıklayıp sırala, satırları seç, tümünü seç, kolonları gizle/göster, sayfalar arasında gez ve sayfa başına satır sayısını değiştir."
       >
         <DataTable
           columns={columns}
@@ -133,6 +135,7 @@ export default function DataShowcasePage(): React.ReactElement {
               }
             />
           )}
+          pagination={(table) => <DataTablePagination table={table} />}
         />
       </Preview>
 
@@ -178,6 +181,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="Liste / tablo üstüne oturan durum-segmenter strip. Tabs primitive üstüne sarılmış; her seçenek için count slot, locale-aware sayı formatı, undefined-count fallback (label-only), explicit zero (trust signal), loading=true → her count Skeleton. Controlled-only (URL state + nuqs ile). Default underline; pill variant constrained kart için. FilterChipGroup additive filtreler için, FilterTabs mutually-exclusive durum segmenti için."
       >
         <FilterTabsShowcase />
+      </Preview>
+
+      <Preview
+        title="DataTablePagination"
+        description="DataTable'ın altına oturan kanonik sayfalama altbiti. Solda &quot;1–10 / 50 satır&quot; özet, sağda perPage Select [10/25/50/100] + &quot;Sayfa X / Y&quot; caption + ilk/önceki/sonraki/son. Tüm sayılar useFormatter().number üstünden — tr-TR'de 1.472 olarak gruplanır. Server-side aware: manualPagination + pageCount/rowCount geçildiğinde aynı UI çalışır. Boş seride graceful fallback (Sayfa 1 / 1, tüm nav disabled). DataTable'ın `pagination` slot'una geçilir."
+      >
+        <DataTablePaginationShowcase />
       </Preview>
     </>
   );

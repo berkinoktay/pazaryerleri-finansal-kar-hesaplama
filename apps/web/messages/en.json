@@ -46,6 +46,15 @@
         "export": "Export",
         "toggleColumns": "Toggle columns",
         "visibleColumns": "Visible columns"
+      },
+      "pagination": {
+        "rowsPerPage": "Per page",
+        "rowsOf": "{shown} of {total} rows",
+        "pageOf": "Page {page} of {total}",
+        "first": "First page",
+        "previous": "Previous page",
+        "next": "Next page",
+        "last": "Last page"
       }
     },
     "lastSynced": "Last synced",

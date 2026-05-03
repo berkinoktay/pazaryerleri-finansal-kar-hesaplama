@@ -46,6 +46,15 @@
         "export": "Dışa aktar",
         "toggleColumns": "Kolonları düzenle",
         "visibleColumns": "Görünür kolonlar"
+      },
+      "pagination": {
+        "rowsPerPage": "Sayfa başına",
+        "rowsOf": "{shown} / {total} satır",
+        "pageOf": "Sayfa {page} / {total}",
+        "first": "İlk sayfa",
+        "previous": "Önceki sayfa",
+        "next": "Sonraki sayfa",
+        "last": "Son sayfa"
       }
     },
     "lastSynced": "Son senkronizasyon",
