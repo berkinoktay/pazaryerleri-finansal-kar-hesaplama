@@ -63,6 +63,7 @@
   --size-sheet-wide: 28rem; /* sheet on ≥sm viewports (448px) */
   --size-modal: 32rem; /* dialog content (512px) */
   --size-dropdown-popover: 24rem; /* org+store switcher dropdown panel (384px) */
+  --size-pagesize-select: 5rem; /* DataTablePagination per-page Select trigger (80px — fits 1–3 digit page sizes + chevron) */
   --size-headline: 56rem; /* landing hero H1 column (896px) */
 
   --radius-xs: 4px;

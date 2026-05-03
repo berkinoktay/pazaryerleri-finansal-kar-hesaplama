@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 89,
+  "count": 90,
   "components": [
     {
       "name": "Accordion",
@@ -169,6 +169,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering a sortable, filterable, optionally selectable or expandable data table (pair with DataTableToolbar for the standard top row)"
+    },
+    {
+      "name": "DataTablePagination",
+      "path": "apps/web/src/components/patterns/data-table-pagination.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "mounting the standard pagination footer beneath a DataTable (works for both client-side TanStack pagination and server-side controlled pagination — the wrapping DataTable decides the mode)"
     },
     {
       "name": "DataTableToolbar",
