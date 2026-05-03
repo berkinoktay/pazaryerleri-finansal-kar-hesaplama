@@ -1,9 +1,8 @@
 'use client';
 
-import { Image01Icon } from 'hugeicons-react';
 import * as React from 'react';
 
-import { cn } from '@/lib/utils';
+import { ImageCell } from '@/components/patterns/image-cell';
 
 interface ProductImageCellProps {
   url: string | null | undefined;
@@ -12,38 +11,16 @@ interface ProductImageCellProps {
 }
 
 /**
- * Square thumbnail for the products table. Uses a regular <img> rather
- * than next/image so we don't need to configure remotePatterns for
- * cdn.dsmcdn.com — the Trendyol CDN. Falls back to a placeholder icon
- * when the URL is missing or fails to load.
+ * Domain wrapper around `ImageCell` for the products table. Locks in
+ * the `size="md"` / `shape="square"` / `fallback="icon"` defaults that
+ * fit Trendyol product thumbnails and delegates the actual image +
+ * fallback plumbing to the shared pattern. Existing call sites stay
+ * source-compatible — same `{url, alt, className}` API.
  */
 export function ProductImageCell({
   url,
   alt,
   className,
 }: ProductImageCellProps): React.ReactElement {
-  const [errored, setErrored] = React.useState(false);
-  const showFallback = url === null || url === undefined || url.length === 0 || errored;
-
-  return (
-    <div
-      className={cn(
-        'bg-muted relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md',
-        className,
-      )}
-    >
-      {showFallback ? (
-        <Image01Icon className="text-muted-foreground size-icon-sm" aria-hidden />
-      ) : (
-        <img
-          src={url}
-          alt={alt}
-          loading="lazy"
-          decoding="async"
-          onError={() => setErrored(true)}
-          className="size-full object-cover"
-        />
-      )}
-    </div>
-  );
+  return <ImageCell src={url} alt={alt} className={className} />;
 }

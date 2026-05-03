@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 90,
+  "count": 91,
   "components": [
     {
       "name": "Accordion",
@@ -267,6 +267,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "showing a hover-triggered preview card with rich content (use Tooltip for short hint text, Popover for click-triggered panels)"
+    },
+    {
+      "name": "ImageCell",
+      "path": "apps/web/src/components/patterns/image-cell.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a fixed-footprint image inside a table cell or list row with a built-in fallback for missing / failed loads (use ImageCell with shape=circle + fallback=initials for avatar-style cells)"
     },
     {
       "name": "InlineEdit",

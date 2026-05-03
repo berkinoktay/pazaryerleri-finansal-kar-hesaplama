@@ -11,6 +11,7 @@ import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 
 import { DefinitionListShowcase } from '../definition-list-showcase';
+import { ImageCellShowcase } from '../image-cell-showcase';
 import { ProfitCellShowcase } from '../profit-cell-showcase';
 import { SparklineShowcase } from '../sparkline-showcase';
 import { TimeAgoShowcase } from '../time-ago-showcase';
@@ -225,6 +226,13 @@ export default function DisplayPatternsPage(): React.ReactElement {
         description="Geçmiş tarih için relative label (&quot;2 dk önce&quot;) + tooltip'te tam zaman + opsiyonel timezone. SSR-safe: ilk paint deterministic absolute date, mount sonrası relative'e döner. SyncBadge / NotificationBell / ActivityFeed bu atomu paylaşacak."
       >
         <TimeAgoShowcase />
+      </Preview>
+
+      <Preview
+        title="ImageCell"
+        description="Sabit-footprintli kare ya da daire thumbnail. Tablo hücresinde + dense list satırında çalışır. Raw <img> kullanır (next/image değil) — marketplace CDN'leri için remotePatterns config gerektirmez. src eksik / yüklenemediğinde icon ya da initials fallback. sm 32 / md 40 / lg 56 boyut presetleri. shape='circle' + fallback='initials' = avatar primitive. Domain wrapper'lar (ProductImageCell) bunu sarar — PR #130'daki MappedBadge promotion idiomu."
+      >
+        <ImageCellShowcase />
       </Preview>
 
       <Preview
