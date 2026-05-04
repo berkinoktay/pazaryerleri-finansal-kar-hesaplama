@@ -30,6 +30,7 @@ export function useProductsFilters(): {
       'status' in next ||
       'brandId' in next ||
       'categoryId' in next ||
+      'overrideMissing' in next ||
       'sort' in next;
     return setRaw({
       ...next,
