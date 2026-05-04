@@ -11,6 +11,7 @@ import type { Prisma } from '@pazarsync/db';
 import type {
   ListProductsQuery,
   ProductListSort,
+  ProductOverrideMissing,
   ProductVariantStatus,
 } from '../validators/product.validator';
 import {
@@ -38,6 +39,17 @@ function variantStatusWhere(status: ProductVariantStatus): Prisma.ProductVariant
   }
 }
 
+function variantOverrideMissingWhere(
+  missing: ProductOverrideMissing,
+): Prisma.ProductVariantWhereInput {
+  switch (missing) {
+    case 'cost':
+      return { costPrice: null };
+    case 'vat':
+      return { vatRate: null };
+  }
+}
+
 function buildSearchWhere(q: string): Prisma.ProductWhereInput {
   return {
     OR: [
@@ -59,6 +71,18 @@ function buildOrderBy(sort: ProductListSort): Prisma.ProductOrderByWithRelationI
       return { title: 'asc' };
     case '-title':
       return { title: 'desc' };
+    case 'salePrice':
+    case '-salePrice':
+      // Prisma can't natively MAX over a decimal child relation without
+      // raw SQL or a denormalized column. Until we ship Product.minSalePrice
+      // (follow-up), sort by platformModifiedAt as a deterministic fallback
+      // when the user picks salePrice. Surfaced as a known limitation in
+      // the validator's openapi description.
+      return { platformModifiedAt: sort.startsWith('-') ? 'desc' : 'asc' };
+    case 'totalStock':
+      return { totalStock: 'asc' };
+    case '-totalStock':
+      return { totalStock: 'desc' };
   }
 }
 
@@ -71,8 +95,22 @@ export async function list(opts: {
 }): Promise<ListResponse> {
   const { organizationId, storeId, filters } = opts;
 
-  const variantWhere =
-    filters.status !== undefined ? variantStatusWhere(filters.status) : undefined;
+  // Variant-level filters compose with AND. Today: status (onSale/archived/…)
+  // and overrideMissing (cost/vat). The parent is included if ≥1 variant
+  // matches; the response variants[] is filtered to matching variants.
+  const variantConditions: Prisma.ProductVariantWhereInput[] = [];
+  if (filters.status !== undefined) {
+    variantConditions.push(variantStatusWhere(filters.status));
+  }
+  if (filters.overrideMissing !== undefined) {
+    variantConditions.push(variantOverrideMissingWhere(filters.overrideMissing));
+  }
+  const variantWhere: Prisma.ProductVariantWhereInput | undefined =
+    variantConditions.length === 0
+      ? undefined
+      : variantConditions.length === 1
+        ? variantConditions[0]
+        : { AND: variantConditions };
 
   const productWhere: Prisma.ProductWhereInput = {
     organizationId,
@@ -125,7 +163,7 @@ export async function facets(opts: {
 }): Promise<FacetsResponse> {
   const { organizationId, storeId } = opts;
 
-  const [brandRows, categoryRows] = await Promise.all([
+  const [brandRows, categoryRows, missingCost, missingVat, total] = await Promise.all([
     prisma.product.groupBy({
       by: ['brandId', 'brandName'],
       where: { organizationId, storeId, brandId: { not: null }, brandName: { not: null } },
@@ -143,6 +181,13 @@ export async function facets(opts: {
       _count: { _all: true },
       orderBy: { _count: { categoryId: 'desc' } },
     }),
+    prisma.product.count({
+      where: { organizationId, storeId, variants: { some: { costPrice: null } } },
+    }),
+    prisma.product.count({
+      where: { organizationId, storeId, variants: { some: { vatRate: null } } },
+    }),
+    prisma.product.count({ where: { organizationId, storeId } }),
   ]);
 
   return {
@@ -166,5 +211,6 @@ export async function facets(opts: {
         name: r.categoryName,
         count: r._count._all,
       })),
+    overrideCounts: { missingCost, missingVat, total },
   };
 }

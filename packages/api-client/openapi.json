@@ -1076,11 +1076,35 @@
                 "count"
               ]
             }
+          },
+          "overrideCounts": {
+            "type": "object",
+            "properties": {
+              "missingCost": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "missingVat": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "missingCost",
+              "missingVat",
+              "total"
+            ],
+            "description": "Counts of products with ≥1 variant missing the corresponding override field. Used to populate the override-state tab badges. Computed against the unfiltered store-scoped set (does not respect the current q/brand/category/status filters — tabs reset to the full set when activated)."
           }
         },
         "required": [
           "brands",
-          "categories"
+          "categories",
+          "overrideCounts"
         ]
       }
     },
@@ -2393,17 +2417,36 @@
             "schema": {
               "type": "string",
               "enum": [
+                "cost",
+                "vat"
+              ],
+              "description": "Variant-level filter: \"cost\" → variants with NULL costPrice; \"vat\" → variants with NULL vatRate. Composes with the status filter via AND. Parent included if ≥1 variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+              "example": "cost"
+            },
+            "required": false,
+            "description": "Variant-level filter: \"cost\" → variants with NULL costPrice; \"vat\" → variants with NULL vatRate. Composes with the status filter via AND. Parent included if ≥1 variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+            "name": "overrideMissing",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
                 "-platformModifiedAt",
                 "platformModifiedAt",
                 "title",
-                "-title"
+                "-title",
+                "salePrice",
+                "-salePrice",
+                "totalStock",
+                "-totalStock"
               ],
               "default": "-platformModifiedAt",
-              "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first.",
+              "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformModifiedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
               "example": "-platformModifiedAt"
             },
             "required": false,
-            "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first.",
+            "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformModifiedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
             "name": "sort",
             "in": "query"
           }
