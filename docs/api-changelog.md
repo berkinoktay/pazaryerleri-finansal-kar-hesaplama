@@ -13,6 +13,11 @@ section "Versioning" for details.
 
 ### Added
 
+- `GET /v1/organizations/{orgId}/stores/{storeId}/products`
+  - New optional query param `overrideMissing: 'cost' | 'vat'` — variant-level filter for products with at least one variant missing the corresponding override field. Composes with `status` via AND.
+  - Sort vocabulary widened with `salePrice` / `-salePrice` / `totalStock` / `-totalStock`. `salePrice` currently falls back to `platformModifiedAt` (documented limitation pending `Product.minSalePrice` / `maxSalePrice` denormalization); `totalStock` sorts on the new `Product.totalStock` column.
+- `GET /v1/organizations/{orgId}/stores/{storeId}/products/facets`
+  - New required field `overrideCounts: { missingCost: number; missingVat: number; total: number }`. Counts are computed against the unfiltered store-scoped set.
 - **`SyncLogResponse.skippedPages`** (array | null) — pages the worker
   skipped after exhausting MAX_ATTEMPTS on a `MARKETPLACE_UNREACHABLE`
   error. Each entry: `{ page, attemptedAt, errorCode, httpStatus,

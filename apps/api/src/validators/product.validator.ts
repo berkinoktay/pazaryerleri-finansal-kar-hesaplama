@@ -142,11 +142,18 @@ export const SyncLogListResponseSchema = z
 export const PRODUCT_VARIANT_STATUSES = ['onSale', 'archived', 'locked', 'blacklisted'] as const;
 export type ProductVariantStatus = (typeof PRODUCT_VARIANT_STATUSES)[number];
 
+export const PRODUCT_OVERRIDE_MISSING = ['cost', 'vat'] as const;
+export type ProductOverrideMissing = (typeof PRODUCT_OVERRIDE_MISSING)[number];
+
 export const PRODUCT_LIST_SORTS = [
   '-platformModifiedAt',
   'platformModifiedAt',
   'title',
   '-title',
+  'salePrice',
+  '-salePrice',
+  'totalStock',
+  '-totalStock',
 ] as const;
 export type ProductListSort = (typeof PRODUCT_LIST_SORTS)[number];
 
@@ -180,10 +187,27 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
     description: 'Trendyol category id (BigInt) — exact match against Product.categoryId.',
     example: '2122',
   }),
-  sort: z.enum(PRODUCT_LIST_SORTS).default('-platformModifiedAt').openapi({
-    description: 'Sort key. Prefix with `-` for descending. Default: most-recently-modified first.',
-    example: '-platformModifiedAt',
-  }),
+  overrideMissing: z
+    .enum(PRODUCT_OVERRIDE_MISSING)
+    .optional()
+    .openapi({
+      description:
+        'Variant-level filter: "cost" → variants with NULL costPrice; "vat" → variants with NULL vatRate. ' +
+        'Composes with the status filter via AND. Parent included if ≥1 variant matches; response variants[] ' +
+        'is filtered to matching variants (consistent with status semantics).',
+      example: 'cost',
+    }),
+  sort: z
+    .enum(PRODUCT_LIST_SORTS)
+    .default('-platformModifiedAt')
+    .openapi({
+      description:
+        'Sort key. Prefix with `-` for descending. Default: most-recently-modified first. ' +
+        'KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformModifiedAt because ' +
+        'Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized ' +
+        'column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.',
+      example: '-platformModifiedAt',
+    }),
 }).openapi('ListProductsQuery');
 
 export type ListProductsQuery = z.infer<typeof ListProductsQuerySchema>;
@@ -283,6 +307,18 @@ export const ProductFacetsResponseSchema = z
   .object({
     brands: z.array(FacetEntrySchema),
     categories: z.array(FacetEntrySchema),
+    overrideCounts: z
+      .object({
+        missingCost: z.number().int().nonnegative(),
+        missingVat: z.number().int().nonnegative(),
+        total: z.number().int().nonnegative(),
+      })
+      .openapi({
+        description:
+          'Counts of products with ≥1 variant missing the corresponding override field. Used to populate ' +
+          'the override-state tab badges. Computed against the unfiltered store-scoped set (does not respect ' +
+          'the current q/brand/category/status filters — tabs reset to the full set when activated).',
+      }),
   })
   .openapi('ProductFacetsResponse');
 

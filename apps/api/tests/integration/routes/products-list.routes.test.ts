@@ -393,6 +393,200 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
   });
 });
 
+// ─── overrideMissing filter ───────────────────────────────────────────
+// Variant-level filter for products with at least one variant missing
+// the corresponding override field. Composes with status via AND.
+//
+// These tests build their own minimal setup (no shared fixtures) so the
+// assertions stay focused on the new filter semantics. The default
+// fixture set has costPrice=null and vatRate=null on every variant, so
+// reusing it would muddy "matches" / "does not match" expectations.
+
+async function setupBareTenant(): Promise<{
+  user: { accessToken: string };
+  orgId: string;
+  storeId: string;
+}> {
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  const store = await prisma.store.create({
+    data: {
+      organizationId: org.id,
+      name: 'Test Store',
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId: '4738',
+      credentials: encryptCredentials({
+        supplierId: '4738',
+        apiKey: 'k',
+        apiSecret: 's',
+      }),
+    },
+  });
+  return { user: { accessToken: user.accessToken }, orgId: org.id, storeId: store.id };
+}
+
+describe('GET /v1/.../products — overrideMissing filter', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('returns only products with ≥1 variant having NULL costPrice when overrideMissing=cost', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 1001,
+      productMainId: 'P-WITHCOST',
+      title: 'Has cost',
+      variants: [{ platformVariantId: 1101, barcode: 'B1', stockCode: 'S1' }],
+    });
+    // seedProduct does not set costPrice (defaults to null), so set it
+    // explicitly here to make this product NOT match overrideMissing=cost.
+    await prisma.productVariant.updateMany({
+      where: { stockCode: 'S1' },
+      data: { costPrice: '50.00' },
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 1002,
+      productMainId: 'P-NOCOST',
+      title: 'Missing cost',
+      variants: [{ platformVariantId: 1102, barcode: 'B2', stockCode: 'S2' }],
+    });
+
+    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'cost',
+    });
+    expect(status).toBe(200);
+    const ids = body.data.map((p) => p.productMainId);
+    expect(ids).toContain('P-NOCOST');
+    expect(ids).not.toContain('P-WITHCOST');
+  });
+
+  it('returns only products with ≥1 variant having NULL vatRate when overrideMissing=vat', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 2001,
+      productMainId: 'P-WITHVAT',
+      title: 'Has vat',
+      variants: [{ platformVariantId: 2101, barcode: 'B3', stockCode: 'S3' }],
+    });
+    await prisma.productVariant.updateMany({
+      where: { stockCode: 'S3' },
+      data: { vatRate: 18 },
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 2002,
+      productMainId: 'P-NOVAT',
+      title: 'Missing vat',
+      variants: [{ platformVariantId: 2102, barcode: 'B4', stockCode: 'S4' }],
+    });
+
+    const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'vat',
+    });
+    expect(status).toBe(200);
+    const ids = body.data.map((p) => p.productMainId);
+    expect(ids).toContain('P-NOVAT');
+    expect(ids).not.toContain('P-WITHVAT');
+  });
+
+  it('AND-composes overrideMissing=cost with status=onSale (variant must satisfy both)', async () => {
+    const fixtures = await setupBareTenant();
+    // P-A: archived variant missing cost → excluded by status=onSale
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 3001,
+      productMainId: 'P-A',
+      title: 'A',
+      variants: [
+        { platformVariantId: 3101, barcode: 'BA', stockCode: 'SA', archived: true, onSale: false },
+      ],
+    });
+    // P-B: onSale variant with cost → excluded by overrideMissing=cost
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 3002,
+      productMainId: 'P-B',
+      title: 'B',
+      variants: [{ platformVariantId: 3102, barcode: 'BB', stockCode: 'SB' }],
+    });
+    await prisma.productVariant.updateMany({
+      where: { stockCode: 'SB' },
+      data: { costPrice: '99.00' },
+    });
+    // P-C: onSale variant missing cost → matches both
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 3003,
+      productMainId: 'P-C',
+      title: 'C',
+      variants: [{ platformVariantId: 3103, barcode: 'BC', stockCode: 'SC' }],
+    });
+
+    const { body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'cost',
+      status: 'onSale',
+    });
+    const ids = body.data.map((p) => p.productMainId);
+    expect(ids).toEqual(['P-C']);
+  });
+});
+
+describe('GET /v1/.../products — sort=totalStock', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('orders products by Product.totalStock ascending then descending', async () => {
+    const fixtures = await setupBareTenant();
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 4001,
+      productMainId: 'P-LOW',
+      title: 'Low',
+      variants: [{ platformVariantId: 4101, barcode: 'BL', stockCode: 'SL' }],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 4002,
+      productMainId: 'P-HIGH',
+      title: 'High',
+      variants: [{ platformVariantId: 4102, barcode: 'BH', stockCode: 'SH' }],
+    });
+    await prisma.product.update({
+      where: {
+        storeId_platformContentId: {
+          storeId: fixtures.storeId,
+          platformContentId: BigInt(4001),
+        },
+      },
+      data: { totalStock: 5 },
+    });
+    await prisma.product.update({
+      where: {
+        storeId_platformContentId: {
+          storeId: fixtures.storeId,
+          platformContentId: BigInt(4002),
+        },
+      },
+      data: { totalStock: 50 },
+    });
+
+    const ascRes = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      sort: 'totalStock',
+    });
+    expect(ascRes.body.data.map((p) => p.productMainId)).toEqual(['P-LOW', 'P-HIGH']);
+
+    const descRes = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      sort: '-totalStock',
+    });
+    expect(descRes.body.data.map((p) => p.productMainId)).toEqual(['P-HIGH', 'P-LOW']);
+  });
+});
+
 describe('GET /v1/organizations/:orgId/stores/:storeId/products/facets', () => {
   beforeAll(async () => {
     await ensureDbReachable();
