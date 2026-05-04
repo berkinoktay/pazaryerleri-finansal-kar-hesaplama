@@ -15,9 +15,8 @@ import { useProductsFilters } from '../hooks/use-products-filters';
 import { useStartProductSync } from '../hooks/use-start-product-sync';
 
 import { ProductsEmptyState } from './products-empty-state';
-import { ProductsFilterBar } from './products-filter-bar';
-import { ProductsPagination } from './products-pagination';
 import { ProductsTable } from './products-table';
+import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
 
 interface ProductsPageClientProps {
   orgId: string | null;
@@ -28,11 +27,16 @@ interface ProductsPageClientProps {
 
 /**
  * Top-level client component for the products page. Owns:
- *   - URL state (via useProductsFilters / nuqs)
- *   - Server state (via useProducts / useProductFacets — React Query)
+ *   - URL state (via useProductsFilters / nuqs) — q, status, brand,
+ *     category, overrideMissing, page, perPage, sort.
+ *   - Server state (via useProducts / useProductFacets — React Query).
  *   - Sync surface (active sync logs via REST + Realtime overlay,
- *     manual trigger via mutation)
- *   - Composition of filter bar + table + pagination + sync center
+ *     manual trigger via mutation).
+ *   - Composition of header + tab strip + table + sync center.
+ *
+ * The toolbar (search input + facet chips) and pagination footer are
+ * mounted inside ProductsTable's render-prop slots so the table-bordered
+ * card frames the whole control surface visually.
  */
 export function ProductsPageClient({
   orgId,
@@ -56,6 +60,7 @@ export function ProductsPageClient({
           status: filters.status,
           brandId: filters.brandId.length > 0 ? filters.brandId : undefined,
           categoryId: filters.categoryId.length > 0 ? filters.categoryId : undefined,
+          overrideMissing: filters.overrideMissing ?? undefined,
           page: filters.page,
           perPage: filters.perPage,
           sort: filters.sort,
@@ -93,13 +98,25 @@ export function ProductsPageClient({
   const productSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
+  const tabValue: ProductsOverrideTab = filters.overrideMissing ?? 'all';
+  // Tab-aware empty-state variant. Per spec §6.3: missing-cost / missing-vat
+  // tabs that come back empty read as "you're all set" rather than the
+  // generic "no products match the filter" copy.
+  const emptyVariant = ((): ProductsEmptyVariant | undefined => {
+    if (!isEmptyAfterLoad) return undefined;
+    if (filters.overrideMissing === 'cost') return 'missing-cost-none';
+    if (filters.overrideMissing === 'vat') return 'missing-vat-none';
+    if (hasActiveSearchOrFilter) return 'filtered';
+    return 'no-products';
+  })();
+
   return (
     <>
       <div className="gap-lg flex flex-col">
         <PageHeader
           title={pageTitle}
           intent={pageIntent}
-          actions={
+          meta={
             <SyncBadge
               state={productSyncSnapshot.state}
               lastSyncedAt={productSyncSnapshot.lastSyncedAt}
@@ -112,47 +129,40 @@ export function ProductsPageClient({
           }
         />
 
-        <ProductsFilterBar
-          q={filters.q}
-          status={filters.status}
-          brandId={filters.brandId}
-          categoryId={filters.categoryId}
-          onSearchChange={(next) => void setFilters({ q: next })}
-          onStatusChange={(next) => void setFilters({ status: next })}
-          onBrandChange={(next) => void setFilters({ brandId: next })}
-          onCategoryChange={(next) => void setFilters({ categoryId: next })}
-          onClearAll={() =>
+        <ProductsTabStrip
+          value={tabValue}
+          counts={facetsQuery.data?.overrideCounts}
+          loading={facetsQuery.isLoading}
+          onChange={(next) =>
             void setFilters({
-              q: '',
-              status: 'onSale',
-              brandId: '',
-              categoryId: '',
+              overrideMissing: next === 'all' ? null : next,
               page: 1,
             })
           }
-          facets={facetsQuery.data}
         />
 
         <ProductsTable
           data={data}
           loading={isInitialLoad}
           empty={
-            isEmptyAfterLoad ? (
-              <ProductsEmptyState variant={hasActiveSearchOrFilter ? 'filtered' : 'no-products'} />
-            ) : undefined
+            emptyVariant !== undefined ? <ProductsEmptyState variant={emptyVariant} /> : undefined
           }
+          pagination={pagination}
+          q={filters.q}
+          status={filters.status}
+          brandId={filters.brandId}
+          categoryId={filters.categoryId}
+          overrideMissing={filters.overrideMissing}
+          sort={filters.sort}
+          facets={facetsQuery.data}
+          onSearchChange={(next) => void setFilters({ q: next, page: 1 })}
+          onStatusChange={(next) => void setFilters({ status: next, page: 1 })}
+          onBrandChange={(next) => void setFilters({ brandId: next, page: 1 })}
+          onCategoryChange={(next) => void setFilters({ categoryId: next, page: 1 })}
+          onSortChange={(next) => void setFilters({ sort: next })}
+          onPageChange={(next) => void setFilters({ page: next })}
+          onPerPageChange={(next) => void setFilters({ perPage: next, page: 1 })}
         />
-
-        {pagination.total > 0 ? (
-          <ProductsPagination
-            page={pagination.page}
-            perPage={pagination.perPage}
-            total={pagination.total}
-            totalPages={pagination.totalPages}
-            onPageChange={(next) => void setFilters({ page: next })}
-            onPerPageChange={(next) => void setFilters({ perPage: next, page: 1 })}
-          />
-        ) : null}
       </div>
 
       <SyncCenter
@@ -173,6 +183,13 @@ export function ProductsPageClient({
   );
 }
 
+type ProductsEmptyVariant =
+  | 'no-store'
+  | 'no-products'
+  | 'filtered'
+  | 'missing-cost-none'
+  | 'missing-vat-none';
+
 interface SyncSnapshot {
   state: SyncState;
   lastSyncedAt: Date | string | null;
@@ -181,17 +198,10 @@ interface SyncSnapshot {
 
 /**
  * Derive the SyncBadge's display state from the active+recent sync
- * logs for the PRODUCTS sync type. The provider already classified
- * rows into active (PENDING / RUNNING / FAILED_RETRYABLE) vs recent
+ * logs for the PRODUCTS sync type. Provider already classifies rows
+ * into active (PENDING / RUNNING / FAILED_RETRYABLE) vs recent
  * (COMPLETED / FAILED), so this is a thin "first PRODUCTS log per
- * bucket wins" projection:
- *
- * - FAILED_RETRYABLE active row → `retrying` state with progress
- *   (sync hit a transient error and is in backoff; user can open
- *   SyncCenter for the error code + retry time)
- * - RUNNING / PENDING active row → `syncing` state with progress
- * - Otherwise: latest finished run sets `lastSyncedAt` and tone
- *   (`failed` for terminal FAILED, `fresh` for COMPLETED or no history).
+ * bucket wins" projection.
  */
 function derivedSyncSnapshot(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncSnapshot {
   const active = activeSyncs.find((l) => l.syncType === 'PRODUCTS');
@@ -212,15 +222,6 @@ function derivedSyncSnapshot(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): Sy
   return { state: 'fresh', lastSyncedAt: recent.completedAt ?? recent.startedAt };
 }
 
-/**
- * Project SyncLog rows from the org-wide provider onto the SyncCenterLog
- * shape. SyncCenter and the underlying type now span the full worker
- * pipeline lifecycle (PENDING → RUNNING → FAILED_RETRYABLE → COMPLETED
- * /FAILED), so this is a straightforward field-level mapping with no
- * status filtering. Pulls through `errorMessage`, `attemptCount`, and
- * `nextAttemptAt` so the FAILED_RETRYABLE rendering can show the user
- * what's happening + when the next retry will fire.
- */
 function toSyncCenterLogs(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncCenterLog[] {
   return [...activeSyncs, ...recentSyncs].map(projectSyncLog);
 }

@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
 
 interface ProductsEmptyStateProps {
-  variant: 'no-store' | 'no-products' | 'filtered';
+  variant: 'no-store' | 'no-products' | 'filtered' | 'missing-cost-none' | 'missing-vat-none';
 }
 
 export function ProductsEmptyState({ variant }: ProductsEmptyStateProps): React.ReactElement {
@@ -37,6 +37,12 @@ export function ProductsEmptyState({ variant }: ProductsEmptyStateProps): React.
         description={t('noProducts.description')}
       />
     );
+  }
+  if (variant === 'missing-cost-none') {
+    return <EmptyState title={t('missingCostNone')} className="border-0" />;
+  }
+  if (variant === 'missing-vat-none') {
+    return <EmptyState title={t('missingVatNone')} className="border-0" />;
   }
   return <EmptyState title={t('filtered')} />;
 }

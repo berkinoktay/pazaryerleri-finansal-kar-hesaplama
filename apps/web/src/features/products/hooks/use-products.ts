@@ -29,6 +29,7 @@ function argsToFilters(args: ListProductsArgs): ProductListFilters {
     status: args.status,
     brandId: args.brandId,
     categoryId: args.categoryId,
+    overrideMissing: args.overrideMissing,
     page: args.page,
     perPage: args.perPage,
     sort: args.sort,

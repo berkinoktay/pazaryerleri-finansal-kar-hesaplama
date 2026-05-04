@@ -733,9 +733,36 @@
         "blacklisted": "Engelli"
       }
     },
+    "overrideTabs": {
+      "all": "Tümü",
+      "missingCost": "Maliyeti girilmemiş",
+      "missingVat": "KDV girilmemiş"
+    },
+    "facets": {
+      "brand": {
+        "trigger": "+ Marka",
+        "active": "Marka: {name}",
+        "clear": "Markayı temizle",
+        "search": "Marka ara…",
+        "noResults": "Sonuç yok"
+      },
+      "category": {
+        "trigger": "+ Kategori",
+        "active": "Kategori: {name}",
+        "clear": "Kategoriyi temizle",
+        "search": "Kategori ara…",
+        "noResults": "Sonuç yok"
+      },
+      "status": {
+        "trigger": "+ Durum",
+        "active": "Durum: {label}",
+        "clear": "Durumu temizle"
+      }
+    },
     "columns": {
       "image": "Görsel",
       "title": "Ürün",
+      "properties": "Özellikler",
       "brand": "Marka",
       "category": "Kategori",
       "productMainId": "Model Kodu",
@@ -768,7 +795,9 @@
         "description": "İlk ürünleri senkronize ederek başla.",
         "cta": "Şimdi senkronize et"
       },
-      "filtered": "Filtreyle eşleşen ürün yok."
+      "filtered": "Filtreyle eşleşen ürün yok.",
+      "missingCostNone": "Tüm ürünler için maliyet girilmiş.",
+      "missingVatNone": "Tüm ürünler için KDV oranı girilmiş."
     },
     "pagination": {
       "showing": "{from}–{to} arası, {total} üründen",

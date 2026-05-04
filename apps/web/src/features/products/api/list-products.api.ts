@@ -14,9 +14,18 @@ export interface ListProductsArgs {
   status?: 'onSale' | 'archived' | 'locked' | 'blacklisted';
   brandId?: string;
   categoryId?: string;
+  overrideMissing?: 'cost' | 'vat';
   page: number;
   perPage: number;
-  sort: '-platformModifiedAt' | 'platformModifiedAt' | 'title' | '-title';
+  sort:
+    | '-platformModifiedAt'
+    | 'platformModifiedAt'
+    | 'title'
+    | '-title'
+    | 'salePrice'
+    | '-salePrice'
+    | 'totalStock'
+    | '-totalStock';
 }
 
 export async function listProducts(args: ListProductsArgs): Promise<ListProductsResponse> {
@@ -34,6 +43,9 @@ export async function listProducts(args: ListProductsArgs): Promise<ListProducts
             : {}),
           ...(query.categoryId !== undefined && query.categoryId.length > 0
             ? { categoryId: query.categoryId }
+            : {}),
+          ...(query.overrideMissing !== undefined
+            ? { overrideMissing: query.overrideMissing }
             : {}),
           page: query.page,
           perPage: query.perPage,

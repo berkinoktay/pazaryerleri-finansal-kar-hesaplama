@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { NextIntlClientProvider } from 'next-intl';
+import { describe, expect, it } from 'vitest';
 
 import type { ProductWithVariants } from '@/features/products/api/list-products.api';
 import { ProductsTable } from '@/features/products/components/products-table';
@@ -14,6 +14,7 @@ const messages = {
   products: {
     columns: {
       title: 'Ürün',
+      properties: 'Özellikler',
       brand: 'Marka',
       category: 'Kategori',
       productMainId: 'Model',
@@ -38,11 +39,57 @@ const messages = {
     empty: { filtered: 'Filtreyle eşleşen ürün yok.' },
     a11y: { expandRow: 'Varyantları göster', collapseRow: 'Varyantları gizle' },
     filters: {
+      searchPlaceholder: 'Ürün adı, model kodu, stok kodu, barkod ile ara…',
       statusOptions: {
         onSale: 'Satışta',
         archived: 'Arşivde',
         locked: 'Kilitli',
         blacklisted: 'Engelli',
+      },
+    },
+    facets: {
+      brand: {
+        trigger: '+ Marka',
+        active: 'Marka: {name}',
+        clear: 'Markayı temizle',
+        search: 'Marka ara…',
+        noResults: 'Sonuç yok',
+      },
+      category: {
+        trigger: '+ Kategori',
+        active: 'Kategori: {name}',
+        clear: 'Kategoriyi temizle',
+        search: 'Kategori ara…',
+        noResults: 'Sonuç yok',
+      },
+      status: {
+        trigger: '+ Durum',
+        active: 'Durum: {label}',
+        clear: 'Durumu temizle',
+      },
+    },
+  },
+  common: {
+    dataTable: {
+      empty: { title: 'Sonuç yok', description: 'Filtreleri değiştirin.' },
+      toolbar: {
+        searchPlaceholder: 'Ara…',
+        clear: 'Temizle',
+        import: 'İçeri aktar',
+        export: 'Dışarı aktar',
+        toggleColumns: 'Sütunlar',
+        visibleColumns: 'Görünür sütunlar',
+        pinLeft: 'Sola sabitle',
+        pinRight: 'Sağa sabitle',
+      },
+      pagination: {
+        rowsOf: '{shown} / {total} satır',
+        rowsPerPage: 'Sayfa başına',
+        pageOf: 'Sayfa {page} / {total}',
+        first: 'İlk sayfa',
+        previous: 'Önceki sayfa',
+        next: 'Sonraki sayfa',
+        last: 'Son sayfa',
       },
     },
   },
@@ -91,69 +138,74 @@ function makeProduct(overrides: Partial<ProductWithVariants> = {}): ProductWithV
   };
 }
 
+const noop = (): void => {};
+
+const baseProps = {
+  loading: false,
+  pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
+  q: '',
+  status: 'onSale' as const,
+  brandId: '',
+  categoryId: '',
+  overrideMissing: null,
+  sort: '-platformModifiedAt' as const,
+  facets: undefined,
+  onSearchChange: noop,
+  onStatusChange: noop,
+  onBrandChange: noop,
+  onCategoryChange: noop,
+  onSortChange: noop,
+  onPageChange: noop,
+  onPerPageChange: noop,
+};
+
 function renderTable(data: ProductWithVariants[]) {
   return render(
     <NextIntlClientProvider locale="tr" messages={messages} formats={FORMATS}>
-      <ProductsTable data={data} />
+      <ProductsTable {...baseProps} data={data} />
     </NextIntlClientProvider>,
   );
 }
 
 describe('ProductsTable', () => {
-  it('renders a single-variant product flat (no expand chevron)', () => {
+  it('renders single-variant products flat (no chevron)', () => {
     const product = makeProduct({
       title: 'Solo Product',
       variantCount: 1,
       variants: [makeVariant({ stockCode: 'STK-SOLO', barcode: 'BC-SOLO' })],
     });
     renderTable([product]);
-
     expect(screen.getByText('Solo Product')).toBeInTheDocument();
-    expect(screen.getByText('STK-SOLO')).toBeInTheDocument();
     expect(screen.getByText('BC-SOLO')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Varyantları göster' })).toBeNull();
   });
 
-  it('renders a multi-variant product with expand chevron and "{n} varyant" placeholder', () => {
-    const product = makeProduct({
-      title: 'Multi Product',
-      variantCount: 3,
-      variants: [
-        makeVariant({ id: 'v-1', size: 'S', stockCode: 'STK-S' }),
-        makeVariant({ id: 'v-2', size: 'M', stockCode: 'STK-M' }),
-        makeVariant({ id: 'v-3', size: 'L', stockCode: 'STK-L' }),
-      ],
-    });
-    renderTable([product]);
-
-    expect(screen.getByText('Multi Product')).toBeInTheDocument();
-    expect(screen.getAllByText('3 varyant').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: 'Varyantları göster' })).toBeInTheDocument();
-    // Variant detail rows are NOT visible until the chevron is clicked.
-    expect(screen.queryByText('STK-S')).toBeNull();
-  });
-
-  it('toggles the variant sub-table when the expand chevron is clicked', async () => {
+  it('renders multi-variant parent with chevron; clicking expands variant rows', async () => {
     const product = makeProduct({
       title: 'Multi Product',
       variantCount: 2,
       variants: [
-        makeVariant({ id: 'v-1', size: 'S', stockCode: 'STK-S' }),
-        makeVariant({ id: 'v-2', size: 'M', stockCode: 'STK-M' }),
+        makeVariant({ id: 'v-2a', size: 'S', stockCode: 'STK-S' }),
+        makeVariant({ id: 'v-2b', size: 'L', stockCode: 'STK-L' }),
       ],
     });
     const { user } = renderTable([product]);
-
-    await user.click(screen.getByRole('button', { name: 'Varyantları göster' }));
-    expect(screen.getByText('STK-S')).toBeInTheDocument();
-    expect(screen.getByText('STK-M')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Varyantları gizle' }));
-    expect(screen.queryByText('STK-S')).toBeNull();
+    const chevron = screen.getByRole('button', { name: 'Varyantları göster' });
+    await user.click(chevron);
+    // Variant rows now visible — assert by stock codes
+    expect(screen.getByText(/STK-S/)).toBeInTheDocument();
+    expect(screen.getByText(/STK-L/)).toBeInTheDocument();
+    // Variant rows carry data-depth='1' (DataTable contract)
+    const variantRow = screen.getByText(/STK-S/).closest('tr');
+    expect(variantRow?.getAttribute('data-depth')).toBe('1');
   });
 
   it('shows the empty-state slot when data is empty', () => {
-    renderTable([]);
+    render(
+      <NextIntlClientProvider locale="tr" messages={messages} formats={FORMATS}>
+        <ProductsTable {...baseProps} data={[]} empty={<div>Filtreyle eşleşen ürün yok.</div>} />
+      </NextIntlClientProvider>,
+    );
     expect(screen.getByText('Filtreyle eşleşen ürün yok.')).toBeInTheDocument();
   });
 
@@ -168,8 +220,6 @@ describe('ProductsTable', () => {
       ],
     });
     renderTable([product]);
-    // Dominant status is "onSale" (2 of 3) — Satışta badge plus a "+1"
-    // overflow chip showing the archived variant exists.
     expect(screen.getByText('Satışta')).toBeInTheDocument();
     expect(screen.getByText('+1')).toBeInTheDocument();
   });

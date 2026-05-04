@@ -113,6 +113,44 @@ describe('useProducts', () => {
     expect(result.current.status).toBe('pending');
   });
 
+  it('forwards overrideMissing as a query param', async () => {
+    let capturedUrl = '';
+    server.use(
+      http.get(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products`,
+        ({ request }) => {
+          capturedUrl = request.url;
+          return HttpResponse.json(fixtureResponse(), { status: 200 });
+        },
+      ),
+    );
+
+    const { result } = renderHook(() => useProducts({ ...baseArgs, overrideMissing: 'cost' }), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(capturedUrl).toContain('overrideMissing=cost');
+  });
+
+  it('forwards new sort vocabulary (e.g. -salePrice)', async () => {
+    let capturedUrl = '';
+    server.use(
+      http.get(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products`,
+        ({ request }) => {
+          capturedUrl = request.url;
+          return HttpResponse.json(fixtureResponse(), { status: 200 });
+        },
+      ),
+    );
+
+    const { result } = renderHook(() => useProducts({ ...baseArgs, sort: '-salePrice' }), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(capturedUrl).toContain('sort=-salePrice');
+  });
+
   it('surfaces an ApiError on 403', async () => {
     server.use(
       http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products`, () =>
