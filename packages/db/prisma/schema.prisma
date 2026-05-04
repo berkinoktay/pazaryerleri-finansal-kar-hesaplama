@@ -199,6 +199,12 @@ model Product {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
+  // Denormalized SUM(variants[*].quantity) for the store. Updated
+  // transactionally inside upsertBatch in the sync worker — see
+  // apps/sync-worker/src/handlers/products.ts. Indexed for the
+  // products-list sort=totalStock workflow (pricing + restock review).
+  totalStock Int @default(0) @map("total_stock")
+
   store    Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   variants ProductVariant[]
   images   ProductImage[]
@@ -207,6 +213,7 @@ model Product {
   @@index([organizationId])
   @@index([storeId, productMainId])
   @@index([storeId, brandId])
+  @@index([storeId, totalStock])
   @@index([storeId, categoryId])
   @@map("products")
 }
