@@ -1,0 +1,11 @@
+/* DataTable depth-based row styling — driven by patterns/data-table.tsx
+   when getSubRows is supplied. Feature code does not author these styles
+   directly; setting data-depth on the row is the entire contract. */
+
+table tr[data-depth='1'] {
+  background-color: var(--muted);
+}
+
+table tr[data-depth='1'] > td:first-child {
+  padding-left: var(--space-xl);
+}

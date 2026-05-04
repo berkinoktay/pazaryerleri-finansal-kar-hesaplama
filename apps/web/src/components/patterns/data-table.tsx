@@ -71,6 +71,22 @@ export interface DataTableProps<TData, TValue> {
    */
   renderSubComponent?: (row: Row<TData>) => React.ReactNode;
   /**
+   * Project a parent row's children to render as sibling sub-rows in
+   * the same grid (TanStack v8 native subRows machinery). When
+   * supplied, sub-rows pick up the parent's column definitions
+   * verbatim — column widths align, every cell is rendered against the
+   * same `columns[]`. Combine with `row.depth` in your column cell
+   * renderers to branch parent vs child rendering, and with
+   * `row.getIsExpanded()` (gated by the chevron in your expand column)
+   * to toggle visibility.
+   *
+   * Mutually exclusive in spirit with `renderSubComponent`: the two
+   * patterns target different visual treatments (sibling rows vs
+   * panel inside a colspan cell). Don't combine them on the same
+   * table.
+   */
+  getSubRows?: (row: TData) => TData[] | undefined;
+  /**
    * Initial column pinning state — handy when the page wants a few
    * columns pinned by default (e.g. the select-checkbox always on the
    * left). Each entry is a column id. Ignored when `columnPinning` is
@@ -177,6 +193,7 @@ export function DataTable<TData, TValue>({
   getRowId,
   getRowCanExpand,
   renderSubComponent,
+  getSubRows,
   initialColumnPinning,
   columnPinning,
   onColumnPinningChange,
@@ -282,6 +299,7 @@ export function DataTable<TData, TValue>({
     enableRowSelection,
     getRowId,
     getRowCanExpand,
+    getSubRows,
   });
 
   return (
@@ -378,6 +396,7 @@ export function DataTable<TData, TValue>({
                   <React.Fragment key={row.id}>
                     <TableRow
                       data-state={row.getIsSelected() ? 'selected' : undefined}
+                      data-depth={row.depth || undefined}
                       role={onRowClick ? 'button' : undefined}
                       tabIndex={onRowClick ? 0 : undefined}
                       onClick={handleRowClick}
