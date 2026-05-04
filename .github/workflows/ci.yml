@@ -133,7 +133,7 @@ jobs:
       # spun up just for this job. Schema applied via prisma db push so
       # no migration artifacts leak into the run.
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
           version: latest
 
