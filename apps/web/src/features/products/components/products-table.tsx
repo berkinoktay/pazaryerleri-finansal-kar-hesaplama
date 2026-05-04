@@ -1,192 +1,224 @@
 'use client';
 
-import {
-  type ColumnDef,
-  type Row,
-  flexRender,
-  getCoreRowModel,
-  getExpandedRowModel,
-  getPaginationRowModel,
-  useReactTable,
-} from '@tanstack/react-table';
+import { type ColumnDef, type SortingState } from '@tanstack/react-table';
 import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { EmptyState } from '@/components/patterns/empty-state';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { cn } from '@/lib/utils';
+import { Currency } from '@/components/patterns/currency';
+import { DataTable } from '@/components/patterns/data-table';
+import { DataTablePagination } from '@/components/patterns/data-table-pagination';
+import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 
-import type { ProductWithVariants } from '../api/list-products.api';
+import type { ProductFacetsResponse } from '../api/list-product-facets.api';
+import type { ProductWithVariants, VariantSummary } from '../api/list-products.api';
 import {
   dominantDeliveryDuration,
-  getRepresentativeVariant,
   isMultiVariant,
   priceRange,
   summarizeStatus,
   totalStock,
   uniqueSizes,
 } from '../lib/format-product';
+import {
+  type ProductListSortExtended,
+  type ProductOverrideMissing,
+  type ProductVariantStatus,
+} from '../lib/products-filter-parsers';
 
-import { ColorAttribute } from './color-attribute';
 import { DeliveryBadge } from './delivery-badge';
 import { ProductImageCell } from './product-image-cell';
-import { ProductVariantTable } from './product-variant-table';
+import { ProductsFacetChips } from './products-facet-chips';
 import { VariantStatusBadge } from './variant-status-badge';
+
+/**
+ * Discriminated union projected from the API's ProductWithVariants.
+ * Parent rows render the compound product cell + aggregate cells;
+ * variant rows (depth=1, returned by getSubRows) render per-SKU detail.
+ *
+ * The same `columns[]` defines BOTH visual treatments — column cell
+ * renderers branch on `row.original.kind`. Column widths align by
+ * construction because TanStack v8 reuses the parent column defs for
+ * sub-rows when `getSubRows` is supplied.
+ */
+type ProductRow =
+  | { kind: 'parent'; product: ProductWithVariants }
+  | { kind: 'variant'; parent: ProductWithVariants; variant: VariantSummary };
+
+function projectRows(products: ProductWithVariants[]): ProductRow[] {
+  return products.map((p) => ({ kind: 'parent', product: p }));
+}
 
 interface ProductsTableProps {
   data: ProductWithVariants[];
   loading?: boolean;
   empty?: React.ReactNode;
+  pagination?: { page: number; perPage: number; total: number; totalPages: number };
+
+  // URL-driven filter state — passed in so the toolbar's controlled-search
+  // input + the facet chips stay in sync with the URL.
+  q: string;
+  status: ProductVariantStatus;
+  brandId: string;
+  categoryId: string;
+  overrideMissing: ProductOverrideMissing | null;
+  sort: ProductListSortExtended;
+
+  facets?: ProductFacetsResponse;
+
+  onSearchChange: (next: string) => void;
+  onStatusChange: (next: ProductVariantStatus) => void;
+  onBrandChange: (next: string) => void;
+  onCategoryChange: (next: string) => void;
+  onSortChange: (next: ProductListSortExtended) => void;
+  onPageChange: (next: number) => void;
+  onPerPageChange: (next: number) => void;
 }
 
 /**
- * Single-variant products render flat — cells populated from the lone
- * variant, no chevron. Multi-variant products render with aggregate
- * cells (price range, summed stock, dominant status, dominant delivery)
- * and an expand chevron that reveals the full variant breakdown via
- * ProductVariantTable.
+ * Products table built on the shared DataTable pattern with TanStack v8's
+ * native getSubRows machinery — multi-variant parents render their child
+ * variants as sibling rows in the same grid (column widths align), with
+ * a tree connector + muted background tint applied by `data-depth='1'`
+ * on the row element (token-driven, see tokens/components.css).
  *
- * Built directly on TanStack Table's expanded-row machinery rather than
- * going through the shared DataTable wrapper because the products table
- * has feature-specific composition needs (toolbar lives outside the
- * card, custom column rendering, sub-row that itself contains a Table).
- * The shared DataTable now exposes expand props, but this implementation
- * pre-dates that work and matches Trendyol's own panel layout exactly.
+ * 8-column hierarchical layout: expand · Ürün bilgisi (compound: image +
+ * title + brand·category·model code subtitle) · Özellikler · Barkod ·
+ * Satış fiyatı · Stok · Teslimat · Durum.
+ *
+ * Server-side everything: sorting, filtering, pagination — DataTable runs
+ * in controlled mode for sort + pagination, and the toolbar's controlled-
+ * search mode emits q changes back through `onSearchChange`. The data
+ * passed in is already the current page's slice.
  */
-export function ProductsTable({
-  data,
-  loading = false,
-  empty,
-}: ProductsTableProps): React.ReactElement {
+export function ProductsTable(props: ProductsTableProps): React.ReactElement {
   const t = useTranslations('products');
   const tCols = useTranslations('products.columns');
   const formatter = useFormatter();
 
-  const columns = React.useMemo<ColumnDef<ProductWithVariants>[]>(
+  const rows = React.useMemo(() => projectRows(props.data), [props.data]);
+
+  const columns = React.useMemo<ColumnDef<ProductRow>[]>(
     () => [
       {
         id: 'expand',
-        header: () => null,
-        cell: ({ row }) =>
-          row.getCanExpand() ? (
+        enableSorting: false,
+        cell: ({ row }) => {
+          if (row.depth > 0) {
+            return (
+              <span aria-hidden className="text-muted-foreground">
+                └
+              </span>
+            );
+          }
+          if (!row.getCanExpand()) {
+            return <span aria-hidden className="size-icon-sm inline-block" />;
+          }
+          const expanded = row.getIsExpanded();
+          return (
             <button
               type="button"
               onClick={row.getToggleExpandedHandler()}
-              aria-label={row.getIsExpanded() ? t('a11y.collapseRow') : t('a11y.expandRow')}
-              className={cn(
-                'gap-3xs duration-fast inline-flex size-6 items-center justify-center rounded-sm transition-colors',
-                'hover:bg-background',
-              )}
+              aria-label={expanded ? t('a11y.collapseRow') : t('a11y.expandRow')}
+              aria-expanded={expanded}
+              className="text-muted-foreground hover:text-foreground p-3xs duration-fast hover:bg-background focus-visible:ring-ring inline-flex items-center justify-center rounded-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
             >
-              {row.getIsExpanded() ? (
-                <ArrowDown01Icon className="size-icon-xs" />
+              {expanded ? (
+                <ArrowDown01Icon className="size-icon-sm" />
               ) : (
-                <ArrowRight01Icon className="size-icon-xs" />
+                <ArrowRight01Icon className="size-icon-sm" />
               )}
             </button>
-          ) : null,
-        size: 40,
+          );
+        },
       },
       {
         id: 'product',
         header: () => tCols('title'),
         cell: ({ row }) => {
-          const product = row.original;
-          const firstImage = product.images[0];
+          if (row.original.kind === 'variant') {
+            const v = row.original.variant;
+            const sizePrefix = v.size !== null && v.size.length > 0 ? `${v.size} · ` : '';
+            return (
+              <span className="text-muted-foreground font-mono text-xs">
+                {sizePrefix}
+                {v.stockCode}
+              </span>
+            );
+          }
+          const p = row.original.product;
+          const firstImage = p.images[0];
+          const subtitle = [p.brand.name, p.category.name, p.productMainId]
+            .filter((s): s is string => s !== null && s.length > 0)
+            .join(' · ');
           return (
             <div className="gap-sm flex items-center">
-              <ProductImageCell url={firstImage?.url ?? null} alt={product.title} />
+              <ProductImageCell url={firstImage?.url ?? null} alt={p.title} />
               <div className="gap-3xs flex flex-col">
-                <span className="text-foreground line-clamp-1 font-medium">{product.title}</span>
-                <span className="text-muted-foreground font-mono text-xs">
-                  {product.productMainId}
-                </span>
+                <span className="text-foreground line-clamp-1 font-medium">{p.title}</span>
+                <span className="text-muted-foreground line-clamp-1 text-xs">{subtitle}</span>
               </div>
             </div>
           );
         },
       },
       {
-        id: 'brand',
-        header: () => tCols('brand'),
-        cell: ({ row }) => row.original.brand.name ?? '—',
-      },
-      {
-        id: 'category',
-        header: () => tCols('category'),
-        cell: ({ row }) => row.original.category.name ?? '—',
-      },
-      {
-        id: 'color',
-        header: () => tCols('color'),
-        cell: ({ row }) => <ColorAttribute color={row.original.color} />,
-      },
-      {
-        id: 'size',
-        header: () => tCols('size'),
+        id: 'properties',
+        header: () => tCols('properties'),
         cell: ({ row }) => {
-          if (!isMultiVariant(row.original)) {
-            const variant = getRepresentativeVariant(row.original);
-            return variant?.size ?? '—';
-          }
-          const { shown, remaining } = uniqueSizes(row.original.variants);
-          if (shown.length === 0) return '—';
-          return (
-            <span className="text-foreground text-sm">
-              {shown.join(', ')}
-              {remaining > 0 ? ` +${remaining.toString()}` : ''}
-            </span>
-          );
-        },
-      },
-      {
-        id: 'stockCode',
-        header: () => tCols('stockCode'),
-        cell: ({ row }) => {
-          if (isMultiVariant(row.original)) {
-            return (
-              <span className="text-muted-foreground text-xs">
-                {t('multiVariantPlaceholder', { n: row.original.variantCount })}
-              </span>
+          if (row.original.kind === 'variant') {
+            const v = row.original.variant;
+            const parts = [v.size, row.original.parent.color].filter(
+              (s): s is string => s !== null && s !== undefined && s.length > 0,
             );
+            return parts.length > 0 ? parts.join(' · ') : '—';
           }
-          const variant = getRepresentativeVariant(row.original);
-          return <span className="font-mono text-xs">{variant?.stockCode ?? '—'}</span>;
+          const p = row.original.product;
+          if (!isMultiVariant(p)) {
+            const v0 = p.variants[0];
+            const parts = [v0?.size, p.color].filter(
+              (s): s is string => s !== null && s !== undefined && s.length > 0,
+            );
+            return parts.length > 0 ? parts.join(' · ') : '—';
+          }
+          const { shown, remaining } = uniqueSizes(p.variants);
+          if (shown.length > 0) {
+            return `${shown.join(', ')}${remaining > 0 ? ` +${remaining.toString()}` : ''}`;
+          }
+          return t('multiVariantPlaceholder', { n: p.variantCount });
         },
       },
       {
         id: 'barcode',
         header: () => tCols('barcode'),
         cell: ({ row }) => {
-          if (isMultiVariant(row.original)) {
+          if (row.original.kind === 'variant') {
+            return <span className="font-mono text-xs">{row.original.variant.barcode}</span>;
+          }
+          const p = row.original.product;
+          if (isMultiVariant(p)) {
             return (
               <span className="text-muted-foreground text-xs">
-                {t('multiVariantPlaceholder', { n: row.original.variantCount })}
+                {t('multiVariantPlaceholder', { n: p.variantCount })}
               </span>
             );
           }
-          const variant = getRepresentativeVariant(row.original);
-          return <span className="font-mono text-xs">{variant?.barcode ?? '—'}</span>;
+          return <span className="font-mono text-xs">{p.variants[0]?.barcode ?? '—'}</span>;
         },
       },
       {
         id: 'salePrice',
         header: () => tCols('salePrice'),
         meta: { numeric: true },
+        enableSorting: true,
         cell: ({ row }) => {
-          const range = priceRange(row.original.variants);
+          if (row.original.kind === 'variant') {
+            return <Currency value={row.original.variant.salePrice} />;
+          }
+          const range = priceRange(row.original.product.variants);
           if (range === null) return '—';
           if (range.isSingle) {
-            return formatter.number(Number.parseFloat(range.min), 'currency');
+            return <Currency value={range.min} />;
           }
           return (
             <span className="tabular-nums">
@@ -198,24 +230,32 @@ export function ProductsTable({
         },
       },
       {
-        id: 'stock',
+        id: 'totalStock',
         header: () => tCols('stock'),
         meta: { numeric: true },
+        enableSorting: true,
         cell: ({ row }) => {
-          const total = totalStock(row.original.variants);
-          return <span className="tabular-nums">{total}</span>;
+          const v =
+            row.original.kind === 'variant'
+              ? row.original.variant.quantity
+              : totalStock(row.original.product.variants);
+          return <span className="tabular-nums">{v}</span>;
         },
       },
       {
         id: 'delivery',
         header: () => tCols('delivery'),
         cell: ({ row }) => {
-          const { value, mixed } = dominantDeliveryDuration(row.original.variants);
-          const variant = getRepresentativeVariant(row.original);
+          if (row.original.kind === 'variant') {
+            const v = row.original.variant;
+            return <DeliveryBadge durationDays={v.deliveryDuration} isRush={v.isRushDelivery} />;
+          }
+          const { value, mixed } = dominantDeliveryDuration(row.original.product.variants);
+          const v0 = row.original.product.variants[0];
           return (
             <DeliveryBadge
               durationDays={value}
-              isRush={variant?.isRushDelivery ?? false}
+              isRush={v0?.isRushDelivery ?? false}
               mixed={mixed}
             />
           );
@@ -225,95 +265,112 @@ export function ProductsTable({
         id: 'status',
         header: () => tCols('status'),
         cell: ({ row }) => {
-          const summary = summarizeStatus(row.original.variants);
+          if (row.original.kind === 'variant') {
+            return <VariantStatusBadge status={row.original.variant.status} />;
+          }
+          const summary = summarizeStatus(row.original.product.variants);
           if (summary === null) return '—';
           const others = Object.entries(summary.counts)
-            .filter(([key]) => key !== summary.dominant)
-            .reduce((sum, [, n]) => sum + (n ?? 0), 0);
+            .filter(([k]) => k !== summary.dominant)
+            .reduce((s, [, n]) => s + (n ?? 0), 0);
           return <VariantStatusBadge status={summary.dominant} overflowCount={others} />;
         },
       },
     ],
-    [t, tCols, formatter],
+    [formatter, t, tCols],
   );
 
-  const table = useReactTable({
-    data,
-    columns,
-    getRowId: (row) => row.id,
-    getRowCanExpand: (row) => isMultiVariant(row.original),
-    state: {},
-    getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-  });
+  // Map the URL sort string back into TanStack's SortingState shape, and
+  // back the other way when the user clicks a header.
+  const sortingState = sortToTanstack(props.sort);
 
   return (
-    <div className="border-border bg-card overflow-hidden rounded-lg border">
-      <Table>
-        <TableHeader>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <TableHead key={header.id}>
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(header.column.columnDef.header, header.getContext())}
-                </TableHead>
-              ))}
-            </TableRow>
-          ))}
-        </TableHeader>
-        <TableBody>
-          {loading ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <TableRow key={`skeleton-${i.toString()}`}>
-                {columns.map((_col, colIdx) => (
-                  <TableCell key={colIdx}>
-                    <Skeleton className="h-4 w-full" />
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
-          ) : table.getRowModel().rows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="p-0">
-                {empty ?? <EmptyState title={t('empty.filtered')} className="border-0" />}
-              </TableCell>
-            </TableRow>
-          ) : (
-            table.getRowModel().rows.map((row) => <ProductRow key={row.id} row={row} />)
-          )}
-        </TableBody>
-      </Table>
-    </div>
+    <DataTable<ProductRow, unknown>
+      columns={columns}
+      data={rows}
+      loading={props.loading}
+      empty={props.empty}
+      getRowId={(row) => (row.kind === 'parent' ? `p:${row.product.id}` : `v:${row.variant.id}`)}
+      getRowCanExpand={(row) =>
+        row.original.kind === 'parent' && isMultiVariant(row.original.product)
+      }
+      getSubRows={(row) => {
+        if (row.kind !== 'parent' || !isMultiVariant(row.product)) return undefined;
+        return row.product.variants.map((v) => ({
+          kind: 'variant',
+          parent: row.product,
+          variant: v,
+        }));
+      }}
+      sorting={sortingState}
+      onSortingChange={(updater) => {
+        const next = typeof updater === 'function' ? updater(sortingState) : updater;
+        props.onSortChange(tanstackToSort(next));
+      }}
+      paginationState={{
+        pageIndex: (props.pagination?.page ?? 1) - 1,
+        pageSize: props.pagination?.perPage ?? 25,
+      }}
+      onPaginationChange={(updater) => {
+        const current = {
+          pageIndex: (props.pagination?.page ?? 1) - 1,
+          pageSize: props.pagination?.perPage ?? 25,
+        };
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        if (next.pageSize !== current.pageSize) {
+          props.onPerPageChange(next.pageSize);
+        } else if (next.pageIndex !== current.pageIndex) {
+          props.onPageChange(next.pageIndex + 1);
+        }
+      }}
+      pageCount={props.pagination?.totalPages ?? 0}
+      rowCount={props.pagination?.total ?? 0}
+      toolbar={(table) => (
+        <DataTableToolbar
+          table={table}
+          searchValue={props.q}
+          onSearchChange={props.onSearchChange}
+          searchPlaceholder={t('filters.searchPlaceholder')}
+          facets={
+            <ProductsFacetChips
+              brand={props.brandId}
+              category={props.categoryId}
+              status={props.status}
+              brandOptions={(props.facets?.brands ?? []).map((b) => ({
+                value: b.id,
+                label: b.name,
+                count: b.count,
+              }))}
+              categoryOptions={(props.facets?.categories ?? []).map((c) => ({
+                value: c.id,
+                label: c.name,
+                count: c.count,
+              }))}
+              onBrandChange={props.onBrandChange}
+              onCategoryChange={props.onCategoryChange}
+              onStatusChange={props.onStatusChange}
+            />
+          }
+        />
+      )}
+      pagination={(table) => <DataTablePagination table={table} />}
+    />
   );
 }
 
-function ProductRow({ row }: { row: Row<ProductWithVariants> }): React.ReactElement {
-  return (
-    <>
-      <TableRow data-state={row.getIsExpanded() ? 'expanded' : undefined}>
-        {row.getVisibleCells().map((cell) => {
-          const isNumeric = cell.column.columnDef.meta?.numeric === true;
-          return (
-            <TableCell
-              key={cell.id}
-              data-numeric={isNumeric || undefined}
-              className={cn(isNumeric && 'text-right')}
-            >
-              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-            </TableCell>
-          );
-        })}
-      </TableRow>
-      {row.getIsExpanded() ? (
-        <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={row.getVisibleCells().length} className="bg-muted p-0">
-            <ProductVariantTable variants={row.original.variants} />
-          </TableCell>
-        </TableRow>
-      ) : null}
-    </>
-  );
+// ─── sort marshalling ───
+// URL state stores strings like '-platformModifiedAt'. TanStack's
+// SortingState is `[{ id, desc }]`. These two helpers convert between
+// the two representations.
+
+function sortToTanstack(sort: ProductListSortExtended): SortingState {
+  const desc = sort.startsWith('-');
+  const id = desc ? sort.slice(1) : sort;
+  return [{ id, desc }];
+}
+
+function tanstackToSort(state: SortingState): ProductListSortExtended {
+  const head = state[0];
+  if (head === undefined) return '-platformModifiedAt';
+  return (head.desc ? `-${head.id}` : head.id) as ProductListSortExtended;
 }
