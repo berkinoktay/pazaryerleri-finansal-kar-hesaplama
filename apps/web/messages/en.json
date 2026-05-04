@@ -733,9 +733,36 @@
         "blacklisted": "Blacklisted"
       }
     },
+    "overrideTabs": {
+      "all": "All",
+      "missingCost": "Missing cost",
+      "missingVat": "Missing VAT rate"
+    },
+    "facets": {
+      "brand": {
+        "trigger": "+ Brand",
+        "active": "Brand: {name}",
+        "clear": "Clear brand",
+        "search": "Search brand…",
+        "noResults": "No results"
+      },
+      "category": {
+        "trigger": "+ Category",
+        "active": "Category: {name}",
+        "clear": "Clear category",
+        "search": "Search category…",
+        "noResults": "No results"
+      },
+      "status": {
+        "trigger": "+ Status",
+        "active": "Status: {label}",
+        "clear": "Clear status"
+      }
+    },
     "columns": {
       "image": "Image",
       "title": "Product",
+      "properties": "Attributes",
       "brand": "Brand",
       "category": "Category",
       "productMainId": "Model code",
@@ -768,7 +795,9 @@
         "description": "Run the first sync to get started.",
         "cta": "Sync now"
       },
-      "filtered": "No products match the filters."
+      "filtered": "No products match the filters.",
+      "missingCostNone": "All products have a cost set.",
+      "missingVatNone": "All products have a VAT rate set."
     },
     "pagination": {
       "showing": "{from}–{to} of {total} products",
