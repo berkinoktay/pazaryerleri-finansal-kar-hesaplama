@@ -199,3 +199,92 @@ export function DataTableServerModeShowcase(): React.ReactElement {
     </div>
   );
 }
+
+// Same server-mode shell, but the search input is wired through the
+// new `searchValue` + `onSearchChange` prop pair instead of a TanStack
+// column filter. Use this variant when search is a page-level URL query
+// param (nuqs) — the hook owns the value, the toolbar is a controlled
+// input. Debouncing is the consumer's responsibility (a real page would
+// debounce before calling the React Query refetch).
+export function DataTableServerModeControlledSearchShowcase(): React.ReactElement {
+  const [search, setSearch] = React.useState('');
+  const [sorting, setSorting] = React.useState<SortingState>([]);
+  const [paginationState, setPaginationState] = React.useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 50,
+  });
+
+  const currentParams: ServerQuery = {
+    search,
+    sortField:
+      sorting[0]?.id === 'customer'
+        ? 'customer'
+        : sorting[0]?.id === 'netProfit'
+          ? 'netProfit'
+          : null,
+    sortDesc: sorting[0]?.desc ?? false,
+    pageIndex: paginationState.pageIndex,
+    pageSize: paginationState.pageSize,
+  };
+
+  const [completed, setCompleted] = React.useState<{
+    params: ServerQuery;
+    response: ServerResponse;
+  }>(() => ({ params: INITIAL_PARAMS, response: queryServer(INITIAL_PARAMS) }));
+
+  const loading = JSON.stringify(currentParams) !== JSON.stringify(completed.params);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setCompleted({ params: currentParams, response: queryServer(currentParams) });
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [JSON.stringify(currentParams)]);
+
+  const response = completed.response;
+
+  return (
+    <div className="gap-md flex flex-col">
+      <span className="text-2xs text-muted-foreground">
+        {loading ? 'Sunucudan getiriliyor…' : 'Hazır.'} &middot; aranan{' '}
+        <span className="text-foreground font-mono">{search === '' ? '(boş)' : search}</span>{' '}
+        &middot; toplam <span className="text-foreground font-mono">{response.total}</span> kayıt
+      </span>
+      <DataTable
+        columns={COLUMNS}
+        data={response.rows}
+        getRowId={(row) => row.id}
+        loading={loading && response.rows.length === 0}
+        sorting={sorting}
+        onSortingChange={setSorting}
+        paginationState={paginationState}
+        onPaginationChange={setPaginationState}
+        pageCount={response.pageCount}
+        rowCount={response.total}
+        toolbar={(table) => (
+          <DataTableToolbar
+            table={table}
+            searchValue={search}
+            onSearchChange={(next) => {
+              setSearch(next);
+              // Reset to first page whenever the search changes — same
+              // discipline a real page-level useEffect on `search` would
+              // enforce.
+              setPaginationState((prev) => ({ ...prev, pageIndex: 0 }));
+            }}
+            searchPlaceholder="Müşteri ara (page-level state)…"
+          />
+        )}
+        pagination={(table) => <DataTablePagination table={table} />}
+      />
+      <span className="text-2xs text-muted-foreground">
+        Search input page-level <code>useState</code>&apos;e bind — TanStack column filter yok.
+        Server-paginated sayfalarda nuqs gibi URL query param ile beslemek için tercih edilir (
+        <code>searchValue</code> + <code>onSearchChange</code>). Debouncing caller&apos;ın
+        sorumluluğunda; gerçek sayfada hook seviyesinde useDebounce ile sarılır. Iki search modu
+        mutually exclusive — <code>searchColumn</code> verilirse onu kazanır,{' '}
+        <code>searchValue</code> ignore edilir (dev-mode warning).
+      </span>
+    </div>
+  );
+}

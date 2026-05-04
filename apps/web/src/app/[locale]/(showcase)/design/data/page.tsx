@@ -16,7 +16,10 @@ import { DataTableExpandableRowsShowcase } from '../patterns/data-table-expandab
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
 import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
 import { DataTableRowClickShowcase } from '../patterns/data-table-row-click-showcase';
-import { DataTableServerModeShowcase } from '../patterns/data-table-server-mode-showcase';
+import {
+  DataTableServerModeControlledSearchShowcase,
+  DataTableServerModeShowcase,
+} from '../patterns/data-table-server-mode-showcase';
 import { DataTableSubrowsShowcase } from '../patterns/data-table-subrows-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
@@ -214,6 +217,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="`sorting` + `onSortingChange`, `columnFilters` + `onColumnFiltersChange`, `paginationState` + `onPaginationChange` + `pageCount` + `rowCount` props verildiğinde DataTable kendi tarafında compute etmeyi bırakır — manualSorting / manualFiltering / manualPagination otomatik aktif olur. Caller state'i lift eder, API'ye forward eder, gelen slice'ı `data` olarak besler. UI birebir aynı; sadece kim hesaplıyor değişiyor. PR 4'ün columnPinning idiomu üç axis'e daha yayıldı."
       >
         <DataTableServerModeShowcase />
+      </Preview>
+
+      <Preview
+        title="Server-side mode + controlled search"
+        description="DataTableToolbar'ın `searchValue` + `onSearchChange` prop pair'i — `searchColumn`'a alternatif. Server-paginated sayfalarda search input bir TanStack column filter değil, page-level URL query param (nuqs) olduğunda tercih edilir. Caller value'yu owner; toolbar saf controlled input. Iki mod mutually exclusive: hem `searchColumn` hem `searchValue` verilirse `searchColumn` kazanır (dev-mode warning). Debouncing caller'ın sorumluluğunda — gerçek sayfa hook seviyesinde useDebounce ile sarar."
+      >
+        <DataTableServerModeControlledSearchShowcase />
       </Preview>
 
       <Preview
