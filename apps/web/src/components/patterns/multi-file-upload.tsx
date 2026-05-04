@@ -256,8 +256,8 @@ export function MultiFileUpload({
           isDragging
             ? 'border-ring bg-info-surface'
             : effectiveError !== null && effectiveError !== undefined
-              ? 'border-destructive bg-background'
-              : 'border-border bg-background hover:border-border-strong',
+              ? 'border-destructive bg-input'
+              : 'border-border bg-input hover:border-border-strong',
           disabled && 'cursor-not-allowed opacity-60',
         )}
       >

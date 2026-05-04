@@ -51,7 +51,13 @@
   /* Softer than --border for incidental accents (active tab ring, inner
      dividers) where a full border reads too heavy. */
   --border-muted: oklch(95% 0.006 265);
-  --input: oklch(94% 0.006 265);
+  /* Form-control fill — matches --card. Inputs become the brightest
+     surface so they pop against the slightly tinted --background, while
+     reading as the same surface as a Card they sit inside (border +
+     shadow-xs handle the in-card separation). The earlier 94% lightness
+     read as "dirty grey" against the near-white page; pure white is the
+     Stripe / Mercury pattern for clean form chrome. */
+  --input: oklch(100% 0 0);
   --ring: oklch(55% 0.14 265);
 
   /* Brand */
