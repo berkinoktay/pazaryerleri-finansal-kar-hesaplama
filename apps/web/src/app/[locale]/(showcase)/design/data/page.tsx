@@ -17,6 +17,7 @@ import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-s
 import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
 import { DataTableRowClickShowcase } from '../patterns/data-table-row-click-showcase';
 import { DataTableServerModeShowcase } from '../patterns/data-table-server-mode-showcase';
+import { DataTableSubrowsShowcase } from '../patterns/data-table-subrows-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
@@ -220,6 +221,13 @@ export default function DataShowcasePage(): React.ReactElement {
         description="`getRowCanExpand` koşulu sağlayan satırlar chevron buttonu render eder — tıklandığında `renderSubComponent` döner ve altında inline genişler. Tek kalemli siparişler chevron almaz; doldurucu boş slot ile dikey hizalama korunur. TanStack `getExpandedRowModel` zaten DataTable'da wired — yeni API yok, sadece propslar. Sipariş kalemleri, varyant satırları, log entry detayları için kanonik."
       >
         <DataTableExpandableRowsShowcase />
+      </Preview>
+
+      <Preview
+        title="Sub-row mode (getSubRows)"
+        description="`getSubRows` parent satırların child koleksiyonunu döner — TanStack v8 native subRows machinery alt satırları aynı `<tbody>`'de sibling olarak render eder, parent'ın column tanımlarını birebir uygular. Column genişlikleri hizalanır; her cell aynı `columns[]` üzerinden render edilir. Sub-row'lar `data-depth=&quot;1&quot;` taşır, feature CSS'i `tokens/components.css` üstünden tek kaynaktan stilliyor (muted bg + leading cell indent). `renderSubComponent` ile karıştırma — biri sibling row, diğeri colspan paneli. Varyantlı ürünler, hierarchical SKU listeleri için kanonik."
+      >
+        <DataTableSubrowsShowcase />
       </Preview>
     </>
   );
