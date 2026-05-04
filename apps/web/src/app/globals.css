@@ -21,6 +21,7 @@
 @import './tokens/spacing.css';
 @import './tokens/motion.css';
 @import './tokens/shadow.css';
+@import './tokens/components.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
