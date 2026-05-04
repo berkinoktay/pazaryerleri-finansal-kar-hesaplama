@@ -334,4 +334,57 @@ describe('processProductsChunk', () => {
     expect(result.cursor).toEqual({ kind: 'page', n: 25 });
     expect(result.progress).toBe(2401);
   });
+
+  it('upserts Product with totalStock equal to sum of variant quantities', async () => {
+    // Denormalized total_stock column is updated transactionally inside
+    // upsertBatch (sync worker is the single source of truth for product
+    // mutations, so totalStock stays immediately consistent for the
+    // products-list sort=totalStock workflow).
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 900_001,
+            productMainId: 'TS-TOTALSTOCK-1',
+            title: 'TotalStock Sum Product',
+            variants: [
+              { variantId: 900_101, barcode: 'ts-bc-1', stockCode: 'ts-sk-1', quantity: 7 },
+              { variantId: 900_102, barcode: 'ts-bc-2', stockCode: 'ts-sk-2', quantity: 13 },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+
+    await processProductsChunk({ syncLog: log, cursor: null });
+
+    const product = await prisma.product.findFirstOrThrow({
+      where: { storeId, platformContentId: BigInt(900_001) },
+    });
+    expect(product.totalStock).toBe(20);
+  });
 });

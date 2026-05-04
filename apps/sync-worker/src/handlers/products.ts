@@ -299,6 +299,16 @@ async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: stri
           });
         }
 
+        // Recompute totalStock from the variants we just upserted. We do this
+        // inside the same transaction (rather than using a SQL trigger) so the
+        // sync worker remains the single source of truth for product mutations
+        // and the value is immediately consistent for the products-list sort.
+        const totalStock = mapped.variants.reduce((sum, v) => sum + v.quantity, 0);
+        await tx.product.update({
+          where: { id: product.id },
+          data: { totalStock },
+        });
+
         // Replace images for this product. ProductImage rows have no
         // per-image identifier we can match against (Trendyol gives an
         // ordered URL list), so the cleanest semantic is "this is the
