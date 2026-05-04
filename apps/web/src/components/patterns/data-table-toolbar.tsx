@@ -31,6 +31,17 @@ export interface DataTableToolbarProps<TData> {
   table: Table<TData>;
   /** Column id to filter via the search input. */
   searchColumn?: string;
+  /**
+   * Controlled-search alternative to `searchColumn`. Bind the search
+   * input to a page-level value/onChange pair instead of a TanStack
+   * column filter. Use for server-paginated pages where search is a
+   * query param, not a column filter.
+   *
+   * Mutually exclusive with `searchColumn` — pass exactly one. If both
+   * are supplied, `searchColumn` wins (development-mode warning).
+   */
+  searchValue?: string;
+  onSearchChange?: (next: string) => void;
   /** Override the localized default placeholder if a feature needs custom copy. */
   searchPlaceholder?: string;
   /** Handler invoked when the user clicks the import button. */
@@ -54,6 +65,8 @@ export interface DataTableToolbarProps<TData> {
 export function DataTableToolbar<TData>({
   table,
   searchColumn,
+  searchValue,
+  onSearchChange,
   searchPlaceholder,
   onImport,
   onExport,
@@ -61,21 +74,41 @@ export function DataTableToolbar<TData>({
 }: DataTableToolbarProps<TData>): React.ReactElement {
   const t = useTranslations('common.dataTable.toolbar');
   const isFiltered = table.getState().columnFilters.length > 0;
-  const searchValue = searchColumn
+
+  const isColumnSearch = searchColumn !== undefined;
+  const isControlledSearch =
+    !isColumnSearch && searchValue !== undefined && onSearchChange !== undefined;
+
+  // Dev-mode warning if both search modes are supplied — searchColumn wins
+  // for backwards compatibility, onSearchChange will not fire.
+  if (process.env['NODE_ENV'] !== 'production' && isColumnSearch && searchValue !== undefined) {
+    console.warn(
+      '[DataTableToolbar] both `searchColumn` and `searchValue` were supplied. ' +
+        'searchColumn wins; onSearchChange will not fire.',
+    );
+  }
+
+  const inputValue = isColumnSearch
     ? ((table.getColumn(searchColumn)?.getFilterValue() as string | undefined) ?? '')
-    : '';
+    : (searchValue ?? '');
+
+  const handleSearchInput = (next: string): void => {
+    if (isColumnSearch) {
+      table.getColumn(searchColumn)?.setFilterValue(next);
+    } else if (isControlledSearch) {
+      onSearchChange(next);
+    }
+  };
 
   return (
     <div className="gap-sm flex flex-wrap items-center justify-between">
       <div className="gap-xs flex flex-1 flex-wrap items-center">
-        {searchColumn ? (
+        {isColumnSearch || isControlledSearch ? (
           <div className="max-w-input relative flex-1">
             <Search01Icon className="left-sm size-icon-sm text-muted-foreground pointer-events-none absolute top-1/2 -translate-y-1/2" />
             <Input
-              value={searchValue}
-              onChange={(event) =>
-                table.getColumn(searchColumn)?.setFilterValue(event.target.value)
-              }
+              value={inputValue}
+              onChange={(event) => handleSearchInput(event.target.value)}
               placeholder={searchPlaceholder ?? t('searchPlaceholder')}
               className="pl-2xl"
             />
