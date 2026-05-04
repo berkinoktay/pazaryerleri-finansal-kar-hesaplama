@@ -7,6 +7,7 @@ export interface ProductListFilters {
   status?: string;
   brandId?: string;
   categoryId?: string;
+  overrideMissing?: string;
   page: number;
   perPage: number;
   sort: string;
