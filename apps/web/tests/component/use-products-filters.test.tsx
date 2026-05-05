@@ -89,7 +89,8 @@ describe('useProductsFilters', () => {
 
   it('accepts the extended sort vocabulary (e.g. -salePrice)', async () => {
     const { user } = renderHarness();
-    expect(screen.getByTestId('sort').textContent).toBe('-platformModifiedAt');
+    // Default matches the Trendyol seller-panel ordering — newest listings first.
+    expect(screen.getByTestId('sort').textContent).toBe('-platformCreatedAt');
 
     await user.click(screen.getByText('sort-desc-price'));
     expect(screen.getByTestId('sort').textContent).toBe('-salePrice');

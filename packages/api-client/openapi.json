@@ -810,7 +810,8 @@
           },
           "variantCount": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Number of variants in the `variants[]` array on this response. When a `status` filter is supplied, this matches the filtered count (e.g. `?status=onSale` returns only onSale variants in `variants[]` and `variantCount` mirrors that length). Without a status filter, it equals the product's total variant count. The contract is intentionally \"what you see is what you count\" — UI can use this for the variant count chip, the multi-variant expand affordance, and the Beden chip overflow with no separate length lookup."
           },
           "variants": {
             "type": "array",
@@ -2432,6 +2433,8 @@
             "schema": {
               "type": "string",
               "enum": [
+                "-platformCreatedAt",
+                "platformCreatedAt",
                 "-platformModifiedAt",
                 "platformModifiedAt",
                 "title",
@@ -2441,12 +2444,12 @@
                 "totalStock",
                 "-totalStock"
               ],
-              "default": "-platformModifiedAt",
-              "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformModifiedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
-              "example": "-platformModifiedAt"
+              "default": "-platformCreatedAt",
+              "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformCreatedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
+              "example": "-platformCreatedAt"
             },
             "required": false,
-            "description": "Sort key. Prefix with `-` for descending. Default: most-recently-modified first. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformModifiedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
+            "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformCreatedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
             "name": "sort",
             "in": "query"
           }

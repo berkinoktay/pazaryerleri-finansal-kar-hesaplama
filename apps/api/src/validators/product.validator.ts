@@ -146,6 +146,15 @@ export const PRODUCT_OVERRIDE_MISSING = ['cost', 'vat'] as const;
 export type ProductOverrideMissing = (typeof PRODUCT_OVERRIDE_MISSING)[number];
 
 export const PRODUCT_LIST_SORTS = [
+  // Default — matches the Trendyol seller-panel "Eklenme tarihi" column
+  // (newest listings first). Backed by Product.platformCreatedAt, which
+  // mirrors Trendyol's content.creationDate. This is the closest content-
+  // level analog to Trendyol's `orderByDirection: SellerCreatedDate` API
+  // parameter (Trendyol sorts variants by sellerCreatedDate; we sort
+  // contents by their creationDate, which coincides with the first
+  // variant's creation in the typical case).
+  '-platformCreatedAt',
+  'platformCreatedAt',
   '-platformModifiedAt',
   'platformModifiedAt',
   'title',
@@ -199,14 +208,17 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
     }),
   sort: z
     .enum(PRODUCT_LIST_SORTS)
-    .default('-platformModifiedAt')
+    .default('-platformCreatedAt')
     .openapi({
       description:
-        'Sort key. Prefix with `-` for descending. Default: most-recently-modified first. ' +
-        'KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformModifiedAt because ' +
+        'Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` ' +
+        '(newest listings first) — matches the Trendyol seller-panel default ordering, ' +
+        'analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on ' +
+        "Trendyol's /products/approved endpoint. " +
+        'KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformCreatedAt because ' +
         'Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized ' +
         'column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.',
-      example: '-platformModifiedAt',
+      example: '-platformCreatedAt',
     }),
 }).openapi('ListProductsQuery');
 
@@ -276,7 +288,20 @@ export const ProductWithVariantsSchema = z
     }),
     color: z.string().nullable(),
     images: z.array(ProductImageSchema),
-    variantCount: z.number().int().nonnegative(),
+    variantCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({
+        description:
+          'Number of variants in the `variants[]` array on this response. When a `status` ' +
+          'filter is supplied, this matches the filtered count (e.g. `?status=onSale` returns ' +
+          'only onSale variants in `variants[]` and `variantCount` mirrors that length). ' +
+          "Without a status filter, it equals the product's total variant count. The contract " +
+          'is intentionally "what you see is what you count" — UI can use this for the variant ' +
+          'count chip, the multi-variant expand affordance, and the Beden chip overflow with no ' +
+          'separate length lookup.',
+      }),
     variants: z.array(VariantSummarySchema).openapi({
       description: 'Filtered to variants matching the `status` query param when one is supplied.',
     }),
@@ -369,7 +394,6 @@ export function toVariantSummary(variant: VariantRow): z.infer<typeof VariantSum
 
 export function toProductWithVariantsResponse(
   product: ProductWithRelations,
-  totalVariantCount: number,
 ): z.infer<typeof ProductWithVariantsSchema> {
   return {
     id: product.id,
@@ -389,7 +413,10 @@ export function toProductWithVariantsResponse(
     images: product.images
       .sort((a, b) => a.position - b.position)
       .map((img) => ({ id: img.id, url: img.url, position: img.position })),
-    variantCount: totalVariantCount,
+    // Mirrors variants[].length on purpose — see the schema description.
+    // Same source ⇒ count chip + Beden chips + expanded sub-rows can never
+    // disagree.
+    variantCount: product.variants.length,
     variants: product.variants.map(toVariantSummary),
     lastSyncedAt: product.lastSyncedAt.toISOString(),
     platformModifiedAt: product.platformModifiedAt?.toISOString() ?? null,

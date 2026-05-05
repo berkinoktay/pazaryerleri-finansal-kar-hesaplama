@@ -186,7 +186,7 @@ describe('ProductsTable', () => {
     expect(screen.queryByRole('button', { name: 'Varyantları göster' })).toBeNull();
   });
 
-  it('renders multi-variant parent with chevron; clicking expands variant rows', async () => {
+  it('renders multi-variant parent with count chip; clicking expands variant rows', async () => {
     const product = makeProduct({
       title: 'Multi Product',
       variantCount: 2,
@@ -196,14 +196,69 @@ describe('ProductsTable', () => {
       ],
     });
     const { user } = renderTable([product]);
-    const chevron = screen.getByRole('button', { name: 'Varyantları göster' });
-    await user.click(chevron);
+    const trigger = screen.getByRole('button', { name: 'Varyantları göster' });
+    // Count chip surfaces variantCount up-front (no need to expand to find out)
+    expect(trigger).toHaveTextContent('2');
+    // Parent row shows aggregate Beden chips (S, L)
+    expect(screen.getByText('S')).toBeInTheDocument();
+    expect(screen.getByText('L')).toBeInTheDocument();
+
+    await user.click(trigger);
     // Variant rows now visible — assert by stock codes
     expect(screen.getByText(/STK-S/)).toBeInTheDocument();
     expect(screen.getByText(/STK-L/)).toBeInTheDocument();
     // Variant rows carry data-depth='1' (DataTable contract)
     const variantRow = screen.getByText(/STK-S/).closest('tr');
     expect(variantRow?.getAttribute('data-depth')).toBe('1');
+    // After expand, parent + variant sub-row each render a chip for "S"
+    expect(screen.getAllByText('S')).toHaveLength(2);
+  });
+
+  it('renders Renk column from product.color on parent rows', () => {
+    const product = makeProduct({
+      title: 'Colorful Product',
+      color: 'Antrasit',
+      variantCount: 1,
+      variants: [makeVariant()],
+    });
+    renderTable([product]);
+    expect(screen.getByText('Antrasit')).toBeInTheDocument();
+  });
+
+  it('renders em-dash placeholder when product.color is null', () => {
+    const product = makeProduct({
+      title: 'Colorless Product',
+      color: null,
+      variantCount: 1,
+      variants: [makeVariant({ size: null })],
+    });
+    renderTable([product]);
+    // Both Beden and Renk fall back to em-dash; getAllByText handles it.
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('caps Beden chip list at 4 visible + overflow chip', () => {
+    const product = makeProduct({
+      title: 'Many Sizes',
+      variantCount: 6,
+      variants: [
+        makeVariant({ id: 'v-1', size: 'XS' }),
+        makeVariant({ id: 'v-2', size: 'S' }),
+        makeVariant({ id: 'v-3', size: 'M' }),
+        makeVariant({ id: 'v-4', size: 'L' }),
+        makeVariant({ id: 'v-5', size: 'XL' }),
+        makeVariant({ id: 'v-6', size: 'XXL' }),
+      ],
+    });
+    renderTable([product]);
+    // First 4 unique sizes render as chips, remaining 2 collapse into +N
+    expect(screen.getByText('XS')).toBeInTheDocument();
+    expect(screen.getByText('S')).toBeInTheDocument();
+    expect(screen.getByText('M')).toBeInTheDocument();
+    expect(screen.getByText('L')).toBeInTheDocument();
+    expect(screen.queryByText('XL')).toBeNull();
+    expect(screen.queryByText('XXL')).toBeNull();
+    expect(screen.getByText('+2')).toBeInTheDocument();
   });
 
   it('shows the empty-state slot when data is empty', () => {

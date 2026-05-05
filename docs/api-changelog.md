@@ -42,6 +42,33 @@ xRequestId?, responseBodySnippet? }`. Surfaces deterministic upstream
 
 ### Changed
 
+- **`ProductWithVariants.variantCount` semantic changed: now matches
+  `variants[].length` instead of returning the unfiltered DB total.**
+  Under a `status` filter, both `variants[]` and `variantCount` reflect
+  the filtered set, so UI consumers (variant count chip, Beden chip
+  overflow, expand affordance) can never disagree. Trendyol's seller
+  panel uses the same "what you see is what you count" semantic. The
+  earlier total-count contract surfaced phantom variants in our count
+  chip — e.g. a product with 2 onSale + 2 archived variants showed
+  "4 varyant" on the onSale tab but expanded to only 2 sub-rows. **Wire-
+  level breaking change** for callers that read `variantCount` to know
+  "how many variants exist beyond this filter"; that need is rare and
+  can be served by issuing a second unfiltered request. The validator's
+  `variantCount` description on `/v1/organizations/:orgId/stores/:storeId/products`
+  documents the new contract.
+- **`GET /v1/organizations/:orgId/stores/:storeId/products` default sort
+  changed from `-platformModifiedAt` to `-platformCreatedAt`** — newest
+  listings first, matching the Trendyol seller-panel ordering (Trendyol's
+  upstream `/products/approved` exposes the same notion via
+  `orderByDirection: SellerCreatedDate, DESC`). The sort vocabulary gains
+  `platformCreatedAt` / `-platformCreatedAt` as new options. NULL
+  `platformCreatedAt` rows (legacy syncs from before the column was
+  populated) sort to the end via `nulls: 'last'`. **Wire-level breaking
+  change** for callers that explicitly relied on the previous default;
+  existing callers passing `sort=-platformModifiedAt` continue to work
+  unchanged. The frontend nuqs default and the `tanstackToSort` fallback
+  in `apps/web/src/features/products/components/products-table.tsx` were
+  updated in lockstep.
 - **`POST /v1/organizations/:orgId/stores/:storeId/products/sync` response
   shape** — sync trigger now returns `{ syncLogId, status: 'PENDING',
 enqueuedAt }` instead of the prior `{ syncLogId, status: 'RUNNING',

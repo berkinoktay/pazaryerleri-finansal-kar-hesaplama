@@ -33,6 +33,7 @@ interface SeedProductSpec {
   color?: string;
   variants: SeedVariantSpec[];
   imageUrls?: string[];
+  platformCreatedAt?: Date;
   platformModifiedAt?: Date;
 }
 
@@ -41,6 +42,7 @@ async function seedProduct(
   storeId: string,
   spec: SeedProductSpec,
 ): Promise<void> {
+  const modifiedAt = spec.platformModifiedAt ?? new Date();
   const product = await prisma.product.create({
     data: {
       organizationId,
@@ -53,7 +55,11 @@ async function seedProduct(
       categoryId: spec.categoryId ?? null,
       categoryName: spec.categoryName ?? null,
       color: spec.color ?? null,
-      platformModifiedAt: spec.platformModifiedAt ?? new Date(),
+      // Default platformCreatedAt to platformModifiedAt so the default
+      // `-platformCreatedAt` sort yields the same ordering as the older
+      // `-platformModifiedAt` for fixtures that only specify the latter.
+      platformCreatedAt: spec.platformCreatedAt ?? modifiedAt,
+      platformModifiedAt: modifiedAt,
     },
   });
   for (const v of spec.variants) {
@@ -267,14 +273,16 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     expect(res.status).toBe(404);
   });
 
-  it('returns all five seeded products with default sort (newest platformModifiedAt first)', async () => {
+  it('returns all five seeded products with default sort (newest platformCreatedAt first)', async () => {
     const { user, orgId, storeId } = await setupOrgWithStoreAndFixtures();
     const { status, body } = await callList(user, orgId, storeId);
 
     expect(status).toBe(200);
     expect(body.pagination).toEqual({ page: 1, perPage: 25, total: 5, totalPages: 1 });
     expect(body.data).toHaveLength(5);
-    // Default sort: -platformModifiedAt — Kırmızı Etek (apr 27) first.
+    // Default sort: -platformCreatedAt — Kırmızı Etek (apr 27) first.
+    // Fixtures default platformCreatedAt to platformModifiedAt (see seedProduct),
+    // so the relative ordering is the same as the old -platformModifiedAt default.
     expect(body.data[0]?.title).toBe('Kırmızı Etek');
     expect(body.data[body.data.length - 1]?.title).toBe('Yeşil Mont');
   });
@@ -334,8 +342,11 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/products', () => {
     expect(pantolon).toBeDefined();
     expect(pantolon?.variants).toHaveLength(1);
     expect(pantolon?.variants[0]?.status).toBe('onSale');
-    // variantCount is the TOTAL count (regardless of filter), so consumers know there's more
-    expect(pantolon?.variantCount).toBe(2);
+    // variantCount mirrors variants[].length so the UI count chip, Beden chip
+    // overflow, and expanded sub-row count never disagree. Trendyol's seller
+    // panel uses the same "what you see is what you count" semantic — the
+    // earlier total-count contract surfaced phantom variants in the chip.
+    expect(pantolon?.variantCount).toBe(1);
   });
 
   it('status=archived shows only the products that have an archived variant', async () => {
