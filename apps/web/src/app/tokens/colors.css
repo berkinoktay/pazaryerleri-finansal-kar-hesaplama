@@ -12,32 +12,41 @@
  */
 
 :root {
-  /* Surfaces */
-  --background: oklch(99% 0.004 265);
+  /* Surfaces — TWO-TONE LAYOUT pattern (Stripe / Brisval / Coursue /
+     Linear): the main content area sits on a soft tinted gray so the
+     pure-white sidebar rail and pure-white cards both read as RAISED
+     surfaces floating above the page. Without this contrast, every
+     surface looks like the same paint — no depth, no hierarchy.
+     --background drops from 99% to 97% lightness; --sidebar (below)
+     and --card stay at pure white. */
+  --background: oklch(98% 0.005 265);
   --foreground: oklch(18% 0.02 265);
 
-  --muted: oklch(96.5% 0.005 265);
+  /* Muted shifts down to maintain its "darker than --background" semantic.
+     Was 96.5% when --background was 99%; now ~94% to keep a comfortable
+     drop from the new lighter --background while staying visibly distinct. */
+  --muted: oklch(94% 0.006 265);
   --muted-foreground: oklch(46% 0.015 265);
   /* One step dimmer than muted-foreground for non-interactive out-of-scope
      text (e.g. calendar days outside the active month). Keeps semantics —
      avoids `text-muted-foreground/50` alpha shortcuts. */
-  --muted-foreground-dim: oklch(62% 0.012 265);
+  --muted-foreground-dim: oklch(60% 0.012 265);
 
   /* Surface one step subtler than --muted; sits above --background but below
      --muted. Use for static zones like table footers, code blocks, callouts,
      placeholders. Avoid reaching for `bg-muted/50`. */
-  --surface-subtle: oklch(97.5% 0.005 265);
+  --surface-subtle: oklch(96% 0.005 265);
 
   /* Interactive row hover on a `bg-card` (or equivalent raised) surface.
      Used in tables, list rows. Drops slightly below --card in light, lifts
      slightly above --card in dark — comparable perceived contrast in both
      modes. Replaces `bg-muted/50` (a dark-mode trap). */
-  --surface-row-hover: oklch(97% 0.006 265);
+  --surface-row-hover: oklch(96% 0.006 265);
 
   /* Inactive trigger hover on a `bg-muted` container (segmented controls /
      pill tabs). Lifts toward the active state without becoming active.
      Replaces `bg-background/50` (a dark-mode trap). */
-  --surface-trigger-hover: oklch(98.5% 0.005 265);
+  --surface-trigger-hover: oklch(96.5% 0.005 265);
 
   --card: oklch(100% 0 0);
   --card-foreground: var(--foreground);
@@ -45,12 +54,13 @@
   --popover: oklch(100% 0 0);
   --popover-foreground: var(--foreground);
 
-  /* Lines */
-  --border: oklch(92% 0.006 265);
-  --border-strong: oklch(85% 0.008 265);
+  /* Lines — pulled slightly darker so they stay legible against the new
+     gray --background (which is closer to where borders used to sit). */
+  --border: oklch(89% 0.007 265);
+  --border-strong: oklch(83% 0.008 265);
   /* Softer than --border for incidental accents (active tab ring, inner
      dividers) where a full border reads too heavy. */
-  --border-muted: oklch(95% 0.006 265);
+  --border-muted: oklch(92% 0.006 265);
   /* Form-control fill — matches --card. Inputs become the brightest
      surface so they pop against the slightly tinted --background, while
      reading as the same surface as a Card they sit inside (border +
@@ -65,10 +75,10 @@
   --primary-foreground: oklch(98% 0.004 265);
   --primary-hover: oklch(40% 0.15 265);
 
-  --secondary: oklch(96% 0.006 265);
+  --secondary: oklch(93.5% 0.006 265);
   --secondary-foreground: oklch(22% 0.02 265);
 
-  --accent: oklch(94% 0.02 265);
+  --accent: oklch(91% 0.02 265);
   --accent-foreground: oklch(25% 0.04 265);
 
   /* Semantic — financial data */
@@ -108,18 +118,35 @@
 
   /* Sidebar surface contract — required by the shadcn Sidebar primitive
      (`bg-sidebar`, `bg-sidebar-accent`, `text-sidebar-foreground`, …).
-     Without these bindings the primitive's default + hover + active
-     classes silently produce no styles. We bind to existing tokens —
-     no new palette: sidebar surface = page background, hover/accent =
-     muted, foreground = foreground. The "active" state is overridden
-     at the consumer level (app-shell.tsx + nav-group.tsx) to use
-     `bg-primary` for a strong glanceable selection cue. */
-  --sidebar: var(--background);
+
+     The rail uses the SAME brand hue 265 as the rest of the system —
+     consistent with the design contract ("Neutrals tinted toward the
+     brand hue at chroma 0.005–0.01 — barely perceptible. It's the
+     difference between off-the-shelf and designed."). All chroma values
+     stay in that 0.005–0.01 range so the rail reads as "barely-tinted
+     neutral that belongs to this product," NOT as "bluish".
+
+     Lightness ladder differentiates the surfaces: --sidebar at 95% sits
+     between --background (99%) and --muted (96.5%) so the rail is
+     visibly its own surface but stays on the same family. Hover bumps
+     to 91% with marginally more chroma to signal interaction. Active
+     state is overridden at the consumer level (app-shell.tsx +
+     nav-group.tsx) to a full bg-primary fill — the only saturated color
+     in the rail, carrying the entire brand identity. */
+  --sidebar: var(--card);
   --sidebar-foreground: var(--foreground);
-  --sidebar-accent: var(--muted);
+  --sidebar-foreground-dim: oklch(48% 0.012 265);
+  --sidebar-accent: oklch(95% 0.008 265);
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border: var(--border);
+  --sidebar-border: oklch(89% 0.007 265);
   --sidebar-ring: var(--ring);
+
+  /* Sidebar gradient — disabled (matches --sidebar). The two-tone
+     layout (white rail on gray --background) carries the depth on its
+     own; gradients would just dilute that contrast. The token stays
+     plumbed in case a later iteration wants subtle depth back. */
+  --sidebar-grad-top: var(--sidebar);
+  --sidebar-grad-bottom: var(--sidebar);
 }
 
 .dark {
@@ -188,13 +215,27 @@
   --warning-border: oklch(50% 0.1 75);
   --destructive-border: oklch(48% 0.14 27);
 
-  /* Sidebar surface contract — see :root for full rationale. Dark
-     mode uses the same chain (sidebar = background, accent = muted)
-     so the relationship holds in both themes. */
-  --sidebar: var(--background);
+  /* Sidebar surface contract — see :root for full rationale. In dark
+     mode the rail sits ~3% darker than the main content panel so it
+     reads as recessed (the inverse contrast direction of light mode
+     where the rail is darker than the page; here both are dark, but
+     the rail is darker still). Same brand-tinted character via the
+     0.014 chroma bump over the page neutral. */
+  /* Sidebar surface contract — dark mode mirrors the light-mode
+     two-tone pattern: --sidebar = --card (the raised surface), reads
+     as lighter than --background (page bg) per dark-mode discipline
+     #1 ("raised surfaces in dark mode are LIGHTER than their
+     container, not darker"). */
+  --sidebar: var(--card);
   --sidebar-foreground: var(--foreground);
-  --sidebar-accent: var(--muted);
+  --sidebar-foreground-dim: oklch(58% 0.012 265);
+  --sidebar-accent: oklch(22% 0.014 265);
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border: var(--border);
+  --sidebar-border: oklch(24% 0.014 265);
   --sidebar-ring: var(--ring);
+
+  /* Dark-mode gradient — disabled in this iteration to match light
+     mode's flat two-tone aesthetic. */
+  --sidebar-grad-top: var(--sidebar);
+  --sidebar-grad-bottom: var(--sidebar);
 }

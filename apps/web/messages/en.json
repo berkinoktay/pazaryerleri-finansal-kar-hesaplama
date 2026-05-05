@@ -814,7 +814,12 @@
     "a11y": {
       "expandRow": "Show variants",
       "collapseRow": "Hide variants",
-      "openFilter": "Open filter"
+      "openFilter": "Open filter",
+      "viewImage": "View product image at full size"
+    },
+    "syncButton": {
+      "label": "Sync",
+      "syncing": "Syncing…"
     }
   }
 }

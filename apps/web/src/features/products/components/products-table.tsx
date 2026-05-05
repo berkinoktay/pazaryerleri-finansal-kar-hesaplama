@@ -29,6 +29,7 @@ import {
 import { DeliveryBadge } from './delivery-badge';
 import { ProductImageCell } from './product-image-cell';
 import { ProductsFacetChips } from './products-facet-chips';
+import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
 import { VariantStatusBadge } from './variant-status-badge';
 
 /**
@@ -65,6 +66,14 @@ interface ProductsTableProps {
   sort: ProductListSortExtended;
 
   facets?: ProductFacetsResponse;
+
+  // Override-state tab strip props — the strip lives INSIDE the DataTable
+  // shell now (top zone, above the toolbar), so the table owns rendering
+  // and forwards the change callback up to the page client which mutates URL state.
+  overrideTab: ProductsOverrideTab;
+  overrideCounts?: ProductFacetsResponse['overrideCounts'];
+  facetsLoading?: boolean;
+  onOverrideTabChange: (next: ProductsOverrideTab) => void;
 
   onSearchChange: (next: string) => void;
   onStatusChange: (next: ProductVariantStatus) => void;
@@ -133,8 +142,19 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         },
       },
       {
-        id: 'product',
+        // id matches the backend `title` sort key so sortToTanstack /
+        // tanstackToSort round-trip cleanly when the user toggles the
+        // "Ürün" header. Column label still reads "Ürün" via tCols('title').
+        // accessorFn is a no-op contract requirement — TanStack v8's
+        // `column.getCanSort()` returns false unless the column declares
+        // an accessor (key or fn), even when `enableSorting: true`. Since
+        // ordering is server-driven (`manualSorting: true`), the returned
+        // value is never used for client-side sorting; it just unlocks the
+        // sort header button.
+        id: 'title',
+        accessorFn: (row) => (row.kind === 'parent' ? row.product.title : ''),
         header: () => tCols('title'),
+        enableSorting: true,
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {
             const v = row.original.variant;
@@ -208,6 +228,13 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
       },
       {
         id: 'salePrice',
+        // accessorFn unlocks canSort (see `title` column for the rationale).
+        // Returns the first variant's sale price as a number — never read
+        // because manualSorting is on, so any value works.
+        accessorFn: (row) =>
+          row.kind === 'parent'
+            ? Number(row.product.variants[0]?.salePrice ?? 0)
+            : Number(row.variant.salePrice),
         header: () => tCols('salePrice'),
         meta: { numeric: true },
         enableSorting: true,
@@ -231,6 +258,9 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
       },
       {
         id: 'totalStock',
+        // accessorFn unlocks canSort (see `title` column for the rationale).
+        accessorFn: (row) =>
+          row.kind === 'parent' ? totalStock(row.product.variants) : row.variant.quantity,
         header: () => tCols('stock'),
         meta: { numeric: true },
         enableSorting: true,
@@ -325,6 +355,14 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
       }}
       pageCount={props.pagination?.totalPages ?? 0}
       rowCount={props.pagination?.total ?? 0}
+      tabs={
+        <ProductsTabStrip
+          value={props.overrideTab}
+          counts={props.overrideCounts}
+          loading={props.facetsLoading}
+          onChange={props.onOverrideTabChange}
+        />
+      }
       toolbar={(table) => (
         <DataTableToolbar
           table={table}

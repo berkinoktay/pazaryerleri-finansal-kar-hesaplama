@@ -98,9 +98,15 @@ const NAV_ITEM_CLASSES = cn(
  * The alpha lives on the primary token (theme-aware in both light and
  * dark), not on a flat color.
  */
+// Sub-nav rows use the sidebar-namespaced tokens so they adapt cleanly
+// to the rail's color (--sidebar-foreground for full-strength text,
+// --sidebar-foreground-dim for at-rest, --sidebar-accent for hover).
+// Active state lifts the row to a primary-tinted surface with brand
+// text — pairs with the parent row's full bg-primary fill at lower
+// intensity so the parent stays the dominant "you are here" cue.
 const SUB_NAV_LINK_CLASSES = cn(
   'duration-fast px-xs py-2xs text-xs rounded-sm transition-colors',
-  'text-muted-foreground hover:bg-muted hover:text-foreground',
+  'text-sidebar-foreground-dim hover:bg-sidebar-accent hover:text-sidebar-foreground',
 );
 const SUB_NAV_LINK_ACTIVE_CLASSES =
   'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary font-medium';
@@ -191,7 +197,15 @@ export function AppShell({
             <UserMenu />
           </div>
         </header>
-        <div className="max-w-content-max gap-lg px-sm py-sm md:px-lg md:py-lg mx-auto flex w-full flex-1 flex-col overflow-y-auto">
+        {/*
+          No `max-w-content-max` here — the dashboard is data-dense
+          (tables, KPI grids, charts) and benefits from filling 4K /
+          ultra-wide viewports rather than reserving 2000+px of empty
+          gutter. Pages that genuinely need a reading-width cap
+          (settings forms, prose, marketing-style content) opt in
+          per-page with `max-w-prose-max` / `max-w-form` / etc.
+        */}
+        <div className="gap-lg px-md py-md md:px-2xl md:py-xl flex w-full flex-1 flex-col overflow-y-auto">
           {children}
         </div>
       </SidebarInset>
@@ -222,10 +236,22 @@ function AppSidebar({
   const collapsed = state === 'collapsed';
 
   return (
+    // Default 'sidebar' variant — the dark brand-tinted rail (see
+    // tokens/colors.css) carries the visual identity on its own; no
+    // floating-card inset trick needed. The high-contrast boundary
+    // between dark sidebar and bright main content is the separation.
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-xs">
         <div className="gap-xs px-xs py-3xs flex items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <Wordmark withText className="group-data-[collapsible=icon]:hidden" />
+          {/*
+            text-sidebar-foreground keeps the wordmark synced with the
+            rail's foreground token in both light AND dark mode — the
+            mark reads correctly whichever theme is active.
+          */}
+          <Wordmark
+            withText
+            className="text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+          />
           <SidebarTrigger className="[&>svg]:size-icon-lg ml-auto size-9 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:size-10" />
         </div>
         <div className="px-xs group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">

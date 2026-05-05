@@ -814,7 +814,12 @@
     "a11y": {
       "expandRow": "Varyantları göster",
       "collapseRow": "Varyantları gizle",
-      "openFilter": "Filtreyi aç"
+      "openFilter": "Filtreyi aç",
+      "viewImage": "Ürün görselini büyüt"
+    },
+    "syncButton": {
+      "label": "Eşitle",
+      "syncing": "Eşitleniyor…"
     }
   }
 }

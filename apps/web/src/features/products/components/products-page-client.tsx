@@ -1,13 +1,16 @@
 'use client';
 
+import { RefreshIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
 import { SyncBadge, type SyncState } from '@/components/patterns/sync-badge';
 import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-center';
+import { Button } from '@/components/ui/button';
 import type { SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
+import { cn } from '@/lib/utils';
 
 import { useProductFacets } from '../hooks/use-product-facets';
 import { useProducts } from '../hooks/use-products';
@@ -16,7 +19,7 @@ import { useStartProductSync } from '../hooks/use-start-product-sync';
 
 import { ProductsEmptyState } from './products-empty-state';
 import { ProductsTable } from './products-table';
-import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
+import { type ProductsOverrideTab } from './products-tab-strip';
 
 interface ProductsPageClientProps {
   orgId: string | null;
@@ -45,6 +48,7 @@ export function ProductsPageClient({
   pageIntent,
 }: ProductsPageClientProps): React.ReactElement {
   const tSync = useTranslations('syncCenter');
+  const tProducts = useTranslations('products');
   const { filters, setFilters } = useProductsFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
 
@@ -110,6 +114,12 @@ export function ProductsPageClient({
     return 'no-products';
   })();
 
+  // The Eşitle button can fire only when no products sync is already in
+  // flight — mirrors the SyncCenter trigger guard so we never POST a
+  // duplicate that would 409 with SYNC_IN_PROGRESS.
+  const productsSyncInFlight = activeSyncs.some((l) => l.syncType === 'PRODUCTS');
+  const syncButtonDisabled = startSync.isPending || productsSyncInFlight;
+
   return (
     <>
       <div className="gap-lg flex flex-col">
@@ -127,17 +137,21 @@ export function ProductsPageClient({
               ariaLabel={tSync('openLabel')}
             />
           }
-        />
-
-        <ProductsTabStrip
-          value={tabValue}
-          counts={facetsQuery.data?.overrideCounts}
-          loading={facetsQuery.isLoading}
-          onChange={(next) =>
-            void setFilters({
-              overrideMissing: next === 'all' ? null : next,
-              page: 1,
-            })
+          actions={
+            // Promoted from a hidden text-link inside the SyncBadge to a
+            // first-class action — sellers expect a top-right "Eşitle"
+            // button (Tiyasis ships the same affordance) and the prior
+            // long meta string was illegible as a clickable target.
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => startSync.mutate()}
+              disabled={syncButtonDisabled}
+              className="gap-xs"
+            >
+              <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
+              {syncButtonDisabled ? tProducts('syncButton.syncing') : tProducts('syncButton.label')}
+            </Button>
           }
         />
 
@@ -155,6 +169,15 @@ export function ProductsPageClient({
           overrideMissing={filters.overrideMissing}
           sort={filters.sort}
           facets={facetsQuery.data}
+          overrideTab={tabValue}
+          overrideCounts={facetsQuery.data?.overrideCounts}
+          facetsLoading={facetsQuery.isLoading}
+          onOverrideTabChange={(next) =>
+            void setFilters({
+              overrideMissing: next === 'all' ? null : next,
+              page: 1,
+            })
+          }
           onSearchChange={(next) => void setFilters({ q: next, page: 1 })}
           onStatusChange={(next) => void setFilters({ status: next, page: 1 })}
           onBrandChange={(next) => void setFilters({ brandId: next, page: 1 })}

@@ -24,7 +24,12 @@ export function BottomDock({ children, className }: BottomDockProps): React.Reac
   return (
     <div
       className={cn(
-        'border-border bg-background gap-3xs p-xs flex flex-col border-t',
+        // bg-sidebar (not bg-background) so the dock continues the
+        // rail surface uninterrupted. The earlier bg-background paint
+        // produced a jarring white box at the bottom of the rail
+        // whenever --sidebar diverged from --background — caught in
+        // post-Tiyasis-redesign review.
+        'border-sidebar-border bg-sidebar gap-3xs p-xs flex flex-col border-t',
         'group-data-[collapsible=icon]:px-3xs',
         className,
       )}
