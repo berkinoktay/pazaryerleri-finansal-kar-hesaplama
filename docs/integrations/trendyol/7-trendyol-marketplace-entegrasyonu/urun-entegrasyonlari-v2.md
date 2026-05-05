@@ -1,5 +1,35 @@
 # Ürün Entegrasyonu V2 - Dokümantasyon
 
+
+## Ürün Varyantlama
+
+> 🚧 **ÖNEMLİ**
+>
+> **NOT :** Bir ürünün birden fazla variant'ı olması durumunda `productMainId` değeri aynı olacak şekilde (Ürünün XL ve L bedeni gibi) isteğin gönderilmesi beklenmektedir. Ürünün sadece `attributes` bölümü farklılaştırılmalıdır.
+
+Ürün varyantlama işlemi `"productMainId"` değerine göre yapılmaktadır. İlgili kategori özelliği üzerinden `"slicer"` ve `"varianter"` değeri kontrol edilmelidir.
+
+`"slicer"` (ürün renk değeri, ürün hafıza değeri vb.)
+
+Ürünü ayrı contentlerde açar, sistem üzerinde en fazla Slicer olarak kullanılan değer renktir, ancak elektronik kategorilerinde ürünün ayrı contentlerde açılabilmesi için (dahili hafıza gibi) slicer değeri olarak kullanılabilir. (kategori özelliği servisi üzerinden `slicer=true` dönmelidir.)
+
+- Bir kategoride birden fazla slicer değeri olabilir.
+- Slicer değer ürünü ayrı contentlerde açtığı için, variant olarak kullanılabilir.
+
+> 📷 **[RESİM](slicer.png)**
+> Görsel URL: `https://developers.trendyol.com/docs/assets/slicer.png`
+
+---
+
+`"varianter"` (ürün beden değeri vb.)
+
+Aynı content üzerinde yer alan ürünün ayrı bedenleridir. Ürünü farklı contentlerde açmaz. Her kategoride bir tane varianter seçilebilir. Birden fazla seçime izin verilmemektedir.
+
+> 📷 **[RESİM](varianter.png)**
+> Görsel URL: `https://developers.trendyol.com/docs/assets/varianter.png`
+
+
+
 ---
 
 ## 1. Ürün Filtreleme - Temel Bilgiler v2
@@ -35,110 +65,193 @@ https://stageapigw.trendyol.com/integration/product/sellers/{sellerId}/product/{
 
 ---
 
-## 2. Ürün Filtreleme - Onaysız Ürün v2
+## Ürün Filtreleme - Onaylı Ürün v2
 
-Bu servis ile Trendyol mağazanızdaki onaysız (draft) ürünlerinizi listeleyebilirsiniz.
+Bu servis ile Trendyol mağazanızdaki onaylı ürünlerinizi listeleyebilirsiniz.
 
-Bu servis ile ürün onay süreci devam eden ve kontrol sonrası reddedilen ürünlerinizi listeleyebilirsiniz. Reddedilen ürün için reddetme sebebini kontrol edip, gerekli güncellemeleri yapmanız halinde, ürününüz tekrar onay sürecine girecektir.
+- Bu servise yapılan isteklere `"nextPageToken"` bilgisi eklenmiştir. Yapmış olduğunuz istekte `request?page=10&size=100` yazmanız halinde 10. sayfadaki 100 content response olarak döner. Sonraki isteğinizde `request?size=100&nextPageToken=TOKEN` yazmanız halinde sonraki sayfa olan 11. sayfadaki 100 content response olarak döner. (`nextPageToken` isteği 10.000'den fazla onaylı content olması halinde kullanılabilir.)
+- Page x size maksimum 10.000 değerini alabilir.
 
-Bu servise yapılan isteklere `nextPageToken` bilgisi eklenmiştir.
-
-- Yapmış olduğunuz istekte `request?page=10&size=1000` yazmanız halinde 10. sayfadaki 1000 ürün response olarak döner.
-- Sonraki isteğinizde `request?size=1000&nextPageToken=TOKEN` yazmanız halinde sonraki sayfa olan 11. sayfadaki 1000 ürün response olarak döner.
-- (`nextPageToken` isteği 10.000'den fazla onaysız barcode olması halinde kullanılabilir.)
-- `Page x size` maksimum 10.000 değerini alabilir.
+---
 
 ### GET filterProducts
 
 **PROD**
-
-```
-https://apigw.trendyol.com/integration/product/sellers/{sellerId}/products/unapproved
-```
+`https://apigw.trendyol.com/integration/product/sellers/{sellerId}/products/approved`
 
 **STAGE**
+`https://stageapigw.trendyol.com/integration/product/sellers/{sellerId}/products/approved`
 
-```
-https://stageapigw.trendyol.com/integration/product/sellers/{sellerId}/products/unapproved
-```
+---
 
-### Giriş Parametreleri
+#### Giriş Parametreleri
 
-| Parametre     | Açıklama                                                                                      | Tip    |
-| ------------- | --------------------------------------------------------------------------------------------- | ------ |
-| barcode       | Tekil barkod sorgulamak için gönderilmelidir                                                  | string |
-| startDate     | Belirli bir tarihten sonraki ürünleri getirir. Timestamp olarak gönderilmelidir.              | long   |
-| endDate       | Belirli bir tarihten önceki ürünleri getirir. Timestamp olarak gönderilmelidir.               | long   |
-| page          | Sadece belirtilen sayfadaki bilgileri döndürür.                                               | int    |
-| dateQueryType | Tarih filtresinin çalışacağı tarih. `CREATED_DATE` ya da `LAST_MODIFIED_DATE` gönderilebilir. | string |
-| size          | Bir sayfada listelenecek maksimum adeti belirtir. Maksimum 1000 değerini alabilir.            | int    |
-| supplierId    | İlgili tedarikçinin ID bilgisi gönderilmelidir.                                               | long   |
-| stockCode     | İlgili tedarikçinin stock code bilgisi gönderilmelidir.                                       | string |
-| productMainId | İlgili tedarikçinin productMainId bilgisi gönderilmelidir.                                    | string |
-| brandIds      | Belirtilen brandId'ye sahip ürünleri listelemek için kullanılmalıdır.                         | array  |
-| status        | Status alanı `rejected` ve `pendingApproval` değerlerini alabilir.                            | string |
-| nextPageToken | 10.000 adet ürün'den sonraki ürünleri almak için kullanılmalıdır.                             | string |
+| Parametre | Açıklama | Tip |
+|-----------|----------|-----|
+| barcode | Tekil barkod sorgulamak için gönderilmelidir | string |
+| startDate | Belirli bir tarihten sonraki ürünleri getirir. Timestamp olarak gönderilmelidir. | long |
+| endDate | Belirli bir tarihten sonraki önceki getirir. Timestamp olarak gönderilmelidir. | long |
+| page | Sadece belirtilen sayfadaki bilgileri döndürür. | int |
+| dateQueryType | Tarih filtresinin çalışacağı tarih `VARIANT_CREATED_DATE`, `VARIANT_MODIFIED_DATE`, `CONTENT_MODIFIED_DATE` olarak gönderilebilir. `VARIANT_CREATED_DATE`: Satıcının kendi barkoduyla ürünü açtığı tarih. Response body'deki `"sellerCreatedDate"`e denk gelmektedir. `VARIANT_MODIFIED_DATE`: Barkodun satıcı tarafından en son güncellendiği tarih. Response body'deki `"sellerModifiedDate"`e denk gelmektedir. `CONTENT_MODIFIED_DATE`: Content üzerine yapılan en son değişikliğin tarihi. Response body'deki `"lastModifiedDate"`e denk gelmektedir. | string |
+| size | Bir sayfada listelenecek maksimum adeti belirtir. Maksimum 100 değerini alabilir. | int |
+| supplierId | İlgili tedarikçinin ID bilgisi gönderilmelidir | long |
+| stockCode | İlgili tedarikçinin stock code bilgisi gönderilmelidir | string |
+| productMainId | İlgili tedarikçinin productMainId bilgisi gönderilmelidir | string |
+| brandIds | Belirtilen brandId'ye sahip ürünleri listelemek için kullanılmalıdır. | array |
+| status | Status alanı `archived`, `blacklisted`, `locked`, `onSale`, `notOnSale` değerlerini alabilir | string |
+| nextPageToken | 10.000 adet content'den sonraki contentleri almak için kullanılmalıdır | string |
+| contentId | Tekil contentId sorgulamak için gönderilmelidir | string |
+| orderByDirection | `"SellerCreatedDate"` alanına göre `ASC`/`DESC` olarak gönderilebilir. `ASC`: Eskiden yeniye doğru sıralar. `DESC`: Yeniden eskiye doğru sıralar. | string |
 
-**Örnek Servis Cevabı**
+---
+
+#### Örnek Servis Cevabı
 
 ```json
 {
   "totalElements": 1,
   "totalPages": 1,
   "page": 0,
-  "size": 1,
+  "size": 20,
   "nextPageToken": "eyJzb3J0IjpbMTI3MTU4MTVdfQ==",
   "content": [
     {
-      "supplierId": 2748,
-      "productMainId": "smoketest-114333a11",
-      "createDateTime": 1763964757705,
-      "lastUpdateDate": 1764059908901,
-      "lastPriceChangeDate": 1763964757656,
-      "lastStockChangeDate": 1763964757656,
+      "contentId": 12715815,
+      "productMainId": "12613876842A60",
       "brand": {
-        "id": 317259,
-        "name": "Trendyol Üyelik"
+        "id": 315675,
+        "name": "GUEYA"
       },
       "category": {
-        "id": 129332,
-        "name": "Üyelik Servisi"
+        "id": 91266,
+        "name": "DOKUNMAYIN Attribute Attribute"
       },
-      "barcode": "smoketest-114333a11",
-      "title": "Test Product",
-      "description": "Test Product Description",
-      "quantity": 1,
-      "listPrice": 25000,
-      "salePrice": 20000,
-      "vatRate": 20,
-      "dimensionalWeight": null,
-      "stockCode": "TEST-STOCK",
-      "media": [
+      "creationDate": 1760531038063,
+      "lastModifiedDate": 1760938781669,
+      "lastModifiedBy": "anilcan.gul@trendyol.com",
+      "title": "Açık Gri T-",
+      "description": "değişti değişti2",
+      "images": [
         {
-          "url": "https://marketplace-supplier-media-center.oss-eu-central-1.aliyuncs.com/prod/431929/3bda8d78-00e8-4bbf-abb7-f7a13297d2f3/A_TABLO1148.jpg?x-oss-process=style/resized"
+          "url": "/mediacenter-stage3/stage/QC_PREP/20250731/11/f63d6503-ab94-3567-adbc-8f26a5cdaac6/1.jpg"
         }
       ],
-      "attributes": [],
-      "rejectReasonDetails": [
+      "attributes": [
         {
-          "rejectReason": "Sakıncalı Görsel Değişt",
-          "rejectReasonDetail": "Ürün görselleriniz  platform kurallarımız uyarınca sakıncalı olarak kabul edilen görselleri içermektedir. Ürün görselleri ile kelepçe, bağlama ipleri vb. ürünlerin canlı mankenler üzerinde gösterimi, cinsel oyuncak kullanımının gösterimi, cinsel pozisyonun veya cinsel organların gösterimi ve çocuk manken üzerinde iç çamaşırı/plaj giyimi sunumu platform kurallarımız uyarınca yasaktır. Lütfen ürün görsellerinizi platform kurallarımıza uygun hale getirecek şekilde değiştiriniz. https://akademi.trendyol.com/ELearning?TrainingId=23555 Değişti"
+          "attributeId": 47,
+          "attributeName": "Renk",
+          "attributeValue": "Black"
         },
         {
-          "rejectReason": "Zorunlu Ürün Özellik Değeri Eksik/Yanlış",
-          "rejectReasonDetail": "Zorunlu özellik değeri hatalı ya da eksiktir. Lütfen zorunlu özellik bilgilerinizi doldurun ya da değiştiriniz."
+          "attributeId": 295,
+          "attributeName": "Web Color",
+          "attributeValueId": 2886,
+          "attributeValue": "Kırmızı"
         },
         {
-          "rejectReason": "Hatalı Marka Bilgisi",
-          "rejectReasonDetail": "Ürün markasındaki, ismindeki, görselindeki, barkodundaki ve/veya açıklamasındaki marka ile ürünün asıl markası uyuşmamaktadır. Lütfen ürünün markasını ve ürün listeleme kurallarına/içerik kalitesine uygunluğunu kontrol ediniz."
+          "attributeId": 294,
+          "attributeName": "Yaş Grubu",
+          "attributeValueId": 2879,
+          "attributeValue": "Yetişkin"
         },
         {
-          "rejectReason": "Satış Kurallarına Aykırı Ürün",
-          "rejectReasonDetail": "Bu ürün Trendyol Platformu satış kurallarıyla uyumlu değildir. Kuralları görmek için tıklayınız. https://tymp.mncdn.com/prod/documents/engagement/yasal_surecler/satisa_uygun_olmayan_urunler.pdf"
+          "attributeId": 296,
+          "attributeName": "Cinsiyet",
+          "attributeValueId": 2873,
+          "attributeValue": "Erkek"
         }
       ],
-      "locationBasedDelivery": "DISABLED",
-      "lotNumber": "PartiNo:011220,SeriNo:M00A59153,SKT:12/12/2012,LotNo:0301A79"
+      "variants": [
+        {
+          "variantId": 70228905,
+          "supplierId": 2748,
+          "barcode": "12613876842A60",
+          "attributes": [
+            {
+              "attributeId": 293,
+              "attributeName": "Beden",
+              "attributeValueId": 4602,
+              "attributeValue": "77 x 200 cm"
+            }
+          ],
+          "productUrl": "https://stage.trendyol.com/abc/xyz-p-12715815?&merchantId=2748&filterOverPriceListings=false",
+          "onSale": false,
+          "deliveryOptions": {
+            "deliveryDuration": 1,
+            "isRushDelivery": true,
+            "fastDeliveryOptions": [
+              {
+                "deliveryOptionType": "SAME_DAY_SHIPPING",
+                "deliveryDailyCutOffHour": "15:00"
+              }
+            ]
+          },
+          "stock": {
+            "quantity": 0,
+            "lastModifiedDate": 1774948958844
+          },
+          "price": {
+            "salePrice": 222,
+            "listPrice": 222
+          },
+          "stockCode": "STK-stokum-1",
+          "vatRate": 0,
+          "sellerCreatedDate": 1760534152000,
+          "sellerModifiedDate": 1761041127000,
+          "locked": false,
+          "lockReason": null,
+          "lockDate": null,
+          "archived": false,
+          "archivedDate": null,
+          "docNeeded": false,
+          "hasViolation": false,
+          "blacklisted": false
+        },
+        {
+          "variantId": 70229505,
+          "supplierId": 2748,
+          "barcode": "12613876842A61",
+          "attributes": [
+            {
+              "attributeId": 293,
+              "attributeName": "Beden",
+              "attributeValueId": 4603,
+              "attributeValue": "77 x 300 cm"
+            }
+          ],
+          "productUrl": "https://stage.trendyol.com/abc/xyz-p-12715815?&merchantId=2748&filterOverPriceListings=false",
+          "onSale": false,
+          "deliveryOptions": {
+            "deliveryDuration": 1,
+            "isRushDelivery": true,
+            "fastDeliveryOptions": [
+              {
+                "deliveryOptionType": "SAME_DAY_SHIPPING",
+                "deliveryDailyCutOffHour": "15:00"
+              }
+            ]
+          },
+          "stock": {
+            "lastModifiedDate": null
+          },
+          "price": {
+            "salePrice": 222,
+            "listPrice": 222
+          },
+          "stockCode": "STK-stokum-1",
+          "vatRate": 0,
+          "sellerCreatedDate": 1760534320000,
+          "sellerModifiedDate": 1761041127000,
+          "locked": false,
+          "lockReason": null,
+          "lockDate": null,
+          "archived": false,
+          "archivedDate": null,
+          "docNeeded": false,
+          "hasViolation": false,
+          "blacklisted": false
+        }
+      ]
     }
   ]
 }
