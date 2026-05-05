@@ -56,16 +56,21 @@ const tabsTriggerVariants = cva(
     variants: {
       variant: {
         // Pill: fills the muted container's inner height (minus p-3xs padding) via h-full.
-        // Active reads as a surfaced card (bg-card + shadow-sm + subtle ring for definition).
-        // Inactive hover surfaces a faint background so non-primary tabs still signal "clickable".
+        // Active reads as a surfaced card lifted with a stronger shadow (the dark-mode
+        // inset highlight in --shadow-md keeps the lift legible in both themes — the
+        // earlier shadow-sm was invisible against a near-black backdrop). The active
+        // state picks up `text-foreground` (ink black) plus a 1px ring at full --border
+        // strength for a sharper segmented-control feel, à la Linear / Mercury.
+        // Inactive hover surfaces a faint background so non-primary tabs still
+        // signal "clickable".
         pill: cn(
           'h-full rounded-md',
           'hover:text-foreground',
           'data-[state=inactive]:hover:bg-surface-trigger-hover',
           'data-[state=active]:bg-card',
           'data-[state=active]:text-foreground',
-          'data-[state=active]:shadow-sm',
-          'data-[state=active]:ring-1 data-[state=active]:ring-border-muted',
+          'data-[state=active]:shadow-md',
+          'data-[state=active]:ring-1 data-[state=active]:ring-border',
         ),
         // Underline: container has border-b; trigger overlaps it with its own border-b-2 via -mb-px.
         // Weight stays constant (no semibold swap) to prevent width jitter when switching tabs.

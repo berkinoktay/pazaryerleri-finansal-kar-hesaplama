@@ -14,11 +14,13 @@ import { cn } from '@/lib/utils';
  * the alt text's initials (`fallback="initials"`, useful for customer
  * + team avatars).
  *
- * Three size presets line up with the typical row densities:
+ * Four size presets line up with the typical row densities:
  *
  *   sm (32px) — compact tables, dense lists
  *   md (40px) — default for product / customer rows
  *   lg (56px) — header avatars, spotlight cards
+ *   xl (80px) — spotlight product thumbnails on data-dense pages where
+ *               the seller needs to identify a SKU at a glance
  *
  * `shape="circle"` swaps the default `rounded-md` corner for a circle
  * — paired with `fallback="initials"` it reads as the canonical avatar
@@ -32,7 +34,7 @@ import { cn } from '@/lib/utils';
  * @useWhen rendering a fixed-footprint image inside a table cell or list row with a built-in fallback for missing / failed loads (use ImageCell with shape=circle + fallback=initials for avatar-style cells)
  */
 
-export type ImageCellSize = 'sm' | 'md' | 'lg';
+export type ImageCellSize = 'sm' | 'md' | 'lg' | 'xl';
 export type ImageCellShape = 'square' | 'circle';
 export type ImageCellFallback = 'icon' | 'initials';
 
@@ -40,6 +42,7 @@ const SIZE_CLASS: Record<ImageCellSize, string> = {
   sm: 'size-thumb-sm',
   md: 'size-thumb-md',
   lg: 'size-thumb-lg',
+  xl: 'size-thumb-xl',
 };
 
 export interface ImageCellProps {

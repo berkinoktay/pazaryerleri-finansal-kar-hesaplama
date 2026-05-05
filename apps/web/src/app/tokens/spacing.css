@@ -33,10 +33,13 @@
   /* Thumbnail sizes for ImageCell — square footprints used inside table
    * cells and list rows. sm fits dense tables (32px), md is the default
    * for product / customer rows (40px), lg is for header avatars or
-   * spotlight cards (56px). */
+   * spotlight cards (56px), xl for spotlight product thumbnails on
+   * data-dense pages where the seller needs to identify a SKU at a
+   * glance (80px). */
   --size-thumb-sm: 32px;
   --size-thumb-md: 40px;
   --size-thumb-lg: 56px;
+  --size-thumb-xl: 80px;
 
   --size-rail-icon: 48px;
   --size-rail-context: 240px;
@@ -73,6 +76,13 @@
   --size-dropdown-popover: 24rem; /* org+store switcher dropdown panel (384px) */
   --size-pagesize-select: 5rem; /* DataTablePagination per-page Select trigger (80px — fits 1–3 digit page sizes + chevron) */
   --size-headline: 56rem; /* landing hero H1 column (896px) */
+
+  /* Image modal viewport caps — used by ui/image-modal.tsx so the full-size
+   * image fills the screen without bleeding past the edges. Viewport units
+   * are intentional (the modal scales with the user's screen, not a fixed
+   * point); the token names keep them out of arbitrary-value linting. */
+  --size-image-modal-w: 90vw;
+  --size-image-modal-h: 90vh;
 
   --radius-xs: 4px;
   --radius-sm: 6px;

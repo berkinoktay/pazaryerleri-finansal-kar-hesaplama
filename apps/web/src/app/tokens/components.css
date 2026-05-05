@@ -9,3 +9,33 @@ table tr[data-depth='1'] {
 table tr[data-depth='1'] > td:first-child {
   padding-left: var(--space-xl);
 }
+
+/* Image modal viewport caps — driven by ui/image-modal.tsx. Tokenized
+   here (not as a Tailwind utility) because viewport-relative values
+   (`90vw` / `90vh`) need a CSS class wrapper to compose cleanly with
+   `object-contain` + `rounded-lg` on the same <img>. */
+.image-modal-img {
+  max-width: var(--size-image-modal-w);
+  max-height: var(--size-image-modal-h);
+}
+
+/* Sidebar visual identity — applied to BOTH the desktop sidebar inner
+   AND the BottomDock so they share one continuous surface. Two layered
+   treatments give the rail its distinctive PazarSync character:
+   1. A vertical brand-tinted gradient (--sidebar-grad-top → --sidebar)
+      so the header zone reads as quietly elevated and the rail has
+      subtle depth instead of flat paint.
+   2. A stronger right border (--sidebar-border, weighed up vs --border)
+      so the rail-to-content boundary is unmistakable in both themes.
+   Token-driven; never hand-roll alternative colors here. */
+[data-slot='sidebar-inner'] {
+  background-image: linear-gradient(
+    180deg,
+    var(--sidebar-grad-top) 0%,
+    var(--sidebar-grad-bottom) 320px
+  );
+}
+
+[data-slot='sidebar-container'][data-side='left'] {
+  border-right-color: var(--sidebar-border);
+}

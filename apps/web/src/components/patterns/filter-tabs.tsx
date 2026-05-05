@@ -26,9 +26,10 @@ import { cn } from '@/lib/utils';
  * via nuqs, React Query slice keys), so the wrapper makes `value` +
  * `onValueChange` required and omits `defaultValue` to keep the API tight.
  *
- * Defaults to the `underline` Tabs variant — reads as page-level
- * segmentation above a list. Pass `variant="pill"` when the strip lives
- * inside a constrained card or toolbar.
+ * Defaults to the `pill` Tabs variant — reads as a segmented control
+ * inside a constrained card surface (DataTable shell, toolbar). Pass
+ * `variant="underline"` when the strip introduces a full page section
+ * with no surrounding container.
  *
  * Renders ONLY the tab list. The content panel below the strip is the
  * caller's shared list — there is no per-tab `TabsContent`. Pair with
@@ -64,7 +65,7 @@ export function FilterTabs<V extends string = string>({
   onValueChange,
   options,
   loading = false,
-  variant = 'underline',
+  variant = 'pill',
   size = 'md',
   className,
   ...rest
@@ -79,16 +80,46 @@ export function FilterTabs<V extends string = string>({
       className={className}
       {...rest}
     >
-      <TabsList>
+      {/*
+        Override the base pill TabsList chrome so the strip blends with
+        whatever surface it's mounted on (typically the integrated
+        DataTable shell). Without the override, the inherited
+        `bg-muted border rounded-lg` produced a "floating widget inside
+        a card" effect — visual nesting that read as noise. Triggers
+        keep their own surface for the active state, so differentiation
+        still works.
+      */}
+      <TabsList className="gap-xs h-auto rounded-none border-none bg-transparent p-0">
         {options.map((option) => (
-          <TabsTrigger key={option.value} value={option.value} disabled={option.disabled}>
+          // `group` lets the count chip swap styles when the parent trigger
+          // flips to data-state="active" — no parallel state tracking needed.
+          <TabsTrigger
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+            className="group h-9"
+          >
             <span className="gap-2xs flex items-center">
               <span>{option.label}</span>
               {option.count !== undefined ? (
                 loading ? (
                   <Skeleton className="h-xs inline-block w-sm rounded-sm" />
                 ) : (
-                  <span className={cn('text-2xs text-muted-foreground tabular-nums')}>
+                  <span
+                    className={cn(
+                      'px-2xs py-3xs text-2xs rounded-sm border tabular-nums',
+                      // Inactive: bright chip on a muted container — pops as
+                      // a discrete data point without adding chroma noise.
+                      'bg-card border-border text-muted-foreground',
+                      // Active: brand-tinted fill picks up the primary, signals
+                      // the live count for the selected tab without color
+                      // overload elsewhere on the strip.
+                      'group-data-[state=active]:bg-primary',
+                      'group-data-[state=active]:border-primary',
+                      'group-data-[state=active]:text-primary-foreground',
+                      'duration-fast transition-colors',
+                    )}
+                  >
                     {formatter.number(option.count, 'integer')}
                   </span>
                 )

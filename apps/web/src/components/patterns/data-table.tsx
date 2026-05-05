@@ -40,6 +40,13 @@ import { cn } from '@/lib/utils';
 export interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  /**
+   * Optional tab strip mounted at the very top of the integrated table
+   * shell — typically a `FilterTabs` for status/segment filtering. Sits
+   * above the toolbar with an inner border-b separator so the whole
+   * surface (tabs · toolbar · rows · pagination) reads as one panel.
+   */
+  tabs?: React.ReactNode;
   /** Optional toolbar receives the table instance for faceted filter controls. */
   toolbar?: (table: TanstackTable<TData>) => React.ReactNode;
   /**
@@ -185,6 +192,7 @@ export interface DataTableProps<TData, TValue> {
 export function DataTable<TData, TValue>({
   columns,
   data,
+  tabs,
   toolbar,
   pagination,
   loading = false,
@@ -303,9 +311,17 @@ export function DataTable<TData, TValue>({
   });
 
   return (
-    <div className="gap-md flex flex-col">
-      {toolbar ? toolbar(table) : null}
-      <div className="border-border bg-card overflow-hidden rounded-lg border">
+    // Integrated table shell — `tabs` (optional) → `toolbar` (optional) →
+    // table rows → `pagination` (optional) all live inside one bordered,
+    // rounded surface. Internal `border-b` / `border-t` dividers separate
+    // the zones so the whole control surface reads as one panel instead
+    // of four floating siblings. The shell uses bg-card as the consistent
+    // surface; the recessed inset variant of the AppShell sidebar already
+    // gives the panel its outer lift.
+    <div className="border-border bg-card overflow-hidden rounded-lg border">
+      {tabs ? <div className="border-border px-md pt-sm pb-2xs border-b">{tabs}</div> : null}
+      {toolbar ? <div className="border-border px-md py-sm border-b">{toolbar(table)}</div> : null}
+      <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -435,7 +451,9 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      {pagination ? pagination(table) : null}
+      {pagination ? (
+        <div className="border-border px-md py-sm border-t">{pagination(table)}</div>
+      ) : null}
     </div>
   );
 }

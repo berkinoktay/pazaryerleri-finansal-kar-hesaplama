@@ -39,6 +39,12 @@ export const TableHeader = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <thead
     ref={ref}
+    // bg-muted is the design system's canonical "raised band" neutral
+    // (--muted: oklch(94% 0.006 265) — tinted toward the brand hue at
+    // the design-system-mandated 0.005-0.01 chroma). On a bg-card table
+    // surface it gives the header zone clear visual separation from the
+    // body without reading as a heavy gray panel. Same hue family as
+    // every other neutral in the system.
     className={cn('bg-muted [&_tr]:border-border sticky top-0 z-10 [&_tr]:border-b', className)}
     {...props}
   />
@@ -106,6 +112,9 @@ export const TableHead = React.forwardRef<
     className={cn(
       'px-sm text-2xs text-muted-foreground h-10 text-left align-middle font-medium tracking-wide uppercase',
       'data-[numeric=true]:text-right',
+      // Pinned cells use bg-muted to match the surrounding TableHeader
+      // band, so a sticky pinned header column doesn't break out of the
+      // header zone visually.
       'data-[pinned-side]:bg-muted data-[pinned-side]:sticky data-[pinned-side]:z-20',
       'data-[pinned-edge=last-left]:shadow-pin-left-edge data-[pinned-edge=first-right]:shadow-pin-right-edge',
       className,
@@ -122,7 +131,12 @@ export const TableCell = React.forwardRef<
   <td
     ref={ref}
     className={cn(
-      'h-table-row-h px-sm text-foreground align-middle text-sm',
+      // py-sm gives content vertical breathing room — critical when a row
+      // contains a tall element like a 56px product thumbnail, where
+      // without padding the image would touch the row's border-b.
+      // h-table-row-h still acts as the minimum so text-only rows
+      // (price, stock, status) keep the established 44px row rhythm.
+      'h-table-row-h px-sm py-sm text-foreground align-middle text-sm',
       'data-[numeric=true]:text-right data-[numeric=true]:tabular-nums',
       // Pinned body cells stay opaque so unpinned columns scrolling
       // beneath them don't show through; mirror the row's hover +
