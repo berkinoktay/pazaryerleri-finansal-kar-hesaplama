@@ -769,7 +769,7 @@
       "stockCode": "Stock code",
       "barcode": "Barcode",
       "color": "Color",
-      "size": "Variant",
+      "size": "Size",
       "variants": "Variants",
       "delivery": "Delivery",
       "salePrice": "Price",

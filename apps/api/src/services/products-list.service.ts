@@ -63,6 +63,12 @@ function buildSearchWhere(q: string): Prisma.ProductWhereInput {
 
 function buildOrderBy(sort: ProductListSort): Prisma.ProductOrderByWithRelationInput {
   switch (sort) {
+    case '-platformCreatedAt':
+      // Default. NULL platformCreatedAt rows (legacy syncs from before the
+      // column was populated) sort to the end so they don't pollute the top.
+      return { platformCreatedAt: { sort: 'desc', nulls: 'last' } };
+    case 'platformCreatedAt':
+      return { platformCreatedAt: { sort: 'asc', nulls: 'last' } };
     case '-platformModifiedAt':
       return { platformModifiedAt: 'desc' };
     case 'platformModifiedAt':
@@ -75,10 +81,10 @@ function buildOrderBy(sort: ProductListSort): Prisma.ProductOrderByWithRelationI
     case '-salePrice':
       // Prisma can't natively MAX over a decimal child relation without
       // raw SQL or a denormalized column. Until we ship Product.minSalePrice
-      // (follow-up), sort by platformModifiedAt as a deterministic fallback
+      // (follow-up), sort by platformCreatedAt as a deterministic fallback
       // when the user picks salePrice. Surfaced as a known limitation in
       // the validator's openapi description.
-      return { platformModifiedAt: sort.startsWith('-') ? 'desc' : 'asc' };
+      return { platformCreatedAt: { sort: sort.startsWith('-') ? 'desc' : 'asc', nulls: 'last' } };
     case 'totalStock':
       return { totalStock: 'asc' };
     case '-totalStock':
@@ -129,9 +135,11 @@ export async function list(opts: {
       include: {
         // Filter the variants[] in the response when status is set —
         // matches the contract documented on ListProductsQuerySchema.
+        // No `_count` — variantCount is now derived from variants.length
+        // inside the mapper, so the count chip / Beden chips / expanded
+        // sub-rows on the UI can never disagree.
         variants: variantWhere !== undefined ? { where: variantWhere } : true,
         images: true,
-        _count: { select: { variants: true } },
       },
       orderBy: buildOrderBy(filters.sort),
       take: filters.perPage,
@@ -143,9 +151,7 @@ export async function list(opts: {
   const totalPages = total === 0 ? 0 : Math.ceil(total / filters.perPage);
 
   return {
-    data: products.map((product) =>
-      toProductWithVariantsResponse(product, product._count.variants),
-    ),
+    data: products.map((product) => toProductWithVariantsResponse(product)),
     pagination: {
       page: filters.page,
       perPage: filters.perPage,

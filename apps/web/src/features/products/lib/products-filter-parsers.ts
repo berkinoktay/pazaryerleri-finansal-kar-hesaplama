@@ -12,6 +12,11 @@ export const PRODUCT_OVERRIDE_MISSING = ['cost', 'vat'] as const;
 export type ProductOverrideMissing = (typeof PRODUCT_OVERRIDE_MISSING)[number];
 
 export const PRODUCT_LIST_SORTS_EXTENDED = [
+  // Default — newest listings first, matching the Trendyol seller-panel
+  // ordering. See apps/api/src/validators/product.validator.ts for the
+  // backend's matching enum.
+  '-platformCreatedAt',
+  'platformCreatedAt',
   '-platformModifiedAt',
   'platformModifiedAt',
   'title',
@@ -40,7 +45,7 @@ export const productsFiltersParsers = {
   page: parseAsInteger.withDefault(1),
   perPage: parseAsInteger.withDefault(25),
   sort: parseAsStringEnum<ProductListSortExtended>([...PRODUCT_LIST_SORTS_EXTENDED]).withDefault(
-    '-platformModifiedAt',
+    '-platformCreatedAt',
   ),
 };
 

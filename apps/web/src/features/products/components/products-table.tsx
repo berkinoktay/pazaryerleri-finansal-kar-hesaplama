@@ -26,10 +26,12 @@ import {
   type ProductVariantStatus,
 } from '../lib/products-filter-parsers';
 
+import { ColorAttribute } from './color-attribute';
 import { DeliveryBadge } from './delivery-badge';
 import { ProductImageCell } from './product-image-cell';
 import { ProductsFacetChips } from './products-facet-chips';
 import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
+import { SizeChipList } from './size-chip-list';
 import { VariantStatusBadge } from './variant-status-badge';
 
 /**
@@ -91,9 +93,11 @@ interface ProductsTableProps {
  * a tree connector + muted background tint applied by `data-depth='1'`
  * on the row element (token-driven, see tokens/components.css).
  *
- * 8-column hierarchical layout: expand · Ürün bilgisi (compound: image +
- * title + brand·category·model code subtitle) · Özellikler · Barkod ·
- * Satış fiyatı · Stok · Teslimat · Durum.
+ * 9-column hierarchical layout: expand · Ürün bilgisi (compound: image +
+ * title + brand·category·model code subtitle) · Beden · Renk · Barkod ·
+ * Satış fiyatı · Stok · Teslimat · Durum. Beden + Renk replace the older
+ * combined "Özellikler" column — Beden lives at the variant level
+ * (Trendyol's `varianter`), Renk at the content level (`slicer`).
  *
  * Server-side everything: sorting, filtering, pagination — DataTable runs
  * in controlled mode for sort + pagination, and the toolbar's controlled-
@@ -124,19 +128,23 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
             return <span aria-hidden className="size-icon-sm inline-block" />;
           }
           const expanded = row.getIsExpanded();
+          const variantCount =
+            row.original.kind === 'parent' ? row.original.product.variantCount : 0;
+          // Count chip + caret. Wider click target than a bare arrow,
+          // and the count surfaces "this row has N variants" without
+          // forcing the user to expand to find out. Styling mirrors
+          // Badge tone="outline" size="sm" radius="md" — kept inline
+          // because Badge is a <span>, not interactive.
           return (
             <button
               type="button"
               onClick={row.getToggleExpandedHandler()}
               aria-label={expanded ? t('a11y.collapseRow') : t('a11y.expandRow')}
               aria-expanded={expanded}
-              className="text-muted-foreground hover:text-foreground p-3xs duration-fast hover:bg-background focus-visible:ring-ring inline-flex items-center justify-center rounded-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              className="border-border text-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring duration-fast gap-3xs px-xs py-3xs text-2xs [&_svg]:size-icon-xs inline-flex cursor-pointer items-center rounded-md border bg-transparent font-medium tabular-nums transition-colors focus-visible:ring-2 focus-visible:outline-none"
             >
-              {expanded ? (
-                <ArrowDown01Icon className="size-icon-sm" />
-              ) : (
-                <ArrowRight01Icon className="size-icon-sm" />
-              )}
+              {variantCount}
+              {expanded ? <ArrowDown01Icon /> : <ArrowRight01Icon />}
             </button>
           );
         },
@@ -157,12 +165,11 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         enableSorting: true,
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {
-            const v = row.original.variant;
-            const sizePrefix = v.size !== null && v.size.length > 0 ? `${v.size} · ` : '';
+            // Beden moved into its own column; sub-row title shows just the
+            // stock code so the size isn't duplicated across two cells.
             return (
               <span className="text-muted-foreground font-mono text-xs">
-                {sizePrefix}
-                {v.stockCode}
+                {row.original.variant.stockCode}
               </span>
             );
           }
@@ -183,29 +190,49 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         },
       },
       {
-        id: 'properties',
-        header: () => tCols('properties'),
+        // Beden — variant-level attribute (Trendyol's "varianter").
+        // Parent rows aggregate sizes across variants; sub-rows show the
+        // single variant's own size as one chip.
+        id: 'size',
+        header: () => tCols('size'),
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {
             const v = row.original.variant;
-            const parts = [v.size, row.original.parent.color].filter(
-              (s): s is string => s !== null && s !== undefined && s.length > 0,
+            return v.size !== null && v.size.length > 0 ? (
+              <SizeChipList sizes={[v.size]} extraCount={0} />
+            ) : (
+              <span className="text-muted-foreground">—</span>
             );
-            return parts.length > 0 ? parts.join(' · ') : '—';
           }
           const p = row.original.product;
           if (!isMultiVariant(p)) {
-            const v0 = p.variants[0];
-            const parts = [v0?.size, p.color].filter(
-              (s): s is string => s !== null && s !== undefined && s.length > 0,
+            const size = p.variants[0]?.size;
+            return size !== undefined && size !== null && size.length > 0 ? (
+              <SizeChipList sizes={[size]} extraCount={0} />
+            ) : (
+              <span className="text-muted-foreground">—</span>
             );
-            return parts.length > 0 ? parts.join(' · ') : '—';
           }
           const { shown, remaining } = uniqueSizes(p.variants);
-          if (shown.length > 0) {
-            return `${shown.join(', ')}${remaining > 0 ? ` +${remaining.toString()}` : ''}`;
+          return <SizeChipList sizes={shown} extraCount={remaining} />;
+        },
+      },
+      {
+        // Renk — content-level attribute (Trendyol's "slicer", typically).
+        // Lives on Product, not ProductVariant: every variant of one
+        // content shares the same color. Variant sub-rows therefore
+        // leave Renk empty to avoid redundancy with the parent row.
+        id: 'color',
+        header: () => tCols('color'),
+        cell: ({ row }) => {
+          if (row.original.kind === 'variant') {
+            return <span aria-hidden />;
           }
-          return t('multiVariantPlaceholder', { n: p.variantCount });
+          const color = row.original.product.color;
+          if (color === null || color.length === 0) {
+            return <span className="text-muted-foreground">—</span>;
+          }
+          return <ColorAttribute color={color} />;
         },
       },
       {
@@ -409,6 +436,6 @@ function sortToTanstack(sort: ProductListSortExtended): SortingState {
 
 function tanstackToSort(state: SortingState): ProductListSortExtended {
   const head = state[0];
-  if (head === undefined) return '-platformModifiedAt';
+  if (head === undefined) return '-platformCreatedAt';
   return (head.desc ? `-${head.id}` : head.id) as ProductListSortExtended;
 }

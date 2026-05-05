@@ -18,6 +18,8 @@ export interface ListProductsArgs {
   page: number;
   perPage: number;
   sort:
+    | '-platformCreatedAt'
+    | 'platformCreatedAt'
     | '-platformModifiedAt'
     | 'platformModifiedAt'
     | 'title'
