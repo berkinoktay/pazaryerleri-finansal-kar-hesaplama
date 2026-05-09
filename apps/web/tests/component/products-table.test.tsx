@@ -118,6 +118,9 @@ function makeVariant(
     productUrl: null,
     locationBasedDelivery: 'DISABLED',
     status: 'onSale',
+    currentCostTry: null,
+    profileCount: 0,
+    costStatus: 'NO_PROFILES',
     ...overrides,
   };
 }

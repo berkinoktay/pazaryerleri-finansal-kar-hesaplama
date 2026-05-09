@@ -11,6 +11,8 @@ import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
 import costProfileRoutes from './routes/cost-profiles/index';
 import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index';
+import fxRatesRoutes from './routes/fx-rates/index';
+import productsSubRoutes from './routes/products/index';
 import variantRoutes from './routes/variants/index';
 import meRoutes from './routes/me.routes';
 import organizationRoutes from './routes/organization.routes';
@@ -124,10 +126,12 @@ export function createApp(): OpenAPIHono {
   app.route('/', organizationRoutes);
   app.route('/', storeRoutes);
   app.route('/', productRoutes);
+  app.route('/', productsSubRoutes);
   app.route('/', syncLogRoutes);
   app.route('/', costProfileRoutes);
   app.route('/', costProfileAttachmentRoutes);
   app.route('/', variantRoutes);
+  app.route('/', fxRatesRoutes);
 
   return app;
 }
