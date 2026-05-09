@@ -787,7 +787,8 @@
       "delivery": "Delivery",
       "salePrice": "Price",
       "stock": "Stock",
-      "status": "Status"
+      "status": "Status",
+      "cost": "Cost"
     },
     "delivery": {
       "sameDay": "Same-day shipping",
@@ -837,6 +838,18 @@
       "title": "{count} products missing cost — profit cannot be calculated.",
       "description": "Complete the missing costs.",
       "cta": "Filter products without costs"
+    },
+    "costCell": {
+      "addCost": "+ Add cost",
+      "profileCount": "{count} profile(s)",
+      "popover": {
+        "title": "Cost profiles",
+        "attachPlaceholder": "Select a profile…",
+        "attachSearch": "Search profiles…",
+        "attachEmpty": "No profiles found",
+        "newProfile": "+ Create new cost profile",
+        "removeLabel": "Remove profile"
+      }
     }
   },
   "costs": {

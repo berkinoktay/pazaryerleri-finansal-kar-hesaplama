@@ -28,6 +28,8 @@ import {
 } from '../lib/products-filter-parsers';
 
 import { ColorAttribute } from './color-attribute';
+import { CostCell } from './cost-cell';
+import { CostCellPopover } from './cost-cell-popover';
 import { DeliveryBadge } from './delivery-badge';
 import { ProductImageCell } from './product-image-cell';
 import { ProductsFacetChips } from './products-facet-chips';
@@ -52,6 +54,7 @@ function projectRows(products: ProductWithVariants[]): ProductRow[] {
 }
 
 interface ProductsTableProps {
+  orgId: string;
   data: ProductWithVariants[];
   loading?: boolean;
   empty?: React.ReactNode;
@@ -124,6 +127,7 @@ interface ProductsTableProps {
 export function ProductsTable(props: ProductsTableProps): React.ReactElement {
   const t = useTranslations('products');
   const tCols = useTranslations('products.columns');
+  const tCostCell = useTranslations('products.costCell');
   const formatter = useFormatter();
 
   const rows = React.useMemo(() => projectRows(props.data), [props.data]);
@@ -369,8 +373,52 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           return <DeliveryBadge type={type} mixed={mixed} />;
         },
       },
+      {
+        id: 'cost',
+        header: () => tCols('cost'),
+        meta: { numeric: true },
+        cell: ({ row }) => {
+          // Parent rows show no cost cell — cost lives at the variant level.
+          // The parent-row aggregate cell is PR 10 work.
+          if (row.original.kind === 'parent') {
+            const p = row.original.product;
+            if (!isMultiVariant(p)) {
+              // Single-variant product: show the variant cost cell inline.
+              const v = p.variants[0];
+              if (v === undefined) return <span className="text-muted-foreground">—</span>;
+              return (
+                <CostCellPopover orgId={props.orgId} variant={v}>
+                  <span>
+                    <CostCell variant={v} />
+                  </span>
+                </CostCellPopover>
+              );
+            }
+            // Multi-variant parent: placeholder until PR 10.
+            const hasCost = p.variants.some((v) => v.profileCount > 0);
+            return (
+              <span className={cn('text-xs', !hasCost && 'text-muted-foreground')}>
+                {hasCost
+                  ? tCostCell('profileCount', {
+                      count: p.variants.reduce((s, v) => s + v.profileCount, 0),
+                    })
+                  : tCostCell('addCost')}
+              </span>
+            );
+          }
+          // Variant sub-row: interactive cost cell.
+          const v = row.original.variant;
+          return (
+            <CostCellPopover orgId={props.orgId} variant={v}>
+              <span>
+                <CostCell variant={v} />
+              </span>
+            </CostCellPopover>
+          );
+        },
+      },
     ],
-    [formatter, t, tCols],
+    [formatter, t, tCols, tCostCell, props.orgId],
   );
 
   // Map the URL sort string back into TanStack's SortingState shape, and

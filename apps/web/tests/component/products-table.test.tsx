@@ -67,6 +67,18 @@ const messages = {
         clear: 'Durumu temizle',
       },
     },
+    costCell: {
+      addCost: '+ Maliyet ekle',
+      profileCount: '{count} profil',
+      popover: {
+        title: 'Maliyet profilleri',
+        attachPlaceholder: 'Profil seç…',
+        attachSearch: 'Profil ara…',
+        attachEmpty: 'Profil bulunamadı',
+        newProfile: '+ Yeni maliyet oluştur',
+        removeLabel: 'Profili kaldır',
+      },
+    },
   },
   common: {
     copy: {
@@ -147,6 +159,7 @@ function makeProduct(overrides: Partial<ProductWithVariants> = {}): ProductWithV
 const noop = (): void => {};
 
 const baseProps = {
+  orgId: '00000000-0000-0000-0000-000000000001',
   loading: false,
   pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
   q: '',
@@ -282,7 +295,12 @@ describe('ProductsTable', () => {
   it('shows the empty-state slot when data is empty', () => {
     render(
       <NextIntlClientProvider locale="tr" messages={messages} formats={FORMATS}>
-        <ProductsTable {...baseProps} data={[]} empty={<div>Filtreyle eşleşen ürün yok.</div>} />
+        <ProductsTable
+          {...baseProps}
+          orgId="00000000-0000-0000-0000-000000000001"
+          data={[]}
+          empty={<div>Filtreyle eşleşen ürün yok.</div>}
+        />
       </NextIntlClientProvider>,
     );
     expect(screen.getByText('Filtreyle eşleşen ürün yok.')).toBeInTheDocument();
