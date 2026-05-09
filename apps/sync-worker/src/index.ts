@@ -35,6 +35,7 @@ import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync
 
 import type { Registry } from './dispatcher';
 import { errorCodeOf } from './error-code';
+import { ordersHandler } from './handlers/orders';
 import { productsHandler } from './handlers/products';
 import { runSyncToCompletion } from './loop';
 import { advanceCursorPastBadPage } from './skip-bad-page';
@@ -61,7 +62,8 @@ const PERMANENT_FAILURE_CODES: ReadonlySet<SyncErrorCode> = new Set<SyncErrorCod
 
 const REGISTRY: Registry = {
   PRODUCTS: productsHandler,
-  // ORDERS, SETTLEMENTS will register here as they land.
+  ORDERS: ordersHandler,
+  // SETTLEMENTS will register here when orders-sync integration lands.
 };
 
 let shuttingDown = false;
