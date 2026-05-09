@@ -112,7 +112,7 @@ describe('Tenant isolation — cost-profile attachment routes', () => {
   // Expected: 422 COST_PROFILE_VARIANT_ORG_MISMATCH (Org B variant is invisible to Org A)
 
   it('Case 2: Org A cannot attach Org A profile to Org B variant → 422 COST_PROFILE_VARIANT_ORG_MISMATCH', async () => {
-    const { userA, orgA, storeA } = await setupOrgAUser();
+    const { userA, orgA } = await setupOrgAUser();
     const { orgB, storeB } = await setupOrgB();
 
     const profileA = await seedProfile(orgA.id);

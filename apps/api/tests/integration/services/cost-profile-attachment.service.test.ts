@@ -171,7 +171,6 @@ describe('cost-profile-attachment service', () => {
       const user = await createUserProfile();
       const orgA = await createOrganization();
       const orgB = await createOrganization();
-      const storeA = await createStore(orgA.id);
       const storeB = await createStore(orgB.id);
 
       const profileA = await seedProfile(orgA.id);
@@ -221,7 +220,6 @@ describe('cost-profile-attachment service', () => {
     it('throws CostProfileVariantOrgMismatchError when detaching from a cross-org variant', async () => {
       const orgA = await createOrganization();
       const orgB = await createOrganization();
-      const storeA = await createStore(orgA.id);
       const storeB = await createStore(orgB.id);
 
       const profileA = await seedProfile(orgA.id);
