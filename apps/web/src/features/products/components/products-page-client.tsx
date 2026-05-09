@@ -17,6 +17,7 @@ import { useProducts } from '../hooks/use-products';
 import { useProductsFilters } from '../hooks/use-products-filters';
 import { useStartProductSync } from '../hooks/use-start-product-sync';
 
+import { MissingCostWarningBanner } from './missing-cost-warning-banner';
 import { ProductsEmptyState } from './products-empty-state';
 import { ProductsTable } from './products-table';
 import { type ProductsOverrideTab } from './products-tab-strip';
@@ -153,6 +154,11 @@ export function ProductsPageClient({
               {syncButtonDisabled ? tProducts('syncButton.syncing') : tProducts('syncButton.label')}
             </Button>
           }
+        />
+
+        <MissingCostWarningBanner
+          orgId={orgId}
+          onFilterClick={() => void setFilters({ overrideMissing: 'cost', page: 1 })}
         />
 
         <ProductsTable
