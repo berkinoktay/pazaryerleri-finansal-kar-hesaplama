@@ -970,6 +970,31 @@
               "inactive"
             ],
             "description": "Computed status from variant flags. Order of precedence: archived → blacklisted → locked → onSale → inactive."
+          },
+          "currentCostTry": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Live sum of all active cost profiles converted to TRY. Null when profileCount is 0 or when an AUTO profile has no FX rate. Decimal string.",
+            "example": "45.75"
+          },
+          "profileCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of active (non-archived) cost profiles attached to this variant.",
+            "example": 2
+          },
+          "costStatus": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "NO_PROFILES",
+              "FX_STALE",
+              "FX_MISSING"
+            ],
+            "description": "Live cost availability status. OK = profiles exist + FX resolved. NO_PROFILES = variant has no attached profiles. FX_STALE = AUTO profile exists but most-recent FX rate is >2 days old. FX_MISSING = AUTO profile exists but no FX rate has ever been fetched.",
+            "example": "OK"
           }
         },
         "required": [
@@ -988,7 +1013,10 @@
           "fastDeliveryOptions",
           "productUrl",
           "locationBasedDelivery",
-          "status"
+          "status",
+          "currentCostTry",
+          "profileCount",
+          "costStatus"
         ]
       },
       "TableMeta": {
@@ -1106,6 +1134,51 @@
           "brands",
           "categories",
           "overrideCounts"
+        ]
+      },
+      "MissingCostStatsResponse": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of variants with zero attached active cost profiles.",
+            "example": 42
+          },
+          "totalVariants": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total number of variants across all stores in the organization.",
+            "example": 350
+          },
+          "byStore": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "storeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "example": "1c1b9b3a-4f2d-49a8-9c5e-3a2f1d8b9c0e"
+                },
+                "missingCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "example": 15
+                }
+              },
+              "required": [
+                "storeId",
+                "missingCount"
+              ]
+            },
+            "description": "Per-store breakdown. Only includes stores that have at least one variant. Stores with missingCount = 0 are still included so the UI can calculate totals."
+          }
+        },
+        "required": [
+          "count",
+          "totalVariants",
+          "byStore"
         ]
       },
       "ListCostProfilesResponse": {
@@ -1755,6 +1828,57 @@
         "required": [
           "data"
         ]
+      },
+      "FxRatesLatestResponse": {
+        "type": "object",
+        "properties": {
+          "USD": {
+            "$ref": "#/components/schemas/FxRateEntry"
+          },
+          "EUR": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FxRateEntry"
+              },
+              {
+                "description": "Latest EUR/TRY rate. Null when no rate has been fetched yet."
+              }
+            ]
+          }
+        },
+        "required": [
+          "USD",
+          "EUR"
+        ]
+      },
+      "FxRateEntry": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "rate": {
+            "type": "string",
+            "description": "Rate to TRY, as a decimal string.",
+            "example": "38.5220"
+          },
+          "date": {
+            "type": "string",
+            "description": "Rate date (ISO 8601 date string).",
+            "example": "2026-05-09"
+          },
+          "source": {
+            "type": "string",
+            "description": "Data source.",
+            "example": "TCMB"
+          }
+        },
+        "required": [
+          "rate",
+          "date",
+          "source"
+        ],
+        "description": "Latest USD/TRY rate. Null when no rate has been fetched yet."
       }
     },
     "parameters": {}
@@ -3293,6 +3417,109 @@
           },
           "404": {
             "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/products/missing-cost-stats": {
+      "get": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "Count variants with no active cost profiles",
+        "description": "Returns the total number of product variants that have zero attached (non-archived) cost profiles, along with a per-store breakdown. Used to populate the missing-cost banner on the products page and the dashboard widget.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Missing cost stats",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissingCostStatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
             "content": {
               "application/json": {
                 "schema": {
@@ -5079,6 +5306,109 @@
           },
           "422": {
             "description": "Variant not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/fx-rates/latest": {
+      "get": {
+        "tags": [
+          "FxRates"
+        ],
+        "summary": "Get the latest FX rates (USD, EUR → TRY)",
+        "description": "Returns the most-recent cached exchange rate for each non-TRY currency. The route is org-scoped for API-surface consistency; the data is global (rates are not filtered by organization). Rates are populated daily by the TCMB Edge Function cron job. A null entry means the rate has never been fetched — the AUTO FX flow will fall back to null cost snapshots until the cron succeeds.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest FX rates per currency",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRatesLatestResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
             "content": {
               "application/json": {
                 "schema": {

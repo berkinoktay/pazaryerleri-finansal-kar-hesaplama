@@ -239,6 +239,18 @@ const ProductImageSchema = z
   })
   .openapi('ProductImage');
 
+const COST_STATUSES = ['OK', 'NO_PROFILES', 'FX_STALE', 'FX_MISSING'] as const;
+export type CostStatus = (typeof COST_STATUSES)[number];
+
+const CostStatusSchema = z.enum(COST_STATUSES).openapi({
+  description:
+    'Live cost availability status. OK = profiles exist + FX resolved. ' +
+    'NO_PROFILES = variant has no attached profiles. ' +
+    'FX_STALE = AUTO profile exists but most-recent FX rate is >2 days old. ' +
+    'FX_MISSING = AUTO profile exists but no FX rate has ever been fetched.',
+  example: 'OK',
+});
+
 const VariantSummarySchema = z
   .object({
     id: z.string().uuid(),
@@ -265,6 +277,20 @@ const VariantSummarySchema = z
     productUrl: z.string().nullable(),
     locationBasedDelivery: z.string().nullable(),
     status: VariantStatusSchema,
+    currentCostTry: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Live sum of all active cost profiles converted to TRY. Null when profileCount is 0 ' +
+          'or when an AUTO profile has no FX rate. Decimal string.',
+        example: '45.75',
+      }),
+    profileCount: z.number().int().nonnegative().openapi({
+      description: 'Number of active (non-archived) cost profiles attached to this variant.',
+      example: 2,
+    }),
+    costStatus: CostStatusSchema,
   })
   .openapi('VariantSummary');
 
@@ -366,7 +392,16 @@ function computeVariantStatus(variant: VariantRow): z.infer<typeof VariantStatus
   return 'inactive';
 }
 
-export function toVariantSummary(variant: VariantRow): z.infer<typeof VariantSummarySchema> {
+export interface VariantCostAggregate {
+  currentCostTry: string | null;
+  profileCount: number;
+  costStatus: CostStatus;
+}
+
+export function toVariantSummary(
+  variant: VariantRow,
+  cost: VariantCostAggregate,
+): z.infer<typeof VariantSummarySchema> {
   return {
     id: variant.id,
     platformVariantId: variant.platformVariantId.toString(),
@@ -389,12 +424,21 @@ export function toVariantSummary(variant: VariantRow): z.infer<typeof VariantSum
     productUrl: variant.productUrl,
     locationBasedDelivery: variant.locationBasedDelivery,
     status: computeVariantStatus(variant),
+    currentCostTry: cost.currentCostTry,
+    profileCount: cost.profileCount,
+    costStatus: cost.costStatus,
   };
 }
 
 export function toProductWithVariantsResponse(
   product: ProductWithRelations,
+  costByVariantId: Map<string, VariantCostAggregate>,
 ): z.infer<typeof ProductWithVariantsSchema> {
+  const defaultCost: VariantCostAggregate = {
+    currentCostTry: null,
+    profileCount: 0,
+    costStatus: 'NO_PROFILES',
+  };
   return {
     id: product.id,
     productMainId: product.productMainId,
@@ -417,7 +461,9 @@ export function toProductWithVariantsResponse(
     // Same source ⇒ count chip + Beden chips + expanded sub-rows can never
     // disagree.
     variantCount: product.variants.length,
-    variants: product.variants.map(toVariantSummary),
+    variants: product.variants.map((v) =>
+      toVariantSummary(v, costByVariantId.get(v.id) ?? defaultCost),
+    ),
     lastSyncedAt: product.lastSyncedAt.toISOString(),
     platformModifiedAt: product.platformModifiedAt?.toISOString() ?? null,
   };
