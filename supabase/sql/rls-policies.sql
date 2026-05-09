@@ -235,8 +235,8 @@ CREATE POLICY product_variant_cost_profiles_org_member_read ON product_variant_c
 -- reject_snapshot_update trigger in cost-snapshot-immutable.sql (Task 1.4).
 -- RLS just gates authenticated reads.
 ALTER TABLE order_item_cost_snapshot_components ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS oi_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components;
-CREATE POLICY oi_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components
+DROP POLICY IF EXISTS order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components;
+CREATE POLICY order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
 
