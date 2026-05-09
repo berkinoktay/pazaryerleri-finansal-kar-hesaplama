@@ -398,10 +398,10 @@ model CostProfile {
   manualFxRate    Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
   note            String?
   archivedAt      DateTime?       @map("archived_at")
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
   createdBy       String?         @map("created_by") @db.Uuid
   updatedBy       String?         @map("updated_by") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
 
   organization Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   versions     CostProfileVersion[]
@@ -454,7 +454,7 @@ model ProductVariantCostProfile {
 
   @@unique([productVariantId, profileId])
   @@index([profileId])
-  @@index([organizationId, productVariantId])
+  @@index([organizationId, productVariantId], map: "idx_pvcp_org_product_variant")
   @@map("product_variant_cost_profiles")
 }
 
@@ -491,7 +491,8 @@ model FxRate {
   fetchedAt DateTime @default(now()) @map("fetched_at")
 
   @@unique([currency, rateDate])
-  @@index([currency, rateDate(sort: Desc)])
+  // Note: no separate DESC index — Postgres B-tree is bidirectional; the unique
+  // index above is used for "latest rate per currency" queries via backward scan.
   @@map("fx_rates")
 }
 
