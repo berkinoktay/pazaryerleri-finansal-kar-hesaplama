@@ -25,7 +25,10 @@ export type ListCostProfilesResponse = components['schemas']['ListCostProfilesRe
 export type ListCostProfileVersionsResponse =
   components['schemas']['ListCostProfileVersionsResponse'];
 export type ListAttachedVariantsResponse = components['schemas']['ListAttachedVariantsResponse'];
+export type AttachResponse = components['schemas']['AttachResponse'];
 export type DetachResponse = components['schemas']['DetachResponse'];
+export type ListVariantCostProfilesResponse =
+  components['schemas']['ListVariantCostProfilesResponse'];
 export type CursorMeta = components['schemas']['CursorMeta'];
 
 // ─── List filter shape ─────────────────────────────────────────────────

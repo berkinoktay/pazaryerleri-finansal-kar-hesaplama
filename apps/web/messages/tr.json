@@ -787,7 +787,8 @@
       "delivery": "Teslimat",
       "salePrice": "Fiyat",
       "stock": "Stok",
-      "status": "Durum"
+      "status": "Durum",
+      "cost": "Maliyet"
     },
     "delivery": {
       "sameDay": "Bugün Kargoda",
@@ -837,6 +838,18 @@
       "title": "Maliyetsiz {count} ürün — kâr hesabı yapılamıyor.",
       "description": "Eksik maliyetleri tamamla.",
       "cta": "Maliyetsiz ürünleri filtrele"
+    },
+    "costCell": {
+      "addCost": "+ Maliyet ekle",
+      "profileCount": "{count} profil",
+      "popover": {
+        "title": "Maliyet profilleri",
+        "attachPlaceholder": "Profil seç…",
+        "attachSearch": "Profil ara…",
+        "attachEmpty": "Profil bulunamadı",
+        "newProfile": "+ Yeni maliyet oluştur",
+        "removeLabel": "Profili kaldır"
+      }
     }
   },
   "costs": {
