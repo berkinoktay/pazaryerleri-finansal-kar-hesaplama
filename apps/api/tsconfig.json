@@ -9,6 +9,7 @@
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
     "noEmit": true,
+    "rootDir": "../../",
     "types": ["node"],
     "paths": {
       "@/*": ["./src/*"]
