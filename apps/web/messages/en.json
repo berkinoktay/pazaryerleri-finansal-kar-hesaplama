@@ -828,5 +828,106 @@
       "label": "Sync",
       "syncing": "Syncing…"
     }
+  },
+  "costs": {
+    "page": {
+      "title": "Costs",
+      "description": "Reusable cost profiles attached to product variants.",
+      "createCta": "New cost profile"
+    },
+    "empty": {
+      "title": "No cost profiles yet",
+      "description": "Create cost profiles to attach to product variants. Each profile represents a cost type (raw materials, packaging, etc.).",
+      "action": "Create your first cost profile"
+    },
+    "table": {
+      "columns": {
+        "type": "Type",
+        "name": "Cost name",
+        "amount": "Amount",
+        "vatRate": "VAT",
+        "lastUpdated": "Updated",
+        "actions": "Actions"
+      },
+      "filters": {
+        "searchPlaceholder": "Search costs…",
+        "showArchived": "Show archived",
+        "typeLabel": "Type"
+      },
+      "actions": {
+        "edit": "Edit",
+        "archive": "Archive",
+        "restore": "Restore"
+      },
+      "archived": "Archived"
+    },
+    "types": {
+      "COGS": "COGS",
+      "PACKAGING": "Packaging",
+      "SHIPPING": "Shipping",
+      "SOFTWARE": "Software",
+      "MARKETING": "Marketing",
+      "OTHER": "Other"
+    },
+    "currency": {
+      "TRY": "TRY",
+      "USD": "USD",
+      "EUR": "EUR"
+    },
+    "fxMode": {
+      "AUTO": "Auto (TCMB)",
+      "MANUAL": "Manual rate"
+    },
+    "vatRates": {
+      "0": "0%",
+      "1": "1%",
+      "8": "8%",
+      "10": "10%",
+      "18": "18%",
+      "20": "20%"
+    },
+    "form": {
+      "fields": {
+        "name": "Cost name",
+        "namePlaceholder": "e.g. Raw materials COGS",
+        "type": "Type",
+        "currency": "Currency",
+        "amount": "Amount",
+        "amountPlaceholder": "0.00",
+        "vatRate": "VAT rate",
+        "fxRateMode": "FX rate mode",
+        "manualFxRate": "Manual FX rate (TRY)",
+        "manualFxRatePlaceholder": "e.g. 35.50",
+        "note": "Note",
+        "notePlaceholder": "Optional description…"
+      },
+      "fxPreview": {
+        "label": "Current TRY equivalent",
+        "source": "Source",
+        "noRate": "Loading exchange rate…",
+        "result": "{amount} × {rate} = {result}"
+      },
+      "validation": {
+        "nameRequired": "Cost name is required.",
+        "nameTooLong": "Cost name must be 100 characters or fewer.",
+        "amountRequired": "Amount is required.",
+        "amountNegative": "Amount must be 0 or greater.",
+        "manualFxRateRequired": "A rate is required in MANUAL mode.",
+        "manualFxRatePositive": "Rate must be greater than 0.",
+        "tryMustUseAuto": "TRY currency always uses Auto mode."
+      },
+      "submit": "Save",
+      "cancel": "Cancel"
+    },
+    "createDialog": {
+      "title": "New cost profile",
+      "description": "Create a reusable cost profile you can attach to product variants."
+    },
+    "archive": {
+      "confirmTitle": "Archive profile",
+      "confirmDescription": "This cost profile will be archived and can no longer be attached to new variants. Past orders are unaffected. You can restore it at any time.",
+      "confirm": "Archive",
+      "cancel": "Cancel"
+    }
   }
 }
