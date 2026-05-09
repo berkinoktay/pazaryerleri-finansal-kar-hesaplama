@@ -70,7 +70,7 @@ describe('useUpdateCostProfile', () => {
     result.current.mutate({
       orgId: ORG_ID,
       profileId: PROFILE_ID,
-      body: { name: 'COGS v2', amount: '15.00' },
+      body: { name: 'COGS v2', amount: '15.00', currency: 'TRY', vatRate: 18, fxRateMode: 'AUTO' },
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

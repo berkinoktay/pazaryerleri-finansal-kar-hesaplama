@@ -828,5 +828,106 @@
       "label": "Eşitle",
       "syncing": "Eşitleniyor…"
     }
+  },
+  "costs": {
+    "page": {
+      "title": "Maliyetler",
+      "description": "Ürün varyantlarına atamlı yeniden kullanılabilir maliyet profilleri.",
+      "createCta": "Yeni maliyet oluştur"
+    },
+    "empty": {
+      "title": "Henüz maliyet profili yok",
+      "description": "Ürün varyantlarına atamak için maliyet profilleri oluştur. Her profil bir maliyet türünü (hammadde, ambalaj vb.) temsil eder.",
+      "action": "İlk maliyetini oluştur"
+    },
+    "table": {
+      "columns": {
+        "type": "Tür",
+        "name": "Maliyet adı",
+        "amount": "Tutar",
+        "vatRate": "KDV",
+        "lastUpdated": "Güncellendi",
+        "actions": "İşlemler"
+      },
+      "filters": {
+        "searchPlaceholder": "Maliyet ara…",
+        "showArchived": "Arşivlenenleri göster",
+        "typeLabel": "Tür"
+      },
+      "actions": {
+        "edit": "Düzenle",
+        "archive": "Arşivle",
+        "restore": "Geri yükle"
+      },
+      "archived": "Arşivlendi"
+    },
+    "types": {
+      "COGS": "Hammadde",
+      "PACKAGING": "Ambalaj",
+      "SHIPPING": "Kargo",
+      "SOFTWARE": "Yazılım",
+      "MARKETING": "Pazarlama",
+      "OTHER": "Diğer"
+    },
+    "currency": {
+      "TRY": "TL",
+      "USD": "USD",
+      "EUR": "EUR"
+    },
+    "fxMode": {
+      "AUTO": "Otomatik (TCMB)",
+      "MANUAL": "Manuel kur"
+    },
+    "vatRates": {
+      "0": "%0",
+      "1": "%1",
+      "8": "%8",
+      "10": "%10",
+      "18": "%18",
+      "20": "%20"
+    },
+    "form": {
+      "fields": {
+        "name": "Maliyet adı",
+        "namePlaceholder": "ör. Hammadde COGS",
+        "type": "Tür",
+        "currency": "Para birimi",
+        "amount": "Tutar",
+        "amountPlaceholder": "0.00",
+        "vatRate": "KDV oranı",
+        "fxRateMode": "Kur modu",
+        "manualFxRate": "Manuel kur (TRY)",
+        "manualFxRatePlaceholder": "ör. 35.50",
+        "note": "Not",
+        "notePlaceholder": "İsteğe bağlı açıklama…"
+      },
+      "fxPreview": {
+        "label": "Güncel TRY karşılığı",
+        "source": "Kaynak",
+        "noRate": "Kur bilgisi yükleniyor…",
+        "result": "{amount} × {rate} = {result}"
+      },
+      "validation": {
+        "nameRequired": "Maliyet adı zorunludur.",
+        "nameTooLong": "Maliyet adı en fazla 100 karakter olabilir.",
+        "amountRequired": "Tutar zorunludur.",
+        "amountNegative": "Tutar 0 veya daha büyük olmalıdır.",
+        "manualFxRateRequired": "MANUAL modunda kur değeri zorunludur.",
+        "manualFxRatePositive": "Kur değeri 0'dan büyük olmalıdır.",
+        "tryMustUseAuto": "TL para birimi her zaman Otomatik kur kullanır."
+      },
+      "submit": "Kaydet",
+      "cancel": "Vazgeç"
+    },
+    "createDialog": {
+      "title": "Yeni maliyet profili",
+      "description": "Ürün varyantlarına atayabileceğin yeniden kullanılabilir bir maliyet profili oluştur."
+    },
+    "archive": {
+      "confirmTitle": "Profili arşivle",
+      "confirmDescription": "Bu maliyet profili arşivlenecek ve yeni varyantlara eklenemeyecek. Geçmiş siparişler etkilenmez. İstediğin zaman geri yükleyebilirsin.",
+      "confirm": "Arşivle",
+      "cancel": "Vazgeç"
+    }
   }
 }
