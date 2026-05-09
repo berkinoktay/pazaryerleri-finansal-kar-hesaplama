@@ -604,6 +604,11 @@
       "pendingOrders": { "label": "Pending Orders", "cta": "Review now →" },
       "noCostProducts": { "label": "Products Missing Cost", "cta": "Bulk update →" },
       "returnReviews": { "label": "Return Reviews", "cta": "Awaiting approval →" }
+    },
+    "missingCostWidget": {
+      "label": "{count} products missing cost",
+      "percentOfTotal": "{percent}% of total products",
+      "cta": "Complete costs →"
     }
   },
   "placeholderPage": {
@@ -827,6 +832,11 @@
     "syncButton": {
       "label": "Sync",
       "syncing": "Syncing…"
+    },
+    "missingCostBanner": {
+      "title": "{count} products missing cost — profit cannot be calculated.",
+      "description": "Complete the missing costs.",
+      "cta": "Filter products without costs"
     }
   },
   "costs": {

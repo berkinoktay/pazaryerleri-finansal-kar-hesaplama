@@ -604,6 +604,11 @@
       "pendingOrders": { "label": "Bekleyen Sipariş", "cta": "Hemen incele →" },
       "noCostProducts": { "label": "Maliyet Eksik Ürün", "cta": "Toplu güncelle →" },
       "returnReviews": { "label": "İade İncelemesi", "cta": "Onay bekle →" }
+    },
+    "missingCostWidget": {
+      "label": "Maliyetsiz {count} ürün",
+      "percentOfTotal": "{percent}% toplam ürünün",
+      "cta": "Maliyetleri tamamla →"
     }
   },
   "placeholderPage": {
@@ -827,6 +832,11 @@
     "syncButton": {
       "label": "Eşitle",
       "syncing": "Eşitleniyor…"
+    },
+    "missingCostBanner": {
+      "title": "Maliyetsiz {count} ürün — kâr hesabı yapılamıyor.",
+      "description": "Eksik maliyetleri tamamla.",
+      "cta": "Maliyetsiz ürünleri filtrele"
     }
   },
   "costs": {
