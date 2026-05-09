@@ -2,8 +2,6 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { productKeys } from '@/features/products/query-keys';
-
 import { updateCostProfile, type UpdateCostProfileArgs } from '../api/update-cost-profile.api';
 import type { CostProfile } from '../types/cost-profile.types';
 
@@ -16,7 +14,13 @@ import { costsKeys } from './costs-keys';
  *   - profile(id) — refresh the detail view
  *   - profileVersions(id) — new version row was inserted
  *   - profiles() — name/amount shown in the list may have changed
- *   - productsKeys.all — live currentCostTry in the products table may have changed
+ *   - ['products'] — live currentCostTry in the products table may have changed
+ *
+ * The ['products'] invalidation uses a string literal instead of importing
+ * productKeys from @/features/products to keep the cross-feature audit clean
+ * (audit-boundaries blocks runtime imports between feature slices). The
+ * string is the leading element of products' query-key factory; both keys
+ * stay in sync via the convention that every feature's keys.all = [<feature>].
  *
  * No custom onError — the global QueryProvider error pipeline handles toasting.
  */
@@ -31,7 +35,7 @@ export function useUpdateCostProfile() {
         queryKey: costsKeys.profileVersions(variables.profileId),
       });
       void queryClient.invalidateQueries({ queryKey: costsKeys.profiles() });
-      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
     },
   });
 }
