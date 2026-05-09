@@ -29,10 +29,9 @@ const messages = {
       status: 'Durum',
     },
     delivery: {
-      sameDay: 'Bugün kargoda',
-      nextDay: 'Yarın kargoda',
-      days: '{n} gün',
-      standard: 'Standart',
+      sameDay: 'Bugün Kargoda',
+      fast: 'Hızlı Teslimat',
+      standard: 'Standart Teslimat',
       mixed: 'Karışık',
     },
     multiVariantPlaceholder: '{n} varyant',
@@ -70,6 +69,10 @@ const messages = {
     },
   },
   common: {
+    copy: {
+      copy: '{label} kopyala',
+      copied: '{label} kopyalandı',
+    },
     dataTable: {
       empty: { title: 'Sonuç yok', description: 'Filtreleri değiştirin.' },
       toolbar: {
@@ -199,9 +202,14 @@ describe('ProductsTable', () => {
     const trigger = screen.getByRole('button', { name: 'Varyantları göster' });
     // Count chip surfaces variantCount up-front (no need to expand to find out)
     expect(trigger).toHaveTextContent('2');
-    // Parent row shows aggregate Beden chips (S, L)
-    expect(screen.getByText('S')).toBeInTheDocument();
-    expect(screen.getByText('L')).toBeInTheDocument();
+    // Parent's Beden cell shows the aggregate "N varyant" summary, not
+    // a chip per size — Trendyol's panel does the same when the variant
+    // count is high; long size strings would otherwise wrap into a
+    // tall, busy stack.
+    expect(screen.getByText('2 varyant')).toBeInTheDocument();
+    // The actual sizes are NOT mapped onto the parent row.
+    expect(screen.queryByText('S')).toBeNull();
+    expect(screen.queryByText('L')).toBeNull();
 
     await user.click(trigger);
     // Variant rows now visible — assert by stock codes
@@ -210,8 +218,9 @@ describe('ProductsTable', () => {
     // Variant rows carry data-depth='1' (DataTable contract)
     const variantRow = screen.getByText(/STK-S/).closest('tr');
     expect(variantRow?.getAttribute('data-depth')).toBe('1');
-    // After expand, parent + variant sub-row each render a chip for "S"
-    expect(screen.getAllByText('S')).toHaveLength(2);
+    // Once expanded, each variant sub-row renders its own size chip.
+    expect(screen.getByText('S')).toBeInTheDocument();
+    expect(screen.getByText('L')).toBeInTheDocument();
   });
 
   it('renders Renk column from product.color on parent rows', () => {
@@ -237,7 +246,7 @@ describe('ProductsTable', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('caps Beden chip list at 4 visible + overflow chip', () => {
+  it('parent Beden cell shows only the variant count, not individual sizes', () => {
     const product = makeProduct({
       title: 'Many Sizes',
       variantCount: 6,
@@ -251,14 +260,20 @@ describe('ProductsTable', () => {
       ],
     });
     renderTable([product]);
-    // First 4 unique sizes render as chips, remaining 2 collapse into +N
-    expect(screen.getByText('XS')).toBeInTheDocument();
-    expect(screen.getByText('S')).toBeInTheDocument();
-    expect(screen.getByText('M')).toBeInTheDocument();
-    expect(screen.getByText('L')).toBeInTheDocument();
+    // The cell collapses to "N varyant" (matches Trendyol's seller-panel
+    // pattern for products with many variants — the actual sizes are
+    // available in the expanded sub-rows).
+    expect(screen.getByText('6 varyant')).toBeInTheDocument();
+    // None of the individual sizes leak into the parent row.
+    expect(screen.queryByText('XS')).toBeNull();
+    expect(screen.queryByText('S')).toBeNull();
+    expect(screen.queryByText('M')).toBeNull();
+    expect(screen.queryByText('L')).toBeNull();
     expect(screen.queryByText('XL')).toBeNull();
     expect(screen.queryByText('XXL')).toBeNull();
-    expect(screen.getByText('+2')).toBeInTheDocument();
+    // No "+N" overflow chip on the parent either — the count text
+    // already conveys cardinality.
+    expect(screen.queryByText('+2')).toBeNull();
   });
 
   it('shows the empty-state slot when data is empty', () => {
@@ -270,18 +285,27 @@ describe('ProductsTable', () => {
     expect(screen.getByText('Filtreyle eşleşen ürün yok.')).toBeInTheDocument();
   });
 
-  it('aggregates the status chip across mixed variants with an overflow count', () => {
+  it('renders 0 stock with destructive color and >0 with default', () => {
     const product = makeProduct({
-      title: 'Mixed Product',
-      variantCount: 3,
-      variants: [
-        makeVariant({ id: 'v-1', status: 'onSale' }),
-        makeVariant({ id: 'v-2', status: 'onSale' }),
-        makeVariant({ id: 'v-3', status: 'archived' }),
-      ],
+      title: 'Stock Tier Product',
+      variantCount: 1,
+      variants: [makeVariant({ quantity: 0 })],
     });
     renderTable([product]);
-    expect(screen.getByText('Satışta')).toBeInTheDocument();
-    expect(screen.getByText('+1')).toBeInTheDocument();
+    const cell = screen.getByText('0');
+    // Destructive class signals "out of stock" — see StockCount in
+    // products-table.tsx for the tier ladder.
+    expect(cell.className).toMatch(/text-destructive/);
+  });
+
+  it('renders low stock (1-9) with warning tone', () => {
+    const product = makeProduct({
+      title: 'Low Stock Product',
+      variantCount: 1,
+      variants: [makeVariant({ quantity: 5 })],
+    });
+    renderTable([product]);
+    const cell = screen.getByText('5');
+    expect(cell.className).toMatch(/text-warning/);
   });
 });

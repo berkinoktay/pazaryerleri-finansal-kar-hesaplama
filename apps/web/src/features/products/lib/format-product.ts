@@ -30,21 +30,48 @@ export function totalStock(variants: VariantSummary[]): number {
 }
 
 /**
- * Pick the dominant delivery duration across variants — used as the
- * aggregated "Teslimat" cell on the parent row. If variants disagree,
- * returns null so the UI renders a "Karışık" (mixed) badge instead.
+ * Trendyol's three delivery tiers, mapped from the marketplace's API
+ * vocabulary (`fastDeliveryOptions[].deliveryOptionType` plus the
+ * legacy `isRushDelivery` boolean):
+ *
+ *   - 'sameDay'  → fastDeliveryOptions includes "SAME_DAY_SHIPPING"
+ *   - 'fast'     → fastDeliveryOptions includes "FAST_DELIVERY", or
+ *                  the variant carries `isRushDelivery: true`
+ *   - 'standard' → neither — the variant ships under standard
+ *                  marketplace lead time
+ *
+ * Mirrors the seller-panel taxonomy under `Hızlı Teslimat` settings.
  */
-export function dominantDeliveryDuration(variants: VariantSummary[]): {
-  value: number | null;
+export type DeliveryType = 'sameDay' | 'fast' | 'standard';
+
+export function computeDeliveryType(variant: VariantSummary): DeliveryType {
+  for (const opt of variant.fastDeliveryOptions) {
+    if (opt.deliveryOptionType === 'SAME_DAY_SHIPPING') return 'sameDay';
+  }
+  for (const opt of variant.fastDeliveryOptions) {
+    if (opt.deliveryOptionType === 'FAST_DELIVERY') return 'fast';
+  }
+  if (variant.isRushDelivery) return 'fast';
+  return 'standard';
+}
+
+/**
+ * Aggregate the delivery tier across a product's variants for the
+ * parent row's "Teslimat" cell. If every variant agrees, returns that
+ * type; if they disagree, returns `mixed: true` so the UI renders a
+ * "Karışık" (mixed) badge instead of misleading the seller into
+ * thinking the parent has a single uniform delivery option.
+ */
+export function dominantDeliveryType(variants: VariantSummary[]): {
+  type: DeliveryType | null;
   mixed: boolean;
 } {
-  if (variants.length === 0) return { value: null, mixed: false };
-  const values = variants.map((v) => v.deliveryDuration);
-  const distinct = new Set(values.map((v) => (v === null ? 'null' : v.toString())));
-  if (distinct.size === 1) {
-    return { value: values[0] ?? null, mixed: false };
-  }
-  return { value: null, mixed: true };
+  if (variants.length === 0) return { type: null, mixed: false };
+  const first = variants[0];
+  if (first === undefined) return { type: null, mixed: false };
+  const firstType = computeDeliveryType(first);
+  const allSame = variants.every((v) => computeDeliveryType(v) === firstType);
+  return allSame ? { type: firstType, mixed: false } : { type: null, mixed: true };
 }
 
 export type StatusValue = VariantSummary['status'];

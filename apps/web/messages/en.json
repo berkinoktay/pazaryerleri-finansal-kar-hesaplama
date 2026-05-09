@@ -62,6 +62,10 @@
     "lastSynced": "Last synced",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} syncs running",
+    "copy": {
+      "copy": "Copy {label}",
+      "copied": "{label} copied"
+    },
     "networkStatus": {
       "offline": "No internet connection. Your changes may not be saved."
     },
@@ -778,9 +782,8 @@
     },
     "delivery": {
       "sameDay": "Same-day shipping",
-      "nextDay": "Next-day shipping",
-      "days": "{n} days",
-      "standard": "Standard",
+      "fast": "Fast delivery",
+      "standard": "Standard delivery",
       "mixed": "Mixed"
     },
     "multiVariantPlaceholder": "{n} variants",
