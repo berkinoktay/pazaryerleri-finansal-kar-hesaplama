@@ -45,6 +45,7 @@ export async function truncateAll(): Promise<void> {
        products,
        cost_profile_versions,
        cost_profiles,
+       fx_rates,
        expenses,
        stores,
        organization_members,
