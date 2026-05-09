@@ -928,6 +928,72 @@
       "confirmDescription": "Bu maliyet profili arşivlenecek ve yeni varyantlara eklenemeyecek. Geçmiş siparişler etkilenmez. İstediğin zaman geri yükleyebilirsin.",
       "confirm": "Arşivle",
       "cancel": "Vazgeç"
+    },
+    "detail": {
+      "tabs": {
+        "detail": "Detay",
+        "history": "Geçmiş",
+        "attachedVariants": "Bağlı varyantlar"
+      },
+      "header": {
+        "backToList": "Maliyetler",
+        "archivedBadge": "Arşivlendi"
+      },
+      "actions": {
+        "archive": "Arşivle",
+        "restore": "Geri yükle"
+      },
+      "archiveConfirm": {
+        "title": "Profili arşivle",
+        "description": "Bu maliyet profili arşivlenecek ve yeni varyantlara eklenemeyecek. Geçmiş siparişler etkilenmez. İstediğin zaman geri yükleyebilirsin.",
+        "confirm": "Arşivle",
+        "cancel": "Vazgeç"
+      },
+      "history": {
+        "empty": {
+          "title": "Geçmiş kaydı yok",
+          "description": "Bu profilde henüz bir değişiklik kaydı bulunmuyor."
+        },
+        "version": "v{version}",
+        "initialCreate": "İlk oluşturma",
+        "changedBy": "Değiştiren: {userId}",
+        "system": "Sistem",
+        "viewDiff": "Farkı gör",
+        "fields": {
+          "name": "Ad",
+          "type": "Tür",
+          "amount": "Tutar",
+          "currency": "Para birimi",
+          "vatRate": "KDV oranı",
+          "fxRateMode": "Kur modu",
+          "manualFxRate": "Manuel kur",
+          "note": "Not",
+          "archivedAt": "Arşivlendi"
+        },
+        "diffSheet": {
+          "title": "v{version} değişiklikleri",
+          "setInitial": "İlk değer",
+          "before": "Önce",
+          "after": "Sonra"
+        }
+      },
+      "attachedVariants": {
+        "empty": {
+          "title": "Bağlı varyant yok",
+          "description": "Bu maliyet profili henüz hiçbir ürün varyantına bağlanmamış."
+        },
+        "detach": "Ayır",
+        "detachLabel": "{stockCode} varyantını ayır",
+        "columns": {
+          "product": "Ürün",
+          "stockCode": "Stok kodu",
+          "attachedAt": "Bağlandı"
+        }
+      },
+      "editForm": {
+        "title": "Profil detayları",
+        "savedSuccess": "Profil güncellendi."
+      }
     }
   }
 }

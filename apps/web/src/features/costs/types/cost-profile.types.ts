@@ -25,6 +25,7 @@ export type ListCostProfilesResponse = components['schemas']['ListCostProfilesRe
 export type ListCostProfileVersionsResponse =
   components['schemas']['ListCostProfileVersionsResponse'];
 export type ListAttachedVariantsResponse = components['schemas']['ListAttachedVariantsResponse'];
+export type DetachResponse = components['schemas']['DetachResponse'];
 export type CursorMeta = components['schemas']['CursorMeta'];
 
 // ─── List filter shape ─────────────────────────────────────────────────

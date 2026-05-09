@@ -1,0 +1,125 @@
+import { NextIntlClientProvider } from 'next-intl';
+import * as React from 'react';
+import { describe, expect, it } from 'vitest';
+
+import { CostProfileHistoryList } from '@/features/costs/components/cost-profile-history-list';
+
+import type { CostProfileVersion } from '@/features/costs/types/cost-profile.types';
+
+import { FORMATS } from '../../../../src/i18n/formats';
+import trMessages from '../../../../messages/tr.json';
+import { render, screen, createTestQueryClient } from '../../../helpers/render';
+import { QueryClientProvider } from '@tanstack/react-query';
+
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={createTestQueryClient()}>
+      <NextIntlClientProvider
+        locale="tr"
+        messages={trMessages}
+        formats={FORMATS}
+        timeZone="Europe/Istanbul"
+      >
+        {children}
+      </NextIntlClientProvider>
+    </QueryClientProvider>
+  );
+}
+
+function renderWithIntl(ui: React.ReactElement) {
+  return render(ui, { wrapper: Wrapper });
+}
+
+// ─── Fixtures ────────────────────────────────────────────────────────────────
+
+const BASE_VERSION: CostProfileVersion = {
+  id: 'v1-id',
+  profileId: 'profile-1',
+  organizationId: 'org-1',
+  version: 1,
+  name: 'Hammadde COGS',
+  type: 'COGS',
+  amount: '25.50',
+  currency: 'TRY',
+  vatRate: 18,
+  fxRateMode: 'AUTO',
+  manualFxRate: null,
+  note: null,
+  archivedAt: null,
+  changedFields: [],
+  changedBy: null,
+  changedAt: '2026-04-01T10:00:00Z',
+  changeReason: null,
+};
+
+const V2_VERSION: CostProfileVersion = {
+  ...BASE_VERSION,
+  id: 'v2-id',
+  version: 2,
+  amount: '30.00',
+  changedFields: ['amount'],
+  changedBy: 'user-abc-123',
+  changedAt: '2026-04-15T14:30:00Z',
+};
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+describe('CostProfileHistoryList', () => {
+  it('shows empty state when versions array is empty', () => {
+    renderWithIntl(<CostProfileHistoryList versions={[]} isLoading={false} />);
+    expect(screen.getByText('Geçmiş kaydı yok')).toBeInTheDocument();
+  });
+
+  it('shows skeleton while loading', () => {
+    renderWithIntl(<CostProfileHistoryList versions={[]} isLoading={true} />);
+    expect(screen.getByRole('status')).toBeInTheDocument();
+  });
+
+  it('renders a version row with version badge and relative time', () => {
+    renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
+    expect(screen.getByText('v1')).toBeInTheDocument();
+    // The relative time component renders an absolute date on SSR/first paint
+    expect(screen.getByRole('time')).toBeInTheDocument();
+  });
+
+  it('renders "İlk oluşturma" label for version 1', () => {
+    renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
+    expect(screen.getByText('İlk oluşturma')).toBeInTheDocument();
+  });
+
+  it('renders changed-field chips for version 2', () => {
+    renderWithIntl(
+      <CostProfileHistoryList versions={[V2_VERSION, BASE_VERSION]} isLoading={false} />,
+    );
+    // "Tutar" is the label for the 'amount' field
+    expect(screen.getByText('Tutar')).toBeInTheDocument();
+  });
+
+  it('renders multiple version rows in reverse-chronological order (newest first)', () => {
+    renderWithIntl(
+      <CostProfileHistoryList versions={[V2_VERSION, BASE_VERSION]} isLoading={false} />,
+    );
+    const versionBadges = screen.getAllByText(/^v\d+$/);
+    expect(versionBadges[0]).toHaveTextContent('v2');
+    expect(versionBadges[1]).toHaveTextContent('v1');
+  });
+
+  it('renders "Sistem" for null changedBy', () => {
+    renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
+    expect(screen.getByText('Sistem')).toBeInTheDocument();
+  });
+
+  it('renders "Farkı gör" button per version', () => {
+    renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
+    expect(screen.getByRole('button', { name: 'Farkı gör' })).toBeInTheDocument();
+  });
+
+  it('opens the diff sheet when "Farkı gör" is clicked', async () => {
+    const { user } = renderWithIntl(
+      <CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Farkı gör' }));
+    // Sheet title references the version number
+    expect(screen.getByText('v1 değişiklikleri')).toBeInTheDocument();
+  });
+});
