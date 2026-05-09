@@ -193,3 +193,62 @@ CREATE POLICY sync_logs_org_member_read ON sync_logs
 CREATE UNIQUE INDEX IF NOT EXISTS sync_logs_active_slot_uniq
   ON sync_logs (store_id, sync_type)
   WHERE status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE');
+
+-- ─── cost_profiles — org-scoped read ─────────────────────────────────
+-- Writes are API-only via the postgres role. The Hono backend handles
+-- create/update/archive through the cost-profile service, which checks
+-- organization scope before every mutation. RLS here just guards
+-- authenticated-client SELECTs for the Costs page.
+ALTER TABLE cost_profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cost_profiles_org_member_read ON cost_profiles;
+CREATE POLICY cost_profiles_org_member_read ON cost_profiles
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── cost_profile_versions — org-scoped read ─────────────────────────
+-- Append-only audit log. Writes happen in the same Prisma transaction
+-- as profile updates (cost-profile.service.ts). RLS denies any direct
+-- write from authenticated clients.
+ALTER TABLE cost_profile_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cost_profile_versions_org_member_read ON cost_profile_versions;
+CREATE POLICY cost_profile_versions_org_member_read ON cost_profile_versions
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── product_variant_cost_profiles — org-scoped read ─────────────────
+-- The cross-org INSERT guard (variant.organization_id MUST match
+-- profile.organization_id MUST match request context's org) is
+-- enforced at the backend service layer (cost-profile-attachment.service.ts),
+-- not in RLS. The backend reads both rows via the postgres role,
+-- compares organization_id, and rejects with COST_PROFILE_VARIANT_ORG_MISMATCH
+-- (HTTP 422) before any INSERT. RLS here only governs authenticated reads.
+ALTER TABLE product_variant_cost_profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS product_variant_cost_profiles_org_member_read ON product_variant_cost_profiles;
+CREATE POLICY product_variant_cost_profiles_org_member_read ON product_variant_cost_profiles
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── order_item_cost_snapshot_components — org-scoped read ───────────
+-- Frozen, write-once. Inserts happen only via the sync worker (Edge
+-- Function with service-role key) when an order arrives and its variant
+-- has cost profiles attached. Updates are blocked by the
+-- reject_snapshot_update trigger in cost-snapshot-immutable.sql (Task 1.4).
+-- RLS just gates authenticated reads.
+ALTER TABLE order_item_cost_snapshot_components ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS oi_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components;
+CREATE POLICY oi_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── fx_rates — global read, service-role writes ─────────────────────
+-- FX rates are not tenant-scoped; the same TCMB rate applies to every
+-- org. Any authenticated user can read the latest cached rates for UI
+-- display (e.g., the cost-profile-fx-preview component). Writes are
+-- service-role only via the fx-rates-sync Edge Function — postgres
+-- bypasses RLS, and there is no INSERT/UPDATE/DELETE policy for
+-- `authenticated`, so direct client writes default-deny.
+ALTER TABLE fx_rates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS fx_rates_authenticated_read ON fx_rates;
+CREATE POLICY fx_rates_authenticated_read ON fx_rates
+  FOR SELECT TO authenticated
+  USING (true);
