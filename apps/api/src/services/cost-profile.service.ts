@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { CostProfile, CostProfileVersion, ProductVariant, Product } from '@pazarsync/db';
+import type { CostProfile, CostProfileVersion } from '@pazarsync/db';
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '../lib/errors';
 import type {

@@ -85,6 +85,10 @@
       "SYNC_IN_PROGRESS": "A sync is already running for this store. Wait for it to finish.",
       "MARKETPLACE_ACCESS_DENIED": "Marketplace access blocked. Sandbox may require IP allowlisting.",
       "MARKETPLACE_UNREACHABLE": "The marketplace is currently unreachable. Please try again in a few minutes.",
+      "COST_PROFILE_NAME_TAKEN": "A cost profile with this name already exists. Choose a different name.",
+      "COST_PROFILE_NOT_FOUND": "Cost profile not found.",
+      "COST_PROFILE_ARCHIVED_CANNOT_ATTACH": "Cannot attach an archived cost profile. Restore it first.",
+      "COST_PROFILE_VARIANT_ORG_MISMATCH": "The product variant does not belong to this cost profile's organization.",
       "generic": "Something went wrong. Please try again."
     }
   },

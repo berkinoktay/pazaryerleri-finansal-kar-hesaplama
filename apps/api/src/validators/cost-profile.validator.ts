@@ -27,15 +27,10 @@ const FxRateModeSchema = z.enum(FxRateMode).openapi({
 // Zod 4. Split the base object so both schemas share the same field shapes.
 
 const costProfileBaseObject = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, 'NAME_REQUIRED')
-    .max(120, 'NAME_TOO_LONG')
-    .openapi({
-      description: 'Profile display name. Unique within the organization.',
-      example: 'Hammadde COGS',
-    }),
+  name: z.string().trim().min(1, 'NAME_REQUIRED').max(120, 'NAME_TOO_LONG').openapi({
+    description: 'Profile display name. Unique within the organization.',
+    example: 'Hammadde COGS',
+  }),
   type: CostProfileTypeSchema,
   amount: z
     .string()
@@ -61,15 +56,10 @@ const costProfileBaseObject = z.object({
       description: 'Required when fxRateMode is MANUAL. Up to 6 decimal places.',
       example: '35.500000',
     }),
-  note: z
-    .string()
-    .trim()
-    .max(500, 'NOTE_TOO_LONG')
-    .optional()
-    .openapi({
-      description: 'Optional free-text note for the profile.',
-      example: 'Kumaş + dikiş maliyeti',
-    }),
+  note: z.string().trim().max(500, 'NOTE_TOO_LONG').optional().openapi({
+    description: 'Optional free-text note for the profile.',
+    example: 'Kumaş + dikiş maliyeti',
+  }),
 });
 
 // ─── Create payload ─────────────────────────────────────────────────────────
