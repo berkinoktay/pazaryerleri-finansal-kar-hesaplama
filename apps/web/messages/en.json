@@ -828,7 +828,9 @@
       "expandRow": "Show variants",
       "collapseRow": "Hide variants",
       "openFilter": "Open filter",
-      "viewImage": "View product image at full size"
+      "viewImage": "View product image at full size",
+      "selectAll": "Select all products",
+      "selectRow": "Select this product"
     },
     "syncButton": {
       "label": "Sync",
@@ -849,6 +851,46 @@
         "attachEmpty": "No profiles found",
         "newProfile": "+ Create new cost profile",
         "removeLabel": "Remove profile"
+      }
+    },
+    "parentCostCell": {
+      "allSame": "all same",
+      "variantCount": "{count} variants",
+      "popoverTitle": "Variant costs",
+      "popoverStats": "{with} / {total} variants have cost profiles, {without} missing",
+      "applyToAllLabel": "Add cost to all variants",
+      "applyToAllPlaceholder": "Select a profile…",
+      "applyToAllSearch": "Search profiles…",
+      "applyToAllEmpty": "No profiles found"
+    },
+    "bulkCost": {
+      "selectedCount": "{count} products selected",
+      "clearSelection": "Clear selection",
+      "attach": "Add cost",
+      "detach": "Remove cost",
+      "replace": "Replace costs",
+      "attachDialog": {
+        "title": "Add cost",
+        "placeholder": "Select a profile…",
+        "search": "Search profiles…",
+        "empty": "No profiles found"
+      },
+      "detachDialog": {
+        "title": "Remove cost",
+        "placeholder": "Select profile to remove…",
+        "search": "Search profiles…",
+        "empty": "No profiles found"
+      },
+      "replaceDialog": {
+        "title": "Replace costs",
+        "placeholder": "Select new profile…",
+        "search": "Search profiles…",
+        "empty": "No profiles found"
+      },
+      "replaceConfirm": {
+        "title": "Replace costs",
+        "description": "This will remove all existing cost profiles from {count} variants and attach only the selected profile. This cannot be undone.",
+        "confirm": "Yes, replace"
       }
     }
   },

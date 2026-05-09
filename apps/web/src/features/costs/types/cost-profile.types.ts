@@ -27,6 +27,7 @@ export type ListCostProfileVersionsResponse =
 export type ListAttachedVariantsResponse = components['schemas']['ListAttachedVariantsResponse'];
 export type AttachResponse = components['schemas']['AttachResponse'];
 export type DetachResponse = components['schemas']['DetachResponse'];
+export type ReplaceResponse = components['schemas']['ReplaceResponse'];
 export type ListVariantCostProfilesResponse =
   components['schemas']['ListVariantCostProfilesResponse'];
 export type CursorMeta = components['schemas']['CursorMeta'];
