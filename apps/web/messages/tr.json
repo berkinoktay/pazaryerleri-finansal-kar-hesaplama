@@ -62,6 +62,10 @@
     "lastSynced": "Son senkronizasyon",
     "gmtOffset": "GMT+3",
     "activeSyncCount": "{n} senkronizasyon çalışıyor",
+    "copy": {
+      "copy": "{label} kopyala",
+      "copied": "{label} kopyalandı"
+    },
     "networkStatus": {
       "offline": "İnternet bağlantın yok. Değişikliklerin kaydedilmeyebilir."
     },
@@ -777,10 +781,9 @@
       "status": "Durum"
     },
     "delivery": {
-      "sameDay": "Bugün kargoda",
-      "nextDay": "Yarın kargoda",
-      "days": "{n} gün",
-      "standard": "Standart",
+      "sameDay": "Bugün Kargoda",
+      "fast": "Hızlı Teslimat",
+      "standard": "Standart Teslimat",
       "mixed": "Karışık"
     },
     "multiVariantPlaceholder": "{n} varyant",

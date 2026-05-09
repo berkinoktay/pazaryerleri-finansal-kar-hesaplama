@@ -1,10 +1,26 @@
 /* DataTable depth-based row styling — driven by patterns/data-table.tsx
    when getSubRows is supplied. Feature code does not author these styles
-   directly; setting data-depth on the row is the entire contract. */
+   directly; setting data-depth on the row is the entire contract.
 
-table tr[data-depth='1'] {
-  background-color: var(--muted);
-}
+   Hierarchy is signalled by TWO token-compliant cues — NO row-level
+   background fill, NO side-stripe (BAN 1 of /ui-design-system forbids
+   `border-left > 1px` and `inset box-shadow` faking the same effect on
+   rows / cards / callouts):
+
+     1. A CSS-drawn rounded-corner connector in the expand column,
+        rendered by feature code as a 16-px square with `border-l +
+        border-b + rounded-bl-md` (see products-table.tsx). This is the
+        "leading icon carries the semantic" pattern from the design
+        system.
+     2. A larger first-cell padding so the connector indents into the
+        row. Image position is unaffected (image lives in column 2, not
+        column 1) so variant images stay aligned with the parent's.
+
+   Earlier iterations tried `--muted` (4% lightness step) and then
+   `--surface-subtle` (2% step) as variant backgrounds; both were
+   rejected as either muddy or visually distracting. The connector +
+   indent + the table's row separators carry the hierarchy on their own
+   on a uniform white surface. */
 
 table tr[data-depth='1'] > td:first-child {
   padding-left: var(--space-xl);

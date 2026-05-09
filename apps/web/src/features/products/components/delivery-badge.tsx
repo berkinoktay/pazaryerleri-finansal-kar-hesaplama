@@ -3,43 +3,49 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
+
+import type { DeliveryType } from '../lib/format-product';
 
 interface DeliveryBadgeProps {
-  /** Trendyol's deliveryDuration in days. null → standard (no rush). */
-  durationDays: number | null;
-  /** True if Trendyol flagged this variant as rush-eligible. */
-  isRush?: boolean;
-  /** Mixed across variants — render the "Karışık" label instead of a value. */
+  /**
+   * Trendyol delivery tier — one of three values, see
+   * `computeDeliveryType` in `lib/format-product.ts` for the mapping.
+   * `null` ⇒ no variants / unknown — rendered as an em-dash placeholder.
+   */
+  type: DeliveryType | null;
+  /** Mixed across variants on a parent row → "Karışık" instead of a tier. */
   mixed?: boolean;
 }
 
 /**
- * Maps Trendyol's `deliveryDuration` (days) to a localized badge.
- *   1   → Bugün kargoda
- *   2   → Yarın kargoda
- *   3+  → "{n} gün"
- *   null → Standart
- *   mixed → Karışık
+ * Tone mapping is deliberate, not decorative:
+ *
+ *   sameDay  → success — a same-day-shipping flag is a "good thing"
+ *              for the seller's listing health (Trendyol surfaces it
+ *              with a green chip in the buyer-facing UI too).
+ *   fast     → info — neutral context indicator, the variant is on the
+ *              fast-delivery program but not same-day.
+ *   standard → outline — calmest tone, the default lead time, no signal
+ *              the seller needs to act on.
  */
-export function DeliveryBadge({
-  durationDays,
-  isRush = false,
-  mixed = false,
-}: DeliveryBadgeProps): React.ReactElement {
-  const t = useTranslations('products.delivery');
+const TONE: Record<DeliveryType, NonNullable<BadgeProps['tone']>> = {
+  sameDay: 'success',
+  fast: 'info',
+  standard: 'outline',
+};
 
+export function DeliveryBadge({ type, mixed = false }: DeliveryBadgeProps): React.ReactElement {
+  const t = useTranslations('products.delivery');
   if (mixed) {
     return <Badge tone="outline">{t('mixed')}</Badge>;
   }
-  if (durationDays === null) {
-    return <Badge tone="outline">{t('standard')}</Badge>;
+  if (type === null) {
+    return <span className="text-muted-foreground">—</span>;
   }
-  if (durationDays === 1) {
-    return <Badge tone={isRush ? 'success' : 'info'}>{t('sameDay')}</Badge>;
-  }
-  if (durationDays === 2) {
-    return <Badge tone="info">{t('nextDay')}</Badge>;
-  }
-  return <Badge tone="outline">{t('days', { n: durationDays })}</Badge>;
+  // The DeliveryType union (`'sameDay' | 'fast' | 'standard'`) is the
+  // same shape as the i18n keys under `products.delivery.*`, so we can
+  // pass the type directly as the message key — no separate label map
+  // needed (and next-intl's literal-keyed `t()` typecheck stays happy).
+  return <Badge tone={TONE[type]}>{t(type)}</Badge>;
 }

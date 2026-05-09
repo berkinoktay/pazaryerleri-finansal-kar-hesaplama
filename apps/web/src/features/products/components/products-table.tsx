@@ -5,20 +5,21 @@ import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { CopyableValue } from '@/components/patterns/copyable-value';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
+import { cn } from '@/lib/utils';
 
 import type { ProductFacetsResponse } from '../api/list-product-facets.api';
 import type { ProductWithVariants, VariantSummary } from '../api/list-products.api';
 import {
-  dominantDeliveryDuration,
+  computeDeliveryType,
+  dominantDeliveryType,
   isMultiVariant,
   priceRange,
-  summarizeStatus,
   totalStock,
-  uniqueSizes,
 } from '../lib/format-product';
 import {
   type ProductListSortExtended,
@@ -31,8 +32,6 @@ import { DeliveryBadge } from './delivery-badge';
 import { ProductImageCell } from './product-image-cell';
 import { ProductsFacetChips } from './products-facet-chips';
 import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
-import { SizeChipList } from './size-chip-list';
-import { VariantStatusBadge } from './variant-status-badge';
 
 /**
  * Discriminated union projected from the API's ProductWithVariants.
@@ -89,15 +88,33 @@ interface ProductsTableProps {
 /**
  * Products table built on the shared DataTable pattern with TanStack v8's
  * native getSubRows machinery — multi-variant parents render their child
- * variants as sibling rows in the same grid (column widths align), with
- * a tree connector + muted background tint applied by `data-depth='1'`
- * on the row element (token-driven, see tokens/components.css).
+ * variants as sibling rows in the same grid (column widths align). The
+ * variant-vs-parent hierarchy is signalled WITHOUT a row background
+ * fill — we tried both `--muted` and `--surface-subtle` and the seller
+ * read both as a foreign surface that broke the table's airy feel. The
+ * remaining cues are token-compliant: a CSS-drawn rounded-corner
+ * connector in the expand column (a 28-px SVG path traced with a 2-px
+ * `--muted-foreground` stroke and round line caps — earlier passes
+ * tried a 1-px CSS border-L and it read as a stray hair against the
+ * white surface) and a deeper first-cell padding (token-driven, see
+ * tokens/components.css
+ * `tr[data-depth='1']`). NO side-stripe — that pattern is banned by
+ * /ui-design-system BAN 1.
  *
- * 9-column hierarchical layout: expand · Ürün bilgisi (compound: image +
- * title + brand·category·model code subtitle) · Beden · Renk · Barkod ·
- * Satış fiyatı · Stok · Teslimat · Durum. Beden + Renk replace the older
- * combined "Özellikler" column — Beden lives at the variant level
- * (Trendyol's `varianter`), Renk at the content level (`slicer`).
+ * 7-column layout: expand · Ürün bilgisi (compound) · Beden · Renk ·
+ * Satış fiyatı · Stok · Teslimat. Two columns retired: "Barkod" (every
+ * alphanumeric identifier — model / stock / barcode — now ships inside
+ * the title cell with an explicit `Marka · Kategori` label line plus
+ * dedicated `Stok Kodu` / `Barkod` / `Model Kodu` lines, each value
+ * wrapped in `CopyableValue`) and "Durum" (the override tab strip and
+ * the status filter already let the seller scope by status; a status
+ * column on every row repeated information they had just narrowed by).
+ *
+ * Variant sub-rows mirror their parent's image at the same 56px size
+ * (no step-down) and surface both `Stok Kodu` and `Barkod` on two
+ * labelled, copyable rows. The variant content is top-aligned (matching
+ * the parent's `items-start`) so the visual rhythm reads as a column
+ * of identifiers anchored under the product image.
  *
  * Server-side everything: sorting, filtering, pagination — DataTable runs
  * in controlled mode for sort + pagination, and the toolbar's controlled-
@@ -118,10 +135,32 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         enableSorting: false,
         cell: ({ row }) => {
           if (row.depth > 0) {
+            // SVG-drawn branch connector. The previous CSS-border L
+            // (1-px hairline) read as "a strand of hair" against the
+            // table's white surface — too subtle to feel like a real
+            // hierarchy cue. This version traces the same conceptual
+            // shape (vertical line → quarter-circle → horizontal stub)
+            // as a single SVG path with a 2-px stroke and round line
+            // caps, which lands as a substantial, intentional mark
+            // without crossing into BAN 1 territory (it's an SVG glyph
+            // inside the cell, not a side-stripe on the row's edge).
+            // 28-px square (`size-7`) gives the corner enough space to
+            // feel rounded; `--muted-foreground` keeps the tone neutral
+            // and on-brand against the white surface.
             return (
-              <span aria-hidden className="text-muted-foreground">
-                └
-              </span>
+              <svg
+                aria-hidden
+                viewBox="0 0 24 24"
+                fill="none"
+                className="text-muted-foreground ml-3xs mt-2xs size-7 shrink-0"
+              >
+                <path
+                  d="M6 2 V12 A 8 8 0 0 0 14 20 H22"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
             );
           }
           if (!row.getCanExpand()) {
@@ -165,25 +204,53 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         enableSorting: true,
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {
-            // Beden moved into its own column; sub-row title shows just the
-            // stock code so the size isn't duplicated across two cells.
+            // Variant sub-row: 56px image (same as the parent — the user
+            // wants images on every variant aligned identically with the
+            // parent's image, not stepped down). Two labeled rows surface
+            // the variant's two identifiers (Stok Kodu + Barkod) since the
+            // dedicated barcode column was retired in favour of inline
+            // labels — the column header alone never disambiguated three
+            // similar-looking alphanumerics (model / stock / barcode).
+            const v = row.original.variant;
+            const parent = row.original.parent;
+            const parentImage = parent.images[0];
             return (
-              <span className="text-muted-foreground font-mono text-xs">
-                {row.original.variant.stockCode}
-              </span>
+              <div className="gap-sm flex items-start">
+                <ProductImageCell url={parentImage?.url ?? null} alt={parent.title} size="lg" />
+                <div className="gap-3xs py-3xs flex min-w-0 flex-col">
+                  <LabeledIdentifier label={tCols('stockCode')} value={v.stockCode} />
+                  <LabeledIdentifier label={tCols('barcode')} value={v.barcode} />
+                </div>
+              </div>
             );
           }
+          // Parent row. Two layouts depending on whether the product has
+          // multiple variants: multi-variant gets the model code (the
+          // grouping key shared by every variant), single-variant gets
+          // the variant's own identifiers because the variant IS the
+          // product — model code adds nothing the seller can act on.
           const p = row.original.product;
           const firstImage = p.images[0];
-          const subtitle = [p.brand.name, p.category.name, p.productMainId]
-            .filter((s): s is string => s !== null && s.length > 0)
-            .join(' · ');
+          const v0 = !isMultiVariant(p) ? p.variants[0] : null;
           return (
-            <div className="gap-sm flex items-center">
-              <ProductImageCell url={firstImage?.url ?? null} alt={p.title} />
-              <div className="gap-3xs flex flex-col">
+            <div className="gap-sm flex items-start">
+              <ProductImageCell url={firstImage?.url ?? null} alt={p.title} size="lg" />
+              <div className="gap-3xs flex min-w-0 flex-col">
                 <span className="text-foreground line-clamp-1 font-medium">{p.title}</span>
-                <span className="text-muted-foreground line-clamp-1 text-xs">{subtitle}</span>
+                <BrandCategoryLine
+                  brand={p.brand.name}
+                  category={p.category.name}
+                  brandLabel={tCols('brand')}
+                  categoryLabel={tCols('category')}
+                />
+                {v0 !== null ? (
+                  <>
+                    <LabeledIdentifier label={tCols('stockCode')} value={v0.stockCode} />
+                    <LabeledIdentifier label={tCols('barcode')} value={v0.barcode} />
+                  </>
+                ) : (
+                  <LabeledIdentifier label={tCols('productMainId')} value={p.productMainId} />
+                )}
               </div>
             </div>
           );
@@ -199,7 +266,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           if (row.original.kind === 'variant') {
             const v = row.original.variant;
             return v.size !== null && v.size.length > 0 ? (
-              <SizeChipList sizes={[v.size]} extraCount={0} />
+              <span className="text-foreground text-sm">{v.size}</span>
             ) : (
               <span className="text-muted-foreground">—</span>
             );
@@ -208,13 +275,23 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           if (!isMultiVariant(p)) {
             const size = p.variants[0]?.size;
             return size !== undefined && size !== null && size.length > 0 ? (
-              <SizeChipList sizes={[size]} extraCount={0} />
+              <span className="text-foreground text-sm">{size}</span>
             ) : (
               <span className="text-muted-foreground">—</span>
             );
           }
-          const { shown, remaining } = uniqueSizes(p.variants);
-          return <SizeChipList sizes={shown} extraCount={remaining} />;
+          // Multi-variant parent: aggregate label ("N varyant") instead of
+          // mapping every variant's size as a chip. With long Trendyol
+          // size strings (e.g. `100 × 200 × 10 cm Cam Renk`) the chip
+          // stack wrapped into a tall, busy block — sellers asked for
+          // the same calm "N Varyant" summary that Trendyol's own panel
+          // uses, with the actual sizes available one click away in the
+          // expanded variant sub-rows.
+          return (
+            <span className="text-muted-foreground text-xs">
+              {t('multiVariantPlaceholder', { n: p.variantCount })}
+            </span>
+          );
         },
       },
       {
@@ -233,24 +310,6 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
             return <span className="text-muted-foreground">—</span>;
           }
           return <ColorAttribute color={color} />;
-        },
-      },
-      {
-        id: 'barcode',
-        header: () => tCols('barcode'),
-        cell: ({ row }) => {
-          if (row.original.kind === 'variant') {
-            return <span className="font-mono text-xs">{row.original.variant.barcode}</span>;
-          }
-          const p = row.original.product;
-          if (isMultiVariant(p)) {
-            return (
-              <span className="text-muted-foreground text-xs">
-                {t('multiVariantPlaceholder', { n: p.variantCount })}
-              </span>
-            );
-          }
-          return <span className="font-mono text-xs">{p.variants[0]?.barcode ?? '—'}</span>;
         },
       },
       {
@@ -292,11 +351,11 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         meta: { numeric: true },
         enableSorting: true,
         cell: ({ row }) => {
-          const v =
+          const count =
             row.original.kind === 'variant'
               ? row.original.variant.quantity
               : totalStock(row.original.product.variants);
-          return <span className="tabular-nums">{v}</span>;
+          return <StockCount count={count} />;
         },
       },
       {
@@ -304,33 +363,10 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         header: () => tCols('delivery'),
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {
-            const v = row.original.variant;
-            return <DeliveryBadge durationDays={v.deliveryDuration} isRush={v.isRushDelivery} />;
+            return <DeliveryBadge type={computeDeliveryType(row.original.variant)} />;
           }
-          const { value, mixed } = dominantDeliveryDuration(row.original.product.variants);
-          const v0 = row.original.product.variants[0];
-          return (
-            <DeliveryBadge
-              durationDays={value}
-              isRush={v0?.isRushDelivery ?? false}
-              mixed={mixed}
-            />
-          );
-        },
-      },
-      {
-        id: 'status',
-        header: () => tCols('status'),
-        cell: ({ row }) => {
-          if (row.original.kind === 'variant') {
-            return <VariantStatusBadge status={row.original.variant.status} />;
-          }
-          const summary = summarizeStatus(row.original.product.variants);
-          if (summary === null) return '—';
-          const others = Object.entries(summary.counts)
-            .filter(([k]) => k !== summary.dominant)
-            .reduce((s, [, n]) => s + (n ?? 0), 0);
-          return <VariantStatusBadge status={summary.dominant} overflowCount={others} />;
+          const { type, mixed } = dominantDeliveryType(row.original.product.variants);
+          return <DeliveryBadge type={type} mixed={mixed} />;
         },
       },
     ],
@@ -438,4 +474,112 @@ function tanstackToSort(state: SortingState): ProductListSortExtended {
   const head = state[0];
   if (head === undefined) return '-platformCreatedAt';
   return (head.desc ? `-${head.id}` : head.id) as ProductListSortExtended;
+}
+
+// ─── Cell sub-components ──────────────────────────────────────────
+// Two tiny presentational helpers shared across the parent + variant
+// title cell renderers above. They live in this file (not in a shared
+// pattern) because the visual contract — small muted label + mono
+// value + optional copy — is specific to "products table identifier
+// rows" and changes whenever this table's typography does.
+
+interface StockCountProps {
+  count: number;
+}
+
+/**
+ * Stock cell renderer with three semantic tiers — surfaces inventory
+ * health at a glance without an extra column or icon:
+ *
+ *   - 0     → `text-destructive` — out of stock, the seller has lost
+ *             the listing and needs to act now.
+ *   - 1–9   → `text-warning` — low stock, an early signal to reorder
+ *             before the variant goes out.
+ *   - 10+   → `text-foreground` — healthy, no styling needed (color
+ *             tokens reserved for things that need attention).
+ *
+ * Using semantic color tokens (not raw hex / OKLCH) means dark-mode
+ * gets the same treatment automatically without a parallel ladder.
+ */
+function StockCount({ count }: StockCountProps): React.ReactElement {
+  return (
+    <span
+      className={cn(
+        'font-medium tabular-nums',
+        count === 0 && 'text-destructive',
+        count > 0 && count < 10 && 'text-warning',
+      )}
+    >
+      {count}
+    </span>
+  );
+}
+
+interface LabeledIdentifierProps {
+  label: string;
+  value: string | null | undefined;
+}
+
+/**
+ * One row of "label  {monospace value} [copy on hover]". The full
+ * value is the click target via CopyableValue; the label is decorative
+ * and stays muted. Used for stockCode, barcode, productMainId.
+ *
+ * Returns null when the value is missing — empty string, null, or
+ * undefined — so the parent cell doesn't render an orphan label
+ * (e.g. "Stok Kodu" with nothing after it). The whole pair drops out
+ * together; the layout collapses naturally because callers compose
+ * these via flex-col gap, not fixed rows.
+ */
+function LabeledIdentifier({ label, value }: LabeledIdentifierProps): React.ReactElement | null {
+  if (value === null || value === undefined || value.length === 0) {
+    return null;
+  }
+  return (
+    <span className="gap-xs flex items-baseline text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <CopyableValue value={value} label={label}>
+        <span className="text-foreground font-mono">{value}</span>
+      </CopyableValue>
+    </span>
+  );
+}
+
+interface BrandCategoryLineProps {
+  brand: string | null;
+  category: string | null;
+  brandLabel: string;
+  categoryLabel: string;
+}
+
+/**
+ * Brand + category line on parent rows, both labelled. Rendered as
+ * two label-value pairs with breathing room between them — without
+ * labels the seller couldn't tell "Guess · Spor" was brand · category.
+ */
+function BrandCategoryLine({
+  brand,
+  category,
+  brandLabel,
+  categoryLabel,
+}: BrandCategoryLineProps): React.ReactElement | null {
+  const hasBrand = brand !== null && brand.length > 0;
+  const hasCategory = category !== null && category.length > 0;
+  if (!hasBrand && !hasCategory) return null;
+  return (
+    <span className="gap-md flex flex-wrap items-baseline text-xs">
+      {hasBrand ? (
+        <span className="gap-xs flex items-baseline">
+          <span className="text-muted-foreground">{brandLabel}</span>
+          <span className="text-foreground">{brand}</span>
+        </span>
+      ) : null}
+      {hasCategory ? (
+        <span className="gap-xs flex items-baseline">
+          <span className="text-muted-foreground">{categoryLabel}</span>
+          <span className="text-foreground">{category}</span>
+        </span>
+      ) : null}
+    </span>
+  );
 }
