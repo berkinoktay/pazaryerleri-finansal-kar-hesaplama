@@ -92,7 +92,9 @@ describe('GET /v1/organizations/:orgId/fx-rates/latest', () => {
 
     // EUR: single row
     expect(body.EUR).not.toBeNull();
-    expect(body.EUR?.rate).toBe('42.10');
+    // Decimal.js .toString() strips trailing zeros, so seeded "42.10" comes
+    // back as "42.1". Both are mathematically equal; assert the canonical form.
+    expect(body.EUR?.rate).toBe('42.1');
     expect(body.EUR?.date).toBe('2026-05-09');
     expect(body.EUR?.source).toBe('TCMB');
   });
