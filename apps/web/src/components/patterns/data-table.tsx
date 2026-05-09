@@ -173,6 +173,14 @@ export interface DataTableProps<TData, TValue> {
    * when it isn't supplied.
    */
   rowCount?: number;
+  /**
+   * Optional floating action bar slot. Receives the table instance so it
+   * can read selection state (`table.getSelectedRowModel()`) and fire
+   * deselect (`table.resetRowSelection()`). Rendered outside the bordered
+   * card shell so it overlays the page rather than being clipped. Typically
+   * used for bulk-operation bars (BulkActionBar) visible when rows are selected.
+   */
+  fab?: (table: TanstackTable<TData>) => React.ReactNode;
 }
 
 /**
@@ -214,6 +222,7 @@ export function DataTable<TData, TValue>({
   onPaginationChange,
   pageCount,
   rowCount,
+  fab,
 }: DataTableProps<TData, TValue>): React.ReactElement {
   const t = useTranslations('common.dataTable.empty');
   // Each of these triples follows the same controlled-when-supplied
@@ -318,143 +327,151 @@ export function DataTable<TData, TValue>({
     // of four floating siblings. The shell uses bg-card as the consistent
     // surface; the recessed inset variant of the AppShell sidebar already
     // gives the panel its outer lift.
-    <div className="border-border bg-card overflow-hidden rounded-lg border">
-      {tabs ? <div className="border-border px-md pt-sm pb-2xs border-b">{tabs}</div> : null}
-      {toolbar ? <div className="border-border px-md py-sm border-b">{toolbar(table)}</div> : null}
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const isNumeric = header.column.columnDef.meta?.numeric === true;
-                  const canSort = header.column.getCanSort();
-                  const sortDir = header.column.getIsSorted();
-                  const pinning = computePinningProps(header.column);
-                  return (
-                    <TableHead
-                      key={header.id}
-                      data-numeric={isNumeric || undefined}
-                      className={cn(isNumeric && 'text-right')}
-                      {...pinning}
-                    >
-                      {header.isPlaceholder ? null : canSort ? (
-                        <button
-                          type="button"
-                          onClick={header.column.getToggleSortingHandler()}
-                          className={cn(
-                            'gap-3xs px-3xs py-3xs -mx-3xs duration-fast inline-flex items-center rounded-sm transition-colors',
-                            'hover:bg-background',
-                            'focus-visible:outline-none',
-                            isNumeric && 'ml-auto',
-                          )}
-                        >
-                          {flexRender(header.column.columnDef.header, header.getContext())}
-                          {sortDir === 'asc' ? (
-                            <ArrowUp01Icon className="size-icon-xs" />
-                          ) : sortDir === 'desc' ? (
-                            <ArrowDown01Icon className="size-icon-xs" />
-                          ) : (
-                            <SortingDownIcon className="size-icon-xs opacity-40" />
-                          )}
-                        </button>
-                      ) : (
-                        flexRender(header.column.columnDef.header, header.getContext())
-                      )}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              Array.from({ length: 6 }).map((_, i) => (
-                <TableRow key={`skeleton-${i}`}>
-                  {columns.map((_col, colIdx) => (
-                    <TableCell key={colIdx}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="p-0">
-                  {empty ?? (
-                    <EmptyState
-                      title={t('title')}
-                      description={t('description')}
-                      className="border-0"
-                    />
-                  )}
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => {
-                const handleRowClick = onRowClick
-                  ? (event: React.MouseEvent<HTMLTableRowElement>) => {
-                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
-                      onRowClick(row.original, event);
-                    }
-                  : undefined;
-                const handleRowKeyDown = onRowClick
-                  ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') return;
-                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
-                      // Stop Space from scrolling and Enter from re-activating
-                      // the focused row twice via bubbling.
-                      event.preventDefault();
-                      onRowClick(row.original, event);
-                    }
-                  : undefined;
-                return (
-                  <React.Fragment key={row.id}>
-                    <TableRow
-                      data-state={row.getIsSelected() ? 'selected' : undefined}
-                      data-depth={row.depth || undefined}
-                      role={onRowClick ? 'button' : undefined}
-                      tabIndex={onRowClick ? 0 : undefined}
-                      onClick={handleRowClick}
-                      onKeyDown={handleRowKeyDown}
-                      className={cn(
-                        onRowClick &&
-                          'focus-visible:ring-ring cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
-                      )}
-                    >
-                      {row.getVisibleCells().map((cell) => {
-                        const isNumeric = cell.column.columnDef.meta?.numeric === true;
-                        const pinning = computePinningProps(cell.column);
-                        return (
-                          <TableCell
-                            key={cell.id}
-                            data-numeric={isNumeric || undefined}
-                            className={cn(isNumeric && 'text-right')}
-                            {...pinning}
+    <>
+      <div className="border-border bg-card overflow-hidden rounded-lg border">
+        {tabs ? <div className="border-border px-md pt-sm pb-2xs border-b">{tabs}</div> : null}
+        {toolbar ? (
+          <div className="border-border px-md py-sm border-b">{toolbar(table)}</div>
+        ) : null}
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => {
+                    const isNumeric = header.column.columnDef.meta?.numeric === true;
+                    const canSort = header.column.getCanSort();
+                    const sortDir = header.column.getIsSorted();
+                    const pinning = computePinningProps(header.column);
+                    return (
+                      <TableHead
+                        key={header.id}
+                        data-numeric={isNumeric || undefined}
+                        className={cn(isNumeric && 'text-right')}
+                        {...pinning}
+                      >
+                        {header.isPlaceholder ? null : canSort ? (
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            className={cn(
+                              'gap-3xs px-3xs py-3xs -mx-3xs duration-fast inline-flex items-center rounded-sm transition-colors',
+                              'hover:bg-background',
+                              'focus-visible:outline-none',
+                              isNumeric && 'ml-auto',
+                            )}
                           >
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                    {row.getIsExpanded() && renderSubComponent !== undefined ? (
-                      <TableRow data-expanded-content="true" className="hover:bg-transparent">
-                        <TableCell colSpan={row.getVisibleCells().length} className="bg-muted p-0">
-                          {renderSubComponent(row)}
-                        </TableCell>
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {sortDir === 'asc' ? (
+                              <ArrowUp01Icon className="size-icon-xs" />
+                            ) : sortDir === 'desc' ? (
+                              <ArrowDown01Icon className="size-icon-xs" />
+                            ) : (
+                              <SortingDownIcon className="size-icon-xs opacity-40" />
+                            )}
+                          </button>
+                        ) : (
+                          flexRender(header.column.columnDef.header, header.getContext())
+                        )}
+                      </TableHead>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={`skeleton-${i}`}>
+                    {columns.map((_col, colIdx) => (
+                      <TableCell key={colIdx}>
+                        <Skeleton className="h-4 w-full" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : table.getRowModel().rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={columns.length} className="p-0">
+                    {empty ?? (
+                      <EmptyState
+                        title={t('title')}
+                        description={t('description')}
+                        className="border-0"
+                      />
+                    )}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                table.getRowModel().rows.map((row) => {
+                  const handleRowClick = onRowClick
+                    ? (event: React.MouseEvent<HTMLTableRowElement>) => {
+                        if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                        onRowClick(row.original, event);
+                      }
+                    : undefined;
+                  const handleRowKeyDown = onRowClick
+                    ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                        // Stop Space from scrolling and Enter from re-activating
+                        // the focused row twice via bubbling.
+                        event.preventDefault();
+                        onRowClick(row.original, event);
+                      }
+                    : undefined;
+                  return (
+                    <React.Fragment key={row.id}>
+                      <TableRow
+                        data-state={row.getIsSelected() ? 'selected' : undefined}
+                        data-depth={row.depth || undefined}
+                        role={onRowClick ? 'button' : undefined}
+                        tabIndex={onRowClick ? 0 : undefined}
+                        onClick={handleRowClick}
+                        onKeyDown={handleRowKeyDown}
+                        className={cn(
+                          onRowClick &&
+                            'focus-visible:ring-ring cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+                        )}
+                      >
+                        {row.getVisibleCells().map((cell) => {
+                          const isNumeric = cell.column.columnDef.meta?.numeric === true;
+                          const pinning = computePinningProps(cell.column);
+                          return (
+                            <TableCell
+                              key={cell.id}
+                              data-numeric={isNumeric || undefined}
+                              className={cn(isNumeric && 'text-right')}
+                              {...pinning}
+                            >
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </TableCell>
+                          );
+                        })}
                       </TableRow>
-                    ) : null}
-                  </React.Fragment>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
+                      {row.getIsExpanded() && renderSubComponent !== undefined ? (
+                        <TableRow data-expanded-content="true" className="hover:bg-transparent">
+                          <TableCell
+                            colSpan={row.getVisibleCells().length}
+                            className="bg-muted p-0"
+                          >
+                            {renderSubComponent(row)}
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        {pagination ? (
+          <div className="border-border px-md py-sm border-t">{pagination(table)}</div>
+        ) : null}
       </div>
-      {pagination ? (
-        <div className="border-border px-md py-sm border-t">{pagination(table)}</div>
-      ) : null}
-    </div>
+      {fab ? fab(table) : null}
+    </>
   );
 }
 

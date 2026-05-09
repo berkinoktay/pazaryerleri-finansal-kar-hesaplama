@@ -828,7 +828,9 @@
       "expandRow": "Varyantları göster",
       "collapseRow": "Varyantları gizle",
       "openFilter": "Filtreyi aç",
-      "viewImage": "Ürün görselini büyüt"
+      "viewImage": "Ürün görselini büyüt",
+      "selectAll": "Tüm ürünleri seç",
+      "selectRow": "Bu ürünü seç"
     },
     "syncButton": {
       "label": "Eşitle",
@@ -849,6 +851,46 @@
         "attachEmpty": "Profil bulunamadı",
         "newProfile": "+ Yeni maliyet oluştur",
         "removeLabel": "Profili kaldır"
+      }
+    },
+    "parentCostCell": {
+      "allSame": "tümü aynı",
+      "variantCount": "{count} varyant",
+      "popoverTitle": "Varyant maliyetleri",
+      "popoverStats": "{with} / {total} varyant maliyet profiline sahip, {without} eksik",
+      "applyToAllLabel": "Tüm varyantlara maliyet ekle",
+      "applyToAllPlaceholder": "Profil seç…",
+      "applyToAllSearch": "Profil ara…",
+      "applyToAllEmpty": "Profil bulunamadı"
+    },
+    "bulkCost": {
+      "selectedCount": "{count} ürün seçili",
+      "clearSelection": "Seçimi temizle",
+      "attach": "Maliyet ekle",
+      "detach": "Maliyet kaldır",
+      "replace": "Maliyetleri değiştir",
+      "attachDialog": {
+        "title": "Maliyet ekle",
+        "placeholder": "Profil seç…",
+        "search": "Profil ara…",
+        "empty": "Profil bulunamadı"
+      },
+      "detachDialog": {
+        "title": "Maliyet kaldır",
+        "placeholder": "Kaldırılacak profili seç…",
+        "search": "Profil ara…",
+        "empty": "Profil bulunamadı"
+      },
+      "replaceDialog": {
+        "title": "Maliyetleri değiştir",
+        "placeholder": "Yeni profili seç…",
+        "search": "Profil ara…",
+        "empty": "Profil bulunamadı"
+      },
+      "replaceConfirm": {
+        "title": "Maliyetleri değiştir",
+        "description": "Bu işlem {count} varyantın mevcut tüm maliyet profillerini silerek sadece seçilen profili ekleyecek. Bu işlem geri alınamaz.",
+        "confirm": "Evet, değiştir"
       }
     }
   },

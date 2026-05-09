@@ -1,0 +1,270 @@
+'use client';
+
+import { AddCircleIcon, Delete01Icon, RepeatIcon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
+import * as React from 'react';
+
+import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
+import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
+import { Combobox, type ComboboxOption } from '@/components/patterns/combobox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { CostProfileTypeBadge } from '@/features/costs/components/cost-profile-type-badge';
+import { useAttachCostProfiles } from '@/features/costs/hooks/use-attach-cost-profiles';
+import { useDetachCostProfiles } from '@/features/costs/hooks/use-detach-cost-profiles';
+import { useReplaceCostProfiles } from '@/features/costs/hooks/use-replace-cost-profiles';
+import { useCostProfiles } from '@/features/costs/hooks/use-cost-profiles';
+import { CostProfileType } from '@/features/costs/types/cost-profile.types';
+
+import type { ProductRow } from './products-bulk-cost-action-bar.types';
+
+export type { ProductRow };
+
+/**
+ * Resolves the full set of variant IDs from a selection of product rows.
+ *
+ * - Variant rows   → use their own id directly.
+ * - Parent rows    → expand to all their child variant IDs so bulk operations
+ *   apply to every variant under the product.
+ */
+export function resolveVariantIds(rows: ProductRow[]): string[] {
+  const ids: string[] = [];
+  for (const row of rows) {
+    if (row.kind === 'variant') {
+      ids.push(row.variant.id);
+    } else {
+      for (const v of row.product.variants) {
+        ids.push(v.id);
+      }
+    }
+  }
+  return ids;
+}
+
+export interface ProductsBulkCostActionBarProps {
+  orgId: string;
+  /** Currently selected rows from the TanStack table's getSelectedRowModel().rows */
+  selectedRows: ProductRow[];
+  /** Clears the table's row selection state */
+  onClearSelection: () => void;
+}
+
+type ActiveDialog = 'attach' | 'detach' | 'replace' | null;
+
+/**
+ * Floating action bar for bulk cost operations on selected products table rows.
+ *
+ * Visible when ≥ 2 rows are selected. Offers three operations:
+ *   1. "Maliyet ekle"          → combobox → useAttachCostProfiles
+ *   2. "Maliyet kaldır"        → combobox → useDetachCostProfiles
+ *   3. "Maliyetleri değiştir"  → combobox + ConfirmDialog (destructive)
+ *      → useReplaceCostProfiles
+ *
+ * Parent rows are automatically expanded to their child variant IDs via
+ * `resolveVariantIds` — the seller's selection of a parent product row
+ * implies intent to operate on all its variants.
+ */
+export function ProductsBulkCostActionBar({
+  orgId,
+  selectedRows,
+  onClearSelection,
+}: ProductsBulkCostActionBarProps): React.ReactElement | null {
+  const t = useTranslations('products.bulkCost');
+
+  const [activeDialog, setActiveDialog] = React.useState<ActiveDialog>(null);
+  const [replaceProfileId, setReplaceProfileId] = React.useState<string | null>(null);
+  const [replaceConfirmOpen, setReplaceConfirmOpen] = React.useState(false);
+
+  const profilesQuery = useCostProfiles(
+    activeDialog !== null ? { orgId, filters: { archived: 'false' } } : null,
+  );
+
+  const attachMutation = useAttachCostProfiles();
+  const detachMutation = useDetachCostProfiles();
+  const replaceMutation = useReplaceCostProfiles();
+
+  const variantIds = React.useMemo(() => resolveVariantIds(selectedRows), [selectedRows]);
+
+  const selectedCount = selectedRows.length;
+
+  // Build combobox options from the non-archived profiles list.
+  const profileOptions: ComboboxOption[] = React.useMemo(() => {
+    const all = profilesQuery.data?.data ?? [];
+    return all.map((p) => ({
+      value: p.id,
+      label: p.name,
+      description: `${p.currency} ${p.amount}`,
+      icon: <CostProfileTypeBadge type={p.type as CostProfileType} iconOnly />,
+    }));
+  }, [profilesQuery.data]);
+
+  // ─── Action handlers ────────────────────────────────────────────────────────
+
+  function handleAttach(profileId: string | null) {
+    if (profileId === null) return;
+    attachMutation.mutate(
+      { orgId, profileIds: [profileId], variantIds },
+      {
+        onSuccess: () => {
+          setActiveDialog(null);
+          onClearSelection();
+        },
+      },
+    );
+  }
+
+  function handleDetach(profileId: string | null) {
+    if (profileId === null) return;
+    detachMutation.mutate(
+      { orgId, profileIds: [profileId], variantIds },
+      {
+        onSuccess: () => {
+          setActiveDialog(null);
+          onClearSelection();
+        },
+      },
+    );
+  }
+
+  function handleReplacePick(profileId: string | null) {
+    if (profileId === null) return;
+    setReplaceProfileId(profileId);
+    setActiveDialog(null);
+    setReplaceConfirmOpen(true);
+  }
+
+  async function handleReplaceConfirm(): Promise<void> {
+    if (replaceProfileId === null) return;
+    return new Promise<void>((resolve, reject) => {
+      replaceMutation.mutate(
+        { orgId, profileIds: [replaceProfileId], variantIds },
+        {
+          onSuccess: () => {
+            setReplaceProfileId(null);
+            setReplaceConfirmOpen(false);
+            onClearSelection();
+            resolve();
+          },
+          onError: (error) => {
+            reject(error);
+          },
+        },
+      );
+    });
+  }
+
+  // ─── BulkActionBar actions ──────────────────────────────────────────────────
+
+  const actions = [
+    {
+      id: 'attach',
+      label: t('attach'),
+      icon: <AddCircleIcon className="size-icon-sm" />,
+      onClick: () => setActiveDialog('attach'),
+      disabled: attachMutation.isPending,
+    },
+    {
+      id: 'detach',
+      label: t('detach'),
+      icon: <Delete01Icon className="size-icon-sm" />,
+      onClick: () => setActiveDialog('detach'),
+      disabled: detachMutation.isPending,
+    },
+    {
+      id: 'replace',
+      label: t('replace'),
+      icon: <RepeatIcon className="size-icon-sm" />,
+      onClick: () => setActiveDialog('replace'),
+      tone: 'destructive' as const,
+      disabled: replaceMutation.isPending,
+    },
+  ];
+
+  // Config for the three combobox dialogs — same structure, different strings + handler.
+  const comboboxDialogs: Array<{
+    id: Exclude<ActiveDialog, null>;
+    titleKey: Parameters<typeof t>[0];
+    placeholderKey: Parameters<typeof t>[0];
+    searchKey: Parameters<typeof t>[0];
+    emptyKey: Parameters<typeof t>[0];
+    onChange: (id: string | null) => void;
+    loading: boolean;
+    disabled?: boolean;
+  }> = [
+    {
+      id: 'attach',
+      titleKey: 'attachDialog.title',
+      placeholderKey: 'attachDialog.placeholder',
+      searchKey: 'attachDialog.search',
+      emptyKey: 'attachDialog.empty',
+      onChange: handleAttach,
+      loading: attachMutation.isPending || profilesQuery.isLoading,
+      disabled: attachMutation.isPending,
+    },
+    {
+      id: 'detach',
+      titleKey: 'detachDialog.title',
+      placeholderKey: 'detachDialog.placeholder',
+      searchKey: 'detachDialog.search',
+      emptyKey: 'detachDialog.empty',
+      onChange: handleDetach,
+      loading: detachMutation.isPending || profilesQuery.isLoading,
+      disabled: detachMutation.isPending,
+    },
+    {
+      id: 'replace',
+      titleKey: 'replaceDialog.title',
+      placeholderKey: 'replaceDialog.placeholder',
+      searchKey: 'replaceDialog.search',
+      emptyKey: 'replaceDialog.empty',
+      onChange: handleReplacePick,
+      loading: profilesQuery.isLoading,
+    },
+  ];
+
+  return (
+    <>
+      <BulkActionBar
+        selectedCount={selectedCount}
+        onClear={onClearSelection}
+        actions={actions}
+        countLabel={(count) => t('selectedCount', { count })}
+        clearLabel={t('clearSelection')}
+      />
+
+      {comboboxDialogs.map((dialog) => (
+        <Dialog
+          key={dialog.id}
+          open={activeDialog === dialog.id}
+          onOpenChange={(o) => !o && setActiveDialog(null)}
+        >
+          <DialogContent className="max-w-input-narrow">
+            <DialogHeader>
+              <DialogTitle>{t(dialog.titleKey)}</DialogTitle>
+            </DialogHeader>
+            <Combobox
+              value={null}
+              onChange={dialog.onChange}
+              options={profileOptions}
+              placeholder={t(dialog.placeholderKey)}
+              searchPlaceholder={t(dialog.searchKey)}
+              emptyMessage={t(dialog.emptyKey)}
+              loading={dialog.loading}
+              disabled={dialog.disabled}
+            />
+          </DialogContent>
+        </Dialog>
+      ))}
+
+      <ConfirmDialog
+        open={replaceConfirmOpen}
+        onOpenChange={setReplaceConfirmOpen}
+        title={t('replaceConfirm.title')}
+        description={t('replaceConfirm.description', { count: variantIds.length })}
+        confirmLabel={t('replaceConfirm.confirm')}
+        tone="destructive"
+        onConfirm={handleReplaceConfirm}
+        loading={replaceMutation.isPending}
+      />
+    </>
+  );
+}

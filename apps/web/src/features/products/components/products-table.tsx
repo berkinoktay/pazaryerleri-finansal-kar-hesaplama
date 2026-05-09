@@ -1,6 +1,10 @@
 'use client';
 
-import { type ColumnDef, type SortingState } from '@tanstack/react-table';
+import {
+  type ColumnDef,
+  type SortingState,
+  type Table as TanstackTable,
+} from '@tanstack/react-table';
 import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -10,10 +14,11 @@ import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 import type { ProductFacetsResponse } from '../api/list-product-facets.api';
-import type { ProductWithVariants, VariantSummary } from '../api/list-products.api';
+import type { ProductWithVariants } from '../api/list-products.api';
 import {
   computeDeliveryType,
   dominantDeliveryType,
@@ -31,26 +36,23 @@ import { ColorAttribute } from './color-attribute';
 import { CostCell } from './cost-cell';
 import { CostCellPopover } from './cost-cell-popover';
 import { DeliveryBadge } from './delivery-badge';
+import { ParentRowCostCell } from './parent-row-cost-cell';
 import { ProductImageCell } from './product-image-cell';
+import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
+import type { ProductRow } from './products-bulk-cost-action-bar.types';
 import { ProductsFacetChips } from './products-facet-chips';
 import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
 
-/**
- * Discriminated union projected from the API's ProductWithVariants.
- * Parent rows render the compound product cell + aggregate cells;
- * variant rows (depth=1, returned by getSubRows) render per-SKU detail.
- *
- * The same `columns[]` defines BOTH visual treatments — column cell
- * renderers branch on `row.original.kind`. Column widths align by
- * construction because TanStack v8 reuses the parent column defs for
- * sub-rows when `getSubRows` is supplied.
- */
-type ProductRow =
-  | { kind: 'parent'; product: ProductWithVariants }
-  | { kind: 'variant'; parent: ProductWithVariants; variant: VariantSummary };
-
 function projectRows(products: ProductWithVariants[]): ProductRow[] {
   return products.map((p) => ({ kind: 'parent', product: p }));
+}
+
+/**
+ * Extracts selected ProductRow originals from the TanStack table instance.
+ * Used to feed the bulk action bar.
+ */
+function getSelectedRowOriginals(table: TanstackTable<ProductRow>): ProductRow[] {
+  return table.getSelectedRowModel().rows.map((r) => r.original);
 }
 
 interface ProductsTableProps {
@@ -134,6 +136,37 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
 
   const columns = React.useMemo<ColumnDef<ProductRow>[]>(
     () => [
+      {
+        // Row selection checkbox — parent rows only. Variant sub-rows don't
+        // need independent selection; selecting the parent is the intent.
+        id: 'select',
+        enableSorting: false,
+        header: ({ table }) => (
+          <Checkbox
+            checked={
+              table.getIsAllPageRowsSelected() ||
+              (table.getIsSomePageRowsSelected() ? 'indeterminate' : false)
+            }
+            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+            aria-label={t('a11y.selectAll')}
+            className="block"
+          />
+        ),
+        cell: ({ row }) => {
+          // Variant sub-rows don't render a checkbox — they're subsumed
+          // by the parent row's selection.
+          if (row.depth > 0) return null;
+          return (
+            <Checkbox
+              checked={row.getIsSelected()}
+              onCheckedChange={(value) => row.toggleSelected(!!value)}
+              aria-label={t('a11y.selectRow')}
+              onClick={(e) => e.stopPropagation()}
+              className="block"
+            />
+          );
+        },
+      },
       {
         id: 'expand',
         enableSorting: false,
@@ -378,8 +411,6 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         header: () => tCols('cost'),
         meta: { numeric: true },
         cell: ({ row }) => {
-          // Parent rows show no cost cell — cost lives at the variant level.
-          // The parent-row aggregate cell is PR 10 work.
           if (row.original.kind === 'parent') {
             const p = row.original.product;
             if (!isMultiVariant(p)) {
@@ -394,17 +425,8 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
                 </CostCellPopover>
               );
             }
-            // Multi-variant parent: placeholder until PR 10.
-            const hasCost = p.variants.some((v) => v.profileCount > 0);
-            return (
-              <span className={cn('text-xs', !hasCost && 'text-muted-foreground')}>
-                {hasCost
-                  ? tCostCell('profileCount', {
-                      count: p.variants.reduce((s, v) => s + v.profileCount, 0),
-                    })
-                  : tCostCell('addCost')}
-              </span>
-            );
+            // Multi-variant parent: aggregate cell (PR 10).
+            return <ParentRowCostCell orgId={props.orgId} product={p} />;
           }
           // Variant sub-row: interactive cost cell.
           const v = row.original.variant;
@@ -431,6 +453,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
       data={rows}
       loading={props.loading}
       empty={props.empty}
+      enableRowSelection
       getRowId={(row) => (row.kind === 'parent' ? `p:${row.product.id}` : `v:${row.variant.id}`)}
       getRowCanExpand={(row) =>
         row.original.kind === 'parent' && isMultiVariant(row.original.product)
@@ -503,6 +526,17 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         />
       )}
       pagination={(table) => <DataTablePagination table={table} />}
+      fab={(table) => {
+        const selected = getSelectedRowOriginals(table);
+        if (selected.length < 2) return null;
+        return (
+          <ProductsBulkCostActionBar
+            orgId={props.orgId}
+            selectedRows={selected}
+            onClearSelection={() => table.resetRowSelection()}
+          />
+        );
+      }}
     />
   );
 }
