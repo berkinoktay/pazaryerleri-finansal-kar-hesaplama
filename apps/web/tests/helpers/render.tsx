@@ -1,7 +1,10 @@
 import { type ReactElement, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NextIntlClientProvider } from 'next-intl';
 import { render as rtlRender, type RenderOptions } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+import trMessages from '../../messages/tr.json';
 
 /**
  * Build a fresh QueryClient per test. Disables retries and caching so tests
@@ -24,12 +27,19 @@ interface ProvidersProps {
 
 function AllProviders({ children, queryClient }: ProvidersProps) {
   const client = queryClient ?? createTestQueryClient();
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <NextIntlClientProvider locale="tr" messages={trMessages} timeZone="Europe/Istanbul">
+        {children}
+      </NextIntlClientProvider>
+    </QueryClientProvider>
+  );
 }
 
 /**
- * Render a React tree wrapped in all standard providers (QueryClient for now;
- * add more here as the app grows: theme, i18n, auth context, etc).
+ * Render a React tree wrapped in all standard providers (QueryClient + NextIntl
+ * with the Turkish message catalog). Components that call `useTranslations()`
+ * get a real context here without per-test boilerplate.
  *
  * Returns the standard RTL render result plus a `user` instance for typing
  * and clicking — preferred over `fireEvent` per Testing Library guidance.

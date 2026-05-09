@@ -44,7 +44,7 @@ describe('<ConfirmDialog>', () => {
       expect(screen.getByRole('heading', { name: 'Test başlığı' })).toBeInTheDocument();
       expect(screen.getByText('Test açıklaması')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Onayla' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'İptal' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Vazgeç' })).toBeInTheDocument();
     });
 
     it('renders nothing when closed', () => {
@@ -52,10 +52,11 @@ describe('<ConfirmDialog>', () => {
       expect(screen.queryByRole('heading', { name: 'Test başlığı' })).not.toBeInTheDocument();
     });
 
-    it('uses the localized cancelLabel when provided', () => {
-      render(<ControlledHarness cancelLabel="Vazgeç" />);
-      expect(screen.getByRole('button', { name: 'Vazgeç' })).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'İptal' })).not.toBeInTheDocument();
+    it('uses the cancelLabel prop override instead of the default catalog string', () => {
+      render(<ControlledHarness cancelLabel="Kapat" />);
+      expect(screen.getByRole('button', { name: 'Kapat' })).toBeInTheDocument();
+      // Default common.cancel is "Vazgeç" — confirm the prop override replaces it.
+      expect(screen.queryByRole('button', { name: 'Vazgeç' })).not.toBeInTheDocument();
     });
   });
 
@@ -129,7 +130,7 @@ describe('<ConfirmDialog>', () => {
       // When loading the spinner's status-role label shifts the confirm
       // button's accessible name to "Loading Onayla"; match with regex.
       expect(screen.getByRole('button', { name: /Onayla/ })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'İptal' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Vazgeç' })).toBeDisabled();
     });
 
     it('renders a status-role spinner inside the confirm button when loading', () => {
@@ -153,7 +154,7 @@ describe('<ConfirmDialog>', () => {
         // Confirm button's accessible name flips to "Loading Onayla" once
         // the spinner mounts mid-pending; match by regex.
         expect(screen.getByRole('button', { name: /Onayla/ })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'İptal' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Vazgeç' })).toBeDisabled();
       });
 
       resolve?.();
@@ -165,7 +166,7 @@ describe('<ConfirmDialog>', () => {
       const onConfirm = vi.fn();
       const { user } = render(<ControlledHarness onConfirm={onConfirm} />);
 
-      await user.click(screen.getByRole('button', { name: 'İptal' }));
+      await user.click(screen.getByRole('button', { name: 'Vazgeç' }));
 
       await waitFor(() => {
         expect(screen.queryByRole('heading', { name: 'Test başlığı' })).not.toBeInTheDocument();
