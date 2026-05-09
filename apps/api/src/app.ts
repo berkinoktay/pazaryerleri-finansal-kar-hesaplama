@@ -9,6 +9,7 @@ import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
+import costProfileRoutes from './routes/cost-profiles/index';
 import meRoutes from './routes/me.routes';
 import organizationRoutes from './routes/organization.routes';
 import productRoutes from './routes/product.routes';
@@ -122,6 +123,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', storeRoutes);
   app.route('/', productRoutes);
   app.route('/', syncLogRoutes);
+  app.route('/', costProfileRoutes);
 
   return app;
 }
