@@ -3,6 +3,10 @@ import { EncryptionKeyError } from '@pazarsync/sync-core';
 
 import {
   ConflictError,
+  CostProfileArchivedCannotAttachError,
+  CostProfileNameTakenError,
+  CostProfileNotFoundError,
+  CostProfileVariantOrgMismatchError,
   ForbiddenError,
   InvalidReferenceError,
   MarketplaceAccessError,
@@ -102,6 +106,55 @@ function classify(err: unknown): ProblemDetailsResult {
         title: 'Access denied',
         status: 403,
         code: 'FORBIDDEN',
+        detail: err.message,
+      },
+    };
+  }
+  // ─── Cost-profile domain errors (checked before the generic base classes) ───
+  if (err instanceof CostProfileNameTakenError) {
+    return {
+      status: 409,
+      body: {
+        type: `${TYPE_BASE}/cost-profile-name-taken`,
+        title: 'Cost profile name already taken',
+        status: 409,
+        code: 'COST_PROFILE_NAME_TAKEN',
+        detail: err.message,
+      },
+    };
+  }
+  if (err instanceof CostProfileNotFoundError) {
+    return {
+      status: 404,
+      body: {
+        type: `${TYPE_BASE}/cost-profile-not-found`,
+        title: 'Cost profile not found',
+        status: 404,
+        code: 'COST_PROFILE_NOT_FOUND',
+        detail: err.message,
+      },
+    };
+  }
+  if (err instanceof CostProfileArchivedCannotAttachError) {
+    return {
+      status: 409,
+      body: {
+        type: `${TYPE_BASE}/cost-profile-archived-cannot-attach`,
+        title: 'Cost profile is archived',
+        status: 409,
+        code: 'COST_PROFILE_ARCHIVED_CANNOT_ATTACH',
+        detail: err.message,
+      },
+    };
+  }
+  if (err instanceof CostProfileVariantOrgMismatchError) {
+    return {
+      status: 422,
+      body: {
+        type: `${TYPE_BASE}/cost-profile-variant-org-mismatch`,
+        title: 'Variant organization mismatch',
+        status: 422,
+        code: 'COST_PROFILE_VARIANT_ORG_MISMATCH',
         detail: err.message,
       },
     };

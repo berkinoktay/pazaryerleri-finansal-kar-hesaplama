@@ -7,6 +7,9 @@
  * `@pazarsync/sync-core` (so the worker can import them without reaching
  * back into `apps/api/src/`). They are re-exported here so existing call
  * sites in `apps/api/` continue to import from `../lib/errors` unchanged.
+ *
+ * Cost-profile-specific error classes live here (not in sync-core) because
+ * they are API-only — the sync worker does not handle cost profiles.
  */
 
 export {
@@ -21,6 +24,62 @@ export {
   ValidationError,
   type ValidationIssue,
 } from '@pazarsync/sync-core';
+
+// ─── Cost-profile domain errors ────────────────────────────────────────────
+// Per spec §6.7. Subclasses of the shared base classes so existing
+// `instanceof ConflictError` / `instanceof NotFoundError` guards in
+// problem-details.ts still match. problem-details.ts checks more-specific
+// subclasses FIRST so the domain code is preserved on the wire.
+
+export class CostProfileNameTakenError extends Error {
+  readonly status = 409 as const;
+  readonly code = 'COST_PROFILE_NAME_TAKEN' as const;
+
+  constructor(name: string) {
+    super(`A cost profile named "${name}" already exists in this organization`);
+    this.name = 'CostProfileNameTakenError';
+  }
+}
+
+export class CostProfileNotFoundError extends Error {
+  readonly status = 404 as const;
+  readonly code = 'COST_PROFILE_NOT_FOUND' as const;
+
+  constructor(profileId: string) {
+    super(`Cost profile ${profileId} not found`);
+    this.name = 'CostProfileNotFoundError';
+  }
+}
+
+/**
+ * Used in PR 3 (variant attachment): thrown when the caller tries to attach
+ * an archived cost profile to a product variant.
+ */
+export class CostProfileArchivedCannotAttachError extends Error {
+  readonly status = 409 as const;
+  readonly code = 'COST_PROFILE_ARCHIVED_CANNOT_ATTACH' as const;
+
+  constructor(profileId: string) {
+    super(`Cost profile ${profileId} is archived and cannot be attached to a variant`);
+    this.name = 'CostProfileArchivedCannotAttachError';
+  }
+}
+
+/**
+ * Used in PR 3 (variant attachment): thrown when the variant being attached
+ * belongs to a different organization than the cost profile.
+ */
+export class CostProfileVariantOrgMismatchError extends Error {
+  readonly status = 422 as const;
+  readonly code = 'COST_PROFILE_VARIANT_ORG_MISMATCH' as const;
+
+  constructor(profileId: string, variantId: string) {
+    super(
+      `Variant ${variantId} does not belong to the same organization as cost profile ${profileId}`,
+    );
+    this.name = 'CostProfileVariantOrgMismatchError';
+  }
+}
 
 export class UnauthorizedError extends Error {
   readonly status = 401 as const;
