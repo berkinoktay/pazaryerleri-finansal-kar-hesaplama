@@ -53,6 +53,21 @@ export function evaluateCrossFeatureImport(imp: CrossFeatureImport): ViolationDe
     };
   }
 
+  // The `costs` feature is an audited cross-feature provider, by design.
+  // Cost profiles are org-scoped primitives consumed by `products` (cost cell
+  // + popover), `dashboard` (missing-cost widget), `orders`, and `settlements`.
+  // Promoting hooks into `lib/` would break the vertical-slice cohesion of the
+  // feature — the api layer + hooks + types belong together under `features/costs`.
+  // Cross-feature consumers import hooks only (never api/, lib/, or components/
+  // internals) from `@/features/costs/hooks/...`. This mirrors the `sync` precedent.
+  // See docs/superpowers/specs/2026-05-09-cost-profiles-design.md §2 implicit decisions.
+  if (imp.targetFeature === 'costs') {
+    return {
+      severity: 'allow',
+      message: `Cross-feature consumption of the "costs" feature is permitted by design (org-wide reusable cost primitives).`,
+    };
+  }
+
   if (imp.isTypeOnly) {
     return {
       severity: 'warn',
