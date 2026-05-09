@@ -14,8 +14,6 @@ import { CostProfileNameTakenError, CostProfileNotFoundError } from '@/lib/error
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
 
-const ACTOR_ID = '00000000-0000-0000-0000-000000000001';
-
 const BASE_INPUT = {
   name: 'Hammadde COGS',
   type: 'COGS' as const,
@@ -38,15 +36,15 @@ describe('cost-profile service', () => {
 
   describe('createCostProfile', () => {
     it('creates profile and seeds version 1 with changedFields: []', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, ACTOR_ID);
+      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
 
       expect(profile.id).toBeDefined();
       expect(profile.name).toBe('Hammadde COGS');
-      expect(profile.amount.toString()).toBe('25.50');
+      expect(profile.amount.toFixed(2)).toBe('25.50');
       expect(profile.organizationId).toBe(org.id);
 
       // Verify version row was created in the same transaction
@@ -56,29 +54,29 @@ describe('cost-profile service', () => {
       expect(versions).toHaveLength(1);
       expect(versions[0]?.version).toBe(1);
       expect(versions[0]?.changedFields).toEqual([]);
-      expect(versions[0]?.changedBy).toBe(ACTOR_ID);
+      expect(versions[0]?.changedBy).toBe(user.id);
     });
 
     it('throws CostProfileNameTakenError on duplicate name within the org', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      await createCostProfile(org.id, BASE_INPUT, ACTOR_ID);
+      await createCostProfile(org.id, BASE_INPUT, user.id);
 
-      await expect(createCostProfile(org.id, BASE_INPUT, ACTOR_ID)).rejects.toBeInstanceOf(
+      await expect(createCostProfile(org.id, BASE_INPUT, user.id)).rejects.toBeInstanceOf(
         CostProfileNameTakenError,
       );
     });
 
     it('allows the same name in a different org', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const orgA = await createOrganization();
       await createMembership(orgA.id, user.id);
       const orgB = await createOrganization();
 
-      await expect(createCostProfile(orgA.id, BASE_INPUT, ACTOR_ID)).resolves.toBeDefined();
-      await expect(createCostProfile(orgB.id, BASE_INPUT, ACTOR_ID)).resolves.toBeDefined();
+      await expect(createCostProfile(orgA.id, BASE_INPUT, user.id)).resolves.toBeDefined();
+      await expect(createCostProfile(orgB.id, BASE_INPUT, user.id)).resolves.toBeDefined();
     });
   });
 
@@ -86,21 +84,21 @@ describe('cost-profile service', () => {
 
   describe('updateCostProfile', () => {
     it('appends a version with the correct changedFields diff', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, ACTOR_ID);
+      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
 
       const updated = await updateCostProfile(
         org.id,
         profile.id,
         { name: 'Updated COGS', amount: '30.00' },
-        ACTOR_ID,
+        user.id,
       );
 
       expect(updated.name).toBe('Updated COGS');
-      expect(updated.amount.toString()).toBe('30.00');
+      expect(updated.amount.toFixed(2)).toBe('30.00');
 
       const versions = await prisma.costProfileVersion.findMany({
         where: { profileId: profile.id },
@@ -114,15 +112,15 @@ describe('cost-profile service', () => {
     });
 
     it('throws CostProfileNotFoundError for cross-org access', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const orgA = await createOrganization();
       await createMembership(orgA.id, user.id);
       const orgB = await createOrganization();
 
-      const profile = await createCostProfile(orgA.id, BASE_INPUT, ACTOR_ID);
+      const profile = await createCostProfile(orgA.id, BASE_INPUT, user.id);
 
       await expect(
-        updateCostProfile(orgB.id, profile.id, { name: 'Hijack' }, ACTOR_ID),
+        updateCostProfile(orgB.id, profile.id, { name: 'Hijack' }, user.id),
       ).rejects.toBeInstanceOf(CostProfileNotFoundError);
     });
   });
@@ -131,12 +129,12 @@ describe('cost-profile service', () => {
 
   describe('archiveCostProfile', () => {
     it('sets archivedAt and appends version with changedFields: [archivedAt]', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, ACTOR_ID);
-      const archived = await archiveCostProfile(org.id, profile.id, ACTOR_ID);
+      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const archived = await archiveCostProfile(org.id, profile.id, user.id);
 
       expect(archived.archivedAt).not.toBeNull();
 
@@ -154,12 +152,12 @@ describe('cost-profile service', () => {
 
   describe('getCostProfile', () => {
     it('throws CostProfileNotFoundError for cross-org access (non-disclosure)', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const orgA = await createOrganization();
       await createMembership(orgA.id, user.id);
       const orgB = await createOrganization();
 
-      const profile = await createCostProfile(orgA.id, BASE_INPUT, ACTOR_ID);
+      const profile = await createCostProfile(orgA.id, BASE_INPUT, user.id);
 
       // Org B should NOT see Org A's profile
       await expect(getCostProfile(orgB.id, profile.id)).rejects.toBeInstanceOf(
@@ -172,18 +170,18 @@ describe('cost-profile service', () => {
 
   describe('concurrent updates', () => {
     it('serializes concurrent PATCHes via SELECT FOR UPDATE — version numbers are monotonically increasing', async () => {
-      const user = await createUserProfile({ id: ACTOR_ID });
+      const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, ACTOR_ID);
+      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
 
       // Fire two concurrent updates. Because the service uses SELECT FOR UPDATE,
       // one will block until the other commits, ensuring both succeed and produce
       // distinct, non-colliding version numbers.
       await Promise.all([
-        updateCostProfile(org.id, profile.id, { name: 'Race A' }, ACTOR_ID),
-        updateCostProfile(org.id, profile.id, { vatRate: 20 }, ACTOR_ID),
+        updateCostProfile(org.id, profile.id, { name: 'Race A' }, user.id),
+        updateCostProfile(org.id, profile.id, { vatRate: 20 }, user.id),
       ]);
 
       const versions = await prisma.costProfileVersion.findMany({
