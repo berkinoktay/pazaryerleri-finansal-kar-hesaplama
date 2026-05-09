@@ -82,7 +82,7 @@ This is the foundational economics primitive the rest of the platform (profit re
 | Backend services        | `apps/api/src/services/cost-snapshot.service.ts`, `apps/api/src/services/fx-rates.service.ts` |
 | Edge function           | `supabase/functions/fx-rates-sync/`                                                           |
 | Schema                  | `packages/db/prisma/schema.prisma`                                                            |
-| RLS                     | `supabase/sql/cost-profiles-rls.sql`, `supabase/sql/cost-snapshot-immutable.sql`              |
+| RLS                     | Appended to `supabase/sql/rls-policies.sql` and `supabase/sql/triggers.sql`                   |
 | Audit-boundaries policy | `scripts/audit-feature-boundaries.config.ts`                                                  |
 
 ---
@@ -663,71 +663,57 @@ Both consume the same endpoint via `useMissingCostStats()`.
 | Middleware | Hono `requireOrgMembership(:orgId)` — existing                                              |
 | API        | Every query passes `organizationId = ctx.orgId`                                             |
 | Service    | `attachCostProfiles()` checks `profile.orgId === variant.orgId === ctx.orgId` before INSERT |
-| RLS        | Policies in `supabase/sql/cost-profiles-rls.sql` (§8.2)                                     |
+| RLS        | Policies appended to `supabase/sql/rls-policies.sql` (§8.2)                                 |
 | Schema     | `organizationId` denormalized + indexed on every tenant-scoped table                        |
 
-### 8.2 RLS policies (`supabase/sql/cost-profiles-rls.sql`)
+### 8.2 RLS policies (appended to `supabase/sql/rls-policies.sql`)
 
-Cross-table checks go through `SECURITY DEFINER STABLE` helpers per `feedback_rls_recursion_security_definer` to avoid 42P17.
+The project uses a single consolidated `rls-policies.sql` file (loaded at apply time by `packages/db/scripts/apply-policies.ts`) with a SECURITY DEFINER STABLE helper `is_org_member(_org_id uuid)` already defined at the top. The cost-profile blocks append to that file. The policy pattern is:
+
+- **SELECT-only via RLS, writes default-deny for `authenticated`.** The Hono backend uses Prisma with the `postgres` role, which bypasses RLS, so all INSERT/UPDATE/DELETE happen there with cross-org checks done at the service layer (per the multi-tenancy invariants table above).
+- **Flat `is_org_member(organization_id)` checks** — no cross-table EXISTS in policy bodies (Supabase Realtime's `postgres_changes` evaluator can't reliably handle EXISTS-walks; per memory `feedback_rls_recursion_security_definer`). All tenant-scoped tables denormalize `organization_id` for this reason — the schema in §4 already does.
+- **Idempotent application** — `DROP POLICY IF EXISTS` before each `CREATE POLICY` so `pnpm db:apply-policies` is re-runnable.
+- **`fx_rates` is global** (not tenant-scoped) — uses `USING (true)` for SELECT TO authenticated.
+- **Cross-org INSERT guard for the `product_variant_cost_profiles` link is enforced at the service layer**, NOT in RLS. The backend reads both rows via the postgres role, compares organization_id, and rejects with `COST_PROFILE_VARIANT_ORG_MISMATCH` (HTTP 422) before any INSERT — see `apps/api/src/services/cost-profile-attachment.service.ts` (PR 3).
 
 ```sql
--- ── cost_profiles ─────────────────────────────────────────
-CREATE POLICY cost_profiles_select ON cost_profiles
-  FOR SELECT USING (organization_id = auth.org_id());
-CREATE POLICY cost_profiles_insert ON cost_profiles
-  FOR INSERT WITH CHECK (organization_id = auth.org_id());
-CREATE POLICY cost_profiles_update ON cost_profiles
-  FOR UPDATE USING (organization_id = auth.org_id())
-                 WITH CHECK (organization_id = auth.org_id());
-CREATE POLICY cost_profiles_no_hard_delete ON cost_profiles FOR DELETE USING (false);
+-- ─── cost_profiles — org-scoped read ─────────────────────────────────
+ALTER TABLE cost_profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cost_profiles_org_member_read ON cost_profiles;
+CREATE POLICY cost_profiles_org_member_read ON cost_profiles
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
 
--- ── cost_profile_versions (append-only) ────────────────────
-CREATE POLICY versions_select ON cost_profile_versions
-  FOR SELECT USING (organization_id = auth.org_id());
-CREATE POLICY versions_insert ON cost_profile_versions
-  FOR INSERT WITH CHECK (organization_id = auth.org_id());
-CREATE POLICY versions_no_update ON cost_profile_versions FOR UPDATE USING (false);
-CREATE POLICY versions_no_delete ON cost_profile_versions FOR DELETE USING (false);
+-- ─── cost_profile_versions — org-scoped read ─────────────────────────
+ALTER TABLE cost_profile_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cost_profile_versions_org_member_read ON cost_profile_versions;
+CREATE POLICY cost_profile_versions_org_member_read ON cost_profile_versions
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
 
--- ── product_variant_cost_profiles ──────────────────────────
-CREATE OR REPLACE FUNCTION cost_profile_link_authorized(
-  p_profile_id uuid, p_variant_id uuid
-) RETURNS boolean LANGUAGE sql SECURITY DEFINER STABLE AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM cost_profiles cp
-    JOIN product_variants pv ON pv.organization_id = cp.organization_id
-    WHERE cp.id = p_profile_id AND pv.id = p_variant_id
-      AND cp.organization_id = auth.org_id() AND cp.archived_at IS NULL
-  );
-$$;
+-- ─── product_variant_cost_profiles — org-scoped read ─────────────────
+ALTER TABLE product_variant_cost_profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS product_variant_cost_profiles_org_member_read ON product_variant_cost_profiles;
+CREATE POLICY product_variant_cost_profiles_org_member_read ON product_variant_cost_profiles
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
 
-CREATE POLICY links_select ON product_variant_cost_profiles
-  FOR SELECT USING (organization_id = auth.org_id());
-CREATE POLICY links_insert ON product_variant_cost_profiles
-  FOR INSERT WITH CHECK (
-    organization_id = auth.org_id()
-    AND cost_profile_link_authorized(profile_id, product_variant_id)
-  );
-CREATE POLICY links_no_update ON product_variant_cost_profiles FOR UPDATE USING (false);
-CREATE POLICY links_delete ON product_variant_cost_profiles
-  FOR DELETE USING (organization_id = auth.org_id());
+-- ─── order_item_cost_snapshot_components — org-scoped read ───────────
+ALTER TABLE order_item_cost_snapshot_components ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components;
+CREATE POLICY order_item_cost_snapshot_components_org_member_read ON order_item_cost_snapshot_components
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
 
--- ── order_item_cost_snapshot_components (write-once) ────────
-CREATE POLICY components_select ON order_item_cost_snapshot_components
-  FOR SELECT USING (organization_id = auth.org_id());
-CREATE POLICY components_insert_service_only ON order_item_cost_snapshot_components
-  FOR INSERT WITH CHECK (current_setting('request.jwt.claim.role', true) = 'service_role');
-CREATE POLICY components_no_update ON order_item_cost_snapshot_components FOR UPDATE USING (false);
-CREATE POLICY components_no_user_delete ON order_item_cost_snapshot_components
-  FOR DELETE USING (current_setting('request.jwt.claim.role', true) = 'service_role');
-
--- ── fx_rates (public read, service-only write) ──────────────
-CREATE POLICY fx_rates_public_read ON fx_rates FOR SELECT USING (true);
-CREATE POLICY fx_rates_service_write ON fx_rates FOR ALL
-  USING (current_setting('request.jwt.claim.role', true) = 'service_role');
+-- ─── fx_rates — global read for any authenticated user ───────────────
+ALTER TABLE fx_rates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS fx_rates_authenticated_read ON fx_rates;
+CREATE POLICY fx_rates_authenticated_read ON fx_rates
+  FOR SELECT TO authenticated
+  USING (true);
 ```
 
-### 8.3 Write-once trigger (`supabase/sql/cost-snapshot-immutable.sql`)
+### 8.3 Write-once trigger (appended to `supabase/sql/triggers.sql`)
 
 ```sql
 CREATE OR REPLACE FUNCTION reject_snapshot_update() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -833,7 +819,7 @@ Critical path: 1 → 3 → 6 → 9 → 10. PR 4 → 5 runs in parallel with the 
 5. **Concurrent profile-update race** — addressed via `SELECT FOR UPDATE` in the version-creation tx (§8.4).
 6. **`Organization.currency` is `String`, not enum** — separate PR to migrate.
 7. **`ProductVariant.costPrice` deprecation** — leave field unused in v1, drop in follow-up PR per `feedback_schema_only_pr_is_a_lie`.
-8. **`auth.org_id()` function name** — RLS policies in §8.2 assume a function with this signature exists. Verify the actual name in `supabase/sql/` during PR 1; rename in policies if different.
+8. ~~**`auth.org_id()` function name**~~ — **RESOLVED in PR 1.** The project uses `is_org_member(_org_id uuid)` (SECURITY DEFINER STABLE helper, defined at the top of `supabase/sql/rls-policies.sql`). §8.2 has been updated to reflect the actual SQL.
 9. **`Order.netProfit` write-once enforcement** — §5.4 enforces at app layer. A matching DB trigger (`reject_netprofit_update`) would mirror the snapshot-immutability pattern, but the existing sync code may already write `netProfit` in flows we're not aware of. Implementation step: audit existing writes during PR 5 before adding the trigger; if existing code only ever writes nullable→value, add the trigger; otherwise document the behavior and add the trigger in a follow-up.
 10. **Organization back-relation** — `Organization` model needs `costProfiles CostProfile[]` array added when CostProfile is introduced (Prisma requires both sides for relation).
 
