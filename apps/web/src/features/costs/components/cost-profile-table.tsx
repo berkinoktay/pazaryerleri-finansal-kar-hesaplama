@@ -15,6 +15,7 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { Button } from '@/components/ui/button';
+import { useIsMounted } from '@/lib/use-is-mounted';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,6 +71,12 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
   const t = useTranslations('costs');
   const tCols = useTranslations('costs.table.columns');
   const formatter = useFormatter();
+  // Gate relativeTime() on mount: SSR has no stable "now", so server/client
+  // would render different relative labels and trip a hydration mismatch.
+  // Before mount we render the deterministic absolute date; after mount we
+  // swap in the friendlier relative form. Pattern from apps/web/CLAUDE.md
+  // (SSR safety §2).
+  const mounted = useIsMounted();
 
   const columns = React.useMemo<ColumnDef<CostProfile>[]>(
     () => [
@@ -135,11 +142,16 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
       {
         id: 'updatedAt',
         header: () => tCols('lastUpdated'),
-        cell: ({ row }) => (
-          <span className="text-muted-foreground text-sm">
-            {formatter.relativeTime(new Date(row.original.updatedAt))}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const updatedAt = new Date(row.original.updatedAt);
+          return (
+            <span className="text-muted-foreground text-sm">
+              {mounted
+                ? formatter.relativeTime(updatedAt, new Date())
+                : formatter.dateTime(updatedAt, 'short')}
+            </span>
+          );
+        },
       },
       {
         id: 'actions',
@@ -154,7 +166,7 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
         ),
       },
     ],
-    [formatter, t, tCols, props.onEditClick, props.onArchiveClick, props.onRestoreClick],
+    [formatter, t, tCols, mounted, props.onEditClick, props.onArchiveClick, props.onRestoreClick],
   );
 
   return (
