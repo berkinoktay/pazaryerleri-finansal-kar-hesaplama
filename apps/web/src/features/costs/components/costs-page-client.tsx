@@ -7,6 +7,8 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { PageHeader } from '@/components/patterns/page-header';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 import type { CostProfile } from '../types/cost-profile.types';
 import { useCostProfiles } from '../hooks/use-cost-profiles';
@@ -88,10 +90,18 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
         title={t('page.title')}
         intent={t('page.description')}
         actions={
-          <Button onClick={() => setCreateOpen(true)} size="sm">
-            <PlusSignIcon className="size-icon-xs" />
-            {t('page.createCta')}
-          </Button>
+          <div className="gap-md flex items-center">
+            <div className="gap-xs flex items-center">
+              <Switch id="show-archived" checked={showArchived} onCheckedChange={setShowArchived} />
+              <Label htmlFor="show-archived" className="text-muted-foreground cursor-pointer">
+                {t('table.filters.showArchived')}
+              </Label>
+            </div>
+            <Button onClick={() => setCreateOpen(true)} size="sm">
+              <PlusSignIcon className="size-icon-xs" />
+              {t('page.createCta')}
+            </Button>
+          </div>
         }
       />
 

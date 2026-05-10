@@ -17,7 +17,7 @@ export function useCostProfiles(
 ): UseQueryResult<ListCostProfilesResponse> {
   return useQuery<ListCostProfilesResponse>({
     queryKey:
-      args !== null ? costsKeys.profiles(args.filters) : ['costs', 'profiles', '__disabled__'],
+      args !== null ? costsKeys.profilesList(args.filters) : ['costs', 'profiles', '__disabled__'],
     queryFn: () => {
       if (args === null) throw new Error('useCostProfiles called with null args');
       return listCostProfiles({ orgId: args.orgId, filters: args.filters });

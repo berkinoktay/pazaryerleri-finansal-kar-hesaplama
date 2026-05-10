@@ -102,6 +102,7 @@ export function CostProfileCreateDialog({
         </DialogHeader>
 
         <CostProfileForm
+          orgId={orgId}
           initialValues={
             isEditing && editProfile !== null ? profileToFormValues(editProfile) : undefined
           }

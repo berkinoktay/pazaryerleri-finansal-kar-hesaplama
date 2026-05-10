@@ -198,6 +198,7 @@ export function CostProfileDetail({
             </div>
           ) : (
             <CostProfileForm
+              orgId={orgId}
               initialValues={profileToFormValues(profile)}
               onSubmit={handleFormSubmit}
               onCancel={() => {

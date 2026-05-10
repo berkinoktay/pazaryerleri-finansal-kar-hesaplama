@@ -1,29 +1,25 @@
 /**
- * Fetches the latest FX rates (USD/TRY and EUR/TRY) from the TCMB cron cache.
+ * Fetches the latest TCMB FX rates (USD/TRY and EUR/TRY) for the given org.
  *
- * NOTE: This endpoint is added in PR 6 (GET /fx-rates/latest). Until PR 6 is
- * merged into @pazarsync/api-client, this function returns a typed stub.
- * The hook (use-fx-rates-latest.ts) gracefully handles null data.
+ * Backed by GET /v1/organizations/{orgId}/fx-rates/latest. Rates are global
+ * (the org scope is a routing convention; data is not partitioned by org).
+ * A null entry for either currency means TCMB cron has not yet populated
+ * that rate — UI shows a fallback "loading" placeholder in that case.
  */
 
-export interface FxRateEntry {
-  rate: string;
-  date: string;
-  source: string;
-}
+import type { components } from '@pazarsync/api-client';
 
-export interface FxRatesLatestResponse {
-  USD: FxRateEntry | null;
-  EUR: FxRateEntry | null;
-}
+import { apiClient } from '@/lib/api-client/browser';
+import { throwApiError } from '@/lib/api-error';
 
-/**
- * Returns the latest FX rates for display in the cost-profile form's FX preview.
- * Placeholder until the /fx-rates/latest endpoint lands from PR 6.
- */
-export async function getFxRatesLatest(): Promise<FxRatesLatestResponse> {
-  // TODO(PR6): replace with apiClient.GET('/v1/fx-rates/latest', ...) once the
-  // endpoint lands in @pazarsync/api-client. The hook already wraps this in
-  // useQuery so callers handle loading/null states.
-  return { USD: null, EUR: null };
+export type FxRateEntry = components['schemas']['FxRateEntry'];
+export type FxRatesLatestResponse = components['schemas']['FxRatesLatestResponse'];
+
+export async function getFxRatesLatest(orgId: string): Promise<FxRatesLatestResponse> {
+  const { data, error, response } = await apiClient.GET(
+    '/v1/organizations/{orgId}/fx-rates/latest',
+    { params: { path: { orgId } } },
+  );
+  if (error !== undefined) throwApiError(error, response);
+  return data;
 }
