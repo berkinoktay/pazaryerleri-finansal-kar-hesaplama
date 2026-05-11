@@ -3,6 +3,7 @@
 import { AddCircleIcon, Delete01Icon, RepeatIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
+import { toast } from 'sonner';
 
 import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
@@ -101,10 +102,18 @@ export function ProductsBulkCostActionBar({
 
   function handleAttach(profileId: string | null) {
     if (profileId === null) return;
+    const profile = profilesQuery.data?.data.find((p) => p.id === profileId);
+    const affected = variantIds.length;
     attachMutation.mutate(
-      { orgId, profileIds: [profileId], variantIds },
+      {
+        orgId,
+        profileIds: [profileId],
+        variantIds,
+        ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
+      },
       {
         onSuccess: () => {
+          toast.success(t('toast.attached', { count: affected }));
           setActiveDialog(null);
           onClearSelection();
         },
@@ -114,10 +123,12 @@ export function ProductsBulkCostActionBar({
 
   function handleDetach(profileId: string | null) {
     if (profileId === null) return;
+    const affected = variantIds.length;
     detachMutation.mutate(
       { orgId, profileIds: [profileId], variantIds },
       {
         onSuccess: () => {
+          toast.success(t('toast.detached', { count: affected }));
           setActiveDialog(null);
           onClearSelection();
         },
@@ -134,11 +145,19 @@ export function ProductsBulkCostActionBar({
 
   async function handleReplaceConfirm(): Promise<void> {
     if (replaceProfileId === null) return;
+    const profile = profilesQuery.data?.data.find((p) => p.id === replaceProfileId);
+    const affected = variantIds.length;
     return new Promise<void>((resolve, reject) => {
       replaceMutation.mutate(
-        { orgId, profileIds: [replaceProfileId], variantIds },
+        {
+          orgId,
+          profileIds: [replaceProfileId],
+          variantIds,
+          ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
+        },
         {
           onSuccess: () => {
+            toast.success(t('toast.replaced', { count: affected }));
             setReplaceProfileId(null);
             setReplaceConfirmOpen(false);
             onClearSelection();

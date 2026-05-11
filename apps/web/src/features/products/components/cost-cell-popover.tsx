@@ -73,10 +73,12 @@ export function CostCellPopover({
 
   function handleAttach(profileId: string | null) {
     if (profileId === null) return;
+    const profile = allProfilesQuery.data?.data.find((p) => p.id === profileId);
     attachMutation.mutate({
       orgId,
       profileIds: [profileId],
       variantIds: [variant.id],
+      ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
     });
   }
 

@@ -163,6 +163,7 @@
     "dashboard": "Panel",
     "orders": "Siparişler",
     "products": "Ürünler",
+    "costs": "Maliyetler",
     "profitability": "Karlılık",
     "reconciliation": "Mutabakat",
     "expenses": "Giderler",
@@ -192,10 +193,6 @@
         "noCost": "Maliyetsiz",
         "noDesi": "Desisiz",
         "lowStock": "Düşük stok"
-      },
-      "meta": {
-        "title": "Ek bilgiler",
-        "costs": "Maliyetler"
       }
     },
     "profitability": {
@@ -891,6 +888,11 @@
         "title": "Maliyetleri değiştir",
         "description": "Bu işlem {count} varyantın mevcut tüm maliyet profillerini silerek sadece seçilen profili ekleyecek. Bu işlem geri alınamaz.",
         "confirm": "Evet, değiştir"
+      },
+      "toast": {
+        "attached": "{count} varyanta maliyet eklendi",
+        "detached": "{count} varyanttan maliyet kaldırıldı",
+        "replaced": "{count} varyantın maliyet profilleri güncellendi"
       }
     }
   },
