@@ -1024,25 +1024,7 @@
         "version": "v{version}",
         "initialCreate": "İlk oluşturma",
         "changedBy": "Değiştiren: {userId}",
-        "system": "Sistem",
-        "viewDiff": "Farkı gör",
-        "fields": {
-          "name": "Ad",
-          "type": "Tür",
-          "amount": "Tutar",
-          "currency": "Para birimi",
-          "vatRate": "KDV oranı",
-          "fxRateMode": "Kur modu",
-          "manualFxRate": "Manuel kur",
-          "note": "Not",
-          "archivedAt": "Arşivlendi"
-        },
-        "diffSheet": {
-          "title": "v{version} değişiklikleri",
-          "setInitial": "İlk değer",
-          "before": "Önce",
-          "after": "Sonra"
-        }
+        "system": "Sistem"
       },
       "attachedVariants": {
         "empty": {
@@ -1051,6 +1033,7 @@
         },
         "detach": "Ayır",
         "detachLabel": "{stockCode} varyantını ayır",
+        "viewProductLabel": "{title} ürününe git",
         "columns": {
           "product": "Ürün",
           "stockCode": "Stok kodu",

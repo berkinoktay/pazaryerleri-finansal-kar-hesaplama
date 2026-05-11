@@ -82,6 +82,7 @@ app.openapi(listAttachedVariantsRoute, async (c) => {
       stockCode: link.stockCode,
       productId: link.productId,
       productTitle: link.productTitle,
+      productImageUrl: link.productImageUrl,
       attachedAt: link.attachedAt.toISOString(),
       attachedBy: link.attachedBy,
     }),

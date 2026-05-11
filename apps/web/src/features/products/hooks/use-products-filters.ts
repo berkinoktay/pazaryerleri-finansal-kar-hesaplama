@@ -32,9 +32,15 @@ export function useProductsFilters(): {
       'categoryId' in next ||
       'overrideMissing' in next ||
       'sort' in next;
+    // Any deliberate filter change clears a deep-link productId — landing
+    // on /products?productId=X is meant as a starting view, not a sticky
+    // pin. If the caller is itself setting productId (e.g. the deep link
+    // navigator), respect their value.
+    const clearsProductId = touchesNonPaginationFilter && !('productId' in next);
     return setRaw({
       ...next,
       ...(touchesNonPaginationFilter && next.page === undefined ? { page: 1 } : {}),
+      ...(clearsProductId ? { productId: '' } : {}),
     });
   };
 

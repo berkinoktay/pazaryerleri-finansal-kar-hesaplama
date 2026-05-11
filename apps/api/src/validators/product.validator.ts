@@ -206,6 +206,17 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
         'is filtered to matching variants (consistent with status semantics).',
       example: 'cost',
     }),
+  productId: z
+    .string()
+    .uuid()
+    .optional()
+    .openapi({
+      description:
+        'Filter by internal Product.id (UUID). Used for deep links from feature pages like ' +
+        'the cost-profile detail (Bağlı varyantlar tab) where the seller clicks a variant and ' +
+        'lands on the products page with that single product visible.',
+      example: 'b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b',
+    }),
   sort: z
     .enum(PRODUCT_LIST_SORTS)
     .default('-platformCreatedAt')

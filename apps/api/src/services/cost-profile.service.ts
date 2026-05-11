@@ -20,6 +20,7 @@ export interface AttachedVariantDTO {
   stockCode: string;
   productId: string;
   productTitle: string;
+  productImageUrl: string | null;
   attachedAt: Date;
   attachedBy: string | null;
 }
@@ -515,7 +516,17 @@ export async function getAttachedVariants(
     where: { profileId, organizationId: orgId },
     include: {
       productVariant: {
-        include: { product: { select: { id: true, title: true } } },
+        include: {
+          product: {
+            select: {
+              id: true,
+              title: true,
+              // First image only (by ascending position) is the "primary".
+              // Cheap because ProductImage has @@index([productId, position]).
+              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+            },
+          },
+        },
       },
     },
     orderBy: [{ attachedAt: 'desc' }],
@@ -535,6 +546,7 @@ export async function getAttachedVariants(
     stockCode: link.productVariant.stockCode,
     productId: link.productVariant.product.id,
     productTitle: link.productVariant.product.title,
+    productImageUrl: link.productVariant.product.images[0]?.url ?? null,
     attachedAt: link.attachedAt,
     attachedBy: link.attachedBy,
   }));

@@ -87,12 +87,23 @@ describe('CostProfileHistoryList', () => {
     expect(screen.getByText('İlk oluşturma')).toBeInTheDocument();
   });
 
-  it('renders changed-field chips for version 2', () => {
+  it('renders every non-null initial field for version 1 with the new value', () => {
+    renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
+    // Initial create row shows the field label and the value
+    expect(screen.getByText('Ad')).toBeInTheDocument();
+    expect(screen.getByText('Hammadde COGS')).toBeInTheDocument();
+    expect(screen.getByText('Tutar')).toBeInTheDocument();
+    expect(screen.getByText('25.50')).toBeInTheDocument();
+  });
+
+  it('renders inline before → after diff for version 2 changed fields', () => {
     renderWithIntl(
       <CostProfileHistoryList versions={[V2_VERSION, BASE_VERSION]} isLoading={false} />,
     );
-    // "Tutar" is the label for the 'amount' field
-    expect(screen.getByText('Tutar')).toBeInTheDocument();
+    // amount diff: "25.50" (old) and "30.00" (new) both visible on v2's row
+    expect(screen.getByText('25.50')).toBeInTheDocument();
+    expect(screen.getByText('30.00')).toBeInTheDocument();
+    expect(screen.getAllByText('Tutar').length).toBeGreaterThan(0);
   });
 
   it('renders multiple version rows in reverse-chronological order (newest first)', () => {
@@ -107,19 +118,5 @@ describe('CostProfileHistoryList', () => {
   it('renders "Sistem" for null changedBy', () => {
     renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
     expect(screen.getByText('Sistem')).toBeInTheDocument();
-  });
-
-  it('renders "Farkı gör" button per version', () => {
-    renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
-    expect(screen.getByRole('button', { name: 'Farkı gör' })).toBeInTheDocument();
-  });
-
-  it('opens the diff sheet when "Farkı gör" is clicked', async () => {
-    const { user } = renderWithIntl(
-      <CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />,
-    );
-    await user.click(screen.getByRole('button', { name: 'Farkı gör' }));
-    // Sheet title references the version number
-    expect(screen.getByText('v1 değişiklikleri')).toBeInTheDocument();
   });
 });
