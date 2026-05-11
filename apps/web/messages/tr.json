@@ -1004,7 +1004,20 @@
       },
       "header": {
         "backToList": "Maliyetler",
-        "archivedBadge": "Arşivlendi"
+        "archivedBadge": "Arşivlendi",
+        "lastUpdated": "Son güncelleme"
+      },
+      "detailTab": {
+        "title": "Profil bilgileri",
+        "description": "Değişiklikler tüm yeni siparişlere uygulanır; geçmiş siparişler etkilenmez."
+      },
+      "historyTab": {
+        "title": "Değişiklik geçmişi",
+        "description": "Her satır profil üzerinde gerçekleşen bir olayı temsil eder."
+      },
+      "variantsTab": {
+        "title": "Bağlı ürün varyantları",
+        "description": "Bu profilin maliyet hesabında kullanıldığı varyantlar."
       },
       "actions": {
         "archive": "Arşivle",
@@ -1021,8 +1034,12 @@
           "title": "Geçmiş kaydı yok",
           "description": "Bu profilde henüz bir değişiklik kaydı bulunmuyor."
         },
-        "version": "v{version}",
-        "initialCreate": "İlk oluşturma",
+        "event": {
+          "created": "Oluşturuldu",
+          "updated": "Düzenlendi",
+          "archived": "Arşivlendi",
+          "restored": "Geri yüklendi"
+        },
         "changedBy": "Değiştiren: {userId}",
         "system": "Sistem"
       },

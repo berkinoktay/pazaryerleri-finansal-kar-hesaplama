@@ -1,12 +1,15 @@
 'use client';
 
+import { ArrowLeft02Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { PageHeader } from '@/components/patterns/page-header';
+import { TimeAgo } from '@/components/patterns/time-ago';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Link } from '@/i18n/navigation';
@@ -30,6 +33,8 @@ const TAB_DETAIL = 'detail' as const;
 const TAB_HISTORY = 'history' as const;
 const TAB_VARIANTS = 'variants' as const;
 
+type TabValue = typeof TAB_DETAIL | typeof TAB_HISTORY | typeof TAB_VARIANTS;
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 export interface CostProfileDetailProps {
@@ -42,13 +47,13 @@ export interface CostProfileDetailProps {
 /**
  * Full detail view for a cost profile — mounted by the [profileId]/page route.
  *
- * Three tabs:
- *   - Detay:             editable form (pre-filled via profileToFormValues)
- *   - Geçmiş:           reverse-chronological version history
- *   - Bağlı varyantlar: attached product variants with detach action
- *
- * The page header carries the profile name, type badge, archive status,
- * and an archive / restore action button with a ConfirmDialog guard.
+ * Layout:
+ *   PageHeader with breadcrumb (leading) · title · type + archive badges · meta
+ *   ─────────────────────────────────────────────────────────────────────────
+ *   Tabs: Detay / Geçmiş / Bağlı varyantlar
+ *     Detay tab            → form inside a Card
+ *     Geçmiş tab           → reverse-chronological event timeline (inline diff)
+ *     Bağlı varyantlar tab → image-led list with deep link to /products
  *
  * @useWhen rendering the full detail page for a single cost profile
  */
@@ -60,9 +65,7 @@ export function CostProfileDetail({
 
   // ─── State ─────────────────────────────────────────────────────────────
   const [archiveConfirmOpen, setArchiveConfirmOpen] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<
-    typeof TAB_DETAIL | typeof TAB_HISTORY | typeof TAB_VARIANTS
-  >(TAB_DETAIL);
+  const [activeTab, setActiveTab] = React.useState<TabValue>(TAB_DETAIL);
 
   // ─── Queries ────────────────────────────────────────────────────────────
   const { data: profile, isLoading: profileLoading } = useCostProfile(orgId, profileId);
@@ -120,56 +123,60 @@ export function CostProfileDetail({
     });
   }
 
-  // ─── Header actions ──────────────────────────────────────────────────────
-  const headerActions = (
+  // ─── Header slots ───────────────────────────────────────────────────────
+
+  const headerLeading = (
     <>
-      {isArchived ? (
-        <Button variant="outline" size="sm" onClick={handleRestore} disabled={restore.isPending}>
-          {tDetail('actions.restore')}
-        </Button>
-      ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setArchiveConfirmOpen(true)}
-          disabled={archive.isPending}
-        >
-          {tDetail('actions.archive')}
-        </Button>
-      )}
+      <Link
+        href="/costs"
+        className="hover:text-foreground gap-3xs flex items-center transition-colors"
+      >
+        <ArrowLeft02Icon className="size-icon-xs" />
+        {tDetail('header.backToList')}
+      </Link>
     </>
   );
 
-  // ─── Heading meta row (type badge + archived badge) ─────────────────────
-  const headingMeta = profile ? (
-    <div className="gap-xs flex items-center">
+  const headerMeta = profile ? (
+    <div className="gap-sm flex flex-wrap items-center">
       <CostProfileTypeBadge type={profile.type as CostProfileType} />
       {isArchived ? (
         <Badge tone="warning" size="sm">
           {tDetail('header.archivedBadge')}
         </Badge>
       ) : null}
+      <span className="text-muted-foreground/60 text-xs">·</span>
+      <span className="text-muted-foreground text-xs">
+        {tDetail('header.lastUpdated')}{' '}
+        <TimeAgo value={profile.updatedAt} className="text-foreground" />
+      </span>
     </div>
+  ) : null;
+
+  const headerActions = profile ? (
+    isArchived ? (
+      <Button variant="outline" size="sm" onClick={handleRestore} disabled={restore.isPending}>
+        {tDetail('actions.restore')}
+      </Button>
+    ) : (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setArchiveConfirmOpen(true)}
+        disabled={archive.isPending}
+        className="text-warning hover:text-warning hover:border-warning/40"
+      >
+        {tDetail('actions.archive')}
+      </Button>
+    )
   ) : null;
 
   return (
     <div className="gap-lg flex flex-col">
-      {/* Back-link breadcrumb */}
-      <div className="gap-xs text-2xs text-muted-foreground flex items-center">
-        <Link href="/costs" className="hover:text-foreground transition-colors">
-          {tDetail('header.backToList')}
-        </Link>
-        <span>/</span>
-        {profileLoading ? (
-          <Skeleton className="h-3 w-32" />
-        ) : (
-          <span className="text-foreground">{profile?.name ?? profileId}</span>
-        )}
-      </div>
-
       <PageHeader
         title={profileLoading ? '…' : (profile?.name ?? profileId)}
-        meta={headingMeta}
+        leading={headerLeading}
+        meta={headerMeta}
         actions={headerActions}
       />
 
@@ -184,44 +191,90 @@ export function CostProfileDetail({
       >
         <TabsList>
           <TabsTrigger value={TAB_DETAIL}>{tDetail('tabs.detail')}</TabsTrigger>
-          <TabsTrigger value={TAB_HISTORY}>{tDetail('tabs.history')}</TabsTrigger>
-          <TabsTrigger value={TAB_VARIANTS}>{tDetail('tabs.attachedVariants')}</TabsTrigger>
+          <TabsTrigger value={TAB_HISTORY}>
+            {tDetail('tabs.history')}
+            {versions.length > 0 ? (
+              <span className="bg-muted text-muted-foreground ml-xs text-2xs rounded-full px-1.5 py-px font-medium tabular-nums">
+                {versions.length}
+              </span>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger value={TAB_VARIANTS}>
+            {tDetail('tabs.attachedVariants')}
+            {variants.length > 0 ? (
+              <span className="bg-muted text-muted-foreground ml-xs text-2xs rounded-full px-1.5 py-px font-medium tabular-nums">
+                {variants.length}
+              </span>
+            ) : null}
+          </TabsTrigger>
         </TabsList>
 
         {/* ── Detay tab ─────────────────────────────────────────── */}
-        <TabsContent value={TAB_DETAIL}>
-          {profileLoading || profile === undefined ? (
-            <div className="gap-md flex flex-col">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : (
-            <CostProfileForm
-              orgId={orgId}
-              initialValues={profileToFormValues(profile)}
-              onSubmit={handleFormSubmit}
-              onCancel={() => {
-                // Reset to last saved — parent re-fetches after successful update
-              }}
-              isSubmitting={update.isPending}
-            />
-          )}
+        <TabsContent value={TAB_DETAIL} className="mt-lg">
+          <Card>
+            <CardHeader>
+              <h2 className="text-foreground text-sm font-semibold">
+                {tDetail('detailTab.title')}
+              </h2>
+              <p className="text-muted-foreground text-xs">{tDetail('detailTab.description')}</p>
+            </CardHeader>
+            <CardContent>
+              {profileLoading || profile === undefined ? (
+                <div className="gap-md flex flex-col">
+                  <Skeleton className="max-w-form h-10 w-full" />
+                  <Skeleton className="max-w-form h-10 w-full" />
+                  <Skeleton className="max-w-form h-10 w-full" />
+                </div>
+              ) : (
+                <div className="max-w-form">
+                  <CostProfileForm
+                    orgId={orgId}
+                    initialValues={profileToFormValues(profile)}
+                    onSubmit={handleFormSubmit}
+                    onCancel={() => {
+                      // Reset to last saved — parent re-fetches after successful update
+                    }}
+                    isSubmitting={update.isPending}
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Geçmiş tab ────────────────────────────────────────── */}
-        <TabsContent value={TAB_HISTORY}>
-          <CostProfileHistoryList versions={versions} isLoading={versionsLoading} />
+        <TabsContent value={TAB_HISTORY} className="mt-lg">
+          <Card>
+            <CardHeader>
+              <h2 className="text-foreground text-sm font-semibold">
+                {tDetail('historyTab.title')}
+              </h2>
+              <p className="text-muted-foreground text-xs">{tDetail('historyTab.description')}</p>
+            </CardHeader>
+            <CardContent>
+              <CostProfileHistoryList versions={versions} isLoading={versionsLoading} />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Bağlı varyantlar tab ──────────────────────────────── */}
-        <TabsContent value={TAB_VARIANTS}>
-          <CostProfileAttachedVariants
-            orgId={orgId}
-            profileId={profileId}
-            variants={variants}
-            isLoading={variantsLoading}
-          />
+        <TabsContent value={TAB_VARIANTS} className="mt-lg">
+          <Card>
+            <CardHeader>
+              <h2 className="text-foreground text-sm font-semibold">
+                {tDetail('variantsTab.title')}
+              </h2>
+              <p className="text-muted-foreground text-xs">{tDetail('variantsTab.description')}</p>
+            </CardHeader>
+            <CardContent>
+              <CostProfileAttachedVariants
+                orgId={orgId}
+                profileId={profileId}
+                variants={variants}
+                isLoading={variantsLoading}
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 

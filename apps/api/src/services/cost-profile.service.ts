@@ -258,16 +258,28 @@ export async function updateCostProfile(
 ): Promise<CostProfile> {
   try {
     const updated = await prisma.$transaction(async (tx) => {
-      // SELECT FOR UPDATE to serialize concurrent updates on this profile.
-      // Prisma 7 + @prisma/adapter-pg: use $queryRaw for the FOR UPDATE hint.
-      const [locked] = await tx.$queryRaw<CostProfile[]>`
-        SELECT * FROM cost_profiles
+      // Take a row-level lock for concurrency: $queryRaw with FOR UPDATE
+      // acquires the lock; the subsequent Prisma findFirst inside the same
+      // tx reads the locked row with proper camelCase mapping + Decimal
+      // boxing. Reading directly via $queryRaw<CostProfile[]> is wrong —
+      // it returns raw snake_case columns (`vat_rate`, `fx_rate_mode`, ...),
+      // and the camelCase property accesses in diffFields silently resolve
+      // to `undefined`, which then flags every mapped field as changed.
+      const lockRows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM cost_profiles
         WHERE id = ${profileId}::uuid
           AND organization_id = ${orgId}::uuid
         FOR UPDATE
       `;
 
-      if (locked === undefined) {
+      if (lockRows.length === 0) {
+        throw new CostProfileNotFoundError(profileId);
+      }
+
+      const locked = await tx.costProfile.findFirst({
+        where: { id: profileId, organizationId: orgId },
+      });
+      if (locked === null) {
         throw new CostProfileNotFoundError(profileId);
       }
 
