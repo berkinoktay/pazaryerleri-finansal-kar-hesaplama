@@ -839,25 +839,24 @@
       "cta": "Maliyetsiz ürünleri filtrele"
     },
     "costCell": {
-      "addCost": "+ Maliyet ekle",
+      "addCost": "Maliyet ekle",
       "profileCount": "{count} profil",
       "popover": {
         "title": "Maliyet profilleri",
-        "attachPlaceholder": "Profil seç…",
-        "attachSearch": "Profil ara…",
-        "attachEmpty": "Profil bulunamadı",
-        "newProfile": "+ Yeni maliyet oluştur",
-        "removeLabel": "Profili kaldır"
+        "attachedCount": "{count} bağlı",
+        "emptyAttached": "Bu varyantta henüz maliyet yok",
+        "searchPlaceholder": "Profil ara veya seç…",
+        "noResults": "Eşleşen profil yok",
+        "newProfile": "Yeni profil oluştur",
+        "removeLabel": "{name} profilini kaldır"
       }
     },
     "parentCostCell": {
       "allSame": "tümü aynı",
       "variantCount": "{count} varyant",
       "popoverTitle": "Varyant maliyetleri",
-      "popoverStats": "{with} / {total} varyant maliyet profiline sahip, {without} eksik",
-      "applyToAllLabel": "Tüm varyantlara maliyet ekle",
-      "applyToAllPlaceholder": "Profil seç…",
-      "applyToAllSearch": "Profil ara…",
+      "coverage": "{with} / {total} varyanta maliyet profili atanmış. Seçtiğin profil tüm varyantlara uygulanır.",
+      "applyToAllSearch": "Tüm varyantlara uygulamak için profil seç…",
       "applyToAllEmpty": "Profil bulunamadı"
     },
     "bulkCost": {
