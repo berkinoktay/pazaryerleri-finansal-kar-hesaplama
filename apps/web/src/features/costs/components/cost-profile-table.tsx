@@ -12,9 +12,9 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
-import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { Button } from '@/components/ui/button';
+import { Link } from '@/i18n/navigation';
 import { useIsMounted } from '@/lib/use-is-mounted';
 import {
   DropdownMenu,
@@ -93,8 +93,13 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
         cell: ({ row }) => {
           const profile = row.original;
           return (
-            <div className="flex flex-col gap-0.5">
-              <span className="text-foreground font-medium">{profile.name}</span>
+            <Link
+              href={`/costs/${profile.id}`}
+              className="hover:text-primary group flex flex-col gap-0.5 transition-colors outline-none focus-visible:underline"
+            >
+              <span className="text-foreground group-hover:text-primary font-medium underline-offset-2 group-hover:underline">
+                {profile.name}
+              </span>
               {profile.note !== null && profile.note.length > 0 ? (
                 <span className="text-muted-foreground max-w-input-narrow truncate text-xs">
                   {profile.note}
@@ -103,7 +108,7 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
               {profile.archivedAt !== null ? (
                 <span className="text-warning text-xs">{t('table.archived')}</span>
               ) : null}
-            </div>
+            </Link>
           );
         },
       },

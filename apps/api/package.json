@@ -15,7 +15,8 @@
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:watch": "vitest",
     "openapi:dump": "tsx scripts/dump-openapi.ts",
-    "gen:encryption-key": "tsx scripts/gen-encryption-key.ts"
+    "gen:encryption-key": "tsx scripts/gen-encryption-key.ts",
+    "fx:seed": "tsx --env-file=../../.env scripts/seed-fx-rates.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

@@ -225,6 +225,16 @@ export const AttachedVariantSchema = z
     stockCode: z.string(),
     productId: z.string().uuid(),
     productTitle: z.string(),
+    productImageUrl: z
+      .string()
+      .url()
+      .nullable()
+      .openapi({
+        description:
+          "URL of the product's primary image (first ProductImage by position), or null if the " +
+          'product has no images. Used by the cost-profile detail page "Bağlı varyantlar" tab to ' +
+          'render each variant alongside its product thumbnail.',
+      }),
     attachedAt: z.string().datetime(),
     attachedBy: z.string().uuid().nullable(),
   })

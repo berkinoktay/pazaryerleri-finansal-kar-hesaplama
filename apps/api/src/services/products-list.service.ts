@@ -127,6 +127,7 @@ export async function list(opts: {
     storeId,
     ...(filters.brandId !== undefined ? { brandId: filters.brandId } : {}),
     ...(filters.categoryId !== undefined ? { categoryId: filters.categoryId } : {}),
+    ...(filters.productId !== undefined ? { id: filters.productId } : {}),
     ...(variantWhere !== undefined ? { variants: { some: variantWhere } } : {}),
     ...(filters.q !== undefined ? buildSearchWhere(filters.q) : {}),
   };

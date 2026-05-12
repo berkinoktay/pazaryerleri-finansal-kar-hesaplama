@@ -75,51 +75,64 @@ describe('CostProfileHistoryList', () => {
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
-  it('renders a version row with version badge and relative time', () => {
+  it('renders an event label and relative time for v1', () => {
     renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
-    expect(screen.getByText('v1')).toBeInTheDocument();
+    expect(screen.getByText('Oluşturuldu')).toBeInTheDocument();
     // The relative time component renders an absolute date on SSR/first paint
     expect(screen.getByRole('time')).toBeInTheDocument();
   });
 
-  it('renders "İlk oluşturma" label for version 1', () => {
+  it('renders every non-null initial field for version 1 with the new value', () => {
     renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
-    expect(screen.getByText('İlk oluşturma')).toBeInTheDocument();
-  });
-
-  it('renders changed-field chips for version 2', () => {
-    renderWithIntl(
-      <CostProfileHistoryList versions={[V2_VERSION, BASE_VERSION]} isLoading={false} />,
-    );
-    // "Tutar" is the label for the 'amount' field
+    // Initial create row shows the field label and the value
+    expect(screen.getByText('Ad')).toBeInTheDocument();
+    expect(screen.getByText('Hammadde COGS')).toBeInTheDocument();
     expect(screen.getByText('Tutar')).toBeInTheDocument();
+    expect(screen.getByText('25.50')).toBeInTheDocument();
   });
 
-  it('renders multiple version rows in reverse-chronological order (newest first)', () => {
+  it('renders inline before → after diff for an UPDATED event', () => {
     renderWithIntl(
       <CostProfileHistoryList versions={[V2_VERSION, BASE_VERSION]} isLoading={false} />,
     );
-    const versionBadges = screen.getAllByText(/^v\d+$/);
-    expect(versionBadges[0]).toHaveTextContent('v2');
-    expect(versionBadges[1]).toHaveTextContent('v1');
+    expect(screen.getByText('Düzenlendi')).toBeInTheDocument();
+    // amount diff: "25.50" (old) and "30.00" (new) both visible on v2's row
+    expect(screen.getByText('25.50')).toBeInTheDocument();
+    expect(screen.getByText('30.00')).toBeInTheDocument();
+  });
+
+  it('classifies archive event when only archivedAt was set', () => {
+    const archived: CostProfileVersion = {
+      ...BASE_VERSION,
+      id: 'v2-archive',
+      version: 2,
+      archivedAt: '2026-04-20T12:00:00Z',
+      changedFields: ['archivedAt'],
+      changedAt: '2026-04-20T12:00:00Z',
+    };
+    renderWithIntl(
+      <CostProfileHistoryList versions={[archived, BASE_VERSION]} isLoading={false} />,
+    );
+    expect(screen.getByText('Arşivlendi')).toBeInTheDocument();
+  });
+
+  it('classifies restore event when archivedAt was cleared', () => {
+    const restored: CostProfileVersion = {
+      ...BASE_VERSION,
+      id: 'v3-restore',
+      version: 3,
+      archivedAt: null,
+      changedFields: ['archivedAt'],
+      changedAt: '2026-04-21T09:00:00Z',
+    };
+    renderWithIntl(
+      <CostProfileHistoryList versions={[restored, BASE_VERSION]} isLoading={false} />,
+    );
+    expect(screen.getByText('Geri yüklendi')).toBeInTheDocument();
   });
 
   it('renders "Sistem" for null changedBy', () => {
     renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
     expect(screen.getByText('Sistem')).toBeInTheDocument();
-  });
-
-  it('renders "Farkı gör" button per version', () => {
-    renderWithIntl(<CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />);
-    expect(screen.getByRole('button', { name: 'Farkı gör' })).toBeInTheDocument();
-  });
-
-  it('opens the diff sheet when "Farkı gör" is clicked', async () => {
-    const { user } = renderWithIntl(
-      <CostProfileHistoryList versions={[BASE_VERSION]} isLoading={false} />,
-    );
-    await user.click(screen.getByRole('button', { name: 'Farkı gör' }));
-    // Sheet title references the version number
-    expect(screen.getByText('v1 değişiklikleri')).toBeInTheDocument();
   });
 });

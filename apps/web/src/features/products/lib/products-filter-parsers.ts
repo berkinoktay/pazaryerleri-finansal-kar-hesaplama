@@ -37,6 +37,10 @@ export const productsFiltersParsers = {
   ),
   brandId: parseAsString.withDefault(''),
   categoryId: parseAsString.withDefault(''),
+  // Deep-link filter — empty string means "no productId filter active".
+  // Set from feature pages (cost-profile detail → "Bağlı varyantlar") so
+  // the seller lands on the products page with a single product visible.
+  productId: parseAsString.withDefault(''),
   // Absent from URL → null. Present and one of 'cost' | 'vat' → that value.
   // Present but invalid → null (nuqs default behavior). Don't .withDefault()
   // — we want null as the "no override-tab active" signal, distinct from
@@ -54,6 +58,7 @@ export interface ProductsFilters {
   status: ProductVariantStatus;
   brandId: string;
   categoryId: string;
+  productId: string;
   overrideMissing: ProductOverrideMissing | null;
   page: number;
   perPage: number;

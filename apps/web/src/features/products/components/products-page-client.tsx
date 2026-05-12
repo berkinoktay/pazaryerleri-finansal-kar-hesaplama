@@ -65,6 +65,7 @@ export function ProductsPageClient({
           status: filters.status,
           brandId: filters.brandId.length > 0 ? filters.brandId : undefined,
           categoryId: filters.categoryId.length > 0 ? filters.categoryId : undefined,
+          productId: filters.productId.length > 0 ? filters.productId : undefined,
           overrideMissing: filters.overrideMissing ?? undefined,
           page: filters.page,
           perPage: filters.perPage,

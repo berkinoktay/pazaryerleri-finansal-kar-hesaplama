@@ -1682,6 +1682,14 @@
           "productTitle": {
             "type": "string"
           },
+          "productImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "URL of the product's primary image (first ProductImage by position), or null if the product has no images. Used by the cost-profile detail page \"Bağlı varyantlar\" tab to render each variant alongside its product thumbnail."
+          },
           "attachedAt": {
             "type": "string",
             "format": "date-time"
@@ -1701,6 +1709,7 @@
           "stockCode",
           "productId",
           "productTitle",
+          "productImageUrl",
           "attachedAt",
           "attachedBy"
         ]
@@ -3199,6 +3208,18 @@
             "required": false,
             "description": "Variant-level filter: \"cost\" → variants with NULL costPrice; \"vat\" → variants with NULL vatRate. Composes with the status filter via AND. Parent included if ≥1 variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
             "name": "overrideMissing",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter by internal Product.id (UUID). Used for deep links from feature pages like the cost-profile detail (Bağlı varyantlar tab) where the seller clicks a variant and lands on the products page with that single product visible.",
+              "example": "b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b"
+            },
+            "required": false,
+            "description": "Filter by internal Product.id (UUID). Used for deep links from feature pages like the cost-profile detail (Bağlı varyantlar tab) where the seller clicks a variant and lands on the products page with that single product visible.",
+            "name": "productId",
             "in": "query"
           },
           {

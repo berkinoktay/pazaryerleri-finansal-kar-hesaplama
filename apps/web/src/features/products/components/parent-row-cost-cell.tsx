@@ -1,14 +1,24 @@
 'use client';
 
+import { PlusSignIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Combobox, type ComboboxOption } from '@/components/patterns/combobox';
 import { Currency } from '@/components/patterns/currency';
 import { Badge } from '@/components/ui/badge';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Separator } from '@/components/ui/separator';
-import { CostProfileTypeBadge } from '@/features/costs/components/cost-profile-type-badge';
+import {
+  CostProfileTypeIconSquare,
+  ProfileAmount,
+} from '@/features/costs/components/cost-profile-glyphs';
 import { useAttachCostProfiles } from '@/features/costs/hooks/use-attach-cost-profiles';
 import { useCostProfiles } from '@/features/costs/hooks/use-cost-profiles';
 import { CostProfileType } from '@/features/costs/types/cost-profile.types';
@@ -72,15 +82,18 @@ export interface ParentRowCostCellProps {
 /**
  * Cost cell for multi-variant parent rows in the products table.
  *
- * Displays an aggregate cost label:
- *   - All variants same → "₺142,50 (tümü aynı)"
- *   - Range              → "₺120 – ₺180 / 8 varyant"
- *   - No costs at all   → "+ Maliyet ekle" placeholder
+ * Trigger states (mirrors the variant-row CostCell rhythm):
+ *   - No costs anywhere → "+ Maliyet ekle" pill
+ *   - All same          → currency amount alone
+ *   - Range             → "₺120 – ₺180" + small "8" chip (variant count)
  *
- * Click opens a popover with:
- *   1. Summary stats (range + how many variants have/lack profiles)
- *   2. Combobox: "Bu ürünün tüm varyantlarına maliyet ekle"
- *      → calls useAttachCostProfiles with all child variant IDs
+ * Popover content:
+ *   Title row → sub-line ("X / N varyantta maliyet var")
+ *   Flat search input (cmdk) — same flat treatment as CostCellPopover
+ *   Result list → applies the chosen profile to ALL child variants
+ *
+ * Section header is intentionally dropped — the title + sub-line plus the
+ * input placeholder convey intent without an additional uppercase label.
  */
 export function ParentRowCostCell({ orgId, product }: ParentRowCostCellProps): React.ReactElement {
   const t = useTranslations('products.costCell');
@@ -95,53 +108,58 @@ export function ParentRowCostCell({ orgId, product }: ParentRowCostCellProps): R
 
   const aggregate = React.useMemo(() => computeCostAggregate(product.variants), [product.variants]);
 
-  const comboboxOptions: ComboboxOption[] = React.useMemo(() => {
-    const all = allProfilesQuery.data?.data ?? [];
-    return all.map((p) => ({
-      value: p.id,
-      label: p.name,
-      description: `${p.currency} ${p.amount}`,
-      icon: <CostProfileTypeBadge type={p.type as CostProfileType} iconOnly />,
-    }));
-  }, [allProfilesQuery.data]);
+  // Stats fall back to (with: 0, without: total) when no variant has profiles
+  // yet, so the user always sees "X / N varyantta maliyet var".
+  const stats =
+    aggregate !== null
+      ? {
+          withCount: aggregate.withProfiles,
+          totalCount: product.variants.length,
+        }
+      : { withCount: 0, totalCount: product.variants.length };
 
-  function handleAttachToAll(profileId: string | null) {
-    if (profileId === null) return;
+  function handleAttachToAll(profileId: string) {
+    const profile = allProfilesQuery.data?.data.find((p) => p.id === profileId);
     attachMutation.mutate({
       orgId,
       profileIds: [profileId],
       variantIds: allVariantIds,
+      ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
     });
+    setOpen(false);
   }
+
+  const availableProfiles = allProfilesQuery.data?.data ?? [];
 
   function renderTrigger() {
     if (aggregate === null) {
       return (
         <button
           type="button"
-          className="text-muted-foreground hover:text-primary duration-fast text-xs transition-colors"
+          className="text-muted-foreground/70 hover:text-primary hover:bg-primary/5 duration-fast gap-2xs inline-flex h-7 cursor-pointer items-center rounded-sm px-2 text-xs transition-colors"
         >
+          <PlusSignIcon className="size-icon-xs" />
           {t('addCost')}
         </button>
       );
     }
 
-    const badge =
-      aggregate.isSame && aggregate.sameValue !== null ? (
-        <Badge tone="neutral" size="sm" radius="full">
-          {tParent('allSame')}
-        </Badge>
-      ) : (
-        <Badge tone="neutral" size="sm" radius="full">
-          {tParent('variantCount', { count: product.variants.length })}
-        </Badge>
-      );
+    const variantCountChip = !aggregate.isSame ? (
+      <Badge
+        tone="neutral"
+        size="sm"
+        radius="full"
+        className="text-2xs px-1.5 font-medium tabular-nums"
+      >
+        {product.variants.length}
+      </Badge>
+    ) : null;
 
     const amount =
       aggregate.isSame && aggregate.sameValue !== null ? (
-        <Currency value={aggregate.sameValue} />
+        <Currency value={aggregate.sameValue} className="text-sm tabular-nums" />
       ) : (
-        <span className="text-foreground text-xs tabular-nums">
+        <span className="text-foreground text-sm tabular-nums">
           {formatter.number(aggregate.min, 'currency')}
           {' – '}
           {formatter.number(aggregate.max, 'currency')}
@@ -151,10 +169,10 @@ export function ParentRowCostCell({ orgId, product }: ParentRowCostCellProps): R
     return (
       <button
         type="button"
-        className="gap-xs hover:bg-muted duration-fast inline-flex cursor-pointer items-center rounded px-1 py-0.5 transition-colors"
+        className="gap-xs hover:bg-muted/60 duration-fast inline-flex h-7 cursor-pointer items-center rounded-sm px-2 transition-colors"
       >
         {amount}
-        {badge}
+        {variantCountChip}
       </button>
     );
   }
@@ -162,40 +180,51 @@ export function ParentRowCostCell({ orgId, product }: ParentRowCostCellProps): R
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{renderTrigger()}</PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-0" sideOffset={6}>
-        <div className="gap-md flex flex-col">
-          {/* Header */}
-          <div className="px-md pt-md">
-            <p className="text-foreground text-sm font-medium">{tParent('popoverTitle')}</p>
-            {aggregate !== null ? (
-              <p className="text-muted-foreground mt-1 text-xs">
-                {tParent('popoverStats', {
-                  with: aggregate.withProfiles,
-                  without: aggregate.withoutProfiles,
-                  total: product.variants.length,
-                })}
-              </p>
-            ) : null}
-          </div>
-
-          <Separator />
-
-          {/* Apply-to-all combobox */}
-          <div className="px-md pb-md">
-            <p className="text-muted-foreground mb-sm text-xs">{tParent('applyToAllLabel')}</p>
-            <Combobox
-              value={null}
-              onChange={handleAttachToAll}
-              options={comboboxOptions}
-              placeholder={tParent('applyToAllPlaceholder')}
-              searchPlaceholder={tParent('applyToAllSearch')}
-              emptyMessage={tParent('applyToAllEmpty')}
-              loading={attachMutation.isPending || allProfilesQuery.isLoading}
-              disabled={attachMutation.isPending}
-              triggerSize="sm"
-            />
-          </div>
+      <PopoverContent align="start" sideOffset={6} className="w-dropdown-popover p-0">
+        {/* Title bar with stats sub-line */}
+        <div className="px-md pt-sm pb-2xs gap-3xs flex flex-col">
+          <h3 className="text-foreground text-sm font-semibold">{tParent('popoverTitle')}</h3>
+          <p className="text-muted-foreground text-xs">
+            {tParent('coverage', { with: stats.withCount, total: stats.totalCount })}
+          </p>
         </div>
+
+        {/* Inline cmdk — same flat treatment as CostCellPopover */}
+        <Command className="border-border border-t">
+          <CommandInput
+            placeholder={tParent('applyToAllSearch')}
+            className="text-sm"
+            wrapperClassName="border-0 shadow-none rounded-none m-0 border-b border-border h-9 px-md"
+          />
+          <CommandList className="max-h-56">
+            <CommandEmpty className="text-muted-foreground px-md py-sm text-xs">
+              {tParent('applyToAllEmpty')}
+            </CommandEmpty>
+            {availableProfiles.length > 0 ? (
+              <CommandGroup className="p-xs">
+                {availableProfiles.map((profile) => (
+                  <CommandItem
+                    key={profile.id}
+                    value={`${profile.name} ${profile.currency} ${profile.amount}`}
+                    onSelect={() => handleAttachToAll(profile.id)}
+                    className="gap-sm flex items-center"
+                    disabled={attachMutation.isPending}
+                  >
+                    <CostProfileTypeIconSquare type={profile.type as CostProfileType} />
+                    <span className="text-foreground min-w-0 flex-1 truncate text-sm">
+                      {profile.name}
+                    </span>
+                    <ProfileAmount
+                      amount={profile.amount}
+                      currency={profile.currency}
+                      className="text-muted-foreground shrink-0 text-xs"
+                    />
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+          </CommandList>
+        </Command>
       </PopoverContent>
     </Popover>
   );

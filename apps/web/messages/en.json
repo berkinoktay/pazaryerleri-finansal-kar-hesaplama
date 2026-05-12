@@ -163,6 +163,7 @@
     "dashboard": "Dashboard",
     "orders": "Orders",
     "products": "Products",
+    "costs": "Costs",
     "profitability": "Profitability",
     "reconciliation": "Reconciliation",
     "expenses": "Expenses",
@@ -192,10 +193,6 @@
         "noCost": "Missing cost",
         "noDesi": "Missing desi",
         "lowStock": "Low stock"
-      },
-      "meta": {
-        "title": "Extras",
-        "costs": "Costs"
       }
     },
     "profitability": {
@@ -891,6 +888,11 @@
         "title": "Replace costs",
         "description": "This will remove all existing cost profiles from {count} variants and attach only the selected profile. This cannot be undone.",
         "confirm": "Yes, replace"
+      },
+      "toast": {
+        "attached": "Cost attached to {count} variants",
+        "detached": "Cost removed from {count} variants",
+        "replaced": "Cost profiles updated on {count} variants"
       }
     }
   },

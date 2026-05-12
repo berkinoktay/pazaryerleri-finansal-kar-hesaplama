@@ -10,6 +10,7 @@ import {
   PackageIcon,
   ReceiptDollarIcon,
   ShoppingBag01Icon,
+  Tag01Icon,
 } from 'hugeicons-react';
 
 import type { SubNavItem } from '@/components/patterns/sub-nav-list';
@@ -155,14 +156,13 @@ export const NAV_ITEMS = [
           },
         ],
       },
-      {
-        key: 'meta',
-        labelKey: 'navSections.products.meta.title',
-        items: [
-          { key: 'costs', labelKey: 'navSections.products.meta.costs', href: '/products/costs' },
-        ],
-      },
     ],
+  },
+  {
+    key: 'costs',
+    labelKey: 'nav.costs',
+    href: '/costs',
+    icon: Tag01Icon,
   },
   {
     key: 'profitability',

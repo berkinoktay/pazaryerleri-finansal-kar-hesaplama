@@ -12,9 +12,10 @@ import {
   FormField,
   FormItem,
   FormLabel,
-  FormMessage,
+  useFormField,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
@@ -38,7 +39,57 @@ import { formatFxRateSource } from '../lib/format-fx-rate-source';
 import { CostProfileFxPreview } from './cost-profile-fx-preview';
 import { CostProfileTypeBadge } from './cost-profile-type-badge';
 
+// Validation codes the schema sets as `message` — the same keys exist under
+// `costs.form.validation.*` in next-intl. Anything not in this set is a
+// genuine zod-internal message (e.g. "Invalid enum value") and should pass
+// through untranslated.
+const VALIDATION_CODES = new Set([
+  'nameRequired',
+  'nameTooLong',
+  'amountRequired',
+  'amountNegative',
+  'manualFxRateRequired',
+  'manualFxRatePositive',
+  'tryMustUseAuto',
+] as const);
+
+type ValidationCode =
+  | 'nameRequired'
+  | 'nameTooLong'
+  | 'amountRequired'
+  | 'amountNegative'
+  | 'manualFxRateRequired'
+  | 'manualFxRatePositive'
+  | 'tryMustUseAuto';
+
+function knownValidationCode(value: string | undefined): ValidationCode | undefined {
+  if (value === undefined) return undefined;
+  return VALIDATION_CODES.has(value as ValidationCode) ? (value as ValidationCode) : undefined;
+}
+
+/**
+ * FormMessage variant that translates the schema's error code via next-intl
+ * (`costs.form.validation.<code>`). Falls back to the raw message for any
+ * unrecognized code so we don't silently swallow zod-internal errors.
+ */
+function TranslatedFormMessage({ className }: { className?: string }): React.ReactElement | null {
+  const { error, formMessageId } = useFormField();
+  const tValidation = useTranslations('costs.form.validation');
+  if (error === undefined) return null;
+  const raw = error.message;
+  const code = knownValidationCode(typeof raw === 'string' ? raw : undefined);
+  const body = code !== undefined ? tValidation(code) : (raw ?? '');
+  if (body === '') return null;
+  return (
+    <p id={formMessageId} className={cn('text-2xs text-destructive font-medium', className)}>
+      {body}
+    </p>
+  );
+}
+
 interface CostProfileFormProps {
+  /** Active organization id — required to fetch live TCMB FX rates. */
+  orgId: string | null;
   /** When editing an existing profile, supply it for pre-filling. */
   initialValues?: Partial<CostProfileFormValues>;
   onSubmit: (values: CostProfileFormValues) => void;
@@ -54,6 +105,7 @@ interface CostProfileFormProps {
  * (conditional on MANUAL + non-TRY), note. FX preview is reactive.
  */
 export function CostProfileForm({
+  orgId,
   initialValues,
   onSubmit,
   onCancel,
@@ -61,8 +113,9 @@ export function CostProfileForm({
 }: CostProfileFormProps): React.ReactElement {
   const t = useTranslations('costs.form');
   const tTypes = useTranslations('costs.types');
+  const tFxMode = useTranslations('costs.fxMode');
 
-  const { data: fxData } = useFxRatesLatest();
+  const { data: fxData } = useFxRatesLatest(orgId);
 
   const form = useForm<CostProfileFormValues>({
     resolver: zodResolver(costProfileFormSchema),
@@ -126,7 +179,7 @@ export function CostProfileForm({
               <FormControl>
                 <Input placeholder={t('fields.namePlaceholder')} autoComplete="off" {...field} />
               </FormControl>
-              <FormMessage />
+              <TranslatedFormMessage />
             </FormItem>
           )}
         />
@@ -155,7 +208,7 @@ export function CostProfileForm({
                   ))}
                 </SelectContent>
               </Select>
-              <FormMessage />
+              <TranslatedFormMessage />
             </FormItem>
           )}
         />
@@ -182,7 +235,7 @@ export function CostProfileForm({
                     ))}
                   </SelectContent>
                 </Select>
-                <FormMessage />
+                <TranslatedFormMessage />
               </FormItem>
             )}
           />
@@ -210,7 +263,7 @@ export function CostProfileForm({
                   autoFxRate={autoFxRate}
                   fxRateSource={autoFxRateSource}
                 />
-                <FormMessage />
+                <TranslatedFormMessage />
               </FormItem>
             )}
           />
@@ -237,7 +290,7 @@ export function CostProfileForm({
                   ))}
                 </SelectContent>
               </Select>
-              <FormMessage />
+              <TranslatedFormMessage />
             </FormItem>
           )}
         />
@@ -258,15 +311,15 @@ export function CostProfileForm({
                   >
                     <label className="gap-xs flex cursor-pointer items-center text-sm">
                       <RadioGroupItem value={FxRateMode.AUTO} />
-                      {t('fields.fxRateMode')} — TCMB
+                      {tFxMode(FxRateMode.AUTO)}
                     </label>
                     <label className="gap-xs flex cursor-pointer items-center text-sm">
                       <RadioGroupItem value={FxRateMode.MANUAL} />
-                      Manuel
+                      {tFxMode(FxRateMode.MANUAL)}
                     </label>
                   </RadioGroup>
                 </FormControl>
-                <FormMessage />
+                <TranslatedFormMessage />
               </FormItem>
             )}
           />
@@ -289,7 +342,7 @@ export function CostProfileForm({
                     onChange={(e) => field.onChange(e.target.value || null)}
                   />
                 </FormControl>
-                <FormMessage />
+                <TranslatedFormMessage />
               </FormItem>
             )}
           />
@@ -310,7 +363,7 @@ export function CostProfileForm({
                   onChange={(e) => field.onChange(e.target.value || null)}
                 />
               </FormControl>
-              <FormMessage />
+              <TranslatedFormMessage />
             </FormItem>
           )}
         />

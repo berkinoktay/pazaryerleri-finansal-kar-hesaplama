@@ -1,5 +1,6 @@
 'use client';
 
+import { PlusSignIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -20,13 +21,15 @@ export interface CostCellProps {
 /**
  * Cost cell for a product variant row in the products table.
  *
- * Three states:
- *   - 0 profiles → "+ Maliyet ekle" placeholder button
- *   - 1 profile  → currency amount + badge showing "1 profil"
- *   - N profiles → currency amount + badge showing "N profil"
+ * Three visual states:
+ *   - 0 profiles → muted "+ Maliyet ekle" pill (dashed-on-hover affordance)
+ *   - 1 profile  → currency amount alone (no badge — count of 1 is the
+ *                  common case and a "1 profil" pill would just be noise)
+ *   - N profiles → currency amount + tight count chip ("2", "3", …)
  *
  * Hover tooltip lists profile names when `profileNames` is supplied.
- * The cell itself is the click target that opens the `CostCellPopover`.
+ * Click target sized to satisfy the 32px minimum density rule for
+ * dense tables — bigger than the prior `px-1 py-0.5` micro-button.
  */
 export function CostCell({ variant, profileNames, onClick }: CostCellProps): React.ReactElement {
   const t = useTranslations('products.costCell');
@@ -36,23 +39,32 @@ export function CostCell({ variant, profileNames, onClick }: CostCellProps): Rea
       <button
         type="button"
         onClick={onClick}
-        className="text-muted-foreground hover:text-primary duration-fast text-xs transition-colors"
+        className="text-muted-foreground/70 hover:text-primary hover:bg-primary/5 duration-fast gap-2xs inline-flex h-7 cursor-pointer items-center rounded-sm px-2 text-xs transition-colors"
       >
+        <PlusSignIcon className="size-icon-xs" />
         {t('addCost')}
       </button>
     );
   }
 
+  const showCountChip = variant.profileCount > 1;
   const cell = (
     <button
       type="button"
       onClick={onClick}
-      className="gap-xs hover:bg-muted duration-fast inline-flex cursor-pointer items-center rounded px-1 py-0.5 transition-colors"
+      className="gap-xs hover:bg-muted/60 duration-fast inline-flex h-7 cursor-pointer items-center rounded-sm px-2 transition-colors"
     >
-      <Currency value={variant.currentCostTry ?? '0'} />
-      <Badge tone="neutral" size="sm" radius="full">
-        {t('profileCount', { count: variant.profileCount })}
-      </Badge>
+      <Currency value={variant.currentCostTry ?? '0'} className="text-sm tabular-nums" />
+      {showCountChip ? (
+        <Badge
+          tone="neutral"
+          size="sm"
+          radius="full"
+          className="text-2xs px-1.5 font-medium tabular-nums"
+        >
+          {variant.profileCount}
+        </Badge>
+      ) : null}
     </button>
   );
 

@@ -45,6 +45,7 @@ const VARIANT_1: AttachedVariant = {
   stockCode: 'SKU-001',
   productId: 'product-1',
   productTitle: 'Pamuklu T-Shirt',
+  productImageUrl: null,
   attachedAt: '2026-04-01T10:00:00Z',
   attachedBy: null,
 };
@@ -56,6 +57,7 @@ const VARIANT_2: AttachedVariant = {
   stockCode: 'SKU-002',
   productId: 'product-2',
   productTitle: 'Denim Pantolon',
+  productImageUrl: null,
   attachedAt: '2026-04-10T09:00:00Z',
   attachedBy: 'user-abc',
 };

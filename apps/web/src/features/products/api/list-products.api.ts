@@ -14,6 +14,7 @@ export interface ListProductsArgs {
   status?: 'onSale' | 'archived' | 'locked' | 'blacklisted';
   brandId?: string;
   categoryId?: string;
+  productId?: string;
   overrideMissing?: 'cost' | 'vat';
   page: number;
   perPage: number;
@@ -45,6 +46,9 @@ export async function listProducts(args: ListProductsArgs): Promise<ListProducts
             : {}),
           ...(query.categoryId !== undefined && query.categoryId.length > 0
             ? { categoryId: query.categoryId }
+            : {}),
+          ...(query.productId !== undefined && query.productId.length > 0
+            ? { productId: query.productId }
             : {}),
           ...(query.overrideMissing !== undefined
             ? { overrideMissing: query.overrideMissing }
