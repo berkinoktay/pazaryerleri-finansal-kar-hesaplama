@@ -917,6 +917,26 @@
             ],
             "description": "Decimal string, user-entered"
           },
+          "dimensionalWeight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Effective dimensional weight (TR: \"desi\"). Decimal string. The user override takes precedence; falls back to the marketplace-synced value when no override is set. Null when neither side has a value yet.",
+            "example": "1.50"
+          },
+          "syncedDimensionalWeight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The marketplace's latest dimensional weight for this variant. Refreshed every sync. Independent of any user override. Used by the UI to show the seller what the marketplace currently reports.",
+            "example": "1.20"
+          },
+          "isDimensionalWeightOverridden": {
+            "type": "boolean",
+            "description": "True when the user has manually set a dimensional weight that differs from (or shadows) the marketplace value. Drives the override badge and the \"↺ Reset\" affordance in the UI."
+          },
           "quantity": {
             "type": "integer",
             "minimum": 0
@@ -1007,6 +1027,9 @@
           "listPrice",
           "vatRate",
           "costPrice",
+          "dimensionalWeight",
+          "syncedDimensionalWeight",
+          "isDimensionalWeightOverridden",
           "quantity",
           "deliveryDuration",
           "isRushDelivery",
@@ -1134,6 +1157,102 @@
           "brands",
           "categories",
           "overrideCounts"
+        ]
+      },
+      "VariantDimensionalWeightResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dimensionalWeight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Effective dimensional weight after the update.",
+            "example": "1.50"
+          },
+          "syncedDimensionalWeight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The marketplace's value, unchanged by this endpoint.",
+            "example": "1.20"
+          },
+          "isDimensionalWeightOverridden": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "dimensionalWeight",
+          "syncedDimensionalWeight",
+          "isDimensionalWeightOverridden"
+        ]
+      },
+      "UpdateVariantDimensionalWeightBody": {
+        "type": "object",
+        "properties": {
+          "dimensionalWeight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d+(\\.\\d{1,2})?$",
+            "description": "Decimal string with up to 2 fractional digits, in the (closed) range [0.01, 999.99], or null. Null clears the user override and reverts the read path to the marketplace's last synced value.",
+            "example": "1.50"
+          }
+        },
+        "required": [
+          "dimensionalWeight"
+        ]
+      },
+      "BulkUpdateVariantDimensionalWeightResponse": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many variants in the request actually matched the org+store filter and received the new value. May be less than variantIds.length if some IDs were stale (variant deleted or moved stores between selection and submit).",
+            "example": 12
+          }
+        },
+        "required": [
+          "updated"
+        ]
+      },
+      "BulkUpdateVariantDimensionalWeightBody": {
+        "type": "object",
+        "properties": {
+          "variantIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 200,
+            "description": "Variant UUIDs to update. 1–200 items.",
+            "example": [
+              "7a1a1a1a-1111-4111-8111-111111111111"
+            ]
+          },
+          "dimensionalWeight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d+(\\.\\d{1,2})?$",
+            "description": "Same shape as the single-variant endpoint. Applied uniformly to every listed variant. Null clears the override on all of them.",
+            "example": "1.50"
+          }
+        },
+        "required": [
+          "variantIds",
+          "dimensionalWeight"
         ]
       },
       "MissingCostStatsResponse": {
@@ -3438,6 +3557,297 @@
           },
           "404": {
             "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight": {
+      "patch": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "Set or clear the user override for a variant's dimensional weight (desi)",
+        "description": "Writes exclusively to ProductVariant.dimensional_weight (the user-override column). Trendyol's value lives in a sister column that this endpoint never touches — so the override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the override and revert the read path to the marketplace-synced value.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "variantId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVariantDimensionalWeightBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated variant — effective desi, synced desi, and override flag",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VariantDimensionalWeightResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store or variant not found (or belongs to a different org/store)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid dimensional weight value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/products/variants/dimensional-weight": {
+      "patch": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "Apply one dimensional-weight value (or clear) across many variants",
+        "description": "Same single-column write rule as the per-variant endpoint: only ProductVariant.dimensional_weight is touched. Variant IDs that don't belong to the org+store are silently filtered out (not surfaced as an error — the UX is \"apply to what you can\"). Returns the actual updated count so the UI can warn when the selection went stale between click and submit.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkUpdateVariantDimensionalWeightBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bulk update applied; response carries the affected variant count",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkUpdateVariantDimensionalWeightResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body (bad UUID, empty array, out-of-range value)",
             "content": {
               "application/json": {
                 "schema": {

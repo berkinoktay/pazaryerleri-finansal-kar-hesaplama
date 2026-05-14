@@ -255,6 +255,14 @@ model ProductVariant {
   listPrice             Decimal  @map("list_price") @db.Decimal(12, 2)
   vatRate               Int?     @map("vat_rate")
   costPrice             Decimal? @map("cost_price") @db.Decimal(12, 2)
+  // Two-column sync-protection pair (see docs/plans/archive/... for rationale):
+  // syncedDimensionalWeight is the marketplace's value, refreshed every sync.
+  // dimensionalWeight is the user's manual override; null = no override, fall
+  // back to synced at read time. The sync worker writes ONLY to the synced
+  // column — never to dimensionalWeight — so the "user value is sacred"
+  // invariant is structural, not just enforced in code.
+  syncedDimensionalWeight Decimal? @map("synced_dimensional_weight") @db.Decimal(6, 2)
+  dimensionalWeight       Decimal? @map("dimensional_weight") @db.Decimal(6, 2)
   quantity              Int      @default(0)
   deliveryDuration      Int?     @map("delivery_duration")
   isRushDelivery        Boolean  @default(false) @map("is_rush_delivery")

@@ -99,6 +99,48 @@ describe('<BulkActionBar>', () => {
     });
   });
 
+  describe('group breaks', () => {
+    it('renders a vertical separator before an action with groupBreakBefore=true', () => {
+      const { container } = render(
+        <BulkActionBar
+          selectedCount={1}
+          onClear={vi.fn()}
+          actions={[
+            { id: 'a1', label: 'Maliyet ekle', onClick: vi.fn() },
+            { id: 'a2', label: 'Maliyet kaldır', onClick: vi.fn() },
+            // Third action starts the second visual group.
+            { id: 'a3', label: 'Desi ayarla', onClick: vi.fn(), groupBreakBefore: true },
+          ]}
+        />,
+      );
+      // Two separators expected total: one between count-label/actions
+      // (the original one) plus one before the groupBreakBefore action.
+      const separators = container.querySelectorAll('[data-orientation="vertical"]');
+      expect(separators.length).toBe(2);
+      // All three action buttons still rendered.
+      expect(screen.getByRole('button', { name: 'Maliyet ekle' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Desi ayarla' })).toBeInTheDocument();
+    });
+
+    it('does not render a leading separator when the first action has groupBreakBefore=true', () => {
+      const { container } = render(
+        <BulkActionBar
+          selectedCount={1}
+          onClear={vi.fn()}
+          actions={[
+            // groupBreakBefore on the FIRST action must be ignored — otherwise
+            // the bar would lead with a hanging separator.
+            { id: 'a1', label: 'İlk aksiyon', onClick: vi.fn(), groupBreakBefore: true },
+            { id: 'a2', label: 'İkinci aksiyon', onClick: vi.fn() },
+          ]}
+        />,
+      );
+      const separators = container.querySelectorAll('[data-orientation="vertical"]');
+      // Only the original between count-label and actions; no extra leading one.
+      expect(separators.length).toBe(1);
+    });
+  });
+
   describe('position', () => {
     it('floating wraps the bar in a fixed pointer-events container by default', () => {
       const { container } = render(

@@ -31,6 +31,7 @@ interface VariantSpec {
   size?: string;
   salePrice?: number;
   quantity?: number;
+  dimensionalWeight?: number;
 }
 
 function buildContent(spec: ContentSpec): unknown {
@@ -62,6 +63,7 @@ function buildContent(spec: ContentSpec): unknown {
       locked: false,
       archived: false,
       blacklisted: false,
+      ...(v.dimensionalWeight !== undefined ? { dimensionalWeight: v.dimensionalWeight } : {}),
     })),
   };
 }
@@ -386,5 +388,232 @@ describe('processProductsChunk', () => {
       where: { storeId, platformContentId: BigInt(900_001) },
     });
     expect(product.totalStock).toBe(20);
+  });
+
+  it('seeds syncedDimensionalWeight from Trendyol response on first sync, leaving user override null', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 800_001,
+            productMainId: 'TS-DESI-1',
+            title: 'Desi Seed Product',
+            variants: [
+              {
+                variantId: 800_101,
+                barcode: 'desi-bc-1',
+                stockCode: 'desi-sk-1',
+                dimensionalWeight: 1.5,
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+
+    await processProductsChunk({ syncLog: log, cursor: null });
+
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(800_101) },
+    });
+    expect(variant.syncedDimensionalWeight?.toString()).toBe('1.5');
+    expect(variant.dimensionalWeight).toBeNull();
+  });
+
+  it('LOAD-BEARING: re-sync never overwrites the user override (dimensionalWeight column is sacred)', async () => {
+    // This is the test that proves the two-column architecture works.
+    // If this ever fails, somebody has reintroduced a write to
+    // ProductVariant.dimensional_weight from the sync handler — that path
+    // must never exist.
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    // Seed: first sync brings Trendyol's value (1.0), no user override yet.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 800_002,
+            productMainId: 'TS-DESI-2',
+            title: 'Desi Override Survives',
+            variants: [
+              {
+                variantId: 800_102,
+                barcode: 'desi-bc-2',
+                stockCode: 'desi-sk-2',
+                dimensionalWeight: 1.0,
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    const log1 = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+    await processProductsChunk({ syncLog: log1, cursor: null });
+
+    // Mark log1 as completed so the (store_id, sync_type) active-sync
+    // uniqueness constraint allows log2 to be created.
+    await prisma.syncLog.update({
+      where: { id: log1.id },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    });
+
+    // Simulate the user editing the value to 5.00.
+    await prisma.productVariant.updateMany({
+      where: { storeId, platformVariantId: BigInt(800_102) },
+      data: { dimensionalWeight: '5.00' },
+    });
+
+    // Second sync: Trendyol now reports 2.0 (their pipeline recomputed).
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 800_002,
+            productMainId: 'TS-DESI-2',
+            title: 'Desi Override Survives',
+            variants: [
+              {
+                variantId: 800_102,
+                barcode: 'desi-bc-2',
+                stockCode: 'desi-sk-2',
+                dimensionalWeight: 2.0,
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    const log2 = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+    await processProductsChunk({ syncLog: log2, cursor: null });
+
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(800_102) },
+    });
+    // User value untouched.
+    expect(variant.dimensionalWeight?.toString()).toBe('5');
+    // Synced column refreshed.
+    expect(variant.syncedDimensionalWeight?.toString()).toBe('2');
+  });
+
+  it('treats omitted or zero dimensionalWeight from Trendyol as null (preserves "unknown" vs "0 desi")', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 800_003,
+            productMainId: 'TS-DESI-3',
+            title: 'Desi Missing Product',
+            variants: [
+              // Omitted (real Trendyol responses often skip this field
+              // until their pricing pipeline computes it).
+              { variantId: 800_103, barcode: 'desi-bc-3a', stockCode: 'desi-sk-3a' },
+              // Explicit 0 — Trendyol's "not yet computed" sentinel,
+              // distinct from a real 0-desi claim.
+              {
+                variantId: 800_104,
+                barcode: 'desi-bc-3b',
+                stockCode: 'desi-sk-3b',
+                dimensionalWeight: 0,
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+    await processProductsChunk({ syncLog: log, cursor: null });
+
+    const missing = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(800_103) },
+    });
+    const zero = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(800_104) },
+    });
+    expect(missing.syncedDimensionalWeight).toBeNull();
+    expect(zero.syncedDimensionalWeight).toBeNull();
   });
 });

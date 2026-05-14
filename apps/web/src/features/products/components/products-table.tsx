@@ -21,6 +21,7 @@ import type { ProductFacetsResponse } from '../api/list-product-facets.api';
 import type { ProductWithVariants } from '../api/list-products.api';
 import {
   computeDeliveryType,
+  desiRange,
   dominantDeliveryType,
   isMultiVariant,
   priceRange,
@@ -36,6 +37,8 @@ import { ColorAttribute } from './color-attribute';
 import { CostCell } from './cost-cell';
 import { CostCellPopover } from './cost-cell-popover';
 import { DeliveryBadge } from './delivery-badge';
+import { DesiCell } from './desi-cell';
+import { DesiCellPopover } from './desi-cell-popover';
 import { ParentRowCostCell } from './parent-row-cost-cell';
 import { ProductImageCell } from './product-image-cell';
 import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
@@ -57,6 +60,7 @@ function getSelectedRowOriginals(table: TanstackTable<ProductRow>): ProductRow[]
 
 interface ProductsTableProps {
   orgId: string;
+  storeId: string;
   data: ProductWithVariants[];
   loading?: boolean;
   empty?: React.ReactNode;
@@ -407,6 +411,54 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         },
       },
       {
+        id: 'desi',
+        header: () => tCols('desi'),
+        meta: { numeric: true },
+        cell: ({ row }) => {
+          if (row.original.kind === 'parent') {
+            const p = row.original.product;
+            if (!isMultiVariant(p)) {
+              const v = p.variants[0];
+              if (v === undefined) return <span className="text-muted-foreground">—</span>;
+              return (
+                <DesiCellPopover orgId={props.orgId} storeId={props.storeId} variant={v}>
+                  <span>
+                    <DesiCell variant={v} />
+                  </span>
+                </DesiCellPopover>
+              );
+            }
+            const range = desiRange(p.variants);
+            if (range === null) return <span className="text-muted-foreground">—</span>;
+            if (range.isSingle) {
+              return (
+                <span
+                  className={cn(
+                    'text-sm tabular-nums',
+                    range.anyOverridden ? 'text-primary font-medium' : 'text-foreground',
+                  )}
+                >
+                  {range.min}
+                </span>
+              );
+            }
+            return (
+              <span className="text-foreground text-sm tabular-nums">
+                {range.min} – {range.max}
+              </span>
+            );
+          }
+          const v = row.original.variant;
+          return (
+            <DesiCellPopover orgId={props.orgId} storeId={props.storeId} variant={v}>
+              <span>
+                <DesiCell variant={v} />
+              </span>
+            </DesiCellPopover>
+          );
+        },
+      },
+      {
         id: 'cost',
         header: () => tCols('cost'),
         meta: { numeric: true },
@@ -532,6 +584,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         return (
           <ProductsBulkCostActionBar
             orgId={props.orgId}
+            storeId={props.storeId}
             selectedRows={selected}
             onClearSelection={() => table.resetRowSelection()}
           />

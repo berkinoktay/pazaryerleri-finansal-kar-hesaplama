@@ -1,6 +1,6 @@
 'use client';
 
-import { AddCircleIcon, Delete01Icon, RepeatIcon } from 'hugeicons-react';
+import { AddCircleIcon, Delete01Icon, RepeatIcon, WeightScaleIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
@@ -16,6 +16,7 @@ import { useReplaceCostProfiles } from '@/features/costs/hooks/use-replace-cost-
 import { useCostProfiles } from '@/features/costs/hooks/use-cost-profiles';
 import { CostProfileType } from '@/features/costs/types/cost-profile.types';
 
+import { BulkDesiDialog } from './bulk-desi-dialog';
 import type { ProductRow } from './products-bulk-cost-action-bar.types';
 
 export type { ProductRow };
@@ -43,13 +44,14 @@ export function resolveVariantIds(rows: ProductRow[]): string[] {
 
 export interface ProductsBulkCostActionBarProps {
   orgId: string;
+  storeId: string;
   /** Currently selected rows from the TanStack table's getSelectedRowModel().rows */
   selectedRows: ProductRow[];
   /** Clears the table's row selection state */
   onClearSelection: () => void;
 }
 
-type ActiveDialog = 'attach' | 'detach' | 'replace' | null;
+type ActiveDialog = 'attach' | 'detach' | 'replace' | 'desi' | null;
 
 /**
  * Floating action bar for bulk cost operations on selected products table rows.
@@ -66,10 +68,12 @@ type ActiveDialog = 'attach' | 'detach' | 'replace' | null;
  */
 export function ProductsBulkCostActionBar({
   orgId,
+  storeId,
   selectedRows,
   onClearSelection,
 }: ProductsBulkCostActionBarProps): React.ReactElement | null {
   const t = useTranslations('products.bulkCost');
+  const tDesi = useTranslations('products.bulkDesi');
 
   const [activeDialog, setActiveDialog] = React.useState<ActiveDialog>(null);
   const [replaceProfileId, setReplaceProfileId] = React.useState<string | null>(null);
@@ -196,6 +200,16 @@ export function ProductsBulkCostActionBar({
       tone: 'destructive' as const,
       disabled: replaceMutation.isPending,
     },
+    {
+      id: 'desi',
+      label: tDesi('actionLabel'),
+      icon: <WeightScaleIcon className="size-icon-sm" />,
+      onClick: () => setActiveDialog('desi'),
+      // Group break visually separates the cost cluster (3 actions on the
+      // left) from the dimensional-weight cluster (this action, and any
+      // future per-weight bulk operations to the right of it).
+      groupBreakBefore: true,
+    },
   ];
 
   // Config for the three combobox dialogs — same structure, different strings + handler.
@@ -283,6 +297,15 @@ export function ProductsBulkCostActionBar({
         tone="destructive"
         onConfirm={handleReplaceConfirm}
         loading={replaceMutation.isPending}
+      />
+
+      <BulkDesiDialog
+        open={activeDialog === 'desi'}
+        onOpenChange={(o) => setActiveDialog(o ? 'desi' : null)}
+        orgId={orgId}
+        storeId={storeId}
+        variantIds={variantIds}
+        onClearSelection={onClearSelection}
       />
     </>
   );
