@@ -115,6 +115,15 @@ enum FxRateMode {
   MANUAL
 }
 
+// Marketplace komisyon tarifesi kuralı türü. CATEGORY yalnız kategori bazlı;
+// CATEGORY_BRAND ek olarak marka kırılımı içerir. Trendyol'un "matching rules
+// → en düşüğü uygulanır" mantığı için iki türü tek tabloda toplayıp app-layer'da
+// MIN() üzerinden resolve ediyoruz.
+enum CommissionRuleKind {
+  CATEGORY
+  CATEGORY_BRAND
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -141,11 +150,12 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members      OrganizationMember[]
-  stores       Store[]
-  expenses     Expense[]
-  syncLogs     SyncLog[]
-  costProfiles CostProfile[]
+  members         OrganizationMember[]
+  stores          Store[]
+  expenses        Expense[]
+  syncLogs        SyncLog[]
+  costProfiles    CostProfile[]
+  commissionRates MarketplaceCommissionRate[]
 
   @@map("organizations")
 }
@@ -188,6 +198,7 @@ model Store {
   orders          Order[]
   settlements     Settlement[]
   syncLogs        SyncLog[]
+  commissionRates MarketplaceCommissionRate[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -565,4 +576,71 @@ model SyncLog {
   @@index([storeId, startedAt])
   @@index([status, nextAttemptAt])
   @@map("sync_logs")
+}
+
+// Marketplace komisyon tarifesi. Trendyol partner panel BFF'inden
+// (apigw.trendyol.com /partner/seller-allowance-sfjdomestic-santral/commercial-rules/*)
+// veya gelecekte Hepsiburada panelinden çekilen, satıcıya özel müzakere edilmiş
+// kategori (+ marka) bazlı komisyon oranı ve vade. Order.commissionAmount'tan
+// FARKLI — bu **gelecek komisyon tahmini** içindir (yeni ürün fiyatlandırma),
+// sipariş satırının fiili komisyonu değil.
+//
+// REPLACE semantiği: her refresh `(store_id, rule_kind)` çiftindeki tüm satırlar
+// transaction içinde silinir ve yeniden yazılır. Historik tarife saklanmaz —
+// geçmiş siparişler için OrderItem.commissionAmount/Rate authoritative.
+model MarketplaceCommissionRate {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @map("organization_id") @db.Uuid
+  storeId        String             @map("store_id") @db.Uuid
+  platform       Platform
+  ruleKind       CommissionRuleKind @map("rule_kind")
+
+  // External marketplace identity. BigInt çünkü Trendyol categoryId/brandId
+  // alanları int64 (örn. brandId 977855).
+  categoryId BigInt  @map("category_id")
+  brandId    BigInt? @map("brand_id") // CATEGORY kuralları için NULL
+
+  // Denormalize display alanları — reference tablo eklemeden import edebilelim
+  // diye (CLAUDE.md WET+1 promotion trigger: ikinci feature isteyince normalize
+  // ederiz). parentCategoryName sadece CATEGORY kurallarında dolu olur;
+  // brandName sadece CATEGORY_BRAND'de.
+  categoryName       String  @map("category_name")
+  parentCategoryName String? @map("parent_category_name")
+  brandName          String? @map("brand_name")
+
+  // Tarife. Decimal(5,2) — stage'de 99.50, prod'da ≤30; (5,2) sınırı 999.99
+  // ile güvenli pay bırakıyor. OrderItem.commissionRate ile aynı precision.
+  baseRate        Decimal @map("base_rate") @db.Decimal(5, 2)
+  paymentTermDays Int     @map("payment_term_days")
+
+  // Platform-spesifik segment override'lar. Trendyol için key'ler:
+  // {"ka1": "4.00", "ka2": "5.00", "na1": "...", "microSegment": "..."}.
+  // Hepsiburada gelirse farklı key seti — JSONB sabit kolonu zorlamadığı için
+  // şema migration'sız yeni platform kabul ediyor. Resolve mantığı app-layer'da
+  // platform-spesifik key lookup yapar (commission-rate-resolver.ts).
+  segmentOverrides Json @default("{}") @map("segment_overrides")
+
+  // Audit
+  fetchedAt    DateTime @map("fetched_at")
+  sourceScreen String   @map("source_screen") // x-system-screen header değeri
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  // NULL brandId (CATEGORY kuralları) durumunda PostgreSQL'in default
+  // NULLS DISTINCT davranışı bu unique'i kısmen etkisiz bırakır — yani aynı
+  // (store, CATEGORY, categoryId) için teorik olarak birden fazla satır olabilir.
+  // Defense-in-depth: import servisi her zaman transactional REPLACE yapar
+  // (DELETE WHERE store_id=$1 AND rule_kind=$2; sonra INSERT-many), bu yüzden
+  // import path üzerinden duplicate giremez. Manual SQL/admin yazımı senaryosu
+  // için resolver findFirst kullanır, findUnique değil.
+  // Migration sonrası raw SQL ile partial unique indexes eklenecek (gerçek
+  // dedup garantisi için, rule_kind başına ayrı kısıt) — `migration.sql` post-step.
+  @@unique([storeId, ruleKind, categoryId, brandId], map: "marketplace_commission_rate_dedup")
+  @@index([organizationId])
+  @@index([storeId, ruleKind, categoryId])
+  @@map("marketplace_commission_rate")
 }
