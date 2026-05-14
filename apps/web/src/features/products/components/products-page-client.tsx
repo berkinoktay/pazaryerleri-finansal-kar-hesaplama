@@ -164,6 +164,7 @@ export function ProductsPageClient({
 
         <ProductsTable
           orgId={orgId}
+          storeId={storeId}
           data={data}
           loading={isInitialLoad}
           empty={

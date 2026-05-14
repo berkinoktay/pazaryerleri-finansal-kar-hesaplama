@@ -785,7 +785,8 @@
       "salePrice": "Price",
       "stock": "Stock",
       "status": "Status",
-      "cost": "Cost"
+      "cost": "Cost",
+      "desi": "Desi"
     },
     "delivery": {
       "sameDay": "Same-day shipping",
@@ -850,6 +851,24 @@
         "removeLabel": "Remove profile"
       }
     },
+    "desiCell": {
+      "addDesi": "+ Add desi",
+      "overrideAria": "You set this dimensional weight manually.",
+      "parentRange": "{min} – {max}",
+      "popover": {
+        "title": "Dimensional weight",
+        "placeholder": "1.5",
+        "syncedHint": "Trendyol value: {value}",
+        "reset": "Reset to Trendyol value",
+        "save": "Save",
+        "cancel": "Cancel",
+        "errors": {
+          "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be greater than zero.",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi must be less than 999.99."
+        }
+      }
+    },
     "parentCostCell": {
       "allSame": "all same",
       "variantCount": "{count} variants",
@@ -893,6 +912,26 @@
         "attached": "Cost attached to {count} variants",
         "detached": "Cost removed from {count} variants",
         "replaced": "Cost profiles updated on {count} variants"
+      }
+    },
+    "bulkDesi": {
+      "actionLabel": "Set desi",
+      "title": "Set dimensional weight",
+      "description": "Apply one desi value to all {count} selected variants.",
+      "fieldLabel": "Desi",
+      "placeholder": "1.5",
+      "help": "This value overwrites the Trendyol value and is preserved across future syncs.",
+      "apply": "Apply to {count} variants",
+      "cancel": "Cancel",
+      "clearAll": "Reset all to Trendyol value",
+      "toast": {
+        "applied": "Applied desi {value} to {count} variants",
+        "cleared": "Cleared desi override on {count} variants"
+      },
+      "errors": {
+        "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be greater than zero.",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi must be less than 999.99."
       }
     }
   },

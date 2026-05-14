@@ -35,6 +35,17 @@ function priceToDecimalString(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
+// Nullable variant of the decimal mapper, used for fields where "absent on
+// the wire" must remain distinguishable from zero in the DB (e.g. desi,
+// where 0 has a different shipping cost meaning than "unknown"). Also
+// treats 0 as null — Trendyol commonly emits 0 when its own pipeline has
+// not computed the value yet, and we don't want to mistake that for a
+// real "0 desi" claim.
+function nullableDecimalString(value: number | null | undefined): string | null {
+  if (value === null || value === undefined || !Number.isFinite(value) || value === 0) return null;
+  return value.toFixed(2);
+}
+
 // Trendyol's panel concatenates every "Renk" attribute with a space — categories
 // often emit two entries (attrId 47 + 295 for cottons, both as attributeName
 // "Renk") that the seller sees as e.g. "Red Haki" or "Black Siyah". Picking just
@@ -95,6 +106,7 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     locked: variant.locked ?? false,
     size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
+    syncedDimensionalWeight: nullableDecimalString(variant.dimensionalWeight),
   };
 }
 

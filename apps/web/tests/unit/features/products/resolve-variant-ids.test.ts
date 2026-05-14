@@ -30,6 +30,9 @@ function makeVariant(id: string, overrides: Partial<VariantSummary> = {}): Varia
     currentCostTry: null,
     profileCount: 0,
     costStatus: 'NO_PROFILES',
+    dimensionalWeight: null,
+    syncedDimensionalWeight: null,
+    isDimensionalWeightOverridden: false,
     ...overrides,
   };
 }

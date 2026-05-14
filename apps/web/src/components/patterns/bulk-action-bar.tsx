@@ -46,6 +46,15 @@ export interface BulkAction {
   tone?: 'default' | 'destructive';
   /** Disable this individual action without hiding the whole bar. */
   disabled?: boolean;
+  /**
+   * When true, render a thin vertical separator BEFORE this action.
+   * Use to visually group actions by domain — e.g. three cost actions
+   * followed by `{ groupBreakBefore: true, ... }` on a desi action so
+   * the bar reads as two clusters instead of an undifferentiated row.
+   * The first action in the list never gets a leading separator even
+   * if this flag is set.
+   */
+  groupBreakBefore?: boolean;
 }
 
 export interface BulkActionBarProps {
@@ -112,18 +121,22 @@ export function BulkActionBar({
         <>
           <Separator orientation="vertical" className="h-5" />
           <div className="gap-3xs flex items-center">
-            {actions.map((action) => (
-              <Button
-                key={action.id}
-                type="button"
-                variant={action.tone === 'destructive' ? 'destructive' : 'ghost'}
-                size="sm"
-                onClick={action.onClick}
-                disabled={action.disabled}
-              >
-                {action.icon}
-                {action.label}
-              </Button>
+            {actions.map((action, index) => (
+              <React.Fragment key={action.id}>
+                {action.groupBreakBefore === true && index > 0 ? (
+                  <Separator orientation="vertical" className="mx-3xs h-5" />
+                ) : null}
+                <Button
+                  type="button"
+                  variant={action.tone === 'destructive' ? 'destructive' : 'ghost'}
+                  size="sm"
+                  onClick={action.onClick}
+                  disabled={action.disabled}
+                >
+                  {action.icon}
+                  {action.label}
+                </Button>
+              </React.Fragment>
             ))}
           </div>
         </>
