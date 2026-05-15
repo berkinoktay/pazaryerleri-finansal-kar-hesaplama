@@ -1,6 +1,12 @@
 'use client';
 
-import { parseAsString, parseAsStringEnum, useQueryStates, type Values } from 'nuqs';
+import {
+  parseAsInteger,
+  parseAsString,
+  parseAsStringEnum,
+  useQueryStates,
+  type Values,
+} from 'nuqs';
 
 import type {
   CommissionRateProductScope,
@@ -22,6 +28,8 @@ export const COMMISSION_RATE_SORTS: readonly CommissionRateSort[] = [
   'base_rate:desc',
   'product_count:desc',
 ];
+export const COMMISSION_RATES_PER_PAGE_OPTIONS: readonly number[] = [10, 25, 50, 100];
+export const COMMISSION_RATES_DEFAULT_PER_PAGE = 50;
 
 export const commissionRatesFiltersParsers = {
   ruleKind: parseAsStringEnum<CommissionRateRuleKind>([...COMMISSION_RATE_RULE_KINDS]).withDefault(
@@ -34,26 +42,36 @@ export const commissionRatesFiltersParsers = {
   sort: parseAsStringEnum<CommissionRateSort>([...COMMISSION_RATE_SORTS]).withDefault(
     'category_name:asc',
   ),
+  page: parseAsInteger.withDefault(1),
+  perPage: parseAsInteger.withDefault(COMMISSION_RATES_DEFAULT_PER_PAGE),
 };
 
 export type CommissionRatesFilters = Values<typeof commissionRatesFiltersParsers>;
 type FiltersUpdater = Partial<CommissionRatesFilters>;
 
 /**
- * URL ↔ filter state binding via nuqs. Every filter change generates a
- * new React Query key (cursor is owned by useInfiniteQuery via
- * pageParam, not stored here) so list pages reset automatically.
- *
- * Crucially: switching `sort` to 'product_count:desc' MUST happen in a
- * single setFilters call together with productScope='active' to honor
- * the backend's INVALID_SORT_FOR_SCOPE invariant. The auto-switch
- * helper in lib/sort-options.ts computes the safe pair; the table's
- * sort handler invokes it before calling setFilters.
+ * URL ↔ filter state binding via nuqs. Any change that's not strictly
+ * `page` / `perPage` resets `page` to 1 so the user never lands on an
+ * empty page after narrowing the result set.
  */
 export function useCommissionRatesFilters(): {
   filters: CommissionRatesFilters;
   setFilters: (next: FiltersUpdater) => Promise<URLSearchParams>;
 } {
   const [filters, setRaw] = useQueryStates(commissionRatesFiltersParsers, { history: 'push' });
-  return { filters, setFilters: setRaw };
+
+  const setFilters = async (next: FiltersUpdater): Promise<URLSearchParams> => {
+    const touchesNonPaginationFilter =
+      'ruleKind' in next ||
+      'productScope' in next ||
+      'q' in next ||
+      'sort' in next ||
+      'perPage' in next;
+    return setRaw({
+      ...next,
+      ...(touchesNonPaginationFilter && next.page === undefined ? { page: 1 } : {}),
+    });
+  };
+
+  return { filters, setFilters };
 }

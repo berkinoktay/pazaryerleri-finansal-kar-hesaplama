@@ -1,11 +1,6 @@
 // Query key factory for the commission-rates feature. Mirrors the
 // convention in features/products/query-keys.ts so React Query
 // invalidation reads predictably across the codebase.
-//
-// Note: the cursor is intentionally NOT part of the filters object —
-// useInfiniteQuery owns cursor lifecycle via pageParam. Including
-// `cursor` in the queryKey would prevent the infinite cache from
-// stitching pages together.
 
 export type CommissionRateRuleKind = 'CATEGORY' | 'CATEGORY_BRAND';
 export type CommissionRateProductScope = 'all' | 'active';
@@ -20,6 +15,8 @@ export interface CommissionRateListFilters {
   productScope: CommissionRateProductScope;
   q?: string;
   sort: CommissionRateSort;
+  page: number;
+  perPage: number;
 }
 
 export const commissionRateKeys = {

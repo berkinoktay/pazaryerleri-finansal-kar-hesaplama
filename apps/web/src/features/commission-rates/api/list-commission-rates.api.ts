@@ -19,14 +19,14 @@ export interface ListCommissionRatesArgs {
   productScope: CommissionRateProductScope;
   q?: string;
   sort: CommissionRateSort;
-  cursor?: string;
-  limit?: number;
+  page: number;
+  perPage: number;
 }
 
 export async function listCommissionRates(
   args: ListCommissionRatesArgs,
 ): Promise<ListCommissionRatesResponse> {
-  const { orgId, storeId, ruleKind, productScope, q, sort, cursor, limit } = args;
+  const { orgId, storeId, ruleKind, productScope, q, sort, page, perPage } = args;
   const { data, error, response } = await apiClient.GET(
     '/v1/organizations/{orgId}/stores/{storeId}/commission-rates',
     {
@@ -37,8 +37,8 @@ export async function listCommissionRates(
           productScope,
           ...(q !== undefined && q.length > 0 ? { q } : {}),
           sort,
-          ...(cursor !== undefined && cursor.length > 0 ? { cursor } : {}),
-          ...(limit !== undefined ? { limit } : {}),
+          page,
+          perPage,
         },
       },
     },
