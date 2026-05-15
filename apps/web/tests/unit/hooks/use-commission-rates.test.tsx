@@ -23,6 +23,8 @@ const baseArgs = {
   ruleKind: 'CATEGORY' as const,
   productScope: 'all' as const,
   sort: 'category_name:asc' as const,
+  page: 1,
+  perPage: 50,
 };
 
 function row(overrides: Partial<Record<string, unknown>> = {}) {
@@ -46,16 +48,16 @@ function row(overrides: Partial<Record<string, unknown>> = {}) {
 
 function fixtureResponse(
   rows: ReturnType<typeof row>[],
-  meta: Partial<{ nextCursor: string | null; hasMore: boolean; limit: number }> = {},
+  pagination: Partial<{ page: number; perPage: number; total: number; totalPages: number }> = {},
 ) {
   return {
     data: rows,
-    meta: { nextCursor: null, hasMore: false, limit: 50, ...meta },
+    pagination: { page: 1, perPage: 50, total: rows.length, totalPages: 1, ...pagination },
   };
 }
 
 describe('useCommissionRates', () => {
-  it('fetches the first page with the required ruleKind', async () => {
+  it('fetches page 1 by default with the page + perPage query params', async () => {
     let capturedUrl = '';
     server.use(
       http.get(ENDPOINT, ({ request }) => {
@@ -66,11 +68,13 @@ describe('useCommissionRates', () => {
 
     const { result } = renderHook(() => useCommissionRates(baseArgs), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.pages[0]?.data).toHaveLength(1);
+    expect(result.current.data?.data).toHaveLength(1);
+    expect(result.current.data?.pagination.page).toBe(1);
     expect(capturedUrl).toContain('ruleKind=CATEGORY');
     expect(capturedUrl).toContain('productScope=all');
     expect(capturedUrl).toContain('sort=category_name%3Aasc');
-    expect(capturedUrl).toContain('limit=50');
+    expect(capturedUrl).toContain('page=1');
+    expect(capturedUrl).toContain('perPage=50');
     expect(capturedUrl).not.toContain('cursor=');
   });
 
@@ -80,35 +84,25 @@ describe('useCommissionRates', () => {
     expect(result.current.status).toBe('pending');
   });
 
-  it('uses the previous nextCursor on fetchNextPage', async () => {
-    const capturedCursors: string[] = [];
+  it('forwards page=2 to the request when the caller increments page', async () => {
+    let capturedUrl = '';
     server.use(
       http.get(ENDPOINT, ({ request }) => {
-        const url = new URL(request.url);
-        const cursor = url.searchParams.get('cursor');
-        capturedCursors.push(cursor ?? '');
-        if (cursor === null) {
-          return HttpResponse.json(
-            fixtureResponse([row()], { nextCursor: 'cursor-page-2', hasMore: true }),
-            { status: 200 },
-          );
-        }
+        capturedUrl = request.url;
         return HttpResponse.json(
-          fixtureResponse([row({ id: 'r-2' })], { nextCursor: null, hasMore: false }),
+          fixtureResponse([row({ id: 'r-2' })], { page: 2, total: 60, totalPages: 2 }),
           { status: 200 },
         );
       }),
     );
 
-    const { result } = renderHook(() => useCommissionRates(baseArgs), { wrapper });
+    const { result } = renderHook(() => useCommissionRates({ ...baseArgs, page: 2 }), {
+      wrapper,
+    });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.hasNextPage).toBe(true);
-
-    void result.current.fetchNextPage();
-    await waitFor(() => expect(result.current.data?.pages.length).toBe(2));
-    expect(capturedCursors).toEqual(['', 'cursor-page-2']);
-    expect(result.current.hasNextPage).toBe(false);
-    expect(result.current.data?.pages.flatMap((p) => p.data)).toHaveLength(2);
+    expect(capturedUrl).toContain('page=2');
+    expect(result.current.data?.pagination.page).toBe(2);
+    expect(result.current.data?.pagination.totalPages).toBe(2);
   });
 
   it('surfaces an ApiError on 422 INVALID_SORT_FOR_SCOPE', async () => {
@@ -128,11 +122,7 @@ describe('useCommissionRates', () => {
     );
 
     const { result } = renderHook(
-      () =>
-        useCommissionRates({
-          ...baseArgs,
-          sort: 'product_count:desc',
-        }),
+      () => useCommissionRates({ ...baseArgs, sort: 'product_count:desc' }),
       { wrapper },
     );
     await waitFor(() => expect(result.current.isError).toBe(true));
