@@ -1,0 +1,169 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
+import * as React from 'react';
+import { toast } from 'sonner';
+
+import { FilterTabs } from '@/components/patterns/filter-tabs';
+import { PageHeader } from '@/components/patterns/page-header';
+
+import { useCommissionRates } from '../hooks/use-commission-rates';
+import { useCommissionRatesFilters } from '../hooks/use-commission-rates-filters';
+import type {
+  CommissionRateProductScope,
+  CommissionRateRuleKind,
+  CommissionRateSort,
+} from '../query-keys';
+
+import { CommissionRatesEmptyState } from './commission-rates-empty-state';
+import { CommissionRatesLoadMore } from './commission-rates-load-more';
+import { CommissionRatesTable } from './commission-rates-table';
+import { CommissionRatesToolbar } from './commission-rates-toolbar';
+
+interface CommissionRatesPageClientProps {
+  orgId: string | null;
+  storeId: string | null;
+  pageTitle: string;
+  pageIntent: string;
+}
+
+const SEARCH_DEBOUNCE_MS = 250;
+
+export function CommissionRatesPageClient({
+  orgId,
+  storeId,
+  pageTitle,
+  pageIntent,
+}: CommissionRatesPageClientProps): React.ReactElement {
+  const t = useTranslations('features.commissionRates');
+  const { filters, setFilters } = useCommissionRatesFilters();
+  const noStoreSelected = orgId === null || storeId === null;
+
+  // Search input has its own local state so each keystroke doesn't push
+  // a URL update; we debounce the URL write to ~250ms idle. The local
+  // state is only seeded from URL once on mount — handleClearFilters
+  // resets both layers in a single transition for the in-app reset path,
+  // and we accept that browser back/forward won't repaint the draft
+  // value (acceptable v1 trade-off for filter pages).
+  const [qInput, setQInput] = React.useState(filters.q);
+
+  React.useEffect(() => {
+    if (qInput === filters.q) return;
+    const handle = window.setTimeout(() => {
+      void setFilters({ q: qInput });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [qInput, filters.q, setFilters]);
+
+  const query = useCommissionRates(
+    noStoreSelected
+      ? null
+      : {
+          orgId,
+          storeId,
+          ruleKind: filters.ruleKind,
+          productScope: filters.productScope,
+          q: filters.q.length > 0 ? filters.q : undefined,
+          sort: filters.sort,
+        },
+  );
+
+  if (noStoreSelected) {
+    return (
+      <div className="gap-lg flex flex-col">
+        <PageHeader title={pageTitle} intent={pageIntent} />
+        <CommissionRatesEmptyState variant="no-store" />
+      </div>
+    );
+  }
+
+  const rows = query.data?.pages.flatMap((p) => p.data) ?? [];
+  const totalLoaded = rows.length;
+  const isInitialLoad = query.isLoading;
+  const hasNextPage = query.hasNextPage ?? false;
+
+  const hasActiveFilter = filters.q.length > 0 || filters.productScope === 'active';
+  const isEmptyAfterLoad = !isInitialLoad && totalLoaded === 0;
+
+  const handleRuleKindChange = (next: CommissionRateRuleKind): void => {
+    void setFilters({ ruleKind: next });
+  };
+
+  const handleProductScopeChange = (next: CommissionRateProductScope): void => {
+    // Don't auto-flip an existing 'product_count:desc' sort back to
+    // default when the user is just toggling scope — instead, drop sort
+    // back to the safe default if the invariant breaks.
+    const sortBecomesInvalid = next === 'all' && filters.sort === 'product_count:desc';
+    void setFilters({
+      productScope: next,
+      ...(sortBecomesInvalid ? { sort: 'category_name:asc' as CommissionRateSort } : {}),
+    });
+  };
+
+  const handleSortChange = (intent: {
+    sort: CommissionRateSort;
+    productScope: CommissionRateProductScope;
+    autoSwitchedScope: boolean;
+  }): void => {
+    void setFilters({ sort: intent.sort, productScope: intent.productScope });
+    if (intent.autoSwitchedScope) {
+      toast.info(t('autoSwitchedToActive'));
+    }
+  };
+
+  const handleClearFilters = (): void => {
+    setQInput('');
+    void setFilters({ q: '', productScope: 'all' });
+  };
+
+  const emptyNode = isEmptyAfterLoad ? (
+    hasActiveFilter ? (
+      <CommissionRatesEmptyState variant="no-matches" onClearFilters={handleClearFilters} />
+    ) : (
+      <CommissionRatesEmptyState variant="no-rates" />
+    )
+  ) : undefined;
+
+  return (
+    <div className="gap-lg flex flex-col">
+      <PageHeader title={pageTitle} intent={pageIntent} />
+
+      <div className="gap-md flex flex-col">
+        <FilterTabs<CommissionRateRuleKind>
+          value={filters.ruleKind}
+          onValueChange={handleRuleKindChange}
+          options={[
+            { value: 'CATEGORY', label: t('tabs.category') },
+            { value: 'CATEGORY_BRAND', label: t('tabs.categoryBrand') },
+          ]}
+        />
+
+        <CommissionRatesTable
+          rows={rows}
+          ruleKind={filters.ruleKind}
+          productScope={filters.productScope}
+          sort={filters.sort}
+          loading={isInitialLoad}
+          empty={emptyNode}
+          toolbar={
+            <CommissionRatesToolbar
+              q={qInput}
+              onSearchChange={setQInput}
+              productScope={filters.productScope}
+              onProductScopeChange={handleProductScopeChange}
+            />
+          }
+          pagination={
+            <CommissionRatesLoadMore
+              hasNextPage={hasNextPage}
+              isFetchingNextPage={query.isFetchingNextPage}
+              totalLoaded={totalLoaded}
+              onLoadMore={() => void query.fetchNextPage()}
+            />
+          }
+          onSortChange={handleSortChange}
+        />
+      </div>
+    </div>
+  );
+}

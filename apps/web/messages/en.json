@@ -208,8 +208,8 @@
     "tools": {
       "tools": {
         "title": "Tools",
+        "commissionRates": "Commission Rates",
         "commissionCalculator": "Commission Calculator",
-        "categoryCommissions": "Category Commissions",
         "plusCommissionRates": "Plus Commission Rates",
         "productPricing": "Product Pricing"
       }
@@ -1034,6 +1034,57 @@
       "confirmDescription": "This cost profile will be archived and can no longer be attached to new variants. Past orders are unaffected. You can restore it at any time.",
       "confirm": "Archive",
       "cancel": "Cancel"
+    }
+  },
+  "features": {
+    "commissionRates": {
+      "page": {
+        "title": "Commission Rates",
+        "intent": "Current commission tariff for your Trendyol store"
+      },
+      "tabs": {
+        "category": "Categories",
+        "categoryBrand": "Category + Brand"
+      },
+      "toolbar": {
+        "searchPlaceholder": "Search category, parent category, or brand…",
+        "activeOnly": "Only what I sell"
+      },
+      "columns": {
+        "category": "Category",
+        "parentCategory": "Parent Category",
+        "brand": "Brand",
+        "baseRate": "Commission",
+        "paymentTermDays": "Settlement",
+        "productCount": "Products #",
+        "productCountHint": "Number of synced, approved products you have in this category."
+      },
+      "tooltip": {
+        "segmentOverridesTitle": "Segment overrides",
+        "paymentTermDaysSuffix": "{days} days"
+      },
+      "autoSwitchedToActive": "Switched to 'Only what I sell' — sorted by product count.",
+      "loadMore": {
+        "button": "Load more",
+        "loading": "Loading…",
+        "exhausted": "All results loaded — {count} rows"
+      },
+      "empty": {
+        "noStore": {
+          "title": "No active store",
+          "description": "Connect a store to view its commission tariff.",
+          "cta": "Connect store"
+        },
+        "noRates": {
+          "title": "Commission tariff not loaded yet",
+          "description": "Rates for this marketplace are not yet imported. The tariff will be available soon."
+        },
+        "noMatches": {
+          "title": "No rates match the current filter",
+          "description": "The search or 'Only what I sell' filter narrowed the results. Clear filters to view the full tariff.",
+          "action": "Clear filters"
+        }
+      }
     }
   }
 }
