@@ -4,7 +4,6 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { encodeCursor } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
 
@@ -33,7 +32,7 @@ interface ListItemWire {
 
 interface ListResponseWire {
   data: ListItemWire[];
-  meta: { nextCursor: string | null; hasMore: boolean; limit: number };
+  pagination: { page: number; perPage: number; total: number; totalPages: number };
 }
 
 interface ProblemDetailsWire {
@@ -178,8 +177,10 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/commission-rates', () => 
     expect(body.data[0]?.brandName).toBeNull();
     expect(body.data[0]?.parentCategoryName).toBe('Günlük Ayakkabı');
     expect(body.data[0]?.productCount).toBe(0);
-    expect(body.meta.hasMore).toBe(false);
-    expect(body.meta.nextCursor).toBeNull();
+    expect(body.pagination.page).toBe(1);
+    expect(body.pagination.perPage).toBe(50);
+    expect(body.pagination.total).toBeGreaterThanOrEqual(body.data.length);
+    expect(body.pagination.totalPages).toBeGreaterThanOrEqual(1);
   });
 
   // ─── 2. ruleKind splits results ───────────────────────────────────────────
@@ -302,7 +303,9 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/commission-rates', () => 
     expect(res.status).toBe(200);
     const body = (await res.json()) as ListResponseWire;
     expect(body.data).toEqual([]);
-    expect(body.meta.hasMore).toBe(false);
+    expect(body.pagination.page).toBe(1);
+    expect(body.pagination.total).toBe(0);
+    expect(body.pagination.totalPages).toBe(0);
   });
 
   // ─── 7. productCount excludes unapproved + variant-archived ───────────────
@@ -329,71 +332,69 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/commission-rates', () => 
     expect(body.data[0]?.productCount).toBe(3);
   });
 
-  // ─── 8. Cursor pagination ─────────────────────────────────────────────────
+  // ─── 8. Page-based pagination ─────────────────────────────────────────────
 
-  it('paginates with cursor and returns no overlap across pages', async () => {
-    const { user, orgId, storeId } = await setupOrgStore();
-    for (let i = 0; i < 25; i++) {
+  it('paginates with page=N and returns disjoint slices across pages', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
+
+    // Seed 30 CATEGORY rows so perPage=10 produces 3 pages
+    for (let i = 0; i < 30; i++) {
       await seedRate({
         ruleKind: 'CATEGORY',
         categoryId: 1000 + i,
-        // Pad numerically so alpha sort matches insertion order
-        categoryName: `Category ${String(i).padStart(3, '0')}`,
+        categoryName: `Cat ${String(i).padStart(3, '0')}`,
       });
     }
 
-    const firstRes = await app.request(
-      listUrl(orgId, storeId, { ruleKind: 'CATEGORY', limit: 10 }),
-      { headers: { Authorization: bearer(user.accessToken) } },
-    );
-    expect(firstRes.status).toBe(200);
-    const firstBody = (await firstRes.json()) as ListResponseWire;
-    expect(firstBody.data).toHaveLength(10);
-    expect(firstBody.meta.hasMore).toBe(true);
-    expect(firstBody.meta.nextCursor).not.toBeNull();
+    const reqPage = (page: number) =>
+      app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/commission-rates?ruleKind=CATEGORY&page=${page}&perPage=10`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
 
-    const secondRes = await app.request(
-      listUrl(orgId, storeId, {
-        ruleKind: 'CATEGORY',
-        limit: 10,
-        cursor: firstBody.meta.nextCursor ?? undefined,
-      }),
-      { headers: { Authorization: bearer(user.accessToken) } },
-    );
-    expect(secondRes.status).toBe(200);
-    const secondBody = (await secondRes.json()) as ListResponseWire;
-    expect(secondBody.data).toHaveLength(10);
+    const r1 = await reqPage(1);
+    expect(r1.status).toBe(200);
+    const b1 = (await r1.json()) as ListResponseWire;
+    expect(b1.data).toHaveLength(10);
+    expect(b1.pagination).toEqual({ page: 1, perPage: 10, total: 30, totalPages: 3 });
 
-    const firstIds = new Set(firstBody.data.map((r) => r.id));
-    const overlap = secondBody.data.filter((r) => firstIds.has(r.id));
-    expect(overlap).toEqual([]);
+    const r2 = await reqPage(2);
+    const b2 = (await r2.json()) as ListResponseWire;
+    expect(b2.data).toHaveLength(10);
+    expect(b2.pagination.page).toBe(2);
+
+    const r3 = await reqPage(3);
+    const b3 = (await r3.json()) as ListResponseWire;
+    expect(b3.data).toHaveLength(10);
+    expect(b3.pagination.page).toBe(3);
+
+    const ids = new Set<string>();
+    for (const row of [...b1.data, ...b2.data, ...b3.data]) {
+      expect(ids.has(row.id)).toBe(false);
+      ids.add(row.id);
+    }
+    expect(ids.size).toBe(30);
   });
 
-  // ─── 9. CURSOR_SORT_MISMATCH when sort changes between pages ──────────────
+  // ─── 9. perPage outside locked set → 422 ─────────────────────────────────
 
-  it('rejects a cursor encoded for a different sort with 422 CURSOR_SORT_MISMATCH', async () => {
-    const { user, orgId, storeId } = await setupOrgStore();
-    await seedRate({ ruleKind: 'CATEGORY', categoryId: 411 });
-
-    // Cursor was issued for a different sort
-    const staleCursor = encodeCursor({
-      sort: 'category_name:asc',
-      values: { id: '00000000-0000-0000-0000-000000000000' },
-    });
+  it('rejects perPage outside the locked set (e.g. 200) with 422 VALIDATION_ERROR', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
 
     const res = await app.request(
-      listUrl(orgId, storeId, {
-        ruleKind: 'CATEGORY',
-        sort: 'base_rate:asc',
-        cursor: staleCursor,
-      }),
+      `/v1/organizations/${org.id}/stores/${store.id}/commission-rates?ruleKind=CATEGORY&perPage=200`,
       { headers: { Authorization: bearer(user.accessToken) } },
     );
     expect(res.status).toBe(422);
     const body = (await res.json()) as ProblemDetailsWire;
     expect(body.code).toBe('VALIDATION_ERROR');
-    expect(body.errors?.[0]?.field).toBe('cursor');
-    expect(body.errors?.[0]?.code).toBe('CURSOR_SORT_MISMATCH');
+    expect(body.errors?.[0]?.field).toBe('perPage');
   });
 
   // ─── 10. sort=base_rate:desc ──────────────────────────────────────────────

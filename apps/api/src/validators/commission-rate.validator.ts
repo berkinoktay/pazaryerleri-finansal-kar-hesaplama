@@ -2,7 +2,7 @@ import { z } from '@hono/zod-openapi';
 
 import { CommissionRuleKind, Platform } from '@pazarsync/db/enums';
 
-import { CursorMetaSchema } from '../openapi';
+import { TablePaginationQuerySchema, tablePaginated } from '../openapi';
 
 // ─── Shared field schemas ────────────────────────────────────────────────────
 
@@ -58,23 +58,15 @@ export const listCommissionRatesQuerySchema = z
         example: 'ayakkabı',
       }),
     sort: SortSchema.default('category_name:asc'),
-    cursor: z
-      .string()
-      .optional()
-      .openapi({
-        description:
-          'Opaque pagination cursor from previous page meta.nextCursor. Encodes ' +
-          'the sort param; reusing a cursor with a different sort returns 422 ' +
-          'CURSOR_SORT_MISMATCH.',
-      }),
-    limit: z.coerce
-      .number()
-      .int()
-      .min(1, 'LIMIT_TOO_SMALL')
-      .max(100, 'LIMIT_TOO_LARGE')
-      .default(50)
-      .openapi({ description: 'Page size (1–100). Default 50.', example: 50 }),
   })
+  .merge(
+    TablePaginationQuerySchema.extend({
+      perPage: TablePaginationQuerySchema.shape.perPage.default(50).openapi({
+        description: 'Items per page. Locked to {10, 25, 50, 100}. Default 50.',
+        example: 50,
+      }),
+    }),
+  )
   .openapi('ListCommissionRatesQuery');
 
 export type ListCommissionRatesQuery = z.infer<typeof listCommissionRatesQuerySchema>;
@@ -139,11 +131,8 @@ export type CommissionRateListItem = z.infer<typeof CommissionRateListItemSchema
 
 // ─── Paginated response ──────────────────────────────────────────────────────
 
-export const ListCommissionRatesResponseSchema = z
-  .object({
-    data: z.array(CommissionRateListItemSchema),
-    meta: CursorMetaSchema,
-  })
-  .openapi('ListCommissionRatesResponse');
+export const ListCommissionRatesResponseSchema = tablePaginated(
+  CommissionRateListItemSchema,
+).openapi('ListCommissionRatesResponse');
 
 export type ListCommissionRatesResponse = z.infer<typeof ListCommissionRatesResponseSchema>;

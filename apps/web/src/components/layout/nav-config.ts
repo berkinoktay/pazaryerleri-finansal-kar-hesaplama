@@ -237,7 +237,7 @@ export const NAV_ITEMS = [
   {
     key: 'tools',
     labelKey: 'nav.tools',
-    href: '/tools/commission-calculator',
+    href: '/tools/commission-rates',
     icon: Calculator01Icon,
     sections: [
       {
@@ -245,14 +245,14 @@ export const NAV_ITEMS = [
         labelKey: 'navSections.tools.tools.title',
         items: [
           {
+            key: 'commission-rates',
+            labelKey: 'navSections.tools.tools.commissionRates',
+            href: '/tools/commission-rates',
+          },
+          {
             key: 'commission-calculator',
             labelKey: 'navSections.tools.tools.commissionCalculator',
             href: '/tools/commission-calculator',
-          },
-          {
-            key: 'category-commissions',
-            labelKey: 'navSections.tools.tools.categoryCommissions',
-            href: '/tools/category-commissions',
           },
           {
             key: 'plus-commission-rates',

@@ -208,8 +208,8 @@
     "tools": {
       "tools": {
         "title": "Araçlar",
+        "commissionRates": "Komisyon Oranları",
         "commissionCalculator": "Komisyon Hesaplama",
-        "categoryCommissions": "Kategori Komisyonları",
         "plusCommissionRates": "Plus Komisyon Tarifesi",
         "productPricing": "Ürün Fiyatlandırma"
       }
@@ -1098,6 +1098,52 @@
       "editForm": {
         "title": "Profil detayları",
         "savedSuccess": "Profil güncellendi."
+      }
+    }
+  },
+  "features": {
+    "commissionRates": {
+      "page": {
+        "title": "Komisyon Oranları",
+        "intent": "Trendyol mağazana ait güncel komisyon tarifesi"
+      },
+      "tabs": {
+        "category": "Kategoriler",
+        "categoryBrand": "Kategori + Marka"
+      },
+      "toolbar": {
+        "searchPlaceholder": "Kategori, üst kategori veya marka ara…",
+        "activeOnly": "Sadece sattıklarım"
+      },
+      "columns": {
+        "category": "Kategori",
+        "parentCategory": "Üst Kategori",
+        "brand": "Marka",
+        "baseRate": "Komisyon",
+        "paymentTermDays": "Vade",
+        "productCount": "Ürün #",
+        "productCountHint": "Bu kategoride senkronize edilmiş ve onaylı durumda olan ürünlerinin sayısı."
+      },
+      "tooltip": {
+        "segmentOverridesTitle": "Segment override'lar",
+        "paymentTermDaysSuffix": "{days} gün"
+      },
+      "autoSwitchedToActive": "Sattıklarım moduna geçildi — ürün sayısına göre sıralandı.",
+      "empty": {
+        "noStore": {
+          "title": "Aktif mağaza yok",
+          "description": "Komisyon tarifesini görüntülemek için önce bir mağaza bağlaman gerekiyor.",
+          "cta": "Mağaza bağla"
+        },
+        "noRates": {
+          "title": "Komisyon tarifesi henüz yüklenmedi",
+          "description": "Bu pazaryeri için komisyon oranları sistemde mevcut değil. Tarife yakında içeri aktarılacak."
+        },
+        "noMatches": {
+          "title": "Filtreyle eşleşen oran bulunamadı",
+          "description": "Arama veya 'Sattıklarım' filtresi sonuçları daralttı. Filtreyi temizleyerek tüm tarifeyi görüntüle.",
+          "action": "Filtreyi temizle"
+        }
       }
     }
   }
