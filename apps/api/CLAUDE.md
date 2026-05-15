@@ -407,7 +407,7 @@ CI rejects PRs where the spec snapshot drifts from the registered routes (see `.
 ### Conventions
 
 - **Casing**: camelCase in all JSON request/response bodies, query/path params, and headers. Snake_case is confined to the DB layer (Prisma `@@map`).
-- **Pagination**: cursor-based only. Use `cursorPaginationSchema` from `@pazarsync/utils`. Cursor encodes `{ v, sort, values: { …, id } }`. Server validates `sort` matches the request param; mismatch returns `400 CURSOR_SORT_MISMATCH`.
+- **Pagination**: cursor (`paginated`) for infinite-scroll surfaces; offset/page-based (`tablePaginated`) for table-driven endpoints with page-jump UX. Both helpers live in `apps/api/src/openapi/pagination.ts` — reuse, don't re-roll. Cursor encodes `{ v, sort, values: { …, id } }` and server validates `sort` matches the request param; mismatch returns `400 CURSOR_SORT_MISMATCH`.
 - **Errors**: RFC 7807 `ProblemDetails` with a stable `code` field (SCREAMING_SNAKE_CASE). English `title`/`detail` for logs; `code` is what the frontend translates.
 - **Money**: `Decimal` in services, string representation in API responses.
 - **Dates**: ISO 8601 (UTC) on the wire.

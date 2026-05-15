@@ -1,27 +1,19 @@
 import { prisma } from '@pazarsync/db';
 import type { Platform, Prisma } from '@pazarsync/db';
-import {
-  CursorSortMismatchError,
-  InvalidCursorError,
-  decodeCursor,
-  encodeCursor,
-} from '@pazarsync/utils';
+import { mapPrismaError } from '@pazarsync/sync-core';
 
 import { NotFoundError, ValidationError } from '../lib/errors';
 import type {
   CommissionRateListItem,
   ListCommissionRatesQuery,
+  ListCommissionRatesResponse,
 } from '../validators/commission-rate.validator';
 
 // Public input/output ─────────────────────────────────────────────────────────
 
 export type ListCommissionRatesFilters = ListCommissionRatesQuery;
 
-export interface ListCommissionRatesResult {
-  data: CommissionRateListItem[];
-  nextCursor: string | null;
-  hasMore: boolean;
-}
+export type ListCommissionRatesResult = ListCommissionRatesResponse;
 
 // Internal helpers ────────────────────────────────────────────────────────────
 
@@ -110,8 +102,8 @@ function buildSearchClause(q: string): Prisma.MarketplaceCommissionRateWhereInpu
  *
  * When the store has no active products in the relevant scope, returns a
  * clause that forces an empty result (`id: { in: [] }`) — cleaner than
- * branching on "skip the query entirely" and lets cursor pagination return
- * `hasMore: false` naturally.
+ * branching on "skip the query entirely" and lets the offset query return
+ * zero rows with `pagination.total = 0` naturally.
  */
 function buildActiveScopeClause(
   ruleKind: ListCommissionRatesFilters['ruleKind'],
@@ -148,27 +140,6 @@ function buildOrderBy(sort: SortKey): Prisma.MarketplaceCommissionRateOrderByWit
       // caller routes through the DB-side branch by mistake; deterministic
       // fallback keeps the response stable instead of erroring at the DB.
       return [{ id: 'asc' }];
-  }
-}
-
-function decodeAndVerifyCursor(cursor: string, expectedSort: string): string {
-  try {
-    const payload = decodeCursor(cursor, expectedSort);
-    return payload.values.id;
-  } catch (err) {
-    if (err instanceof CursorSortMismatchError) {
-      throw new ValidationError([
-        {
-          field: 'cursor',
-          code: 'CURSOR_SORT_MISMATCH',
-          meta: { cursorSort: err.cursorSort, requestSort: err.requestSort },
-        },
-      ]);
-    }
-    if (err instanceof InvalidCursorError) {
-      throw new ValidationError([{ field: 'cursor', code: 'INVALID_CURSOR' }]);
-    }
-    throw err;
   }
 }
 
@@ -214,36 +185,40 @@ function toWireItem(row: CommissionRateRow, productCount: number): CommissionRat
 
 interface BuildPageArgs {
   rows: CommissionRateRow[];
-  filters: ListCommissionRatesFilters;
   counts: ProductCounts;
+  page: number;
+  perPage: number;
+  total: number;
 }
 
-function buildPage({ rows, filters, counts }: BuildPageArgs): ListCommissionRatesResult {
-  const hasMore = rows.length > filters.limit;
-  const visible = hasMore ? rows.slice(0, filters.limit) : rows;
-  const data = visible.map((row) => toWireItem(row, lookupProductCount(row, counts)));
-
-  const lastRow = visible[visible.length - 1];
-  const nextCursor =
-    hasMore && lastRow !== undefined
-      ? encodeCursor({ sort: filters.sort, values: { id: lastRow.id } })
-      : null;
-
-  return { data, nextCursor, hasMore };
+function buildPage({
+  rows,
+  counts,
+  page,
+  perPage,
+  total,
+}: BuildPageArgs): ListCommissionRatesResult {
+  const data = rows.map((row) => toWireItem(row, lookupProductCount(row, counts)));
+  const totalPages = total === 0 ? 0 : Math.ceil(total / perPage);
+  return {
+    data,
+    pagination: { page, perPage, total, totalPages },
+  };
 }
 
 /**
- * Product-count sort path. Materializes all matching rows (bounded by
- * productScope=active), sorts by productCount desc with id-asc tiebreaker,
- * then slices by cursor. Cursor stores the id of the last shown row; on
- * the next page we filter to rows whose (productCount, id) come strictly
- * after the cursor row.
+ * In-memory sort path for `sort=product_count:desc`. The DB has no
+ * product_count column, so we materialize all rows matching the WHERE,
+ * annotate each with its productCount, sort by (count desc, id asc),
+ * then offset-slice the result by `(page-1) * perPage`. Bounded by the
+ * `productScope=active` invariant the public entry point enforces — that
+ * gate prevents this path from loading the full 135K-row tariff into
+ * memory.
  */
 async function listSortedByProductCount(
   where: Prisma.MarketplaceCommissionRateWhereInput,
   counts: ProductCounts,
   filters: ListCommissionRatesFilters,
-  cursorId: string | null,
 ): Promise<ListCommissionRatesResult> {
   const allRows = await prisma.marketplaceCommissionRate.findMany({ where });
 
@@ -254,27 +229,17 @@ async function listSortedByProductCount(
       return a.row.id < b.row.id ? -1 : a.row.id > b.row.id ? 1 : 0;
     });
 
-  let startIdx = 0;
-  if (cursorId !== null) {
-    const idx = annotated.findIndex((entry) => entry.row.id === cursorId);
-    // Cursor id not in the sorted set (e.g. filters changed between pages):
-    // treat as "start from beginning" rather than 500. The client will fix
-    // it on the next interaction.
-    startIdx = idx === -1 ? 0 : idx + 1;
-  }
+  const total = annotated.length;
+  const skip = (filters.page - 1) * filters.perPage;
+  const window = annotated.slice(skip, skip + filters.perPage);
 
-  const window = annotated.slice(startIdx, startIdx + filters.limit + 1);
-  const hasMore = window.length > filters.limit;
-  const visible = hasMore ? window.slice(0, filters.limit) : window;
+  const data = window.map((entry) => toWireItem(entry.row, entry.count));
+  const totalPages = total === 0 ? 0 : Math.ceil(total / filters.perPage);
 
-  const data = visible.map((entry) => toWireItem(entry.row, entry.count));
-  const lastEntry = visible[visible.length - 1];
-  const nextCursor =
-    hasMore && lastEntry !== undefined
-      ? encodeCursor({ sort: filters.sort, values: { id: lastEntry.row.id } })
-      : null;
-
-  return { data, nextCursor, hasMore };
+  return {
+    data,
+    pagination: { page: filters.page, perPage: filters.perPage, total, totalPages },
+  };
 }
 
 // Public entry point ──────────────────────────────────────────────────────────
@@ -286,10 +251,6 @@ export async function listCommissionRates(
 ): Promise<ListCommissionRatesResult> {
   const platform = await resolveStorePlatform(organizationId, storeId);
 
-  // sort=product_count:desc requires productScope=active to bound the
-  // in-memory set; rejecting the unbounded path keeps the worst case
-  // predictable for the DB (135K rows in the table can't fit a single
-  // request's RAM budget).
   if (filters.sort === 'product_count:desc' && filters.productScope !== 'active') {
     throw new ValidationError([
       {
@@ -302,9 +263,6 @@ export async function listCommissionRates(
 
   const counts = await fetchProductCounts(organizationId, storeId);
 
-  const cursorId =
-    filters.cursor !== undefined ? decodeAndVerifyCursor(filters.cursor, filters.sort) : null;
-
   const where: Prisma.MarketplaceCommissionRateWhereInput = {
     platform,
     ruleKind: filters.ruleKind,
@@ -313,15 +271,25 @@ export async function listCommissionRates(
   };
 
   if (filters.sort === 'product_count:desc') {
-    return listSortedByProductCount(where, counts, filters, cursorId);
+    return listSortedByProductCount(where, counts, filters);
   }
 
-  const rows = await prisma.marketplaceCommissionRate.findMany({
-    where,
-    orderBy: buildOrderBy(filters.sort),
-    take: filters.limit + 1,
-    ...(cursorId !== null ? { cursor: { id: cursorId }, skip: 1 } : {}),
-  });
+  const skip = (filters.page - 1) * filters.perPage;
+  let rows: CommissionRateRow[];
+  let total: number;
+  try {
+    [rows, total] = await prisma.$transaction([
+      prisma.marketplaceCommissionRate.findMany({
+        where,
+        orderBy: buildOrderBy(filters.sort),
+        skip,
+        take: filters.perPage,
+      }),
+      prisma.marketplaceCommissionRate.count({ where }),
+    ]);
+  } catch (err) {
+    mapPrismaError(err);
+  }
 
-  return buildPage({ rows, filters, counts });
+  return buildPage({ rows, counts, page: filters.page, perPage: filters.perPage, total });
 }

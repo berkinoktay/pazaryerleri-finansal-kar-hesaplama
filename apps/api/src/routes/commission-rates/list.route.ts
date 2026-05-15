@@ -33,8 +33,9 @@ const listCommissionRatesRoute = createRoute({
     'and CATEGORY_BRAND (kategori + marka). `ruleKind` is required because the two families ' +
     'have different cardinality and the productCount semantic differs. `productScope=active` ' +
     'restricts to combinations the store actually sells (approved Product with non-archived ' +
-    'variant). Cursor pagination is sort-aware — reusing a cursor with a different sort ' +
-    'returns 422 CURSOR_SORT_MISMATCH.',
+    'variant). Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to ' +
+    '{10, 25, 50, 100} with a default of 50. `sort=product_count:desc` requires ' +
+    'productScope=active (returns 422 INVALID_SORT_FOR_SCOPE otherwise).',
   security: [{ bearerAuth: [] }],
   request: {
     params: pathParams,
@@ -60,8 +61,7 @@ const listCommissionRatesRoute = createRoute({
     },
     422: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description:
-        'Invalid query params, cursor sort mismatch, or sort=product_count:desc without productScope=active',
+      description: 'Invalid query params or sort=product_count:desc without productScope=active',
     },
     429: Common429Response,
   },
@@ -73,30 +73,16 @@ app.openapi(listCommissionRatesRoute, async (c) => {
   const filters = c.req.valid('query');
   const organizationId = await ensureOrgMember(userId, orgId);
 
-  const { data, nextCursor, hasMore } = await commissionRateListService.listCommissionRates(
-    organizationId,
-    storeId,
-    {
-      ruleKind: filters.ruleKind,
-      productScope: filters.productScope,
-      q: filters.q,
-      sort: filters.sort,
-      cursor: filters.cursor,
-      limit: filters.limit,
-    },
-  );
+  const result = await commissionRateListService.listCommissionRates(organizationId, storeId, {
+    ruleKind: filters.ruleKind,
+    productScope: filters.productScope,
+    q: filters.q,
+    sort: filters.sort,
+    page: filters.page,
+    perPage: filters.perPage,
+  });
 
-  return c.json(
-    {
-      data,
-      meta: {
-        nextCursor,
-        hasMore,
-        limit: filters.limit,
-      },
-    },
-    200,
-  );
+  return c.json(result, 200);
 });
 
 export default app;
