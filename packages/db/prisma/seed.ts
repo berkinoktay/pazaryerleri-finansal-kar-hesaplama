@@ -390,21 +390,26 @@ async function seedStoresProductsOrders(orgs: {
 // \u2500\u2500\u2500 Commission-rate snapshot loader \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Reads the wrapper-JSON snapshots under tmp/trendyol/reference/ that we
 // captured from the Trendyol partner panel BFF and bulk-inserts them into
-// marketplace_commission_rate. Two stores (prod + sandbox) hold the four
-// datasets:
+// marketplace_commission_rate. Data is platform-scoped (NOT per-store): the
+// tariff is the same for every Trendyol seller, so one shared row set
+// services every tenant.
 //
-//   prod-category-commissions.json        \u2192 Aky\u0131ld\u0131z Trendyol (1125805)
-//   prod-category-brand-commissions.json  \u2192 Aky\u0131ld\u0131z Trendyol (1125805)
-//   stage-category-commissions.json       \u2192 Aky\u0131ld\u0131z Trendyol Sandbox (2738)
-//   stage-category-brand-commissions.json \u2192 Aky\u0131ld\u0131z Trendyol Sandbox (2738)
+//   prod-category-commissions.json        \u2192 TRENDYOL \u00b7 CATEGORY
+//   prod-category-brand-commissions.json  \u2192 TRENDYOL \u00b7 CATEGORY_BRAND
+//
+// Stage snapshots (stage-*.json) are kept under tmp/ for operator debug /
+// import-flow testing but are NOT loaded here \u2014 they come from Trendyol's
+// staging environment, where rates and category IDs may diverge from prod.
+// Loading both into platform=TRENDYOL would mean stage rows overwriting
+// prod rows on key collision. The seed treats prod as the source of truth.
 //
 // The files live under tmp/ which is gitignored \u2014 they are NOT shipped in
 // CI. If a file is missing the loader skips that bucket with a clear
 // message, so CI containers without a populated tmp/ stay green.
 //
 // Bulk insert is chunked (1000 rows per batch) to stay under Postgres's
-// 65 535 bind-parameter limit when running via @prisma/adapter-pg. At ~15
-// fields per row, ~4000 rows would already exceed the limit; 1000 leaves
+// 65 535 bind-parameter limit when running via @prisma/adapter-pg. At ~13
+// fields per row, ~5000 rows would already exceed the limit; 1000 leaves
 // a comfortable margin.
 
 interface SnapshotWrapper<TRow> {
@@ -466,8 +471,7 @@ function buildCategoryBrandSegmentOverrides(row: CategoryBrandRow): Record<strin
 
 async function loadSnapshot(args: {
   fileName: string;
-  storeId: string;
-  organizationId: string;
+  platform: 'TRENDYOL';
   ruleKind: 'CATEGORY' | 'CATEGORY_BRAND';
 }): Promise<
   | { status: 'loaded'; count: number; droppedNullRows: number }
@@ -479,8 +483,6 @@ async function loadSnapshot(args: {
   }
 
   interface SeedRateRecord {
-    organizationId: string;
-    storeId: string;
     platform: 'TRENDYOL';
     ruleKind: 'CATEGORY' | 'CATEGORY_BRAND';
     categoryId: bigint;
@@ -513,9 +515,7 @@ async function loadSnapshot(args: {
         continue;
       }
       records.push({
-        organizationId: args.organizationId,
-        storeId: args.storeId,
-        platform: 'TRENDYOL',
+        platform: args.platform,
         ruleKind: 'CATEGORY',
         categoryId: BigInt(r.categoryId),
         brandId: null,
@@ -541,9 +541,7 @@ async function loadSnapshot(args: {
         continue;
       }
       records.push({
-        organizationId: args.organizationId,
-        storeId: args.storeId,
-        platform: 'TRENDYOL',
+        platform: args.platform,
         ruleKind: 'CATEGORY_BRAND',
         categoryId: BigInt(r.categoryId),
         brandId: BigInt(r.brandId),
@@ -559,10 +557,10 @@ async function loadSnapshot(args: {
     }
   }
 
-  // Idempotent REPLACE-by-(storeId, ruleKind). Same contract the production
-  // import endpoint uses.
+  // Idempotent REPLACE-by-(platform, ruleKind). Same contract a future
+  // refresh endpoint will use.
   await prisma.marketplaceCommissionRate.deleteMany({
-    where: { storeId: args.storeId, ruleKind: args.ruleKind },
+    where: { platform: args.platform, ruleKind: args.ruleKind },
   });
 
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -573,40 +571,24 @@ async function loadSnapshot(args: {
   return { status: 'loaded', count: records.length, droppedNullRows };
 }
 
-async function seedCommissionRatesFromCapture(stores: {
-  akyildizTrendyol: string;
-  akyildizTrendyolSandbox: string;
-  organizationId: string;
-}): Promise<void> {
+async function seedCommissionRatesFromCapture(): Promise<void> {
   const targets: Array<{
     fileName: string;
-    storeId: string;
+    platform: 'TRENDYOL';
     ruleKind: 'CATEGORY' | 'CATEGORY_BRAND';
     label: string;
   }> = [
     {
       fileName: 'prod-category-commissions.json',
-      storeId: stores.akyildizTrendyol,
+      platform: 'TRENDYOL',
       ruleKind: 'CATEGORY',
-      label: 'prod   \u00b7 category       ',
+      label: 'TRENDYOL \u00b7 category       ',
     },
     {
       fileName: 'prod-category-brand-commissions.json',
-      storeId: stores.akyildizTrendyol,
+      platform: 'TRENDYOL',
       ruleKind: 'CATEGORY_BRAND',
-      label: 'prod   \u00b7 category+brand ',
-    },
-    {
-      fileName: 'stage-category-commissions.json',
-      storeId: stores.akyildizTrendyolSandbox,
-      ruleKind: 'CATEGORY',
-      label: 'stage  \u00b7 category       ',
-    },
-    {
-      fileName: 'stage-category-brand-commissions.json',
-      storeId: stores.akyildizTrendyolSandbox,
-      ruleKind: 'CATEGORY_BRAND',
-      label: 'stage  \u00b7 category+brand ',
+      label: 'TRENDYOL \u00b7 category+brand ',
     },
   ];
 
@@ -617,8 +599,7 @@ async function seedCommissionRatesFromCapture(stores: {
   for (const t of targets) {
     const result = await loadSnapshot({
       fileName: t.fileName,
-      storeId: t.storeId,
-      organizationId: stores.organizationId,
+      platform: t.platform,
       ruleKind: t.ruleKind,
     });
     if (result.status === 'loaded') {
@@ -637,7 +618,7 @@ async function seedCommissionRatesFromCapture(stores: {
 
   if (loaded === 0) {
     console.log(
-      `\u2713 commission rates: no snapshots loaded (${skipped.toString()} skipped) \u2014 capture them with the import endpoint or check tmp/trendyol/reference/`,
+      `\u2713 commission rates: no snapshots loaded (${skipped.toString()} skipped) \u2014 capture them and drop them under tmp/trendyol/reference/`,
     );
     return;
   }
@@ -652,11 +633,7 @@ async function main(): Promise<void> {
   await seedUsers();
   const orgs = await seedOrgsAndMemberships();
   const storeIds = await seedStoresProductsOrders(orgs);
-  await seedCommissionRatesFromCapture({
-    akyildizTrendyol: storeIds.akyildizTrendyol,
-    akyildizTrendyolSandbox: storeIds.akyildizTrendyolSandbox,
-    organizationId: orgs.akyildiz.id,
-  });
+  await seedCommissionRatesFromCapture();
 
   // Surface the RLS policy count as a quick "did db:apply-policies run?"
   // sanity check. Zero would mean the policy file never landed — seed

@@ -4,8 +4,9 @@
 //
 // 7-case matrix covers the Trendyol FAQ rule:
 //   "Bir ürün için birden fazla kriter eşleşirse en düşük komisyon uygulanır."
-
-import { randomUUID } from 'node:crypto';
+//
+// Commission rates are platform-scoped reference data (no per-store rows),
+// so the resolver takes `platform` not `storeId`.
 
 import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -14,23 +15,19 @@ import { prisma } from '@pazarsync/db';
 
 import { resolveCommissionRate } from '../../../src/services/commission-rate-resolver';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createOrganization, createStore } from '../../helpers/factories';
 
 const CATEGORY_ID = BigInt(411);
 const BRAND_ID = BigInt(16);
 
 async function seedCategory(
-  storeId: string,
-  organizationId: string,
+  platform: 'TRENDYOL' | 'HEPSIBURADA',
   baseRate: string,
   segmentOverrides: Record<string, string> = {},
   paymentTermDays = 60,
 ): Promise<void> {
   await prisma.marketplaceCommissionRate.create({
     data: {
-      organizationId,
-      storeId,
-      platform: 'TRENDYOL',
+      platform,
       ruleKind: 'CATEGORY',
       categoryId: CATEGORY_ID,
       brandId: null,
@@ -47,17 +44,14 @@ async function seedCategory(
 }
 
 async function seedCategoryBrand(
-  storeId: string,
-  organizationId: string,
+  platform: 'TRENDYOL' | 'HEPSIBURADA',
   baseRate: string,
   segmentOverrides: Record<string, string> = {},
   paymentTermDays = 60,
 ): Promise<void> {
   await prisma.marketplaceCommissionRate.create({
     data: {
-      organizationId,
-      storeId,
-      platform: 'TRENDYOL',
+      platform,
       ruleKind: 'CATEGORY_BRAND',
       categoryId: CATEGORY_ID,
       brandId: BRAND_ID,
@@ -73,26 +67,19 @@ async function seedCategoryBrand(
 }
 
 describe('resolveCommissionRate', () => {
-  let storeId: string;
-  let organizationId: string;
-
   beforeAll(async () => {
     await ensureDbReachable();
   });
 
   beforeEach(async () => {
     await truncateAll();
-    const org = await createOrganization();
-    const store = await createStore(org.id, { platform: 'TRENDYOL' });
-    storeId = store.id;
-    organizationId = org.id;
   });
 
   // ─── Case 1: nothing seeded → null ─────────────────────────────────────
 
   it('returns null when no matching rule exists', async () => {
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: BRAND_ID,
       sellerSegment: null,
@@ -103,10 +90,10 @@ describe('resolveCommissionRate', () => {
   // ─── Case 2: only kategori-only rule → returns it ──────────────────────
 
   it('returns kategori-only base rate when no brand rule exists', async () => {
-    await seedCategory(storeId, organizationId, '8.00');
+    await seedCategory('TRENDYOL', '8.00');
 
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: BRAND_ID,
       sellerSegment: null,
@@ -121,11 +108,11 @@ describe('resolveCommissionRate', () => {
   // ─── Case 3: both rules → MIN wins ─────────────────────────────────────
 
   it('picks the lower rate when category and brand rules both match', async () => {
-    await seedCategory(storeId, organizationId, '8.00');
-    await seedCategoryBrand(storeId, organizationId, '5.00');
+    await seedCategory('TRENDYOL', '8.00');
+    await seedCategoryBrand('TRENDYOL', '5.00');
 
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: BRAND_ID,
       sellerSegment: null,
@@ -140,11 +127,11 @@ describe('resolveCommissionRate', () => {
   it('applies segment override when it beats all base rates', async () => {
     // Trendyol FAQ MIN: ka2 of cat-only (3.00) is lower than both bases (8, 5)
     // and lower than cat-brand's ka2 (4.00) — so cat-only ka2 wins.
-    await seedCategory(storeId, organizationId, '8.00', { ka2: '3.00' });
-    await seedCategoryBrand(storeId, organizationId, '5.00', { ka2: '4.00' });
+    await seedCategory('TRENDYOL', '8.00', { ka2: '3.00' });
+    await seedCategoryBrand('TRENDYOL', '5.00', { ka2: '4.00' });
 
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: BRAND_ID,
       sellerSegment: 'ka2',
@@ -160,11 +147,11 @@ describe('resolveCommissionRate', () => {
   it('ignores segment overrides when sellerSegment is null', async () => {
     // Even though ka2 of cat-only is 3.00 (cheaper), with sellerSegment=null
     // it should NOT be considered. Cat-brand base 5.00 wins over cat 8.00.
-    await seedCategory(storeId, organizationId, '8.00', { ka2: '3.00' });
-    await seedCategoryBrand(storeId, organizationId, '5.00', { ka2: '4.00' });
+    await seedCategory('TRENDYOL', '8.00', { ka2: '3.00' });
+    await seedCategoryBrand('TRENDYOL', '5.00', { ka2: '4.00' });
 
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: BRAND_ID,
       sellerSegment: null,
@@ -177,11 +164,11 @@ describe('resolveCommissionRate', () => {
   // ─── Case 6: brandId null → only cat-only rule considered ──────────────
 
   it('only considers kategori-only rules when brandId is null', async () => {
-    await seedCategory(storeId, organizationId, '8.00');
-    await seedCategoryBrand(storeId, organizationId, '5.00');
+    await seedCategory('TRENDYOL', '8.00');
+    await seedCategoryBrand('TRENDYOL', '5.00');
 
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: null,
       sellerSegment: null,
@@ -196,10 +183,10 @@ describe('resolveCommissionRate', () => {
   // ─── Case 7: missing segment key → override skipped, not error ─────────
 
   it('skips segment override when the seller segment key is not present', async () => {
-    await seedCategory(storeId, organizationId, '8.00', { ka2: '3.00' });
+    await seedCategory('TRENDYOL', '8.00', { ka2: '3.00' });
 
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: null,
       sellerSegment: 'na1', // not in overrides
@@ -212,11 +199,11 @@ describe('resolveCommissionRate', () => {
   // ─── Bonus: paymentTermDays follows the winning rule's row ─────────────
 
   it('returns paymentTermDays from the row that produced the winning rate', async () => {
-    await seedCategory(storeId, organizationId, '8.00', {}, 30);
-    await seedCategoryBrand(storeId, organizationId, '5.00', {}, 90);
+    await seedCategory('TRENDYOL', '8.00', {}, 30);
+    await seedCategoryBrand('TRENDYOL', '5.00', {}, 90);
 
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: BRAND_ID,
       sellerSegment: null,
@@ -227,34 +214,18 @@ describe('resolveCommissionRate', () => {
     expect(result?.paymentTermDays).toBe(90);
   });
 
-  // ─── Cross-store isolation: another store's rule does not bleed in ─────
+  // ─── Cross-platform isolation: HEPSIBURADA rule doesn't bleed into TRENDYOL ─
 
-  it("does not return another store's rate even with same categoryId/brandId", async () => {
-    const otherOrg = await createOrganization();
-    const otherStore = await createStore(otherOrg.id, { platform: 'TRENDYOL' });
-    await seedCategory(otherStore.id, otherOrg.id, '1.00');
+  it("does not return another platform's rate", async () => {
+    await seedCategory('HEPSIBURADA', '1.00');
 
-    // No rule for our store
     const result = await resolveCommissionRate({
-      storeId,
+      platform: 'TRENDYOL',
       categoryId: CATEGORY_ID,
       brandId: null,
       sellerSegment: null,
     });
 
-    expect(result).toBeNull();
-  });
-
-  // ─── Unused param guard: just to silence the linter on randomUUID import ─
-
-  it('synthetic storeId never matches any rule', async () => {
-    await seedCategory(storeId, organizationId, '8.00');
-    const result = await resolveCommissionRate({
-      storeId: randomUUID(),
-      categoryId: CATEGORY_ID,
-      brandId: null,
-      sellerSegment: null,
-    });
     expect(result).toBeNull();
   });
 });

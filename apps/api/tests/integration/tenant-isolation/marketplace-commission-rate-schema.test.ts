@@ -1,9 +1,11 @@
-// Multi-tenancy RLS isolation for the marketplace_commission_rate table.
-// Same shape as cost-profiles-schema.test.ts — exercises the schema layer
-// through createRlsScopedClient() (PostgREST + real Supabase JWT) so the
-// authenticated-role policy actually executes. Writes are API-only (service
-// role bypasses RLS via DATABASE_URL), so the only thing under test here is
-// the SELECT policy + the absence of an INSERT policy for authenticated.
+// RLS contract for marketplace_commission_rate.
+//
+// The table is platform-scoped reference data (NOT tenant-private) — Trendyol's
+// commission tariff is identical for every seller, so all authenticated users
+// read the same global row set. The "tenant isolation" angle here is therefore
+// inverted compared to other org-scoped tables: the policy MUST allow any
+// authenticated user to read, and MUST deny client-initiated writes (writes go
+// through the API on the service-role connection that bypasses RLS).
 
 import { randomUUID } from 'node:crypto';
 
@@ -16,7 +18,7 @@ import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization } from '../../helpers/factories';
 import { createRlsScopedClient } from '../../helpers/rls-client';
 
-describe('marketplace_commission_rate: RLS isolation', () => {
+describe('marketplace_commission_rate: RLS contract', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -25,29 +27,18 @@ describe('marketplace_commission_rate: RLS isolation', () => {
     await truncateAll();
   });
 
-  // ─── Case 1: SELECT isolation ─────────────────────────────────────────
+  // ─── Case 1: SELECT is open to any authenticated user ─────────────────────
 
-  it("Org A user cannot SELECT Org B's commission rate row", async () => {
-    const { user: userA, client: clientA } = await createRlsScopedClient();
-    const orgA = await createOrganization();
-    await createMembership(orgA.id, userA.id);
+  it('any authenticated user can SELECT a commission rate row', async () => {
+    const { user, client } = await createRlsScopedClient();
+    // Create an org + membership so the JWT carries a valid org context, even
+    // though the policy itself doesn't gate on org. Mirrors the actual
+    // production session shape.
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
 
-    const orgB = await createOrganization();
-    const storeB = await prisma.store.create({
+    const rate = await prisma.marketplaceCommissionRate.create({
       data: {
-        organizationId: orgB.id,
-        name: 'Store B',
-        platform: 'TRENDYOL',
-        environment: 'PRODUCTION',
-        externalAccountId: randomUUID(),
-        credentials: 'test-encrypted-blob',
-      },
-    });
-
-    const orgBRate = await prisma.marketplaceCommissionRate.create({
-      data: {
-        organizationId: orgB.id,
-        storeId: storeB.id,
         platform: 'TRENDYOL',
         ruleKind: 'CATEGORY',
         categoryId: BigInt(411),
@@ -63,44 +54,70 @@ describe('marketplace_commission_rate: RLS isolation', () => {
       },
     });
 
-    const { data, error } = await clientA
+    const { data, error } = await client
       .from('marketplace_commission_rate')
       .select('*')
-      .eq('id', orgBRate.id);
+      .eq('id', rate.id);
 
     expect(error).toBeNull();
-    expect(data).toEqual([]);
+    expect(data?.length).toBe(1);
+    expect(data?.[0]?.category_name).toBe('Casual Ayakkabı');
   });
 
-  // ─── Case 2: INSERT cross-org blocked ─────────────────────────────────
+  // ─── Case 2: Two unrelated users see the same row ─────────────────────────
+  //
+  // Reinforces that this is shared reference data, not tenant-private: two
+  // users in different organizations both read the same row.
 
-  it('Org A user cannot INSERT a commission rate with Org B organization_id', async () => {
-    const { user: userA, client: clientA } = await createRlsScopedClient();
+  it('two users in different orgs both read the same global row', async () => {
+    const a = await createRlsScopedClient();
     const orgA = await createOrganization();
-    await createMembership(orgA.id, userA.id);
+    await createMembership(orgA.id, a.user.id);
 
+    const b = await createRlsScopedClient();
     const orgB = await createOrganization();
-    const storeB = await prisma.store.create({
+    await createMembership(orgB.id, b.user.id);
+
+    const rate = await prisma.marketplaceCommissionRate.create({
       data: {
-        organizationId: orgB.id,
-        name: 'Store B',
         platform: 'TRENDYOL',
-        environment: 'PRODUCTION',
-        externalAccountId: randomUUID(),
-        credentials: 'test-encrypted-blob',
+        ruleKind: 'CATEGORY',
+        categoryId: BigInt(412),
+        brandId: null,
+        categoryName: 'Spor Ayakkabı',
+        parentCategoryName: 'Günlük Ayakkabı',
+        brandName: null,
+        baseRate: new Decimal('7.00'),
+        paymentTermDays: 60,
+        segmentOverrides: {},
+        fetchedAt: new Date(),
+        sourceScreen: 'CategoryCommissionPaymentTerms',
       },
     });
 
-    // No INSERT policy exists for `authenticated` — all client-initiated
-    // writes default-deny regardless of which org they target. PostgREST
-    // surfaces this as 42501 or a PGRST-prefixed code.
-    const { error } = await clientA.from('marketplace_commission_rate').insert({
+    const ra = await a.client.from('marketplace_commission_rate').select('id').eq('id', rate.id);
+    const rb = await b.client.from('marketplace_commission_rate').select('id').eq('id', rate.id);
+
+    expect(ra.data?.length).toBe(1);
+    expect(rb.data?.length).toBe(1);
+  });
+
+  // ─── Case 3: client-initiated INSERT is blocked ───────────────────────────
+  //
+  // Writes go through the API on the service-role connection which bypasses
+  // RLS. There is no INSERT policy for `authenticated`, so PostgREST refuses.
+  // This prevents a logged-in user from corrupting the shared tariff.
+
+  it('authenticated user cannot INSERT a commission rate via the Supabase client', async () => {
+    const { user, client } = await createRlsScopedClient();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+
+    const { error } = await client.from('marketplace_commission_rate').insert({
       id: randomUUID(),
-      organization_id: orgB.id,
-      store_id: storeB.id,
       platform: 'TRENDYOL',
       rule_kind: 'CATEGORY',
-      category_id: 411,
+      category_id: 999,
       category_name: 'sneaky insert',
       base_rate: '8.00',
       payment_term_days: 60,
@@ -112,51 +129,5 @@ describe('marketplace_commission_rate: RLS isolation', () => {
 
     expect(error).not.toBeNull();
     expect(error?.code).toMatch(/42501|PGRST/);
-  });
-
-  // ─── Case 3: positive — own org's rate is readable ────────────────────
-
-  it("Org A user CAN SELECT their own org's commission rate row", async () => {
-    const { user: userA, client: clientA } = await createRlsScopedClient();
-    const orgA = await createOrganization();
-    await createMembership(orgA.id, userA.id);
-
-    const storeA = await prisma.store.create({
-      data: {
-        organizationId: orgA.id,
-        name: 'Store A',
-        platform: 'TRENDYOL',
-        environment: 'PRODUCTION',
-        externalAccountId: randomUUID(),
-        credentials: 'test-encrypted-blob',
-      },
-    });
-
-    const ownRate = await prisma.marketplaceCommissionRate.create({
-      data: {
-        organizationId: orgA.id,
-        storeId: storeA.id,
-        platform: 'TRENDYOL',
-        ruleKind: 'CATEGORY_BRAND',
-        categoryId: BigInt(411),
-        brandId: BigInt(16),
-        categoryName: 'Casual Ayakkabı',
-        brandName: 'Reebok 10',
-        baseRate: new Decimal('5.00'),
-        paymentTermDays: 60,
-        segmentOverrides: { ka2: '4.00' },
-        fetchedAt: new Date(),
-        sourceScreen: 'CommercialRatesByCategoryAndBrand',
-      },
-    });
-
-    const { data, error } = await clientA
-      .from('marketplace_commission_rate')
-      .select('*')
-      .eq('id', ownRate.id);
-
-    expect(error).toBeNull();
-    expect(data?.length).toBe(1);
-    expect(data?.[0]?.brand_name).toBe('Reebok 10');
   });
 });

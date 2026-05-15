@@ -2,10 +2,11 @@
 CREATE TYPE "CommissionRuleKind" AS ENUM ('CATEGORY', 'CATEGORY_BRAND');
 
 -- CreateTable
+-- Platform-scoped reference data: tariff is shared across all sellers/tenants
+-- on a given marketplace. RLS allows any authenticated user to SELECT (see
+-- supabase/sql/rls-policies.sql).
 CREATE TABLE "marketplace_commission_rate" (
     "id" UUID NOT NULL,
-    "organization_id" UUID NOT NULL,
-    "store_id" UUID NOT NULL,
     "platform" "Platform" NOT NULL,
     "rule_kind" "CommissionRuleKind" NOT NULL,
     "category_id" BIGINT NOT NULL,
@@ -25,16 +26,7 @@ CREATE TABLE "marketplace_commission_rate" (
 );
 
 -- CreateIndex
-CREATE INDEX "marketplace_commission_rate_organization_id_idx" ON "marketplace_commission_rate"("organization_id");
+CREATE INDEX "marketplace_commission_rate_platform_rule_kind_category_id_idx" ON "marketplace_commission_rate"("platform", "rule_kind", "category_id");
 
 -- CreateIndex
-CREATE INDEX "marketplace_commission_rate_store_id_rule_kind_category_id_idx" ON "marketplace_commission_rate"("store_id", "rule_kind", "category_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "marketplace_commission_rate_dedup" ON "marketplace_commission_rate"("store_id", "rule_kind", "category_id", "brand_id");
-
--- AddForeignKey
-ALTER TABLE "marketplace_commission_rate" ADD CONSTRAINT "marketplace_commission_rate_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "marketplace_commission_rate" ADD CONSTRAINT "marketplace_commission_rate_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "stores"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "marketplace_commission_rate_dedup" ON "marketplace_commission_rate"("platform", "rule_kind", "category_id", "brand_id");

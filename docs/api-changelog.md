@@ -13,6 +13,21 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-rates`** — new
+  endpoint exposing the imported Trendyol commission tariff for the panel UI.
+  Required query: `ruleKind` (`CATEGORY` | `CATEGORY_BRAND`). Optional: `q`
+  (substring match across `categoryName` / `parentCategoryName` / `brandName`),
+  `productScope` (`all` default; `active` filters to (categoryId, brandId)
+  combinations the store actually sells — approved Product with at least one
+  non-archived variant), `sort` (`category_name:asc` default; `base_rate:asc` /
+  `base_rate:desc` / `product_count:desc`), `cursor`, `limit` (default 50, max
+  100). Response includes a `productCount` field per row (count of approved
+  non-archived products in the store for that category / category+brand pair).
+  `product_count:desc` requires `productScope=active` (returns 422
+  `INVALID_SORT_FOR_SCOPE` otherwise — the unbounded path would materialize
+  the full 135K-row set in memory). Sort-aware cursor: reusing a cursor with
+  a different sort returns 422 `CURSOR_SORT_MISMATCH`. Cross-org store id
+  returns 404 (no existence leak).
 - `GET /v1/organizations/{orgId}/stores/{storeId}/products`
   - New optional query param `overrideMissing: 'cost' | 'vat'` — variant-level filter for products with at least one variant missing the corresponding override field. Composes with `status` via AND.
   - Sort vocabulary widened with `salePrice` / `-salePrice` / `totalStock` / `-totalStock`. `salePrice` currently falls back to `platformModifiedAt` (documented limitation pending `Product.minSalePrice` / `maxSalePrice` denormalization); `totalStock` sorts on the new `Product.totalStock` column.
