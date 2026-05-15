@@ -115,6 +115,15 @@ enum FxRateMode {
   MANUAL
 }
 
+// Marketplace komisyon tarifesi kuralı türü. CATEGORY yalnız kategori bazlı;
+// CATEGORY_BRAND ek olarak marka kırılımı içerir. Trendyol'un "matching rules
+// → en düşüğü uygulanır" mantığı için iki türü tek tabloda toplayıp app-layer'da
+// MIN() üzerinden resolve ediyoruz.
+enum CommissionRuleKind {
+  CATEGORY
+  CATEGORY_BRAND
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -565,4 +574,68 @@ model SyncLog {
   @@index([storeId, startedAt])
   @@index([status, nextAttemptAt])
   @@map("sync_logs")
+}
+
+// Marketplace komisyon tarifesi. Trendyol partner panel BFF'inden
+// (apigw.trendyol.com /partner/seller-allowance-sfjdomestic-santral/commercial-rules/*)
+// veya gelecekte Hepsiburada panelinden çekilen platform genelinde **paylaşımlı**
+// kategori (+ marka) bazlı komisyon oranı ve vade. Trendyol tarifesi tüm satıcılar
+// için aynıdır — segment override'lar kavramsal olarak var ama Trendyol satıcının
+// segment bilgisini API üzerinden vermediği için kâr hesaplamasında her zaman
+// `base_rate` kullanılır. Bu yüzden tablo tenant-private değil, platform-bazlı
+// tek paylaşımlı reference data: bütün authenticated user'lar aynı satırları okur.
+//
+// Order.commissionAmount'tan FARKLI — bu **gelecek komisyon tahmini** içindir
+// (yeni ürün fiyatlandırma), sipariş satırının fiili komisyonu değil.
+//
+// REPLACE semantiği: her refresh `(platform, rule_kind)` çiftindeki tüm satırlar
+// transaction içinde silinir ve yeniden yazılır. Historik tarife saklanmaz —
+// geçmiş siparişler için OrderItem.commissionAmount/Rate authoritative.
+model MarketplaceCommissionRate {
+  id       String             @id @default(uuid()) @db.Uuid
+  platform Platform
+  ruleKind CommissionRuleKind @map("rule_kind")
+
+  // External marketplace identity. BigInt çünkü Trendyol categoryId/brandId
+  // alanları int64 (örn. brandId 977855).
+  categoryId BigInt  @map("category_id")
+  brandId    BigInt? @map("brand_id") // CATEGORY kuralları için NULL
+
+  // Denormalize display alanları — reference tablo eklemeden import edebilelim
+  // diye (CLAUDE.md WET+1 promotion trigger: ikinci feature isteyince normalize
+  // ederiz). parentCategoryName sadece CATEGORY kurallarında dolu olur;
+  // brandName sadece CATEGORY_BRAND'de.
+  categoryName       String  @map("category_name")
+  parentCategoryName String? @map("parent_category_name")
+  brandName          String? @map("brand_name")
+
+  // Tarife. Decimal(5,2) — stage'de 99.50, prod'da ≤30; (5,2) sınırı 999.99
+  // ile güvenli pay bırakıyor. OrderItem.commissionRate ile aynı precision.
+  baseRate        Decimal @map("base_rate") @db.Decimal(5, 2)
+  paymentTermDays Int     @map("payment_term_days")
+
+  // Platform-spesifik segment override'lar. Trendyol için key'ler:
+  // {"ka1": "4.00", "ka2": "5.00", "na1": "...", "microSegment": "..."}.
+  // Hepsiburada gelirse farklı key seti — JSONB sabit kolonu zorlamadığı için
+  // şema migration'sız yeni platform kabul ediyor. Şu an üretim kâr hesabında
+  // kullanılmıyor (Trendyol seller segment'i API'den dönmüyor), ama veriyi
+  // import sırasında atıyoruz — Trendyol ileride segment paylaşırsa hazır.
+  segmentOverrides Json @default("{}") @map("segment_overrides")
+
+  // Audit
+  fetchedAt    DateTime @map("fetched_at")
+  sourceScreen String   @map("source_screen") // x-system-screen header değeri
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // NULL brandId (CATEGORY kuralları) durumunda PostgreSQL'in default
+  // NULLS DISTINCT davranışı bu unique'i kısmen etkisiz bırakır — yani aynı
+  // (platform, CATEGORY, categoryId) için teorik olarak birden fazla satır olabilir.
+  // Defense-in-depth: import servisi her zaman transactional REPLACE yapar
+  // (DELETE WHERE platform=$1 AND rule_kind=$2; sonra INSERT-many), bu yüzden
+  // import path üzerinden duplicate giremez. Resolver findFirst kullanır.
+  @@unique([platform, ruleKind, categoryId, brandId], map: "marketplace_commission_rate_dedup")
+  @@index([platform, ruleKind, categoryId])
+  @@map("marketplace_commission_rate")
 }

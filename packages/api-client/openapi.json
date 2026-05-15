@@ -2007,6 +2007,132 @@
           "source"
         ],
         "description": "Latest USD/TRY rate. Null when no rate has been fetched yet."
+      },
+      "ListCommissionRatesResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommissionRateListItem"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/CursorMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "CommissionRateListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b"
+          },
+          "ruleKind": {
+            "type": "string",
+            "enum": [
+              "CATEGORY",
+              "CATEGORY_BRAND"
+            ],
+            "description": "Which family of commission rules to read. CATEGORY = kategori-only tarife; CATEGORY_BRAND = kategori + marka tarife. Two families never mix in a single page because they have different cardinality and the productCount semantics differ (CATEGORY = sum across brands, CATEGORY_BRAND = scoped to this brand).",
+            "example": "CATEGORY"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "TRENDYOL",
+              "HEPSIBURADA"
+            ],
+            "description": "Marketplace this rate row belongs to.",
+            "example": "TRENDYOL"
+          },
+          "categoryId": {
+            "type": "string",
+            "description": "Marketplace categoryId as decimal string (int64 — BigInt-safe).",
+            "example": "411"
+          },
+          "brandId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Marketplace brandId, decimal string. Null on CATEGORY rows.",
+            "example": "16"
+          },
+          "categoryName": {
+            "type": "string",
+            "example": "Casual Ayakkabı"
+          },
+          "parentCategoryName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Populated on CATEGORY rows; null on CATEGORY_BRAND.",
+            "example": "Günlük Ayakkabı"
+          },
+          "brandName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Populated on CATEGORY_BRAND rows; null on CATEGORY.",
+            "example": "Reebok 10"
+          },
+          "baseRate": {
+            "type": "string",
+            "description": "Base commission rate as decimal string (percent, 0–999.99).",
+            "example": "5.00"
+          },
+          "paymentTermDays": {
+            "type": "integer",
+            "description": "Days until marketplace settles this category/brand.",
+            "example": 60
+          },
+          "segmentOverrides": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Platform-specific segment override map (Trendyol: ka1/ka2/na1/microSegment). Empty object when no overrides apply. Values are decimal strings.",
+            "example": {
+              "ka2": "4.00"
+            }
+          },
+          "productCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of approved + non-archived products in this store matching the rule scope. For CATEGORY rows: across all brands. For CATEGORY_BRAND: only this specific (categoryId, brandId) pair.",
+            "example": 42
+          },
+          "fetchedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the rate row was last imported from the marketplace.",
+            "example": "2026-05-12T08:23:01.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "ruleKind",
+          "platform",
+          "categoryId",
+          "brandId",
+          "categoryName",
+          "parentCategoryName",
+          "brandName",
+          "baseRate",
+          "paymentTermDays",
+          "segmentOverrides",
+          "productCount",
+          "fetchedAt"
+        ]
       }
     },
     "parameters": {}
@@ -5840,6 +5966,224 @@
           },
           "403": {
             "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-rates": {
+      "get": {
+        "tags": [
+          "CommissionRates"
+        ],
+        "summary": "List marketplace commission rate tariff for a store",
+        "description": "Returns the imported commission tariff (categoryId × brandId × payment-term × segment-override) for the given store. Two rule families exist: CATEGORY (kategori-only) and CATEGORY_BRAND (kategori + marka). `ruleKind` is required because the two families have different cardinality and the productCount semantic differs. `productScope=active` restricts to combinations the store actually sells (approved Product with non-archived variant). Cursor pagination is sort-aware — reusing a cursor with a different sort returns 422 CURSOR_SORT_MISMATCH.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CATEGORY",
+                "CATEGORY_BRAND"
+              ],
+              "description": "Which family of commission rules to read. CATEGORY = kategori-only tarife; CATEGORY_BRAND = kategori + marka tarife. Two families never mix in a single page because they have different cardinality and the productCount semantics differ (CATEGORY = sum across brands, CATEGORY_BRAND = scoped to this brand).",
+              "example": "CATEGORY"
+            },
+            "required": true,
+            "description": "Which family of commission rules to read. CATEGORY = kategori-only tarife; CATEGORY_BRAND = kategori + marka tarife. Two families never mix in a single page because they have different cardinality and the productCount semantics differ (CATEGORY = sum across brands, CATEGORY_BRAND = scoped to this brand).",
+            "name": "ruleKind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "active"
+              ],
+              "default": "all",
+              "description": "'all' returns every commission rate row matching the other filters. 'active' restricts to (categoryId, brandId) combinations where the store has at least one approved Product with a non-archived variant. Use 'active' to render the panel \"Sattıklarım\" tab.",
+              "example": "all"
+            },
+            "required": false,
+            "description": "'all' returns every commission rate row matching the other filters. 'active' restricts to (categoryId, brandId) combinations where the store has at least one approved Product with a non-archived variant. Use 'active' to render the panel \"Sattıklarım\" tab.",
+            "name": "productScope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "Case-insensitive substring match across categoryName, parentCategoryName, and brandName.",
+              "example": "ayakkabı"
+            },
+            "required": false,
+            "description": "Case-insensitive substring match across categoryName, parentCategoryName, and brandName.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "category_name:asc",
+                "base_rate:asc",
+                "base_rate:desc",
+                "product_count:desc"
+              ],
+              "default": "category_name:asc",
+              "description": "DB-side sort orders. 'product_count:desc' is an app-layer sort over the pre-computed product-count map; it requires productScope='active' to bound the in-memory set (returns 422 INVALID_SORT_FOR_SCOPE otherwise).",
+              "example": "category_name:asc"
+            },
+            "required": false,
+            "description": "DB-side sort orders. 'product_count:desc' is an app-layer sort over the pre-computed product-count map; it requires productScope='active' to bound the in-memory set (returns 422 INVALID_SORT_FOR_SCOPE otherwise).",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque pagination cursor from previous page meta.nextCursor. Encodes the sort param; reusing a cursor with a different sort returns 422 CURSOR_SORT_MISMATCH."
+            },
+            "required": false,
+            "description": "Opaque pagination cursor from previous page meta.nextCursor. Encodes the sort param; reusing a cursor with a different sort returns 422 CURSOR_SORT_MISMATCH.",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "description": "Page size (1–100). Default 50.",
+              "example": 50
+            },
+            "required": false,
+            "description": "Page size (1–100). Default 50.",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of commission rate rows with per-row productCount",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCommissionRatesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params, cursor sort mismatch, or sort=product_count:desc without productScope=active",
             "content": {
               "application/json": {
                 "schema": {

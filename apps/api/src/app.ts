@@ -9,6 +9,7 @@ import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
+import commissionRateRoutes from './routes/commission-rates/index';
 import costProfileRoutes from './routes/cost-profiles/index';
 import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index';
 import fxRatesRoutes from './routes/fx-rates/index';
@@ -132,6 +133,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', costProfileAttachmentRoutes);
   app.route('/', variantRoutes);
   app.route('/', fxRatesRoutes);
+  app.route('/', commissionRateRoutes);
 
   return app;
 }

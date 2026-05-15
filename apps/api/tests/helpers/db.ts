@@ -49,7 +49,8 @@ export async function truncateAll(): Promise<void> {
        expenses,
        stores,
        organization_members,
-       organizations
+       organizations,
+       marketplace_commission_rate
      RESTART IDENTITY CASCADE`,
   );
 }
