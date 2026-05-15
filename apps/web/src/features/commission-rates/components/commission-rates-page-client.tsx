@@ -16,7 +16,6 @@ import type {
 } from '../query-keys';
 
 import { CommissionRatesEmptyState } from './commission-rates-empty-state';
-import { CommissionRatesLoadMore } from './commission-rates-load-more';
 import { CommissionRatesTable } from './commission-rates-table';
 import { CommissionRatesToolbar } from './commission-rates-toolbar';
 
@@ -65,6 +64,8 @@ export function CommissionRatesPageClient({
           productScope: filters.productScope,
           q: filters.q.length > 0 ? filters.q : undefined,
           sort: filters.sort,
+          page: filters.page,
+          perPage: filters.perPage,
         },
   );
 
@@ -77,13 +78,15 @@ export function CommissionRatesPageClient({
     );
   }
 
-  const rows = query.data?.pages.flatMap((p) => p.data) ?? [];
-  const totalLoaded = rows.length;
+  const result = query.data;
+  const rows = result?.data ?? [];
+  const total = result?.pagination.total ?? 0;
+  const totalPages = result?.pagination.totalPages ?? 0;
+  const pageRowCount = rows.length;
   const isInitialLoad = query.isLoading;
-  const hasNextPage = query.hasNextPage ?? false;
 
   const hasActiveFilter = filters.q.length > 0 || filters.productScope === 'active';
-  const isEmptyAfterLoad = !isInitialLoad && totalLoaded === 0;
+  const isEmptyAfterLoad = !isInitialLoad && pageRowCount === 0;
 
   const handleRuleKindChange = (next: CommissionRateRuleKind): void => {
     void setFilters({ ruleKind: next });
@@ -111,6 +114,10 @@ export function CommissionRatesPageClient({
     }
   };
 
+  const handlePaginationChange = (next: { page: number; perPage: number }): void => {
+    void setFilters({ page: next.page, perPage: next.perPage });
+  };
+
   const handleClearFilters = (): void => {
     setQInput('');
     void setFilters({ q: '', productScope: 'all' });
@@ -132,6 +139,7 @@ export function CommissionRatesPageClient({
         <FilterTabs<CommissionRateRuleKind>
           value={filters.ruleKind}
           onValueChange={handleRuleKindChange}
+          variant="underline"
           options={[
             { value: 'CATEGORY', label: t('tabs.category') },
             { value: 'CATEGORY_BRAND', label: t('tabs.categoryBrand') },
@@ -153,14 +161,11 @@ export function CommissionRatesPageClient({
               onProductScopeChange={handleProductScopeChange}
             />
           }
-          pagination={
-            <CommissionRatesLoadMore
-              hasNextPage={hasNextPage}
-              isFetchingNextPage={query.isFetchingNextPage}
-              totalLoaded={totalLoaded}
-              onLoadMore={() => void query.fetchNextPage()}
-            />
-          }
+          page={filters.page}
+          perPage={filters.perPage}
+          total={total}
+          totalPages={totalPages}
+          onPaginationChange={handlePaginationChange}
           onSortChange={handleSortChange}
         />
       </div>
