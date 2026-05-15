@@ -1064,11 +1064,6 @@
         "paymentTermDaysSuffix": "{days} days"
       },
       "autoSwitchedToActive": "Switched to 'Only what I sell' — sorted by product count.",
-      "loadMore": {
-        "button": "Load more",
-        "loading": "Loading…",
-        "exhausted": "All results loaded — {count} rows"
-      },
       "empty": {
         "noStore": {
           "title": "No active store",

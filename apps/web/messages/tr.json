@@ -1129,11 +1129,6 @@
         "paymentTermDaysSuffix": "{days} gün"
       },
       "autoSwitchedToActive": "Sattıklarım moduna geçildi — ürün sayısına göre sıralandı.",
-      "loadMore": {
-        "button": "Daha fazla yükle",
-        "loading": "Yükleniyor…",
-        "exhausted": "Tüm sonuçlar gösteriliyor — {count} satır"
-      },
       "empty": {
         "noStore": {
           "title": "Aktif mağaza yok",
