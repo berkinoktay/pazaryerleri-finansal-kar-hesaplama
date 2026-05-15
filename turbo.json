@@ -26,6 +26,7 @@
       "dependsOn": ["^build", "codegen"],
       "outputs": [],
       "env": [
+        "NODE_ENV",
         "DATABASE_URL",
         "DIRECT_URL",
         "SUPABASE_URL",
@@ -42,6 +43,7 @@
     "test:unit": {
       "outputs": [],
       "env": [
+        "NODE_ENV",
         "TRENDYOL_PROD_BASE_URL",
         "TRENDYOL_SANDBOX_BASE_URL",
         "TRENDYOL_INTEGRATOR_UA_SUFFIX",
@@ -51,6 +53,7 @@
     "test:integration": {
       "outputs": [],
       "env": [
+        "NODE_ENV",
         "DATABASE_URL",
         "DIRECT_URL",
         "SUPABASE_URL",
