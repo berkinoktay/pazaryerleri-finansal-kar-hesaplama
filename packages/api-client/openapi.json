@@ -2017,13 +2017,13 @@
               "$ref": "#/components/schemas/CommissionRateListItem"
             }
           },
-          "meta": {
-            "$ref": "#/components/schemas/CursorMeta"
+          "pagination": {
+            "$ref": "#/components/schemas/TableMeta"
           }
         },
         "required": [
           "data",
-          "meta"
+          "pagination"
         ]
       },
       "CommissionRateListItem": {
@@ -6003,7 +6003,7 @@
           "CommissionRates"
         ],
         "summary": "List marketplace commission rate tariff for a store",
-        "description": "Returns the imported commission tariff (categoryId × brandId × payment-term × segment-override) for the given store. Two rule families exist: CATEGORY (kategori-only) and CATEGORY_BRAND (kategori + marka). `ruleKind` is required because the two families have different cardinality and the productCount semantic differs. `productScope=active` restricts to combinations the store actually sells (approved Product with non-archived variant). Cursor pagination is sort-aware — reusing a cursor with a different sort returns 422 CURSOR_SORT_MISMATCH.",
+        "description": "Returns the imported commission tariff (categoryId × brandId × payment-term × segment-override) for the given store. Two rule families exist: CATEGORY (kategori-only) and CATEGORY_BRAND (kategori + marka). `ruleKind` is required because the two families have different cardinality and the productCount semantic differs. `productScope=active` restricts to combinations the store actually sells (approved Product with non-archived variant). Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, 100} with a default of 50. `sort=product_count:desc` requires productScope=active (returns 422 INVALID_SORT_FOR_SCOPE otherwise).",
         "security": [
           {
             "bearerAuth": []
@@ -6092,26 +6092,27 @@
           },
           {
             "schema": {
-              "type": "string",
-              "description": "Opaque pagination cursor from previous page meta.nextCursor. Encodes the sort param; reusing a cursor with a different sort returns 422 CURSOR_SORT_MISMATCH."
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "1-indexed page number",
+              "example": 1
             },
             "required": false,
-            "description": "Opaque pagination cursor from previous page meta.nextCursor. Encodes the sort param; reusing a cursor with a different sort returns 422 CURSOR_SORT_MISMATCH.",
-            "name": "cursor",
+            "description": "1-indexed page number",
+            "name": "page",
             "in": "query"
           },
           {
             "schema": {
               "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
               "default": 50,
-              "description": "Page size (1–100). Default 50.",
+              "description": "Items per page. Locked to {10, 25, 50, 100}. Default 50.",
               "example": 50
             },
             "required": false,
-            "description": "Page size (1–100). Default 50.",
-            "name": "limit",
+            "description": "Items per page. Locked to {10, 25, 50, 100}. Default 50.",
+            "name": "perPage",
             "in": "query"
           }
         ],
@@ -6183,7 +6184,7 @@
             }
           },
           "422": {
-            "description": "Invalid query params, cursor sort mismatch, or sort=product_count:desc without productScope=active",
+            "description": "Invalid query params or sort=product_count:desc without productScope=active",
             "content": {
               "application/json": {
                 "schema": {
