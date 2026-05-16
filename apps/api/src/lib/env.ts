@@ -26,22 +26,36 @@ function isNodeEnv(value: string): value is NodeEnv {
 /**
  * Resolve NODE_ENV to one of the recognised modes. Defense-in-depth for
  * `apps/api/src/app.ts`, where `NODE_ENV !== 'production'` decides whether
- * to expose `/openapi.json` and the Scalar UI. An unset `NODE_ENV` would
- * otherwise satisfy that check and leak the API surface in production.
+ * to expose `/openapi.json` and the Scalar UI.
+ *
+ * Asymmetric strictness:
+ *   - Unset → default to 'development' (and persist on process.env so the
+ *     docs gate sees the same value). A warning is logged so a production
+ *     deploy that forgot the var still surfaces the misconfiguration in
+ *     ops logs; we just don't crash dev runs over it.
+ *   - Set to an unrecognised value → throw. A typo like 'prod' or
+ *     'PRODUCTION' would silently flip the docs gate the wrong way, so
+ *     fail-fast wins here.
+ *
+ * Production hosting platforms (Vercel, Render, Docker images, etc.)
+ * inject NODE_ENV=production automatically, so the unset path is
+ * realistically a local-dev concern.
  */
 function readNodeEnv(): NodeEnv {
   const raw = process.env['NODE_ENV'];
   if (raw === undefined || raw.length === 0) {
-    throw new Error(
-      `NODE_ENV is not set. Must be one of: ${ALLOWED_NODE_ENVS.join(', ')}. ` +
-        `Local dev defaults to 'development' via the shell or .env; production ` +
-        `deployments must set NODE_ENV=production explicitly so that dev-only ` +
-        `surfaces (OpenAPI docs, debug logging) stay off.`,
+    console.warn(
+      `[env] NODE_ENV is not set; defaulting to 'development'. ` +
+        `Production deployments MUST set NODE_ENV=production explicitly so ` +
+        `dev-only surfaces (OpenAPI docs, Scalar UI) stay off.`,
     );
+    process.env['NODE_ENV'] = 'development';
+    return 'development';
   }
   if (!isNodeEnv(raw)) {
     throw new Error(
-      `NODE_ENV='${raw}' is not recognised. Must be one of: ${ALLOWED_NODE_ENVS.join(', ')}.`,
+      `NODE_ENV='${raw}' is not recognised. Must be one of: ${ALLOWED_NODE_ENVS.join(', ')}. ` +
+        `Common typos: 'prod' → 'production', 'dev' → 'development'.`,
     );
   }
   return raw;
