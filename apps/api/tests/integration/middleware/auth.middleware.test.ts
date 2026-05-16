@@ -1,23 +1,12 @@
-import { Hono } from 'hono';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { UnauthorizedError } from '@/lib/errors';
 import { authMiddleware } from '@/middleware/auth.middleware';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
+import { createTestApp } from '../../helpers/create-test-app';
 
 function makeApp() {
-  const app = new Hono<{ Variables: { userId: string; email: string | undefined } }>();
-
-  // Local onError mirroring the real createApp() shape so middleware throws
-  // surface as 401 JSON responses in this isolated test harness.
-  app.onError((err, c) => {
-    if (err instanceof UnauthorizedError) {
-      return c.json({ code: err.code, detail: err.message }, 401);
-    }
-    throw err;
-  });
-
+  const app = createTestApp<{ userId: string; email: string | undefined }>();
   app.use('*', authMiddleware);
   app.get('/echo', (c) => c.json({ userId: c.get('userId'), email: c.get('email') }));
   return app;

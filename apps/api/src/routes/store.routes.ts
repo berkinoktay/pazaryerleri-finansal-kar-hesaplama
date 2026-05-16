@@ -1,6 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import type { MemberRole } from '@pazarsync/db';
 
+import { RATE_LIMITS } from '../config/rate-limits';
 import { createSubApp } from '../lib/create-hono-app';
 import { ensureOrgMember } from '../lib/ensure-org-member';
 import { rateLimit } from '../middleware/rate-limit.middleware';
@@ -21,12 +22,9 @@ const app = createSubApp<{
 }>();
 
 // D7 — connect-store rate limit: 5 attempts per minute per user.
-// Applied only to POST via method check inside the middleware wrapper.
-const connectRateLimit = rateLimit({
-  max: 5,
-  windowSec: 60,
-  keyPrefix: 'stores-connect',
-});
+// Applied only to POST via direct invocation inside the handler.
+// Numbers live in `config/rate-limits.ts`.
+const connectRateLimit = rateLimit(RATE_LIMITS.STORE_CONNECT);
 
 const orgIdParam = z.object({
   orgId: z

@@ -3,9 +3,11 @@ import { Scalar } from '@scalar/hono-api-reference';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
+import { RATE_LIMITS } from './config/rate-limits';
 import { authMiddleware } from './middleware/auth.middleware';
 import { rateLimit } from './middleware/rate-limit.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { REQUEST_ID_HEADER } from './lib/constants';
 import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
@@ -50,7 +52,7 @@ export function createApp(): OpenAPIHono {
     // Read the correlation id stamped by requestIdMiddleware. Nullable
     // because onError is reachable from a few paths where the middleware
     // may not have run (e.g. outer Hono-level failures) — stay defensive.
-    const requestId = c.res.headers.get('X-Request-Id') ?? undefined;
+    const requestId = c.res.headers.get(REQUEST_ID_HEADER) ?? undefined;
     const { body, status, headers } = problemDetailsForError(err, { requestId });
     if (status === 500) {
       console.error('Unhandled error:', { requestId, err });
@@ -123,10 +125,11 @@ export function createApp(): OpenAPIHono {
   app.use('*', authMiddleware);
 
   // ─── Global per-user rate limit (SECURITY.md §6 baseline) ──────────
-  // 300 req/min matches the documented authenticated-user baseline. Per-
-  // route limits (e.g. POST /stores at 5/min) layer on top inside the
-  // sub-app's route definitions via the `middleware` option on createRoute.
-  app.use('*', rateLimit({ max: 300, windowSec: 60, keyPrefix: 'global' }));
+  // Numbers live in `config/rate-limits.ts` — single source of truth so
+  // deployment/runbook reviewers see every limit in one file. Per-route
+  // limits (e.g. POST /stores) layer on top via the `middleware` option
+  // on createRoute inside each sub-app.
+  app.use('*', rateLimit(RATE_LIMITS.GLOBAL));
 
   // ─── Authenticated routes ──────────────────────────────────────────
   app.route('/', meRoutes);

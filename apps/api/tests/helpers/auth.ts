@@ -3,26 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@pazarsync/db';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+import { getSupabaseAdminClient } from '@/lib/supabase-admin-client';
+
 const TEST_PASSWORD = 'integration-test-password';
 
-let cachedAdminClient: SupabaseClient | undefined;
 let cachedAnonClient: SupabaseClient | undefined;
-
-function adminClient(): SupabaseClient {
-  if (cachedAdminClient !== undefined) return cachedAdminClient;
-  const url = process.env['SUPABASE_URL'];
-  const secret = process.env['SUPABASE_SECRET_KEY'];
-  if (url === undefined || url.length === 0 || secret === undefined || secret.length === 0) {
-    throw new Error(
-      'SUPABASE_URL and SUPABASE_SECRET_KEY must be set for createAuthenticatedTestUser. ' +
-        'Check workspace-root .env or the CI job env block.',
-    );
-  }
-  cachedAdminClient = createClient(url, secret, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  return cachedAdminClient;
-}
 
 function anonClient(): SupabaseClient {
   if (cachedAnonClient !== undefined) return cachedAnonClient;
@@ -62,7 +47,7 @@ export async function createAuthenticatedTestUser(
   overrides: { email?: string; fullName?: string } = {},
 ): Promise<AuthenticatedTestUser> {
   const email = overrides.email ?? `test-${randomUUID()}@test.local`;
-  const admin = adminClient();
+  const admin = getSupabaseAdminClient();
   const anon = anonClient();
 
   const { data: createData, error: createErr } = await admin.auth.admin.createUser({

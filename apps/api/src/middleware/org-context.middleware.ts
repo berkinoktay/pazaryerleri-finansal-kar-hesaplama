@@ -1,8 +1,8 @@
-import { prisma } from '@pazarsync/db';
 import type { MemberRole } from '@pazarsync/db';
 import { createMiddleware } from 'hono/factory';
 
 import { ForbiddenError, UnauthorizedError } from '../lib/errors';
+import { getMembershipRole } from '../lib/org-member-lookup';
 
 /**
  * Reads `:orgId` from the request path, verifies the authenticated user
@@ -39,16 +39,12 @@ export const orgContextMiddleware = createMiddleware<{
     throw new UnauthorizedError('Authentication required');
   }
 
-  const membership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: orgId, userId } },
-    select: { role: true },
-  });
-
-  if (membership === null) {
+  const role = await getMembershipRole(userId, orgId);
+  if (role === null) {
     throw new ForbiddenError('Not a member of this organization');
   }
 
   c.set('organizationId', orgId);
-  c.set('memberRole', membership.role);
+  c.set('memberRole', role);
   await next();
 });

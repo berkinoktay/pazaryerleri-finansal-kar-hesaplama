@@ -18,6 +18,7 @@
 
 import { createMiddleware } from 'hono/factory';
 
+import { RATE_LIMIT_INTERNAL } from '../config/rate-limits';
 import { RateLimitedError } from '../lib/errors';
 
 export interface RateLimitOptions {
@@ -39,7 +40,7 @@ interface Bucket {
   windowStart: number;
 }
 
-const MAX_KEYS = 10_000;
+const MAX_KEYS = RATE_LIMIT_INTERNAL.MAX_IN_MEMORY_BUCKETS;
 const store = new Map<string, Bucket>();
 
 export function rateLimit(opts: RateLimitOptions) {
