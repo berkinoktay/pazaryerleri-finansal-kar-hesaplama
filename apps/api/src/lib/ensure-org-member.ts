@@ -1,7 +1,7 @@
-import { prisma } from '@pazarsync/db';
 import type { MemberRole } from '@pazarsync/db';
 
 import { ForbiddenError } from './errors';
+import { getMembershipRole } from './org-member-lookup';
 
 /**
  * Inline org membership check used by every route handler under
@@ -34,15 +34,12 @@ export async function ensureOrgMember(
   orgIdFromPath: string,
   options: EnsureOrgMemberOptions = {},
 ): Promise<string> {
-  const membership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: orgIdFromPath, userId } },
-    select: { role: true },
-  });
-  if (membership === null) {
+  const role = await getMembershipRole(userId, orgIdFromPath);
+  if (role === null) {
     throw new ForbiddenError('Not a member of this organization');
   }
   const { allowedRoles } = options;
-  if (allowedRoles !== undefined && !allowedRoles.includes(membership.role)) {
+  if (allowedRoles !== undefined && !allowedRoles.includes(role)) {
     throw new ForbiddenError('Insufficient role');
   }
   return orgIdFromPath;

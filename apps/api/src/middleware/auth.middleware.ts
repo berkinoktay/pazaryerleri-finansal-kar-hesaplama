@@ -1,7 +1,7 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createMiddleware } from 'hono/factory';
 
 import { UnauthorizedError } from '../lib/errors';
+import { getSupabaseAdminClient } from '../lib/supabase-admin-client';
 
 /**
  * Extracts the Bearer token from the Authorization header, validates it via
@@ -19,21 +19,6 @@ import { UnauthorizedError } from '../lib/errors';
  * maps it to a 401 ProblemDetails response.
  */
 
-let cachedClient: SupabaseClient | undefined;
-
-function getSupabaseClient(): SupabaseClient {
-  if (cachedClient !== undefined) return cachedClient;
-  const url = process.env['SUPABASE_URL'];
-  const secret = process.env['SUPABASE_SECRET_KEY'];
-  if (url === undefined || url.length === 0 || secret === undefined || secret.length === 0) {
-    throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY must be configured on the server.');
-  }
-  cachedClient = createClient(url, secret, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  return cachedClient;
-}
-
 export const authMiddleware = createMiddleware<{
   Variables: { userId: string; email: string | undefined };
 }>(async (c, next) => {
@@ -45,9 +30,12 @@ export const authMiddleware = createMiddleware<{
   if (match === null) {
     throw new UnauthorizedError('Authorization header must use Bearer scheme');
   }
-  const token = match[1]!;
+  const token = match[1];
+  if (token === undefined || token.length === 0) {
+    throw new UnauthorizedError('Authorization header must use Bearer scheme');
+  }
 
-  const { data, error } = await getSupabaseClient().auth.getUser(token);
+  const { data, error } = await getSupabaseAdminClient().auth.getUser(token);
   if (error !== null || data.user === null) {
     throw new UnauthorizedError('Invalid or expired token');
   }

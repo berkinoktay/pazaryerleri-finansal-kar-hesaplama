@@ -1,6 +1,8 @@
 import { createMiddleware } from 'hono/factory';
 import { randomUUID } from 'node:crypto';
 
+import { REQUEST_ID_HEADER } from '../lib/constants';
+
 /**
  * Stamps every request with a unique `X-Request-Id` header — value is
  * either echoed from an inbound header (so a client / API gateway can
@@ -19,8 +21,8 @@ import { randomUUID } from 'node:crypto';
  * the request id — register it immediately after `cors()` in app.ts.
  */
 export const requestIdMiddleware = createMiddleware(async (c, next) => {
-  const inbound = c.req.header('X-Request-Id');
+  const inbound = c.req.header(REQUEST_ID_HEADER);
   const requestId = inbound ?? randomUUID();
-  c.header('X-Request-Id', requestId);
+  c.header(REQUEST_ID_HEADER, requestId);
   await next();
 });

@@ -1,34 +1,21 @@
 import type { MemberRole } from '@pazarsync/db';
-import { Hono } from 'hono';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { ForbiddenError, UnauthorizedError } from '@/lib/errors';
 import { authMiddleware } from '@/middleware/auth.middleware';
 import { orgContextMiddleware } from '@/middleware/org-context.middleware';
 import { requireRole } from '@/middleware/require-role.middleware';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization } from '../../helpers/factories';
+import { createTestApp } from '../../helpers/create-test-app';
 
 function makeApp(allowedRoles: MemberRole[]) {
-  const app = new Hono<{
-    Variables: {
-      userId: string;
-      email: string | undefined;
-      organizationId: string;
-      memberRole: MemberRole;
-    };
+  const app = createTestApp<{
+    userId: string;
+    email: string | undefined;
+    organizationId: string;
+    memberRole: MemberRole;
   }>();
-
-  app.onError((err, c) => {
-    if (err instanceof UnauthorizedError) {
-      return c.json({ code: err.code, detail: err.message }, 401);
-    }
-    if (err instanceof ForbiddenError) {
-      return c.json({ code: err.code, detail: err.message }, 403);
-    }
-    return c.json({ code: 'INTERNAL_ERROR', detail: err.message }, 500);
-  });
 
   app.use('*', authMiddleware);
   app.use('/organizations/:orgId/*', orgContextMiddleware);
@@ -43,23 +30,11 @@ function makeApp(allowedRoles: MemberRole[]) {
  * behind a forbidden response would let the bug ship silently.
  */
 function makeAppWithoutOrgContext(allowedRoles: MemberRole[]) {
-  const app = new Hono<{
-    Variables: {
-      userId: string;
-      email: string | undefined;
-      memberRole: MemberRole;
-    };
+  const app = createTestApp<{
+    userId: string;
+    email: string | undefined;
+    memberRole: MemberRole;
   }>();
-
-  app.onError((err, c) => {
-    if (err instanceof UnauthorizedError) {
-      return c.json({ code: err.code, detail: err.message }, 401);
-    }
-    if (err instanceof ForbiddenError) {
-      return c.json({ code: err.code, detail: err.message }, 403);
-    }
-    return c.json({ code: 'INTERNAL_ERROR', detail: err.message }, 500);
-  });
 
   app.use('*', authMiddleware);
   app.use('*', requireRole(...allowedRoles));
@@ -158,10 +133,11 @@ describe('requireRole middleware', () => {
 
     // The middleware throws plain Error (not ForbiddenError) so the
     // ordering bug surfaces. If this ever flips to 403 the regression
-    // would hide a real production misconfiguration.
+    // would hide a real production misconfiguration. Detail is redacted
+    // by problemDetailsForError ('An unexpected error occurred') to
+    // avoid internal-detail leaks — only status + code are asserted.
     expect(res.status).toBe(500);
-    const body = (await res.json()) as { code: string; detail: string };
+    const body = (await res.json()) as { code: string };
     expect(body.code).toBe('INTERNAL_ERROR');
-    expect(body.detail).toMatch(/memberRole/i);
   });
 });

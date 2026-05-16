@@ -1,33 +1,20 @@
 import type { MemberRole } from '@pazarsync/db';
-import { Hono } from 'hono';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { ForbiddenError, UnauthorizedError } from '@/lib/errors';
 import { authMiddleware } from '@/middleware/auth.middleware';
 import { orgContextMiddleware } from '@/middleware/org-context.middleware';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization } from '../../helpers/factories';
+import { createTestApp } from '../../helpers/create-test-app';
 
 function makeApp() {
-  const app = new Hono<{
-    Variables: {
-      userId: string;
-      email: string | undefined;
-      organizationId: string;
-      memberRole: MemberRole;
-    };
+  const app = createTestApp<{
+    userId: string;
+    email: string | undefined;
+    organizationId: string;
+    memberRole: MemberRole;
   }>();
-
-  app.onError((err, c) => {
-    if (err instanceof UnauthorizedError) {
-      return c.json({ code: err.code, detail: err.message }, 401);
-    }
-    if (err instanceof ForbiddenError) {
-      return c.json({ code: err.code, detail: err.message }, 403);
-    }
-    throw err;
-  });
 
   app.use('*', authMiddleware);
   app.use('/organizations/:orgId/*', orgContextMiddleware);
