@@ -176,8 +176,13 @@ jobs:
       - name: Run integration tests
         run: pnpm turbo run test:integration --concurrency=1
         env:
+          NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          # NODE_ENV is validated at boot by apps/api/src/lib/env.ts —
+          # 'test' is the recognised mode for CI runs (alongside
+          # production, staging, development). Production must set this
+          # explicitly so the OpenAPI docs gate stays closed.
           # SUPABASE_URL, SUPABASE_SECRET_KEY, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
           # are populated by the "Export Supabase env" step above. The new auth
           # middleware calls `supabase.auth.getUser(token)` via the secret
