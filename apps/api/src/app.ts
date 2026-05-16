@@ -9,6 +9,7 @@ import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
+import commissionRateRoutes from './routes/commission-rates/index';
 import costProfileRoutes from './routes/cost-profiles/index';
 import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index';
 import fxRatesRoutes from './routes/fx-rates/index';
@@ -85,8 +86,14 @@ export function createApp(): OpenAPIHono {
   app.openapi(healthRoute, (c) => c.json({ status: 'ok' as const }, 200));
 
   // Spec + Scalar docs UI — dev/staging only, and also public (they
-  // document the API for developers, not end users).
-  if (process.env['NODE_ENV'] !== 'production') {
+  // document the API for developers, not end users). Fail-closed:
+  // an unset or typo NODE_ENV ('prod', 'dev', '') keeps docs OFF.
+  // env.ts already throws on typos at boot, but this explicit allowlist
+  // is defense-in-depth for any code path that imports app.ts without
+  // first calling validateRequiredEnv() (e.g. ad-hoc tooling).
+  const nodeEnv = process.env['NODE_ENV'];
+  const docsEnabled = nodeEnv === 'development' || nodeEnv === 'staging';
+  if (docsEnabled) {
     app.doc31('/openapi.json', {
       openapi: '3.1.0',
       info: {
@@ -132,6 +139,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', costProfileAttachmentRoutes);
   app.route('/', variantRoutes);
   app.route('/', fxRatesRoutes);
+  app.route('/', commissionRateRoutes);
 
   return app;
 }

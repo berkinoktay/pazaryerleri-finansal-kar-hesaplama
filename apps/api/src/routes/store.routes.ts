@@ -131,9 +131,6 @@ const connectStoreRoute = createRoute({
   },
 });
 
-// TODO(roles): requireRole('OWNER', 'ADMIN') — gated by Milestone #2
-// (requireRole middleware). Today every org member can create; practical
-// impact is zero because only OWNERs exist until the invite flow ships.
 app.openapi(connectStoreRoute, async (c) => {
   // Route-level D7 rate limit: consume a token BEFORE validating. A
   // throw here produces 429; otherwise we proceed. Routes are a handler
@@ -143,7 +140,12 @@ app.openapi(connectStoreRoute, async (c) => {
 
   const userId = c.get('userId');
   const { orgId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  // Connecting a marketplace account is OWNER/ADMIN territory: it
+  // commits the org to billing-bearing API calls and stores credentials
+  // that can fetch financial data. Members and viewers cannot do this.
+  const organizationId = await ensureOrgMember(userId, orgId, {
+    allowedRoles: ['OWNER', 'ADMIN'],
+  });
   const input = c.req.valid('json');
   const store = await storeService.connect(organizationId, input);
   return c.json(store, 201);
@@ -214,11 +216,14 @@ const disconnectStoreRoute = createRoute({
   },
 });
 
-// TODO(roles): requireRole('OWNER', 'ADMIN') — same deferral as POST.
 app.openapi(disconnectStoreRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  // Disconnect is destructive (cascades to products, orders, settlements,
+  // sync_logs) — gate on OWNER/ADMIN. Same rationale as POST /stores.
+  const organizationId = await ensureOrgMember(userId, orgId, {
+    allowedRoles: ['OWNER', 'ADMIN'],
+  });
   await storeService.disconnect(organizationId, storeId);
   return c.body(null, 204);
 });

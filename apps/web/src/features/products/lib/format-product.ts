@@ -29,6 +29,33 @@ export function totalStock(variants: VariantSummary[]): number {
   return variants.reduce((sum, v) => sum + v.quantity, 0);
 }
 
+// Aggregate for the parent row's desi column when a product has multiple
+// variants. Mirrors priceRange — returns null when none of the variants
+// have a value yet, otherwise reports the min/max of the effective
+// desi across all variants.
+export interface DesiRange {
+  min: string;
+  max: string;
+  isSingle: boolean;
+  anyOverridden: boolean;
+}
+
+export function desiRange(variants: VariantSummary[]): DesiRange | null {
+  if (variants.length === 0) return null;
+  const values = variants
+    .map((v) => (v.dimensionalWeight !== null ? Number.parseFloat(v.dimensionalWeight) : null))
+    .filter((n): n is number => n !== null && Number.isFinite(n));
+  if (values.length === 0) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return {
+    min: min.toString(),
+    max: max.toString(),
+    isSingle: min === max,
+    anyOverridden: variants.some((v) => v.isDimensionalWeightOverridden),
+  };
+}
+
 /**
  * Trendyol's three delivery tiers, mapped from the marketplace's API
  * vocabulary (`fastDeliveryOptions[].deliveryOptionType` plus the

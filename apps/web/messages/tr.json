@@ -208,8 +208,8 @@
     "tools": {
       "tools": {
         "title": "Araçlar",
+        "commissionRates": "Komisyon Oranları",
         "commissionCalculator": "Komisyon Hesaplama",
-        "categoryCommissions": "Kategori Komisyonları",
         "plusCommissionRates": "Plus Komisyon Tarifesi",
         "productPricing": "Ürün Fiyatlandırma"
       }
@@ -785,7 +785,8 @@
       "salePrice": "Fiyat",
       "stock": "Stok",
       "status": "Durum",
-      "cost": "Maliyet"
+      "cost": "Maliyet",
+      "desi": "Desi"
     },
     "delivery": {
       "sameDay": "Bugün Kargoda",
@@ -851,6 +852,24 @@
         "removeLabel": "{name} profilini kaldır"
       }
     },
+    "desiCell": {
+      "addDesi": "Desi ekle",
+      "overrideAria": "Bu desi değeri sen tarafından ayarlandı.",
+      "parentRange": "{min} – {max}",
+      "popover": {
+        "title": "Desi",
+        "placeholder": "1.5",
+        "syncedHint": "Trendyol değeri: {value}",
+        "reset": "Trendyol değerine geri al",
+        "save": "Kaydet",
+        "cancel": "İptal",
+        "errors": {
+          "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Geçerli bir sayı gir (örn. 1.5).",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi sıfırdan büyük olmalı.",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi 999,99'dan küçük olmalı."
+        }
+      }
+    },
     "parentCostCell": {
       "allSame": "tümü aynı",
       "variantCount": "{count} varyant",
@@ -892,6 +911,26 @@
         "attached": "{count} varyanta maliyet eklendi",
         "detached": "{count} varyanttan maliyet kaldırıldı",
         "replaced": "{count} varyantın maliyet profilleri güncellendi"
+      }
+    },
+    "bulkDesi": {
+      "actionLabel": "Desi ayarla",
+      "title": "Desi değerini ayarla",
+      "description": "Seçili {count} varyantın desi değeri tek bir değerle güncellenir.",
+      "fieldLabel": "Desi",
+      "placeholder": "1.5",
+      "help": "Bu değer Trendyol'dan gelen değerin üzerine yazılır ve sonraki senkronizasyonlarda korunur.",
+      "apply": "{count} varyanta uygula",
+      "cancel": "İptal",
+      "clearAll": "Tümünü Trendyol değerine sıfırla",
+      "toast": {
+        "applied": "{count} varyanta {value} desi uygulandı",
+        "cleared": "{count} varyantın desi override'ı temizlendi"
+      },
+      "errors": {
+        "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Geçerli bir sayı gir (örn. 1.5).",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi sıfırdan büyük olmalı.",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi 999,99'dan küçük olmalı."
       }
     }
   },
@@ -1059,6 +1098,52 @@
       "editForm": {
         "title": "Profil detayları",
         "savedSuccess": "Profil güncellendi."
+      }
+    }
+  },
+  "features": {
+    "commissionRates": {
+      "page": {
+        "title": "Komisyon Oranları",
+        "intent": "Trendyol mağazana ait güncel komisyon tarifesi"
+      },
+      "tabs": {
+        "category": "Kategoriler",
+        "categoryBrand": "Kategori + Marka"
+      },
+      "toolbar": {
+        "searchPlaceholder": "Kategori, üst kategori veya marka ara…",
+        "activeOnly": "Sadece sattıklarım"
+      },
+      "columns": {
+        "category": "Kategori",
+        "parentCategory": "Üst Kategori",
+        "brand": "Marka",
+        "baseRate": "Komisyon",
+        "paymentTermDays": "Vade",
+        "productCount": "Ürün #",
+        "productCountHint": "Bu kategoride senkronize edilmiş ve onaylı durumda olan ürünlerinin sayısı."
+      },
+      "tooltip": {
+        "segmentOverridesTitle": "Segment override'lar",
+        "paymentTermDaysSuffix": "{days} gün"
+      },
+      "autoSwitchedToActive": "Sattıklarım moduna geçildi — ürün sayısına göre sıralandı.",
+      "empty": {
+        "noStore": {
+          "title": "Aktif mağaza yok",
+          "description": "Komisyon tarifesini görüntülemek için önce bir mağaza bağlaman gerekiyor.",
+          "cta": "Mağaza bağla"
+        },
+        "noRates": {
+          "title": "Komisyon tarifesi henüz yüklenmedi",
+          "description": "Bu pazaryeri için komisyon oranları sistemde mevcut değil. Tarife yakında içeri aktarılacak."
+        },
+        "noMatches": {
+          "title": "Filtreyle eşleşen oran bulunamadı",
+          "description": "Arama veya 'Sattıklarım' filtresi sonuçları daralttı. Filtreyi temizleyerek tüm tarifeyi görüntüle.",
+          "action": "Filtreyi temizle"
+        }
       }
     }
   }

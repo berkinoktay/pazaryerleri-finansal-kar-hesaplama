@@ -274,8 +274,13 @@ async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: stri
               locked: variant.locked,
               size: variant.size,
               attributes: variant.attributes as never,
+              syncedDimensionalWeight: variant.syncedDimensionalWeight,
               lastSyncedAt: new Date(),
             },
+            // The update clause MUST NOT reference `dimensionalWeight`.
+            // That column is the user's override and is sacred — see the
+            // ProductVariant schema comment. Sync writes only the synced
+            // half of the pair.
             update: {
               barcode: variant.barcode,
               stockCode: variant.stockCode,
@@ -294,6 +299,7 @@ async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: stri
               locked: variant.locked,
               size: variant.size,
               attributes: variant.attributes as never,
+              syncedDimensionalWeight: variant.syncedDimensionalWeight,
               lastSyncedAt: new Date(),
             },
           });

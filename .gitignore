@@ -53,3 +53,6 @@ packages/db/prisma/generated/
 
 # Superpowers brainstorm scratch (HTML mockups, server state)
 .superpowers/
+
+# scratch / one-off data captures (may contain commercially sensitive marketplace data)
+tmp/

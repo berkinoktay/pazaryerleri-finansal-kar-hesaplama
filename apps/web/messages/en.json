@@ -208,8 +208,8 @@
     "tools": {
       "tools": {
         "title": "Tools",
+        "commissionRates": "Commission Rates",
         "commissionCalculator": "Commission Calculator",
-        "categoryCommissions": "Category Commissions",
         "plusCommissionRates": "Plus Commission Rates",
         "productPricing": "Product Pricing"
       }
@@ -785,7 +785,8 @@
       "salePrice": "Price",
       "stock": "Stock",
       "status": "Status",
-      "cost": "Cost"
+      "cost": "Cost",
+      "desi": "Desi"
     },
     "delivery": {
       "sameDay": "Same-day shipping",
@@ -850,6 +851,24 @@
         "removeLabel": "Remove profile"
       }
     },
+    "desiCell": {
+      "addDesi": "+ Add desi",
+      "overrideAria": "You set this dimensional weight manually.",
+      "parentRange": "{min} – {max}",
+      "popover": {
+        "title": "Dimensional weight",
+        "placeholder": "1.5",
+        "syncedHint": "Trendyol value: {value}",
+        "reset": "Reset to Trendyol value",
+        "save": "Save",
+        "cancel": "Cancel",
+        "errors": {
+          "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be greater than zero.",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi must be less than 999.99."
+        }
+      }
+    },
     "parentCostCell": {
       "allSame": "all same",
       "variantCount": "{count} variants",
@@ -893,6 +912,26 @@
         "attached": "Cost attached to {count} variants",
         "detached": "Cost removed from {count} variants",
         "replaced": "Cost profiles updated on {count} variants"
+      }
+    },
+    "bulkDesi": {
+      "actionLabel": "Set desi",
+      "title": "Set dimensional weight",
+      "description": "Apply one desi value to all {count} selected variants.",
+      "fieldLabel": "Desi",
+      "placeholder": "1.5",
+      "help": "This value overwrites the Trendyol value and is preserved across future syncs.",
+      "apply": "Apply to {count} variants",
+      "cancel": "Cancel",
+      "clearAll": "Reset all to Trendyol value",
+      "toast": {
+        "applied": "Applied desi {value} to {count} variants",
+        "cleared": "Cleared desi override on {count} variants"
+      },
+      "errors": {
+        "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be greater than zero.",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi must be less than 999.99."
       }
     }
   },
@@ -995,6 +1034,52 @@
       "confirmDescription": "This cost profile will be archived and can no longer be attached to new variants. Past orders are unaffected. You can restore it at any time.",
       "confirm": "Archive",
       "cancel": "Cancel"
+    }
+  },
+  "features": {
+    "commissionRates": {
+      "page": {
+        "title": "Commission Rates",
+        "intent": "Current commission tariff for your Trendyol store"
+      },
+      "tabs": {
+        "category": "Categories",
+        "categoryBrand": "Category + Brand"
+      },
+      "toolbar": {
+        "searchPlaceholder": "Search category, parent category, or brand…",
+        "activeOnly": "Only what I sell"
+      },
+      "columns": {
+        "category": "Category",
+        "parentCategory": "Parent Category",
+        "brand": "Brand",
+        "baseRate": "Commission",
+        "paymentTermDays": "Settlement",
+        "productCount": "Products #",
+        "productCountHint": "Number of synced, approved products you have in this category."
+      },
+      "tooltip": {
+        "segmentOverridesTitle": "Segment overrides",
+        "paymentTermDaysSuffix": "{days} days"
+      },
+      "autoSwitchedToActive": "Switched to 'Only what I sell' — sorted by product count.",
+      "empty": {
+        "noStore": {
+          "title": "No active store",
+          "description": "Connect a store to view its commission tariff.",
+          "cta": "Connect store"
+        },
+        "noRates": {
+          "title": "Commission tariff not loaded yet",
+          "description": "Rates for this marketplace are not yet imported. The tariff will be available soon."
+        },
+        "noMatches": {
+          "title": "No rates match the current filter",
+          "description": "The search or 'Only what I sell' filter narrowed the results. Clear filters to view the full tariff.",
+          "action": "Clear filters"
+        }
+      }
     }
   }
 }

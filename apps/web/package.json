@@ -82,14 +82,14 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.1",
-    "@vitest/ui": "^4.1.4",
+    "@vitest/ui": "^4.1.6",
     "dotenv-cli": "^11.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.4",
+    "eslint-config-next": "16.2.6",
     "happy-dom": "^20.9.0",
     "msw": "^2",
     "tailwindcss": "^4",
     "typescript": "^6",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.6"
   }
 }

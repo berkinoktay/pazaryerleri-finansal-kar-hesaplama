@@ -276,6 +276,31 @@ const VariantSummarySchema = z
     listPrice: z.string().openapi({ description: 'Decimal string', example: '249.90' }),
     vatRate: z.number().int().nullable(),
     costPrice: z.string().nullable().openapi({ description: 'Decimal string, user-entered' }),
+    dimensionalWeight: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Effective dimensional weight (TR: "desi"). Decimal string. The user override takes ' +
+          'precedence; falls back to the marketplace-synced value when no override is set. Null ' +
+          'when neither side has a value yet.',
+        example: '1.50',
+      }),
+    syncedDimensionalWeight: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "The marketplace's latest dimensional weight for this variant. Refreshed every sync. " +
+          'Independent of any user override. Used by the UI to show the seller what the ' +
+          'marketplace currently reports.',
+        example: '1.20',
+      }),
+    isDimensionalWeightOverridden: z.boolean().openapi({
+      description:
+        'True when the user has manually set a dimensional weight that differs from (or shadows) ' +
+        'the marketplace value. Drives the override badge and the "↺ Reset" affordance in the UI.',
+    }),
     quantity: z.number().int().nonnegative(),
     deliveryDuration: z.number().int().nullable(),
     isRushDelivery: z.boolean(),
@@ -423,6 +448,15 @@ export function toVariantSummary(
     listPrice: variant.listPrice.toString(),
     vatRate: variant.vatRate,
     costPrice: variant.costPrice !== null ? variant.costPrice.toString() : null,
+    dimensionalWeight:
+      variant.dimensionalWeight !== null
+        ? variant.dimensionalWeight.toString()
+        : variant.syncedDimensionalWeight !== null
+          ? variant.syncedDimensionalWeight.toString()
+          : null,
+    syncedDimensionalWeight:
+      variant.syncedDimensionalWeight !== null ? variant.syncedDimensionalWeight.toString() : null,
+    isDimensionalWeightOverridden: variant.dimensionalWeight !== null,
     quantity: variant.quantity,
     deliveryDuration: variant.deliveryDuration,
     isRushDelivery: variant.isRushDelivery,
@@ -566,3 +600,110 @@ function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] 
   }
   return out.length > 0 ? out : null;
 }
+
+// ─── PATCH variant dimensional weight (Desi) ──────────────────────────
+// Bounds: Decimal(6,2) max is 9999.99 at the DB level; the cap below is a
+// UX guard against typos. 0 is rejected because a 0-desi parcel is
+// nonsensical for shipping cost calculations. Negative is rejected
+// because… negative weight. Null is permitted and clears the override
+// (the read path then falls back to syncedDimensionalWeight).
+
+const DIMENSIONAL_WEIGHT_MIN_INCLUSIVE = 0.01;
+const DIMENSIONAL_WEIGHT_MAX_INCLUSIVE = 999.99;
+
+export const UpdateVariantDimensionalWeightBodySchema = z
+  .object({
+    dimensionalWeight: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')
+      .refine(
+        (v) => Number(v) >= DIMENSIONAL_WEIGHT_MIN_INCLUSIVE,
+        'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL',
+      )
+      .refine(
+        (v) => Number(v) <= DIMENSIONAL_WEIGHT_MAX_INCLUSIVE,
+        'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE',
+      )
+      .nullable()
+      .openapi({
+        description:
+          'Decimal string with up to 2 fractional digits, in the (closed) range ' +
+          `[${DIMENSIONAL_WEIGHT_MIN_INCLUSIVE.toString()}, ${DIMENSIONAL_WEIGHT_MAX_INCLUSIVE.toString()}], ` +
+          'or null. Null clears the user override and reverts the read path to ' +
+          "the marketplace's last synced value.",
+        example: '1.50',
+      }),
+  })
+  .openapi('UpdateVariantDimensionalWeightBody');
+
+export const VariantDimensionalWeightResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    dimensionalWeight: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Effective dimensional weight after the update.', example: '1.50' }),
+    syncedDimensionalWeight: z.string().nullable().openapi({
+      description: "The marketplace's value, unchanged by this endpoint.",
+      example: '1.20',
+    }),
+    isDimensionalWeightOverridden: z.boolean(),
+  })
+  .openapi('VariantDimensionalWeightResponse');
+
+// ─── Bulk variant dimensional-weight update ────────────────────────────
+// Same value-validation rules as the single-variant endpoint, plus a
+// non-empty array of UUIDs. The hard cap (200) is a safety rail: the
+// products table paginates at 100, so a "select all visible + neighbor
+// page" worst case stays under it; anything larger is almost certainly
+// a script that should be using the per-variant endpoint in a controlled
+// loop with its own progress reporting.
+
+const BULK_DIMENSIONAL_WEIGHT_VARIANT_LIMIT = 200;
+
+export const BulkUpdateVariantDimensionalWeightBodySchema = z
+  .object({
+    variantIds: z
+      .array(z.string().uuid('INVALID_VARIANT_ID'))
+      .min(1, 'INVALID_VARIANT_IDS_EMPTY')
+      .max(BULK_DIMENSIONAL_WEIGHT_VARIANT_LIMIT, 'INVALID_VARIANT_IDS_TOO_MANY')
+      .openapi({
+        description: `Variant UUIDs to update. 1–${BULK_DIMENSIONAL_WEIGHT_VARIANT_LIMIT.toString()} items.`,
+        example: ['7a1a1a1a-1111-4111-8111-111111111111'],
+      }),
+    dimensionalWeight: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')
+      .refine(
+        (v) => Number(v) >= DIMENSIONAL_WEIGHT_MIN_INCLUSIVE,
+        'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL',
+      )
+      .refine(
+        (v) => Number(v) <= DIMENSIONAL_WEIGHT_MAX_INCLUSIVE,
+        'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE',
+      )
+      .nullable()
+      .openapi({
+        description:
+          'Same shape as the single-variant endpoint. Applied uniformly to every ' +
+          'listed variant. Null clears the override on all of them.',
+        example: '1.50',
+      }),
+  })
+  .openapi('BulkUpdateVariantDimensionalWeightBody');
+
+export const BulkUpdateVariantDimensionalWeightResponseSchema = z
+  .object({
+    updated: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({
+        description:
+          'How many variants in the request actually matched the org+store filter and ' +
+          'received the new value. May be less than variantIds.length if some IDs were ' +
+          'stale (variant deleted or moved stores between selection and submit).',
+        example: 12,
+      }),
+  })
+  .openapi('BulkUpdateVariantDimensionalWeightResponse');

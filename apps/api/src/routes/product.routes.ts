@@ -5,14 +5,19 @@ import { createSubApp } from '../lib/create-hono-app';
 import { ensureOrgMember } from '../lib/ensure-org-member';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as productsListService from '../services/products-list.service';
+import * as productVariantService from '../services/product-variant.service';
 import * as storeService from '../services/store.service';
 import {
+  BulkUpdateVariantDimensionalWeightBodySchema,
+  BulkUpdateVariantDimensionalWeightResponseSchema,
   ListProductsQuerySchema,
   ListProductsResponseSchema,
   ProductFacetsResponseSchema,
   StartSyncResponseSchema,
   SyncLogListResponseSchema,
   SyncLogResponseSchema,
+  UpdateVariantDimensionalWeightBodySchema,
+  VariantDimensionalWeightResponseSchema,
   toSyncLogResponse,
 } from '../validators/product.validator';
 
@@ -308,6 +313,164 @@ app.openapi(productFacetsRoute, async (c) => {
   const organizationId = await ensureOrgMember(userId, orgId);
   await storeService.requireOwnedStore(organizationId, storeId);
   const result = await productsListService.facets({ organizationId, storeId });
+  return c.json(result, 200);
+});
+
+// ─── PATCH variant dimensional weight (Desi user override) ─────────────
+
+const variantIdParams = z.object({
+  orgId: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: 'orgId', in: 'path' } }),
+  storeId: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: 'storeId', in: 'path' } }),
+  variantId: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: 'variantId', in: 'path' } }),
+});
+
+const setVariantDimensionalWeightRoute = createRoute({
+  method: 'patch',
+  path: '/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight',
+  tags: ['Products'],
+  summary: "Set or clear the user override for a variant's dimensional weight (desi)",
+  description:
+    'Writes exclusively to ProductVariant.dimensional_weight (the user-override column). ' +
+    "Trendyol's value lives in a sister column that this endpoint never touches — so the " +
+    'override survives every subsequent sync. Pass `dimensionalWeight: null` to clear the ' +
+    'override and revert the read path to the marketplace-synced value.',
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: variantIdParams,
+    body: {
+      content: { 'application/json': { schema: UpdateVariantDimensionalWeightBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: VariantDimensionalWeightResponseSchema } },
+      description: 'Updated variant — effective desi, synced desi, and override flag',
+      headers: RateLimitHeaders,
+    },
+    401: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Missing or invalid auth token',
+    },
+    403: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Not a member of this organization',
+    },
+    404: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Store or variant not found (or belongs to a different org/store)',
+    },
+    422: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Invalid dimensional weight value',
+    },
+    429: Common429Response,
+  },
+});
+
+app.openapi(setVariantDimensionalWeightRoute, async (c) => {
+  const userId = c.get('userId');
+  const { orgId, storeId, variantId } = c.req.valid('param');
+  const { dimensionalWeight } = c.req.valid('json');
+  const organizationId = await ensureOrgMember(userId, orgId);
+  await storeService.requireOwnedStore(organizationId, storeId);
+
+  const updated = await productVariantService.setDimensionalWeight({
+    organizationId,
+    storeId,
+    variantId,
+    value: dimensionalWeight,
+  });
+
+  return c.json(
+    {
+      id: updated.id,
+      dimensionalWeight:
+        updated.dimensionalWeight !== null
+          ? updated.dimensionalWeight.toString()
+          : updated.syncedDimensionalWeight !== null
+            ? updated.syncedDimensionalWeight.toString()
+            : null,
+      syncedDimensionalWeight:
+        updated.syncedDimensionalWeight !== null
+          ? updated.syncedDimensionalWeight.toString()
+          : null,
+      isDimensionalWeightOverridden: updated.dimensionalWeight !== null,
+    },
+    200,
+  );
+});
+
+// ─── Bulk PATCH variant dimensional weights ────────────────────────────
+
+const bulkSetVariantDimensionalWeightRoute = createRoute({
+  method: 'patch',
+  path: '/organizations/{orgId}/stores/{storeId}/products/variants/dimensional-weight',
+  tags: ['Products'],
+  summary: 'Apply one dimensional-weight value (or clear) across many variants',
+  description:
+    'Same single-column write rule as the per-variant endpoint: only ' +
+    "ProductVariant.dimensional_weight is touched. Variant IDs that don't belong to " +
+    'the org+store are silently filtered out (not surfaced as an error — the UX is ' +
+    '"apply to what you can"). Returns the actual updated count so the UI can warn ' +
+    'when the selection went stale between click and submit.',
+  security: [{ bearerAuth: [] }],
+  request: {
+    params: storeIdParams,
+    body: {
+      content: { 'application/json': { schema: BulkUpdateVariantDimensionalWeightBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': { schema: BulkUpdateVariantDimensionalWeightResponseSchema },
+      },
+      description: 'Bulk update applied; response carries the affected variant count',
+      headers: RateLimitHeaders,
+    },
+    401: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Missing or invalid auth token',
+    },
+    403: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Not a member of this organization',
+    },
+    404: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Store not found',
+    },
+    422: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Invalid body (bad UUID, empty array, out-of-range value)',
+    },
+    429: Common429Response,
+  },
+});
+
+app.openapi(bulkSetVariantDimensionalWeightRoute, async (c) => {
+  const userId = c.get('userId');
+  const { orgId, storeId } = c.req.valid('param');
+  const { variantIds, dimensionalWeight } = c.req.valid('json');
+  const organizationId = await ensureOrgMember(userId, orgId);
+  await storeService.requireOwnedStore(organizationId, storeId);
+
+  const result = await productVariantService.bulkSetDimensionalWeight({
+    organizationId,
+    storeId,
+    variantIds,
+    value: dimensionalWeight,
+  });
+
   return c.json(result, 200);
 });
 

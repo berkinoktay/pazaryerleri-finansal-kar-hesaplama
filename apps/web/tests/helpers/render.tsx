@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { render as rtlRender, type RenderOptions } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { FORMATS } from '../../src/i18n/formats';
 import trMessages from '../../messages/tr.json';
 
 /**
@@ -29,7 +30,12 @@ function AllProviders({ children, queryClient }: ProvidersProps) {
   const client = queryClient ?? createTestQueryClient();
   return (
     <QueryClientProvider client={client}>
-      <NextIntlClientProvider locale="tr" messages={trMessages} timeZone="Europe/Istanbul">
+      <NextIntlClientProvider
+        locale="tr"
+        messages={trMessages}
+        timeZone="Europe/Istanbul"
+        formats={FORMATS}
+      >
         {children}
       </NextIntlClientProvider>
     </QueryClientProvider>

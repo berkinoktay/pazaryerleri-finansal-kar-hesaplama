@@ -87,6 +87,11 @@ export interface TrendyolVariant {
   hasViolation?: boolean;
   blacklisted?: boolean;
   locationBasedDelivery?: string;
+  // Volumetric weight ("desi" in TR parcel shipping). Not present in the
+  // documented `/products/approved` example response, but real payloads
+  // and the `variant-bulk-update` endpoint both speak this field. Treated
+  // as optional so a missing value never breaks the sync.
+  dimensionalWeight?: number;
 }
 
 export interface TrendyolBrand {
@@ -157,6 +162,10 @@ export interface MappedProductVariant {
   locked: boolean;
   size: string | null;
   attributes: TrendyolAttribute[];
+  // null when Trendyol omits the value. Always lands in the
+  // syncedDimensionalWeight column — never in dimensionalWeight, which is
+  // exclusively the user's override (see ProductVariant schema comment).
+  syncedDimensionalWeight: string | null;
 }
 
 export interface MappedProduct {

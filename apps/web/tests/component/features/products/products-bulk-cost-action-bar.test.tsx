@@ -91,6 +91,9 @@ function makeVariant(id: string, overrides: Partial<VariantSummary> = {}): Varia
     currentCostTry: null,
     profileCount: 0,
     costStatus: 'NO_PROFILES',
+    dimensionalWeight: null,
+    syncedDimensionalWeight: null,
+    isDimensionalWeightOverridden: false,
     ...overrides,
   };
 }
@@ -128,7 +131,12 @@ function makeVariantRow(parentId: string, variantId: string): ProductRow {
 function renderBar(rows: ProductRow[], onClear = vi.fn()) {
   return render(
     <NextIntlClientProvider locale="tr" messages={messages}>
-      <ProductsBulkCostActionBar orgId="org-1" selectedRows={rows} onClearSelection={onClear} />
+      <ProductsBulkCostActionBar
+        orgId="org-1"
+        storeId="store-1"
+        selectedRows={rows}
+        onClearSelection={onClear}
+      />
     </NextIntlClientProvider>,
   );
 }

@@ -252,3 +252,21 @@ DROP POLICY IF EXISTS fx_rates_authenticated_read ON fx_rates;
 CREATE POLICY fx_rates_authenticated_read ON fx_rates
   FOR SELECT TO authenticated
   USING (true);
+
+-- marketplace_commission_rate: platform-scoped reference data, NOT tenant-private.
+-- Trendyol/Hepsiburada commission tariff is the same for every seller on the
+-- platform — segment-based overrides conceptually exist, but the marketplaces
+-- don't expose a seller's segment via API, so profit calculation always uses
+-- base_rate. Storing per-tenant would mean duplicating the same ~35K rows for
+-- every org, which is wasteful and inconsistent. One global table, every
+-- authenticated user reads the same rows.
+--
+-- Writes are API-only — the Hono backend uses the service role connection
+-- (DATABASE_URL) which bypasses RLS, so no INSERT/UPDATE/DELETE policy for
+-- authenticated is needed and direct client writes default-deny.
+ALTER TABLE marketplace_commission_rate ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS marketplace_commission_rate_org_member_read ON marketplace_commission_rate;
+DROP POLICY IF EXISTS marketplace_commission_rate_authenticated_read ON marketplace_commission_rate;
+CREATE POLICY marketplace_commission_rate_authenticated_read ON marketplace_commission_rate
+  FOR SELECT TO authenticated
+  USING (true);

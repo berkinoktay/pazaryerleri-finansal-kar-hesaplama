@@ -133,6 +133,9 @@ function makeVariant(
     currentCostTry: null,
     profileCount: 0,
     costStatus: 'NO_PROFILES',
+    dimensionalWeight: null,
+    syncedDimensionalWeight: null,
+    isDimensionalWeightOverridden: false,
     ...overrides,
   };
 }
@@ -160,6 +163,7 @@ const noop = (): void => {};
 
 const baseProps = {
   orgId: '00000000-0000-0000-0000-000000000001',
+  storeId: '00000000-0000-0000-0000-000000000002',
   loading: false,
   pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
   q: '',
