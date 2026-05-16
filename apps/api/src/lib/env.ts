@@ -24,15 +24,17 @@ function isNodeEnv(value: string): value is NodeEnv {
 }
 
 /**
- * Resolve NODE_ENV to one of the recognised modes. Defense-in-depth for
- * `apps/api/src/app.ts`, where `NODE_ENV !== 'production'` decides whether
- * to expose `/openapi.json` and the Scalar UI.
+ * Validate NODE_ENV at boot. Defense-in-depth for `apps/api/src/app.ts`,
+ * which gates the OpenAPI docs surface on an explicit `development`/
+ * `staging` allowlist (fail-closed against anything else).
  *
  * Asymmetric strictness:
- *   - Unset → default to 'development' (and persist on process.env so the
- *     docs gate sees the same value). A warning is logged so a production
- *     deploy that forgot the var still surfaces the misconfiguration in
- *     ops logs; we just don't crash dev runs over it.
+ *   - Unset → warn only. We do NOT mutate `process.env.NODE_ENV` so the
+ *     docs gate stays closed if a production deploy ever boots with the
+ *     var unset (broken deploy script, forgotten platform config). Local
+ *     dev still boots; the developer sees the warning and either lives
+ *     with docs at /v1/docs being 404 or adds NODE_ENV=development to
+ *     their .env (recommended).
  *   - Set to an unrecognised value → throw. A typo like 'prod' or
  *     'PRODUCTION' would silently flip the docs gate the wrong way, so
  *     fail-fast wins here.
@@ -41,16 +43,16 @@ function isNodeEnv(value: string): value is NodeEnv {
  * inject NODE_ENV=production automatically, so the unset path is
  * realistically a local-dev concern.
  */
-function readNodeEnv(): NodeEnv {
+function readNodeEnv(): NodeEnv | undefined {
   const raw = process.env['NODE_ENV'];
   if (raw === undefined || raw.length === 0) {
     console.warn(
-      `[env] NODE_ENV is not set; defaulting to 'development'. ` +
-        `Production deployments MUST set NODE_ENV=production explicitly so ` +
-        `dev-only surfaces (OpenAPI docs, Scalar UI) stay off.`,
+      `[env] NODE_ENV is not set. OpenAPI docs (/v1/docs, /v1/openapi.json) ` +
+        `will stay off (fail-closed). To enable docs locally, add ` +
+        `NODE_ENV=development to your workspace-root .env. Production ` +
+        `deployments MUST set NODE_ENV=production explicitly.`,
     );
-    process.env['NODE_ENV'] = 'development';
-    return 'development';
+    return undefined;
   }
   if (!isNodeEnv(raw)) {
     throw new Error(
