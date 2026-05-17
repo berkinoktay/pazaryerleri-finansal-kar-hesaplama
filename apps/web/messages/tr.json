@@ -789,7 +789,8 @@
       "stock": "Stok",
       "status": "Durum",
       "cost": "Maliyet",
-      "desi": "Desi"
+      "desi": "Desi",
+      "netProfit": "Tahmini Net Kar"
     },
     "delivery": {
       "sameDay": "Bugün Kargoda",
@@ -1174,6 +1175,49 @@
       "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "Trendyol Anlaşmalı seçildiyse kargo firması zorunludur.",
       "SHIPPING_CARRIER_PLATFORM_MISMATCH": "Seçilen kargo firması bu mağazanın pazaryeriyle uyumlu değil.",
       "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı."
+    },
+    "products": {
+      "columnHeader": "Tahmini Net Kar",
+      "popoverTitle": "Kar Detayı",
+      "rows": {
+        "salePrice": "Satış fiyatı",
+        "cost": "Maliyet",
+        "shipping": "Kargo",
+        "commission": "Komisyon",
+        "netProfit": "Net Kar"
+      },
+      "tariff": {
+        "NORMAL": "Normal",
+        "BAREM": "Barem",
+        "OWN_CONTRACT": "Kendi"
+      },
+      "states": {
+        "NO_DESI": {
+          "title": "Desi değeri eksik",
+          "reason": "Kargo tahmini için ürün desi/dimensional_weight bilgisi gerekli.",
+          "cta": "Ürüne desi ekle"
+        },
+        "NO_CARRIER": {
+          "title": "Kargo firması seçilmemiş",
+          "reason": "Mağaza ayarlarınızda varsayılan kargo firması seçili değil.",
+          "cta": "Mağaza ayarlarına git"
+        },
+        "OWN_CONTRACT_EMPTY": {
+          "title": "Tarife bekleniyor",
+          "reason": "Kendi anlaşmanız seçili, fakat kargo tarifeniz henüz yüklenmedi.",
+          "cta": "Excel ile yükle (yakında)"
+        },
+        "DESI_OVERFLOW": {
+          "title": "Yüksek desi, tarife dışı",
+          "reason": "Bu ürün seçili carrier'ın tarife tablosunda yer alan en yüksek desiyi aşıyor.",
+          "cta": "Kargo firmanızı değiştirin"
+        }
+      },
+      "banner": {
+        "title": "{count} üründe tahmini kar hesaplanamıyor",
+        "breakdown": "desi eksik ({noDesi}) · carrier seçilmemiş ({noCarrier}) · yüksek desi ({overflow})",
+        "filterCta": "Filtreyi uygula"
+      }
     }
   }
 }

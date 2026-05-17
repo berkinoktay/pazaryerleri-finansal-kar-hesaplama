@@ -789,7 +789,8 @@
       "stock": "Stock",
       "status": "Status",
       "cost": "Cost",
-      "desi": "Desi"
+      "desi": "Desi",
+      "netProfit": "Est. Net Profit"
     },
     "delivery": {
       "sameDay": "Same-day shipping",
@@ -1109,6 +1110,49 @@
       "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "A carrier is required when Trendyol Contract is selected.",
       "SHIPPING_CARRIER_PLATFORM_MISMATCH": "The selected carrier does not match this store's marketplace.",
       "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found."
+    },
+    "products": {
+      "columnHeader": "Est. Net Profit",
+      "popoverTitle": "Profit Breakdown",
+      "rows": {
+        "salePrice": "Sale price",
+        "cost": "Cost",
+        "shipping": "Shipping",
+        "commission": "Commission",
+        "netProfit": "Net Profit"
+      },
+      "tariff": {
+        "NORMAL": "Normal",
+        "BAREM": "Barem",
+        "OWN_CONTRACT": "Own"
+      },
+      "states": {
+        "NO_DESI": {
+          "title": "Desi value missing",
+          "reason": "Shipping estimate needs the product's desi / dimensional weight.",
+          "cta": "Add desi to product"
+        },
+        "NO_CARRIER": {
+          "title": "No default carrier",
+          "reason": "Your store doesn't have a default shipping carrier configured.",
+          "cta": "Open store settings"
+        },
+        "OWN_CONTRACT_EMPTY": {
+          "title": "Awaiting tariff",
+          "reason": "Own contract is selected, but your shipping tariff hasn't been uploaded yet.",
+          "cta": "Upload Excel (coming soon)"
+        },
+        "DESI_OVERFLOW": {
+          "title": "High desi, out of tariff",
+          "reason": "This product exceeds the highest desi covered by the selected carrier's tariff.",
+          "cta": "Switch carriers"
+        }
+      },
+      "banner": {
+        "title": "{count} product can't compute estimated profit",
+        "breakdown": "missing desi ({noDesi}) · no carrier ({noCarrier}) · high desi ({overflow})",
+        "filterCta": "Apply filter"
+      }
     }
   }
 }
