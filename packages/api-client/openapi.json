@@ -1015,6 +1015,48 @@
             ],
             "description": "Live cost availability status. OK = profiles exist + FX resolved. NO_PROFILES = variant has no attached profiles. FX_STALE = AUTO profile exists but most-recent FX rate is >2 days old. FX_MISSING = AUTO profile exists but no FX rate has ever been fetched.",
             "example": "OK"
+          },
+          "estimatedShippingNet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Estimated net shipping cost (KDV hariç, TRY) computed inline by the shipping CTE. Decimal string. Null when shippingEstimateStatus !== \"OK\" (see that field for the reason). Canonical algorithm lives in `apps/api/src/services/shipping-estimator.service.ts`; the SQL mirror in `shipping-estimator.sql.ts` is asserted equivalent by an integration test.",
+            "example": "51.24"
+          },
+          "shippingCarrierCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Code of the carrier the estimate was sourced against (SENDEOMP, ARASMP, YKMP, ...). Returned even when shippingEstimateStatus is NO_DESI / DESI_OVERFLOW (the CTE still resolves the configured carrier so the UI can show \"no shipping available for SENDEOMP, try CEVA\"). Null when the store has no defaultShippingCarrierId (NO_CARRIER).",
+            "example": "SENDEOMP"
+          },
+          "shippingTariffApplied": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "NORMAL",
+              "BAREM",
+              "OWN_CONTRACT",
+              null
+            ],
+            "description": "Which tariff lane produced the estimate. NORMAL = desi-bazlı tariff (the carrier row indexed by CEIL(desi)). BAREM = Trendyol's Barem destek tier for fast-delivery variants priced inside a tier. OWN_CONTRACT = tenant-private tariff. Null when no estimate could be produced (see shippingEstimateStatus for the reason).",
+            "example": "BAREM"
+          },
+          "shippingEstimateStatus": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "NO_CARRIER",
+              "NO_DESI",
+              "OWN_CONTRACT_EMPTY",
+              "DESI_OVERFLOW"
+            ],
+            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = variant has neither a user override nor a synced dimensional weight. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
+            "example": "OK"
           }
         },
         "required": [
@@ -1039,7 +1081,11 @@
           "status",
           "currentCostTry",
           "profileCount",
-          "costStatus"
+          "costStatus",
+          "estimatedShippingNet",
+          "shippingCarrierCode",
+          "shippingTariffApplied",
+          "shippingEstimateStatus"
         ]
       },
       "TableMeta": {

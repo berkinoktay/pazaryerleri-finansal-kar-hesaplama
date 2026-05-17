@@ -262,6 +262,45 @@ const CostStatusSchema = z.enum(COST_STATUSES).openapi({
   example: 'OK',
 });
 
+// ─── Shipping estimate (per spec §5.4 / §6.2) ──────────────────────────
+// Inlined into the per-variant response by `SHIPPING_ESTIMATE_CTE_SQL` —
+// the raw-SQL mirror of `shipping-estimator.service.ts`. Equivalence is
+// asserted by `tests/integration/shipping-estimator-equivalence.test.ts`.
+
+const SHIPPING_TARIFF_APPLIED = ['NORMAL', 'BAREM', 'OWN_CONTRACT'] as const;
+export type ShippingTariffApplied = (typeof SHIPPING_TARIFF_APPLIED)[number];
+
+const SHIPPING_ESTIMATE_STATUSES = [
+  'OK',
+  'NO_CARRIER',
+  'NO_DESI',
+  'OWN_CONTRACT_EMPTY',
+  'DESI_OVERFLOW',
+] as const;
+export type ShippingEstimateStatus = (typeof SHIPPING_ESTIMATE_STATUSES)[number];
+
+const ShippingTariffAppliedSchema = z
+  .enum(SHIPPING_TARIFF_APPLIED)
+  .nullable()
+  .openapi({
+    description:
+      'Which tariff lane produced the estimate. NORMAL = desi-bazlı tariff (the carrier ' +
+      "row indexed by CEIL(desi)). BAREM = Trendyol's Barem destek tier for fast-delivery " +
+      'variants priced inside a tier. OWN_CONTRACT = tenant-private tariff. Null when no ' +
+      'estimate could be produced (see shippingEstimateStatus for the reason).',
+    example: 'BAREM',
+  });
+
+const ShippingEstimateStatusSchema = z.enum(SHIPPING_ESTIMATE_STATUSES).openapi({
+  description:
+    'Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = ' +
+    'TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = variant has ' +
+    'neither a user override nor a synced dimensional weight. OWN_CONTRACT_EMPTY = ' +
+    'OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). ' +
+    'DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.',
+  example: 'OK',
+});
+
 const VariantSummarySchema = z
   .object({
     id: z.string().uuid(),
@@ -327,6 +366,30 @@ const VariantSummarySchema = z
       example: 2,
     }),
     costStatus: CostStatusSchema,
+    estimatedShippingNet: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Estimated net shipping cost (KDV hariç, TRY) computed inline by the shipping CTE. ' +
+          'Decimal string. Null when shippingEstimateStatus !== "OK" (see that field for the reason). ' +
+          'Canonical algorithm lives in `apps/api/src/services/shipping-estimator.service.ts`; the ' +
+          'SQL mirror in `shipping-estimator.sql.ts` is asserted equivalent by an integration test.',
+        example: '51.24',
+      }),
+    shippingCarrierCode: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Code of the carrier the estimate was sourced against (SENDEOMP, ARASMP, YKMP, ...). ' +
+          'Returned even when shippingEstimateStatus is NO_DESI / DESI_OVERFLOW (the CTE still ' +
+          'resolves the configured carrier so the UI can show "no shipping available for SENDEOMP, ' +
+          'try CEVA"). Null when the store has no defaultShippingCarrierId (NO_CARRIER).',
+        example: 'SENDEOMP',
+      }),
+    shippingTariffApplied: ShippingTariffAppliedSchema,
+    shippingEstimateStatus: ShippingEstimateStatusSchema,
   })
   .openapi('VariantSummary');
 
@@ -434,9 +497,17 @@ export interface VariantCostAggregate {
   costStatus: CostStatus;
 }
 
+export interface VariantShippingEstimate {
+  estimatedShippingNet: string | null;
+  shippingCarrierCode: string | null;
+  shippingTariffApplied: ShippingTariffApplied | null;
+  shippingEstimateStatus: ShippingEstimateStatus;
+}
+
 export function toVariantSummary(
   variant: VariantRow,
   cost: VariantCostAggregate,
+  shipping: VariantShippingEstimate,
 ): z.infer<typeof VariantSummarySchema> {
   return {
     id: variant.id,
@@ -472,17 +543,33 @@ export function toVariantSummary(
     currentCostTry: cost.currentCostTry,
     profileCount: cost.profileCount,
     costStatus: cost.costStatus,
+    estimatedShippingNet: shipping.estimatedShippingNet,
+    shippingCarrierCode: shipping.shippingCarrierCode,
+    shippingTariffApplied: shipping.shippingTariffApplied,
+    shippingEstimateStatus: shipping.shippingEstimateStatus,
   };
 }
 
 export function toProductWithVariantsResponse(
   product: ProductWithRelations,
   costByVariantId: Map<string, VariantCostAggregate>,
+  shippingByVariantId: Map<string, VariantShippingEstimate>,
 ): z.infer<typeof ProductWithVariantsSchema> {
   const defaultCost: VariantCostAggregate = {
     currentCostTry: null,
     profileCount: 0,
     costStatus: 'NO_PROFILES',
+  };
+  // Default mirrors the service fn's STORE_NOT_FOUND behaviour: a variant
+  // whose row didn't come back from the CTE (extremely rare — the join
+  // covers every variant in the org) is treated as a NO_DESI miss with
+  // empty fields. NO_DESI is the safest default because it triggers the
+  // "ürüne desi ekle" CTA, not a misleading carrier-specific suggestion.
+  const defaultShipping: VariantShippingEstimate = {
+    estimatedShippingNet: null,
+    shippingCarrierCode: null,
+    shippingTariffApplied: null,
+    shippingEstimateStatus: 'NO_DESI',
   };
   return {
     id: product.id,
@@ -507,7 +594,11 @@ export function toProductWithVariantsResponse(
     // disagree.
     variantCount: product.variants.length,
     variants: product.variants.map((v) =>
-      toVariantSummary(v, costByVariantId.get(v.id) ?? defaultCost),
+      toVariantSummary(
+        v,
+        costByVariantId.get(v.id) ?? defaultCost,
+        shippingByVariantId.get(v.id) ?? defaultShipping,
+      ),
     ),
     lastSyncedAt: product.lastSyncedAt.toISOString(),
     platformModifiedAt: product.platformModifiedAt?.toISOString() ?? null,

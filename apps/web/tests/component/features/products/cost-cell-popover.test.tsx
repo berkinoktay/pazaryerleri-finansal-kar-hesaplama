@@ -38,6 +38,10 @@ function makeVariant(overrides: Partial<VariantSummary> = {}): VariantSummary {
     dimensionalWeight: null,
     syncedDimensionalWeight: null,
     isDimensionalWeightOverridden: false,
+    estimatedShippingNet: null,
+    shippingCarrierCode: null,
+    shippingTariffApplied: null,
+    shippingEstimateStatus: 'NO_DESI',
     ...overrides,
   };
 }
