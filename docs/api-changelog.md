@@ -13,6 +13,10 @@ section "Versioning" for details.
 
 ### Added
 
+- ADD: `GET /v1/organizations/:orgId/shipping-carriers` — list shipping carriers
+- ADD: `GET /v1/organizations/:orgId/stores/:storeId/shipping-config` — get store's shipping config
+- ADD: `PATCH /v1/organizations/:orgId/stores/:storeId/shipping-config` — update carrier/source (OWNER/ADMIN gated)
+- ADD: `GET /v1/organizations/:orgId/stores/:storeId/own-shipping-tariff` — list own contract tariff rows (V1 always empty)
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-rates`** — new
   endpoint exposing the imported Trendyol commission tariff for the panel UI.
   Required query: `ruleKind` (`CATEGORY` | `CATEGORY_BRAND`). Optional: `q`
