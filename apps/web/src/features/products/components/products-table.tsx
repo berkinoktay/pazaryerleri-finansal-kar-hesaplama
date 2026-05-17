@@ -5,6 +5,7 @@ import {
   type SortingState,
   type Table as TanstackTable,
 } from '@tanstack/react-table';
+import Decimal from 'decimal.js';
 import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -18,7 +19,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 import type { ProductFacetsResponse } from '../api/list-product-facets.api';
-import type { ProductWithVariants } from '../api/list-products.api';
+import type { ProductWithVariants, VariantSummary } from '../api/list-products.api';
 import {
   computeDeliveryType,
   desiRange,
@@ -39,6 +40,8 @@ import { CostCellPopover } from './cost-cell-popover';
 import { DeliveryBadge } from './delivery-badge';
 import { DesiCell } from './desi-cell';
 import { DesiCellPopover } from './desi-cell-popover';
+import { NetProfitCell } from './net-profit-cell';
+import type { NetProfitPopoverData } from './net-profit-popover';
 import { ParentRowCostCell } from './parent-row-cost-cell';
 import { ProductImageCell } from './product-image-cell';
 import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
@@ -56,6 +59,58 @@ function projectRows(products: ProductWithVariants[]): ProductRow[] {
  */
 function getSelectedRowOriginals(table: TanstackTable<ProductRow>): ProductRow[] {
   return table.getSelectedRowModel().rows.map((r) => r.original);
+}
+
+/**
+ * Compute the net profit for one variant inline. Returns null whenever
+ * any required input is missing, so the cell can fall back to the
+ * non-OK rendering even if `shippingEstimateStatus === 'OK'` but cost
+ * or commission isn't ready yet (e.g. the commission-rates frontend
+ * hasn't shipped — V1 always returns `commissionAmount: null`).
+ *
+ * Decimal.js for precision — matches the rest of the money pipeline.
+ */
+function computeNetProfit(v: VariantSummary): string | null {
+  if (v.shippingEstimateStatus !== 'OK') return null;
+  if (v.currentCostTry === null || v.estimatedShippingNet === null) return null;
+  const sale = new Decimal(v.salePrice);
+  const cost = new Decimal(v.currentCostTry);
+  const shipping = new Decimal(v.estimatedShippingNet);
+  // commissionAmount is sourced from a future field on VariantSummary
+  // (commission-rates frontend PR). Until it lands we subtract zero so
+  // the cell still displays a meaningful "net before commission" value
+  // — the popover shows "—" in the commission row so the seller
+  // understands the figure is provisional.
+  const commission = new Decimal(0);
+  return sale.sub(cost).sub(shipping).sub(commission).toFixed(2);
+}
+
+/**
+ * Project a variant into the popover data shape. Returns `null` only
+ * when the variant has no parent context — never thrown from inside
+ * the column cell, where the variant always has a parent row.
+ */
+function projectNetProfitData(v: VariantSummary): NetProfitPopoverData {
+  return {
+    status: v.shippingEstimateStatus,
+    salePrice: v.salePrice,
+    currentCostTry: v.currentCostTry,
+    // commissionAmount / commissionRate are scheduled for a follow-up
+    // PR (commission-rates frontend). VariantSummary does not currently
+    // expose them — the popover renders "—" until they land.
+    commissionAmount: null,
+    commissionRate: null,
+    estimatedShippingNet: v.estimatedShippingNet,
+    shippingCarrierCode: v.shippingCarrierCode,
+    shippingTariffApplied: v.shippingTariffApplied,
+    netProfit: computeNetProfit(v),
+    storeSettingsHref: '/settings/stores',
+    // Deep-link the products page filter to the parent product — opens
+    // the same page scoped to that product so DesiCellPopover is one
+    // click away. The variant has no parent context here, so the cell
+    // wrapper supplies a parent-aware href instead (see column cell).
+    variantEditHref: '/products',
+  };
 }
 
 interface ProductsTableProps {
@@ -488,6 +543,55 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
                 <CostCell variant={v} />
               </span>
             </CostCellPopover>
+          );
+        },
+      },
+      {
+        // Tahmini Net Kar — surfaces the per-variant shipping estimate +
+        // breakdown popover. Multi-variant parents render an em-dash
+        // placeholder because aggregating estimates across variants is
+        // ambiguous (different desi → different carriers → different
+        // tariffs); the seller drills into each variant's own row to
+        // see the number. Mirrors the desi column's "range or chip"
+        // discipline — single-variant parents render the variant's own
+        // cell inline so the user doesn't have to expand for a known
+        // 1-of-1 case.
+        id: 'tahminiNetKar',
+        header: () => tCols('netProfit'),
+        meta: { numeric: true },
+        cell: ({ row }) => {
+          if (row.original.kind === 'parent') {
+            const p = row.original.product;
+            if (!isMultiVariant(p)) {
+              const v = p.variants[0];
+              if (v === undefined) return <span className="text-muted-foreground">—</span>;
+              const data = projectNetProfitData(v);
+              return (
+                <NetProfitCell
+                  data={{
+                    ...data,
+                    // Deep-link the products page filter to this product
+                    // so DesiCellPopover is one click away.
+                    variantEditHref: `/products?productId=${p.id}`,
+                  }}
+                />
+              );
+            }
+            // Multi-variant parent: defer to the variant sub-rows; aggregating
+            // a single estimate across variants is misleading (different
+            // desi → different tariffs).
+            return <span className="text-muted-foreground">—</span>;
+          }
+          const v = row.original.variant;
+          const parent = row.original.parent;
+          const data = projectNetProfitData(v);
+          return (
+            <NetProfitCell
+              data={{
+                ...data,
+                variantEditHref: `/products?productId=${parent.id}`,
+              }}
+            />
           );
         },
       },

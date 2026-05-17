@@ -81,6 +81,29 @@ export class CostProfileVariantOrgMismatchError extends Error {
   }
 }
 
+// ─── Shipping-config domain errors ────────────────────────────────────────
+// Per spec docs/superpowers/specs/2026-05-17-shipping-cost-estimation-design.md
+// §6.4. The cross-platform carrier guard needs its own stable wire code so the
+// frontend can render a distinct message ("Trendyol mağazasına Hepsiburada
+// taşıyıcısı atanamaz" vs the generic INVALID_REFERENCE). The base
+// `InvalidReferenceError` collapses both to `INVALID_REFERENCE` because its
+// `errors[].code` is hardcoded in problem-details.ts; we deliberately use a
+// dedicated class instead so the code is preserved end-to-end.
+
+export class ShippingCarrierPlatformMismatchError extends Error {
+  readonly status = 422 as const;
+  readonly code = 'SHIPPING_CARRIER_PLATFORM_MISMATCH' as const;
+  readonly meta: { expected: string; got: string };
+
+  constructor(meta: { expected: string; got: string }) {
+    super(
+      `Shipping carrier platform mismatch: store expects '${meta.expected}', carrier is '${meta.got}'`,
+    );
+    this.name = 'ShippingCarrierPlatformMismatchError';
+    this.meta = meta;
+  }
+}
+
 export class UnauthorizedError extends Error {
   readonly status = 401 as const;
   readonly code = 'UNAUTHENTICATED' as const;

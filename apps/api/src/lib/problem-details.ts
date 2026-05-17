@@ -14,6 +14,7 @@ import {
   MarketplaceUnreachable,
   NotFoundError,
   RateLimitedError,
+  ShippingCarrierPlatformMismatchError,
   SyncInProgressError,
   UnauthorizedError,
   ValidationError,
@@ -156,6 +157,19 @@ function classify(err: unknown): ProblemDetailsResult {
         status: 422,
         code: 'COST_PROFILE_VARIANT_ORG_MISMATCH',
         detail: err.message,
+      },
+    };
+  }
+  if (err instanceof ShippingCarrierPlatformMismatchError) {
+    return {
+      status: 422,
+      body: {
+        type: `${TYPE_BASE}/shipping-carrier-platform-mismatch`,
+        title: 'Shipping carrier platform mismatch',
+        status: 422,
+        code: 'SHIPPING_CARRIER_PLATFORM_MISMATCH',
+        detail: err.message,
+        meta: { ...err.meta },
       },
     };
   }

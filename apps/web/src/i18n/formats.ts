@@ -36,6 +36,7 @@ export const FORMATS = {
   number: {
     integer: { maximumFractionDigits: 0 },
     decimal: { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+    amount: { minimumFractionDigits: 0, maximumFractionDigits: 2 },
     currency: { style: 'currency', currency: 'TRY' },
     percent: { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 },
     percentDelta: {

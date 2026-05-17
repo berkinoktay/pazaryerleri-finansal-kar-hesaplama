@@ -10,6 +10,7 @@ import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
 
+import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CostStatus,
   ListProductsQuery,
@@ -17,6 +18,7 @@ import type {
   ProductOverrideMissing,
   ProductVariantStatus,
   VariantCostAggregate,
+  VariantShippingEstimate,
 } from '../validators/product.validator';
 import {
   toProductWithVariantsResponse,
@@ -157,13 +159,26 @@ export async function list(opts: {
   // in a single raw-SQL query (per spec §5.5). The LATERAL join resolves
   // the most recent FX rate per AUTO-mode non-TRY profile. Results are
   // keyed by variant id for O(1) lookup in the mapper.
+  //
+  // The shipping aggregate runs in parallel — it's the raw-SQL mirror of
+  // `estimateShippingCostForVariant`. The CTE is constrained to the current
+  // (organizationId, storeId) so the scan matches the page's tenant scope
+  // exactly (the products list endpoint is always store-scoped). Map keyed
+  // by variantId so the mapper can drop entries outside the current page
+  // in O(1). Both queries are independent of each other so `Promise.all`
+  // keeps the wall time at max(cost, shipping) rather than serializing.
   const variantIds = products.flatMap((p) => p.variants.map((v) => v.id));
-  const costByVariantId = await fetchCostAggregates(organizationId, variantIds);
+  const [costByVariantId, shippingByVariantId] = await Promise.all([
+    fetchCostAggregates(organizationId, variantIds),
+    fetchShippingEstimates(organizationId, storeId),
+  ]);
 
   const totalPages = total === 0 ? 0 : Math.ceil(total / filters.perPage);
 
   return {
-    data: products.map((product) => toProductWithVariantsResponse(product, costByVariantId)),
+    data: products.map((product) =>
+      toProductWithVariantsResponse(product, costByVariantId, shippingByVariantId),
+    ),
     pagination: {
       page: filters.page,
       perPage: filters.perPage,
@@ -171,6 +186,35 @@ export async function list(opts: {
       totalPages,
     },
   };
+}
+
+// ─── Shipping estimate aggregate ───────────────────────────────────────
+// Raw SQL via `SHIPPING_ESTIMATE_CTE_SQL` — the mirror of the canonical
+// service function `estimateShippingCostForVariant`. The CTE filters on
+// `(pv.organization_id, pv.store_id)` and returns one row per variant in
+// that scope; we Map by id for O(1) lookup. Equivalence test:
+//   apps/api/tests/integration/shipping-estimator-equivalence.test.ts
+
+async function fetchShippingEstimates(
+  organizationId: string,
+  storeId: string,
+): Promise<Map<string, VariantShippingEstimate>> {
+  const rows = await prisma.$queryRawUnsafe<ShippingEstimateRow[]>(
+    SHIPPING_ESTIMATE_CTE_SQL,
+    organizationId,
+    storeId,
+  );
+
+  const result = new Map<string, VariantShippingEstimate>();
+  for (const row of rows) {
+    result.set(row.id, {
+      estimatedShippingNet: row.estimated_shipping_net,
+      shippingCarrierCode: row.shipping_carrier_code,
+      shippingTariffApplied: row.shipping_tariff_applied,
+      shippingEstimateStatus: row.shipping_estimate_status,
+    });
+  }
+  return result;
 }
 
 // ─── Cost aggregate ────────────────────────────────────────────────────

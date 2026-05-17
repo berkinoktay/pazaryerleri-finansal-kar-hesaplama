@@ -89,6 +89,9 @@
       "COST_PROFILE_NOT_FOUND": "Cost profile not found.",
       "COST_PROFILE_ARCHIVED_CANNOT_ATTACH": "Cannot attach an archived cost profile. Restore it first.",
       "COST_PROFILE_VARIANT_ORG_MISMATCH": "The product variant does not belong to this cost profile's organization.",
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "A carrier is required when Trendyol Anlaşmalı is selected.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "The selected carrier does not match this store's marketplace.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found.",
       "generic": "Something went wrong. Please try again."
     }
   },
@@ -786,7 +789,8 @@
       "stock": "Stock",
       "status": "Status",
       "cost": "Cost",
-      "desi": "Desi"
+      "desi": "Desi",
+      "netProfit": "Est. Net Profit"
     },
     "delivery": {
       "sameDay": "Same-day shipping",
@@ -1079,6 +1083,88 @@
           "description": "The search or 'Only what I sell' filter narrowed the results. Clear filters to view the full tariff.",
           "action": "Clear filters"
         }
+      }
+    }
+  },
+  "shipping": {
+    "settings": {
+      "title": "Shipping Tariff",
+      "subtitle": "Choose the shipping tariff used to estimate your net profit.",
+      "source": {
+        "trendyol": "Trendyol Contract",
+        "ownContract": "My Contract"
+      },
+      "carrierLabel": "Default Carrier",
+      "carrierPlaceholder": "Pick a carrier",
+      "carrierHelp": "This carrier must be approved on your Trendyol contract.",
+      "carrierClear": "Clear",
+      "barem": "(no Barem support)",
+      "ownContract": {
+        "title": "Upload Your Tariff",
+        "description": "You'll soon be able to upload your own shipping tariff via Excel.",
+        "uploadDisabled": "Upload Excel (coming soon)"
+      },
+      "saveSuccess": "Shipping settings updated.",
+      "saveError": "Couldn't update shipping settings.",
+      "tariffTable": {
+        "title": "Current Tariff",
+        "subtitle": "Your carrier's current desi-based prices and Barem support tiers. Prices exclude VAT.",
+        "desiSection": "Desi-Based Tariff",
+        "desiColumn": "Desi",
+        "priceColumn": "Price (excl. VAT)",
+        "baremSection": "Barem Support",
+        "baremRangeColumn": "Order Amount",
+        "baremRangeFormat": "{min} TL - {max} TL packages",
+        "loading": "Loading tariff...",
+        "error": "Couldn't load tariff details."
+      }
+    },
+    "errors": {
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "A carrier is required when Trendyol Contract is selected.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "The selected carrier does not match this store's marketplace.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found."
+    },
+    "products": {
+      "columnHeader": "Est. Net Profit",
+      "popoverTitle": "Profit Breakdown",
+      "rows": {
+        "salePrice": "Sale price",
+        "cost": "Cost",
+        "shipping": "Shipping",
+        "commission": "Commission",
+        "netProfit": "Net Profit"
+      },
+      "tariff": {
+        "NORMAL": "Normal",
+        "BAREM": "Barem",
+        "OWN_CONTRACT": "Own"
+      },
+      "states": {
+        "NO_DESI": {
+          "title": "Desi value missing",
+          "reason": "Shipping estimate needs the product's desi / dimensional weight.",
+          "cta": "Add desi to product"
+        },
+        "NO_CARRIER": {
+          "title": "No default carrier",
+          "reason": "Your store doesn't have a default shipping carrier configured.",
+          "cta": "Open store settings"
+        },
+        "OWN_CONTRACT_EMPTY": {
+          "title": "Awaiting tariff",
+          "reason": "Own contract is selected, but your shipping tariff hasn't been uploaded yet.",
+          "cta": "Upload Excel (coming soon)"
+        },
+        "DESI_OVERFLOW": {
+          "title": "High desi, out of tariff",
+          "reason": "This product exceeds the highest desi covered by the selected carrier's tariff.",
+          "cta": "Switch carriers"
+        }
+      },
+      "banner": {
+        "title": "{count} product can't compute estimated profit",
+        "breakdown": "missing desi ({noDesi}) · no carrier ({noCarrier}) · high desi ({overflow})",
+        "filterCta": "Apply filter"
       }
     }
   }

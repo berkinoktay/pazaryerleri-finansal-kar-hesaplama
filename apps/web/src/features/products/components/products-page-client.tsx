@@ -16,8 +16,10 @@ import { useProductFacets } from '../hooks/use-product-facets';
 import { useProducts } from '../hooks/use-products';
 import { useProductsFilters } from '../hooks/use-products-filters';
 import { useStartProductSync } from '../hooks/use-start-product-sync';
+import { aggregateMissingShipping } from '../lib/aggregate-missing-shipping';
 
 import { MissingCostWarningBanner } from './missing-cost-warning-banner';
+import { MissingShippingBanner } from './missing-shipping-banner';
 import { ProductsEmptyState } from './products-empty-state';
 import { ProductsTable } from './products-table';
 import { type ProductsOverrideTab } from './products-tab-strip';
@@ -93,6 +95,14 @@ export function ProductsPageClient({
     totalPages: 0,
   };
 
+  // Aggregate per-page non-OK shipping estimates for the banner.
+  // Computed in render — `aggregateMissingShipping` is O(n) over the
+  // page's variants (≤ perPage products × variants), well within
+  // render budget. Memoizing was considered and rejected: React's
+  // reference-equality on `data` already short-circuits when the
+  // upstream query result is identical.
+  const shippingCounts = aggregateMissingShipping(data);
+
   const isInitialLoad = productsQuery.isLoading;
   const isEmptyAfterLoad = !isInitialLoad && data.length === 0;
   const hasActiveSearchOrFilter =
@@ -160,6 +170,20 @@ export function ProductsPageClient({
         <MissingCostWarningBanner
           orgId={orgId}
           onFilterClick={() => void setFilters({ overrideMissing: 'cost', page: 1 })}
+        />
+
+        <MissingShippingBanner
+          counts={shippingCounts}
+          // V1: the API has no `shippingEstimateStatus=NOT_OK` query
+          // parameter yet — the dedicated filter ships in V2. For now
+          // the CTA scrolls the table into view so the seller can
+          // immediately scan the non-OK rows (the yellow/red icons
+          // make each one easy to spot on a fresh page).
+          onFilterApply={() => {
+            if (typeof window !== 'undefined') {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+          }}
         />
 
         <ProductsTable

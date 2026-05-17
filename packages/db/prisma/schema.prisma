@@ -115,6 +115,11 @@ enum FxRateMode {
   MANUAL
 }
 
+enum ShippingTariffSource {
+  TRENDYOL_CONTRACT
+  OWN_CONTRACT
+}
+
 // Marketplace komisyon tarifesi kuralı türü. CATEGORY yalnız kategori bazlı;
 // CATEGORY_BRAND ek olarak marka kırılımı içerir. Trendyol'un "matching rules
 // → en düşüğü uygulanır" mantığı için iki türü tek tabloda toplayıp app-layer'da
@@ -160,13 +165,13 @@ model Organization {
 }
 
 model OrganizationMember {
-  id               String     @id @default(uuid()) @db.Uuid
-  organizationId   String     @map("organization_id") @db.Uuid
-  userId           String     @map("user_id") @db.Uuid
-  role             MemberRole @default(MEMBER)
-  lastAccessedAt   DateTime?  @map("last_accessed_at")
-  createdAt        DateTime   @default(now()) @map("created_at")
-  updatedAt        DateTime   @updatedAt @map("updated_at")
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
+  role           MemberRole @default(MEMBER)
+  lastAccessedAt DateTime?  @map("last_accessed_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -177,26 +182,30 @@ model OrganizationMember {
 }
 
 model Store {
-  id                String           @id @default(uuid()) @db.Uuid
-  organizationId    String           @map("organization_id") @db.Uuid
-  name              String
-  platform          Platform
-  environment       StoreEnvironment @default(PRODUCTION)
-  externalAccountId String           @map("external_account_id")
-  credentials       Json
-  status            StoreStatus      @default(ACTIVE)
-  isActive          Boolean          @default(true) @map("is_active")
-  lastConnectedAt   DateTime?        @map("last_connected_at")
-  lastSyncAt        DateTime?        @map("last_sync_at")
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
+  id                       String               @id @default(uuid()) @db.Uuid
+  organizationId           String               @map("organization_id") @db.Uuid
+  name                     String
+  platform                 Platform
+  environment              StoreEnvironment     @default(PRODUCTION)
+  externalAccountId        String               @map("external_account_id")
+  credentials              Json
+  status                   StoreStatus          @default(ACTIVE)
+  isActive                 Boolean              @default(true) @map("is_active")
+  lastConnectedAt          DateTime?            @map("last_connected_at")
+  lastSyncAt               DateTime?            @map("last_sync_at")
+  shippingTariffSource     ShippingTariffSource @default(TRENDYOL_CONTRACT) @map("shipping_tariff_source")
+  defaultShippingCarrierId String?              @map("default_shipping_carrier_id") @db.Uuid
+  createdAt                DateTime             @default(now()) @map("created_at")
+  updatedAt                DateTime             @updatedAt @map("updated_at")
 
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  products        Product[]
-  productVariants ProductVariant[]
-  orders          Order[]
-  settlements     Settlement[]
-  syncLogs        SyncLog[]
+  organization           Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products               Product[]
+  productVariants        ProductVariant[]
+  orders                 Order[]
+  settlements            Settlement[]
+  syncLogs               SyncLog[]
+  defaultShippingCarrier ShippingCarrier?    @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
+  ownShippingTariffs     OwnShippingTariff[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -253,17 +262,17 @@ model Product {
 // clause without recursing through Product (avoids the 42P17 trap, see
 // supabase/sql/rls-policies.sql for the full rationale).
 model ProductVariant {
-  id                    String   @id @default(uuid()) @db.Uuid
-  organizationId        String   @map("organization_id") @db.Uuid
-  storeId               String   @map("store_id") @db.Uuid
-  productId             String   @map("product_id") @db.Uuid
-  platformVariantId     BigInt   @map("platform_variant_id")
-  barcode               String
-  stockCode             String   @map("stock_code")
-  salePrice             Decimal  @map("sale_price") @db.Decimal(12, 2)
-  listPrice             Decimal  @map("list_price") @db.Decimal(12, 2)
-  vatRate               Int?     @map("vat_rate")
-  costPrice             Decimal? @map("cost_price") @db.Decimal(12, 2)
+  id                      String   @id @default(uuid()) @db.Uuid
+  organizationId          String   @map("organization_id") @db.Uuid
+  storeId                 String   @map("store_id") @db.Uuid
+  productId               String   @map("product_id") @db.Uuid
+  platformVariantId       BigInt   @map("platform_variant_id")
+  barcode                 String
+  stockCode               String   @map("stock_code")
+  salePrice               Decimal  @map("sale_price") @db.Decimal(12, 2)
+  listPrice               Decimal  @map("list_price") @db.Decimal(12, 2)
+  vatRate                 Int?     @map("vat_rate")
+  costPrice               Decimal? @map("cost_price") @db.Decimal(12, 2)
   // Two-column sync-protection pair (see docs/plans/archive/... for rationale):
   // syncedDimensionalWeight is the marketplace's value, refreshed every sync.
   // dimensionalWeight is the user's manual override; null = no override, fall
@@ -272,24 +281,24 @@ model ProductVariant {
   // invariant is structural, not just enforced in code.
   syncedDimensionalWeight Decimal? @map("synced_dimensional_weight") @db.Decimal(6, 2)
   dimensionalWeight       Decimal? @map("dimensional_weight") @db.Decimal(6, 2)
-  quantity              Int      @default(0)
-  deliveryDuration      Int?     @map("delivery_duration")
-  isRushDelivery        Boolean  @default(false) @map("is_rush_delivery")
-  fastDeliveryOptions   Json     @default("[]") @map("fast_delivery_options")
-  productUrl            String?  @map("product_url") @db.Text
-  locationBasedDelivery String?  @map("location_based_delivery")
-  onSale                Boolean  @default(true) @map("on_sale")
-  archived              Boolean  @default(false)
-  blacklisted           Boolean  @default(false)
-  locked                Boolean  @default(false)
-  size                  String?
-  attributes            Json     @default("[]")
-  lastSyncedAt          DateTime @default(now()) @map("last_synced_at")
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+  quantity                Int      @default(0)
+  deliveryDuration        Int?     @map("delivery_duration")
+  isRushDelivery          Boolean  @default(false) @map("is_rush_delivery")
+  fastDeliveryOptions     Json     @default("[]") @map("fast_delivery_options")
+  productUrl              String?  @map("product_url") @db.Text
+  locationBasedDelivery   String?  @map("location_based_delivery")
+  onSale                  Boolean  @default(true) @map("on_sale")
+  archived                Boolean  @default(false)
+  blacklisted             Boolean  @default(false)
+  locked                  Boolean  @default(false)
+  size                    String?
+  attributes              Json     @default("[]")
+  lastSyncedAt            DateTime @default(now()) @map("last_synced_at")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
-  product          Product                    @relation(fields: [productId], references: [id], onDelete: Cascade)
-  store            Store                      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product          Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  store            Store                       @relation(fields: [storeId], references: [id], onDelete: Cascade)
   orderItems       OrderItem[]
   costProfileLinks ProductVariantCostProfile[]
 
@@ -352,16 +361,16 @@ model Order {
 }
 
 model OrderItem {
-  id               String  @id @default(uuid()) @db.Uuid
-  orderId                String    @map("order_id") @db.Uuid
-  productVariantId       String?   @map("product_variant_id") @db.Uuid
+  id                     String                           @id @default(uuid()) @db.Uuid
+  orderId                String                           @map("order_id") @db.Uuid
+  productVariantId       String?                          @map("product_variant_id") @db.Uuid
   quantity               Int
-  unitPrice              Decimal   @map("unit_price") @db.Decimal(12, 2)
-  commissionRate         Decimal   @map("commission_rate") @db.Decimal(5, 2)
-  commissionAmount       Decimal   @map("commission_amount") @db.Decimal(12, 2)
-  organizationId         String?   @map("organization_id") @db.Uuid
-  unitCostSnapshot       Decimal?  @map("unit_cost_snapshot") @db.Decimal(12, 2)
-  snapshotCapturedAt     DateTime? @map("snapshot_captured_at")
+  unitPrice              Decimal                          @map("unit_price") @db.Decimal(12, 2)
+  commissionRate         Decimal                          @map("commission_rate") @db.Decimal(5, 2)
+  commissionAmount       Decimal                          @map("commission_amount") @db.Decimal(12, 2)
+  organizationId         String?                          @map("organization_id") @db.Uuid
+  unitCostSnapshot       Decimal?                         @map("unit_cost_snapshot") @db.Decimal(12, 2)
+  snapshotCapturedAt     DateTime?                        @map("snapshot_captured_at")
   costSnapshotComponents OrderItemCostSnapshotComponent[]
 
   order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -404,25 +413,25 @@ model SettlementItem {
 }
 
 model CostProfile {
-  id              String          @id @default(uuid()) @db.Uuid
-  organizationId  String          @map("organization_id") @db.Uuid
-  name            String
-  type            CostProfileType
-  amount          Decimal         @db.Decimal(12, 2)
-  currency        Currency        @default(TRY)
-  vatRate         Int             @default(0) @map("vat_rate")
-  fxRateMode      FxRateMode      @default(AUTO) @map("fx_rate_mode")
-  manualFxRate    Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
-  note            String?
-  archivedAt      DateTime?       @map("archived_at")
-  createdBy       String?         @map("created_by") @db.Uuid
-  updatedBy       String?         @map("updated_by") @db.Uuid
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  name           String
+  type           CostProfileType
+  amount         Decimal         @db.Decimal(12, 2)
+  currency       Currency        @default(TRY)
+  vatRate        Int             @default(0) @map("vat_rate")
+  fxRateMode     FxRateMode      @default(AUTO) @map("fx_rate_mode")
+  manualFxRate   Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
+  note           String?
+  archivedAt     DateTime?       @map("archived_at")
+  createdBy      String?         @map("created_by") @db.Uuid
+  updatedBy      String?         @map("updated_by") @db.Uuid
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
-  organization Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  versions     CostProfileVersion[]
-  variantLinks ProductVariantCostProfile[]
+  organization       Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  versions           CostProfileVersion[]
+  variantLinks       ProductVariantCostProfile[]
   snapshotComponents OrderItemCostSnapshotComponent[]
 
   @@unique([organizationId, name])
@@ -532,10 +541,10 @@ model Expense {
 }
 
 model SyncLog {
-  id               String     @id @default(uuid()) @db.Uuid
-  organizationId   String     @map("organization_id") @db.Uuid
-  storeId          String     @map("store_id") @db.Uuid
-  syncType         SyncType   @map("sync_type")
+  id               String         @id @default(uuid()) @db.Uuid
+  organizationId   String         @map("organization_id") @db.Uuid
+  storeId          String         @map("store_id") @db.Uuid
+  syncType         SyncType       @map("sync_type")
   status           SyncStatus
   // Timestamp columns are @db.Timestamptz(3) so node-postgres reads
   // them as UTC instants (its default for plain TIMESTAMP is the
@@ -544,28 +553,28 @@ model SyncLog {
   // denenecek" countdown lie by N hours). PG-internal SQL comparisons
   // worked either way (session TZ is UTC), but the wire shape is the
   // problem. timestamptz fixes both — see fix(sync) PR.
-  startedAt        DateTime   @map("started_at") @db.Timestamptz(3)
-  completedAt      DateTime?  @map("completed_at") @db.Timestamptz(3)
-  recordsProcessed Int        @default(0) @map("records_processed")
-  progressCurrent  Int        @default(0) @map("progress_current")
-  progressTotal    Int?       @map("progress_total")
-  progressStage    String?    @map("progress_stage")
+  startedAt        DateTime       @map("started_at") @db.Timestamptz(3)
+  completedAt      DateTime?      @map("completed_at") @db.Timestamptz(3)
+  recordsProcessed Int            @default(0) @map("records_processed")
+  progressCurrent  Int            @default(0) @map("progress_current")
+  progressTotal    Int?           @map("progress_total")
+  progressStage    String?        @map("progress_stage")
   errorCode        SyncErrorCode? @map("error_code")
-  errorMessage     String?    @map("error_message")
+  errorMessage     String?        @map("error_message")
   // ─── New columns (PR 2) ────────────────────────────────────
-  claimedAt        DateTime?  @map("claimed_at") @db.Timestamptz(3)
-  claimedBy        String?    @map("claimed_by")
-  lastTickAt       DateTime?  @map("last_tick_at") @db.Timestamptz(3)
-  pageCursor       Json?      @map("page_cursor")
-  attemptCount     Int        @default(0) @map("attempt_count")
-  nextAttemptAt    DateTime?  @map("next_attempt_at") @db.Timestamptz(3)
+  claimedAt        DateTime?      @map("claimed_at") @db.Timestamptz(3)
+  claimedBy        String?        @map("claimed_by")
+  lastTickAt       DateTime?      @map("last_tick_at") @db.Timestamptz(3)
+  pageCursor       Json?          @map("page_cursor")
+  attemptCount     Int            @default(0) @map("attempt_count")
+  nextAttemptAt    DateTime?      @map("next_attempt_at") @db.Timestamptz(3)
   // Bozuk sayfalar (Trendyol upstream 5xx, MAX_ATTEMPTS dolan transient
   // hatalar). Worker bu durumda sync'i terminal FAIL etmek yerine cursor'u
   // bir ileri alır ve atlanan sayfayı buraya kaydeder. Şema:
   // Array<{ page, attemptedAt, errorCode, httpStatus, xRequestId?, responseBodySnippet? }>
   // UI bu array'i okuyup COMPLETED satırının yanında "X sayfa atlandı"
   // uyarısı gösterir.
-  skippedPages     Json?      @map("skipped_pages")
+  skippedPages     Json?          @map("skipped_pages")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
@@ -638,4 +647,79 @@ model MarketplaceCommissionRate {
   @@unique([platform, ruleKind, categoryId, brandId], map: "marketplace_commission_rate_dedup")
   @@index([platform, ruleKind, categoryId])
   @@map("marketplace_commission_rate")
+}
+
+model ShippingCarrier {
+  id                               String   @id @default(uuid()) @db.Uuid
+  platform                         Platform
+  externalId                       Int      @map("external_id")
+  code                             String
+  displayName                      String   @map("display_name")
+  taxNumber                        String?  @map("tax_number")
+  supportsBaremDestek              Boolean  @default(true) @map("supports_barem_destek")
+  maxBaremDesi                     Int      @default(10) @map("max_barem_desi")
+  maxBaremEligibleDeliveryDuration Int      @default(1) @map("max_barem_eligible_delivery_duration")
+  sortOrder                        Int      @default(0) @map("sort_order")
+  active                           Boolean  @default(true)
+  createdAt                        DateTime @default(now()) @map("created_at")
+  updatedAt                        DateTime @updatedAt @map("updated_at")
+
+  desiTariffs  ShippingDesiTariff[]
+  baremTariffs ShippingBaremTariff[]
+  stores       Store[]
+
+  @@unique([platform, externalId])
+  @@unique([platform, code])
+  @@index([platform, active])
+  @@map("shipping_carriers")
+}
+
+model ShippingDesiTariff {
+  id            String   @id @default(uuid()) @db.Uuid
+  carrierId     String   @map("carrier_id") @db.Uuid
+  desi          Int
+  priceNet      Decimal  @map("price_net") @db.Decimal(10, 2)
+  effectiveFrom DateTime @default(now()) @map("effective_from") @db.Date
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  carrier ShippingCarrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+
+  @@unique([carrierId, desi])
+  @@index([carrierId, desi])
+  @@map("shipping_desi_tariffs")
+}
+
+model ShippingBaremTariff {
+  id             String   @id @default(uuid()) @db.Uuid
+  carrierId      String   @map("carrier_id") @db.Uuid
+  minOrderAmount Decimal  @map("min_order_amount") @db.Decimal(12, 2)
+  maxOrderAmount Decimal  @map("max_order_amount") @db.Decimal(12, 2)
+  priceNet       Decimal  @map("price_net") @db.Decimal(10, 2)
+  effectiveFrom  DateTime @default(now()) @map("effective_from") @db.Date
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  carrier ShippingCarrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+
+  @@unique([carrierId, minOrderAmount, maxOrderAmount])
+  @@index([carrierId])
+  @@map("shipping_barem_tariffs")
+}
+
+model OwnShippingTariff {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  storeId        String   @map("store_id") @db.Uuid
+  desi           Int
+  priceNet       Decimal  @map("price_net") @db.Decimal(10, 2)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  createdBy      String?  @map("created_by") @db.Uuid
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, desi])
+  @@index([organizationId])
+  @@map("own_shipping_tariffs")
 }

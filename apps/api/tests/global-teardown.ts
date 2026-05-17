@@ -3,6 +3,8 @@ import { promisify } from 'node:util';
 
 import { prisma } from '@pazarsync/db';
 
+import { ensureShippingReferenceData } from './helpers/seed-shipping-reference';
+
 const execFilePromise = promisify(execFile);
 
 /**
@@ -10,16 +12,40 @@ const execFilePromise = promisify(execFile);
  * the entire test run and may return a teardown function to be invoked
  * once after.
  *
- * We use it purely for the teardown half — restoring seed data so the
- * developer's browser session (logged in as berkin / demo) sees the
- * usual orgs and stores instead of the post-truncate empty state.
+ * SETUP half:
+ *   Ensure shipping reference data (carriers + tariffs + Barem tiers)
+ *   exists. CI runs `prisma db push` which does NOT execute migration
+ *   SQL, so the seed INSERTs in migration 20260517085409_shipping_tariffs
+ *   never land. Tests that depend on the global tariff catalog (every
+ *   shipping integration test) would otherwise fail with "expected
+ *   length 10 but got 0" in CI. The helper is idempotent — local devs
+ *   who already ran `prisma migrate dev` see a fast no-op.
  *
- * Seed is idempotent (upsert + delete-then-create), so running it
- * against an already-hydrated DB is a no-op. Skipped in CI (no dev
- * UI to hydrate) and when only unit tests ran (`pnpm test:unit` sets
- * PAZARSYNC_SKIP_RESEED=1 — no DB was touched).
+ * TEARDOWN half:
+ *   Restore seed data so the developer's browser session (logged in
+ *   as berkin / demo) sees the usual orgs and stores instead of the
+ *   post-truncate empty state. Seed is idempotent (upsert + delete-
+ *   then-create). Skipped in CI (no dev UI to hydrate) and when only
+ *   unit tests ran (`pnpm test:unit` sets PAZARSYNC_SKIP_RESEED=1 —
+ *   no DB was touched).
  */
-export default function globalSetup(): () => Promise<void> {
+export default async function globalSetup(): Promise<() => Promise<void>> {
+  // Setup: shipping reference data. Skipped for unit-only runs (DB may
+  // not even be reachable). Errors are non-fatal — integration tests
+  // will surface a clearer signal than a globalSetup throw would.
+  if (process.env['PAZARSYNC_SKIP_RESEED'] !== '1') {
+    try {
+      await ensureShippingReferenceData();
+    } catch (err) {
+      console.warn(
+        '⚠️  Shipping reference seed skipped (DB likely unreachable). ' +
+          'Integration tests will fail if shipping_carriers is empty. ' +
+          'Start Supabase (`supabase start`) and try again if this was unintentional.',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   return async function teardown(): Promise<void> {
     if (process.env['CI'] !== undefined && process.env['CI'] !== '') return;
     if (process.env['PAZARSYNC_SKIP_RESEED'] === '1') return;

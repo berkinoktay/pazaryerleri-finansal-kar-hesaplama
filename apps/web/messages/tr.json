@@ -89,6 +89,9 @@
       "COST_PROFILE_NOT_FOUND": "Maliyet profili bulunamadı.",
       "COST_PROFILE_ARCHIVED_CANNOT_ATTACH": "Arşivlenmiş bir maliyet profili ürüne eklenemez. Önce profili geri yükle.",
       "COST_PROFILE_VARIANT_ORG_MISMATCH": "Ürün varyantı bu maliyet profiline ait değil.",
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "Trendyol Anlaşmalı seçildiyse kargo firması zorunludur.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "Seçilen kargo firması bu mağazanın pazaryeriyle uyumlu değil.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı.",
       "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
     }
   },
@@ -786,7 +789,8 @@
       "stock": "Stok",
       "status": "Durum",
       "cost": "Maliyet",
-      "desi": "Desi"
+      "desi": "Desi",
+      "netProfit": "Tahmini Net Kar"
     },
     "delivery": {
       "sameDay": "Bugün Kargoda",
@@ -1144,6 +1148,88 @@
           "description": "Arama veya 'Sattıklarım' filtresi sonuçları daralttı. Filtreyi temizleyerek tüm tarifeyi görüntüle.",
           "action": "Filtreyi temizle"
         }
+      }
+    }
+  },
+  "shipping": {
+    "settings": {
+      "title": "Kargo Tarifesi",
+      "subtitle": "Tahmini kar hesabınız için kullanılacak kargo tarifesini seçin.",
+      "source": {
+        "trendyol": "Trendyol Anlaşmalı",
+        "ownContract": "Kendi Anlaşmam"
+      },
+      "carrierLabel": "Varsayılan Kargo Firması",
+      "carrierPlaceholder": "Bir kargo firması seçin",
+      "carrierHelp": "Bu firma sizin Trendyol sözleşmenizde onaylanmış olmalıdır.",
+      "carrierClear": "Temizle",
+      "barem": "(Barem desteği dışı)",
+      "ownContract": {
+        "title": "Kendi Tarifenizi Yükleyin",
+        "description": "Excel ile kendi kargo tarifenizi yakında yükleyebileceksiniz.",
+        "uploadDisabled": "Excel ile yükle (yakında)"
+      },
+      "saveSuccess": "Kargo ayarları güncellendi.",
+      "saveError": "Kargo ayarları güncellenemedi.",
+      "tariffTable": {
+        "title": "Geçerli Tarife",
+        "subtitle": "Kargo firmanızın güncel desi bazlı fiyatları ve barem desteği. Fiyatlar KDV hariçtir.",
+        "desiSection": "Desi Bazlı Tarife",
+        "desiColumn": "Desi",
+        "priceColumn": "Fiyat (KDV hariç)",
+        "baremSection": "Barem Desteği",
+        "baremRangeColumn": "Sipariş Tutarı",
+        "baremRangeFormat": "{min} TL - {max} TL arası gönderiler",
+        "loading": "Tarife yükleniyor...",
+        "error": "Tarife bilgisi alınamadı."
+      }
+    },
+    "errors": {
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "Trendyol Anlaşmalı seçildiyse kargo firması zorunludur.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "Seçilen kargo firması bu mağazanın pazaryeriyle uyumlu değil.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı."
+    },
+    "products": {
+      "columnHeader": "Tahmini Net Kar",
+      "popoverTitle": "Kar Detayı",
+      "rows": {
+        "salePrice": "Satış fiyatı",
+        "cost": "Maliyet",
+        "shipping": "Kargo",
+        "commission": "Komisyon",
+        "netProfit": "Net Kar"
+      },
+      "tariff": {
+        "NORMAL": "Normal",
+        "BAREM": "Barem desteği",
+        "OWN_CONTRACT": "Kendi"
+      },
+      "states": {
+        "NO_DESI": {
+          "title": "Desi değeri eksik",
+          "reason": "Kargo tahmini için ürün desi/dimensional_weight bilgisi gerekli.",
+          "cta": "Ürüne desi ekle"
+        },
+        "NO_CARRIER": {
+          "title": "Kargo firması seçilmemiş",
+          "reason": "Mağaza ayarlarınızda varsayılan kargo firması seçili değil.",
+          "cta": "Mağaza ayarlarına git"
+        },
+        "OWN_CONTRACT_EMPTY": {
+          "title": "Tarife bekleniyor",
+          "reason": "Kendi anlaşmanız seçili, fakat kargo tarifeniz henüz yüklenmedi.",
+          "cta": "Excel ile yükle (yakında)"
+        },
+        "DESI_OVERFLOW": {
+          "title": "Yüksek desi, tarife dışı",
+          "reason": "Bu ürün seçili kargo firmasının tarife tablosunda yer alan en yüksek desiyi aşıyor.",
+          "cta": "Kargo firmanızı değiştirin"
+        }
+      },
+      "banner": {
+        "title": "{count} üründe tahmini kar hesaplanamıyor",
+        "breakdown": "desi eksik ({noDesi}) · kargo firması seçilmemiş ({noCarrier}) · yüksek desi ({overflow})",
+        "filterCta": "Filtreyi uygula"
       }
     }
   }

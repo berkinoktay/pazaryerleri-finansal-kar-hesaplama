@@ -68,6 +68,25 @@ export function evaluateCrossFeatureImport(imp: CrossFeatureImport): ViolationDe
     };
   }
 
+  // The `shipping` feature is an audited cross-feature provider, by design.
+  // The shipping config is a store-scoped primitive consumed by `stores`
+  // (settings page embeds the carrier picker form) and `products` (the
+  // Tahmini Net Kar column reads the estimate / carrier chip / popover
+  // states piped through the products list response). Promoting hooks or
+  // components into `lib/` / `patterns/` would split the slice across three
+  // homes for a feature that owns a single coherent domain — config GET/PATCH,
+  // 5-state estimate rendering, and the own-contract empty state belong
+  // together. Cross-feature consumers import only from `hooks/`, `lib/`,
+  // and `components/` public surfaces — never `api/` directly. Mirrors the
+  // `sync` and `costs` precedents.
+  // See docs/superpowers/specs/2026-05-17-shipping-cost-estimation-design.md §7.3.
+  if (imp.targetFeature === 'shipping') {
+    return {
+      severity: 'allow',
+      message: `Cross-feature consumption of the "shipping" feature is permitted by design (store-scoped reusable shipping primitives).`,
+    };
+  }
+
   if (imp.isTypeOnly) {
     return {
       severity: 'warn',

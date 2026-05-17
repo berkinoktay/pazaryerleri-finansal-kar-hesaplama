@@ -598,6 +598,143 @@ describe('GET /v1/.../products — sort=totalStock', () => {
   });
 });
 
+// ─── Shipping estimate fields (per spec §6.2) ─────────────────────────
+// The list response carries 4 new per-variant fields produced by the
+// SHIPPING_ESTIMATE_CTE_SQL mirror of estimateShippingCostForVariant.
+// Full coverage of the 6 outcome states lives in the service-vs-SQL
+// equivalence test (apps/api/tests/integration/shipping-estimator-equivalence.test.ts);
+// this test verifies the route plumbing: the fields appear in the
+// response with the right values for the configured store + variants.
+
+interface ShippingFieldsBody {
+  data: {
+    id: string;
+    variants: {
+      id: string;
+      barcode: string;
+      estimatedShippingNet: string | null;
+      shippingCarrierCode: string | null;
+      shippingTariffApplied: 'NORMAL' | 'BAREM' | 'OWN_CONTRACT' | null;
+      shippingEstimateStatus:
+        | 'OK'
+        | 'NO_CARRIER'
+        | 'NO_DESI'
+        | 'OWN_CONTRACT_EMPTY'
+        | 'DESI_OVERFLOW';
+    }[];
+  }[];
+}
+
+describe('GET /v1/.../products — shipping estimate fields', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it('includes shipping fields with correct OK + NO_DESI values per variant', async () => {
+    // Build a store wired to SENDEOMP with two products:
+    //   - okProduct → variant has desi=3.0 → OK / NORMAL / SENDEOMP desi-3 = 101.99
+    //   - noDesiProduct → variant has no desi at all → NO_DESI
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (!carrier) {
+      throw new Error('SENDEOMP missing — PR 1 (shipping seed) must run first');
+    }
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Shipping Test Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'ship-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+
+    // OK variant: desi 3.0 → CEIL=3 → SENDEOMP desi-3 = 101.99, salePrice 500 > all Barem ranges
+    const okProduct = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9001n,
+        productMainId: 'PM-SHIP-OK',
+        title: 'OK Shipping Product',
+      },
+    });
+    const okVariant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: okProduct.id,
+        platformVariantId: 90010n,
+        barcode: 'SHIP-OK',
+        stockCode: 'SHIP-OK',
+        salePrice: '500.00',
+        listPrice: '500.00',
+        dimensionalWeight: '3.0',
+      },
+    });
+
+    // NO_DESI variant: no override, no synced
+    const noDesiProduct = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9002n,
+        productMainId: 'PM-SHIP-NODESI',
+        title: 'No Desi Product',
+      },
+    });
+    const noDesiVariant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: noDesiProduct.id,
+        platformVariantId: 90020n,
+        barcode: 'SHIP-NODESI',
+        stockCode: 'SHIP-NODESI',
+        salePrice: '500.00',
+        listPrice: '500.00',
+        dimensionalWeight: null,
+        syncedDimensionalWeight: null,
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/products`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ShippingFieldsBody;
+
+    // Pull each variant out by its barcode (order-independent assertions).
+    const okV = body.data.flatMap((p) => p.variants).find((v) => v.id === okVariant.id);
+    const noDesiV = body.data.flatMap((p) => p.variants).find((v) => v.id === noDesiVariant.id);
+
+    expect(okV).toBeDefined();
+    expect(okV?.shippingEstimateStatus).toBe('OK');
+    expect(okV?.shippingTariffApplied).toBe('NORMAL');
+    expect(okV?.shippingCarrierCode).toBe('SENDEOMP');
+    expect(okV?.estimatedShippingNet).toBe('101.99');
+
+    expect(noDesiV).toBeDefined();
+    expect(noDesiV?.shippingEstimateStatus).toBe('NO_DESI');
+    expect(noDesiV?.shippingTariffApplied).toBeNull();
+    expect(noDesiV?.estimatedShippingNet).toBeNull();
+    // Carrier is still resolved on the join even when desi is missing — the
+    // SHIPPING_ESTIMATE_CTE_SQL contract is "always echo the configured
+    // carrier when the store has one", so the UI can suggest a switch.
+    expect(noDesiV?.shippingCarrierCode).toBe('SENDEOMP');
+  });
+});
+
 describe('GET /v1/organizations/:orgId/stores/:storeId/products/facets', () => {
   beforeAll(async () => {
     await ensureDbReachable();
