@@ -1,6 +1,7 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { Decimal } from 'decimal.js';
+import { useFormatter, useTranslations } from 'next-intl';
 
 import { Currency } from '@/components/patterns/currency';
 import {
@@ -39,7 +40,13 @@ export function CarrierTariffTable({
   carrierId,
 }: CarrierTariffTableProps): React.ReactElement {
   const t = useTranslations('shipping.settings.tariffTable');
+  const format = useFormatter();
   const query = useCarrierTariffs(orgId, carrierId);
+
+  // DB stores both bounds INCLUSIVE (matches Trendyol's "0 - 199,99 TL"
+  // wording verbatim), so we render the raw value without arithmetic.
+  const formatBound = (decimalStr: string): string =>
+    format.number(new Decimal(decimalStr).toNumber(), 'amount');
 
   if (query.isLoading) {
     return <p className="text-muted-foreground text-xs">{t('loading')}</p>;
@@ -102,8 +109,10 @@ export function CarrierTariffTable({
                   <TableRow key={`${row.minOrderAmount}-${row.maxOrderAmount}`}>
                     <TableCell>
                       <span className="tabular-nums">
-                        <Currency value={row.minOrderAmount} /> –{' '}
-                        <Currency value={row.maxOrderAmount} />
+                        {t('baremRangeFormat', {
+                          min: formatBound(row.minOrderAmount),
+                          max: formatBound(row.maxOrderAmount),
+                        })}
                       </span>
                     </TableCell>
                     <TableCell data-numeric="true">

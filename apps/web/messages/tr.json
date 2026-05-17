@@ -1176,9 +1176,10 @@
         "subtitle": "Kargo firmanızın güncel desi bazlı fiyatları ve barem desteği. Fiyatlar KDV hariçtir.",
         "desiSection": "Desi Bazlı Tarife",
         "desiColumn": "Desi",
-        "priceColumn": "Fiyat",
+        "priceColumn": "Fiyat (KDV hariç)",
         "baremSection": "Barem Desteği",
         "baremRangeColumn": "Sipariş Tutarı",
+        "baremRangeFormat": "{min} TL - {max} TL arası gönderiler",
         "loading": "Tarife yükleniyor...",
         "error": "Tarife bilgisi alınamadı."
       }

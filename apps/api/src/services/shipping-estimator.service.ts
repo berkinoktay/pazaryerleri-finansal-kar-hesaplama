@@ -141,7 +141,7 @@ export async function estimateShippingCostForVariant(
       where: {
         carrierId: carrier.id,
         minOrderAmount: { lte: variant.salePrice.toString() },
-        maxOrderAmount: { gt: variant.salePrice.toString() },
+        maxOrderAmount: { gte: variant.salePrice.toString() },
       },
     });
     if (barem) {

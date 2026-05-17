@@ -1111,9 +1111,10 @@
         "subtitle": "Your carrier's current desi-based prices and Barem support tiers. Prices exclude VAT.",
         "desiSection": "Desi-Based Tariff",
         "desiColumn": "Desi",
-        "priceColumn": "Price",
+        "priceColumn": "Price (excl. VAT)",
         "baremSection": "Barem Support",
         "baremRangeColumn": "Order Amount",
+        "baremRangeFormat": "{min} TL - {max} TL packages",
         "loading": "Loading tariff...",
         "error": "Couldn't load tariff details."
       }

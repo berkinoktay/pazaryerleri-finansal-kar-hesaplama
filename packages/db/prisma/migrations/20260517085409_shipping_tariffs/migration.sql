@@ -176,16 +176,20 @@ JOIN carriers c ON c.code = td.carrier_code;
 WITH carriers AS (
   SELECT id, code FROM "shipping_carriers" WHERE supports_barem_destek = true
 ),
+-- minOrderAmount/maxOrderAmount both INCLUSIVE — DB matches Trendyol's
+-- documented "0 - 199,99 TL" / "200 - 349,99 TL" tier wording exactly.
+-- Service algorithm + SQL CTE use closed-interval comparison (gte/<=) so
+-- 199.99 falls in tier 1 and 200.00 falls in tier 2, no overlap, no gap.
 barem_data (carrier_code, min_amount, max_amount, price_net) AS (
   VALUES
-    ('TEXMP',     0.00, 200.00, 34.16), ('PTTMP',     0.00, 200.00, 34.16),
-    ('ARASMP',    0.00, 200.00, 42.91), ('SURATMP',   0.00, 200.00, 48.74),
-    ('SENDEOMP',  0.00, 200.00, 51.24), ('DHLECOMMP', 0.00, 200.00, 52.08),
-    ('YKMP',      0.00, 200.00, 74.58),
-    ('TEXMP',     200.00, 350.00, 65.83), ('PTTMP',     200.00, 350.00, 65.83),
-    ('ARASMP',    200.00, 350.00, 73.74), ('SURATMP',   200.00, 350.00, 79.58),
-    ('SENDEOMP',  200.00, 350.00, 82.08), ('DHLECOMMP', 200.00, 350.00, 82.91),
-    ('YKMP',      200.00, 350.00, 104.58)
+    ('TEXMP',     0.00, 199.99, 34.16), ('PTTMP',     0.00, 199.99, 34.16),
+    ('ARASMP',    0.00, 199.99, 42.91), ('SURATMP',   0.00, 199.99, 48.74),
+    ('SENDEOMP',  0.00, 199.99, 51.24), ('DHLECOMMP', 0.00, 199.99, 52.08),
+    ('YKMP',      0.00, 199.99, 74.58),
+    ('TEXMP',     200.00, 349.99, 65.83), ('PTTMP',     200.00, 349.99, 65.83),
+    ('ARASMP',    200.00, 349.99, 73.74), ('SURATMP',   200.00, 349.99, 79.58),
+    ('SENDEOMP',  200.00, 349.99, 82.08), ('DHLECOMMP', 200.00, 349.99, 82.91),
+    ('YKMP',      200.00, 349.99, 104.58)
 )
 INSERT INTO "shipping_barem_tariffs" (id, carrier_id, min_order_amount, max_order_amount, price_net, effective_from, created_at, updated_at)
 SELECT gen_random_uuid(), c.id, bd.min_amount, bd.max_amount, bd.price_net, '2026-03-26'::date, now(), now()

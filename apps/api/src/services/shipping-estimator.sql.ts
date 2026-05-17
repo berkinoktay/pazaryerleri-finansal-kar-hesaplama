@@ -97,7 +97,7 @@ estimates AS (
          OR jsonb_array_length(vwc.fast_delivery_options) > 0
        )
        AND vwc.sale_price >= sbt.min_order_amount
-       AND vwc.sale_price <  sbt.max_order_amount
+       AND vwc.sale_price <= sbt.max_order_amount
      LIMIT 1
   ) barem ON vwc.shipping_tariff_source = 'TRENDYOL_CONTRACT'
   LEFT JOIN LATERAL (
