@@ -270,3 +270,43 @@ DROP POLICY IF EXISTS marketplace_commission_rate_authenticated_read ON marketpl
 CREATE POLICY marketplace_commission_rate_authenticated_read ON marketplace_commission_rate
   FOR SELECT TO authenticated
   USING (true);
+
+-- ─── shipping_carriers — global reference, public read for authenticated ───
+-- Carriers list (Yurtiçi, Aras, MNG, …) is platform-scoped reference data,
+-- not tenant-private. Every authenticated user sees the same rows. Writes
+-- are API-only via the postgres role; no INSERT/UPDATE/DELETE policy for
+-- authenticated means direct client writes default-deny.
+ALTER TABLE shipping_carriers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS shipping_carriers_authenticated_read ON shipping_carriers;
+CREATE POLICY shipping_carriers_authenticated_read ON shipping_carriers
+  FOR SELECT TO authenticated
+  USING (true);
+
+-- ─── shipping_desi_tariffs — global ────────────────────────────────────
+-- Marketplace-published desi → price tariff. Same reasoning as
+-- shipping_carriers: global reference data, every authenticated user
+-- reads identical rows; writes are API-only.
+ALTER TABLE shipping_desi_tariffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS shipping_desi_tariffs_authenticated_read ON shipping_desi_tariffs;
+CREATE POLICY shipping_desi_tariffs_authenticated_read ON shipping_desi_tariffs
+  FOR SELECT TO authenticated
+  USING (true);
+
+-- ─── shipping_barem_tariffs — global ───────────────────────────────────
+-- Marketplace-published barem (order-amount band) tariff. Same shape as
+-- shipping_desi_tariffs above.
+ALTER TABLE shipping_barem_tariffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS shipping_barem_tariffs_authenticated_read ON shipping_barem_tariffs;
+CREATE POLICY shipping_barem_tariffs_authenticated_read ON shipping_barem_tariffs
+  FOR SELECT TO authenticated
+  USING (true);
+
+-- ─── own_shipping_tariffs — org-private ────────────────────────────────
+-- A seller's negotiated carrier rates for one of their stores. These
+-- reveal commercial cost intelligence and MUST be tenant-isolated; same
+-- flat is_org_member() pattern as stores / products / orders.
+ALTER TABLE own_shipping_tariffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS own_shipping_tariffs_org_member_read ON own_shipping_tariffs;
+CREATE POLICY own_shipping_tariffs_org_member_read ON own_shipping_tariffs
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));

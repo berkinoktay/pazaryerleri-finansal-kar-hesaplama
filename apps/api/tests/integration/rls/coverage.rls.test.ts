@@ -23,6 +23,7 @@ const TENANT_TABLES = [
   'settlements',
   'settlement_items',
   'sync_logs',
+  'own_shipping_tariffs',
 ] as const;
 
 describe('RLS — coverage', () => {
