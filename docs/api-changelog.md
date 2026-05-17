@@ -14,9 +14,11 @@ section "Versioning" for details.
 ### Added
 
 - ADD: `GET /v1/organizations/:orgId/shipping-carriers` — list shipping carriers
+- ADD: `GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs` — get a carrier's desi-bazlı (NORMAL) tariff plus its Barem desteği tier table when supported. Org-scoped (membership-gated) but the tariff data is platform-wide reference. Returns 404 when the carrier id is unknown or inactive.
 - ADD: `GET /v1/organizations/:orgId/stores/:storeId/shipping-config` — get store's shipping config
 - ADD: `PATCH /v1/organizations/:orgId/stores/:storeId/shipping-config` — update carrier/source (OWNER/ADMIN gated)
 - ADD: `GET /v1/organizations/:orgId/stores/:storeId/own-shipping-tariff` — list own contract tariff rows (V1 always empty)
+- CHANGE (BREAKING): `GET /v1/organizations/:orgId/stores/:storeId/shipping-config` and `PATCH ...` no longer return `defaultShippingCarrierId` at the top level. The full carrier (with id) lives in `defaultShippingCarrier`. Clients should read `defaultShippingCarrier?.id`. Input shape (`UpdateShippingConfigInput`) is unchanged.
 - CHANGE: `GET /v1/organizations/:orgId/stores/:storeId/products` per-variant response now includes `estimatedShippingNet`, `shippingCarrierCode`, `shippingTariffApplied`, `shippingEstimateStatus` — computed inline by a raw-SQL CTE that mirrors `estimateShippingCostForVariant` (canonical algorithm in `apps/api/src/services/shipping-estimator.service.ts`). Additive, non-breaking. See spec §5.4 / §6.2 in `docs/superpowers/specs/2026-05-17-shipping-cost-estimation-design.md`.
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-rates`** — new
   endpoint exposing the imported Trendyol commission tariff for the panel UI.

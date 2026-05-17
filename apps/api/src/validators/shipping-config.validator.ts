@@ -28,7 +28,6 @@ export const ShippingCarrierSchema = z
 export const ShippingConfigSchema = z
   .object({
     shippingTariffSource: ShippingTariffSourceSchema,
-    defaultShippingCarrierId: z.string().uuid().nullable(),
     defaultShippingCarrier: ShippingCarrierSchema.nullable(),
   })
   .openapi('ShippingConfig');
@@ -51,5 +50,34 @@ export const OwnShippingTariffRowSchema = z
     priceNet: z.string(),
   })
   .openapi('OwnShippingTariffRow');
+
+/**
+ * Read-only response shape for the per-carrier tariff lookup. Both fee
+ * tables are stringified Decimals (KDV hariç) — never floats — and the
+ * Barem tier ranges are inclusive on both ends in keeping with the
+ * existing seed data convention.
+ */
+export const CarrierDesiTariffRowSchema = z
+  .object({
+    desi: z.number().int(),
+    priceNet: z.string(),
+  })
+  .openapi('CarrierDesiTariffRow');
+
+export const CarrierBaremTariffRowSchema = z
+  .object({
+    minOrderAmount: z.string(),
+    maxOrderAmount: z.string(),
+    priceNet: z.string(),
+  })
+  .openapi('CarrierBaremTariffRow');
+
+export const CarrierTariffsSchema = z
+  .object({
+    carrier: ShippingCarrierSchema,
+    desiTariffs: z.array(CarrierDesiTariffRowSchema),
+    baremTariffs: z.array(CarrierBaremTariffRowSchema),
+  })
+  .openapi('CarrierTariffs');
 
 export type UpdateShippingConfigInput = z.infer<typeof UpdateShippingConfigSchema>;

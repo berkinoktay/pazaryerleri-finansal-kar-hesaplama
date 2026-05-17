@@ -1162,14 +1162,26 @@
       "carrierLabel": "Varsayılan Kargo Firması",
       "carrierPlaceholder": "Bir kargo firması seçin",
       "carrierHelp": "Bu firma sizin Trendyol sözleşmenizde onaylanmış olmalıdır.",
-      "barem": "(Barem destek dışı)",
+      "carrierClear": "Temizle",
+      "barem": "(Barem desteği dışı)",
       "ownContract": {
         "title": "Kendi Tarifenizi Yükleyin",
         "description": "Excel ile kendi kargo tarifenizi yakında yükleyebileceksiniz.",
         "uploadDisabled": "Excel ile yükle (yakında)"
       },
       "saveSuccess": "Kargo ayarları güncellendi.",
-      "saveError": "Kargo ayarları güncellenemedi."
+      "saveError": "Kargo ayarları güncellenemedi.",
+      "tariffTable": {
+        "title": "Geçerli Tarife",
+        "subtitle": "Kargo firmanızın güncel desi bazlı fiyatları ve barem desteği. Fiyatlar KDV hariçtir.",
+        "desiSection": "Desi Bazlı Tarife",
+        "desiColumn": "Desi",
+        "priceColumn": "Fiyat",
+        "baremSection": "Barem Desteği",
+        "baremRangeColumn": "Sipariş Tutarı",
+        "loading": "Tarife yükleniyor...",
+        "error": "Tarife bilgisi alınamadı."
+      }
     },
     "errors": {
       "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "Trendyol Anlaşmalı seçildiyse kargo firması zorunludur.",
@@ -1188,7 +1200,7 @@
       },
       "tariff": {
         "NORMAL": "Normal",
-        "BAREM": "Barem",
+        "BAREM": "Barem desteği",
         "OWN_CONTRACT": "Kendi"
       },
       "states": {
@@ -1209,13 +1221,13 @@
         },
         "DESI_OVERFLOW": {
           "title": "Yüksek desi, tarife dışı",
-          "reason": "Bu ürün seçili carrier'ın tarife tablosunda yer alan en yüksek desiyi aşıyor.",
+          "reason": "Bu ürün seçili kargo firmasının tarife tablosunda yer alan en yüksek desiyi aşıyor.",
           "cta": "Kargo firmanızı değiştirin"
         }
       },
       "banner": {
         "title": "{count} üründe tahmini kar hesaplanamıyor",
-        "breakdown": "desi eksik ({noDesi}) · carrier seçilmemiş ({noCarrier}) · yüksek desi ({overflow})",
+        "breakdown": "desi eksik ({noDesi}) · kargo firması seçilmemiş ({noCarrier}) · yüksek desi ({overflow})",
         "filterCta": "Filtreyi uygula"
       }
     }

@@ -58,7 +58,6 @@ export async function getShippingConfig(
   tx: Prisma.TransactionClient,
 ): Promise<{
   shippingTariffSource: Store['shippingTariffSource'];
-  defaultShippingCarrierId: string | null;
   defaultShippingCarrier: ShippingCarrier | null;
 }> {
   const store = await tx.store.findFirst({
@@ -68,7 +67,6 @@ export async function getShippingConfig(
   if (!store) throw new NotFoundError('Store', storeId);
   return {
     shippingTariffSource: store.shippingTariffSource,
-    defaultShippingCarrierId: store.defaultShippingCarrierId,
     defaultShippingCarrier: store.defaultShippingCarrier,
   };
 }
@@ -133,4 +131,49 @@ export async function listOwnShippingTariff(
     where: { storeId },
     orderBy: { desi: 'asc' },
   });
+}
+
+/**
+ * Returns the desi-bazlı (NORMAL lane) tariff rows plus the Barem
+ * desteği tier table for a single carrier. The tariff data itself is
+ * platform-wide reference (not tenant-scoped), but membership is
+ * still required to keep the endpoint behind the same authz boundary
+ * as the rest of `/v1/organizations/{orgId}/...`.
+ *
+ * Hides inactive carriers symmetrically with `listShippingCarriers` so
+ * a deactivated id cannot be peeked at via this endpoint. Returns 404
+ * when no active carrier matches — existence non-disclosure for
+ * deactivated rows is consistent with the rest of the surface.
+ */
+export async function getCarrierTariffs(
+  carrierId: string,
+  tx: Prisma.TransactionClient,
+): Promise<{
+  carrier: ShippingCarrier;
+  desiTariffs: Array<{ desi: number; priceNet: Prisma.Decimal }>;
+  baremTariffs: Array<{
+    minOrderAmount: Prisma.Decimal;
+    maxOrderAmount: Prisma.Decimal;
+    priceNet: Prisma.Decimal;
+  }>;
+}> {
+  const carrier = await tx.shippingCarrier.findFirst({
+    where: { id: carrierId, active: true },
+  });
+  if (!carrier) throw new NotFoundError('ShippingCarrier', carrierId);
+
+  const [desiTariffs, baremTariffs] = await Promise.all([
+    tx.shippingDesiTariff.findMany({
+      where: { carrierId },
+      orderBy: { desi: 'asc' },
+      select: { desi: true, priceNet: true },
+    }),
+    tx.shippingBaremTariff.findMany({
+      where: { carrierId },
+      orderBy: { minOrderAmount: 'asc' },
+      select: { minOrderAmount: true, maxOrderAmount: true, priceNet: true },
+    }),
+  ]);
+
+  return { carrier, desiTariffs, baremTariffs };
 }

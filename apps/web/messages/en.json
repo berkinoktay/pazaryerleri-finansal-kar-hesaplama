@@ -1097,6 +1097,7 @@
       "carrierLabel": "Default Carrier",
       "carrierPlaceholder": "Pick a carrier",
       "carrierHelp": "This carrier must be approved on your Trendyol contract.",
+      "carrierClear": "Clear",
       "barem": "(no Barem support)",
       "ownContract": {
         "title": "Upload Your Tariff",
@@ -1104,7 +1105,18 @@
         "uploadDisabled": "Upload Excel (coming soon)"
       },
       "saveSuccess": "Shipping settings updated.",
-      "saveError": "Couldn't update shipping settings."
+      "saveError": "Couldn't update shipping settings.",
+      "tariffTable": {
+        "title": "Current Tariff",
+        "subtitle": "Your carrier's current desi-based prices and Barem support tiers. Prices exclude VAT.",
+        "desiSection": "Desi-Based Tariff",
+        "desiColumn": "Desi",
+        "priceColumn": "Price",
+        "baremSection": "Barem Support",
+        "baremRangeColumn": "Order Amount",
+        "loading": "Loading tariff...",
+        "error": "Couldn't load tariff details."
+      }
     },
     "errors": {
       "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "A carrier is required when Trendyol Contract is selected.",

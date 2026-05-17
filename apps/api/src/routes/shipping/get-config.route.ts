@@ -65,7 +65,6 @@ app.openapi(getShippingConfigRoute, async (c) => {
   return c.json(
     {
       shippingTariffSource: config.shippingTariffSource,
-      defaultShippingCarrierId: config.defaultShippingCarrierId,
       defaultShippingCarrier:
         config.defaultShippingCarrier === null
           ? null

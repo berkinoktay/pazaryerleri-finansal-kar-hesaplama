@@ -2224,18 +2224,70 @@
           "sortOrder"
         ]
       },
+      "CarrierTariffs": {
+        "type": "object",
+        "properties": {
+          "carrier": {
+            "$ref": "#/components/schemas/ShippingCarrier"
+          },
+          "desiTariffs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CarrierDesiTariffRow"
+            }
+          },
+          "baremTariffs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CarrierBaremTariffRow"
+            }
+          }
+        },
+        "required": [
+          "carrier",
+          "desiTariffs",
+          "baremTariffs"
+        ]
+      },
+      "CarrierDesiTariffRow": {
+        "type": "object",
+        "properties": {
+          "desi": {
+            "type": "integer"
+          },
+          "priceNet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "desi",
+          "priceNet"
+        ]
+      },
+      "CarrierBaremTariffRow": {
+        "type": "object",
+        "properties": {
+          "minOrderAmount": {
+            "type": "string"
+          },
+          "maxOrderAmount": {
+            "type": "string"
+          },
+          "priceNet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "minOrderAmount",
+          "maxOrderAmount",
+          "priceNet"
+        ]
+      },
       "ShippingConfig": {
         "type": "object",
         "properties": {
           "shippingTariffSource": {
             "$ref": "#/components/schemas/ShippingTariffSource"
-          },
-          "defaultShippingCarrierId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
           },
           "defaultShippingCarrier": {
             "allOf": [
@@ -2253,7 +2305,6 @@
         },
         "required": [
           "shippingTariffSource",
-          "defaultShippingCarrierId",
           "defaultShippingCarrier"
         ]
       },
@@ -6485,6 +6536,128 @@
           },
           "403": {
             "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/shipping-carriers/{carrierId}/tariffs": {
+      "get": {
+        "tags": [
+          "Shipping"
+        ],
+        "summary": "Get a carrier's tariff tables",
+        "description": "Returns the desi-bazlı (NORMAL lane) tariff rows plus the Barem desteği tier table for a single shipping carrier. Tariff data is platform-wide reference (not tenant-scoped), but membership in the path org is still required. Returns 404 when the carrier id is unknown or has been deactivated — existence non-disclosure for inactive rows is consistent with `listShippingCarriers`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "carrierId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Carrier with its desi and (optional) Barem tariff tables",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarrierTariffs"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Carrier not found or inactive",
             "content": {
               "application/json": {
                 "schema": {

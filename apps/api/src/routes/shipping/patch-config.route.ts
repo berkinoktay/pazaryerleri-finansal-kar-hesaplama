@@ -89,7 +89,6 @@ app.openapi(patchShippingConfigRoute, async (c) => {
   return c.json(
     {
       shippingTariffSource: updated.shippingTariffSource,
-      defaultShippingCarrierId: updated.defaultShippingCarrierId,
       defaultShippingCarrier:
         updated.defaultShippingCarrier === null
           ? null

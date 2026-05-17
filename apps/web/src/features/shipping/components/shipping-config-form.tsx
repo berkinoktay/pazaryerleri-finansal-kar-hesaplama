@@ -1,5 +1,6 @@
 'use client';
 
+import { Cancel01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -18,6 +19,7 @@ import {
 } from '../validation/shipping-config.schema';
 
 import { CarrierSelect } from './carrier-select';
+import { CarrierTariffTable } from './carrier-tariff-table';
 import { ShippingConfigEmptyState } from './shipping-config-empty-state';
 import { ShippingTariffSourceSegment } from './shipping-tariff-source-segment';
 
@@ -78,7 +80,7 @@ function resolveDraft(
   if (serverConfig !== undefined) {
     return {
       source: serverConfig.shippingTariffSource,
-      carrierId: serverConfig.defaultShippingCarrierId,
+      carrierId: serverConfig.defaultShippingCarrier?.id ?? null,
     };
   }
   return { source: 'TRENDYOL_CONTRACT', carrierId: null };
@@ -132,6 +134,11 @@ export function ShippingConfigForm({
     setClientErrorCode(undefined);
   };
 
+  const handleCarrierClear = (): void => {
+    setPendingDraft({ source, carrierId: null });
+    setClientErrorCode(undefined);
+  };
+
   const handleSave = (): void => {
     // Build the payload the backend expects. OWN_CONTRACT clears the
     // carrier id (a carrier is meaningless when we are not using the
@@ -173,14 +180,28 @@ export function ShippingConfigForm({
       {source === 'TRENDYOL_CONTRACT' ? (
         <div className="gap-2xs flex flex-col">
           <Label htmlFor="shipping-carrier-select">{t('carrierLabel')}</Label>
-          <div id="shipping-carrier-select">
-            <CarrierSelect
-              carriers={carriersQuery.data ?? []}
-              value={carrierId}
-              onChange={handleCarrierChange}
-              disabled={carriersQuery.isLoading}
-              invalid={errorCode !== undefined}
-            />
+          <div id="shipping-carrier-select" className="gap-xs flex items-center">
+            <div className="flex-1">
+              <CarrierSelect
+                carriers={carriersQuery.data ?? []}
+                value={carrierId}
+                onChange={handleCarrierChange}
+                disabled={carriersQuery.isLoading}
+                invalid={errorCode !== undefined}
+              />
+            </div>
+            {carrierId !== null ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleCarrierClear}
+                className="gap-2xs text-muted-foreground hover:text-foreground"
+              >
+                <Cancel01Icon className="size-icon-xs" aria-hidden />
+                {t('carrierClear')}
+              </Button>
+            ) : null}
           </div>
           {errorCode !== undefined ? (
             <p className="text-destructive text-sm" role="alert">
@@ -189,6 +210,7 @@ export function ShippingConfigForm({
           ) : (
             <p className="text-muted-foreground text-xs">{t('carrierHelp')}</p>
           )}
+          {carrierId !== null ? <CarrierTariffTable orgId={orgId} carrierId={carrierId} /> : null}
         </div>
       ) : (
         <ShippingConfigEmptyState />

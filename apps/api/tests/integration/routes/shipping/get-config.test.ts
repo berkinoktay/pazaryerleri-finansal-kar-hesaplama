@@ -18,7 +18,6 @@ import { createMembership, createOrganization, createStore } from '../../../help
 
 interface ShippingConfigResponse {
   shippingTariffSource: 'TRENDYOL_CONTRACT' | 'OWN_CONTRACT';
-  defaultShippingCarrierId: string | null;
   defaultShippingCarrier: {
     id: string;
     code: string;
@@ -50,7 +49,6 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/shipping-config', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as ShippingConfigResponse;
     expect(body.shippingTariffSource).toBe('TRENDYOL_CONTRACT');
-    expect(body.defaultShippingCarrierId).toBeNull();
     expect(body.defaultShippingCarrier).toBeNull();
   });
 });

@@ -18,12 +18,15 @@ export type ShippingCarrier = components['schemas']['ShippingCarrier'];
 
 export interface ShippingConfig {
   shippingTariffSource: 'TRENDYOL_CONTRACT' | 'OWN_CONTRACT';
-  defaultShippingCarrierId: string | null;
   defaultShippingCarrier: ShippingCarrier | null;
 }
 
 export type UpdateShippingConfigInput = components['schemas']['UpdateShippingConfigInput'];
 export type OwnShippingTariffRow = components['schemas']['OwnShippingTariffRow'];
+
+export type CarrierDesiTariffRow = components['schemas']['CarrierDesiTariffRow'];
+export type CarrierBaremTariffRow = components['schemas']['CarrierBaremTariffRow'];
+export type CarrierTariffs = components['schemas']['CarrierTariffs'];
 
 /**
  * Local domain enums for shipping. ShippingTariffSource is also surfaced

@@ -26,7 +26,6 @@ interface WireShippingCarrierLike {
 
 interface WireShippingConfig {
   shippingTariffSource: 'TRENDYOL_CONTRACT' | 'OWN_CONTRACT';
-  defaultShippingCarrierId: string | null;
   defaultShippingCarrier: WireShippingCarrierLike | null;
 }
 
@@ -47,7 +46,6 @@ function isShippingCarrier(value: WireShippingCarrierLike | null): value is Ship
 export function normalizeShippingConfig(wire: WireShippingConfig): ShippingConfig {
   return {
     shippingTariffSource: wire.shippingTariffSource,
-    defaultShippingCarrierId: wire.defaultShippingCarrierId,
     defaultShippingCarrier: isShippingCarrier(wire.defaultShippingCarrier)
       ? wire.defaultShippingCarrier
       : null,

@@ -16,5 +16,5 @@ export function formatCarrierChip(
 ): string | null {
   if (code === null || tariff === null) return null;
   if (tariff === 'OWN_CONTRACT') return 'Kendi anlaşma';
-  return `${code} · ${tariff === 'BAREM' ? 'Barem' : 'Normal'}`;
+  return `${code} · ${tariff === 'BAREM' ? 'Barem desteği' : 'Normal'}`;
 }

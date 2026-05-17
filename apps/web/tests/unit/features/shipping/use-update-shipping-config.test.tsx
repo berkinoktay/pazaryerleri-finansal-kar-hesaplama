@@ -29,7 +29,6 @@ function makeWrapper(client: QueryClient) {
 
 const UPDATED_CONFIG = {
   shippingTariffSource: 'TRENDYOL_CONTRACT' as const,
-  defaultShippingCarrierId: CARRIER_ID,
   defaultShippingCarrier: {
     id: CARRIER_ID,
     platform: 'TRENDYOL' as const,
@@ -63,7 +62,7 @@ describe('useUpdateShippingConfig', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.shippingTariffSource).toBe('TRENDYOL_CONTRACT');
-    expect(result.current.data?.defaultShippingCarrierId).toBe(CARRIER_ID);
+    expect(result.current.data?.defaultShippingCarrier?.id).toBe(CARRIER_ID);
   });
 
   it('invalidates the shipping config + products list keys on success', async () => {

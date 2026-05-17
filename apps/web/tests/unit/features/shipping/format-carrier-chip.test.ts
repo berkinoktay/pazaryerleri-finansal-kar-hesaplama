@@ -15,8 +15,8 @@ describe('formatCarrierChip', () => {
     expect(formatCarrierChip('SENDEOMP', null)).toBeNull();
   });
 
-  it('formats the BAREM lane as "<code> · Barem"', () => {
-    expect(formatCarrierChip('SENDEOMP', 'BAREM')).toBe('SENDEOMP · Barem');
+  it('formats the BAREM lane as "<code> · Barem desteği"', () => {
+    expect(formatCarrierChip('SENDEOMP', 'BAREM')).toBe('SENDEOMP · Barem desteği');
   });
 
   it('formats the NORMAL lane as "<code> · Normal"', () => {

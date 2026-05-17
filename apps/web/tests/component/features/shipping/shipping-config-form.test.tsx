@@ -45,13 +45,11 @@ const CARRIERS_RESPONSE = {
 
 const CONFIG_TRENDYOL_NO_CARRIER = {
   shippingTariffSource: 'TRENDYOL_CONTRACT',
-  defaultShippingCarrierId: null,
   defaultShippingCarrier: null,
 };
 
 const CONFIG_TRENDYOL_WITH_CARRIER = {
   shippingTariffSource: 'TRENDYOL_CONTRACT',
-  defaultShippingCarrierId: CARRIER_ID_A,
   defaultShippingCarrier: CARRIERS_RESPONSE.data[0],
 };
 
@@ -65,6 +63,28 @@ function setupHandlers(
     http.get(
       `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/shipping-config`,
       () => HttpResponse.json(initialConfig),
+    ),
+    // The form mounts CarrierTariffTable whenever a carrier is selected, so
+    // any *WITH_CARRIER* run also kicks off a /tariffs GET. Stub it with a
+    // minimal payload for both carrier ids the test fixtures use; routes
+    // that aren't hit are ignored, so this stays cheap.
+    http.get(
+      `http://localhost:3001/v1/organizations/${ORG_ID}/shipping-carriers/${CARRIER_ID_A}/tariffs`,
+      () =>
+        HttpResponse.json({
+          carrier: CARRIERS_RESPONSE.data[0],
+          desiTariffs: [{ desi: 1, priceNet: '29.99' }],
+          baremTariffs: [{ minOrderAmount: '0', maxOrderAmount: '200', priceNet: '24.99' }],
+        }),
+    ),
+    http.get(
+      `http://localhost:3001/v1/organizations/${ORG_ID}/shipping-carriers/${CARRIER_ID_B}/tariffs`,
+      () =>
+        HttpResponse.json({
+          carrier: CARRIERS_RESPONSE.data[1],
+          desiTariffs: [{ desi: 1, priceNet: '29.99' }],
+          baremTariffs: [],
+        }),
     ),
   );
 }
