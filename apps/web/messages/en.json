@@ -89,6 +89,9 @@
       "COST_PROFILE_NOT_FOUND": "Cost profile not found.",
       "COST_PROFILE_ARCHIVED_CANNOT_ATTACH": "Cannot attach an archived cost profile. Restore it first.",
       "COST_PROFILE_VARIANT_ORG_MISMATCH": "The product variant does not belong to this cost profile's organization.",
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "A carrier is required when Trendyol Anlaşmalı is selected.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "The selected carrier does not match this store's marketplace.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found.",
       "generic": "Something went wrong. Please try again."
     }
   },
@@ -1080,6 +1083,32 @@
           "action": "Clear filters"
         }
       }
+    }
+  },
+  "shipping": {
+    "settings": {
+      "title": "Shipping Tariff",
+      "subtitle": "Choose the shipping tariff used to estimate your net profit.",
+      "source": {
+        "trendyol": "Trendyol Contract",
+        "ownContract": "My Contract"
+      },
+      "carrierLabel": "Default Carrier",
+      "carrierPlaceholder": "Pick a carrier",
+      "carrierHelp": "This carrier must be approved on your Trendyol contract.",
+      "barem": "(no Barem support)",
+      "ownContract": {
+        "title": "Upload Your Tariff",
+        "description": "You'll soon be able to upload your own shipping tariff via Excel.",
+        "uploadDisabled": "Upload Excel (coming soon)"
+      },
+      "saveSuccess": "Shipping settings updated.",
+      "saveError": "Couldn't update shipping settings."
+    },
+    "errors": {
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "A carrier is required when Trendyol Contract is selected.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "The selected carrier does not match this store's marketplace.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found."
     }
   }
 }

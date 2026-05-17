@@ -89,6 +89,9 @@
       "COST_PROFILE_NOT_FOUND": "Maliyet profili bulunamadı.",
       "COST_PROFILE_ARCHIVED_CANNOT_ATTACH": "Arşivlenmiş bir maliyet profili ürüne eklenemez. Önce profili geri yükle.",
       "COST_PROFILE_VARIANT_ORG_MISMATCH": "Ürün varyantı bu maliyet profiline ait değil.",
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "Trendyol Anlaşmalı seçildiyse kargo firması zorunludur.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "Seçilen kargo firması bu mağazanın pazaryeriyle uyumlu değil.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı.",
       "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
     }
   },
@@ -1145,6 +1148,32 @@
           "action": "Filtreyi temizle"
         }
       }
+    }
+  },
+  "shipping": {
+    "settings": {
+      "title": "Kargo Tarifesi",
+      "subtitle": "Tahmini kar hesabınız için kullanılacak kargo tarifesini seçin.",
+      "source": {
+        "trendyol": "Trendyol Anlaşmalı",
+        "ownContract": "Kendi Anlaşmam"
+      },
+      "carrierLabel": "Varsayılan Kargo Firması",
+      "carrierPlaceholder": "Bir kargo firması seçin",
+      "carrierHelp": "Bu firma sizin Trendyol sözleşmenizde onaylanmış olmalıdır.",
+      "barem": "(Barem destek dışı)",
+      "ownContract": {
+        "title": "Kendi Tarifenizi Yükleyin",
+        "description": "Excel ile kendi kargo tarifenizi yakında yükleyebileceksiniz.",
+        "uploadDisabled": "Excel ile yükle (yakında)"
+      },
+      "saveSuccess": "Kargo ayarları güncellendi.",
+      "saveError": "Kargo ayarları güncellenemedi."
+    },
+    "errors": {
+      "SHIPPING_CARRIER_REQUIRED_FOR_TRENDYOL_CONTRACT": "Trendyol Anlaşmalı seçildiyse kargo firması zorunludur.",
+      "SHIPPING_CARRIER_PLATFORM_MISMATCH": "Seçilen kargo firması bu mağazanın pazaryeriyle uyumlu değil.",
+      "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı."
     }
   }
 }
