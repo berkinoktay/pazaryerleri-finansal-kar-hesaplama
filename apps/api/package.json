@@ -29,7 +29,7 @@
     "@scalar/hono-api-reference": "^0.10.14",
     "@supabase/supabase-js": "^2.105.4",
     "decimal.js": "^10.5.0",
-    "hono": "^4.12.18",
+    "hono": "^4.12.19",
     "zod": "^4.4.3"
   },
   "devDependencies": {
