@@ -36,6 +36,11 @@ export async function truncateAll(): Promise<void> {
        sync_logs,
        settlement_items,
        settlements,
+       order_claim_items,
+       order_claims,
+       order_fees,
+       org_period_fees,
+       commission_invoices,
        order_item_cost_snapshot_components,
        order_items,
        orders,
@@ -51,7 +56,8 @@ export async function truncateAll(): Promise<void> {
        stores,
        organization_members,
        organizations,
-       marketplace_commission_rate
+       marketplace_commission_rate,
+       fee_definitions
      RESTART IDENTITY CASCADE`,
   );
 }

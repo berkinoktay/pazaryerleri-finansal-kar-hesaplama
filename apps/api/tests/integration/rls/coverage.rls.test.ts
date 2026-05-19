@@ -24,6 +24,12 @@ const TENANT_TABLES = [
   'settlement_items',
   'sync_logs',
   'own_shipping_tariffs',
+  // Profit Calculation V1 (PR-1)
+  'order_fees',
+  'order_claims',
+  'order_claim_items',
+  'org_period_fees',
+  'commission_invoices',
 ] as const;
 
 describe('RLS — coverage', () => {

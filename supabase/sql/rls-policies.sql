@@ -310,3 +310,72 @@ DROP POLICY IF EXISTS own_shipping_tariffs_org_member_read ON own_shipping_tarif
 CREATE POLICY own_shipping_tariffs_org_member_read ON own_shipping_tariffs
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
+
+-- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
+-- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
+-- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md
+
+-- ─── order_fees — org-scoped, denormalized organization_id ────────────
+-- Sipariş paket-düzeyi ücret satırları (PSF, Stopaj, Shipping, vs.). Sync
+-- worker insert sırasında organizationId'yi stamp eder; flat is_org_member()
+-- pattern (products / variants / sync_logs ile aynı, EXISTS recursion riski yok).
+ALTER TABLE order_fees ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS order_fees_org_member_read ON order_fees;
+CREATE POLICY order_fees_org_member_read ON order_fees
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── order_claims — org-scoped, denormalized organization_id ─────────
+-- İade talep görünürlüğü; getclaims sync worker (PR-13) yazar. Tenant boundary
+-- denormalize edilmiş — sayı az olduğu için EXISTS walk overhead'i gereksiz.
+ALTER TABLE order_claims ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS order_claims_org_member_read ON order_claims;
+CREATE POLICY order_claims_org_member_read ON order_claims
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── order_claim_items — reach via parent claim ────────────────────────
+-- order_items pattern: no direct organization_id, walk to parent claim.
+-- Recursion risk yok çünkü order_claims kendi policy'sini is_org_member ile
+-- evaluate eder (SECURITY DEFINER helper'a sarılı).
+ALTER TABLE order_claim_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS order_claim_items_org_member_read ON order_claim_items;
+CREATE POLICY order_claim_items_org_member_read ON order_claim_items
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM order_claims
+      WHERE order_claims.id = order_claim_items.claim_id
+        AND is_org_member(order_claims.organization_id)
+    )
+  );
+
+-- ─── org_period_fees — org-scoped ─────────────────────────────────────
+-- Org-düzeyi ücretler (Reklam, Penalty, Notification, PSF/Stopaj audit).
+-- Kar hesabını etkilemez; yalnız audit/transparency. Settlement worker (PR-7) yazar.
+ALTER TABLE org_period_fees ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_period_fees_org_member_read ON org_period_fees;
+CREATE POLICY org_period_fees_org_member_read ON org_period_fees
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── commission_invoices — org-scoped ──────────────────────────────────
+-- Trendyol haftalık komisyon faturası aggregate. otherfinancials 'Komisyon
+-- Faturası' kayıtlarından oluşturulur (PR-7). OrderItem.commissionInvoiceId
+-- FK PR-3'te eklenir; o zaman backfill akışı tamamlanır.
+ALTER TABLE commission_invoices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commission_invoices_org_member_read ON commission_invoices;
+CREATE POLICY commission_invoices_org_member_read ON commission_invoices
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+-- ─── fee_definitions — global reference, public read ──────────────────
+-- Pazaryeri × ücret tipi başına sistem-düzeyi tanım. Tüm seller'lara aynı
+-- kural — fx_rates / shipping_carriers / marketplace_commission_rate ile
+-- aynı pattern. Yazma postgres rolü (PR-2 seed migration); authenticated
+-- INSERT/UPDATE/DELETE policy yok → default-deny.
+ALTER TABLE fee_definitions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS fee_definitions_authenticated_read ON fee_definitions;
+CREATE POLICY fee_definitions_authenticated_read ON fee_definitions
+  FOR SELECT TO authenticated
+  USING (true);
