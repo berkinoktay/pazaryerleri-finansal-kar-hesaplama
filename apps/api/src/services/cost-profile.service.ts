@@ -65,6 +65,11 @@ function toWireProfile(row: CostProfile): CostProfile {
     amount: row.amount,
     currency: row.currency,
     vatRate: row.vatRate,
+    // PR-4: denormalize KDV tutarı (design §3.5 düzeltilmiş, §12.1 #10).
+    // Wire'da exposed — frontend tüketicilerine `amount × vatRate / 100` türetme
+    // yükü yıkılmaz. Şu an migration backfill'iyle dolu, PR-6 service'i create/
+    // update sırasında doldurur.
+    vatAmount: row.vatAmount,
     fxRateMode: row.fxRateMode,
     manualFxRate: row.manualFxRate,
     note: row.note,

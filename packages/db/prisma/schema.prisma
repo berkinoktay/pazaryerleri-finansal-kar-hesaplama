@@ -407,18 +407,18 @@ model ProductImage {
 }
 
 model Order {
-  id               String      @id @default(uuid()) @db.Uuid
-  organizationId   String      @map("organization_id") @db.Uuid
-  storeId          String      @map("store_id") @db.Uuid
-  platformOrderId  String      @map("platform_order_id")
-  orderDate        DateTime    @map("order_date")
-  status           OrderStatus
-  totalAmount      Decimal     @map("total_amount") @db.Decimal(12, 2)
-  commissionAmount Decimal     @map("commission_amount") @db.Decimal(12, 2)
-  shippingCost     Decimal     @map("shipping_cost") @db.Decimal(12, 2)
-  platformFee      Decimal     @default(0) @map("platform_fee") @db.Decimal(12, 2)
-  vatAmount        Decimal     @default(0) @map("vat_amount") @db.Decimal(12, 2)
-  netProfit        Decimal?    @map("net_profit") @db.Decimal(12, 2)
+  id              String      @id @default(uuid()) @db.Uuid
+  organizationId  String      @map("organization_id") @db.Uuid
+  storeId         String      @map("store_id") @db.Uuid
+  platformOrderId String      @map("platform_order_id")
+  orderDate       DateTime    @map("order_date")
+  status          OrderStatus
+  // ESKİ ÜCRET KOLONLARI (totalAmount, commissionAmount, shippingCost, platformFee,
+  // vatAmount, netProfit) PR-5c'de SİLİNDİ (2026-05-19). Yeni convention için:
+  // - Satış: saleSubtotalNet + saleVatTotal (aşağıda PR-5a)
+  // - Komisyon: OrderItem.grossCommissionAmountNet/VatAmount (PR-3)
+  // - Kargo/PSF/Stopaj: OrderFee tablosunda (PR-1)
+  // - Kar: estimatedNetProfit / settledNetProfit (PR-5a, write-once + mutable)
 
   // Trendyol data-input alanları (sync handler PR-6'da set eder, design §3.1).
   // agreedDeliveryDate: getShipmentPackages endpoint direkt field.
@@ -431,6 +431,37 @@ model Order {
   fastDelivery Boolean @default(false) @map("fast_delivery")
   micro        Boolean @default(false) @map("micro")
 
+  // ─── PR-5a: Kar V1 state/derived kolonları (design §3.1) ────────────
+  // saleSubtotalNet + saleVatTotal: OrderItem'lardan agregat (sync handler PR-6'da
+  // set eder). PR-5b veri taşıma mevcut Order.totalAmount'tan backfill yapacak.
+  saleSubtotalNet Decimal? @map("sale_subtotal_net") @db.Decimal(12, 2)
+  saleVatTotal    Decimal? @map("sale_vat_total")    @db.Decimal(12, 2)
+
+  // İki aşamalı kar (design §4.1):
+  // - estimatedNetProfit: T+0 applyEstimateOnOrderCreate yazar, write-once (PR-9 trigger).
+  // - settledNetProfit:   T+~5+ recomputeSettledProfit yazar, mutable (iade güncellemeleri).
+  estimatedNetProfit   Decimal?             @map("estimated_net_profit") @db.Decimal(12, 2)
+  settledNetProfit     Decimal?             @map("settled_net_profit")   @db.Decimal(12, 2)
+  // Durum makinesi: NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED (design §6.1).
+  // İlk SETTLEMENT/CARGO_INVOICE OrderFee yazıldığında PARTIALLY_SETTLED, Sale
+  // satırının paymentOrderId'si dolu görüldüğünde FULLY_SETTLED.
+  reconciliationStatus ReconciliationStatus @default(NOT_SETTLED) @map("reconciliation_status")
+
+  // PaymentOrder bağlantısı — mutabakat sinyali (§3.7). Sale.paymentOrderId dolu
+  // görüldüğünde Order'a yansıtılır → handlePaymentOrderEntry tetiklenir →
+  // cycle'daki PSF/Stopaj ESTIMATE'leri SETTLEMENT'a confirm + recomputeSettledProfit.
+  paymentOrderId BigInt?   @map("payment_order_id")
+  paymentDate    DateTime? @map("payment_date")
+
+  // Türetilmiş: actualDeliveryDate <= agreedDeliveryDate → true (Bugün Kargoda PSF).
+  // applyEstimate hesaplaması: inferDeliveredOnTime(order) — null = henüz delivered değil.
+  deliveredOnTime Boolean? @map("delivered_on_time")
+
+  // Trendyol orderNumber (üst sipariş, paket-üstü). platformOrderId = shipmentPackageId
+  // (paket-seviyesi); platformOrderNumber = orderNumber (split shipment'ta N pakete
+  // referans verir). PR-5b veri taşıma mevcut yanlış dolu rows'u doğrultur (§9 PR-5b).
+  platformOrderNumber String? @map("platform_order_number")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -441,7 +472,10 @@ model Order {
 
   @@unique([storeId, platformOrderId])
   @@index([organizationId])
+  @@index([organizationId, reconciliationStatus])
   @@index([orderDate])
+  @@index([platformOrderNumber])
+  @@index([storeId, paymentOrderId])
   @@map("orders")
 }
 
@@ -450,19 +484,57 @@ model OrderItem {
   orderId                String                           @map("order_id") @db.Uuid
   productVariantId       String?                          @map("product_variant_id") @db.Uuid
   quantity               Int
+  // Eski (KDV-dahil) kolonlar — PR-5c'de silinir, PR-5b veri taşıma sonrası.
   unitPrice              Decimal                          @map("unit_price") @db.Decimal(12, 2)
   commissionRate         Decimal                          @map("commission_rate") @db.Decimal(5, 2)
   commissionAmount       Decimal                          @map("commission_amount") @db.Decimal(12, 2)
   organizationId         String?                          @map("organization_id") @db.Uuid
   unitCostSnapshot       Decimal?                         @map("unit_cost_snapshot") @db.Decimal(12, 2)
   snapshotCapturedAt     DateTime?                        @map("snapshot_captured_at")
+
+  // ─── PR-3: KDV ayrıştırması + commission split (design §3.2) ────────
+  // unitPriceNet = lineUnitPrice / (1 + unitVatRate/100); unitVatAmount = brüt − net.
+  // Nullable çünkü mevcut satırlar PR-5b veri taşıma'sı bunları doldurana kadar boş.
+  unitPriceNet      Decimal? @map("unit_price_net")    @db.Decimal(12, 2)
+  unitVatRate       Decimal? @map("unit_vat_rate")     @db.Decimal(5, 2)
+  unitVatAmount     Decimal? @map("unit_vat_amount")   @db.Decimal(12, 2)
+
+  // Komisyon — Trendyol her satır için ayrı oran verdiği için OrderItem-level.
+  // Effective commission = gross − refunded (research §3.2 — Discount transaction'ı
+  // ayrı komisyon iadesi getiriyor). DB-level CHECK constraint:
+  // refunded_commission_amount_net <= gross_commission_amount_net (migration.sql'de
+  // manual ALTER TABLE). default(0) backward-compat için (PR-6 sync worker
+  // settlement Sale satırlarını işlerken doğru değerleri yazar).
+  grossCommissionAmountNet    Decimal @default(0) @map("gross_commission_amount_net")    @db.Decimal(12, 2)
+  grossCommissionVatAmount    Decimal @default(0) @map("gross_commission_vat_amount")    @db.Decimal(12, 2)
+  refundedCommissionAmountNet Decimal @default(0) @map("refunded_commission_amount_net") @db.Decimal(12, 2)
+  refundedCommissionVatAmount Decimal @default(0) @map("refunded_commission_vat_amount") @db.Decimal(12, 2)
+
+  // Satıcı kaynaklı indirim (gerçek gelir azaltıcı, Discount transaction'tan).
+  sellerDiscountNet       Decimal @default(0) @map("seller_discount_net")       @db.Decimal(12, 2)
+  sellerDiscountVatAmount Decimal @default(0) @map("seller_discount_vat_amount") @db.Decimal(12, 2)
+
+  // Maliyet anlık kopyası — KDV ayrıştırma (mevcut unitCostSnapshot KDV-dahil).
+  // Tümü nullable: maliyet snapshot eksik durumda kar hesabı null kalır (§12.2 #7).
+  unitCostSnapshotNet       Decimal? @map("unit_cost_snapshot_net")       @db.Decimal(12, 2)
+  unitCostSnapshotVatRate   Decimal? @map("unit_cost_snapshot_vat_rate")  @db.Decimal(5, 2)
+  unitCostSnapshotVatAmount Decimal? @map("unit_cost_snapshot_vat_amount") @db.Decimal(12, 2)
+
+  // Komisyon faturası referansı (design §3.8 iki aşamalı populate):
+  // - serialNumber: Sale satırı T+~5'te direkt yazar (raw "DCF...").
+  // - id: T+~7 Komisyon Faturası otherfinancials kaydı geldiğinde backfill FK.
+  commissionInvoiceSerialNumber String? @map("commission_invoice_serial_number")
+  commissionInvoiceId           String? @map("commission_invoice_id") @db.Uuid
+
   costSnapshotComponents OrderItemCostSnapshotComponent[]
   claimItems             OrderClaimItem[]
 
-  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  order             Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productVariant    ProductVariant?    @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  commissionInvoice CommissionInvoice? @relation(fields: [commissionInvoiceId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, snapshotCapturedAt])
+  @@index([commissionInvoiceId])
   @@map("order_items")
 }
 
@@ -503,9 +575,16 @@ model CostProfile {
   organizationId String          @map("organization_id") @db.Uuid
   name           String
   type           CostProfileType
+  // `amount` KDV HARİÇ (NET) — convention'i empirik doğrulandı (design §12.1 #10,
+  // 2026-05-19): profit-calculation.service.ts:11 yorumu + cost-profile.service.ts
+  // pass-through + cost-snapshot.service.ts pass-through + i18n form label.
   amount         Decimal         @db.Decimal(12, 2)
   currency       Currency        @default(TRY)
   vatRate        Int             @default(0) @map("vat_rate")
+  // PR-4: KDV tutarı denormalize. Backfill = ROUND(amount × vatRate / 100, 2).
+  // Nullable çünkü yeni eklenen rows sync worker doldurana kadar boş kalabilir.
+  // CHECK constraint: vat_amount IS NULL OR vat_amount >= 0 (check-constraints.sql).
+  vatAmount      Decimal?        @map("vat_amount") @db.Decimal(12, 2)
   fxRateMode     FxRateMode      @default(AUTO) @map("fx_rate_mode")
   manualFxRate   Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
   note           String?
@@ -536,6 +615,9 @@ model CostProfileVersion {
   amount         Decimal         @db.Decimal(12, 2)
   currency       Currency
   vatRate        Int             @map("vat_rate")
+  // PR-4: Version history KDV tutarı (CostProfile.vatAmount mirror). Cost profile
+  // güncellendiğinde version row'una snapshot edilir; service code PR-6'da updates.
+  vatAmount      Decimal?        @map("vat_amount") @db.Decimal(12, 2)
   fxRateMode     FxRateMode      @map("fx_rate_mode")
   manualFxRate   Decimal?        @map("manual_fx_rate") @db.Decimal(14, 6)
   note           String?
@@ -577,10 +659,16 @@ model OrderItemCostSnapshotComponent {
   profileId      String          @map("profile_id") @db.Uuid
   profileName    String          @map("profile_name")
   profileType    CostProfileType @map("profile_type")
+  // `amount` ve `amountInTry` KDV HARİÇ (NET) — CostProfile convention mirror.
   amount         Decimal         @db.Decimal(12, 2)
   currency       Currency
   vatRate        Int             @map("vat_rate")
   amountInTry    Decimal         @map("amount_in_try") @db.Decimal(12, 2)
+  // PR-4: KDV tutarları snapshot. Backfill:
+  //   vat_amount = ROUND(amount × vat_rate / 100, 2)               (native)
+  //   vat_amount_in_try = ROUND(amount_in_try × vat_rate / 100, 2) (TRY)
+  vatAmount      Decimal?        @map("vat_amount") @db.Decimal(12, 2)
+  vatAmountInTry Decimal?        @map("vat_amount_in_try") @db.Decimal(12, 2)
   fxRateMode     FxRateMode      @map("fx_rate_mode")
   fxRateUsed     Decimal         @map("fx_rate_used") @db.Decimal(14, 6)
   fxRateSource   String          @map("fx_rate_source")
@@ -992,7 +1080,9 @@ model CommissionInvoice {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  store      Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // PR-3'te eklendi: OrderItem.commissionInvoiceId FK ile birlikte iki yönlü relation.
+  orderItems OrderItem[]
 
   @@unique([storeId, trendyolSerialNumber])
   @@index([organizationId, periodStart])

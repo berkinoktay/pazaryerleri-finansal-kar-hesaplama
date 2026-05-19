@@ -1,97 +1,40 @@
 /**
  * Order profit computation service.
  *
- * Per spec §5.4. Write-once: only sets Order.netProfit when:
- *   1. order.netProfit is currently null (never overwrite a sealed value), AND
- *   2. every OrderItem for this order has a non-null unitCostSnapshot.
+ * **PR-5c (2026-05-19) — STUB.** Original implementation used eski Order ücret
+ * kolonları (totalAmount, commissionAmount, shippingCost, platformFee, netProfit)
+ * that were dropped in this PR. New implementation lives in PR-6:
  *
- * If either condition fails, this is a no-op — the caller can safely call
- * this after every sync event without worrying about double-computation.
+ *   - `applyEstimateOnOrderCreate` (T+0 write-once tahmini kar)
+ *   - `recomputeSettledProfit` (mutable, settlement-driven)
  *
- * Profit formula (all values NET of VAT, matching profile.amount convention):
- *   netProfit = totalAmount − commissionAmount − shippingCost − platformFee
- *             − Σ(orderItem.unitCostSnapshot × orderItem.quantity)
+ * Bu dosya PR-6'da `apps/api/src/services/profit/` altında baştan yazılır.
+ * `recomputeOrderProfit` export'u eski signature ile no-op olarak duruyor ki
+ * `apps/sync-worker/src/handlers/orders.ts` import path'i typecheck'ten geçsin —
+ * sync handler'ın gerçek Trendyol fetch logic'i de zaten dormant (PR-6'ya
+ * bağımlı, V1 plan'ın DIŞINDA Trendyol Order Sync feature'ında inşa edilir).
  *
- * `vatAmount` is not subtracted: it is a pass-through tax collected on behalf
- * of the government. The seller's economics are on the NET amounts.
+ * Tek source-of-truth profit formula: design §2.1-§2.2 (KDV-aware), PR-6'da
+ * `computeProfit(ProfitInputs)` olarak yazılacak.
  */
-
-import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface OrderRow {
-  id: string;
-  totalAmount: Decimal;
-  commissionAmount: Decimal;
-  shippingCost: Decimal;
-  platformFee: Decimal;
-  netProfit: Decimal | null;
-}
-
-interface OrderItemRow {
-  unitCostSnapshot: Decimal | null;
-  quantity: number;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 /**
- * Core profit calculation. Accepts Decimal values already resolved.
- * Separated so it can be unit-tested independently of the DB layer.
- */
-export function computeProfit(order: OrderRow, items: OrderItemRow[]): Decimal {
-  const totalCost = items.reduce((acc, item) => {
-    // unitCostSnapshot is guaranteed non-null by the caller's allHaveSnapshot check.
-    return acc.add(new Decimal(item.unitCostSnapshot!).mul(item.quantity));
-  }, new Decimal(0));
-
-  return new Decimal(order.totalAmount)
-    .sub(order.commissionAmount)
-    .sub(order.shippingCost)
-    .sub(order.platformFee)
-    .sub(totalCost);
-}
-
-// ─── Service function ─────────────────────────────────────────────────────────
-
-/**
- * Compute and persist Order.netProfit when all preconditions are met.
+ * STUB — no-op until PR-6.
  *
- * Idempotent — safe to call multiple times; exits early if netProfit is
- * already set or if any item snapshot is still missing.
+ * Eski davranış (silindi): tüm OrderItem'lar snapshot'lı ise Order.netProfit'i
+ * write-once yazardı. Yeni davranış PR-6'da: applyEstimateOnOrderCreate.
  *
- * @param orderId - The order to (potentially) update
- * @param tx      - Active Prisma transaction client
+ * Parametreler caller compatibility için signature'da tutuldu (sync-worker +
+ * cost-snapshot-capture.test.ts hala bu signature ile çağırıyor). PR-6
+ * implementation eklenince void cast'lar kaldırılır.
  */
 export async function recomputeOrderProfit(
   orderId: string,
   tx: Prisma.TransactionClient,
 ): Promise<void> {
-  const items = await tx.orderItem.findMany({ where: { orderId } });
-  const order = await tx.order.findUnique({ where: { id: orderId } });
-
-  if (!order) {
-    return;
-  }
-
-  // Write-once: do nothing if profit was already computed.
-  if (order.netProfit !== null) {
-    return;
-  }
-
-  // Wait for all items to have snapshots before computing profit.
-  const allHaveSnapshot = items.every((i) => i.unitCostSnapshot !== null);
-  if (!allHaveSnapshot) {
-    return;
-  }
-
-  const netProfit = computeProfit(order, items);
-
-  await tx.order.update({
-    where: { id: orderId },
-    data: { netProfit },
-  });
+  void orderId;
+  void tx;
+  // PR-6'da yeniden implement edilecek (design §4.2).
 }

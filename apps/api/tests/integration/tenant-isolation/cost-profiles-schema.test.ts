@@ -186,9 +186,6 @@ describe('cost-profile tables: RLS isolation', () => {
         platformOrderId: `order-b-${randomUUID().slice(0, 8)}`,
         orderDate: new Date(),
         status: 'DELIVERED',
-        totalAmount: '100.00',
-        commissionAmount: '20.00',
-        shippingCost: '10.00',
       },
     });
 

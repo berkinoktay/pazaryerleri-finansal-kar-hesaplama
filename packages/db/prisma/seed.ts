@@ -362,6 +362,11 @@ async function seedStoresProductsOrders(orgs: {
       date: daysAgo(5),
     },
   ];
+  // PR-5c (2026-05-19): Eski Order ücret kolonları silindi (totalAmount,
+  // commissionAmount, shippingCost, platformFee, vatAmount, netProfit). Seed
+  // siparişleri minimal — yeni convention kolonları (saleSubtotalNet, etc.)
+  // PR-6 sync handler doldurur; seed sadece fixture varlığı sağlar. Numeric
+  // değerler (o.total/commission/shipping) artık kullanılmıyor.
   for (const [i, o] of orders.entries()) {
     await prisma.order.create({
       data: {
@@ -370,9 +375,6 @@ async function seedStoresProductsOrders(orgs: {
         platformOrderId: `seed-order-${(i + 1).toString()}`,
         orderDate: o.date,
         status: o.status,
-        totalAmount: o.total,
-        commissionAmount: o.commission,
-        shippingCost: o.shipping,
       },
     });
   }

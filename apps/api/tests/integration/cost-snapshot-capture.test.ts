@@ -138,7 +138,8 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
   });
 
   // §5.8 row 1: variant with 0 profiles when order arrives
-  it('variant with no profiles → snapshot stays null, netProfit stays null', async () => {
+  // PR-5c: netProfit assertion'ı kaldırıldı (Order.netProfit silindi, profit stub).
+  it('variant with no profiles → snapshot stays null', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -151,10 +152,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     await captureAndComputeInTx(item.id, order.id);
 
     const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    const refreshedOrder = await prisma.order.findUnique({ where: { id: order.id } });
-
     expect(refreshedItem!.unitCostSnapshot).toBeNull();
-    expect(refreshedOrder!.netProfit).toBeNull();
   });
 
   // §5.8 row 2: variant with profiles, FX rate stale (>2 days) — still proceeds
@@ -178,11 +176,9 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     const { variant } = await buildVariantWithProfiles(org.id, store.id, [
       { name: 'USD COGS', currency: 'USD', amount: '10.00', fxRateMode: 'AUTO' },
     ]);
-    const order = await createOrder(org.id, store.id, {
-      totalAmount: '200.00',
-      commissionAmount: '20.00',
-      shippingCost: '10.00',
-    });
+    // PR-5c: createOrder ücret override'ları (totalAmount/commissionAmount/shippingCost) kaldırıldı
+    // — Order eski kolonlar silindi. Snapshot test'i netProfit assertion'ına bağlı değil.
+    const order = await createOrder(org.id, store.id);
     const item = await createOrderItem(org.id, order.id, variant.id);
 
     await captureAndComputeInTx(item.id, order.id);
@@ -191,17 +187,13 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     const components = await prisma.orderItemCostSnapshotComponent.findMany({
       where: { orderItemId: item.id },
     });
-    const refreshedOrder = await prisma.order.findUnique({ where: { id: order.id } });
 
     // 10.00 USD × 44.50 = 445.00 TRY
     expect(refreshedItem!.unitCostSnapshot!.toFixed(2)).toBe('445.00');
     expect(components).toHaveLength(1);
     expect(components[0]!.fxRateSource).toBe('TCMB-2026-05-05');
-    // netProfit from createOrder defaults: 100 total - 20 commission - 10 shipping - 0 platformFee - 445 cost = -375
-    // But we used createOrder(org.id, store.id, { totalAmount:'200', commissionAmount:'20', shippingCost:'10' })
-    // platformFee default is 0, vatAmount default is 0
-    // netProfit = 200 - 20 - 10 - 0 - 445 = -275
-    expect(refreshedOrder!.netProfit).not.toBeNull();
+    // PR-5c: Order.netProfit silindi. Profit hesaplama PR-6'da
+    // applyEstimateOnOrderCreate ile yeni convention'da yapılacak.
   });
 
   // §5.8 row 3: variant with AUTO profile, no FX rate ever fetched
@@ -220,10 +212,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     await captureAndComputeInTx(item.id, order.id);
 
     const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    const refreshedOrder = await prisma.order.findUnique({ where: { id: order.id } });
-
     expect(refreshedItem!.unitCostSnapshot).toBeNull();
-    expect(refreshedOrder!.netProfit).toBeNull();
   });
 
   // §5.8 row 4: profile archived between sync arrival and snapshot capture
@@ -248,10 +237,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     await captureAndComputeInTx(item.id, order.id);
 
     const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    const refreshedOrder = await prisma.order.findUnique({ where: { id: order.id } });
-
     expect(refreshedItem!.unitCostSnapshot).toBeNull();
-    expect(refreshedOrder!.netProfit).toBeNull();
   });
 
   // §5.8 row 5: re-sync same order — snapshot untouched (idempotency at app layer)
@@ -329,8 +315,10 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     expect(after2!.unitCostSnapshot!.toFixed(2)).toBe('25.00');
   });
 
-  // Happy path: TRY profiles → snapshot + profit computed correctly
-  it('TRY profiles → unitCostSnapshot and netProfit set in one transaction', async () => {
+  // Happy path: TRY profiles → snapshot computed correctly.
+  // PR-5c: netProfit assertion'ı kaldırıldı (Order.netProfit silindi, profit stub).
+  // Profit hesaplama PR-6'da applyEstimateOnOrderCreate ile yeniden test edilir.
+  it('TRY profiles → unitCostSnapshot set with sum of components', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -340,11 +328,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
       { name: 'COGS A', currency: 'TRY', amount: '30.00', fxRateMode: 'AUTO' },
       { name: 'COGS B', currency: 'TRY', amount: '20.00', fxRateMode: 'AUTO' },
     ]);
-    const order = await createOrder(org.id, store.id, {
-      totalAmount: '200.00',
-      commissionAmount: '20.00',
-      shippingCost: '10.00',
-    });
+    const order = await createOrder(org.id, store.id);
     const item = await createOrderItem(org.id, order.id, variant.id);
 
     await captureAndComputeInTx(item.id, order.id);
@@ -353,14 +337,10 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     const components = await prisma.orderItemCostSnapshotComponent.findMany({
       where: { orderItemId: item.id },
     });
-    const refreshedOrder = await prisma.order.findUnique({ where: { id: order.id } });
 
     // Total cost = 30 + 20 = 50 TRY (qty=1)
     expect(refreshedItem!.unitCostSnapshot!.toFixed(2)).toBe('50.00');
     expect(components).toHaveLength(2);
-
-    // netProfit = 200 - 20 - 10 - 0 (platformFee) - 50 = 120
-    expect(refreshedOrder!.netProfit!.toFixed(2)).toBe('120.00');
   });
 
   // USD MANUAL profile
