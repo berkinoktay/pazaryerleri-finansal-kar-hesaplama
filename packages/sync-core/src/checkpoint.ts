@@ -37,6 +37,35 @@ export function parseProductsCursor(raw: unknown): ProductsCursor | null {
 }
 
 /**
+ * Cursor shape for orders sync — windowed page-based pagination.
+ *
+ * Orders endpoint requires `startDate`/`endDate` window + `page` advance.
+ * Initial backfill: window set on first chunk (90 days default — V1 hardcoded).
+ * Subsequent chunks within same window: page advances until totalElements.
+ *
+ * Future PR-D (delta sync): add `kind: 'delta'` variant with
+ * `sinceLastModifiedDate` cursor.
+ */
+export const OrdersPageWindowCursorSchema = z.object({
+  kind: z.literal('page-window'),
+  /** Trendyol startDate query param (ms epoch). */
+  startDate: z.number().int().min(0),
+  /** Trendyol endDate query param (ms epoch). */
+  endDate: z.number().int().min(0),
+  /** Page index within this window. */
+  n: z.number().int().min(0),
+});
+export type OrdersPageWindowCursor = z.infer<typeof OrdersPageWindowCursorSchema>;
+
+export const OrdersCursorSchema = z.discriminatedUnion('kind', [OrdersPageWindowCursorSchema]);
+export type OrdersCursor = z.infer<typeof OrdersCursorSchema>;
+
+export function parseOrdersCursor(raw: unknown): OrdersCursor | null {
+  if (raw === null || raw === undefined) return null;
+  return OrdersCursorSchema.parse(raw);
+}
+
+/**
  * Skip-bad-page diagnostic record. Worker writes this to
  * `SyncLog.skippedPages` (jsonb array) when MAX_ATTEMPTS is hit on a
  * `MARKETPLACE_UNREACHABLE` error and the cursor is advanced past the
