@@ -129,6 +129,71 @@ enum CommissionRuleKind {
   CATEGORY_BRAND
 }
 
+// Sipariş mutabakat durumu — kar hesaplama V1 (docs/plans/2026-05-18-profit-calculation-design.md §3.1).
+// NOT_SETTLED: ESTIMATE OrderFee'ler yazılı, henüz SETTLEMENT yok.
+// PARTIALLY_SETTLED: Bazı SETTLEMENT/CARGO_INVOICE OrderFee'ler var, Sale.paymentOrderId henüz null.
+// FULLY_SETTLED: Sale paymentOrderId dolu, settledNetProfit yazıldı.
+enum ReconciliationStatus {
+  NOT_SETTLED
+  PARTIALLY_SETTLED
+  FULLY_SETTLED
+}
+
+// OrderFee tipi — pazaryeri ücretlerinin tek kaynağı (design §3.3).
+// İki kategori: sipariş-düzeyi (OrderFee tablosuna yazılır) ve org-düzeyi
+// (OrgPeriodFee tablosuna yazılır — Reklam, Penalty, Notification, COMMISSION_INVOICE).
+// PLATFORM_SERVICE + PLATFORM_SERVICE_FAST ayrı FeeDefinition row'larıyla seçilir;
+// FAST yalnızca fastDelivery=true + deliveredOnTime=true durumda uygulanır (§3.4).
+enum OrderFeeType {
+  SHIPPING
+  PLATFORM_SERVICE
+  PLATFORM_SERVICE_FAST
+  STOPPAGE
+  RETURN_SHIPPING
+  REFUND_DEDUCTION
+  COMMISSION_REFUND
+  PROVISION_ADJUSTMENT
+  MANUAL_REFUND
+  REVENUE_ADJUSTMENT
+  COMMISSION_ADJUSTMENT
+  CUSTOM
+  ADVERTISING
+  PENALTY_DEFECTIVE
+  PENALTY_WRONG_PRODUCT
+  PENALTY_MISSING_PRODUCT
+  PENALTY_LATE_DELIVERY
+  PENALTY_SUPPLY_FAILURE
+  NOTIFICATION_FEE
+  COMMISSION_INVOICE
+}
+
+// OrderFee'nin kaynağı — audit + reconciliation algoritması için kritik (§3.3).
+// ESTIMATE: applyEstimateOnOrderCreate (T+0 deterministic).
+// SETTLEMENT: settlements/otherfinancials API'sinden.
+// CARGO_INVOICE: cargo-invoice/{serial}/items per-order match.
+// USER_OVERRIDE: kullanıcı düzeltti. MANUAL_ENTRY: kullanıcı ekledi (reklam vs.).
+enum OrderFeeSource {
+  ESTIMATE
+  SETTLEMENT
+  CARGO_INVOICE
+  USER_OVERRIDE
+  MANUAL_ENTRY
+}
+
+enum OrderFeeDirection {
+  DEBIT
+  CREDIT
+}
+
+// FeeDefinition hesap türü — sistem-düzeyi ücret tanımları (§3.4).
+// FIXED: sabit tutar (PSF ₺10.99). RATE_OF_SALE: satışın yüzdesi (Stopaj %1).
+// FORMULA: V2'ye ertelendi (karmaşık formüller).
+enum FeeCalculationKind {
+  FIXED
+  RATE_OF_SALE
+  FORMULA
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -206,6 +271,8 @@ model Store {
   syncLogs               SyncLog[]
   defaultShippingCarrier ShippingCarrier?    @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
   ownShippingTariffs     OwnShippingTariff[]
+  orgPeriodFees          OrgPeriodFee[]
+  commissionInvoices     CommissionInvoice[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -273,6 +340,10 @@ model ProductVariant {
   listPrice               Decimal  @map("list_price") @db.Decimal(12, 2)
   vatRate                 Int?     @map("vat_rate")
   costPrice               Decimal? @map("cost_price") @db.Decimal(12, 2)
+  // PSF muafiyet kuralı: tüm OrderItem'larda isDigital=true → PSF=0 (design §3.7).
+  // V1: kullanıcı UI'dan işaretler (variant settings toggle). V2: Trendyol kategori
+  // lookup ile otomatik tahmin.
+  isDigital               Boolean  @default(false) @map("is_digital")
   // Two-column sync-protection pair (see docs/plans/archive/... for rationale):
   // syncedDimensionalWeight is the marketplace's value, refreshed every sync.
   // dimensionalWeight is the user's manual override; null = no override, fall
@@ -348,11 +419,25 @@ model Order {
   platformFee      Decimal     @default(0) @map("platform_fee") @db.Decimal(12, 2)
   vatAmount        Decimal     @default(0) @map("vat_amount") @db.Decimal(12, 2)
   netProfit        Decimal?    @map("net_profit") @db.Decimal(12, 2)
-  createdAt        DateTime    @default(now()) @map("created_at")
-  updatedAt        DateTime    @updatedAt @map("updated_at")
 
-  store Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  items OrderItem[]
+  // Trendyol data-input alanları (sync handler PR-6'da set eder, design §3.1).
+  // agreedDeliveryDate: getShipmentPackages endpoint direkt field.
+  // actualDeliveryDate: packageHistories[status='Delivered'].createdAt'den türetilir;
+  //   Delivered status webhook'unda set'lenir. Order endpoint'te direkt field YOK.
+  agreedDeliveryDate DateTime? @map("agreed_delivery_date")
+  actualDeliveryDate DateTime? @map("actual_delivery_date")
+  // fastDelivery: getShipmentPackages direkt boolean (Bugün Kargoda indikatörü).
+  // micro: getShipmentPackages direkt boolean (mikro ihracat) — PSF muafiyeti.
+  fastDelivery Boolean @default(false) @map("fast_delivery")
+  micro        Boolean @default(false) @map("micro")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store  Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items  OrderItem[]
+  fees   OrderFee[]
+  claims OrderClaim[]
 
   @@unique([storeId, platformOrderId])
   @@index([organizationId])
@@ -372,6 +457,7 @@ model OrderItem {
   unitCostSnapshot       Decimal?                         @map("unit_cost_snapshot") @db.Decimal(12, 2)
   snapshotCapturedAt     DateTime?                        @map("snapshot_captured_at")
   costSnapshotComponents OrderItemCostSnapshotComponent[]
+  claimItems             OrderClaimItem[]
 
   order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
@@ -722,4 +808,193 @@ model OwnShippingTariff {
   @@unique([storeId, desi])
   @@index([organizationId])
   @@map("own_shipping_tariffs")
+}
+
+// ─── Profit Calculation V1 — Schema Foundation (PR-1) ──────────────────
+// design: docs/plans/2026-05-18-profit-calculation-design.md
+// guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md
+
+// Sistem-düzeyi ücret tanımı — pazaryeri × ücret tipi başına 1 satır,
+// effectiveFrom ile zaman bazlı sürümleme (design §3.4). V1'de organizasyon
+// override'ı yok; tüm seller'lara aynı kural. Read-only global tablo:
+// RLS authenticated SELECT açık (USING true), yazma postgres rolünde.
+// Seed PR-2'de Trendyol için 4 satır: PSF 10.99 / PSF_FAST 6.99 / Stopaj %1 /
+// Return shipping. effectiveFrom: 2026-05-18 (Trendyol PSF doc okuma tarihi).
+model FeeDefinition {
+  id              String   @id @default(uuid()) @db.Uuid
+  platform        Platform
+  feeType         OrderFeeType @map("fee_type")
+  displayName     String   @map("display_name")
+
+  calculationKind FeeCalculationKind @map("calculation_kind")
+  fixedAmountNet  Decimal? @map("fixed_amount_net") @db.Decimal(12, 2)
+  rateOfSale      Decimal? @map("rate_of_sale")     @db.Decimal(7, 4)
+
+  defaultVatRate  Decimal  @map("default_vat_rate") @db.Decimal(5, 2)
+
+  effectiveFrom   DateTime  @map("effective_from")
+  effectiveTo     DateTime? @map("effective_to")
+  isRequired      Boolean   @default(false) @map("is_required")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  fees OrderFee[]
+
+  @@unique([platform, feeType, effectiveFrom])
+  @@index([platform, effectiveFrom])
+  @@map("fee_definitions")
+}
+
+// Sipariş paket-düzeyi ücret satırı — tüm pazaryeri ücretleri (komisyon hariç,
+// o OrderItem'da) burada (design §3.3). source ESTIMATE/SETTLEMENT/CARGO_INVOICE
+// karışık yaşar, recomputeSettledProfit filtreyle toplar. PSF/Stopaj ESTIMATE
+// satırları PaymentOrder geldiğinde SETTLEMENT'a confirm edilir (§3.7 — confirmedAt
+// + confirmedBy bunu izler). organizationId denormalize: insert sırasında stamp.
+model OrderFee {
+  id              String   @id @default(uuid()) @db.Uuid
+  orderId         String   @map("order_id") @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  feeDefinitionId String?  @map("fee_definition_id") @db.Uuid
+
+  feeType   OrderFeeType      @map("fee_type")
+  source    OrderFeeSource
+  direction OrderFeeDirection
+
+  amountNet Decimal @map("amount_net") @db.Decimal(12, 2)
+  vatRate   Decimal @map("vat_rate")   @db.Decimal(5, 2)
+  vatAmount Decimal @map("vat_amount") @db.Decimal(12, 2)
+
+  displayName String? @map("display_name")
+  externalRef Json?   @map("external_ref")
+
+  capturedAt  DateTime  @default(now()) @map("captured_at")
+  // confirmedAt + confirmedBy: PSF/Stopaj ESTIMATE → SETTLEMENT confirmation
+  // PaymentOrder ('Ödeme') entry geldiğinde set'lenir (§3.7). Amount comparison
+  // yapılmaz — presence check yeterli (deterministic Trendyol kuralı T+0'da
+  // hesaplandı).
+  confirmedAt DateTime? @map("confirmed_at")
+  confirmedBy String?   @map("confirmed_by")
+
+  order      Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  definition FeeDefinition? @relation(fields: [feeDefinitionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, feeType])
+  @@index([orderId, feeType, source])
+  @@map("order_fees")
+}
+
+// İade talep görünürlüğü — Trendyol getclaims endpoint Settlement Return'den
+// ÖNCE iade talebini gösteriyor (design §3.6). Kar hesabını DOĞRUDAN etkilemez;
+// UI'da "iade riski" badge için kullanılır. Settlement Return geldiğinde resolved
+// set edilir + REFUND_DEDUCTION / COMMISSION_REFUND / RETURN_SHIPPING OrderFee
+// satırları yazılır. trendyolClaimId order başına unique.
+model OrderClaim {
+  id                  String   @id @default(uuid()) @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  orderId             String   @map("order_id") @db.Uuid
+  trendyolClaimId     String   @map("trendyol_claim_id")
+  claimDate           DateTime @map("claim_date")
+  cargoProviderName   String?  @map("cargo_provider_name")
+  cargoTrackingNumber BigInt?  @map("cargo_tracking_number")
+  resolved            Boolean
+  externalRef         Json?    @map("external_ref")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  order Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items OrderClaimItem[]
+
+  @@unique([orderId, trendyolClaimId])
+  @@index([organizationId, resolved])
+  @@map("order_claims")
+}
+
+// OrderClaim satırlarındaki ürün-bazlı iade sebebi (design §3.6).
+// organizationId YOK — RLS parent OrderClaim üzerinden EXISTS walk (order_items
+// pattern). reasonCode "DAMAGEDITEM" / "WRONGITEM" gibi enum-benzeri string;
+// reasonName Türkçe label (Trendyol'dan direkt). orderItemId nullable çünkü
+// match her zaman olmayabilir (item-level eşleme PR-13 sync worker'ında).
+model OrderClaimItem {
+  id                  String    @id @default(uuid()) @db.Uuid
+  claimId             String    @map("claim_id") @db.Uuid
+  orderItemId         String?   @map("order_item_id") @db.Uuid
+  trendyolClaimItemId String    @map("trendyol_claim_item_id")
+  reasonCode          String    @map("reason_code")
+  reasonName          String    @map("reason_name")
+  status              String
+  acceptedBySeller    Boolean   @map("accepted_by_seller")
+  autoApproveDate     DateTime? @map("auto_approve_date")
+  resolved            Boolean
+
+  claim     OrderClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+
+  @@index([claimId])
+  @@index([orderItemId])
+  @@map("order_claim_items")
+}
+
+// Organizasyon-düzeyi ücretler — sipariş'e attribute EDİLEMEYEN faturalar
+// (design §3.7). Reklam Bedeli (org-wide Roboost), Penalty/Notification fee'leri
+// (KDV=0), PSF/Stopaj audit kayıtları (period-level invoice scope ≠ cycle scope).
+// Kar hesabını ETKİLEMEZ — yalnız audit/transparency için. paymentOrderId hangi
+// PaymentOrder cycle'ında basıldığını tutar (V2 monthly aggregate variance audit
+// bu kayıtları kullanır).
+model OrgPeriodFee {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  storeId        String   @map("store_id") @db.Uuid
+  paymentOrderId BigInt   @map("payment_order_id")
+  paymentDate    DateTime @map("payment_date")
+
+  feeType OrderFeeType   @map("fee_type")
+  source  OrderFeeSource
+
+  amountNet Decimal @map("amount_net") @db.Decimal(12, 2)
+  vatRate   Decimal @map("vat_rate")   @db.Decimal(5, 2)
+  vatAmount Decimal @map("vat_amount") @db.Decimal(12, 2)
+
+  invoiceSerialNumber String? @map("invoice_serial_number")
+  description         String?
+  externalRef         Json?   @map("external_ref")
+
+  capturedAt DateTime @default(now()) @map("captured_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, paymentOrderId])
+  @@index([organizationId, feeType, paymentDate])
+  @@index([storeId, paymentDate])
+  @@map("org_period_fees")
+}
+
+// Haftalık komisyon faturası aggregate (design §3.8). Trendyol Sale satırlarındaki
+// commissionInvoiceSerialNumber (DCF...) bu tabloya bağlanır. İki aşamalı populate:
+// (1) T+~5 Sale satırı OrderItem.commissionInvoiceSerialNumber'a string yazar,
+// (2) T+~7 'Komisyon Faturası' otherfinancials kaydı geldiğinde CommissionInvoice
+// row'u upsert edilir + OrderItem.commissionInvoiceId backfill (PR-3'te).
+// orderItems back-relation PR-3'te eklenir (OrderItem.commissionInvoiceId FK
+// ile birlikte).
+model CommissionInvoice {
+  id                   String    @id @default(uuid()) @db.Uuid
+  organizationId       String    @map("organization_id") @db.Uuid
+  storeId              String    @map("store_id") @db.Uuid
+  trendyolSerialNumber String    @map("trendyol_serial_number")
+  periodStart          DateTime  @map("period_start")
+  periodEnd            DateTime  @map("period_end")
+  totalNet             Decimal   @map("total_net") @db.Decimal(14, 2)
+  totalVat             Decimal   @map("total_vat") @db.Decimal(14, 2)
+  paymentOrderId       BigInt?   @map("payment_order_id")
+  paymentDate          DateTime? @map("payment_date")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, trendyolSerialNumber])
+  @@index([organizationId, periodStart])
+  @@map("commission_invoices")
 }
