@@ -1,0 +1,290 @@
+import { Decimal } from 'decimal.js';
+import { prisma } from '@pazarsync/db';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { applyEstimateOnOrderCreate } from '@/services/profit/estimate-on-order-create';
+
+import { ensureDbReachable, truncateAll } from '../../helpers/db';
+import { createOrder, createOrganization, createStore } from '../../helpers/factories';
+import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
+
+/**
+ * Integration tests for `applyEstimateOnOrderCreate` (design §4.2).
+ *
+ * **PR-6 / Option D context:** Sync handler caller henüz yok (Trendyol Order
+ * Sync ayrı epic). Bu test'ler service'i mock data ile direkt çağırır.
+ *
+ * Test scenarios:
+ *   1. Happy path — PSF + Stopaj OrderFee yazılır, estimatedNetProfit hesaplanır
+ *   2. RETURNED status — PSF muafiyet, OrderFee yazılmaz
+ *   3. micro=true — PSF muafiyet
+ *   4. Cost snapshot eksik — estimatedNetProfit null kalır
+ *   5. Write-once — re-entry no-op
+ *   6. saleSubtotalNet null — early return
+ */
+describe('applyEstimateOnOrderCreate (PR-6)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions(); // 4 Trendyol satırı PR-2 seed
+  });
+
+  async function setup() {
+    const org = await createOrganization();
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
+    return { org, store };
+  }
+
+  async function createOrderWithItem(args: {
+    orgId: string;
+    storeId: string;
+    saleSubtotalNet?: string;
+    saleVatTotal?: string;
+    status?: 'DELIVERED' | 'RETURNED';
+    micro?: boolean;
+    unitCostSnapshotNet?: string | null;
+    unitCostSnapshotVatAmount?: string | null;
+    isDigital?: boolean;
+  }) {
+    const order = await prisma.order.update({
+      where: {
+        id: (
+          await createOrder(args.orgId, args.storeId, {
+            status: args.status ?? 'DELIVERED',
+          })
+        ).id,
+      },
+      data: {
+        saleSubtotalNet: args.saleSubtotalNet ?? '100.00',
+        saleVatTotal: args.saleVatTotal ?? '20.00',
+        micro: args.micro ?? false,
+      },
+    });
+
+    // Minimal product + variant + OrderItem
+    const product = await prisma.product.create({
+      data: {
+        organizationId: args.orgId,
+        storeId: args.storeId,
+        platformContentId: BigInt(Date.now() + Math.floor(Math.random() * 100000)),
+        productMainId: `pm-${order.id.slice(0, 8)}`,
+        title: 'Test Product',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: args.orgId,
+        storeId: args.storeId,
+        productId: product.id,
+        platformVariantId: BigInt(Date.now() + Math.floor(Math.random() * 100000)),
+        barcode: `bc-${order.id.slice(0, 6)}`,
+        stockCode: `sk-${order.id.slice(0, 6)}`,
+        salePrice: '100',
+        listPrice: '120',
+        isDigital: args.isDigital ?? false,
+      },
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: args.orgId,
+        productVariantId: variant.id,
+        quantity: 1,
+        unitPrice: '120', // eski KDV-dahil
+        commissionRate: '10',
+        commissionAmount: '12', // eski KDV-dahil
+        // Yeni convention:
+        grossCommissionAmountNet: '10',
+        grossCommissionVatAmount: '2',
+        unitCostSnapshotNet:
+          args.unitCostSnapshotNet !== undefined ? args.unitCostSnapshotNet : '50',
+        unitCostSnapshotVatAmount:
+          args.unitCostSnapshotVatAmount !== undefined ? args.unitCostSnapshotVatAmount : '10',
+      },
+    });
+
+    return order;
+  }
+
+  it('happy path — PSF + Stopaj OrderFee yazılır, estimatedNetProfit hesaplanır', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      saleSubtotalNet: '100.00',
+      saleVatTotal: '20.00',
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    const fees = await prisma.orderFee.findMany({
+      where: { orderId: order.id },
+      orderBy: { feeType: 'asc' },
+    });
+    expect(fees.map((f) => f.feeType).sort()).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
+
+    const psf = fees.find((f) => f.feeType === 'PLATFORM_SERVICE')!;
+    expect(new Decimal(psf.amountNet).toString()).toBe('10.99');
+    expect(new Decimal(psf.vatAmount).toString()).toBe('2.2');
+    expect(psf.source).toBe('ESTIMATE');
+    expect(psf.direction).toBe('DEBIT');
+
+    const stopaj = fees.find((f) => f.feeType === 'STOPPAGE')!;
+    expect(new Decimal(stopaj.amountNet).toString()).toBe('1'); // 100 × 0.01
+    expect(new Decimal(stopaj.vatAmount).toString()).toBe('0');
+
+    // Profit = saleSubtotalNet − itemCost − commission − PSF − Stopaj
+    //       = 100 − 50 − 10 − 10.99 − 1 = 28.01
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(new Decimal(updated.estimatedNetProfit!).toString()).toBe('28.01');
+  });
+
+  it('PSF muafiyet — status RETURNED → PSF OrderFee yazılmaz', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      status: 'RETURNED',
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
+    expect(fees.map((f) => f.feeType).sort()).toEqual(['STOPPAGE']);
+    expect(fees.some((f) => f.feeType === 'PLATFORM_SERVICE')).toBe(false);
+  });
+
+  it('PSF muafiyet — micro=true → PSF OrderFee yazılmaz', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      micro: true,
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
+    expect(fees.some((f) => f.feeType === 'PLATFORM_SERVICE')).toBe(false);
+  });
+
+  it('PSF muafiyet — all-digital → PSF OrderFee yazılmaz', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      isDigital: true,
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
+    expect(fees.some((f) => f.feeType === 'PLATFORM_SERVICE')).toBe(false);
+  });
+
+  it('Cost snapshot eksik → estimatedNetProfit null kalır', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      unitCostSnapshotNet: null,
+      unitCostSnapshotVatAmount: null,
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    // Fee'ler yazılır (PSF + Stopaj) ama estimatedNetProfit null kalır
+    const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
+    expect(fees.length).toBeGreaterThanOrEqual(2);
+
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(updated.estimatedNetProfit).toBeNull();
+  });
+
+  it('Write-once — re-entry idempotent (estimatedNetProfit set ise no-op)', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({ orgId: org.id, storeId: store.id });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+    const fees1 = await prisma.orderFee.count({ where: { orderId: order.id } });
+
+    // İkinci çağrı — Order.estimatedNetProfit zaten dolu, fonksiyon early return.
+    // OrderFee duplicate YAZILMAMALI.
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+    const fees2 = await prisma.orderFee.count({ where: { orderId: order.id } });
+
+    expect(fees2).toBe(fees1);
+  });
+
+  it('saleSubtotalNet null → Stopaj OrderFee yazılmaz, profit null kalır', async () => {
+    const { org, store } = await setup();
+    // createOrderWithItem zorla saleSubtotalNet'i set'ler — null senaryosu için
+    // direkt order create + items, saleSubtotalNet bırakma.
+    const order = await createOrder(org.id, store.id);
+    // OrderItem ekle ama saleSubtotalNet null bırak
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: BigInt(Date.now()),
+        productMainId: 'pm-null-sale',
+        title: 'X',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: BigInt(Date.now() + 1),
+        barcode: 'bc-null',
+        stockCode: 'sk-null',
+        salePrice: '100',
+        listPrice: '120',
+      },
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: org.id,
+        productVariantId: variant.id,
+        quantity: 1,
+        unitPrice: '120',
+        commissionRate: '10',
+        commissionAmount: '12',
+        unitCostSnapshotNet: '50',
+        unitCostSnapshotVatAmount: '10',
+      },
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
+    // PSF yazılır (saleSubtotalNet'ten bağımsız, deterministic), Stopaj yazılmaz
+    // (matrah yok).
+    expect(fees.some((f) => f.feeType === 'PLATFORM_SERVICE')).toBe(true);
+    expect(fees.some((f) => f.feeType === 'STOPPAGE')).toBe(false);
+
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(updated.estimatedNetProfit).toBeNull();
+  });
+});
