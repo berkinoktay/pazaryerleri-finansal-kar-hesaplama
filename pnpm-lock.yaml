@@ -415,6 +415,9 @@ importers:
       '@pazarsync/sync-core':
         specifier: workspace:*
         version: link:../sync-core
+      decimal.js:
+        specifier: ^10.5.0
+        version: 10.6.0
     devDependencies:
       typescript:
         specifier: ^6

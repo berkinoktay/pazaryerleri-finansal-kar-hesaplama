@@ -192,3 +192,143 @@ export interface MappedProductsPageMeta {
   size: number;
   nextPageToken: string | null;
 }
+
+// ─── /orders (getShipmentPackages) response shapes ───────────────────────
+// Source-of-truth: docs/integrations/trendyol/research/2026-05-18-hakedis-
+// bulgulari.md §7 (canlı stage + prod API research), supplemented by
+// docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/
+// siparis-entegrasyonlari.md (official endpoint docs).
+//
+// `Trendyol Order Sync` epic design doc §2.2 has the abridged contract;
+// research §7.1-§7.3 has the full per-field arithmetic (esp. KDV split).
+
+export interface TrendyolOrderLine {
+  lineId: number;
+  barcode: string;
+  stockCode?: string;
+  productName?: string;
+  productSize?: string;
+  productColor?: string;
+  contentId?: number;
+  productCategoryId?: number;
+  merchantSku?: string;
+  quantity: number;
+  /** Effective per-unit price (KDV dahil, indirim sonrası). */
+  lineUnitPrice: number;
+  /** Per-line gross amount = qty × originalUnitPrice (KDV dahil, indirim öncesi). */
+  lineGrossAmount: number;
+  lineSellerDiscount?: number;
+  lineTyDiscount?: number;
+  lineTotalDiscount?: number;
+  /** Per-line VAT rate %. */
+  vatRate: number;
+  /** Commission rate %. Direct in order response (research §7.2). */
+  commission?: number;
+  currencyCode?: string;
+  fastDeliveryOptions?: TrendyolFastDeliveryOption[];
+  orderLineItemStatusName?: string;
+}
+
+export interface TrendyolPackageHistory {
+  status: string;
+  /** Status transition timestamp (ms). For 'Delivered' → actualDeliveryDate. */
+  createdAt: number;
+}
+
+export interface TrendyolShipmentPackage {
+  /** Üst sipariş numarası — commission/payment grouping. */
+  orderNumber: string;
+  /** Bizim Order primary external key (= platformOrderId). */
+  shipmentPackageId: number;
+  shipmentNumber?: number;
+  supplierId?: number;
+  customerId?: number;
+  /** Trendyol enum: Created|Picking|Invoiced|Shipped|Delivered|UnDelivered|Returned|Cancelled. */
+  status: string;
+  shipmentPackageStatus?: string;
+  /** All dates in ms epoch. */
+  orderDate: number;
+  lastModifiedDate: number;
+  agreedDeliveryDate?: number;
+  estimatedDeliveryStartDate?: number;
+  estimatedDeliveryEndDate?: number;
+  originShipmentDate?: number;
+  /** Package totals (KDV DAHİL). */
+  packageGrossAmount: number;
+  packageSellerDiscount?: number;
+  packageTyDiscount?: number;
+  packageTotalDiscount?: number;
+  packageTotalPrice?: number;
+  cargoProviderName?: string;
+  cargoTrackingNumber?: number;
+  deliveryType?: string;
+  isCod?: boolean;
+  commercial?: boolean;
+  fastDelivery: boolean;
+  micro: boolean;
+  containsDangerousProduct?: boolean;
+  lines: TrendyolOrderLine[];
+  packageHistories?: TrendyolPackageHistory[];
+}
+
+export interface TrendyolOrdersResponse {
+  totalElements: number;
+  totalPages: number;
+  page: number;
+  size: number;
+  content: TrendyolShipmentPackage[];
+}
+
+// ─── Mapped Order DTO — KDV-split, ready for Order/OrderItem upsert ─────
+// design §2.3 + research §7.3 — per-line KDV ayrıştırma:
+//   unitPriceNet         = lineUnitPrice / (1 + vatRate/100)
+//   unitVatAmount        = lineUnitPrice − unitPriceNet
+//   grossCommissionGross = lineGrossAmount × commission / 100
+//   grossCommissionNet   = grossCommissionGross / 1.20  (%20 sabit, design §12.2 #1)
+//   sellerDiscountNet    = lineSellerDiscount / (1 + vatRate/100)
+//
+// Package aggregates per-line VAT-aware (multi-rate orders correct):
+//   saleSubtotalNet = Σ (qty × unitPriceNet)
+//   saleVatTotal    = Σ (qty × unitVatAmount)
+
+export interface MappedOrderLine {
+  barcode: string;
+  quantity: number;
+  /** Decimal strings (boundary kontratı — caller Prisma Decimal'a çevirir). */
+  unitPriceNet: string;
+  unitVatRate: string;
+  unitVatAmount: string;
+  grossCommissionAmountNet: string;
+  grossCommissionVatAmount: string;
+  sellerDiscountNet: string;
+  sellerDiscountVatAmount: string;
+  /** Trendyol commission rate %, set even if commission gross 0. */
+  commissionRate: string;
+}
+
+export interface MappedOrder {
+  /** = shipmentPackageId.toString() — Order.platformOrderId. */
+  platformOrderId: string;
+  /** Üst sipariş orderNumber — Order.platformOrderNumber. */
+  platformOrderNumber: string;
+  orderDate: Date;
+  lastModifiedDate: Date;
+  /** Mapped to DB OrderStatus enum (Created → PENDING, vs.). */
+  status: 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
+  /** Sipariş paket-toplamı agregat'ı (per-line VAT-aware). */
+  saleSubtotalNet: string;
+  saleVatTotal: string;
+  agreedDeliveryDate: Date | null;
+  /** packageHistories[status='Delivered'].createdAt'tan türetilir; teslim olmadıysa null. */
+  actualDeliveryDate: Date | null;
+  fastDelivery: boolean;
+  micro: boolean;
+  lines: MappedOrderLine[];
+}
+
+export interface MappedOrdersPageMeta {
+  totalElements: number;
+  totalPages: number;
+  page: number;
+  size: number;
+}
