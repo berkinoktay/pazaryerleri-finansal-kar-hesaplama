@@ -16,14 +16,14 @@ describe('Data-layer tenant isolation', () => {
     const orgB = await createOrganization({ name: 'Org B', slug: 'org-b' });
 
     const storeA = await createStore(orgA.id);
-    await createOrder(orgA.id, storeA.id, { totalAmount: '150.00' });
+    const createdOrder = await createOrder(orgA.id, storeA.id);
 
     // Sanity: Org A sees its own order
     const ordersForOrgA = await prisma.order.findMany({
       where: { organizationId: orgA.id },
     });
     expect(ordersForOrgA).toHaveLength(1);
-    expect(ordersForOrgA[0]?.totalAmount.toString()).toBe('150');
+    expect(ordersForOrgA[0]?.id).toBe(createdOrder.id);
 
     // CRITICAL: Org B sees nothing — Org A's order does not leak
     const ordersForOrgB = await prisma.order.findMany({

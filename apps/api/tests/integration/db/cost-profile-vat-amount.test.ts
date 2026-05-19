@@ -223,9 +223,6 @@ describe('CostProfile vat_amount (PR-4)', () => {
           platformOrderId: `order-${profile.id.slice(0, 8)}`,
           orderDate: new Date(),
           status: 'DELIVERED',
-          totalAmount: '100',
-          commissionAmount: '20',
-          shippingCost: '10',
         },
       });
       const item = await prisma.orderItem.create({
@@ -286,9 +283,6 @@ describe('CostProfile vat_amount (PR-4)', () => {
           platformOrderId: `order-${profile.id.slice(0, 8)}`,
           orderDate: new Date(),
           status: 'DELIVERED',
-          totalAmount: '100',
-          commissionAmount: '20',
-          shippingCost: '10',
         },
       });
       const item = await prisma.orderItem.create({
@@ -351,9 +345,6 @@ describe('CostProfile vat_amount (PR-4)', () => {
           platformOrderId: `order-${profile.id.slice(0, 8)}`,
           orderDate: new Date(),
           status: 'DELIVERED',
-          totalAmount: '100',
-          commissionAmount: '20',
-          shippingCost: '10',
         },
       });
       const item = await prisma.orderItem.create({

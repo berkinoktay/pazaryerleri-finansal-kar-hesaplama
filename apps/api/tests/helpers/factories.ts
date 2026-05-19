@@ -97,10 +97,10 @@ export async function createStore(organizationId: string, overrides: CreateStore
 }
 
 export interface CreateOrderOverrides {
-  totalAmount?: string;
-  commissionAmount?: string;
-  shippingCost?: string;
   status?: OrderStatus;
+  // PR-5c (2026-05-19): eski Order ücret kolonları (totalAmount, commissionAmount,
+  // shippingCost) silindi. Yeni override'lar PR-6+'da eklenir (saleSubtotalNet,
+  // saleVatTotal, estimatedNetProfit, paymentOrderId, vs.).
 }
 
 export async function createOrder(
@@ -115,9 +115,6 @@ export async function createOrder(
       platformOrderId: `test-order-${randomUUID().slice(0, 8)}`,
       orderDate: new Date(),
       status: overrides.status ?? 'DELIVERED',
-      totalAmount: overrides.totalAmount ?? '100.00',
-      commissionAmount: overrides.commissionAmount ?? '20.00',
-      shippingCost: overrides.shippingCost ?? '10.00',
     },
   });
 }

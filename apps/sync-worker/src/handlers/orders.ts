@@ -160,43 +160,21 @@ async function captureCostSnapshot(
   await tx.orderItemCostSnapshotComponent.createMany({ data: components });
 }
 
-// ─── Profit computation ───────────────────────────────────────────────────────
-
-/**
- * Compute and persist Order.netProfit when all items have snapshots.
- * Write-once: no-op if netProfit is already set or any snapshot is missing.
- *
- * Mirrors apps/api/src/services/profit-calculation.service.ts.
- */
-async function recomputeOrderProfit(orderId: string, tx: Prisma.TransactionClient): Promise<void> {
-  const items = await tx.orderItem.findMany({ where: { orderId } });
-  const order = await tx.order.findUnique({ where: { id: orderId } });
-
-  if (!order || order.netProfit !== null) return;
-
-  const allHaveSnapshot = items.every((i) => i.unitCostSnapshot !== null);
-  if (!allHaveSnapshot) return;
-
-  const totalCost = items.reduce(
-    (acc, i) => acc.add(new Decimal(i.unitCostSnapshot!).mul(i.quantity)),
-    new Decimal(0),
-  );
-
-  const netProfit = new Decimal(order.totalAmount)
-    .sub(order.commissionAmount)
-    .sub(order.shippingCost)
-    .sub(order.platformFee)
-    .sub(totalCost);
-
-  await tx.order.update({ where: { id: orderId }, data: { netProfit } });
-}
+// ─── Profit computation — PR-5c STUB (eski formula silindi) ─────────────
+// Eski recomputeOrderProfit Order'ın silinen ücret kolonları (totalAmount,
+// commissionAmount, shippingCost, platformFee, netProfit) üzerinden çalışıyordu.
+// PR-6 yeni applyEstimateOnOrderCreate + recomputeSettledProfit servisleri yazar
+// (apps/api/src/services/profit/). upsertOrderWithSnapshot bu PR-6 service'lerini
+// çağıracak; şu an dormant.
 
 // ─── Order-item mapping ───────────────────────────────────────────────────────
 
 /**
- * Shape of a raw order line from Trendyol.
- * Defined here to avoid a dependency on the marketplace package until
- * the Trendyol orders API integration is implemented.
+ * Shape of a raw order line from Trendyol (minimal fields).
+ *
+ * **PR-5c**: `unitPrice`/`commissionAmount` eski KDV-dahil convention'ı —
+ * PR-6'da Trendyol mapping yazılırken yeni split convention'a (unitPriceNet +
+ * unitVatRate + grossCommissionAmountNet/VatAmount) revize edilir.
  */
 interface RawOrderLine {
   platformOrderLineId: string;
@@ -208,17 +186,17 @@ interface RawOrderLine {
 }
 
 /**
- * Shape of a raw order from Trendyol (minimal fields for the sync).
+ * Shape of a raw order from Trendyol (PR-5c stub — PR-6 yeniden tanımlayacak).
+ *
+ * Eski Order ücret kolonları (totalAmount, commissionAmount, shippingCost,
+ * platformFee, vatAmount) PR-5c'de silindi. RawOrder placeholder olarak
+ * minimal alanlarla kalıyor; PR-6 sync handler real Trendyol mapping ile
+ * saleSubtotalNet/saleVatTotal'i OrderItem'lardan agregate yapacak.
  */
 interface RawOrder {
   platformOrderId: string;
   orderDate: Date;
   status: OrderStatus;
-  totalAmount: string;
-  commissionAmount: string;
-  shippingCost: string;
-  platformFee: string;
-  vatAmount: string;
   lines: RawOrderLine[];
 }
 
@@ -226,8 +204,13 @@ interface RawOrder {
 
 /**
  * Persist a single order and its items inside one transaction.
- * Calls captureCostSnapshot immediately after each new OrderItem INSERT.
- * Calls recomputeOrderProfit after all items are processed.
+ *
+ * **PR-5c (2026-05-19)** Eski Order ücret kolonları silindi. Bu fonksiyon
+ * şu an yalnız minimal Order + OrderItem upsert yapıyor; PR-6 yeni
+ * convention'a göre saleSubtotalNet/VatTotal hesaplaması + ESTIMATE OrderFee
+ * yazımı + applyEstimateOnOrderCreate çağrısı ekleyecek.
+ *
+ * Bu fonksiyonun caller'ı `processOrdersChunk` şu an dormant (line 319 TODO).
  */
 export async function upsertOrderWithSnapshot(
   storeId: string,
@@ -244,19 +227,9 @@ export async function upsertOrderWithSnapshot(
         platformOrderId: raw.platformOrderId,
         orderDate: raw.orderDate,
         status: raw.status,
-        totalAmount: new Decimal(raw.totalAmount),
-        commissionAmount: new Decimal(raw.commissionAmount),
-        shippingCost: new Decimal(raw.shippingCost),
-        platformFee: new Decimal(raw.platformFee),
-        vatAmount: new Decimal(raw.vatAmount),
       },
       update: {
         status: raw.status,
-        totalAmount: new Decimal(raw.totalAmount),
-        commissionAmount: new Decimal(raw.commissionAmount),
-        shippingCost: new Decimal(raw.shippingCost),
-        platformFee: new Decimal(raw.platformFee),
-        vatAmount: new Decimal(raw.vatAmount),
       },
     });
 
@@ -288,8 +261,8 @@ export async function upsertOrderWithSnapshot(
       await captureCostSnapshot(item.id, tx);
     }
 
-    // 3. Compute order profit (write-once no-op if already set or snapshots missing)
-    await recomputeOrderProfit(order.id, tx);
+    // 3. PR-6: applyEstimateOnOrderCreate + recomputeSettledProfit burada çağrılacak.
+    //    Eski recomputeOrderProfit silindi (PR-5c).
   });
 }
 

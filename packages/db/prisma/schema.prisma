@@ -407,18 +407,18 @@ model ProductImage {
 }
 
 model Order {
-  id               String      @id @default(uuid()) @db.Uuid
-  organizationId   String      @map("organization_id") @db.Uuid
-  storeId          String      @map("store_id") @db.Uuid
-  platformOrderId  String      @map("platform_order_id")
-  orderDate        DateTime    @map("order_date")
-  status           OrderStatus
-  totalAmount      Decimal     @map("total_amount") @db.Decimal(12, 2)
-  commissionAmount Decimal     @map("commission_amount") @db.Decimal(12, 2)
-  shippingCost     Decimal     @map("shipping_cost") @db.Decimal(12, 2)
-  platformFee      Decimal     @default(0) @map("platform_fee") @db.Decimal(12, 2)
-  vatAmount        Decimal     @default(0) @map("vat_amount") @db.Decimal(12, 2)
-  netProfit        Decimal?    @map("net_profit") @db.Decimal(12, 2)
+  id              String      @id @default(uuid()) @db.Uuid
+  organizationId  String      @map("organization_id") @db.Uuid
+  storeId         String      @map("store_id") @db.Uuid
+  platformOrderId String      @map("platform_order_id")
+  orderDate       DateTime    @map("order_date")
+  status          OrderStatus
+  // ESKİ ÜCRET KOLONLARI (totalAmount, commissionAmount, shippingCost, platformFee,
+  // vatAmount, netProfit) PR-5c'de SİLİNDİ (2026-05-19). Yeni convention için:
+  // - Satış: saleSubtotalNet + saleVatTotal (aşağıda PR-5a)
+  // - Komisyon: OrderItem.grossCommissionAmountNet/VatAmount (PR-3)
+  // - Kargo/PSF/Stopaj: OrderFee tablosunda (PR-1)
+  // - Kar: estimatedNetProfit / settledNetProfit (PR-5a, write-once + mutable)
 
   // Trendyol data-input alanları (sync handler PR-6'da set eder, design §3.1).
   // agreedDeliveryDate: getShipmentPackages endpoint direkt field.

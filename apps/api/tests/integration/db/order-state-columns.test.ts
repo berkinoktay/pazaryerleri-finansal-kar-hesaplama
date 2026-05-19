@@ -151,9 +151,6 @@ describe('Order state columns (PR-5a)', () => {
           platformOrderNumber: 'TY-ORDER-12345', // orderNumber
           orderDate: new Date(),
           status: 'DELIVERED',
-          totalAmount: '100',
-          commissionAmount: '20',
-          shippingCost: '10',
         },
       });
       expect(order.platformOrderId).toBe('7260001151141191');
