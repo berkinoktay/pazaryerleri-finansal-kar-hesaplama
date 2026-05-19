@@ -20,6 +20,13 @@ export {
   type MappedProductImage,
   type MappedProductVariant,
   type MappedProductsPageMeta,
+  type TrendyolOrderLine,
+  type TrendyolPackageHistory,
+  type TrendyolShipmentPackage,
+  type TrendyolOrdersResponse,
+  type MappedOrder,
+  type MappedOrderLine,
+  type MappedOrdersPageMeta,
 } from './trendyol/types';
 export {
   mapTrendyolApprovedResponse,
@@ -32,5 +39,13 @@ export {
   fetchApprovedProducts,
   type FetchApprovedProductsOpts,
 } from './trendyol/products';
+export {
+  ORDERS_PAGE_SIZE,
+  fetchShipmentPackages,
+  mapTrendyolShipmentPackage,
+  mapTrendyolOrdersResponse,
+  type FetchShipmentPackagesOpts,
+  type MappedOrdersPage,
+} from './trendyol/orders';
 export { probeTrendyolCredentials } from './trendyol/client';
 export { trendyolFactory } from './trendyol/adapter';
