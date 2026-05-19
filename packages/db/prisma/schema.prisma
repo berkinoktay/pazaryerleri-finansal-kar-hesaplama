@@ -450,19 +450,57 @@ model OrderItem {
   orderId                String                           @map("order_id") @db.Uuid
   productVariantId       String?                          @map("product_variant_id") @db.Uuid
   quantity               Int
+  // Eski (KDV-dahil) kolonlar — PR-5c'de silinir, PR-5b veri taşıma sonrası.
   unitPrice              Decimal                          @map("unit_price") @db.Decimal(12, 2)
   commissionRate         Decimal                          @map("commission_rate") @db.Decimal(5, 2)
   commissionAmount       Decimal                          @map("commission_amount") @db.Decimal(12, 2)
   organizationId         String?                          @map("organization_id") @db.Uuid
   unitCostSnapshot       Decimal?                         @map("unit_cost_snapshot") @db.Decimal(12, 2)
   snapshotCapturedAt     DateTime?                        @map("snapshot_captured_at")
+
+  // ─── PR-3: KDV ayrıştırması + commission split (design §3.2) ────────
+  // unitPriceNet = lineUnitPrice / (1 + unitVatRate/100); unitVatAmount = brüt − net.
+  // Nullable çünkü mevcut satırlar PR-5b veri taşıma'sı bunları doldurana kadar boş.
+  unitPriceNet      Decimal? @map("unit_price_net")    @db.Decimal(12, 2)
+  unitVatRate       Decimal? @map("unit_vat_rate")     @db.Decimal(5, 2)
+  unitVatAmount     Decimal? @map("unit_vat_amount")   @db.Decimal(12, 2)
+
+  // Komisyon — Trendyol her satır için ayrı oran verdiği için OrderItem-level.
+  // Effective commission = gross − refunded (research §3.2 — Discount transaction'ı
+  // ayrı komisyon iadesi getiriyor). DB-level CHECK constraint:
+  // refunded_commission_amount_net <= gross_commission_amount_net (migration.sql'de
+  // manual ALTER TABLE). default(0) backward-compat için (PR-6 sync worker
+  // settlement Sale satırlarını işlerken doğru değerleri yazar).
+  grossCommissionAmountNet    Decimal @default(0) @map("gross_commission_amount_net")    @db.Decimal(12, 2)
+  grossCommissionVatAmount    Decimal @default(0) @map("gross_commission_vat_amount")    @db.Decimal(12, 2)
+  refundedCommissionAmountNet Decimal @default(0) @map("refunded_commission_amount_net") @db.Decimal(12, 2)
+  refundedCommissionVatAmount Decimal @default(0) @map("refunded_commission_vat_amount") @db.Decimal(12, 2)
+
+  // Satıcı kaynaklı indirim (gerçek gelir azaltıcı, Discount transaction'tan).
+  sellerDiscountNet       Decimal @default(0) @map("seller_discount_net")       @db.Decimal(12, 2)
+  sellerDiscountVatAmount Decimal @default(0) @map("seller_discount_vat_amount") @db.Decimal(12, 2)
+
+  // Maliyet anlık kopyası — KDV ayrıştırma (mevcut unitCostSnapshot KDV-dahil).
+  // Tümü nullable: maliyet snapshot eksik durumda kar hesabı null kalır (§12.2 #7).
+  unitCostSnapshotNet       Decimal? @map("unit_cost_snapshot_net")       @db.Decimal(12, 2)
+  unitCostSnapshotVatRate   Decimal? @map("unit_cost_snapshot_vat_rate")  @db.Decimal(5, 2)
+  unitCostSnapshotVatAmount Decimal? @map("unit_cost_snapshot_vat_amount") @db.Decimal(12, 2)
+
+  // Komisyon faturası referansı (design §3.8 iki aşamalı populate):
+  // - serialNumber: Sale satırı T+~5'te direkt yazar (raw "DCF...").
+  // - id: T+~7 Komisyon Faturası otherfinancials kaydı geldiğinde backfill FK.
+  commissionInvoiceSerialNumber String? @map("commission_invoice_serial_number")
+  commissionInvoiceId           String? @map("commission_invoice_id") @db.Uuid
+
   costSnapshotComponents OrderItemCostSnapshotComponent[]
   claimItems             OrderClaimItem[]
 
-  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  order             Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productVariant    ProductVariant?    @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  commissionInvoice CommissionInvoice? @relation(fields: [commissionInvoiceId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, snapshotCapturedAt])
+  @@index([commissionInvoiceId])
   @@map("order_items")
 }
 
@@ -992,7 +1030,9 @@ model CommissionInvoice {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  store      Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // PR-3'te eklendi: OrderItem.commissionInvoiceId FK ile birlikte iki yönlü relation.
+  orderItems OrderItem[]
 
   @@unique([storeId, trendyolSerialNumber])
   @@index([organizationId, periodStart])
