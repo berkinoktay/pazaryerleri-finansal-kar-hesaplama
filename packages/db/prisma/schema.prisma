@@ -431,6 +431,37 @@ model Order {
   fastDelivery Boolean @default(false) @map("fast_delivery")
   micro        Boolean @default(false) @map("micro")
 
+  // ─── PR-5a: Kar V1 state/derived kolonları (design §3.1) ────────────
+  // saleSubtotalNet + saleVatTotal: OrderItem'lardan agregat (sync handler PR-6'da
+  // set eder). PR-5b veri taşıma mevcut Order.totalAmount'tan backfill yapacak.
+  saleSubtotalNet Decimal? @map("sale_subtotal_net") @db.Decimal(12, 2)
+  saleVatTotal    Decimal? @map("sale_vat_total")    @db.Decimal(12, 2)
+
+  // İki aşamalı kar (design §4.1):
+  // - estimatedNetProfit: T+0 applyEstimateOnOrderCreate yazar, write-once (PR-9 trigger).
+  // - settledNetProfit:   T+~5+ recomputeSettledProfit yazar, mutable (iade güncellemeleri).
+  estimatedNetProfit   Decimal?             @map("estimated_net_profit") @db.Decimal(12, 2)
+  settledNetProfit     Decimal?             @map("settled_net_profit")   @db.Decimal(12, 2)
+  // Durum makinesi: NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED (design §6.1).
+  // İlk SETTLEMENT/CARGO_INVOICE OrderFee yazıldığında PARTIALLY_SETTLED, Sale
+  // satırının paymentOrderId'si dolu görüldüğünde FULLY_SETTLED.
+  reconciliationStatus ReconciliationStatus @default(NOT_SETTLED) @map("reconciliation_status")
+
+  // PaymentOrder bağlantısı — mutabakat sinyali (§3.7). Sale.paymentOrderId dolu
+  // görüldüğünde Order'a yansıtılır → handlePaymentOrderEntry tetiklenir →
+  // cycle'daki PSF/Stopaj ESTIMATE'leri SETTLEMENT'a confirm + recomputeSettledProfit.
+  paymentOrderId BigInt?   @map("payment_order_id")
+  paymentDate    DateTime? @map("payment_date")
+
+  // Türetilmiş: actualDeliveryDate <= agreedDeliveryDate → true (Bugün Kargoda PSF).
+  // applyEstimate hesaplaması: inferDeliveredOnTime(order) — null = henüz delivered değil.
+  deliveredOnTime Boolean? @map("delivered_on_time")
+
+  // Trendyol orderNumber (üst sipariş, paket-üstü). platformOrderId = shipmentPackageId
+  // (paket-seviyesi); platformOrderNumber = orderNumber (split shipment'ta N pakete
+  // referans verir). PR-5b veri taşıma mevcut yanlış dolu rows'u doğrultur (§9 PR-5b).
+  platformOrderNumber String? @map("platform_order_number")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -441,7 +472,10 @@ model Order {
 
   @@unique([storeId, platformOrderId])
   @@index([organizationId])
+  @@index([organizationId, reconciliationStatus])
   @@index([orderDate])
+  @@index([platformOrderNumber])
+  @@index([storeId, paymentOrderId])
   @@map("orders")
 }
 
