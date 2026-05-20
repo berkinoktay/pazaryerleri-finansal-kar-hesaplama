@@ -168,40 +168,50 @@ function parseRetryAfterSeconds(header: string | null): number | null {
 // ─── Mapping (Trendyol shipmentPackage → MappedOrder) ───────────────────
 
 /**
- * Trendyol status enum → DB OrderStatus enum.
+ * Trendyol status string → DB OrderStatus enum, or null if unmapped.
  *
- * Trendyol set: Created, Picking, Invoiced, Shipped, Delivered, UnDelivered,
- * Returned, Cancelled.
+ * Trendyol exposes 13 status values across `getShipmentPackages` (Title-Case)
+ * and webhook subscribe targets (UPPERCASE). This mapper is case-insensitive
+ * so the same function serves both paths.
  *
- * Mapping reasoning:
- *   - Created            → PENDING (sipariş yeni geldi, henüz işlenmedi)
- *   - Picking, Invoiced  → PROCESSING (depoda işleniyor, faturalandı)
- *   - Shipped, UnDelivered → SHIPPED (kargoya verildi; UnDelivered teslimat
- *     denemesi başarısız ama kargoda — Returned değil)
- *   - Delivered          → DELIVERED
- *   - Returned           → RETURNED
- *   - Cancelled          → CANCELLED
+ * Mapping reasoning (Order Sync design §2b):
+ *   - Created, Awaiting                            → PENDING
+ *   - Picking, Invoiced, Unpacked, Verified        → PROCESSING
+ *   - Shipped, UnDelivered, AtCollectionPoint      → SHIPPED
+ *     (UnDelivered teslimat denemesi başarısız ama kargoda — Returned değil)
+ *   - Delivered                                    → DELIVERED
+ *   - Cancelled, Unsupplied                        → CANCELLED
+ *     (Unsupplied = satıcı tedarik edemedi, cancel'a en yakın)
+ *   - Returned                                     → RETURNED
  *
- * Unknown / unmapped status → PROCESSING (defensive, sync devam etsin).
+ * Unknown / unmapped status → null. Caller decides:
+ *   - Sync handler: ?? 'PROCESSING' (defensive, sync devam etsin)
+ *   - Webhook handler: Order.status DOKUNULMAZ + log warn (forward-compat)
  */
-function mapTrendyolStatusToEnum(status: string): MappedOrder['status'] {
-  switch (status) {
-    case 'Created':
+export function mapTrendyolStatusToEnum(status: string): MappedOrder['status'] | null {
+  switch (status.toUpperCase()) {
+    case 'CREATED':
+    case 'AWAITING':
       return 'PENDING';
-    case 'Picking':
-    case 'Invoiced':
+    case 'PICKING':
+    case 'INVOICED':
+    case 'UNPACKED':
+    case 'VERIFIED':
       return 'PROCESSING';
-    case 'Shipped':
-    case 'UnDelivered':
+    case 'SHIPPED':
+    case 'UNDELIVERED':
+    case 'AT_COLLECTION_POINT':
+    case 'ATCOLLECTIONPOINT':
       return 'SHIPPED';
-    case 'Delivered':
+    case 'DELIVERED':
       return 'DELIVERED';
-    case 'Returned':
-      return 'RETURNED';
-    case 'Cancelled':
+    case 'CANCELLED':
+    case 'UNSUPPLIED':
       return 'CANCELLED';
+    case 'RETURNED':
+      return 'RETURNED';
     default:
-      return 'PROCESSING';
+      return null;
   }
 }
 
@@ -240,7 +250,10 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
     platformOrderNumber: pkg.orderNumber,
     orderDate: new Date(pkg.orderDate),
     lastModifiedDate: new Date(pkg.lastModifiedDate),
-    status: mapTrendyolStatusToEnum(pkg.status),
+    // Sync path: bilinmeyen status'leri PROCESSING'e düşür (defensive — sync
+    // devam etsin). Webhook caller (apps/api PR-C3b) farklı bir politika
+    // izler: Order.status DOKUNULMAZ + log warn (forward-compat).
+    status: mapTrendyolStatusToEnum(pkg.status) ?? 'PROCESSING',
     saleSubtotalNet: saleSubtotalNet.toFixed(2),
     saleVatTotal: saleVatTotal.toFixed(2),
     agreedDeliveryDate: epochMsToDate(pkg.agreedDeliveryDate),

@@ -23,6 +23,7 @@ import organizationRoutes from './routes/organization.routes';
 import productRoutes from './routes/product.routes';
 import storeRoutes from './routes/store.routes';
 import syncLogRoutes from './routes/sync-log.routes';
+import trendyolWebhookRoutes from './routes/webhooks/trendyol-orders.routes';
 
 /**
  * Builds the Hono application without side effects.
@@ -120,6 +121,14 @@ export function createApp(): OpenAPIHono {
       }),
     );
   }
+
+  // ─── Webhook routes (mounted BEFORE authMiddleware) ────────────────
+  // Marketplace webhook callers are NOT Supabase-authenticated users; each
+  // webhook route runs its own store-scoped verify middleware (Basic Auth
+  // against Store.webhookSecret). Mounted in the public bracket so the
+  // global JWT auth doesn't pre-empt the per-store auth.
+  // Design: docs/plans/2026-05-20-trendyol-webhook-receiver-design.md §4.4
+  app.route('/', trendyolWebhookRoutes);
 
   // ─── Auth boundary ─────────────────────────────────────────────────
   // Everything below here requires a valid Supabase Bearer token.

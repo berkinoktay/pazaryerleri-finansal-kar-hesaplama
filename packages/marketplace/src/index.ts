@@ -44,6 +44,7 @@ export {
   fetchShipmentPackages,
   mapTrendyolShipmentPackage,
   mapTrendyolOrdersResponse,
+  mapTrendyolStatusToEnum,
   type FetchShipmentPackagesOpts,
   type MappedOrdersPage,
 } from './trendyol/orders';

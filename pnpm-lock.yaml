@@ -56,6 +56,9 @@ importers:
       '@pazarsync/marketplace':
         specifier: workspace:*
         version: link:../../packages/marketplace
+      '@pazarsync/order-sync':
+        specifier: workspace:*
+        version: link:../../packages/order-sync
       '@pazarsync/profit':
         specifier: workspace:*
         version: link:../../packages/profit
