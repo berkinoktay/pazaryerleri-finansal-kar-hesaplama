@@ -226,4 +226,66 @@ app.openapi(disconnectStoreRoute, async (c) => {
   return c.body(null, 204);
 });
 
+// PR-C4 — manual webhook secret rotation. Triggers Trendyol PUT update with
+// freshly-generated credentials, persists the new encrypted blob, and bumps
+// webhookActiveAt. First-call (webhookId null) falls through to the register
+// path so it doubles as a manual retry for a failed connect-time register.
+const rotateWebhookSecretRoute = createRoute({
+  method: 'post',
+  path: '/organizations/{orgId}/stores/{storeId}/webhook/rotate-secret',
+  tags: ['Stores'],
+  summary: 'Rotate the Trendyol webhook Basic Auth secret',
+  description:
+    'Generates a new credential pair, calls Trendyol PUT /webhooks/:id (or ' +
+    'POST /webhooks if the store has no subscription yet), and stores the ' +
+    'AES-256-GCM encrypted blob on Store.webhookSecret. The old credentials ' +
+    'are rejected immediately. OWNER/ADMIN only.',
+  security: [{ bearerAuth: [] }],
+  request: { params: storeIdParams },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: z
+            .object({
+              rotatedAt: z.string().datetime().openapi({ example: '2026-05-20T12:00:00.000Z' }),
+            })
+            .openapi('RotateWebhookSecretResponse'),
+        },
+      },
+      description: 'Secret rotated successfully',
+      headers: RateLimitHeaders,
+    },
+    401: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Missing or invalid auth token',
+    },
+    403: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Not OWNER/ADMIN of this organization',
+    },
+    404: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Store not found',
+    },
+    422: {
+      content: { 'application/json': { schema: ProblemDetailsSchema } },
+      description: 'Platform not supported or credentials corrupted',
+    },
+    429: Common429Response,
+  },
+});
+
+app.openapi(rotateWebhookSecretRoute, async (c) => {
+  const userId = c.get('userId');
+  const { orgId, storeId } = c.req.valid('param');
+  // Rotation calls Trendyol on the user's behalf with stored credentials —
+  // OWNER/ADMIN only, same posture as the disconnect path.
+  const organizationId = await ensureOrgMember(userId, orgId, {
+    allowedRoles: ['OWNER', 'ADMIN'],
+  });
+  const result = await storeService.rotateWebhookSecret(organizationId, storeId);
+  return c.json(result, 200);
+});
+
 export default app;

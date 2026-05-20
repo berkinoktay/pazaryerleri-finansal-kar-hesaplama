@@ -1,10 +1,20 @@
 import { prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
-import { getAdapter } from '@pazarsync/marketplace';
-import { encryptCredentials, mapPrismaError } from '@pazarsync/sync-core';
+import { getAdapter, isTrendyolCredentials } from '@pazarsync/marketplace';
+import {
+  decryptCredentials,
+  encryptCredentials,
+  mapPrismaError,
+  syncLog,
+} from '@pazarsync/sync-core';
 
 import { NotFoundError, ValidationError } from '../lib/errors';
 import type { ConnectStoreInput, Store } from '../validators/store.validator';
+import {
+  registerStoreWebhook,
+  rotateStoreWebhookSecret,
+  unregisterStoreWebhook,
+} from './webhooks/trendyol-webhook.service';
 
 /**
  * DB row → public wire shape. Explicit field allowlist — never spread
@@ -102,8 +112,9 @@ export async function connect(organizationId: string, input: ConnectStoreInput):
   // transiently through a failed create path.
   const encrypted = encryptCredentials(input.credentials);
 
+  let row: PrismaStore;
   try {
-    const row = await prisma.store.create({
+    row = await prisma.store.create({
       data: {
         organizationId,
         name: input.name,
@@ -115,26 +126,138 @@ export async function connect(organizationId: string, input: ConnectStoreInput):
         lastConnectedAt: new Date(),
       },
     });
-    return toStoreResponse(row);
   } catch (err) {
     // P2002 on (organizationId, platform, externalAccountId) → ConflictError.
     mapPrismaError(err);
   }
+
+  // ─── Trendyol webhook register — PRODUCTION only, non-blocking ─────────
+  // Design: docs/plans/2026-05-20-trendyol-webhook-receiver-design.md §7.2
+  //
+  // Register failure is intentionally non-blocking: the store IS created and
+  // the user can manually retry via the rotate-secret endpoint. The 6-hour
+  // delta sync (PR-D) covers the polling fallback so missed webhooks recover
+  // automatically. We only attempt for TRENDYOL + PRODUCTION; SANDBOX skips
+  // because Trendyol stage URL rejects the production tunnel/host string and
+  // most stage testing predates the webhook subscription.
+  if (platform === 'TRENDYOL' && row.environment === 'PRODUCTION') {
+    try {
+      const { webhookId, encryptedSecret } = await registerStoreWebhook({
+        storeId: row.id,
+        credentials: input.credentials,
+        env: row.environment,
+      });
+      row = await prisma.store.update({
+        where: { id: row.id },
+        data: { webhookId, webhookSecret: encryptedSecret, webhookActiveAt: new Date() },
+      });
+    } catch (err) {
+      syncLog.warn('store.webhook-register-failed', {
+        storeId: row.id,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+      // Store fields stay null → UI will show "webhook bağlı değil" badge.
+    }
+  }
+
+  return toStoreResponse(row);
 }
 
 export async function disconnect(organizationId: string, storeId: string): Promise<void> {
-  // findFirst + explicit delete (vs. deleteMany returning count) so we
-  // get the 404 non-disclosure branch for cross-tenant / missing cases.
-  const row = await prisma.store.findFirst({
-    where: { id: storeId, organizationId },
-    select: { id: true },
-  });
+  // Full row needed: we may need credentials + webhookId for Trendyol DELETE.
+  const row = await prisma.store.findFirst({ where: { id: storeId, organizationId } });
   if (row === null) {
     throw new NotFoundError('Store', storeId);
   }
+
+  // ─── Trendyol webhook unregister — best-effort, non-blocking ───────────
+  // CASCADE DELETE removes the local rows; this call removes the Trendyol-side
+  // subscription so we don't leak entries against the 15-webhook-per-seller
+  // cap (webhook-model.md §"Webhook Önemli Notlar"). Failure does not block
+  // the delete — orphan Trendyol subscription is recoverable manually.
+  if (row.platform === 'TRENDYOL' && row.webhookId !== null && row.webhookId.length > 0) {
+    try {
+      const decrypted = decryptCredentials(row.credentials as string);
+      if (isTrendyolCredentials(decrypted)) {
+        await unregisterStoreWebhook({
+          credentials: decrypted,
+          env: row.environment,
+          webhookId: row.webhookId,
+        });
+      }
+    } catch (err) {
+      syncLog.warn('store.webhook-unregister-failed', {
+        storeId: row.id,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   try {
     await prisma.store.delete({ where: { id: row.id } });
   } catch (err) {
     mapPrismaError(err);
   }
+}
+
+/**
+ * Manual rotation of the per-store webhook Basic Auth credential.
+ *
+ * Trigger: leak/exposure suspicion, scheduled audit, or one-shot retry after
+ * a failed `connect` register flow (Store.webhookId null → first call
+ * registers; non-null → PUT update).
+ *
+ * Caller: `POST /api/v1/organizations/:orgId/stores/:storeId/webhook/rotate-secret`
+ * gated on OWNER/ADMIN.
+ */
+export async function rotateWebhookSecret(
+  organizationId: string,
+  storeId: string,
+): Promise<{ rotatedAt: string }> {
+  const row = await prisma.store.findFirst({ where: { id: storeId, organizationId } });
+  if (row === null) {
+    throw new NotFoundError('Store', storeId);
+  }
+  if (row.platform !== 'TRENDYOL') {
+    throw new ValidationError([
+      { field: '(platform)', code: 'WEBHOOK_NOT_SUPPORTED_FOR_PLATFORM' },
+    ]);
+  }
+
+  const decrypted = decryptCredentials(row.credentials as string);
+  if (!isTrendyolCredentials(decrypted)) {
+    throw new ValidationError([{ field: '(credentials)', code: 'STORE_CREDENTIALS_CORRUPTED' }]);
+  }
+
+  let encryptedSecret: string;
+  let webhookId: string;
+
+  if (row.webhookId === null || row.webhookId.length === 0) {
+    // First-time activation — same flow as connect() retry.
+    const result = await registerStoreWebhook({
+      storeId: row.id,
+      credentials: decrypted,
+      env: row.environment,
+    });
+    encryptedSecret = result.encryptedSecret;
+    webhookId = result.webhookId;
+  } else {
+    // Existing subscription — PUT update at Trendyol with new credentials.
+    const result = await rotateStoreWebhookSecret({
+      storeId: row.id,
+      credentials: decrypted,
+      env: row.environment,
+      webhookId: row.webhookId,
+    });
+    encryptedSecret = result.encryptedSecret;
+    webhookId = row.webhookId;
+  }
+
+  const now = new Date();
+  await prisma.store.update({
+    where: { id: row.id },
+    data: { webhookId, webhookSecret: encryptedSecret, webhookActiveAt: now },
+  });
+
+  return { rotatedAt: now.toISOString() };
 }
