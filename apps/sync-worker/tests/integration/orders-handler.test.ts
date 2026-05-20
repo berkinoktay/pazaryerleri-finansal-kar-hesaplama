@@ -9,9 +9,8 @@
 //   3. Variant lookup by barcode (or null for unmatched)
 //   4. Cost snapshot captured for variants with attached profiles
 //   5. Idempotency (re-sync same page → no duplicates)
-//
-// applyEstimateOnOrderCreate plug-in: ERTELENDİ (PR-B2 cross-app refactor) —
-// estimatedNetProfit null kalır bu test'te.
+//   6. applyEstimateOnOrderCreate plug-in (PR-B2) — PSF + Stopaj ESTIMATE
+//      OrderFee rows + Order.estimatedNetProfit when cost snapshot present.
 
 import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,6 +27,7 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -36,6 +36,13 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
+// Test order dates fall after FeeDefinition seed `effectiveFrom`
+// (2026-05-18), otherwise `resolveFeeDefinition` rejects T+0 estimate.
+const ORDER_DATE_MS = Date.UTC(2026, 4, 19); // 2026-05-19
+const AGREED_DATE_MS = Date.UTC(2026, 4, 20);
+const DELIVERED_DATE_MS = Date.UTC(2026, 4, 20, 12);
+const LAST_MODIFIED_MS = Date.UTC(2026, 4, 20, 13);
+
 function makeShipmentPackage(
   overrides: Partial<TrendyolShipmentPackage> = {},
 ): TrendyolShipmentPackage {
@@ -43,9 +50,9 @@ function makeShipmentPackage(
     orderNumber: '11101228439',
     shipmentPackageId: 3734026895,
     status: 'Delivered',
-    orderDate: 1715000000000,
-    lastModifiedDate: 1715500000000,
-    agreedDeliveryDate: 1715400000000,
+    orderDate: ORDER_DATE_MS,
+    lastModifiedDate: LAST_MODIFIED_MS,
+    agreedDeliveryDate: AGREED_DATE_MS,
     fastDelivery: false,
     micro: false,
     packageGrossAmount: 120,
@@ -61,7 +68,7 @@ function makeShipmentPackage(
         commission: 10,
       },
     ],
-    packageHistories: [{ status: 'Delivered', createdAt: 1715450000000 }],
+    packageHistories: [{ status: 'Delivered', createdAt: DELIVERED_DATE_MS }],
     ...overrides,
   };
 }
@@ -144,6 +151,9 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // applyEstimateOnOrderCreate (PR-B2) PSF + Stopaj FeeDefinition rows ister.
+    // truncateAll fee_definitions'ı temizlediği için her testten önce yeniden seed.
+    await ensureFeeDefinitions();
   });
 
   afterEach(() => {
@@ -177,12 +187,24 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
     // saleSubtotalNet = 100 (120 / 1.20)
     expect(new Decimal(order.saleSubtotalNet!).toString()).toBe('100');
     expect(new Decimal(order.saleVatTotal!).toString()).toBe('20');
-    expect(order.agreedDeliveryDate?.getTime()).toBe(1715400000000);
-    expect(order.actualDeliveryDate?.getTime()).toBe(1715450000000);
+    expect(order.agreedDeliveryDate?.getTime()).toBe(AGREED_DATE_MS);
+    expect(order.actualDeliveryDate?.getTime()).toBe(DELIVERED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
     expect(order.micro).toBe(false);
     expect(order.reconciliationStatus).toBe('NOT_SETTLED');
-    expect(order.estimatedNetProfit).toBeNull(); // applyEstimate plug-in ertelendi
+    // Cost profile attached değil bu test'te → cost snapshot null →
+    // applyEstimateOnOrderCreate erken döner: PSF + Stopaj OrderFee yazılır
+    // ama estimatedNetProfit null kalır. (Cost-snapshot dolu happy-path için
+    // ayrı test aşağıda: "estimatedNetProfit set when cost snapshot exists".)
+    expect(order.estimatedNetProfit).toBeNull();
+
+    // PR-B2 applyEstimateOnOrderCreate plug-in: PSF + Stopaj ESTIMATE OrderFee.
+    const fees = await prisma.orderFee.findMany({
+      where: { orderId: order.id, source: 'ESTIMATE' },
+      orderBy: { feeType: 'asc' },
+    });
+    expect(fees.map((f) => f.feeType)).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
+    expect(fees.every((f) => f.direction === 'DEBIT')).toBe(true);
 
     const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
     expect(items).toHaveLength(1);
@@ -364,6 +386,9 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // applyEstimateOnOrderCreate (PR-B2) PSF + Stopaj FeeDefinition rows ister.
+    // truncateAll fee_definitions'ı temizlediği için her testten önce yeniden seed.
+    await ensureFeeDefinitions();
   });
 
   it('writes Order with NEW convention + OrderItem KDV-split', async () => {
@@ -373,13 +398,13 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     const mappedOrder = {
       platformOrderId: '99999',
       platformOrderNumber: 'TY-99',
-      orderDate: new Date('2026-05-15T10:00:00Z'),
-      lastModifiedDate: new Date('2026-05-15T11:00:00Z'),
+      orderDate: new Date('2026-05-19T10:00:00Z'),
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'DELIVERED' as const,
       saleSubtotalNet: '100.00',
       saleVatTotal: '20.00',
-      agreedDeliveryDate: new Date('2026-05-16T00:00:00Z'),
-      actualDeliveryDate: new Date('2026-05-15T18:00:00Z'),
+      agreedDeliveryDate: new Date('2026-05-20T00:00:00Z'),
+      actualDeliveryDate: new Date('2026-05-19T18:00:00Z'),
       fastDelivery: true,
       micro: false,
       lines: [

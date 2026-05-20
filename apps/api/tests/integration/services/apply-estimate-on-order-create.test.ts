@@ -2,7 +2,7 @@ import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { applyEstimateOnOrderCreate } from '@/services/profit/estimate-on-order-create';
+import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createOrder, createOrganization, createStore } from '../../helpers/factories';
