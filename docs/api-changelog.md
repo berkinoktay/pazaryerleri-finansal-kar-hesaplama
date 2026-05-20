@@ -14,6 +14,12 @@ section "Versioning" for details.
 ### Added
 
 - `POST /v1/webhooks/orders/:storeId` — Trendyol order status webhook receiver. Per-store endpoint authenticated via store-scoped Basic Auth (Trendyol HMAC desteklemiyor — `Authorization: Basic <base64(user:pass)>`). Idempotent via composite `(storeId, platformOrderId, status, lastModifiedDate)` `WebhookEvent` unique constraint. Mounted **before** the global Bearer JWT auth middleware. Status mapping: 13 Trendyol statuses → 6 PazarSync `OrderStatus` (Order Sync design §2b); unknown statuses log + 200 without touching `Order.status` (forward-compat). `createdBy === 'transfer'` overrides status to `CANCELLED` per `webhook-model.md`. Errors: 401 (auth) / 404 (store / disabled) / 422 (payload) / 5xx → Trendyol retries every 5 min.
+- `POST /v1/organizations/:orgId/stores/:storeId/webhook/rotate-secret` — manual rotation of the Trendyol webhook Basic Auth credential. Generates a fresh credential pair, calls Trendyol PUT `/webhooks/:id` (or POST `/webhooks` for first-time activation when `Store.webhookId` is null), persists the new AES-256-GCM blob, and bumps `Store.webhookActiveAt`. The old credentials are rejected immediately. OWNER/ADMIN only. Use case: leak suspicion, audit, or one-shot retry after a failed connect-time register.
+
+### Changed
+
+- `POST /v1/organizations/:orgId/stores` — successful TRENDYOL + PRODUCTION connects now also register a Trendyol webhook subscription (best-effort, non-blocking on failure). `Store.webhookId/Secret/ActiveAt` are populated on success; failures leave them null so the UI can surface a "webhook bağlı değil" badge and the user can rotate to retry.
+- `DELETE /v1/organizations/:orgId/stores/:storeId` — disconnect now also calls Trendyol DELETE `/webhooks/:id` (best-effort) before the local cascade delete, freeing the 15-webhook-per-seller cap (`webhook-model.md`). Failure does not block the local delete.
 
 ### Added
 
