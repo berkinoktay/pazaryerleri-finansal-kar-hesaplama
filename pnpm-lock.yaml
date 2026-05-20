@@ -120,6 +120,9 @@ importers:
       '@pazarsync/marketplace':
         specifier: workspace:*
         version: link:../../packages/marketplace
+      '@pazarsync/order-sync':
+        specifier: workspace:*
+        version: link:../../packages/order-sync
       '@pazarsync/profit':
         specifier: workspace:*
         version: link:../../packages/profit
@@ -428,6 +431,31 @@ importers:
       typescript:
         specifier: ^6
         version: 6.0.3
+
+  packages/order-sync:
+    dependencies:
+      '@pazarsync/db':
+        specifier: workspace:*
+        version: link:../db
+      '@pazarsync/marketplace':
+        specifier: workspace:*
+        version: link:../marketplace
+      '@pazarsync/profit':
+        specifier: workspace:*
+        version: link:../profit
+      '@pazarsync/sync-core':
+        specifier: workspace:*
+        version: link:../sync-core
+      decimal.js:
+        specifier: ^10.5.0
+        version: 10.6.0
+    devDependencies:
+      typescript:
+        specifier: ^6
+        version: 6.0.3
+      vitest:
+        specifier: ^4
+        version: 4.1.6(@types/node@25.6.0)(@vitest/ui@4.1.6)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@25.6.0)(typescript@6.0.3))(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   packages/profit:
     dependencies:
@@ -8583,7 +8611,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.16
       tinyrainbow: 3.1.0
-      vitest: 4.1.6(@types/node@20.19.39)(@vitest/ui@4.1.6)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@20.19.39)(typescript@6.0.3))(vite@8.0.8(@types/node@20.19.39)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+      vitest: 4.1.6(@types/node@20.19.41)(@vitest/ui@4.1.6)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@20.19.41)(typescript@6.0.3))(vite@8.0.8(@types/node@20.19.41)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   '@vitest/utils@4.1.4':
     dependencies:
