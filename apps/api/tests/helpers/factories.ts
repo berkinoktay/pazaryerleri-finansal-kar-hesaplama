@@ -8,6 +8,7 @@ import type {
   OrderFeeType,
   OrderStatus,
   Platform,
+  Prisma,
   StoreEnvironment,
   StoreStatus,
 } from '@pazarsync/db';
@@ -275,6 +276,37 @@ export async function createCommissionInvoice(
       periodEnd: overrides.periodEnd ?? new Date('2026-05-07'),
       totalNet: overrides.totalNet ?? '1000.00',
       totalVat: overrides.totalVat ?? '200.00',
+    },
+  });
+}
+
+// ─── Trendyol webhook (PR-C1) ──────────────────────────────────────────
+
+export async function createWebhookEvent(
+  organizationId: string,
+  storeId: string,
+  overrides: {
+    platform?: Platform;
+    platformOrderId?: string;
+    platformStatus?: string;
+    platformLastModifiedDate?: Date;
+    processedAt?: Date | null;
+    processingError?: string | null;
+    rawPayload?: Record<string, unknown>;
+  } = {},
+) {
+  return prisma.webhookEvent.create({
+    data: {
+      organizationId,
+      storeId,
+      platform: overrides.platform ?? 'TRENDYOL',
+      platformOrderId: overrides.platformOrderId ?? `pkg-${randomUUID().slice(0, 10)}`,
+      platformStatus: overrides.platformStatus ?? 'Delivered',
+      platformLastModifiedDate:
+        overrides.platformLastModifiedDate ?? new Date('2026-05-20T10:00:00Z'),
+      processedAt: overrides.processedAt ?? null,
+      processingError: overrides.processingError ?? null,
+      rawPayload: (overrides.rawPayload ?? { shipmentPackageId: 12345 }) as Prisma.JsonObject,
     },
   });
 }
