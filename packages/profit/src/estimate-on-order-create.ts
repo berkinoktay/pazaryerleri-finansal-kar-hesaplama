@@ -16,10 +16,15 @@
  * `estimatedNetProfit` null bırakılır. Cost profile sonradan eklenirse caller
  * fonksiyonu tekrar çağırır (re-entry idempotent).
  *
- * **PR-6 / Option D context:** Bu fonksiyonun production caller'ı YOK. Trendyol
- * Order Sync epic'inde `apps/sync-worker/src/handlers/orders.ts:319` TODO'su
- * doldurulduğunda `upsertOrderWithSnapshot` bu servisi çağıracak. PR-6'da
- * standalone testable (mock data ile integration test).
+ * **Caller'lar:**
+ *   - `apps/sync-worker/src/handlers/orders.ts:upsertOrderWithSnapshot` —
+ *     T+0 Trendyol order sync sırasında write-once çağrılır (Order Sync PR-B2).
+ *   - Standalone integration test'ler (`apps/api/tests/integration/services/
+ *     apply-estimate-on-order-create.test.ts`) — mock data ile doğrulama.
+ *
+ * Modül `apps/api/src/services/profit/`'ten `packages/profit/`'e promote edildi
+ * (PR-B2): apps/api ve apps/sync-worker iki ayrı consumer; promotion paylaşımı
+ * tek `@pazarsync/profit` paketine indirir, code-duplication önlenir.
  */
 
 import { Decimal } from 'decimal.js';

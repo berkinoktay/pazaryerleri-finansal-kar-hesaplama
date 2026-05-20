@@ -10,19 +10,15 @@
  *      b. For each MappedOrderLine:
  *         - INSERT OrderItem if not already present (variant barcode lookup)
  *         - captureCostSnapshot(orderItemId, tx)
- *      c. (PR-B2/cross-app refactor sonra) applyEstimateOnOrderCreate(order.id, tx)
+ *      c. applyEstimateOnOrderCreate(order.id, tx) — T+0 write-once kar tahmini
  *   5. Advance cursor (page+1) within same window; signal done at end
  *
  * Idempotency: re-syncing the same order is safe.
  *   - UPSERT on Order is idempotent.
  *   - INSERT on OrderItem skips existing rows (checked via findFirst on barcode).
- *   - captureCostSnapshot throws SnapshotAlreadyCapturedError if snapshot
- *     is already set; we catch that error and continue.
- *
- * **PR-B (Order Sync epic):** Trendyol fetch + KDV-split upsert. applyEstimate
- * plug-in cross-app dependency nedeniyle ertelendi — apps/api/src/services/profit/
- * sync-worker'dan erişilemiyor. Sonraki PR: packages/profit shared package
- * promotion + applyEstimateOnOrderCreate çağrı entegrasyonu.
+ *   - captureCostSnapshot has an internal write-once guard.
+ *   - applyEstimateOnOrderCreate has a write-once guard
+ *     (`order.estimatedNetProfit !== null` → early return).
  */
 
 import { Decimal } from 'decimal.js';
@@ -35,6 +31,7 @@ import {
   type MappedOrder,
   type TrendyolCredentials,
 } from '@pazarsync/marketplace';
+import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
 import {
   decryptCredentials,
   parseOrdersCursor,
@@ -194,15 +191,16 @@ function decryptStoreCredentials(store: Store): TrendyolCredentials {
  *   - OrderItem: unitPriceNet/VatRate/VatAmount + grossCommissionAmountNet/Vat
  *     + sellerDiscountNet/VatAmount. Variant lookup by barcode (storeId scoped).
  *   - Cost snapshot capture: write-once per item (existing service mirror).
- *   - applyEstimateOnOrderCreate plug-in: ERTELENDİ — cross-app dep'i nedeniyle
- *     packages/profit shared package promotion sonrası entegre edilir.
- *     Sync sırasında estimatedNetProfit null kalır; ileride backfill veya
- *     standalone batch service çağrısı düzeltir.
+ *   - applyEstimateOnOrderCreate (`@pazarsync/profit`): aynı tx içinde son adım
+ *     olarak çağrılır — PSF + Stopaj ESTIMATE OrderFee rows + Order.estimatedNetProfit
+ *     write-once. Cost snapshot eksikse profit null kalır; cost profile sonradan
+ *     eklenirse recomputation caller'ı (PR-7+) düzeltir.
  *
  * Idempotent:
  *   - Order UPSERT on (storeId, platformOrderId)
  *   - OrderItem INSERT skip-if-exists on (orderId, productVariantId)
- *   - Cost snapshot captureCostSnapshot iç guard'la write-once
+ *   - captureCostSnapshot iç guard ile write-once
+ *   - applyEstimateOnOrderCreate iç guard ile write-once (estimatedNetProfit set'liyse no-op)
  */
 export async function upsertOrderWithSnapshot(
   storeId: string,
@@ -297,11 +295,12 @@ export async function upsertOrderWithSnapshot(
       await captureCostSnapshot(item.id, tx);
     }
 
-    // 3. TODO (PR-B2): applyEstimateOnOrderCreate(upserted.id, tx) çağrısı.
-    //    Cross-app dep nedeniyle ertelendi — apps/api/src/services/profit/
-    //    packages/profit'e promote edildiğinde aktive edilir. Şu an Order.
-    //    estimatedNetProfit null kalır; UI "tahmini kar hesaplanıyor" badge
-    //    gösterebilir (V1 frontend).
+    // 3. applyEstimateOnOrderCreate — T+0 write-once tahmini kar.
+    //    Aynı tx içinde PSF + Stopaj ESTIMATE OrderFee yazar +
+    //    Order.estimatedNetProfit set'ler. Cost snapshot eksikse profit null
+    //    kalır (re-entry idempotent — cost profile sonradan eklenirse caller
+    //    yeniden çağırır).
+    await applyEstimateOnOrderCreate(upserted.id, tx);
   });
 }
 
