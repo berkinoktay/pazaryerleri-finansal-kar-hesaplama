@@ -34,6 +34,7 @@ describe('validateRequiredEnv', () => {
     vi.stubEnv('SUPABASE_SECRET_KEY', 'sb_secret_fake');
     vi.stubEnv('TRENDYOL_PROD_BASE_URL', 'https://apigw.trendyol.com');
     vi.stubEnv('TRENDYOL_SANDBOX_BASE_URL', 'https://stageapigw.trendyol.com');
+    vi.stubEnv('PUBLIC_API_BASE_URL', 'https://api.pazarsync.com');
   });
 
   afterEach(() => {
@@ -72,5 +73,10 @@ describe('validateRequiredEnv', () => {
   it('throws and names TRENDYOL_SANDBOX_BASE_URL when it is missing', () => {
     vi.stubEnv('TRENDYOL_SANDBOX_BASE_URL', '');
     expect(() => validateRequiredEnv()).toThrow(/TRENDYOL_SANDBOX_BASE_URL/);
+  });
+
+  it('throws and names PUBLIC_API_BASE_URL when it is missing', () => {
+    vi.stubEnv('PUBLIC_API_BASE_URL', '');
+    expect(() => validateRequiredEnv()).toThrow(/PUBLIC_API_BASE_URL/);
   });
 });

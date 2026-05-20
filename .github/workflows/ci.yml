@@ -193,6 +193,10 @@ jobs:
           TRENDYOL_PROD_BASE_URL: https://apigw.trendyol.com
           TRENDYOL_SANDBOX_BASE_URL: https://stageapigw.trendyol.com
           TRENDYOL_INTEGRATOR_UA_SUFFIX: SelfIntegration
+          # PR-C2 webhook callback URL builder — integration tests mock fetch,
+          # so the value never reaches Trendyol. Production sets the real HTTPS
+          # tunnel/host. Empty would fail validateRequiredEnv at boot.
+          PUBLIC_API_BASE_URL: https://ci.pazarsync.test
           ALLOW_SANDBOX_CONNECTIONS: 'true'
           NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS: 'true'
           # Fake 32-byte hex for tests — store-create calls encryptCredentials
