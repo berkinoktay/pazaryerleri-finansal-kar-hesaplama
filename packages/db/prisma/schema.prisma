@@ -220,11 +220,12 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members      OrganizationMember[]
-  stores       Store[]
-  expenses     Expense[]
-  syncLogs     SyncLog[]
-  costProfiles CostProfile[]
+  members       OrganizationMember[]
+  stores        Store[]
+  expenses      Expense[]
+  syncLogs      SyncLog[]
+  costProfiles  CostProfile[]
+  webhookEvents WebhookEvent[]
 
   @@map("organizations")
 }
@@ -260,6 +261,17 @@ model Store {
   lastSyncAt               DateTime?            @map("last_sync_at")
   shippingTariffSource     ShippingTariffSource @default(TRENDYOL_CONTRACT) @map("shipping_tariff_source")
   defaultShippingCarrierId String?              @map("default_shipping_carrier_id") @db.Uuid
+  // ─── PR-C1: Trendyol webhook subscription ───────────────────────────
+  // webhookId: Trendyol'un atadığı subscription UUID (POST /webhooks response.id).
+  //   PUT/DELETE call'larında kullanılır. Register fail'de null kalır.
+  // webhookSecret: AES-256-GCM ciphertext (base64) of JSON.stringify({username, password}).
+  //   Random generated at register; decrypt only inside verify middleware.
+  // webhookActiveAt: son register/rotate timestamp. UI badge "webhook bağlı" göstergesi.
+  // Üçü de nullable: mevcut store'lar geriye dönük register zorunda değil; failed
+  // register transient olabilir; non-TRENDYOL platformlarda da null kalır.
+  webhookId                String?              @map("webhook_id")
+  webhookSecret            String?              @map("webhook_secret")
+  webhookActiveAt          DateTime?            @map("webhook_active_at")
   createdAt                DateTime             @default(now()) @map("created_at")
   updatedAt                DateTime             @updatedAt @map("updated_at")
 
@@ -269,6 +281,7 @@ model Store {
   orders                 Order[]
   settlements            Settlement[]
   syncLogs               SyncLog[]
+  webhookEvents          WebhookEvent[]
   defaultShippingCarrier ShippingCarrier?    @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
   ownShippingTariffs     OwnShippingTariff[]
   orgPeriodFees          OrgPeriodFee[]
@@ -428,20 +441,20 @@ model Order {
   actualDeliveryDate DateTime? @map("actual_delivery_date")
   // fastDelivery: getShipmentPackages direkt boolean (Bugün Kargoda indikatörü).
   // micro: getShipmentPackages direkt boolean (mikro ihracat) — PSF muafiyeti.
-  fastDelivery Boolean @default(false) @map("fast_delivery")
-  micro        Boolean @default(false) @map("micro")
+  fastDelivery       Boolean   @default(false) @map("fast_delivery")
+  micro              Boolean   @default(false) @map("micro")
 
   // ─── PR-5a: Kar V1 state/derived kolonları (design §3.1) ────────────
   // saleSubtotalNet + saleVatTotal: OrderItem'lardan agregat (sync handler PR-6'da
   // set eder). PR-5b veri taşıma mevcut Order.totalAmount'tan backfill yapacak.
   saleSubtotalNet Decimal? @map("sale_subtotal_net") @db.Decimal(12, 2)
-  saleVatTotal    Decimal? @map("sale_vat_total")    @db.Decimal(12, 2)
+  saleVatTotal    Decimal? @map("sale_vat_total") @db.Decimal(12, 2)
 
   // İki aşamalı kar (design §4.1):
   // - estimatedNetProfit: T+0 applyEstimateOnOrderCreate yazar, write-once (PR-9 trigger).
   // - settledNetProfit:   T+~5+ recomputeSettledProfit yazar, mutable (iade güncellemeleri).
   estimatedNetProfit   Decimal?             @map("estimated_net_profit") @db.Decimal(12, 2)
-  settledNetProfit     Decimal?             @map("settled_net_profit")   @db.Decimal(12, 2)
+  settledNetProfit     Decimal?             @map("settled_net_profit") @db.Decimal(12, 2)
   // Durum makinesi: NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED (design §6.1).
   // İlk SETTLEMENT/CARGO_INVOICE OrderFee yazıldığında PARTIALLY_SETTLED, Sale
   // satırının paymentOrderId'si dolu görüldüğünde FULLY_SETTLED.
@@ -480,24 +493,24 @@ model Order {
 }
 
 model OrderItem {
-  id                     String                           @id @default(uuid()) @db.Uuid
-  orderId                String                           @map("order_id") @db.Uuid
-  productVariantId       String?                          @map("product_variant_id") @db.Uuid
-  quantity               Int
+  id                 String    @id @default(uuid()) @db.Uuid
+  orderId            String    @map("order_id") @db.Uuid
+  productVariantId   String?   @map("product_variant_id") @db.Uuid
+  quantity           Int
   // Eski (KDV-dahil) kolonlar — PR-5c'de silinir, PR-5b veri taşıma sonrası.
-  unitPrice              Decimal                          @map("unit_price") @db.Decimal(12, 2)
-  commissionRate         Decimal                          @map("commission_rate") @db.Decimal(5, 2)
-  commissionAmount       Decimal                          @map("commission_amount") @db.Decimal(12, 2)
-  organizationId         String?                          @map("organization_id") @db.Uuid
-  unitCostSnapshot       Decimal?                         @map("unit_cost_snapshot") @db.Decimal(12, 2)
-  snapshotCapturedAt     DateTime?                        @map("snapshot_captured_at")
+  unitPrice          Decimal   @map("unit_price") @db.Decimal(12, 2)
+  commissionRate     Decimal   @map("commission_rate") @db.Decimal(5, 2)
+  commissionAmount   Decimal   @map("commission_amount") @db.Decimal(12, 2)
+  organizationId     String?   @map("organization_id") @db.Uuid
+  unitCostSnapshot   Decimal?  @map("unit_cost_snapshot") @db.Decimal(12, 2)
+  snapshotCapturedAt DateTime? @map("snapshot_captured_at")
 
   // ─── PR-3: KDV ayrıştırması + commission split (design §3.2) ────────
   // unitPriceNet = lineUnitPrice / (1 + unitVatRate/100); unitVatAmount = brüt − net.
   // Nullable çünkü mevcut satırlar PR-5b veri taşıma'sı bunları doldurana kadar boş.
-  unitPriceNet      Decimal? @map("unit_price_net")    @db.Decimal(12, 2)
-  unitVatRate       Decimal? @map("unit_vat_rate")     @db.Decimal(5, 2)
-  unitVatAmount     Decimal? @map("unit_vat_amount")   @db.Decimal(12, 2)
+  unitPriceNet  Decimal? @map("unit_price_net") @db.Decimal(12, 2)
+  unitVatRate   Decimal? @map("unit_vat_rate") @db.Decimal(5, 2)
+  unitVatAmount Decimal? @map("unit_vat_amount") @db.Decimal(12, 2)
 
   // Komisyon — Trendyol her satır için ayrı oran verdiği için OrderItem-level.
   // Effective commission = gross − refunded (research §3.2 — Discount transaction'ı
@@ -505,19 +518,19 @@ model OrderItem {
   // refunded_commission_amount_net <= gross_commission_amount_net (migration.sql'de
   // manual ALTER TABLE). default(0) backward-compat için (PR-6 sync worker
   // settlement Sale satırlarını işlerken doğru değerleri yazar).
-  grossCommissionAmountNet    Decimal @default(0) @map("gross_commission_amount_net")    @db.Decimal(12, 2)
-  grossCommissionVatAmount    Decimal @default(0) @map("gross_commission_vat_amount")    @db.Decimal(12, 2)
+  grossCommissionAmountNet    Decimal @default(0) @map("gross_commission_amount_net") @db.Decimal(12, 2)
+  grossCommissionVatAmount    Decimal @default(0) @map("gross_commission_vat_amount") @db.Decimal(12, 2)
   refundedCommissionAmountNet Decimal @default(0) @map("refunded_commission_amount_net") @db.Decimal(12, 2)
   refundedCommissionVatAmount Decimal @default(0) @map("refunded_commission_vat_amount") @db.Decimal(12, 2)
 
   // Satıcı kaynaklı indirim (gerçek gelir azaltıcı, Discount transaction'tan).
-  sellerDiscountNet       Decimal @default(0) @map("seller_discount_net")       @db.Decimal(12, 2)
+  sellerDiscountNet       Decimal @default(0) @map("seller_discount_net") @db.Decimal(12, 2)
   sellerDiscountVatAmount Decimal @default(0) @map("seller_discount_vat_amount") @db.Decimal(12, 2)
 
   // Maliyet anlık kopyası — KDV ayrıştırma (mevcut unitCostSnapshot KDV-dahil).
   // Tümü nullable: maliyet snapshot eksik durumda kar hesabı null kalır (§12.2 #7).
-  unitCostSnapshotNet       Decimal? @map("unit_cost_snapshot_net")       @db.Decimal(12, 2)
-  unitCostSnapshotVatRate   Decimal? @map("unit_cost_snapshot_vat_rate")  @db.Decimal(5, 2)
+  unitCostSnapshotNet       Decimal? @map("unit_cost_snapshot_net") @db.Decimal(12, 2)
+  unitCostSnapshotVatRate   Decimal? @map("unit_cost_snapshot_vat_rate") @db.Decimal(5, 2)
   unitCostSnapshotVatAmount Decimal? @map("unit_cost_snapshot_vat_amount") @db.Decimal(12, 2)
 
   // Komisyon faturası referansı (design §3.8 iki aşamalı populate):
@@ -909,20 +922,20 @@ model OwnShippingTariff {
 // Seed PR-2'de Trendyol için 4 satır: PSF 10.99 / PSF_FAST 6.99 / Stopaj %1 /
 // Return shipping. effectiveFrom: 2026-05-18 (Trendyol PSF doc okuma tarihi).
 model FeeDefinition {
-  id              String   @id @default(uuid()) @db.Uuid
-  platform        Platform
-  feeType         OrderFeeType @map("fee_type")
-  displayName     String   @map("display_name")
+  id          String       @id @default(uuid()) @db.Uuid
+  platform    Platform
+  feeType     OrderFeeType @map("fee_type")
+  displayName String       @map("display_name")
 
   calculationKind FeeCalculationKind @map("calculation_kind")
-  fixedAmountNet  Decimal? @map("fixed_amount_net") @db.Decimal(12, 2)
-  rateOfSale      Decimal? @map("rate_of_sale")     @db.Decimal(7, 4)
+  fixedAmountNet  Decimal?           @map("fixed_amount_net") @db.Decimal(12, 2)
+  rateOfSale      Decimal?           @map("rate_of_sale") @db.Decimal(7, 4)
 
-  defaultVatRate  Decimal  @map("default_vat_rate") @db.Decimal(5, 2)
+  defaultVatRate Decimal @map("default_vat_rate") @db.Decimal(5, 2)
 
-  effectiveFrom   DateTime  @map("effective_from")
-  effectiveTo     DateTime? @map("effective_to")
-  isRequired      Boolean   @default(false) @map("is_required")
+  effectiveFrom DateTime  @map("effective_from")
+  effectiveTo   DateTime? @map("effective_to")
+  isRequired    Boolean   @default(false) @map("is_required")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -940,17 +953,17 @@ model FeeDefinition {
 // satırları PaymentOrder geldiğinde SETTLEMENT'a confirm edilir (§3.7 — confirmedAt
 // + confirmedBy bunu izler). organizationId denormalize: insert sırasında stamp.
 model OrderFee {
-  id              String   @id @default(uuid()) @db.Uuid
-  orderId         String   @map("order_id") @db.Uuid
-  organizationId  String   @map("organization_id") @db.Uuid
-  feeDefinitionId String?  @map("fee_definition_id") @db.Uuid
+  id              String  @id @default(uuid()) @db.Uuid
+  orderId         String  @map("order_id") @db.Uuid
+  organizationId  String  @map("organization_id") @db.Uuid
+  feeDefinitionId String? @map("fee_definition_id") @db.Uuid
 
   feeType   OrderFeeType      @map("fee_type")
   source    OrderFeeSource
   direction OrderFeeDirection
 
   amountNet Decimal @map("amount_net") @db.Decimal(12, 2)
-  vatRate   Decimal @map("vat_rate")   @db.Decimal(5, 2)
+  vatRate   Decimal @map("vat_rate") @db.Decimal(5, 2)
   vatAmount Decimal @map("vat_amount") @db.Decimal(12, 2)
 
   displayName String? @map("display_name")
@@ -1041,7 +1054,7 @@ model OrgPeriodFee {
   source  OrderFeeSource
 
   amountNet Decimal @map("amount_net") @db.Decimal(12, 2)
-  vatRate   Decimal @map("vat_rate")   @db.Decimal(5, 2)
+  vatRate   Decimal @map("vat_rate") @db.Decimal(5, 2)
   vatAmount Decimal @map("vat_amount") @db.Decimal(12, 2)
 
   invoiceSerialNumber String? @map("invoice_serial_number")
@@ -1087,4 +1100,42 @@ model CommissionInvoice {
   @@unique([storeId, trendyolSerialNumber])
   @@index([organizationId, periodStart])
   @@map("commission_invoices")
+}
+
+// PR-C1: Trendyol webhook event idempotency log + raw audit trail.
+//
+// Trendyol payload'da explicit event ID yok (webhook-model.md). Idempotency key
+// = composite (storeId, platformOrderId, platformStatus, platformLastModifiedDate).
+// Re-delivery (5dk Trendyol retry) aynı timestamp ile gelir; INSERT P2002 →
+// 200 OK return, no downstream call.
+//
+// `rawPayload` jsonb full audit trail — Trendyol payload yapısı değişirse veya
+// edge case debugging gerekirse log'tan inceleyebiliriz. 90 gün retention
+// (env-configurable WEBHOOK_EVENT_RETENTION_DAYS) — PR-F cleanup cron.
+//
+// RLS: org-scoped SELECT (admin/owner debugging için). INSERT/UPDATE/DELETE
+// yalnız service role (webhook handler postgres role kullanır).
+model WebhookEvent {
+  id                       String    @id @default(uuid()) @db.Uuid
+  organizationId           String    @map("organization_id") @db.Uuid
+  storeId                  String    @map("store_id") @db.Uuid
+  platform                 Platform
+  // Composite idempotency components
+  platformOrderId          String    @map("platform_order_id")
+  platformStatus           String    @map("platform_status") // raw Trendyol status (mapping öncesi)
+  platformLastModifiedDate DateTime  @map("platform_last_modified_date")
+  // Processing meta
+  receivedAt               DateTime  @default(now()) @map("received_at")
+  processedAt              DateTime? @map("processed_at")
+  processingError          String?   @map("processing_error")
+  // Full payload (jsonb) — debugging + forward-compat
+  rawPayload               Json      @map("raw_payload")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, platformOrderId, platformStatus, platformLastModifiedDate], name: "webhook_event_idempotency_key")
+  @@index([organizationId, receivedAt(sort: Desc)])
+  @@index([storeId, receivedAt(sort: Desc)])
+  @@map("webhook_events")
 }

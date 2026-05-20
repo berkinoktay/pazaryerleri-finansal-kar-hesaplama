@@ -30,6 +30,8 @@ const TENANT_TABLES = [
   'order_claim_items',
   'org_period_fees',
   'commission_invoices',
+  // Trendyol webhook receiver (PR-C1)
+  'webhook_events',
 ] as const;
 
 describe('RLS — coverage', () => {

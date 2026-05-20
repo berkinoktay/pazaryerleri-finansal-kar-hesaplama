@@ -379,3 +379,16 @@ DROP POLICY IF EXISTS fee_definitions_authenticated_read ON fee_definitions;
 CREATE POLICY fee_definitions_authenticated_read ON fee_definitions
   FOR SELECT TO authenticated
   USING (true);
+
+-- ─── webhook_events — org-scoped read (PR-C1) ─────────────────────────────
+-- Trendyol webhook idempotency log + raw audit trail. Composite unique key
+-- (storeId, platformOrderId, platformStatus, platformLastModifiedDate) →
+-- re-delivery'de INSERT P2002 → handler 200 OK döner. SELECT yalnız
+-- organization member'lara — debugging/admin için. INSERT/UPDATE/DELETE
+-- yalnız service role (webhook handler postgres role kullanır); authenticated
+-- mutation policy YOK → default-deny.
+ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS webhook_events_org_member_read ON webhook_events;
+CREATE POLICY webhook_events_org_member_read ON webhook_events
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
