@@ -49,3 +49,14 @@ export {
 } from './trendyol/orders';
 export { probeTrendyolCredentials } from './trendyol/client';
 export { trendyolFactory } from './trendyol/adapter';
+export {
+  TRENDYOL_SUBSCRIBED_STATUSES,
+  WebhookCallbackUrlError,
+  registerTrendyolWebhook,
+  unregisterTrendyolWebhook,
+  updateTrendyolWebhook,
+  type RegisterTrendyolWebhookOpts,
+  type TrendyolSubscribedStatus,
+  type UnregisterTrendyolWebhookOpts,
+  type UpdateTrendyolWebhookOpts,
+} from './trendyol/webhooks';
