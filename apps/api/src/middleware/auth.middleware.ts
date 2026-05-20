@@ -19,9 +19,30 @@ import { getSupabaseAdminClient } from '../lib/supabase-admin-client';
  * maps it to a 401 ProblemDetails response.
  */
 
+/**
+ * Path prefixes that bypass the global Supabase Bearer JWT auth. Each
+ * entry MUST run its own per-route auth (e.g. marketplace webhook receivers
+ * authenticate via store-scoped Basic Auth in
+ * `verify-trendyol-webhook.middleware.ts`).
+ *
+ * Keep this list short and explicit — every entry weakens the global
+ * default-secure posture.
+ */
+const PUBLIC_PATH_PREFIXES = [
+  '/v1/webhooks/', // Trendyol (and future marketplace) order webhooks
+];
+
 export const authMiddleware = createMiddleware<{
   Variables: { userId: string; email: string | undefined };
 }>(async (c, next) => {
+  const path = c.req.path;
+  for (const prefix of PUBLIC_PATH_PREFIXES) {
+    if (path.startsWith(prefix)) {
+      await next();
+      return;
+    }
+  }
+
   const header = c.req.header('Authorization');
   if (header === undefined) {
     throw new UnauthorizedError('Missing Authorization header');

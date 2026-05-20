@@ -24,6 +24,7 @@
     "@hono/zod-validator": "^0.8.0",
     "@pazarsync/db": "workspace:*",
     "@pazarsync/marketplace": "workspace:*",
+    "@pazarsync/order-sync": "workspace:*",
     "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",

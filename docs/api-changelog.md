@@ -13,6 +13,10 @@ section "Versioning" for details.
 
 ### Added
 
+- `POST /v1/webhooks/orders/:storeId` — Trendyol order status webhook receiver. Per-store endpoint authenticated via store-scoped Basic Auth (Trendyol HMAC desteklemiyor — `Authorization: Basic <base64(user:pass)>`). Idempotent via composite `(storeId, platformOrderId, status, lastModifiedDate)` `WebhookEvent` unique constraint. Mounted **before** the global Bearer JWT auth middleware. Status mapping: 13 Trendyol statuses → 6 PazarSync `OrderStatus` (Order Sync design §2b); unknown statuses log + 200 without touching `Order.status` (forward-compat). `createdBy === 'transfer'` overrides status to `CANCELLED` per `webhook-model.md`. Errors: 401 (auth) / 404 (store / disabled) / 422 (payload) / 5xx → Trendyol retries every 5 min.
+
+### Added
+
 - ADD: `GET /v1/organizations/:orgId/shipping-carriers` — list shipping carriers
 - ADD: `GET /v1/organizations/:orgId/shipping-carriers/:carrierId/tariffs` — get a carrier's desi-bazlı (NORMAL) tariff plus its Barem desteği tier table when supported. Org-scoped (membership-gated) but the tariff data is platform-wide reference. Returns 404 when the carrier id is unknown or inactive.
 - ADD: `GET /v1/organizations/:orgId/stores/:storeId/shipping-config` — get store's shipping config

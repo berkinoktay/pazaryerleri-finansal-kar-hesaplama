@@ -44,48 +44,6 @@
           "status"
         ]
       },
-      "MeResponse": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "example": "00000000-0000-0000-0000-000000000000"
-          },
-          "email": {
-            "type": "string",
-            "format": "email",
-            "example": "seller@example.com"
-          },
-          "timezone": {
-            "type": "string",
-            "example": "Europe/Istanbul"
-          },
-          "preferredLanguage": {
-            "type": "string",
-            "example": "tr"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "example": "2026-04-20T10:30:00Z"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time",
-            "example": "2026-04-20T10:30:00Z"
-          }
-        },
-        "required": [
-          "id",
-          "email",
-          "timezone",
-          "preferredLanguage",
-          "createdAt",
-          "updatedAt"
-        ],
-        "description": "The authenticated user’s own profile. Returns timezone + preferred language so the frontend can format timestamps in the viewer’s locale and preselect UI language. Never 404s for an authenticated user — the profile row is auto-created by trigger on signup, and GET /v1/me upserts it defensively if the trigger missed."
-      },
       "ProblemDetails": {
         "type": "object",
         "properties": {
@@ -166,6 +124,48 @@
         "required": [
           "requestId"
         ]
+      },
+      "MeResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "00000000-0000-0000-0000-000000000000"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "seller@example.com"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Europe/Istanbul"
+          },
+          "preferredLanguage": {
+            "type": "string",
+            "example": "tr"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-20T10:30:00Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-20T10:30:00Z"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "timezone",
+          "preferredLanguage",
+          "createdAt",
+          "updatedAt"
+        ],
+        "description": "The authenticated user’s own profile. Returns timezone + preferred language so the frontend can format timestamps in the viewer’s locale and preselect UI language. Never 404s for an authenticated user — the profile row is auto-created by trigger on signup, and GET /v1/me upserts it defensively if the trigger missed."
       },
       "OrganizationListResponse": {
         "type": "object",
@@ -2374,6 +2374,111 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/orders/{storeId}": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Receive a Trendyol order status webhook",
+        "description": "Per-store webhook callback. Authenticated via store-scoped Basic Auth (`Authorization: Basic <base64(user:pass)>`); HMAC not supported by Trendyol. Idempotent: composite key (storeId, platformOrderId, status, lastModifiedDate) catches re-deliveries within the 5-minute retry window. Mounted BEFORE the global Bearer JWT auth middleware.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shipmentPackageId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "orderNumber": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "orderDate": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "lastModifiedDate": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "supplierId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "lines": {
+                    "type": "array",
+                    "items": {},
+                    "minItems": 0
+                  }
+                },
+                "required": [
+                  "shipmentPackageId",
+                  "orderNumber",
+                  "status",
+                  "orderDate",
+                  "lastModifiedDate",
+                  "supplierId",
+                  "lines"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event accepted (processed or deduped)"
+          },
+          "400": {
+            "description": "Malformed payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Webhook auth failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or webhook disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
