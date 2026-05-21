@@ -15,3 +15,4 @@ export { handlePsf } from './psf';
 export { handleStoppage } from './stoppage';
 export { handleAdvertising } from './advertising';
 export { handlePaymentOrderEntry, type HandlePaymentOrderEntryResult } from './payment-order';
+export { handleCommissionInvoice, type HandleCommissionInvoiceResult } from './commission-invoice';
