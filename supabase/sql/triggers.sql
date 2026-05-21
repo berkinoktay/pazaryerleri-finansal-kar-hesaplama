@@ -42,16 +42,22 @@ CREATE TRIGGER on_auth_user_created
   EXECUTE FUNCTION public.handle_new_user();
 
 -- ─── reject_snapshot_update ────────────────────────────────────────────
--- Enforces write-once semantics on order_items.unit_cost_snapshot and
--- .snapshot_captured_at. Once these fields transition from NULL to a
--- value at order arrival (cost-snapshot.service.ts captures them in
--- the same transaction as the OrderItem INSERT), they are frozen
--- forever — any subsequent UPDATE that would change them is rejected
--- with SQLSTATE 42501. This is the load-bearing safety net for the
--- spec's "past calculations remain unaltered" rule (cost-profiles spec
--- §5.7); app-layer guards in the snapshot service can be bypassed by
--- future code, the trigger catches every path including raw SQL,
--- migrations, and seeds.
+-- Enforces write-once semantics on order_items snapshot columns. Once
+-- these fields transition from NULL to a value at order arrival
+-- (cost-snapshot.service.ts captures them in the same transaction as
+-- the OrderItem INSERT), they are frozen forever — any subsequent
+-- UPDATE that would change them is rejected with SQLSTATE 42501. This
+-- is the load-bearing safety net for the spec's "past calculations
+-- remain unaltered" rule (cost-profiles spec §5.7); app-layer guards
+-- in the snapshot service can be bypassed by future code, the trigger
+-- catches every path including raw SQL, migrations, and seeds.
+--
+-- Guarded columns (PR-6 continuation, 2026-05-21 — KDV-split native):
+--   - unit_cost_snapshot          (legacy, scheduled for DROP at PR-8+)
+--   - unit_cost_snapshot_net      (NET aggregate in TRY)
+--   - unit_cost_snapshot_vat_amount (VAT aggregate in TRY)
+--   - unit_cost_snapshot_vat_rate (effective denormalized rate)
+--   - snapshot_captured_at        (capture timestamp)
 --
 -- Not SECURITY DEFINER: the trigger needs to run with the privileges
 -- of the UPDATE caller, not as postgres — its job is to deny, not to
@@ -64,6 +70,24 @@ BEGIN
   IF OLD.unit_cost_snapshot IS NOT NULL AND
      NEW.unit_cost_snapshot IS DISTINCT FROM OLD.unit_cost_snapshot THEN
     RAISE EXCEPTION 'unit_cost_snapshot is write-once'
+      USING ERRCODE = '42501',
+            HINT = 'Past order calculations are immutable by design.';
+  END IF;
+  IF OLD.unit_cost_snapshot_net IS NOT NULL AND
+     NEW.unit_cost_snapshot_net IS DISTINCT FROM OLD.unit_cost_snapshot_net THEN
+    RAISE EXCEPTION 'unit_cost_snapshot_net is write-once'
+      USING ERRCODE = '42501',
+            HINT = 'Past order calculations are immutable by design.';
+  END IF;
+  IF OLD.unit_cost_snapshot_vat_amount IS NOT NULL AND
+     NEW.unit_cost_snapshot_vat_amount IS DISTINCT FROM OLD.unit_cost_snapshot_vat_amount THEN
+    RAISE EXCEPTION 'unit_cost_snapshot_vat_amount is write-once'
+      USING ERRCODE = '42501',
+            HINT = 'Past order calculations are immutable by design.';
+  END IF;
+  IF OLD.unit_cost_snapshot_vat_rate IS NOT NULL AND
+     NEW.unit_cost_snapshot_vat_rate IS DISTINCT FROM OLD.unit_cost_snapshot_vat_rate THEN
+    RAISE EXCEPTION 'unit_cost_snapshot_vat_rate is write-once'
       USING ERRCODE = '42501',
             HINT = 'Past order calculations are immutable by design.';
   END IF;
