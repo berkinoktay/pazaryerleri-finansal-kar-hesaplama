@@ -42,7 +42,7 @@ export type TrendyolSubscribedStatus = (typeof TRENDYOL_SUBSCRIBED_STATUSES)[num
 export interface RegisterTrendyolWebhookOpts {
   credentials: TrendyolCredentials;
   env: StoreEnvironment;
-  /** Tam HTTPS URL (örn. https://api.pazarsync.com/api/v1/webhooks/orders/<storeId>) */
+  /** Tam HTTPS URL (örn. https://api.pazarsync.com/v1/webhooks/orders/<storeId>) */
   callbackUrl: string;
   /** Webhook receiver Basic Auth username — service tarafından random üretilir */
   username: string;

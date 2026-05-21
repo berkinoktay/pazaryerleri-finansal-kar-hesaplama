@@ -68,7 +68,7 @@ function makeShipmentPackage(
         commission: 10,
       },
     ],
-    packageHistories: [{ status: 'Delivered', createdAt: DELIVERED_DATE_MS }],
+    packageHistories: [{ status: 'Delivered', createdDate: DELIVERED_DATE_MS }],
     ...overrides,
   };
 }

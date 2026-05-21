@@ -204,6 +204,9 @@ export interface MappedProductsPageMeta {
 
 export interface TrendyolOrderLine {
   lineId: number;
+  /** Line-level seller id — webhook payloads (Trendyol stage env) may omit root
+   * `supplierId` but always include this per-line. Mirror of `supplierId`. */
+  sellerId?: number;
   barcode: string;
   stockCode?: string;
   productName?: string;
@@ -231,8 +234,10 @@ export interface TrendyolOrderLine {
 
 export interface TrendyolPackageHistory {
   status: string;
-  /** Status transition timestamp (ms). For 'Delivered' → actualDeliveryDate. */
-  createdAt: number;
+  /** Status transition timestamp (ms). For 'Delivered' → actualDeliveryDate.
+   * Trendyol payload field is `createdDate` (per webhook-model.md and
+   * getshipmentpackages docs), not `createdAt` — historical typo. */
+  createdDate: number;
 }
 
 export interface TrendyolShipmentPackage {

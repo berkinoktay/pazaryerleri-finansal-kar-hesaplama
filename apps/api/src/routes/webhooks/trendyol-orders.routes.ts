@@ -1,5 +1,5 @@
 /**
- * Trendyol orders webhook receiver — POST /api/v1/webhooks/orders/:storeId
+ * Trendyol orders webhook receiver — POST /v1/webhooks/orders/:storeId
  *
  * Design: docs/plans/2026-05-20-trendyol-webhook-receiver-design.md §6
  *
@@ -56,6 +56,25 @@ type WebhookEnv = { Variables: { store: Store } };
 // fields the receiver actually consumes so a malformed payload short-circuits
 // before reaching the upsert path. Trendyol's contract is documented in
 // docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/webhook/webhook-model.md.
+// supplierId optional + lines[].sellerId required: Trendyol prod webhook
+// payload (webhook-model.md) ships root-level `supplierId`, but stage test
+// order endpoint omits it. Per-line `sellerId` is present in both envs
+// (it is the authoritative seller scope per Trendyol API contract).
+//
+// lineUnitPrice + lineGrossAmount required: the mapper reads them for KDV
+// split + commission calc. Stage test orders ship sparse payloads without
+// these — that case returns 422 here (cleaner than a deep-mapper crash);
+// real prod orders always carry both fields per webhook-model.md §lines.
+const TrendyolWebhookLineSchema = z
+  .object({
+    sellerId: z.number().int().positive('LINE_SELLER_ID_REQUIRED'),
+    quantity: z.number().int().positive('LINE_QUANTITY_REQUIRED'),
+    lineUnitPrice: z.number().nonnegative('LINE_UNIT_PRICE_REQUIRED'),
+    lineGrossAmount: z.number().nonnegative('LINE_GROSS_AMOUNT_REQUIRED'),
+    vatRate: z.number().nonnegative('LINE_VAT_RATE_REQUIRED'),
+  })
+  .passthrough();
+
 const TrendyolWebhookPayloadSchema = z
   .object({
     shipmentPackageId: z.number().int().positive('SHIPMENT_PACKAGE_ID_REQUIRED'),
@@ -63,8 +82,8 @@ const TrendyolWebhookPayloadSchema = z
     status: z.string().min(1, 'STATUS_REQUIRED'),
     orderDate: z.number().int().positive('ORDER_DATE_REQUIRED'),
     lastModifiedDate: z.number().int().positive('LAST_MODIFIED_DATE_REQUIRED'),
-    supplierId: z.number().int().positive('SUPPLIER_ID_REQUIRED'),
-    lines: z.array(z.unknown()).min(0),
+    supplierId: z.number().int().positive('SUPPLIER_ID_REQUIRED').optional(),
+    lines: z.array(TrendyolWebhookLineSchema).min(1, 'LINES_REQUIRED'),
   })
   .passthrough();
 
@@ -121,12 +140,31 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
   // (Trendyol payload has 30+ fields that we just forward to the mapper).
   const payload = c.req.valid('json') as unknown as TrendyolShipmentPackage;
 
-  // ─── 1. Defense-in-depth: payload supplierId must match store ──────────
+  // ─── 1. Defense-in-depth: payload supplier must match store ────────────
+  // Root `supplierId` is the prod contract (webhook-model.md). Stage payloads
+  // omit it; lines[].sellerId is the always-present fallback. We collect every
+  // candidate seller id and require it to be a single value equal to the store.
   const storeSupplierId = Number.parseInt(store.externalAccountId, 10);
-  if (!Number.isFinite(storeSupplierId) || payload.supplierId !== storeSupplierId) {
+  const payloadSupplierIds = new Set<number>();
+  if (typeof payload.supplierId === 'number') {
+    payloadSupplierIds.add(payload.supplierId);
+  }
+  for (const line of payload.lines) {
+    // Zod schema enforces line.sellerId is a positive integer; the
+    // `TrendyolShipmentPackage` cast erases that narrowing, so we re-guard
+    // here to keep `payloadSupplierIds` strictly typed.
+    if (typeof line.sellerId === 'number') {
+      payloadSupplierIds.add(line.sellerId);
+    }
+  }
+  const isSingleMatch =
+    Number.isFinite(storeSupplierId) &&
+    payloadSupplierIds.size === 1 &&
+    payloadSupplierIds.has(storeSupplierId);
+  if (!isSingleMatch) {
     syncLog.error('webhook.supplier-mismatch', {
       storeId: store.id,
-      payloadSupplierId: payload.supplierId,
+      payloadSupplierIds: Array.from(payloadSupplierIds),
       storeSupplierId: store.externalAccountId,
     });
     throw new UnauthorizedError('Supplier ID mismatch');

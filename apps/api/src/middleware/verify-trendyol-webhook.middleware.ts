@@ -4,7 +4,7 @@
  * Design: docs/plans/2026-05-20-trendyol-webhook-receiver-design.md §4.3
  *
  * Auth model — store-scoped Basic Auth (HMAC YOK; Trendyol HMAC desteklemiyor):
- *   1. URL path: `/api/v1/webhooks/orders/:storeId`
+ *   1. URL path: `/v1/webhooks/orders/:storeId`
  *   2. Authorization: Basic <base64(user:pass)> header
  *   3. Compare against Store.webhookSecret (AES-256-GCM decrypted at-rest)
  *      with `timingSafeEqual` — username + password ayrı ayrı constant-time

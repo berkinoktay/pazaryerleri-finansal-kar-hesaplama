@@ -81,7 +81,7 @@ export function validateRequiredEnv(): void {
     'TRENDYOL_PROD_BASE_URL',
     'TRENDYOL_SANDBOX_BASE_URL',
     // PR-C2: webhook receiver callback URL builder reads this to construct
-    // /api/v1/webhooks/orders/:storeId per-store endpoint. Trendyol register
+    // /v1/webhooks/orders/:storeId per-store endpoint. Trendyol register
     // call rejects http://, localhost, 127.0.0.1 — see webhook design §13.
     'PUBLIC_API_BASE_URL',
   ] as const;

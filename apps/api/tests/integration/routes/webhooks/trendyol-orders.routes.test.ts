@@ -49,6 +49,7 @@ function makeWebhookPayload(overrides: WebhookPayloadOverrides = {}) {
     lines: overrides.lines ?? [
       {
         lineId: 1,
+        sellerId: overrides.supplierId ?? Number.parseInt(SUPPLIER_ID, 10),
         barcode: 'EAN13-WH-001',
         quantity: 1,
         lineUnitPrice: 120,
@@ -58,7 +59,7 @@ function makeWebhookPayload(overrides: WebhookPayloadOverrides = {}) {
         commission: 10,
       },
     ],
-    packageHistories: [{ status: 'Delivered', createdAt: DELIVERED_AT_MS }],
+    packageHistories: [{ status: 'Delivered', createdDate: DELIVERED_AT_MS }],
     ...(overrides.createdBy !== undefined ? { createdBy: overrides.createdBy } : {}),
   };
 }
