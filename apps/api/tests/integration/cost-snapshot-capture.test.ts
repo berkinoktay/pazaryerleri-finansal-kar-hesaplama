@@ -40,6 +40,10 @@ async function buildVariantWithProfiles(
     fxRateMode: 'AUTO' | 'MANUAL';
     manualFxRate?: string;
     archived?: boolean;
+    /** Defaults to 0 (no VAT). Used in KDV-split snapshot tests. */
+    vatRate?: number;
+    /** When omitted, schema default null — exercises defensive compute path. */
+    vatAmount?: string | null;
   }>,
 ) {
   const product = await prisma.product.create({
@@ -66,6 +70,7 @@ async function buildVariantWithProfiles(
   });
 
   for (const p of profiles) {
+    const vatRate = p.vatRate ?? 0;
     const costProfile = await prisma.costProfile.create({
       data: {
         organizationId: orgId,
@@ -73,7 +78,15 @@ async function buildVariantWithProfiles(
         type: 'COGS',
         amount: new Decimal(p.amount),
         currency: p.currency,
-        vatRate: 0,
+        vatRate,
+        // null when caller omits — exercises captureCostSnapshot defensive
+        // compute fallback (canonical formula: amount × vatRate / 100).
+        vatAmount:
+          p.vatAmount === null
+            ? null
+            : p.vatAmount !== undefined
+              ? new Decimal(p.vatAmount)
+              : new Decimal(p.amount).mul(vatRate).div(100),
         fxRateMode: p.fxRateMode,
         manualFxRate: p.manualFxRate != null ? new Decimal(p.manualFxRate) : null,
         archivedAt: p.archived === true ? new Date() : null,
@@ -152,7 +165,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     await captureAndComputeInTx(item.id, order.id);
 
     const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    expect(refreshedItem!.unitCostSnapshot).toBeNull();
+    expect(refreshedItem!.unitCostSnapshotNet).toBeNull();
   });
 
   // §5.8 row 2: variant with profiles, FX rate stale (>2 days) — still proceeds
@@ -189,7 +202,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     });
 
     // 10.00 USD × 44.50 = 445.00 TRY
-    expect(refreshedItem!.unitCostSnapshot!.toFixed(2)).toBe('445.00');
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('445.00');
     expect(components).toHaveLength(1);
     expect(components[0]!.fxRateSource).toBe('TCMB-2026-05-05');
     // PR-5c: Order.netProfit silindi. Profit hesaplama PR-6'da
@@ -212,7 +225,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     await captureAndComputeInTx(item.id, order.id);
 
     const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    expect(refreshedItem!.unitCostSnapshot).toBeNull();
+    expect(refreshedItem!.unitCostSnapshotNet).toBeNull();
   });
 
   // §5.8 row 4: profile archived between sync arrival and snapshot capture
@@ -237,7 +250,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     await captureAndComputeInTx(item.id, order.id);
 
     const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    expect(refreshedItem!.unitCostSnapshot).toBeNull();
+    expect(refreshedItem!.unitCostSnapshotNet).toBeNull();
   });
 
   // §5.8 row 5: re-sync same order — snapshot untouched (idempotency at app layer)
@@ -257,8 +270,8 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     await captureAndComputeInTx(item.id, order.id);
 
     const after1 = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    expect(after1!.unitCostSnapshot).not.toBeNull();
-    const firstSnapshot = after1!.unitCostSnapshot!.toFixed(2);
+    expect(after1!.unitCostSnapshotNet).not.toBeNull();
+    const firstSnapshot = after1!.unitCostSnapshotNet!.toFixed(2);
 
     // Second attempt — throws SnapshotAlreadyCapturedError (write-once)
     await expect(captureAndComputeInTx(item.id, order.id)).rejects.toThrow(
@@ -267,7 +280,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
 
     // Snapshot value unchanged after failed second attempt
     const after2 = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    expect(after2!.unitCostSnapshot!.toFixed(2)).toBe(firstSnapshot);
+    expect(after2!.unitCostSnapshotNet!.toFixed(2)).toBe(firstSnapshot);
   });
 
   // §5.8 row 6: order arrives, profiles attach later → past snapshot stays null
@@ -285,7 +298,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     // First sync — no profiles, snapshot stays null
     await captureAndComputeInTx(item.id, order.id);
     const after1 = await prisma.orderItem.findUnique({ where: { id: item.id } });
-    expect(after1!.unitCostSnapshot).toBeNull();
+    expect(after1!.unitCostSnapshotNet).toBeNull();
 
     // Now attach a profile
     await prisma.costProfile.create({
@@ -304,7 +317,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     });
 
     // Second sync with null snapshot — spec says no backfill so this WILL try to capture
-    // (captureCostSnapshot only skips when unitCostSnapshot !== null)
+    // (captureCostSnapshot only skips when unitCostSnapshotNet !== null)
     // But the caller (sync-worker) skips existing items by findFirst check.
     // Calling capture directly: it sees null snapshot + active profile → will capture
     // This tests the service directly; the sync-worker's idempotency is tested separately
@@ -312,13 +325,13 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     const after2 = await prisma.orderItem.findUnique({ where: { id: item.id } });
     // Service captures because snapshot was null — correct per spec (backfill scenario
     // is prevented by the sync-worker's INSERT-only-once guard, not the service itself)
-    expect(after2!.unitCostSnapshot!.toFixed(2)).toBe('25.00');
+    expect(after2!.unitCostSnapshotNet!.toFixed(2)).toBe('25.00');
   });
 
   // Happy path: TRY profiles → snapshot computed correctly.
   // PR-5c: netProfit assertion'ı kaldırıldı (Order.netProfit silindi, profit stub).
   // Profit hesaplama PR-6'da applyEstimateOnOrderCreate ile yeniden test edilir.
-  it('TRY profiles → unitCostSnapshot set with sum of components', async () => {
+  it('TRY profiles → unitCostSnapshotNet set with sum of components', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -339,7 +352,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     });
 
     // Total cost = 30 + 20 = 50 TRY (qty=1)
-    expect(refreshedItem!.unitCostSnapshot!.toFixed(2)).toBe('50.00');
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('50.00');
     expect(components).toHaveLength(2);
   });
 
@@ -370,7 +383,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     });
 
     // 10.00 × 35.50 = 355.00 TRY
-    expect(refreshedItem!.unitCostSnapshot!.toFixed(2)).toBe('355.00');
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('355.00');
     expect(components[0]!.fxRateSource).toBe('MANUAL');
     expect(components[0]!.fxRateUsed.toFixed(2)).toBe('35.50');
   });
@@ -398,8 +411,123 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
     });
 
     // 10.00 × 45.19 = 451.90 TRY
-    expect(refreshedItem!.unitCostSnapshot!.toFixed(2)).toBe('451.90');
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('451.90');
     expect(components[0]!.fxRateSource).toBe('TCMB-2026-05-08');
+  });
+
+  // PR-6 continuation: KDV-split snapshot — single profile with vatRate > 0
+  it('single TRY profile with vatRate 18 → NET/VAT/effectiveRate columns set', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const { variant } = await buildVariantWithProfiles(org.id, store.id, [
+      { name: 'COGS NET', currency: 'TRY', amount: '50.00', fxRateMode: 'AUTO', vatRate: 18 },
+    ]);
+    const order = await createOrder(org.id, store.id);
+    const item = await createOrderItem(org.id, order.id, variant.id);
+
+    await captureAndComputeInTx(item.id, order.id);
+
+    const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
+    const components = await prisma.orderItemCostSnapshotComponent.findMany({
+      where: { orderItemId: item.id },
+    });
+
+    // amount = 50.00 NET (TRY native) → fx=1 → NET 50.00, VAT 50×18/100 = 9.00, rate 18.00
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('50.00');
+    expect(refreshedItem!.unitCostSnapshotVatAmount!.toFixed(2)).toBe('9.00');
+    expect(refreshedItem!.unitCostSnapshotVatRate!.toFixed(2)).toBe('18.00');
+    // Legacy column stays null — PR-6 continuation cut
+    expect(refreshedItem!.unitCostSnapshot).toBeNull();
+
+    // Component row carries KDV native + TRY snapshot
+    expect(components).toHaveLength(1);
+    expect(components[0]!.vatAmount!.toFixed(2)).toBe('9.00');
+    expect(components[0]!.vatAmountInTry!.toFixed(2)).toBe('9.00');
+  });
+
+  // PR-6 continuation: multi-profile aggregate with mixed VAT rates
+  it('multi-profile mixed VAT rates → blended effective rate denormalized', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const { variant } = await buildVariantWithProfiles(org.id, store.id, [
+      { name: 'COGS A 18%', currency: 'TRY', amount: '100.00', fxRateMode: 'AUTO', vatRate: 18 },
+      { name: 'COGS B 8%', currency: 'TRY', amount: '50.00', fxRateMode: 'AUTO', vatRate: 8 },
+    ]);
+    const order = await createOrder(org.id, store.id);
+    const item = await createOrderItem(org.id, order.id, variant.id);
+
+    await captureAndComputeInTx(item.id, order.id);
+
+    const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
+
+    // NET aggregate = 100 + 50 = 150.00 TRY
+    // VAT aggregate = 100×18/100 + 50×8/100 = 18.00 + 4.00 = 22.00 TRY
+    // Effective rate = 22.00 / 150.00 × 100 = 14.6666... → toDecimalPlaces(2) = 14.67
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('150.00');
+    expect(refreshedItem!.unitCostSnapshotVatAmount!.toFixed(2)).toBe('22.00');
+    expect(refreshedItem!.unitCostSnapshotVatRate!.toFixed(2)).toBe('14.67');
+    expect(refreshedItem!.unitCostSnapshot).toBeNull();
+  });
+
+  // PR-6 continuation: NET=0 edge — rate should be NULL, not 0
+  // (0% is a valid export rate; aliasing the two states would mislead consumers)
+  it('NET=0 (cost-free profile) → vatRate NULL (not 0)', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const { variant } = await buildVariantWithProfiles(org.id, store.id, [
+      { name: 'Zero COGS', currency: 'TRY', amount: '0.00', fxRateMode: 'AUTO', vatRate: 18 },
+    ]);
+    const order = await createOrder(org.id, store.id);
+    const item = await createOrderItem(org.id, order.id, variant.id);
+
+    await captureAndComputeInTx(item.id, order.id);
+
+    const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('0.00');
+    expect(refreshedItem!.unitCostSnapshotVatAmount!.toFixed(2)).toBe('0.00');
+    // NULL — undefined, not 0%
+    expect(refreshedItem!.unitCostSnapshotVatRate).toBeNull();
+  });
+
+  // PR-6 continuation: defensive compute when profile.vatAmount is null
+  // (pre-PR-6 rows where cost-profile.service did not backfill on create)
+  it('profile.vatAmount NULL → defensive compute via canonical formula', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const { variant } = await buildVariantWithProfiles(org.id, store.id, [
+      {
+        name: 'COGS pre-PR-6',
+        currency: 'TRY',
+        amount: '40.00',
+        fxRateMode: 'AUTO',
+        vatRate: 20,
+        vatAmount: null,
+      },
+    ]);
+    const order = await createOrder(org.id, store.id);
+    const item = await createOrderItem(org.id, order.id, variant.id);
+
+    await captureAndComputeInTx(item.id, order.id);
+
+    const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
+
+    // Defensive compute: 40.00 × 20 / 100 = 8.00 — fills the gap that
+    // cost-profile.service should have filled (TODO tracked in master guide).
+    expect(refreshedItem!.unitCostSnapshotNet!.toFixed(2)).toBe('40.00');
+    expect(refreshedItem!.unitCostSnapshotVatAmount!.toFixed(2)).toBe('8.00');
+    expect(refreshedItem!.unitCostSnapshotVatRate!.toFixed(2)).toBe('20.00');
   });
 
   // Unattributed line item (no variant)
@@ -417,7 +545,7 @@ describe('cost-snapshot capture — full pipeline (spec §5.8)', () => {
 
     const refreshedItem = await prisma.orderItem.findUnique({ where: { id: item.id } });
 
-    expect(refreshedItem!.unitCostSnapshot).toBeNull();
+    expect(refreshedItem!.unitCostSnapshotNet).toBeNull();
     expect(refreshedItem!.productVariantId).toBeNull();
   });
 });

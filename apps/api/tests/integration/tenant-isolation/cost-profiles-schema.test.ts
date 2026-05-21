@@ -197,7 +197,7 @@ describe('cost-profile tables: RLS isolation', () => {
         unitPrice: '100.00',
         commissionRate: '20.00',
         commissionAmount: '20.00',
-        unitCostSnapshot: '15.00',
+        unitCostSnapshotNet: '15.00',
         snapshotCapturedAt: new Date(),
       },
     });

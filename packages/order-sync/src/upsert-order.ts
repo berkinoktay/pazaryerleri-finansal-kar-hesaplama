@@ -21,11 +21,11 @@
  *   - applyEstimateOnOrderCreate inner guard ile write-once
  *     (estimatedNetProfit non-null ise no-op)
  *
- * Known gap (Order Sync design §12.3 #1): captureCostSnapshot writes the
- * legacy unitCostSnapshot column only; the PR-3 NET columns stay null. This
- * means applyEstimateOnOrderCreate writes PSF + Stopaj ESTIMATE OrderFee
- * rows but Order.estimatedNetProfit remains null until the NET-aware fix
- * lands (PR-7 settlement worker OR V1 Profit Calc resume mini-PR).
+ * PR-6 continuation (2026-05-21): captureCostSnapshot now writes the
+ * three NET split columns (`unitCostSnapshotNet`, `unitCostSnapshotVatAmount`,
+ * `unitCostSnapshotVatRate`). The estimated_net_profit gap that prevented
+ * applyEstimateOnOrderCreate from completing the write is now closed.
+ * Legacy `unitCostSnapshot` stays NULL; column drop scheduled for PR-8+.
  */
 
 import { Decimal } from 'decimal.js';
@@ -46,6 +46,10 @@ interface SnapshotComponentData {
   currency: Currency;
   vatRate: number;
   amountInTry: Decimal;
+  // PR-6 continuation: KDV snapshot in native currency + TRY (mirror of
+  // apps/api/src/services/cost-snapshot.service.ts SnapshotComponentData).
+  vatAmount: Decimal;
+  vatAmountInTry: Decimal;
   fxRateMode: FxRateMode;
   fxRateUsed: Decimal;
   fxRateSource: string;
@@ -104,7 +108,7 @@ async function captureCostSnapshot(
     include: { productVariant: true },
   });
 
-  if (!item || item.unitCostSnapshot !== null || !item.productVariantId) {
+  if (!item || item.unitCostSnapshotNet !== null || !item.productVariantId) {
     return;
   }
 
@@ -129,27 +133,56 @@ async function captureCostSnapshot(
       });
       return; // best-effort: abort, leave null
     }
+    // KDV split — mirror of apps/api/src/services/cost-snapshot.service.ts.
+    // `profile.amount = NET` (schema convention); canonical
+    // `vatAmount = amount × vatRate / 100`. Defensive compute when nullable
+    // backfill column is null.
+    const amountNet = new Decimal(profile.amount);
+    const vatAmountNative =
+      profile.vatAmount !== null
+        ? new Decimal(profile.vatAmount)
+        : amountNet.mul(profile.vatRate).div(100);
+
     components.push({
       orderItemId,
       organizationId: item.organizationId ?? '',
       profileId: profile.id,
       profileName: profile.name,
       profileType: profile.type,
-      amount: new Decimal(profile.amount),
+      amount: amountNet,
       currency: profile.currency,
       vatRate: profile.vatRate,
-      amountInTry: new Decimal(profile.amount).mul(fx.rate),
+      amountInTry: amountNet.mul(fx.rate),
+      vatAmount: vatAmountNative,
+      vatAmountInTry: vatAmountNative.mul(fx.rate),
       fxRateMode: profile.fxRateMode,
       fxRateUsed: fx.rate,
       fxRateSource: fx.source,
     });
   }
 
-  const unitCostSnapshot = components.reduce((acc, c) => acc.add(c.amountInTry), new Decimal(0));
+  // Aggregate NET + VAT (TRY) across profiles. Effective vatRate denormalized
+  // for downstream consumers — multi-profile case yields a blended rate.
+  const unitCostSnapshotNet = components
+    .reduce((acc, c) => acc.add(c.amountInTry), new Decimal(0))
+    .toDecimalPlaces(2);
+  const unitCostSnapshotVatAmount = components
+    .reduce((acc, c) => acc.add(c.vatAmountInTry), new Decimal(0))
+    .toDecimalPlaces(2);
+  // NET=0 → rate is undefined (0% is a valid export rate, would alias the
+  // states). Leave denormalized rate NULL. Mirror of cost-snapshot.service.
+  const unitCostSnapshotVatRate = unitCostSnapshotNet.isZero()
+    ? null
+    : unitCostSnapshotVatAmount.div(unitCostSnapshotNet).mul(100).toDecimalPlaces(2);
 
   await tx.orderItem.update({
     where: { id: orderItemId },
-    data: { unitCostSnapshot, snapshotCapturedAt: new Date() },
+    data: {
+      unitCostSnapshotNet,
+      unitCostSnapshotVatAmount,
+      unitCostSnapshotVatRate,
+      snapshotCapturedAt: new Date(),
+    },
   });
 
   await tx.orderItemCostSnapshotComponent.createMany({ data: components });
