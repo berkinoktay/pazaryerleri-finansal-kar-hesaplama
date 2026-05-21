@@ -11,3 +11,6 @@
 export { handleSale, type HandleSettlementResult } from './sale';
 export { handleDiscount } from './discount';
 export { handleReturn } from './return';
+export { handlePsf } from './psf';
+export { handleStoppage } from './stoppage';
+export { handleAdvertising } from './advertising';
