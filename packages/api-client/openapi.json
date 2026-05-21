@@ -2444,8 +2444,40 @@
                   },
                   "lines": {
                     "type": "array",
-                    "items": {},
-                    "minItems": 0
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sellerId": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "lineUnitPrice": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "lineGrossAmount": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "vatRate": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "sellerId",
+                        "quantity",
+                        "lineUnitPrice",
+                        "lineGrossAmount",
+                        "vatRate"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "minItems": 1
                   }
                 },
                 "required": [
@@ -2454,7 +2486,6 @@
                   "status",
                   "orderDate",
                   "lastModifiedDate",
-                  "supplierId",
                   "lines"
                 ],
                 "additionalProperties": {}
