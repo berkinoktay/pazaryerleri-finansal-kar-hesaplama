@@ -106,3 +106,37 @@ CREATE TRIGGER order_items_snapshot_immutable
   BEFORE UPDATE ON order_items
   FOR EACH ROW
   EXECUTE FUNCTION public.reject_snapshot_update();
+
+-- ─── reject_estimated_net_profit_update (PR-9 second half) ─────────────
+-- Enforces write-once semantics on Order.estimated_net_profit. T+0 estimate
+-- is captured by applyEstimateOnOrderCreate as part of the order arrival
+-- transaction; once written, it must never be overwritten — settlements
+-- reconcile by writing settled_net_profit instead (spec §3 / §8.3 line 1369).
+--
+-- IS DISTINCT FROM semantics:
+--   null → value : allowed (first write; null IS DISTINCT FROM value = true,
+--                  but OLD IS NOT NULL guard short-circuits before reject)
+--   value → value: no-op UPDATE allowed (IS DISTINCT FROM = false)
+--   value → different value: reject (42501)
+--   value → null : reject (a write-once invariant means no unset either)
+--   0 → value    : reject (0 is a value; null/value boundary is strict)
+CREATE OR REPLACE FUNCTION public.reject_estimated_net_profit_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.estimated_net_profit IS NOT NULL AND
+     NEW.estimated_net_profit IS DISTINCT FROM OLD.estimated_net_profit THEN
+    RAISE EXCEPTION 'estimated_net_profit is write-once'
+      USING ERRCODE = '42501',
+            HINT = 'T+0 estimate is immutable; settlements update settled_net_profit instead.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS orders_estimated_net_profit_write_once ON orders;
+CREATE TRIGGER orders_estimated_net_profit_write_once
+  BEFORE UPDATE ON orders
+  FOR EACH ROW
+  EXECUTE FUNCTION public.reject_estimated_net_profit_update();
