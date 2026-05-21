@@ -46,7 +46,12 @@ export interface HandleSettlementResult {
   /** True if the row was applied to the DB; false if skipped (logged). */
   applied: boolean;
   /** Skip reason — useful for tests + worker telemetry. Empty when applied. */
-  skipReason?: 'sparse_field' | 'order_not_found' | 'variant_not_found' | 'item_not_found';
+  skipReason?:
+    | 'sparse_field'
+    | 'order_not_found'
+    | 'variant_not_found'
+    | 'item_not_found'
+    | 'no_orders_in_cycle';
 }
 
 /**
@@ -121,6 +126,24 @@ export async function handleSale(
         : {}),
     },
   });
+
+  // PR-7 commit 5 cascade prerequisite: backfill Order.paymentOrderId /
+  // paymentDate from the settlement Sale row. Trendyol stamps these on
+  // the Sale row once a PaymentOrder cycle materialises (research §3.1:
+  // T+18..30 after order arrival). handlePaymentOrderEntry then locates
+  // the cycle's orders via this column.
+  //
+  // Idempotent: updateMany with `paymentOrderId: null` filter — only the
+  // first non-null Sale row writes the column. Re-poll cron (PR-12) safe.
+  if (row.paymentOrderId !== null && row.paymentDate !== null) {
+    await tx.order.updateMany({
+      where: { id: order.id, paymentOrderId: null },
+      data: {
+        paymentOrderId: BigInt(row.paymentOrderId),
+        paymentDate: new Date(row.paymentDate),
+      },
+    });
+  }
 
   return { applied: true };
 }

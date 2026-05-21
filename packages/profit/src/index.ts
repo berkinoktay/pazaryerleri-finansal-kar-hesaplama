@@ -12,6 +12,10 @@ export type {
 } from './profit-formula';
 export { inferDeliveredOnTime } from './infer-delivered-on-time';
 export {
+  recomputeSettledProfit,
+  type RecomputeSettledProfitResult,
+} from './recompute-settled-profit';
+export {
   FeeDefinitionNotFoundError,
   isPsfExempt,
   resolveFeeDefinition,

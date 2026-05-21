@@ -14,3 +14,4 @@ export { handleReturn } from './return';
 export { handlePsf } from './psf';
 export { handleStoppage } from './stoppage';
 export { handleAdvertising } from './advertising';
+export { handlePaymentOrderEntry, type HandlePaymentOrderEntryResult } from './payment-order';
