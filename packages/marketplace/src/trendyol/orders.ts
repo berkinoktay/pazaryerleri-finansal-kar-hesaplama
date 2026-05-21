@@ -231,7 +231,7 @@ function epochMsToDate(ms: number | null | undefined): Date | null {
 export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): MappedOrder {
   const deliveredEvent = (pkg.packageHistories ?? []).find((h) => h.status === 'Delivered');
   const actualDeliveryDate =
-    deliveredEvent !== undefined ? epochMsToDate(deliveredEvent.createdAt) : null;
+    deliveredEvent !== undefined ? epochMsToDate(deliveredEvent.createdDate) : null;
 
   const mappedLines: MappedOrderLine[] = pkg.lines.map(mapLine);
 

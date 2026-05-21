@@ -37,6 +37,7 @@ function makePayload(supplierId: number) {
     lines: [
       {
         lineId: 1,
+        sellerId: supplierId,
         barcode: 'EAN13-T-001',
         quantity: 1,
         lineUnitPrice: 120,
@@ -46,7 +47,7 @@ function makePayload(supplierId: number) {
         commission: 10,
       },
     ],
-    packageHistories: [{ status: 'Delivered', createdAt: LAST_MODIFIED_MS }],
+    packageHistories: [{ status: 'Delivered', createdDate: LAST_MODIFIED_MS }],
   };
 }
 

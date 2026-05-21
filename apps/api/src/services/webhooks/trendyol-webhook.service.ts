@@ -55,7 +55,7 @@ export function generateWebhookCredentials(): WebhookReceiverCredentials {
 /**
  * Per-store webhook callback URL builder.
  *
- * Path = `/api/v1/webhooks/orders/:storeId`. Trendyol register call'unda bu
+ * Path = `/v1/webhooks/orders/:storeId`. Trendyol register call'unda bu
  * URL'i gönderiyoruz; her store kendi path scope'unda webhook alıyor.
  *
  * `PUBLIC_API_BASE_URL` env'i `validateRequiredEnv` tarafından boot-time
@@ -64,7 +64,7 @@ export function generateWebhookCredentials(): WebhookReceiverCredentials {
  */
 export function buildWebhookCallbackUrl(storeId: string): string {
   const base = requireEnv('PUBLIC_API_BASE_URL').replace(/\/$/, '');
-  return `${base}/api/v1/webhooks/orders/${storeId}`;
+  return `${base}/v1/webhooks/orders/${storeId}`;
 }
 
 /**

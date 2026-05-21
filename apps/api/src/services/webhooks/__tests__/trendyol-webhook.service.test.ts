@@ -54,16 +54,16 @@ describe('generateWebhookCredentials', () => {
 });
 
 describe('buildWebhookCallbackUrl', () => {
-  it('joins base URL with /api/v1/webhooks/orders/:storeId', () => {
+  it('joins base URL with /v1/webhooks/orders/:storeId', () => {
     expect(buildWebhookCallbackUrl('abc-store-id')).toBe(
-      'https://api.pazarsync.com/api/v1/webhooks/orders/abc-store-id',
+      'https://api.pazarsync.com/v1/webhooks/orders/abc-store-id',
     );
   });
 
   it('strips a trailing slash from PUBLIC_API_BASE_URL', () => {
     process.env['PUBLIC_API_BASE_URL'] = 'https://api.pazarsync.com/';
     expect(buildWebhookCallbackUrl('abc-store-id')).toBe(
-      'https://api.pazarsync.com/api/v1/webhooks/orders/abc-store-id',
+      'https://api.pazarsync.com/v1/webhooks/orders/abc-store-id',
     );
   });
 
@@ -115,7 +115,7 @@ describe('registerStoreWebhook', () => {
     });
 
     const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body.url).toBe('https://api.pazarsync.com/api/v1/webhooks/orders/store-xyz');
+    expect(body.url).toBe('https://api.pazarsync.com/v1/webhooks/orders/store-xyz');
   });
 });
 

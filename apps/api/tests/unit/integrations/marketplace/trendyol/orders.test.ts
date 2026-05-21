@@ -50,8 +50,8 @@ function makePackage(overrides: Partial<TrendyolShipmentPackage> = {}): Trendyol
       },
     ],
     packageHistories: [
-      { status: 'Created', createdAt: 1715000000000 },
-      { status: 'Delivered', createdAt: 1715450000000 },
+      { status: 'Created', createdDate: 1715000000000 },
+      { status: 'Delivered', createdDate: 1715450000000 },
     ],
     ...overrides,
   };
@@ -297,14 +297,14 @@ describe('mapTrendyolShipmentPackage — status + dates', () => {
     expect(mapped.status).toBe(expected);
   });
 
-  it('actualDeliveryDate derived from packageHistories[Delivered].createdAt', () => {
+  it('actualDeliveryDate derived from packageHistories[Delivered].createdDate', () => {
     const deliveredAtMs = 1715450000000;
     const mapped = mapTrendyolShipmentPackage(
       makePackage({
         status: 'Delivered',
         packageHistories: [
-          { status: 'Created', createdAt: 1715000000000 },
-          { status: 'Delivered', createdAt: deliveredAtMs },
+          { status: 'Created', createdDate: 1715000000000 },
+          { status: 'Delivered', createdDate: deliveredAtMs },
         ],
       }),
     );
@@ -315,7 +315,7 @@ describe('mapTrendyolShipmentPackage — status + dates', () => {
     const mapped = mapTrendyolShipmentPackage(
       makePackage({
         status: 'Picking',
-        packageHistories: [{ status: 'Created', createdAt: 1715000000000 }],
+        packageHistories: [{ status: 'Created', createdDate: 1715000000000 }],
       }),
     );
     expect(mapped.actualDeliveryDate).toBeNull();

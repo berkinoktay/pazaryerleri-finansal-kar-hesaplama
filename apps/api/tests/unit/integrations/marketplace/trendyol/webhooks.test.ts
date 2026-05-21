@@ -59,7 +59,7 @@ describe('assertValidCallbackUrl — defense-in-depth before Trendyol POST', () 
       registerTrendyolWebhook({
         credentials: CREDENTIALS,
         env: ENV,
-        callbackUrl: 'http://api.pazarsync.com/api/v1/webhooks/orders/abc',
+        callbackUrl: 'http://api.pazarsync.com/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
@@ -71,7 +71,7 @@ describe('assertValidCallbackUrl — defense-in-depth before Trendyol POST', () 
       registerTrendyolWebhook({
         credentials: CREDENTIALS,
         env: ENV,
-        callbackUrl: 'https://trendyol.example.com/api/v1/webhooks/orders/abc',
+        callbackUrl: 'https://trendyol.example.com/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
@@ -83,7 +83,7 @@ describe('assertValidCallbackUrl — defense-in-depth before Trendyol POST', () 
       registerTrendyolWebhook({
         credentials: CREDENTIALS,
         env: ENV,
-        callbackUrl: 'https://localhost:3000/api/v1/webhooks/orders/abc',
+        callbackUrl: 'https://localhost:3000/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
@@ -95,7 +95,7 @@ describe('assertValidCallbackUrl — defense-in-depth before Trendyol POST', () 
       registerTrendyolWebhook({
         credentials: CREDENTIALS,
         env: ENV,
-        callbackUrl: 'https://dolap.cdn.example.com/api/v1/webhooks/orders/abc',
+        callbackUrl: 'https://dolap.cdn.example.com/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
@@ -110,7 +110,7 @@ describe('registerTrendyolWebhook', () => {
     const result = await registerTrendyolWebhook({
       credentials: CREDENTIALS,
       env: ENV,
-      callbackUrl: 'https://api.pazarsync.com/api/v1/webhooks/orders/abc-store',
+      callbackUrl: 'https://api.pazarsync.com/v1/webhooks/orders/abc-store',
       username: 'webhook-user-1234',
       password: 'webhook-pass-very-secret',
     });
@@ -123,7 +123,7 @@ describe('registerTrendyolWebhook', () => {
 
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body).toEqual({
-      url: 'https://api.pazarsync.com/api/v1/webhooks/orders/abc-store',
+      url: 'https://api.pazarsync.com/v1/webhooks/orders/abc-store',
       username: 'webhook-user-1234',
       password: 'webhook-pass-very-secret',
       authenticationType: 'BASIC_AUTHENTICATION',
@@ -141,7 +141,7 @@ describe('registerTrendyolWebhook', () => {
     await registerTrendyolWebhook({
       credentials: CREDENTIALS,
       env: ENV,
-      callbackUrl: 'https://api.pazarsync.com/api/v1/webhooks/orders/abc-store',
+      callbackUrl: 'https://api.pazarsync.com/v1/webhooks/orders/abc-store',
       username: 'u',
       password: 'p',
       subscribedStatuses: ['CREATED', 'DELIVERED'],
@@ -159,7 +159,7 @@ describe('registerTrendyolWebhook', () => {
       registerTrendyolWebhook({
         credentials: CREDENTIALS,
         env: ENV,
-        callbackUrl: 'https://api.pazarsync.com/api/v1/webhooks/orders/abc',
+        callbackUrl: 'https://api.pazarsync.com/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
@@ -173,7 +173,7 @@ describe('registerTrendyolWebhook', () => {
       registerTrendyolWebhook({
         credentials: CREDENTIALS,
         env: ENV,
-        callbackUrl: 'https://api.pazarsync.com/api/v1/webhooks/orders/abc',
+        callbackUrl: 'https://api.pazarsync.com/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
@@ -188,7 +188,7 @@ describe('registerTrendyolWebhook', () => {
       registerTrendyolWebhook({
         credentials: CREDENTIALS,
         env: ENV,
-        callbackUrl: 'https://api.pazarsync.com/api/v1/webhooks/orders/abc',
+        callbackUrl: 'https://api.pazarsync.com/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
@@ -234,7 +234,7 @@ describe('updateTrendyolWebhook', () => {
       credentials: CREDENTIALS,
       env: ENV,
       webhookId: 'webhook-uuid-rotation',
-      callbackUrl: 'https://api.pazarsync.com/api/v1/webhooks/orders/abc',
+      callbackUrl: 'https://api.pazarsync.com/v1/webhooks/orders/abc',
       username: 'new-user',
       password: 'new-pass',
     });
@@ -257,7 +257,7 @@ describe('updateTrendyolWebhook', () => {
         credentials: CREDENTIALS,
         env: ENV,
         webhookId: 'webhook-uuid-rotation',
-        callbackUrl: 'http://api.pazarsync.com/api/v1/webhooks/orders/abc',
+        callbackUrl: 'http://api.pazarsync.com/v1/webhooks/orders/abc',
         username: 'u',
         password: 'p',
       }),
