@@ -48,6 +48,23 @@ export {
   type FetchShipmentPackagesOpts,
   type MappedOrdersPage,
 } from './trendyol/orders';
+export {
+  FINANCIAL_PAGE_SIZE,
+  FINANCIAL_WINDOW_MAX_DAYS,
+  SETTLEMENT_TRANSACTION_TYPES,
+  OTHER_FINANCIAL_TRANSACTION_TYPES,
+  DEDUCTION_INVOICE_SUBTYPES,
+  fetchSettlements,
+  fetchOtherFinancials,
+  type SettlementTransactionType,
+  type OtherFinancialTransactionType,
+  type DeductionInvoiceSubType,
+  type TrendyolFinancialTransaction,
+  type TrendyolFinancialResponse,
+  type FetchFinancialOpts,
+  type FetchSettlementsOpts,
+  type FetchOtherFinancialsOpts,
+} from './trendyol/settlements';
 export { probeTrendyolCredentials } from './trendyol/client';
 export { trendyolFactory } from './trendyol/adapter';
 export {
