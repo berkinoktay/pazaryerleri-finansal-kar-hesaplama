@@ -65,6 +65,14 @@ export {
   type FetchSettlementsOpts,
   type FetchOtherFinancialsOpts,
 } from './trendyol/settlements';
+export {
+  classifySettlementTransaction,
+  classifyOtherFinancialTransaction,
+  classifyDeductionInvoice,
+  type SettlementDispatchTarget,
+  type OtherFinancialDispatchTarget,
+  type DeductionInvoiceSubClass,
+} from './trendyol/settlements-dispatcher';
 export { probeTrendyolCredentials } from './trendyol/client';
 export { trendyolFactory } from './trendyol/adapter';
 export {
