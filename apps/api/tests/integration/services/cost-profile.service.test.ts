@@ -57,6 +57,27 @@ describe('cost-profile service', () => {
       expect(versions[0]?.changedBy).toBe(user.id);
     });
 
+    // PR-7 öncesi blocker: cost-profile.service vatAmount backfill.
+    // captureCostSnapshot has a defensive fallback for null vatAmount, but
+    // the source profile should not depend on that — it would create a
+    // silent divergence (snapshot non-null, profile NULL).
+    it('backfills vatAmount via canonical formula (amount × vatRate / 100)', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+
+      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+
+      // BASE_INPUT: amount 25.50, vatRate 18 → 25.50 × 18 / 100 = 4.59
+      expect(profile.vatAmount!.toFixed(2)).toBe('4.59');
+
+      // Version row carries the same backfilled value
+      const versions = await prisma.costProfileVersion.findMany({
+        where: { profileId: profile.id },
+      });
+      expect(versions[0]?.vatAmount?.toFixed(2)).toBe('4.59');
+    });
+
     it('throws CostProfileNameTakenError on duplicate name within the org', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
@@ -109,6 +130,33 @@ describe('cost-profile service', () => {
       expect(versions[1]?.changedFields).toContain('name');
       expect(versions[1]?.changedFields).toContain('amount');
       expect(versions[1]?.changedFields).not.toContain('vatRate');
+    });
+
+    // PR-7 öncesi blocker: recompute vatAmount on amount OR vatRate change.
+    // amount-only change → vatAmount recomputed; vatRate-only change → same;
+    // neither → vatAmount left alone (no needless writes).
+    it('recomputes vatAmount when amount changes', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+
+      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const updated = await updateCostProfile(org.id, profile.id, { amount: '100.00' }, user.id);
+
+      // 100.00 × 18 / 100 = 18.00
+      expect(updated.vatAmount!.toFixed(2)).toBe('18.00');
+    });
+
+    it('recomputes vatAmount when vatRate changes', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+
+      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const updated = await updateCostProfile(org.id, profile.id, { vatRate: 20 }, user.id);
+
+      // 25.50 × 20 / 100 = 5.10
+      expect(updated.vatAmount!.toFixed(2)).toBe('5.10');
     });
 
     it('throws CostProfileNotFoundError for cross-org access', async () => {

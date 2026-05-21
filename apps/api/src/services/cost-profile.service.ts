@@ -41,6 +41,20 @@ export interface PaginationOpts {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
+ * Canonical KDV formula for the snapshot column (schema comment `PR-4`):
+ *   vat_amount = ROUND(amount × vatRate / 100, 2)
+ *
+ * Valid because `amount` is the NET (KDV-hariç) value. Used to backfill
+ * `cost_profiles.vat_amount` + `cost_profile_versions.vat_amount` on every
+ * create/update — captureCostSnapshot reads this as authoritative; the
+ * defensive fallback there exists only for pre-PR-6 rows that bypass this
+ * service.
+ */
+function computeVatAmount(amount: Decimal | string, vatRate: number): Decimal {
+  return new Decimal(amount).mul(vatRate).div(100).toDecimalPlaces(2);
+}
+
+/**
  * Encode / decode opaque cursors. The cursor is the profile's id
  * (UUID), base64-encoded so callers treat it as opaque.
  */
@@ -67,8 +81,9 @@ function toWireProfile(row: CostProfile): CostProfile {
     vatRate: row.vatRate,
     // PR-4: denormalize KDV tutarı (design §3.5 düzeltilmiş, §12.1 #10).
     // Wire'da exposed — frontend tüketicilerine `amount × vatRate / 100` türetme
-    // yükü yıkılmaz. Şu an migration backfill'iyle dolu, PR-6 service'i create/
-    // update sırasında doldurur.
+    // yükü yıkılmaz. Backfill formula `vat_amount = amount × vatRate / 100`
+    // service'in create/update/archive/restore path'lerinde uygulanır
+    // (PR-7 öncesi blocker — 2026-05-21).
     vatAmount: row.vatAmount,
     fxRateMode: row.fxRateMode,
     manualFxRate: row.manualFxRate,
@@ -205,14 +220,19 @@ export async function createCostProfile(
 ): Promise<CostProfile> {
   try {
     const profile = await prisma.$transaction(async (tx) => {
+      const amount = new Decimal(input.amount);
+      const vatRate = input.vatRate ?? 0;
+      const vatAmount = computeVatAmount(amount, vatRate);
+
       const row = await tx.costProfile.create({
         data: {
           organizationId: orgId,
           name: input.name,
           type: input.type,
-          amount: new Decimal(input.amount),
+          amount,
           currency: input.currency ?? 'TRY',
-          vatRate: input.vatRate ?? 0,
+          vatRate,
+          vatAmount,
           fxRateMode: input.fxRateMode ?? 'AUTO',
           manualFxRate: input.manualFxRate !== undefined ? new Decimal(input.manualFxRate) : null,
           note: input.note ?? null,
@@ -231,6 +251,7 @@ export async function createCostProfile(
           amount: row.amount,
           currency: row.currency,
           vatRate: row.vatRate,
+          vatAmount: row.vatAmount,
           fxRateMode: row.fxRateMode,
           manualFxRate: row.manualFxRate,
           note: row.note,
@@ -295,7 +316,13 @@ export async function updateCostProfile(
       });
       const nextVersion = (agg._max.version ?? 0) + 1;
 
-      // Build update data from non-undefined patch fields
+      // Build update data from non-undefined patch fields. vatAmount is
+      // derived from (amount, vatRate); recompute when either changes so the
+      // denormalized column stays in lockstep with its inputs.
+      const nextAmount = patch.amount !== undefined ? new Decimal(patch.amount) : locked.amount;
+      const nextVatRate = patch.vatRate !== undefined ? patch.vatRate : locked.vatRate;
+      const vatAmountChanged = patch.amount !== undefined || patch.vatRate !== undefined;
+
       const updateData: Parameters<typeof tx.costProfile.update>[0]['data'] = {
         updatedBy: actorId,
         ...(patch.name !== undefined ? { name: patch.name } : {}),
@@ -303,6 +330,7 @@ export async function updateCostProfile(
         ...(patch.amount !== undefined ? { amount: new Decimal(patch.amount) } : {}),
         ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
         ...(patch.vatRate !== undefined ? { vatRate: patch.vatRate } : {}),
+        ...(vatAmountChanged ? { vatAmount: computeVatAmount(nextAmount, nextVatRate) } : {}),
         ...(patch.fxRateMode !== undefined ? { fxRateMode: patch.fxRateMode } : {}),
         ...(patch.manualFxRate !== undefined
           ? { manualFxRate: patch.manualFxRate !== null ? new Decimal(patch.manualFxRate) : null }
@@ -338,6 +366,7 @@ export async function updateCostProfile(
           amount: row.amount,
           currency: row.currency,
           vatRate: row.vatRate,
+          vatAmount: row.vatAmount,
           fxRateMode: row.fxRateMode,
           manualFxRate: row.manualFxRate,
           note: row.note,
@@ -400,6 +429,7 @@ export async function archiveCostProfile(
         amount: row.amount,
         currency: row.currency,
         vatRate: row.vatRate,
+        vatAmount: row.vatAmount,
         fxRateMode: row.fxRateMode,
         manualFxRate: row.manualFxRate,
         note: row.note,
@@ -457,6 +487,7 @@ export async function restoreCostProfile(
         amount: row.amount,
         currency: row.currency,
         vatRate: row.vatRate,
+        vatAmount: row.vatAmount,
         fxRateMode: row.fxRateMode,
         manualFxRate: row.manualFxRate,
         note: row.note,
