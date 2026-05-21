@@ -28,6 +28,7 @@ import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { recomputeSettledProfit } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
+import { applyFastDeliveryCorrection } from './fast-delivery-correction';
 import type { HandleSettlementResult } from './sale';
 
 const CONFIRMABLE_FEE_TYPES = ['PLATFORM_SERVICE', 'PLATFORM_SERVICE_FAST', 'STOPPAGE'] as const;
@@ -79,13 +80,19 @@ export async function handlePaymentOrderEntry(
       data: { confirmedAt, confirmedBy },
     });
 
-    // 2. Recompute settledNetProfit from confirmed fees + cost snapshots.
+    // 2. Apply fastDelivery PSF correction BEFORE recompute — the new
+    //    CREDIT OrderFee row needs to land before the profit aggregate.
+    //    Idempotent via `externalRef.derivedFrom = 'fast-delivery'` filter
+    //    (PR-7 commit 7).
+    await applyFastDeliveryCorrection(order.id, tx);
+
+    // 3. Recompute settledNetProfit from confirmed fees + cost snapshots.
     //    recomputeSettledProfit only writes when all cost snapshots
     //    present + saleSubtotalNet/saleVatTotal non-null — skip in
     //    incomplete state is safe (subsequent cron run picks it up).
     await recomputeSettledProfit(order.id, tx);
 
-    // 3. Mark order FULLY_SETTLED. Mutable column — set regardless of
+    // 4. Mark order FULLY_SETTLED. Mutable column — set regardless of
     //    whether settledNetProfit was written (status reflects cycle
     //    completion; profit value reflects calculation completeness).
     await tx.order.update({
