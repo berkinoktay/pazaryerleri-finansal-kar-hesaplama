@@ -21,6 +21,11 @@ export const StoreSchema = z
     status: z.enum(StoreStatus).openapi({ example: 'ACTIVE' }),
     lastConnectedAt: z.string().datetime().nullable().openapi({ example: '2026-04-21T10:30:00Z' }),
     lastSyncAt: z.string().datetime().nullable().openapi({ example: null }),
+    // Non-null when a Trendyol webhook subscription is registered for this
+    // store. Drives the UI "webhook bağlı" badge — null means polling-only.
+    // `webhookId` / `webhookSecret` columns are intentionally NOT exposed:
+    // the UUID has no UI use, and the secret is a credential.
+    webhookActiveAt: z.string().datetime().nullable().openapi({ example: '2026-05-20T12:00:00Z' }),
     createdAt: z.string().datetime().openapi({ example: '2026-04-21T10:30:00Z' }),
     updatedAt: z.string().datetime().openapi({ example: '2026-04-21T10:30:00Z' }),
   })

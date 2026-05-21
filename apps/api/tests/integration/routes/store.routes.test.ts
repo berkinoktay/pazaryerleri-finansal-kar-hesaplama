@@ -111,10 +111,15 @@ describe('Store routes', () => {
       expect(body.environment).toBe('PRODUCTION');
       expect(body.externalAccountId).toBe('99999');
       expect(body.status).toBe('ACTIVE');
-      // NEVER return credentials.
+      // PR-C5 wire shape — UI badge reads webhookActiveAt. Probe-only mock
+      // here doesn't register the webhook, so the value is null.
+      expect(body).toHaveProperty('webhookActiveAt');
+      expect(body.webhookActiveAt).toBeNull();
+      // NEVER return credentials OR the webhook secret blob.
       expect('credentials' in body).toBe(false);
+      expect('webhookSecret' in body).toBe(false);
       const raw = JSON.stringify(body);
-      expect(raw).not.toMatch(/apiKey|apiSecret|credentials/i);
+      expect(raw).not.toMatch(/apiKey|apiSecret|credentials|webhookSecret/i);
 
       // DB row has encrypted credentials (not plaintext JSON).
       const row = await prisma.store.findFirstOrThrow({

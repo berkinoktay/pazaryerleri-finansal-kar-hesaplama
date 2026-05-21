@@ -14,6 +14,7 @@ import {
 import { ShippingConfigForm } from '@/features/shipping/components/shipping-config-form';
 
 import { StoresEmptyState } from './stores-empty-state';
+import { WebhookSection } from './webhook-section';
 
 interface StoreOption {
   id: string;
@@ -94,6 +95,8 @@ export function StoresSettingsPageClient({
         storeId={selectedStore.id}
         platform={selectedStore.platform}
       />
+
+      <WebhookSection orgId={orgId} storeId={selectedStore.id} platform={selectedStore.platform} />
     </div>
   );
 }

@@ -155,6 +155,26 @@
         "DUPLICATE_STORE_CONNECTION": "Bu Trendyol hesabı zaten bağlı.",
         "generic": "Mağaza bağlanamadı. Lütfen tekrar dene."
       }
+    },
+    "webhook": {
+      "title": "Webhook",
+      "description": "Trendyol siparişlerin anlık olarak yansıması için webhook bağlantısı.",
+      "status": {
+        "label": "Durum",
+        "active": "Webhook bağlı",
+        "inactive": "Webhook bağlı değil"
+      },
+      "activatedAtLabel": "Aktif:",
+      "url": {
+        "label": "Webhook URL"
+      },
+      "rotate": {
+        "action": "Gizli anahtarı yenile",
+        "confirmTitle": "Webhook gizli anahtarını yenile?",
+        "confirmDescription": "Mevcut webhook anahtarı geçersiz olur ve Trendyol'a yenisi tanıtılır. Bu işlem geri alınamaz.",
+        "confirmAction": "Anahtarı yenile",
+        "success": "Webhook gizli anahtarı yenilendi."
+      }
     }
   },
   "metadata": {

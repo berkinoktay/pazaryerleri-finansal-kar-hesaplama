@@ -155,6 +155,26 @@
         "DUPLICATE_STORE_CONNECTION": "This Trendyol account is already connected.",
         "generic": "We couldn't connect the store. Please try again."
       }
+    },
+    "webhook": {
+      "title": "Webhook",
+      "description": "Trendyol webhook subscription for real-time order updates.",
+      "status": {
+        "label": "Status",
+        "active": "Webhook connected",
+        "inactive": "Webhook not connected"
+      },
+      "activatedAtLabel": "Active:",
+      "url": {
+        "label": "Webhook URL"
+      },
+      "rotate": {
+        "action": "Rotate secret",
+        "confirmTitle": "Rotate webhook secret?",
+        "confirmDescription": "The current webhook secret will be invalidated and a new one registered with Trendyol. This action cannot be undone.",
+        "confirmAction": "Rotate secret",
+        "success": "Webhook secret rotated."
+      }
     }
   },
   "metadata": {

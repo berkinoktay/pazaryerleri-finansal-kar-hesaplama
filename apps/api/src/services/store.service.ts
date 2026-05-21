@@ -30,6 +30,7 @@ function toStoreResponse(store: PrismaStore): Store {
     status: store.status,
     lastConnectedAt: store.lastConnectedAt?.toISOString() ?? null,
     lastSyncAt: store.lastSyncAt?.toISOString() ?? null,
+    webhookActiveAt: store.webhookActiveAt?.toISOString() ?? null,
     createdAt: store.createdAt.toISOString(),
     updatedAt: store.updatedAt.toISOString(),
   };
