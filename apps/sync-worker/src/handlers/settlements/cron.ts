@@ -2,15 +2,23 @@
 //
 // One chunk = one full settlement window scan (3 settlements transactionTypes
 // + 3 otherfinancials types). Single-chunk semantics chosen because:
-//   - 15-day window total volume << orders epic's 90-day backfill
+//   - 60-day window total volume << orders epic's 90-day backfill
 //   - Per-row $transaction isolation already gives partial-fail recovery
 //   - Cursor-resume per-page complexity defers V2 scaling work
 //
 // Cron cadence (design §5.5 line 1139-1140):
-//   - Settlement scan: 6 saat / 15 gün window
+//   - Settlement scan: 6 saat / 60 gün window
 //   - Settlement re-poll (PR-12): same scan, surfaces orphan paymentOrderId
 //
-// 6h tick / 15d window overlap is ~14.75d. Handlers' idempotency anchors
+// Window sizing (PR-7 stage validation BUG #5, 2026-05-22): Trendyol pays
+// orders via weekly Wednesday cycles after a category-dependent payment
+// term (paymentPeriod 7-28 days; see cari-hesap-ekstresi doc line 103).
+// Worst case lifecycle: T+10 delivery + T+28 payment term + T+7 Wednesday
+// wait = T+45. 15-day window (V1 initial estimate) missed the entire
+// stamping phase — observed empirically in stage as 0/500 paymentOrderId
+// in T-15..T-0 vs 97/500 in T-30..T-15. 60d = 15d safety buffer over T+45.
+//
+// 6h tick / 60d window overlap is ~59.75d. Handlers' idempotency anchors
 // (handleSale OrderItem update no-op; handleReturn externalRef.trendyolId
 // pre-insert check; handleCommissionInvoice null FK filter; PaymentOrder
 // confirmedAt null filter; fastDelivery derivedFrom marker) absorb the
@@ -41,7 +49,7 @@ import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
 import type { ChunkResult, ModuleHandler } from '../types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const SCAN_WINDOW_DAYS = 15;
+const SCAN_WINDOW_DAYS = 60;
 
 // V1 happy path — research §3.3 confirmed only Sale/Discount/Return have
 // nonzero observations in 60-day windows. Rare types stay enumerated in
@@ -80,7 +88,7 @@ const DEFAULT_FETCHERS: SettlementsFetchers = {
 /**
  * Process one full settlement cycle for a store.
  *
- * Cursor: unused. Settlement window is always "now − 15d → now" — re-poll
+ * Cursor: unused. Settlement window is always "now − 60d → now" — re-poll
  * cron handles drift, no resume state needed.
  *
  * Returns `done` with the total row count consumed (telemetry only — the
