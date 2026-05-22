@@ -1,17 +1,24 @@
-// Settlement scan window regression guard (PR-7 stage validation BUG #5).
+// Settlement scan window regression guard (PR-7 stage validation BUG #5 + #6).
 //
-// Trendyol payment cycle T+45 worst-case (10 delivery + 28 payment term +
-// 7 Wednesday wait) — a 15-day window misses the entire paymentOrderId
-// stamping phase. Empirical stage observation 2026-05-22: 97/500 Sale
-// rows stamped in T-30..T-15 segment; 0/500 in T-15..T-0. Fix bumps
-// SCAN_WINDOW_DAYS 15 → 60. This test pins the contract: a Sale row
-// dated T-35d (inside the stamping phase but outside the legacy 15d
-// window) must be picked up by the cron, and Order.paymentOrderId must
-// backfill so PaymentOrder cascade can resolve later in the cycle.
+// Two-layer contract pinned here:
+//
+// 1. (BUG #5) Trendyol payment cycle T+45 worst-case (10 delivery + 28
+//    payment term + 7 Wednesday wait) — a 15-day overall scan misses
+//    the entire paymentOrderId stamping phase. Empirical stage 2026-05-22:
+//    97/500 Sale rows stamped in T-30..T-15; 0/500 in T-15..T-0. Total
+//    scan window = 60d.
+//
+// 2. (BUG #6) Trendyol /financial/settlements + /otherfinancials enforce
+//    a 15-day per-call window (FINANCIAL_WINDOW_MAX_DAYS). The 60-day
+//    scan therefore slices into 4 sliding 15-day chunks; each fetcher
+//    call's window must respect the per-call cap, and the union of the
+//    chunk windows must cover the full 60d scan.
 //
 // Assertions:
-//   1. fetcher receives startDate ≈ now − 60d (window range contract)
-//   2. T-35d Sale row reaches handleSale → Order.paymentOrderId backfill
+//   - Every fetcher call window ≤ 15 days (vendor per-call cap)
+//   - Union of windows ≈ 60 days (BUG #5 coverage)
+//   - A T-35d Sale row (falls inside the 3rd chunk) reaches handleSale
+//     and backfills Order.paymentOrderId
 
 import { randomUUID } from 'node:crypto';
 
@@ -181,7 +188,7 @@ describe('processSettlementsChunk — scan window coverage', () => {
     await truncateAll();
   });
 
-  it('opens a 60-day window and picks up T-35d Sale rows', async () => {
+  it('chunks the 60-day scan into ≤15-day slices and backfills a T-35d Sale row', async () => {
     const { storeId, syncLogId, orderId } = await buildScenario();
     const now = Date.now();
     const t35d = now - 35 * MS_PER_DAY;
@@ -189,12 +196,22 @@ describe('processSettlementsChunk — scan window coverage', () => {
 
     const capturedWindows: { start: Date; end: Date }[] = [];
 
+    // Mock fetcher mirrors Trendyol's date filter: a row is only yielded
+    // when its transactionDate falls inside the requested chunk window.
+    // This means the T-35d row reaches the dispatcher exactly once —
+    // via the chunk that covers T-45..T-30.
     const mockFetchers = {
       fetchSettlements: async function* (
         opts: FetchSettlementsOpts,
       ): AsyncGenerator<TrendyolFinancialTransaction, void> {
         capturedWindows.push({ start: opts.startDate, end: opts.endDate });
-        if (opts.transactionType === 'Sale') yield saleRow;
+        if (
+          opts.transactionType === 'Sale' &&
+          saleRow.transactionDate >= opts.startDate.getTime() &&
+          saleRow.transactionDate <= opts.endDate.getTime()
+        ) {
+          yield saleRow;
+        }
       },
       fetchOtherFinancials: async function* (
         _opts: FetchOtherFinancialsOpts,
@@ -206,18 +223,27 @@ describe('processSettlementsChunk — scan window coverage', () => {
     const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
     await processSettlementsChunk({ syncLog, cursor: null }, mockFetchers);
 
-    // 1. Window contract: every fetcher invocation receives a startDate
-    //    ~60 days before endDate. Tolerance: ±0.1d for execution drift.
+    // 1. Per-call window cap (BUG #6): every chunk respects the vendor
+    //    15-day limit. 0.1d tolerance for execution drift.
     expect(capturedWindows.length).toBeGreaterThan(0);
     capturedWindows.forEach((win, i) => {
       const days = (win.end.getTime() - win.start.getTime()) / MS_PER_DAY;
-      expect(days, `window span on call ${i}`).toBeGreaterThan(59.9);
-      expect(days, `window span on call ${i}`).toBeLessThan(60.1);
+      expect(days, `span on call ${i}`).toBeGreaterThan(0);
+      expect(days, `span on call ${i}`).toBeLessThan(15.1);
     });
 
-    // 2. T-35d row reached handleSale and backfilled Order.paymentOrderId.
-    //    With a 15d window this assertion would fail (row out of range,
-    //    fetcher never yielded it through the dispatcher).
+    // 2. Total coverage (BUG #5): the union of chunks spans the full
+    //    60-day scan window. earliestStart ≈ T-60d, latestEnd ≈ T-0.
+    const earliestStart = Math.min(...capturedWindows.map((w) => w.start.getTime()));
+    const latestEnd = Math.max(...capturedWindows.map((w) => w.end.getTime()));
+    const totalDays = (latestEnd - earliestStart) / MS_PER_DAY;
+    expect(totalDays, 'total scan coverage').toBeGreaterThan(59.9);
+    expect(totalDays, 'total scan coverage').toBeLessThan(60.1);
+
+    // 3. T-35d row reached handleSale via the chunk that covers it →
+    //    Order.paymentOrderId backfilled. Pre-chunking this would only
+    //    fire if the entire 60d window was sent in one call (which the
+    //    client rejects), so this is the integration kill-shot.
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(updated.paymentOrderId).toEqual(BigInt(PAYMENT_ORDER_ID));
     expect(updated.paymentDate).not.toBeNull();

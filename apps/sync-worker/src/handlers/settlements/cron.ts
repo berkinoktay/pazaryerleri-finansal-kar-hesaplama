@@ -18,6 +18,15 @@
 // stamping phase — observed empirically in stage as 0/500 paymentOrderId
 // in T-15..T-0 vs 97/500 in T-30..T-15. 60d = 15d safety buffer over T+45.
 //
+// API constraint (BUG #6, 2026-05-22): /financial/settlements and
+// /financial/otherfinancials enforce a 15-day max window on each call
+// (FINANCIAL_WINDOW_MAX_DAYS from settlements client; cari-hesap-ekstresi
+// doc: "Başlangıç ve bitiş tarihi arasındaki süre 15 günden uzun
+// olamaz."). The 60d scan is therefore sliced into ceil(60/15)=4
+// sliding chunks, each ≤15d. Chunk boundaries align so the newest
+// chunk ends at `now`; the oldest chunk's start is clamped to
+// `now − SCAN_WINDOW_DAYS` if the slice would otherwise overshoot.
+//
 // 6h tick / 60d window overlap is ~59.75d. Handlers' idempotency anchors
 // (handleSale OrderItem update no-op; handleReturn externalRef.trendyolId
 // pre-insert check; handleCommissionInvoice null FK filter; PaymentOrder
@@ -36,6 +45,7 @@ import type { Store, SyncLog } from '@pazarsync/db';
 import {
   fetchOtherFinancials,
   fetchSettlements,
+  FINANCIAL_WINDOW_MAX_DAYS,
   isTrendyolCredentials,
   type FetchOtherFinancialsOpts,
   type FetchSettlementsOpts,
@@ -106,58 +116,81 @@ export async function processSettlementsChunk(
   const credentials = decryptStoreCredentials(store);
 
   const endDate = new Date();
-  const startDate = new Date(endDate.getTime() - SCAN_WINDOW_DAYS * MS_PER_DAY);
+  const overallStartTime = endDate.getTime() - SCAN_WINDOW_DAYS * MS_PER_DAY;
+  const chunkCount = Math.ceil(SCAN_WINDOW_DAYS / FINANCIAL_WINDOW_MAX_DAYS);
 
   let totalProcessed = 0;
 
-  for (const transactionType of SETTLEMENT_TYPES) {
-    const generator = fetchers.fetchSettlements({
-      environment: store.environment,
-      credentials,
-      transactionType,
-      startDate,
-      endDate,
-    });
-    for await (const row of generator) {
-      try {
-        await prisma.$transaction(async (tx) => {
-          await dispatchSettlementRow(store.id, store.organizationId, transactionType, row, tx);
-        });
-        totalProcessed += 1;
-      } catch (err) {
-        syncLog.error('settlements.dispatch.failed', {
-          syncLogId: log.id,
-          storeId: store.id,
-          rowId: row.id,
-          transactionType,
-          errorMessage: err instanceof Error ? err.message : String(err),
-        });
+  // Slide newest → oldest in FINANCIAL_WINDOW_MAX_DAYS slices. Oldest chunk
+  // start is clamped to overallStartTime so non-divisible SCAN_WINDOW_DAYS
+  // values (e.g. 50d / 15d → 4 chunks but the 4th is 5d) still respect the
+  // configured scan window.
+  for (let chunkIdx = 0; chunkIdx < chunkCount; chunkIdx += 1) {
+    const chunkEndMs = endDate.getTime() - chunkIdx * FINANCIAL_WINDOW_MAX_DAYS * MS_PER_DAY;
+    const chunkStartMs = Math.max(
+      chunkEndMs - FINANCIAL_WINDOW_MAX_DAYS * MS_PER_DAY,
+      overallStartTime,
+    );
+    const chunkEnd = new Date(chunkEndMs);
+    const chunkStart = new Date(chunkStartMs);
+
+    for (const transactionType of SETTLEMENT_TYPES) {
+      const generator = fetchers.fetchSettlements({
+        environment: store.environment,
+        credentials,
+        transactionType,
+        startDate: chunkStart,
+        endDate: chunkEnd,
+      });
+      for await (const row of generator) {
+        try {
+          await prisma.$transaction(async (tx) => {
+            await dispatchSettlementRow(store.id, store.organizationId, transactionType, row, tx);
+          });
+          totalProcessed += 1;
+        } catch (err) {
+          syncLog.error('settlements.dispatch.failed', {
+            syncLogId: log.id,
+            storeId: store.id,
+            rowId: row.id,
+            transactionType,
+            chunkIdx,
+            errorMessage: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
-  }
 
-  for (const transactionType of OTHER_FINANCIAL_TYPES) {
-    const generator = fetchers.fetchOtherFinancials({
-      environment: store.environment,
-      credentials,
-      transactionType,
-      startDate,
-      endDate,
-    });
-    for await (const row of generator) {
-      try {
-        await prisma.$transaction(async (tx) => {
-          await dispatchOtherFinancialRow(store.id, store.organizationId, transactionType, row, tx);
-        });
-        totalProcessed += 1;
-      } catch (err) {
-        syncLog.error('settlements.dispatch.failed', {
-          syncLogId: log.id,
-          storeId: store.id,
-          rowId: row.id,
-          transactionType,
-          errorMessage: err instanceof Error ? err.message : String(err),
-        });
+    for (const transactionType of OTHER_FINANCIAL_TYPES) {
+      const generator = fetchers.fetchOtherFinancials({
+        environment: store.environment,
+        credentials,
+        transactionType,
+        startDate: chunkStart,
+        endDate: chunkEnd,
+      });
+      for await (const row of generator) {
+        try {
+          await prisma.$transaction(async (tx) => {
+            await dispatchOtherFinancialRow(
+              store.id,
+              store.organizationId,
+              transactionType,
+              row,
+              tx,
+            );
+          });
+          totalProcessed += 1;
+        } catch (err) {
+          syncLog.error('settlements.dispatch.failed', {
+            syncLogId: log.id,
+            storeId: store.id,
+            rowId: row.id,
+            transactionType,
+            chunkIdx,
+            errorMessage: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
   }
