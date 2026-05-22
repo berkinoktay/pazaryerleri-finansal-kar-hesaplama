@@ -15,7 +15,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { StoreEnvironment } from '@pazarsync/db';
-import { MarketplaceUnreachable, RateLimitedError } from '@pazarsync/sync-core';
+import { MarketplaceUnreachable, RateLimitedError, syncLog } from '@pazarsync/sync-core';
 
 import { mapTrendyolResponseToDomainError } from './errors';
 import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
@@ -233,7 +233,9 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
   const actualDeliveryDate =
     deliveredEvent !== undefined ? epochMsToDate(deliveredEvent.createdDate) : null;
 
-  const mappedLines: MappedOrderLine[] = pkg.lines.map(mapLine);
+  const mappedLines: MappedOrderLine[] = pkg.lines.map((line) =>
+    mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }),
+  );
 
   // Package aggregate, per-line VAT-aware. Multi-vatRate order'larda her
   // line kendi vatRate'iyle hesaplanır, package toplam'ı doğru çıkar.
@@ -264,12 +266,54 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
   };
 }
 
-function mapLine(line: TrendyolOrderLine): MappedOrderLine {
-  const vatRate = new Decimal(line.vatRate);
+function mapLine(line: TrendyolOrderLine, ctx: { shipmentPackageId: number }): MappedOrderLine {
+  // Defensive sparse-field handling — PR-A regression hotfix.
+  //
+  // Webhook payload Zod schema (apps/api/src/routes/webhooks/trendyol-orders.routes.ts,
+  // PR #197) rejects lines with null/undefined `quantity` / `lineUnitPrice` /
+  // `lineGrossAmount` / `vatRate` at the 422 level. The sync flow's mapper did
+  // NOT have parallel validation — `new Decimal(undefined)` throws
+  // `[DecimalError] Invalid argument: null` and the whole sync chunk fails
+  // FAILED_RETRYABLE.
+  //
+  // Stage Trendyol getshipmentpackages occasionally returns sparse pricing on
+  // legacy/edge orders (single bad line in a 90-day window poisons the whole
+  // batch). Production prod environment returns full pricing for normal orders,
+  // but a defensive mapper keeps sync resilient if Trendyol ever ships a sparse
+  // order in prod.
+  //
+  // Fallback: `?? 0` keeps the line in the batch with effective-zero values.
+  // applyEstimateOnOrderCreate runs with conservative zeros; settlement
+  // reconciliation (PR-7) writes the real values when they land. Sentry/log
+  // signals the data gap upstream.
+  const missingFields: string[] = [];
+  if (line.quantity === undefined || line.quantity === null) missingFields.push('quantity');
+  if (line.lineUnitPrice === undefined || line.lineUnitPrice === null) {
+    missingFields.push('lineUnitPrice');
+  }
+  if (line.lineGrossAmount === undefined || line.lineGrossAmount === null) {
+    missingFields.push('lineGrossAmount');
+  }
+  if (line.vatRate === undefined || line.vatRate === null) missingFields.push('vatRate');
+
+  if (missingFields.length > 0) {
+    syncLog.warn('orders.sparse-line', {
+      shipmentPackageId: ctx.shipmentPackageId,
+      barcode: line.barcode,
+      missingFields,
+    });
+  }
+
+  const safeQuantity = line.quantity ?? 0;
+  const safeUnitPrice = line.lineUnitPrice ?? 0;
+  const safeGrossAmount = line.lineGrossAmount ?? 0;
+  const safeVatRate = line.vatRate ?? 0;
+
+  const vatRate = new Decimal(safeVatRate);
   const vatMultiplier = new Decimal(1).add(vatRate.div(100));
 
   // Per-unit KDV split. Trendyol lineUnitPrice'ı KDV dahil (research §7).
-  const unitPriceGross = new Decimal(line.lineUnitPrice);
+  const unitPriceGross = new Decimal(safeUnitPrice);
   const unitPriceNet = unitPriceGross.div(vatMultiplier).toDecimalPlaces(4);
   const unitVatAmount = unitPriceGross.sub(unitPriceNet).toDecimalPlaces(4);
 
@@ -277,8 +321,10 @@ function mapLine(line: TrendyolOrderLine): MappedOrderLine {
   // sonra %20 KDV split. (Discount commission iadesi T+0'da YOK — Settlement
   // worker PR-7 doldurur; bu mapper sadece T+0 estimate input'u verir.)
   const commissionRate =
-    line.commission !== undefined ? new Decimal(line.commission) : new Decimal(0);
-  const grossCommissionGross = new Decimal(line.lineGrossAmount).mul(commissionRate).div(100);
+    line.commission !== undefined && line.commission !== null
+      ? new Decimal(line.commission)
+      : new Decimal(0);
+  const grossCommissionGross = new Decimal(safeGrossAmount).mul(commissionRate).div(100);
   const commissionVatMultiplier = new Decimal(1).add(new Decimal(COMMISSION_VAT_RATE).div(100));
   const grossCommissionAmountNet = grossCommissionGross
     .div(commissionVatMultiplier)
@@ -294,7 +340,7 @@ function mapLine(line: TrendyolOrderLine): MappedOrderLine {
 
   return {
     barcode: line.barcode,
-    quantity: line.quantity,
+    quantity: safeQuantity,
     unitPriceNet: unitPriceNet.toString(),
     unitVatRate: vatRate.toString(),
     unitVatAmount: unitVatAmount.toString(),

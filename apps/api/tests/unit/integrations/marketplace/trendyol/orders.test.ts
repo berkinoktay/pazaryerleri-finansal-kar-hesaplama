@@ -281,6 +281,151 @@ describe('mapTrendyolShipmentPackage — KDV split arithmetic', () => {
   });
 });
 
+describe('mapTrendyolShipmentPackage — sparse pricing tolerance (PR-A regression hotfix)', () => {
+  // Trendyol stage occasionally returns lines with null/undefined pricing.
+  // Webhook flow rejects via Zod (PR #197); sync flow must tolerate-and-log
+  // so a single bad line doesn't poison the entire sync chunk.
+  // Each test casts the partial line through `any` because TrendyolOrderLine
+  // declares quantity/lineUnitPrice/etc. as TS-required — at runtime Trendyol
+  // may still emit null/undefined.
+
+  it('lineUnitPrice null → unitPriceNet/unitVatAmount = 0, line stays in batch', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      makePackage({
+        lines: [
+          {
+            lineId: 1,
+            barcode: 'B-1',
+            quantity: 1,
+            lineGrossAmount: 120,
+            vatRate: 20,
+            commission: 10,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...({ lineUnitPrice: null } as any),
+          },
+        ],
+      }),
+    );
+    expect(mapped.lines).toHaveLength(1);
+    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('0');
+    expect(new Decimal(mapped.lines[0]!.unitVatAmount).toString()).toBe('0');
+    // commission still uses lineGrossAmount=120 (non-null)
+    expect(new Decimal(mapped.lines[0]!.grossCommissionAmountNet).toString()).toBe('10');
+  });
+
+  it('lineGrossAmount null → grossCommission = 0', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      makePackage({
+        lines: [
+          {
+            lineId: 1,
+            barcode: 'B-1',
+            quantity: 1,
+            lineUnitPrice: 120,
+            vatRate: 20,
+            commission: 10,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...({ lineGrossAmount: null } as any),
+          },
+        ],
+      }),
+    );
+    expect(mapped.lines).toHaveLength(1);
+    // commission = 0 because lineGrossAmount is 0 (sparse)
+    expect(new Decimal(mapped.lines[0]!.grossCommissionAmountNet).toString()).toBe('0');
+    expect(new Decimal(mapped.lines[0]!.grossCommissionVatAmount).toString()).toBe('0');
+    // unitPriceNet still computed from lineUnitPrice=120 (non-null)
+    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('100');
+  });
+
+  it('vatRate null → vatRate = 0, no division by zero', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      makePackage({
+        lines: [
+          {
+            lineId: 1,
+            barcode: 'B-1',
+            quantity: 1,
+            lineUnitPrice: 100,
+            lineGrossAmount: 100,
+            commission: 10,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...({ vatRate: null } as any),
+          },
+        ],
+      }),
+    );
+    expect(mapped.lines).toHaveLength(1);
+    expect(new Decimal(mapped.lines[0]!.unitVatRate).toString()).toBe('0');
+    // vatMultiplier = 1 → unitPriceNet equals unitPriceGross
+    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('100');
+    expect(new Decimal(mapped.lines[0]!.unitVatAmount).toString()).toBe('0');
+  });
+
+  it('quantity null → quantity 0, line effectively skipped from package aggregate', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      makePackage({
+        lines: [
+          {
+            lineId: 1,
+            barcode: 'B-1',
+            lineUnitPrice: 120,
+            lineGrossAmount: 120,
+            vatRate: 20,
+            commission: 10,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...({ quantity: null } as any),
+          },
+        ],
+      }),
+    );
+    expect(mapped.lines).toHaveLength(1);
+    expect(mapped.lines[0]!.quantity).toBe(0);
+    // saleSubtotalNet = qty × unitPriceNet = 0 × 100 = 0
+    expect(new Decimal(mapped.saleSubtotalNet).toString()).toBe('0');
+    expect(new Decimal(mapped.saleVatTotal).toString()).toBe('0');
+  });
+
+  it('multi-line: 1 sparse + 1 valid → valid line aggregates correctly', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      makePackage({
+        lines: [
+          // Sparse line — null lineUnitPrice
+          {
+            lineId: 1,
+            barcode: 'B-sparse',
+            quantity: 1,
+            lineGrossAmount: 100,
+            vatRate: 20,
+            commission: 10,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...({ lineUnitPrice: null } as any),
+          },
+          // Valid line
+          {
+            lineId: 2,
+            barcode: 'B-valid',
+            quantity: 1,
+            lineUnitPrice: 120,
+            lineGrossAmount: 120,
+            vatRate: 20,
+            commission: 10,
+          },
+        ],
+      }),
+    );
+    expect(mapped.lines).toHaveLength(2);
+    // Sparse line: zeros
+    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('0');
+    // Valid line: 100 net + 20 vat
+    expect(new Decimal(mapped.lines[1]!.unitPriceNet).toString()).toBe('100');
+    expect(new Decimal(mapped.lines[1]!.unitVatAmount).toString()).toBe('20');
+    // Package aggregate = sparse (0) + valid (100 net, 20 vat)
+    expect(new Decimal(mapped.saleSubtotalNet).toString()).toBe('100');
+    expect(new Decimal(mapped.saleVatTotal).toString()).toBe('20');
+  });
+});
+
 describe('mapTrendyolShipmentPackage — status + dates', () => {
   it.each([
     ['Created', 'PENDING'],
