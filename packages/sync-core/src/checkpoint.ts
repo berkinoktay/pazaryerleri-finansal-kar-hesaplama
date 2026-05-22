@@ -43,8 +43,12 @@ export function parseProductsCursor(raw: unknown): ProductsCursor | null {
  * Initial backfill: window set on first chunk (90 days default — V1 hardcoded).
  * Subsequent chunks within same window: page advances until totalElements.
  *
- * Future PR-D (delta sync): add `kind: 'delta'` variant with
- * `sinceLastModifiedDate` cursor.
+ * **Deprecated by BUG #9 migration (2026-05-22):** the orders handler now
+ * uses the cursor-based `getShipmentPackagesStream` endpoint. This variant
+ * is preserved in the discriminated union so legacy `SyncLog.pageCursor`
+ * rows still parse — the handler treats them as a fresh-start signal and
+ * restarts under the new `stream-window` cursor. Will be removed in V2
+ * once no `page-window` rows remain.
  */
 export const OrdersPageWindowCursorSchema = z.object({
   kind: z.literal('page-window'),
@@ -57,7 +61,41 @@ export const OrdersPageWindowCursorSchema = z.object({
 });
 export type OrdersPageWindowCursor = z.infer<typeof OrdersPageWindowCursorSchema>;
 
-export const OrdersCursorSchema = z.discriminatedUnion('kind', [OrdersPageWindowCursorSchema]);
+/**
+ * Cursor shape for orders sync — stream endpoint (BUG #9, 2026-05-22).
+ *
+ * Trendyol's `getShipmentPackagesStream` is cursor-based with an opaque
+ * `nextCursor` token and a 14-day per-call window cap. The handler chunks
+ * the configured backfill (90 days = Trendyol's 3-month stream max) into
+ * `ceil(90 / 14) = 7` sliding 14-day slices. Each tick processes one
+ * cursor-page; the cursor advances either within the current chunk
+ * (`streamCursor` updated) or moves to the next chunk (`chunkIndex` bumped,
+ * `streamCursor` reset to null).
+ *
+ *   endDate         — fixed at sync start, defines the newest slice boundary.
+ *   chunkIndex      — 0 = newest 14d slice, increases backwards through history.
+ *   streamCursor    — Trendyol's opaque token; null = start of the slice.
+ *
+ * Doc rule (line 77 of getshipmentpackagesstream.md): a cursor is tied to
+ * its filter — sending the same cursor with different
+ * `lastModifiedStartDate/EndDate` returns 400. The handler honours this by
+ * resetting `streamCursor` to null whenever `chunkIndex` changes.
+ */
+export const OrdersStreamWindowCursorSchema = z.object({
+  kind: z.literal('stream-window'),
+  /** Sync başlangıcında set + sabit. Chunk window'ları buradan hesaplanır. */
+  endDate: z.number().int().min(0),
+  /** 0..N-1 — newest → oldest. N = ceil(INITIAL_BACKFILL_DAYS / STREAM_CHUNK_DAYS). */
+  chunkIndex: z.number().int().min(0),
+  /** Trendyol opaque nextCursor; null = chunk başı (yeni stream). */
+  streamCursor: z.string().nullable(),
+});
+export type OrdersStreamWindowCursor = z.infer<typeof OrdersStreamWindowCursorSchema>;
+
+export const OrdersCursorSchema = z.discriminatedUnion('kind', [
+  OrdersPageWindowCursorSchema,
+  OrdersStreamWindowCursorSchema,
+]);
 export type OrdersCursor = z.infer<typeof OrdersCursorSchema>;
 
 export function parseOrdersCursor(raw: unknown): OrdersCursor | null {

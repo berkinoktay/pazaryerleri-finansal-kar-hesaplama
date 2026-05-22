@@ -284,6 +284,28 @@ export interface TrendyolOrdersResponse {
   content: TrendyolShipmentPackage[];
 }
 
+/**
+ * Response shape for `getShipmentPackagesStream` — cursor-based pagination.
+ *
+ * Unlike `TrendyolOrdersResponse` (page-based), this endpoint omits
+ * `totalElements`/`totalPages` and provides an opaque `nextCursor` token
+ * plus an explicit `hasMore` flag. The cursor must be passed back verbatim
+ * on subsequent calls; sending the same cursor with different
+ * `lastModifiedStartDate/EndDate` filters returns 400 Bad Request.
+ *
+ * Source: docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/
+ * siparis-entegrasyonu/siparis-paketlerini-akis-ile-cekme-getshipmentpackagesstream.md
+ */
+export interface TrendyolOrdersStreamResponse {
+  /** True if more pages exist; false on the terminal page of a stream. */
+  hasMore: boolean;
+  /** Opaque cursor for the next call; null on the terminal page. */
+  nextCursor: string | null;
+  /** Number of items returned in this page (≤ requested `size`). */
+  size: number;
+  content: TrendyolShipmentPackage[];
+}
+
 // ─── Mapped Order DTO — KDV-split, ready for Order/OrderItem upsert ─────
 // design §2.3 + research §7.3 — per-line KDV ayrıştırma:
 //   unitPriceNet         = lineUnitPrice / (1 + vatRate/100)

@@ -22,6 +22,10 @@ const BASE_ITEM = {
   commissionRate: new Decimal('10.00'),
   commissionAmount: new Decimal('20.00'),
   unitCostSnapshot: null,
+  // PR-6 continuation: write-once guard reads unitCostSnapshotNet.
+  unitCostSnapshotNet: null,
+  unitCostSnapshotVatAmount: null,
+  unitCostSnapshotVatRate: null,
   snapshotCapturedAt: null,
   productVariant: { id: 'variant-1' },
 };
@@ -34,6 +38,9 @@ const TRY_PROFILE = {
   amount: new Decimal('50.00'),
   currency: 'TRY' as const,
   vatRate: 0,
+  // PR-4: KDV snapshot column. null exercises captureCostSnapshot's
+  // defensive compute (canonical formula). vatRate=0 → vatAmount=0 either way.
+  vatAmount: null,
   fxRateMode: 'AUTO' as const,
   manualFxRate: null,
   note: null,
@@ -95,9 +102,9 @@ function makeTx(overrides: {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('captureCostSnapshot', () => {
-  it('throws SnapshotAlreadyCapturedError when unitCostSnapshot is already set', async () => {
+  it('throws SnapshotAlreadyCapturedError when unitCostSnapshotNet is already set', async () => {
     const tx = makeTx({
-      item: { ...BASE_ITEM, unitCostSnapshot: new Decimal('100.00') },
+      item: { ...BASE_ITEM, unitCostSnapshotNet: new Decimal('100.00') },
     });
 
     await expect(captureCostSnapshot('item-1', tx as never)).rejects.toThrow(
@@ -133,7 +140,7 @@ describe('captureCostSnapshot', () => {
 
     expect(tx.orderItem.update).toHaveBeenCalledOnce();
     const updateCall = tx.orderItem.update.mock.calls[0]![0];
-    expect(updateCall.data.unitCostSnapshot.toFixed(2)).toBe('50.00');
+    expect(updateCall.data.unitCostSnapshotNet.toFixed(2)).toBe('50.00');
     expect(updateCall.data.snapshotCapturedAt).toBeInstanceOf(Date);
 
     expect(tx.orderItemCostSnapshotComponent.createMany).toHaveBeenCalledOnce();
@@ -162,7 +169,7 @@ describe('captureCostSnapshot', () => {
     expect(tx.orderItem.update).toHaveBeenCalledOnce();
     const updateCall = tx.orderItem.update.mock.calls[0]![0];
     // 10.00 USD × 45.19 = 451.90 TRY
-    expect(updateCall.data.unitCostSnapshot.toFixed(2)).toBe('451.90');
+    expect(updateCall.data.unitCostSnapshotNet.toFixed(2)).toBe('451.90');
 
     const components: Array<{
       fxRateSource: string;
@@ -194,7 +201,7 @@ describe('captureCostSnapshot', () => {
     expect(tx.orderItem.update).toHaveBeenCalledOnce();
     const updateCall = tx.orderItem.update.mock.calls[0]![0];
     // 10.00 USD × 35.50 = 355.00 TRY
-    expect(updateCall.data.unitCostSnapshot.toFixed(2)).toBe('355.00');
+    expect(updateCall.data.unitCostSnapshotNet.toFixed(2)).toBe('355.00');
 
     const components: Array<{
       fxRateSource: string;

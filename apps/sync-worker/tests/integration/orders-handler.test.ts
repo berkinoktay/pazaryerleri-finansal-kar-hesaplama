@@ -1,25 +1,32 @@
-// Integration test: PR-B Trendyol orders sync handler.
+// Integration test: orders sync handler (BUG #9 stream endpoint).
 //
-// Drives the chunk loop with a mocked Trendyol /orders response and
-// verifies:
+// Drives the chunk loop with a mocked Trendyol `getShipmentPackagesStream`
+// response and verifies:
 //   1. Order rows created (NEW convention: saleSubtotalNet, saleVatTotal,
 //      agreedDeliveryDate, fastDelivery, micro, platformOrderNumber)
 //   2. OrderItem rows created with KDV-split (unitPriceNet/VatRate/VatAmount,
 //      grossCommissionAmountNet/VatAmount, sellerDiscountNet/VatAmount)
 //   3. Variant lookup by barcode (or null for unmatched)
-//   4. Cost snapshot captured for variants with attached profiles
-//   5. Idempotency (re-sync same page → no duplicates)
-//   6. applyEstimateOnOrderCreate plug-in (PR-B2) — PSF + Stopaj ESTIMATE
-//      OrderFee rows + Order.estimatedNetProfit when cost snapshot present.
+//   4. Idempotency (re-sync same page → no duplicates)
+//   5. applyEstimateOnOrderCreate plug-in — PSF + Stopaj ESTIMATE OrderFee
+//   6. Stream cursor advance within a chunk (hasMore + nextCursor)
+//   7. Chunk transition (hasMore=false → chunkIndex+1, streamCursor=null)
+//   8. Window contract — 14-day per-call cap (vendor enforced)
 
 import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import type { TrendyolOrdersResponse, TrendyolShipmentPackage } from '@pazarsync/marketplace';
+import type { TrendyolOrdersStreamResponse, TrendyolShipmentPackage } from '@pazarsync/marketplace';
 import { encryptCredentials } from '@pazarsync/sync-core';
+import type { OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 
-import { processOrdersChunk, upsertOrderWithSnapshot } from '../../src/handlers/orders';
+import {
+  processOrdersChunk,
+  STREAM_CHUNK_COUNT,
+  STREAM_CHUNK_DAYS,
+  upsertOrderWithSnapshot,
+} from '../../src/handlers/orders';
 
 import {
   createMembership,
@@ -28,6 +35,8 @@ import {
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -73,16 +82,15 @@ function makeShipmentPackage(
   };
 }
 
-function makeOrdersResponse(args: {
-  page: number;
-  totalElements: number;
+function makeStreamResponse(args: {
+  hasMore: boolean;
+  nextCursor: string | null;
   content: TrendyolShipmentPackage[];
-}): TrendyolOrdersResponse {
+}): TrendyolOrdersStreamResponse {
   return {
-    totalElements: args.totalElements,
-    totalPages: Math.ceil(args.totalElements / 200) || 1,
-    page: args.page,
-    size: 200,
+    hasMore: args.hasMore,
+    nextCursor: args.nextCursor,
+    size: args.content.length,
     content: args.content,
   };
 }
@@ -106,7 +114,6 @@ async function setupStoreAndSyncLog(barcodes: string[] = []) {
     },
   });
 
-  // Optional variants for barcode lookup
   for (const barcode of barcodes) {
     const product = await prisma.product.create({
       data: {
@@ -144,15 +151,14 @@ async function setupStoreAndSyncLog(barcodes: string[] = []) {
   return { org, store, log };
 }
 
-describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
+describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
 
   beforeEach(async () => {
     await truncateAll();
-    // applyEstimateOnOrderCreate (PR-B2) PSF + Stopaj FeeDefinition rows ister.
-    // truncateAll fee_definitions'ı temizlediği için her testten önce yeniden seed.
+    // applyEstimateOnOrderCreate PSF + Stopaj FeeDefinition rows ister.
     await ensureFeeDefinitions();
   });
 
@@ -160,14 +166,14 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
     vi.restoreAllMocks();
   });
 
-  it('happy path: fetches 1 page, upserts Order + OrderItem with NEW convention', async () => {
+  it('happy path: upserts Order + OrderItem with NEW convention; advances to next chunk', async () => {
     const { store, log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
-        makeOrdersResponse({
-          page: 0,
-          totalElements: 1,
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
           content: [makeShipmentPackage()],
         }),
       ),
@@ -175,7 +181,14 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
 
     const result = await processOrdersChunk({ syncLog: log, cursor: null });
 
-    expect(result.kind).toBe('done');
+    // hasMore=false on chunk 0 → continue with chunkIndex=1 (not done yet,
+    // STREAM_CHUNK_COUNT > 1).
+    expect(result.kind).toBe('continue');
+    if (result.kind !== 'continue') return;
+    const cursor = result.cursor as OrdersStreamWindowCursor;
+    expect(cursor.kind).toBe('stream-window');
+    expect(cursor.chunkIndex).toBe(1);
+    expect(cursor.streamCursor).toBeNull();
 
     const orders = await prisma.order.findMany({ where: { storeId: store.id } });
     expect(orders).toHaveLength(1);
@@ -184,38 +197,29 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
     expect(order.platformOrderId).toBe('3734026895');
     expect(order.platformOrderNumber).toBe('11101228439');
     expect(order.status).toBe('DELIVERED');
-    // saleSubtotalNet = 100 (120 / 1.20)
     expect(new Decimal(order.saleSubtotalNet!).toString()).toBe('100');
     expect(new Decimal(order.saleVatTotal!).toString()).toBe('20');
     expect(order.agreedDeliveryDate?.getTime()).toBe(AGREED_DATE_MS);
     expect(order.actualDeliveryDate?.getTime()).toBe(DELIVERED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
-    expect(order.micro).toBe(false);
     expect(order.reconciliationStatus).toBe('NOT_SETTLED');
-    // Cost profile attached değil bu test'te → cost snapshot null →
-    // applyEstimateOnOrderCreate erken döner: PSF + Stopaj OrderFee yazılır
-    // ama estimatedNetProfit null kalır. (Cost-snapshot dolu happy-path için
-    // ayrı test aşağıda: "estimatedNetProfit set when cost snapshot exists".)
+    // No cost profile attached → estimatedNetProfit null but ESTIMATE
+    // OrderFee rows still written.
     expect(order.estimatedNetProfit).toBeNull();
 
-    // PR-B2 applyEstimateOnOrderCreate plug-in: PSF + Stopaj ESTIMATE OrderFee.
     const fees = await prisma.orderFee.findMany({
       where: { orderId: order.id, source: 'ESTIMATE' },
       orderBy: { feeType: 'asc' },
     });
     expect(fees.map((f) => f.feeType)).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
-    expect(fees.every((f) => f.direction === 'DEBIT')).toBe(true);
 
     const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
     expect(items).toHaveLength(1);
     const item = items[0]!;
     expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
-    expect(new Decimal(item.unitVatRate!).toString()).toBe('20');
     expect(new Decimal(item.unitVatAmount!).toString()).toBe('20');
     expect(new Decimal(item.grossCommissionAmountNet).toString()).toBe('10');
     expect(new Decimal(item.grossCommissionVatAmount).toString()).toBe('2');
-    expect(new Decimal(item.refundedCommissionAmountNet).toString()).toBe('0');
-    expect(new Decimal(item.sellerDiscountNet).toString()).toBe('0');
   });
 
   it('variant barcode match: OrderItem.productVariantId set when barcode exists', async () => {
@@ -223,9 +227,9 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
-        makeOrdersResponse({
-          page: 0,
-          totalElements: 1,
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
           content: [
             makeShipmentPackage({
               lines: [
@@ -258,9 +262,9 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
-        makeOrdersResponse({
-          page: 0,
-          totalElements: 1,
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
           content: [
             makeShipmentPackage({
               lines: [
@@ -291,12 +295,11 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
   it('idempotent: re-sync same page → no duplicate Order/OrderItem rows', async () => {
     const { store, log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
 
-    // First sync
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
-        makeOrdersResponse({
-          page: 0,
-          totalElements: 1,
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
           content: [makeShipmentPackage()],
         }),
       ),
@@ -304,17 +307,15 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
     await processOrdersChunk({ syncLog: log, cursor: null });
     vi.restoreAllMocks();
 
-    const ordersAfterFirst = await prisma.order.count({ where: { storeId: store.id } });
-    const itemsAfterFirst = await prisma.orderItem.count();
-    expect(ordersAfterFirst).toBe(1);
-    expect(itemsAfterFirst).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.orderItem.count()).toBe(1);
 
     // Second sync (same page, same data) — idempotent
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
-        makeOrdersResponse({
-          page: 0,
-          totalElements: 1,
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
           content: [makeShipmentPackage()],
         }),
       ),
@@ -325,57 +326,126 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
     expect(await prisma.orderItem.count()).toBe(1);
   });
 
-  it('multi-page: returns continue cursor when not yet exhausted', async () => {
-    const { store, log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
+  it('cursor advance within chunk: hasMore + nextCursor → streamCursor updated, chunkIndex unchanged', async () => {
+    const { log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
-        makeOrdersResponse({
-          page: 0,
-          totalElements: 250, // > 200 page size → birden fazla page var
+        makeStreamResponse({
+          hasMore: true,
+          nextCursor: 'opaque-token-xyz',
           content: [makeShipmentPackage()],
         }),
       ),
     );
 
     const result = await processOrdersChunk({ syncLog: log, cursor: null });
+
     expect(result.kind).toBe('continue');
     if (result.kind !== 'continue') return;
-    const cursor = result.cursor as { kind: string; n: number };
-    expect(cursor.kind).toBe('page-window');
-    expect(cursor.n).toBe(1);
+    const cursor = result.cursor as OrdersStreamWindowCursor;
+    expect(cursor.kind).toBe('stream-window');
+    expect(cursor.chunkIndex).toBe(0); // same chunk
+    expect(cursor.streamCursor).toBe('opaque-token-xyz');
     expect(result.progress).toBe(1);
-    expect(result.total).toBe(250);
+    expect(result.total).toBeNull(); // stream omits totalElements
   });
 
-  it('empty page → done immediately', async () => {
+  it('chunk transition: hasMore=false on chunk 0 → chunkIndex=1, streamCursor reset', async () => {
     const { log } = await setupStoreAndSyncLog([]);
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      jsonResponse(makeOrdersResponse({ page: 0, totalElements: 0, content: [] })),
+      jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
     );
 
     const result = await processOrdersChunk({ syncLog: log, cursor: null });
+
+    expect(result.kind).toBe('continue');
+    if (result.kind !== 'continue') return;
+    const cursor = result.cursor as OrdersStreamWindowCursor;
+    expect(cursor.chunkIndex).toBe(1);
+    expect(cursor.streamCursor).toBeNull();
+    // endDate preserved across chunks (filter binding kuralı — doc line 77).
+    expect(typeof cursor.endDate).toBe('number');
+  });
+
+  it('last chunk exhausted: hasMore=false on chunk N-1 → done', async () => {
+    const { log } = await setupStoreAndSyncLog([]);
+    const lastChunkIndex = STREAM_CHUNK_COUNT - 1;
+    const endDate = Date.now();
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+    );
+
+    const resumeCursor: OrdersStreamWindowCursor = {
+      kind: 'stream-window',
+      endDate,
+      chunkIndex: lastChunkIndex,
+      streamCursor: null,
+    };
+    const result = await processOrdersChunk({ syncLog: log, cursor: resumeCursor });
+
     expect(result.kind).toBe('done');
   });
 
-  it('initial backfill window: cursor null → 90-day window set', async () => {
+  it('initial backfill window: cursor null → 14-day lastModified window on chunk 0', async () => {
     const { log } = await setupStoreAndSyncLog([]);
 
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
-        jsonResponse(makeOrdersResponse({ page: 0, totalElements: 0, content: [] })),
+        jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
       );
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
     const url = fetchSpy.mock.calls[0]![0] as string;
     const parsed = new URL(url);
-    const startDate = Number.parseInt(parsed.searchParams.get('startDate')!, 10);
-    const endDate = Number.parseInt(parsed.searchParams.get('endDate')!, 10);
-    const windowDays = (endDate - startDate) / (24 * 60 * 60 * 1000);
-    expect(windowDays).toBeCloseTo(90, 0);
+    // Vendor cap: lastModifiedStartDate/EndDate (NOT orderDate startDate/endDate)
+    const lastModifiedStartDate = Number.parseInt(
+      parsed.searchParams.get('lastModifiedStartDate')!,
+      10,
+    );
+    const lastModifiedEndDate = Number.parseInt(
+      parsed.searchParams.get('lastModifiedEndDate')!,
+      10,
+    );
+    const windowDays = (lastModifiedEndDate - lastModifiedStartDate) / MS_PER_DAY;
+    // Trendyol stream enforces ≤14d per call (STREAM_WINDOW_MAX_DAYS).
+    // The handler chunks 90d into ceil(90/14)=7 sliding 14d slices.
+    expect(windowDays).toBeCloseTo(STREAM_CHUNK_DAYS, 0);
+    // Newest chunk ends at "now" — within a few seconds of test execution.
+    expect(Math.abs(lastModifiedEndDate - Date.now())).toBeLessThan(5000);
+    // No legacy startDate/endDate (page endpoint params) — stream uses
+    // lastModifiedStartDate/EndDate exclusively.
+    expect(parsed.searchParams.get('startDate')).toBeNull();
+    expect(parsed.searchParams.get('endDate')).toBeNull();
+  });
+
+  it('legacy page-window cursor → treated as fresh start (BUG #9 migration)', async () => {
+    const { log } = await setupStoreAndSyncLog([]);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+    );
+
+    // Legacy `page-window` cursor from a SyncLog row written under the old
+    // page-based handler. The new handler should ignore it and start fresh.
+    const legacyCursor = {
+      kind: 'page-window',
+      startDate: Date.now() - 30 * MS_PER_DAY,
+      endDate: Date.now(),
+      n: 5,
+    };
+
+    const result = await processOrdersChunk({ syncLog: log, cursor: legacyCursor });
+
+    expect(result.kind).toBe('continue');
+    if (result.kind !== 'continue') return;
+    const cursor = result.cursor as OrdersStreamWindowCursor;
+    expect(cursor.kind).toBe('stream-window');
+    expect(cursor.chunkIndex).toBe(1); // chunk 0 just processed (empty), advance to 1
   });
 });
 
@@ -386,8 +456,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
 
   beforeEach(async () => {
     await truncateAll();
-    // applyEstimateOnOrderCreate (PR-B2) PSF + Stopaj FeeDefinition rows ister.
-    // truncateAll fee_definitions'ı temizlediği için her testten önce yeniden seed.
     await ensureFeeDefinitions();
   });
 

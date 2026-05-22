@@ -33,11 +33,9 @@ import { randomBytes } from 'node:crypto';
 import { SyncErrorCode } from '@pazarsync/db/enums';
 import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
 
-import type { Registry } from './dispatcher';
 import { errorCodeOf } from './error-code';
-import { ordersHandler } from './handlers/orders';
-import { productsHandler } from './handlers/products';
 import { runSyncToCompletion } from './loop';
+import { REGISTRY } from './registry';
 import { advanceCursorPastBadPage } from './skip-bad-page';
 import { sweepStaleClaims } from './watchdog';
 
@@ -59,12 +57,6 @@ const PERMANENT_FAILURE_CODES: ReadonlySet<SyncErrorCode> = new Set<SyncErrorCod
   SyncErrorCode.MARKETPLACE_AUTH_FAILED,
   SyncErrorCode.MARKETPLACE_ACCESS_DENIED,
 ]);
-
-const REGISTRY: Registry = {
-  PRODUCTS: productsHandler,
-  ORDERS: ordersHandler,
-  // SETTLEMENTS will register here when orders-sync integration lands.
-};
 
 let shuttingDown = false;
 function isShuttingDown(): boolean {
