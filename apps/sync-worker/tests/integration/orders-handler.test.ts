@@ -359,7 +359,7 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
     expect(result.kind).toBe('done');
   });
 
-  it('initial backfill window: cursor null → 90-day window set', async () => {
+  it('initial backfill window: cursor null → 30-day window set (Trendyol doc cap)', async () => {
     const { log } = await setupStoreAndSyncLog([]);
 
     const fetchSpy = vi
@@ -375,7 +375,9 @@ describe('processOrdersChunk — PR-B real Trendyol fetch + upsert', () => {
     const startDate = Number.parseInt(parsed.searchParams.get('startDate')!, 10);
     const endDate = Number.parseInt(parsed.searchParams.get('endDate')!, 10);
     const windowDays = (endDate - startDate) / (24 * 60 * 60 * 1000);
-    expect(windowDays).toBeCloseTo(90, 0);
+    // Trendyol getshipmentpackages caps history at 1 month (BUG #7).
+    // Sound rule: Settlement W (60d) = Order backfill (30d) + T+30 cycle buffer.
+    expect(windowDays).toBeCloseTo(30, 0);
   });
 });
 

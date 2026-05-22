@@ -3,7 +3,7 @@
  *
  * Order sync flow (Order Sync epic — design §5):
  *   1. Decrypt store credentials
- *   2. Compute window (initial backfill: 90 gün geriye; delta sync PR-D'de)
+ *   2. Compute window (initial backfill: 30 gün geriye; delta sync PR-D'de)
  *   3. fetchShipmentPackages → MappedOrder[] (PR-A KDV-split mapper)
  *   4. For each MappedOrder:
  *      - upsertOrderWithSnapshot (from `@pazarsync/order-sync`) →
@@ -36,8 +36,22 @@ import type { ChunkResult, ModuleHandler } from './types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Initial backfill window — V1 hardcoded 90 gün (design §4.1). */
-const INITIAL_BACKFILL_DAYS = 90;
+/**
+ * Initial backfill window — V1 hardcoded 30 gün.
+ *
+ * Trendyol getshipmentpackages doc explicitly caps history queries at one
+ * month: "Maksimum 1 aylık geçmişe dönük sipariş sorgularını bu servis
+ * üzerinden yapabilirsiniz." (siparis-paketlerini-cekme-getshipmentpackages.md
+ * line 40). The V1 initial estimate (90d, design §4.1) exceeded the vendor
+ * cap *and* left T-30..T-90 orders without matching Sale rows in the
+ * 60-day Settlement scan window — paymentOrderId never backfilled, the
+ * cascade never fired. PR-7 stage validation BUG #7 (2026-05-22).
+ *
+ * Window math:
+ *   Settlement scan ≥ Order backfill + Trendyol payment cycle buffer
+ *   60d            =  30d            + 30d (T+30 worst case)
+ */
+const INITIAL_BACKFILL_DAYS = 30;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 // ─── Credentials decryption (products.ts mirror) ─────────────────────────────
@@ -58,7 +72,7 @@ function decryptStoreCredentials(store: Store): TrendyolCredentials {
  * Process one page of Trendyol orders.
  *
  * Cursor semantics (OrdersCursor `kind: 'page-window'`):
- *   - First invocation (cursor null): set window = [now − 90d, now], page = 0
+ *   - First invocation (cursor null): set window = [now − 30d, now], page = 0
  *   - Subsequent: same window, advance page
  *   - Window exhausted (totalElements reached): return done
  *
