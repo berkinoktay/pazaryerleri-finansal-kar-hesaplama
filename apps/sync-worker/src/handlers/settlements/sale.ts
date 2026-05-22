@@ -66,19 +66,6 @@ export async function handleSale(
   row: TrendyolFinancialTransaction,
   tx: Prisma.TransactionClient,
 ): Promise<HandleSettlementResult> {
-  // BUG #8 diagnostic — entry log before any skip path. Removed once the
-  // silent-failure root cause is identified. Pairs with `settlements.sale.applied`
-  // at the success return; the cardinality gap (entries vs applied vs warn)
-  // pinpoints which branch the rows take in prod.
-  syncLog.info('settlements.sale.entry', {
-    id: row.id,
-    shipmentPackageId: row.shipmentPackageId,
-    barcode: row.barcode,
-    commissionAmount: row.commissionAmount,
-    paymentOrderId: row.paymentOrderId,
-    commissionInvoiceSerialNumber: row.commissionInvoiceSerialNumber,
-  });
-
   if (row.shipmentPackageId === null || row.barcode === null || row.commissionAmount === null) {
     syncLog.warn('settlements.sale.sparse', {
       id: row.id,
@@ -148,28 +135,15 @@ export async function handleSale(
   //
   // Idempotent: updateMany with `paymentOrderId: null` filter — only the
   // first non-null Sale row writes the column. Re-poll cron (PR-12) safe.
-  let paymentOrderIdBackfilled = false;
   if (row.paymentOrderId !== null && row.paymentDate !== null) {
-    const result = await tx.order.updateMany({
+    await tx.order.updateMany({
       where: { id: order.id, paymentOrderId: null },
       data: {
         paymentOrderId: BigInt(row.paymentOrderId),
         paymentDate: new Date(row.paymentDate),
       },
     });
-    paymentOrderIdBackfilled = result.count > 0;
   }
-
-  // BUG #8 diagnostic — success path log. Removed alongside the entry log
-  // once the silent-failure root cause is identified.
-  syncLog.info('settlements.sale.applied', {
-    id: row.id,
-    orderId: order.id,
-    itemId: item.id,
-    grossCommissionAmountNet: grossCommissionAmountNet.toString(),
-    commissionInvoiceSerialBackfilled: row.commissionInvoiceSerialNumber !== null,
-    paymentOrderIdBackfilled,
-  });
 
   return { applied: true };
 }

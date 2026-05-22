@@ -26,6 +26,7 @@ import type {
   TrendyolCredentials,
   TrendyolOrderLine,
   TrendyolOrdersResponse,
+  TrendyolOrdersStreamResponse,
   TrendyolShipmentPackage,
 } from './types';
 
@@ -95,7 +96,7 @@ interface FetcherDeps {
   signal?: AbortSignal;
 }
 
-async function fetchOnce(url: string, deps: FetcherDeps): Promise<TrendyolOrdersResponse> {
+async function fetchOnce<T>(url: string, deps: FetcherDeps): Promise<T> {
   let attempt = 0;
   for (;;) {
     let res: Response | undefined;
@@ -115,7 +116,7 @@ async function fetchOnce(url: string, deps: FetcherDeps): Promise<TrendyolOrders
     }
 
     if (res !== undefined && res.ok) {
-      return (await res.json()) as TrendyolOrdersResponse;
+      return (await res.json()) as T;
     }
 
     const sandbox503 = res !== undefined && res.status === 503 && deps.env === 'SANDBOX';
@@ -436,7 +437,7 @@ export async function* fetchShipmentPackages(
       page,
     });
 
-    const raw = await fetchOnce(url, deps);
+    const raw = await fetchOnce<TrendyolOrdersResponse>(url, deps);
     const mapped = mapTrendyolOrdersResponse(raw);
 
     if (totalElements === null) totalElements = mapped.pageMeta.totalElements;
@@ -449,5 +450,138 @@ export async function* fetchShipmentPackages(
     if (totalElements !== null && processedSoFar >= totalElements) return;
 
     page += 1;
+  }
+}
+
+// ─── Stream endpoint (BUG #9 migration, 2026-05-22) ─────────────────────
+//
+// `getShipmentPackagesStream` is Trendyol's recommended endpoint for full
+// scans, periodic sync, and large-data backfills. The page-based
+// `getShipmentPackages` above is being constrained to "1 month history"
+// (planned vendor change per `siparis-paketlerini-cekme-getshipmentpackages.md`
+// line 3-9) — the stream endpoint exposes 3 months and is rate-limit-friendly.
+//
+// Differences from the page-based path:
+//   - Cursor-based pagination: opaque `nextCursor` token + `hasMore` flag
+//   - Filter param: `lastModifiedStartDate`/`lastModifiedEndDate` (NOT orderDate)
+//   - Window cap: 14 days per call (vendor enforced; caller must chunk)
+//   - Cursor binding: a cursor is tied to its filter — re-sending with
+//     different start/end returns 400 Bad Request (doc line 77).
+//   - Rate-limit guidance: minimum 5 second interval between calls
+//     (doc line 79). The retry/backoff loop in fetchOnce already enforces
+//     min 1s on transient errors; aktif rate-limit aware sleep generator
+//     iç loop'ta YOK — dispatcher tick aralığı (polling backoff up to 5s)
+//     bu kuralı dolaylı sağlar.
+
+/** Trendyol stream endpoint max window per call. Caller chunks longer ranges. */
+export const STREAM_WINDOW_MAX_DAYS = 14;
+
+interface StreamPageRequest {
+  lastModifiedStartDate: number;
+  lastModifiedEndDate: number;
+  cursor?: string;
+  size: number;
+}
+
+function buildStreamUrl(base: string, supplierId: string, req: StreamPageRequest): string {
+  const url = new URL(`${base}/integration/order/sellers/${supplierId}/orders/stream`);
+  url.searchParams.set('lastModifiedStartDate', req.lastModifiedStartDate.toString());
+  url.searchParams.set('lastModifiedEndDate', req.lastModifiedEndDate.toString());
+  url.searchParams.set('size', req.size.toString());
+  if (req.cursor !== undefined) {
+    url.searchParams.set('nextCursor', req.cursor);
+  }
+  return url.toString();
+}
+
+/**
+ * Opts for the stream endpoint. `lastModifiedEndDate − lastModifiedStartDate`
+ * must be ≤ 14 days; the generator throws RangeError otherwise so the
+ * dispatcher fails fast instead of receiving 400 from Trendyol.
+ */
+export interface FetchShipmentPackagesStreamOpts {
+  baseUrl?: string;
+  environment?: StoreEnvironment;
+  credentials: TrendyolCredentials;
+  signal?: AbortSignal;
+  /** PackageLastModifiedDate window start (epoch ms). */
+  lastModifiedStartDate: number;
+  /** PackageLastModifiedDate window end (epoch ms). */
+  lastModifiedEndDate: number;
+  /**
+   * Opaque cursor from a previous stream page. Omit (or pass undefined) to
+   * start a fresh stream. Never parse — the doc treats this as a black box.
+   */
+  cursor?: string;
+  /** Page size; defaults to ORDERS_PAGE_SIZE (200). */
+  size?: number;
+}
+
+/** Yield shape per stream page — caller advances via the next cursor + flag. */
+export interface StreamPageResult {
+  /** Mapped orders from this page. */
+  batch: MappedOrder[];
+  /** Trendyol's opaque cursor for the next page; null on the terminal page. */
+  nextCursor: string | null;
+  /** True when more pages remain in the current stream/window. */
+  hasMore: boolean;
+}
+
+const MS_PER_DAY_STREAM = 24 * 60 * 60 * 1000;
+
+/**
+ * Async generator over Trendyol's `getShipmentPackagesStream` within a
+ * `lastModifiedStartDate`/`lastModifiedEndDate` window (≤14 days per call,
+ * vendor enforced). Yields one page at a time; the caller drives cursor
+ * advancement by re-invoking with the previous `nextCursor` or by closing
+ * the stream when `hasMore` is false.
+ *
+ * Window validation: throws RangeError if the window exceeds
+ * `STREAM_WINDOW_MAX_DAYS`. Caller must chunk longer ranges into ≤14d
+ * sliding windows (mirrors the settlement-cron `FINANCIAL_WINDOW_MAX_DAYS`
+ * caller-chunking pattern from BUG #6).
+ */
+export async function* fetchShipmentPackagesStream(
+  opts: FetchShipmentPackagesStreamOpts,
+): AsyncGenerator<StreamPageResult, void> {
+  const windowMs = opts.lastModifiedEndDate - opts.lastModifiedStartDate;
+  const maxMs = STREAM_WINDOW_MAX_DAYS * MS_PER_DAY_STREAM;
+  if (windowMs > maxMs) {
+    throw new RangeError(
+      `Stream endpoint window exceeds Trendyol max ${STREAM_WINDOW_MAX_DAYS} days: ` +
+        `got ${(windowMs / MS_PER_DAY_STREAM).toFixed(1)} days. ` +
+        `Chunk into sliding ${STREAM_WINDOW_MAX_DAYS}-day windows at the caller.`,
+    );
+  }
+
+  const env = opts.environment ?? 'PRODUCTION';
+  const base = opts.baseUrl ?? baseUrlFor(env);
+  const deps: FetcherDeps = {
+    credentials: opts.credentials,
+    env,
+    signal: opts.signal,
+  };
+
+  let cursor: string | undefined = opts.cursor;
+
+  for (;;) {
+    if (deps.signal?.aborted === true) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
+    const url = buildStreamUrl(base, opts.credentials.supplierId, {
+      lastModifiedStartDate: opts.lastModifiedStartDate,
+      lastModifiedEndDate: opts.lastModifiedEndDate,
+      cursor,
+      size: opts.size ?? ORDERS_PAGE_SIZE,
+    });
+
+    const raw = await fetchOnce<TrendyolOrdersStreamResponse>(url, deps);
+    const batch = raw.content.map(mapTrendyolShipmentPackage);
+
+    yield { batch, nextCursor: raw.nextCursor, hasMore: raw.hasMore };
+
+    if (raw.hasMore !== true || raw.nextCursor === null) return;
+    cursor = raw.nextCursor;
   }
 }

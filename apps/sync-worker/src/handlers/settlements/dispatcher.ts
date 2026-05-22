@@ -39,13 +39,6 @@ export async function dispatchSettlementRow(
   switch (target.kind) {
     case 'order_item_update':
       if (target.semantics === 'sale') {
-        // BUG #8 diagnostic — trace that the Sale row actually reaches the
-        // dispatch site. Removed once the silent-failure root cause is
-        // identified.
-        syncLog.info('settlements.dispatcher.sale-route', {
-          id: row.id,
-          shipmentPackageId: row.shipmentPackageId,
-        });
         await handleSale(storeId, row, tx);
       } else if (target.semantics === 'discount') {
         await handleDiscount(storeId, row, tx);

@@ -24,6 +24,7 @@ export {
   type TrendyolPackageHistory,
   type TrendyolShipmentPackage,
   type TrendyolOrdersResponse,
+  type TrendyolOrdersStreamResponse,
   type MappedOrder,
   type MappedOrderLine,
   type MappedOrdersPageMeta,
@@ -41,12 +42,16 @@ export {
 } from './trendyol/products';
 export {
   ORDERS_PAGE_SIZE,
+  STREAM_WINDOW_MAX_DAYS,
   fetchShipmentPackages,
+  fetchShipmentPackagesStream,
   mapTrendyolShipmentPackage,
   mapTrendyolOrdersResponse,
   mapTrendyolStatusToEnum,
   type FetchShipmentPackagesOpts,
+  type FetchShipmentPackagesStreamOpts,
   type MappedOrdersPage,
+  type StreamPageResult,
 } from './trendyol/orders';
 export {
   FINANCIAL_PAGE_SIZE,
