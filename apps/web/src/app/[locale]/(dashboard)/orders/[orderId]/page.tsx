@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { OrdersPageClient } from '@/features/orders/components/orders-page-client';
+import { OrderDetailClient } from '@/features/orders/components/order-detail-client';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
@@ -15,24 +15,25 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const t = await getTranslations({ locale: effectiveLocale, namespace: 'ordersPage' });
-  return { title: t('title') };
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'orderDetail' });
+  return { title: t('title.placeholder') };
 }
 
 /**
- * Server shell. Resolves the active org + store via cookie-first lookup with
- * a "first member / first store" fallback (matches the dashboard layout
- * resolution). Hands the ids to OrdersPageClient which owns filter URL state,
- * React Query, and the table composition.
+ * Server shell for the order detail. Resolves the active org + store via
+ * the same cookie-first lookup the orders list uses, so a direct link to
+ * /orders/:orderId still works as long as the user has a matching active
+ * store. The detail page does not currently scope by storeId — the orderId
+ * is globally unique and the backend re-verifies tenant ownership — but
+ * the resolution is kept consistent with the list page so the same query
+ * client cache key invariants hold.
  */
-export default async function OrdersPage({
+export default async function OrderDetailPage({
   params,
 }: {
-  params: Promise<{ locale: string }>;
+  params: Promise<{ locale: string; orderId: string }>;
 }): Promise<React.ReactElement> {
-  const { locale } = await params;
-  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const t = await getTranslations({ locale: effectiveLocale, namespace: 'ordersPage' });
+  const { orderId } = await params;
 
   const api = await getServerApiClient();
   const { data: orgsResponse } = await api.GET('/v1/organizations', {});
@@ -49,11 +50,10 @@ export default async function OrdersPage({
   }
 
   return (
-    <OrdersPageClient
+    <OrderDetailClient
       orgId={activeOrgId ?? null}
       storeId={activeStoreId ?? null}
-      pageTitle={t('title')}
-      pageIntent={t('intent')}
+      orderId={orderId}
     />
   );
 }
