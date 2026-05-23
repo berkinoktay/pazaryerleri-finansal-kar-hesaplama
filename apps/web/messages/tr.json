@@ -601,9 +601,18 @@
   },
   "dashboard": {
     "quickAccess": {
-      "pendingOrders": { "label": "Bekleyen Sipariş", "cta": "Hemen incele →" },
-      "noCostProducts": { "label": "Maliyet Eksik Ürün", "cta": "Toplu güncelle →" },
-      "returnReviews": { "label": "İade İncelemesi", "cta": "Onay bekle →" }
+      "pendingOrders": {
+        "label": "Bekleyen Sipariş",
+        "cta": "Hemen incele →"
+      },
+      "noCostProducts": {
+        "label": "Maliyet Eksik Ürün",
+        "cta": "Toplu güncelle →"
+      },
+      "returnReviews": {
+        "label": "İade İncelemesi",
+        "cta": "Onay bekle →"
+      }
     },
     "missingCostWidget": {
       "label": "Maliyetsiz {count} ürün",
@@ -616,7 +625,55 @@
     "description": "Bu sayfa henüz geliştirme aşamasında. İlerleyen güncellemelerde aktif olacak."
   },
   "ordersPage": {
-    "title": "Siparişler"
+    "title": "Siparişler",
+    "intent": "Bağlı mağazalardan akan siparişler. Filtrele, mutabakat durumunu izle, detayda kâr dökümünü gör.",
+    "toolbar": {
+      "searchPlaceholder": "Sipariş no veya paket no ara",
+      "statusPlaceholder": "Sipariş durumu",
+      "statusAll": "Tüm durumlar",
+      "reconciliationPlaceholder": "Mutabakat durumu",
+      "reconciliationAll": "Tüm mutabakatlar"
+    },
+    "status": {
+      "PENDING": "Bekliyor",
+      "PROCESSING": "Hazırlanıyor",
+      "SHIPPED": "Kargoda",
+      "DELIVERED": "Teslim edildi",
+      "CANCELLED": "İptal",
+      "RETURNED": "İade"
+    },
+    "reconciliationStatus": {
+      "NOT_SETTLED": "Mutabakat bekliyor",
+      "PARTIALLY_SETTLED": "Kısmi mutabakat",
+      "FULLY_SETTLED": "Mutabakat tamamlandı"
+    },
+    "table": {
+      "columns": {
+        "orderDate": "Tarih",
+        "orderNumber": "Sipariş No",
+        "status": "Durum",
+        "reconciliationStatus": "Mutabakat",
+        "saleSubtotalNet": "Satış (net)",
+        "estimatedNetProfit": "Tahmini kâr",
+        "settledNetProfit": "Fiili kâr",
+        "itemCount": "Kalem"
+      }
+    },
+    "empty": {
+      "noStore": {
+        "title": "Henüz mağaza bağlı değil",
+        "description": "Siparişleri görmek için önce bir mağaza bağlayın.",
+        "cta": "Mağaza ekle"
+      },
+      "noOrders": {
+        "title": "Henüz sipariş yok",
+        "description": "Bağlı mağazadan ilk sipariş senkronlandığında burada görünecek."
+      }
+    },
+    "syncButton": {
+      "label": "Eşitle",
+      "syncing": "Eşitleniyor…"
+    }
   },
   "productsPage": {
     "title": "Ürünler"
@@ -1231,6 +1288,129 @@
         "breakdown": "desi eksik ({noDesi}) · kargo firması seçilmemiş ({noCarrier}) · yüksek desi ({overflow})",
         "filterCta": "Filtreyi uygula"
       }
+    }
+  },
+  "orderDetail": {
+    "title": {
+      "placeholder": "Sipariş detayı"
+    },
+    "intent": "{date} tarihli sipariş — kâr dökümü, fatura zaman çizgisi ve iade durumu.",
+    "backToList": "Listeye dön",
+    "kpis": {
+      "saleSubtotalNet": {
+        "label": "Satış (net)"
+      },
+      "estimatedNetProfit": {
+        "label": "Tahmini kâr",
+        "hint": "Sipariş anında deterministik PSF/Stopaj/Kargo tahmini ile hesaplandı."
+      },
+      "settledNetProfit": {
+        "label": "Fiili kâr",
+        "hint": "Hakediş kalemleri Trendyol'dan akıp mutabakat tamamlandığında güncellendi.",
+        "pending": "Henüz mutabakat satırı işlenmedi."
+      },
+      "margin": {
+        "label": "Net marj",
+        "basisSettled": "Satış netine oran (fiili kâr esas).",
+        "basisEstimated": "Satış netine oran (tahmini kâr esas)."
+      },
+      "common": {
+        "notAvailable": "Henüz veri yok."
+      }
+    },
+    "banner": {
+      "titles": {
+        "NOT_SETTLED": "Mutabakat bekliyor",
+        "PARTIALLY_SETTLED": "Kısmi mutabakat",
+        "FULLY_SETTLED": "Mutabakat tamamlandı"
+      },
+      "descriptions": {
+        "NOT_SETTLED": "T+0'da tahmini kâr yazıldı. İlk hakediş satırı Trendyol'dan geldiğinde durum güncellenecek.",
+        "PARTIALLY_SETTLED": "Bazı hakediş kalemleri işlendi. PaymentOrder onayıyla birlikte fiili kâr kesinleşecek.",
+        "FULLY_SETTLED": "PaymentOrder onayı geldi. Fiili kâr kesinleşti.",
+        "FULLY_SETTLED_WITH_DATE": "PaymentOrder {date} tarihinde onaylandı. Fiili kâr kesinleşti."
+      }
+    },
+    "vatBreakdown": {
+      "title": "Net & KDV dökümü",
+      "saleSubtotalNet": "Satış (net)",
+      "saleVatTotal": "Satış KDV",
+      "grossCommissionNet": "Brüt komisyon (net)",
+      "refundedCommissionNet": "İade edilen komisyon (net)",
+      "effectiveCommissionNet": "Etkin komisyon (net)",
+      "effectiveCommissionHint": "Brüt − iade edilen.",
+      "sellerDiscountNet": "Satıcı indirimi (net)",
+      "costSnapshotNet": "Maliyet anlık kopyası (net)",
+      "costSnapshotMissing": "Bazı kalemlerde maliyet profili eksik — kâr hesabı yaklaşık."
+    },
+    "fees": {
+      "title": "Ücret zaman çizgisi",
+      "empty": {
+        "title": "Henüz ücret kaydı yok",
+        "description": "Sipariş oluşturulduğunda tahmini PSF/Stopaj/Kargo kalemleri burada görünecek."
+      },
+      "vatLabel": "KDV %{rate}",
+      "confirmedAt": "Mutabakat: {date}",
+      "types": {
+        "SHIPPING": "Kargo",
+        "PLATFORM_SERVICE": "Hizmet Bedeli (PSF)",
+        "PLATFORM_SERVICE_FAST": "Bugün Kargoda PSF",
+        "STOPPAGE": "Stopaj",
+        "RETURN_SHIPPING": "İade kargosu",
+        "REFUND_DEDUCTION": "İade kesintisi",
+        "COMMISSION_REFUND": "Komisyon iadesi",
+        "PROVISION_ADJUSTMENT": "Provizyon düzeltme",
+        "MANUAL_REFUND": "Manuel iade",
+        "REVENUE_ADJUSTMENT": "Gelir düzeltme",
+        "COMMISSION_ADJUSTMENT": "Komisyon düzeltme",
+        "CUSTOM": "Diğer",
+        "ADVERTISING": "Reklam",
+        "PENALTY_DEFECTIVE": "Defolu ürün cezası",
+        "PENALTY_WRONG_PRODUCT": "Yanlış ürün cezası",
+        "PENALTY_MISSING_PRODUCT": "Eksik ürün cezası",
+        "PENALTY_LATE_DELIVERY": "Geç teslimat cezası",
+        "PENALTY_SUPPLY_FAILURE": "Tedarik başarısızlığı cezası",
+        "NOTIFICATION_FEE": "Bildirim ücreti",
+        "COMMISSION_INVOICE": "Komisyon faturası"
+      },
+      "sources": {
+        "ESTIMATE": "Tahmini",
+        "SETTLEMENT": "Hakediş",
+        "CARGO_INVOICE": "Kargo Faturası",
+        "USER_OVERRIDE": "Kullanıcı düzeltmesi",
+        "MANUAL_ENTRY": "Manuel"
+      }
+    },
+    "items": {
+      "title": "Sipariş kalemleri",
+      "empty": {
+        "title": "Sipariş kalemi yok",
+        "description": "Sipariş senkronu kalemleri henüz çekmedi."
+      },
+      "columns": {
+        "variant": "Varyant",
+        "quantity": "Adet",
+        "unitPriceNet": "Birim (net)",
+        "grossCommissionNet": "Komisyon (net)",
+        "refundedCommissionNet": "İade kom.",
+        "unitCostSnapshotNet": "Maliyet (net)"
+      },
+      "unknownVariant": "Varyant bağlı değil",
+      "costMissing": "Maliyet eksik"
+    },
+    "claims": {
+      "title": "İade talepleri",
+      "empty": {
+        "title": "Bu siparişe ait iade talebi yok",
+        "description": "İade talepleri Trendyol'dan akmaya başladığında burada listelenecek."
+      },
+      "open": "Açık",
+      "resolved": "Tamamlandı"
+    },
+    "errors": {
+      "noStoreContext": "Sipariş detayını görmek için aktif bir mağaza gerekli.",
+      "notFound": "Sipariş bulunamadı veya bu mağazaya ait değil.",
+      "loadFailed": "Sipariş yüklenemedi. Lütfen tekrar deneyin."
     }
   }
 }

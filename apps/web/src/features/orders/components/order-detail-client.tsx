@@ -1,0 +1,164 @@
+'use client';
+
+import { ArrowLeft01Icon } from 'hugeicons-react';
+import { useFormatter, useTranslations } from 'next-intl';
+import { useRouter } from 'next/navigation';
+import * as React from 'react';
+
+import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
+import { PageHeader } from '@/components/patterns/page-header';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ApiError } from '@/lib/api-error';
+
+import { useOrder } from '../hooks/use-order';
+
+import { OrderClaimsCard } from './order-claims-card';
+import { OrderFeeTimeline } from './order-fee-timeline';
+import { OrderItemsTable } from './order-items-table';
+import { OrderKpiGrid } from './order-kpi-grid';
+import { OrderStatusBadge } from './order-status-badge';
+import { OrderStatusBanner } from './order-status-banner';
+import { OrderVatBreakdown } from './order-vat-breakdown';
+import { ReconciliationStatusBadge } from './reconciliation-status-badge';
+
+interface OrderDetailClientProps {
+  orgId: string | null;
+  storeId: string | null;
+  orderId: string;
+}
+
+/**
+ * Order detail composer. Loads the full order graph and stacks the layered
+ * surfaces specified in the V1 design doc § 7.4:
+ *   1. Header — order number, status, marketplace badge, back nav
+ *   2. Reconciliation banner — state-machine signal + next-step copy
+ *   3. KPI grid — sale net / estimated profit / settled profit / margin
+ *   4. VAT breakdown — net+VAT aggregate of items
+ *   5. Fee timeline — chronological OrderFee rows with confirmedAt pairing
+ *   6. Items table — per-line variant + commission split + cost snapshot
+ *   7. Claims card — PR-13 graceful empty until GetClaims worker ships
+ */
+export function OrderDetailClient({
+  orgId,
+  storeId,
+  orderId,
+}: OrderDetailClientProps): React.ReactElement {
+  const t = useTranslations('orderDetail');
+  const formatter = useFormatter();
+  const router = useRouter();
+
+  const noContext = orgId === null || storeId === null;
+
+  const orderQuery = useOrder(noContext ? null : { orgId, storeId, orderId });
+
+  if (noContext) {
+    return (
+      <>
+        <PageHeader title={t('title.placeholder')} />
+        <Alert tone="warning" size="md">
+          <AlertDescription>{t('errors.noStoreContext')}</AlertDescription>
+        </Alert>
+      </>
+    );
+  }
+
+  if (orderQuery.isLoading) {
+    return <LoadingState />;
+  }
+
+  if (orderQuery.error !== null) {
+    const notFound = orderQuery.error instanceof ApiError && orderQuery.error.status === 404;
+    return (
+      <>
+        <PageHeader title={t('title.placeholder')} />
+        <Alert tone={notFound ? 'neutral' : 'destructive'} size="md">
+          <AlertDescription>
+            {notFound ? t('errors.notFound') : t('errors.loadFailed')}
+          </AlertDescription>
+        </Alert>
+        <div>
+          <Button variant="outline" onClick={() => router.push('/orders')}>
+            <ArrowLeft01Icon className="size-icon-sm" />
+            {t('backToList')}
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  const order = orderQuery.data;
+  if (order === undefined) {
+    return <LoadingState />;
+  }
+
+  const headerTitle = order.platformOrderNumber ?? order.platformOrderId;
+
+  return (
+    <div className="gap-lg flex flex-col">
+      <div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => router.push('/orders')}
+          className="gap-3xs"
+        >
+          <ArrowLeft01Icon className="size-icon-sm" />
+          {t('backToList')}
+        </Button>
+      </div>
+      <PageHeader
+        title={headerTitle}
+        intent={t('intent', {
+          date: formatter.dateTime(new Date(order.orderDate), 'long'),
+        })}
+        meta={
+          <div className="gap-xs flex flex-wrap items-center">
+            <MarketplaceLogo
+              platform={order.store.platform}
+              alt={order.store.platform}
+              className="size-icon-md"
+            />
+            <span className="text-sm">{order.store.name}</span>
+            <OrderStatusBadge status={order.status} />
+            <ReconciliationStatusBadge status={order.reconciliationStatus} />
+          </div>
+        }
+      />
+
+      <OrderStatusBanner order={order} />
+
+      <OrderKpiGrid order={order} />
+
+      <div className="gap-lg grid grid-cols-1 lg:grid-cols-2">
+        <OrderVatBreakdown order={order} />
+        <OrderFeeTimeline fees={order.fees} />
+      </div>
+
+      <OrderItemsTable items={order.items} />
+
+      <OrderClaimsCard claims={order.claims} />
+    </div>
+  );
+}
+
+function LoadingState(): React.ReactElement {
+  return (
+    <div className="gap-lg flex flex-col">
+      <Skeleton className="h-10 w-48" />
+      <Skeleton className="h-24 w-full" />
+      <div className="gap-md grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-32" />
+        <Skeleton className="h-32" />
+        <Skeleton className="h-32" />
+        <Skeleton className="h-32" />
+      </div>
+      <div className="gap-lg grid grid-cols-1 lg:grid-cols-2">
+        <Skeleton className="h-72" />
+        <Skeleton className="h-72" />
+      </div>
+      <Skeleton className="h-64 w-full" />
+    </div>
+  );
+}

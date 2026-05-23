@@ -601,9 +601,18 @@
   },
   "dashboard": {
     "quickAccess": {
-      "pendingOrders": { "label": "Pending Orders", "cta": "Review now →" },
-      "noCostProducts": { "label": "Products Missing Cost", "cta": "Bulk update →" },
-      "returnReviews": { "label": "Return Reviews", "cta": "Awaiting approval →" }
+      "pendingOrders": {
+        "label": "Pending Orders",
+        "cta": "Review now →"
+      },
+      "noCostProducts": {
+        "label": "Products Missing Cost",
+        "cta": "Bulk update →"
+      },
+      "returnReviews": {
+        "label": "Return Reviews",
+        "cta": "Awaiting approval →"
+      }
     },
     "missingCostWidget": {
       "label": "{count} products missing cost",
@@ -616,7 +625,55 @@
     "description": "This page is still under development. It will be active in upcoming updates."
   },
   "ordersPage": {
-    "title": "Orders"
+    "title": "Orders",
+    "intent": "Orders flowing from connected stores. Filter, watch reconciliation state, open the detail for the profit breakdown.",
+    "toolbar": {
+      "searchPlaceholder": "Search by order or package number",
+      "statusPlaceholder": "Order status",
+      "statusAll": "All statuses",
+      "reconciliationPlaceholder": "Reconciliation status",
+      "reconciliationAll": "All reconciliations"
+    },
+    "status": {
+      "PENDING": "Pending",
+      "PROCESSING": "Processing",
+      "SHIPPED": "Shipped",
+      "DELIVERED": "Delivered",
+      "CANCELLED": "Cancelled",
+      "RETURNED": "Returned"
+    },
+    "reconciliationStatus": {
+      "NOT_SETTLED": "Awaiting settlement",
+      "PARTIALLY_SETTLED": "Partially settled",
+      "FULLY_SETTLED": "Fully settled"
+    },
+    "table": {
+      "columns": {
+        "orderDate": "Date",
+        "orderNumber": "Order #",
+        "status": "Status",
+        "reconciliationStatus": "Reconciliation",
+        "saleSubtotalNet": "Sale (net)",
+        "estimatedNetProfit": "Estimated profit",
+        "settledNetProfit": "Settled profit",
+        "itemCount": "Items"
+      }
+    },
+    "empty": {
+      "noStore": {
+        "title": "No store connected yet",
+        "description": "Connect a store to start seeing orders.",
+        "cta": "Add a store"
+      },
+      "noOrders": {
+        "title": "No orders yet",
+        "description": "Once the first order syncs from the connected store, it will land here."
+      }
+    },
+    "syncButton": {
+      "label": "Sync",
+      "syncing": "Syncing…"
+    }
   },
   "productsPage": {
     "title": "Products"
@@ -1166,6 +1223,129 @@
         "breakdown": "missing desi ({noDesi}) · no carrier ({noCarrier}) · high desi ({overflow})",
         "filterCta": "Apply filter"
       }
+    }
+  },
+  "orderDetail": {
+    "title": {
+      "placeholder": "Order detail"
+    },
+    "intent": "Order from {date} — profit breakdown, fee timeline, and return status.",
+    "backToList": "Back to list",
+    "kpis": {
+      "saleSubtotalNet": {
+        "label": "Sale (net)"
+      },
+      "estimatedNetProfit": {
+        "label": "Estimated profit",
+        "hint": "Computed deterministically at T+0 from PSF, stoppage, and shipping estimates."
+      },
+      "settledNetProfit": {
+        "label": "Settled profit",
+        "hint": "Updated as settlement rows land from Trendyol and reconciliation completes.",
+        "pending": "No settlement row processed yet."
+      },
+      "margin": {
+        "label": "Net margin",
+        "basisSettled": "Share of net sale (based on settled profit).",
+        "basisEstimated": "Share of net sale (based on estimated profit)."
+      },
+      "common": {
+        "notAvailable": "No data yet."
+      }
+    },
+    "banner": {
+      "titles": {
+        "NOT_SETTLED": "Awaiting settlement",
+        "PARTIALLY_SETTLED": "Partially settled",
+        "FULLY_SETTLED": "Fully settled"
+      },
+      "descriptions": {
+        "NOT_SETTLED": "Estimated profit was written at T+0. The state will update when the first settlement row arrives.",
+        "PARTIALLY_SETTLED": "Some settlement rows have been processed. Settled profit will be finalized when the PaymentOrder confirms.",
+        "FULLY_SETTLED": "PaymentOrder has confirmed. Settled profit is final.",
+        "FULLY_SETTLED_WITH_DATE": "PaymentOrder confirmed on {date}. Settled profit is final."
+      }
+    },
+    "vatBreakdown": {
+      "title": "Net & VAT breakdown",
+      "saleSubtotalNet": "Sale (net)",
+      "saleVatTotal": "Sale VAT",
+      "grossCommissionNet": "Gross commission (net)",
+      "refundedCommissionNet": "Refunded commission (net)",
+      "effectiveCommissionNet": "Effective commission (net)",
+      "effectiveCommissionHint": "Gross minus refunded.",
+      "sellerDiscountNet": "Seller discount (net)",
+      "costSnapshotNet": "Cost snapshot (net)",
+      "costSnapshotMissing": "Some line items lack a cost profile — profit is approximate."
+    },
+    "fees": {
+      "title": "Fee timeline",
+      "empty": {
+        "title": "No fee rows yet",
+        "description": "PSF, stoppage, and shipping estimates will appear here once the order is created."
+      },
+      "vatLabel": "VAT %{rate}",
+      "confirmedAt": "Confirmed: {date}",
+      "types": {
+        "SHIPPING": "Shipping",
+        "PLATFORM_SERVICE": "Platform Service Fee",
+        "PLATFORM_SERVICE_FAST": "Fast Delivery PSF",
+        "STOPPAGE": "Stoppage",
+        "RETURN_SHIPPING": "Return shipping",
+        "REFUND_DEDUCTION": "Refund deduction",
+        "COMMISSION_REFUND": "Commission refund",
+        "PROVISION_ADJUSTMENT": "Provision adjustment",
+        "MANUAL_REFUND": "Manual refund",
+        "REVENUE_ADJUSTMENT": "Revenue adjustment",
+        "COMMISSION_ADJUSTMENT": "Commission adjustment",
+        "CUSTOM": "Custom",
+        "ADVERTISING": "Advertising",
+        "PENALTY_DEFECTIVE": "Defective product penalty",
+        "PENALTY_WRONG_PRODUCT": "Wrong product penalty",
+        "PENALTY_MISSING_PRODUCT": "Missing product penalty",
+        "PENALTY_LATE_DELIVERY": "Late delivery penalty",
+        "PENALTY_SUPPLY_FAILURE": "Supply failure penalty",
+        "NOTIFICATION_FEE": "Notification fee",
+        "COMMISSION_INVOICE": "Commission invoice"
+      },
+      "sources": {
+        "ESTIMATE": "Estimate",
+        "SETTLEMENT": "Settlement",
+        "CARGO_INVOICE": "Cargo Invoice",
+        "USER_OVERRIDE": "User override",
+        "MANUAL_ENTRY": "Manual"
+      }
+    },
+    "items": {
+      "title": "Order items",
+      "empty": {
+        "title": "No order items",
+        "description": "The sync has not pulled line items yet."
+      },
+      "columns": {
+        "variant": "Variant",
+        "quantity": "Qty",
+        "unitPriceNet": "Unit (net)",
+        "grossCommissionNet": "Commission (net)",
+        "refundedCommissionNet": "Refunded com.",
+        "unitCostSnapshotNet": "Cost (net)"
+      },
+      "unknownVariant": "Variant not linked",
+      "costMissing": "Cost missing"
+    },
+    "claims": {
+      "title": "Return claims",
+      "empty": {
+        "title": "No return claims on this order",
+        "description": "Return claims will appear here once they start flowing from Trendyol."
+      },
+      "open": "Open",
+      "resolved": "Resolved"
+    },
+    "errors": {
+      "noStoreContext": "An active store is required to view order detail.",
+      "notFound": "Order not found or does not belong to this store.",
+      "loadFailed": "Failed to load the order. Please try again."
     }
   }
 }

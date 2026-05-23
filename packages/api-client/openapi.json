@@ -492,6 +492,702 @@
           "rotatedAt"
         ]
       },
+      "ListOrdersResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderListItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/TableMeta"
+          }
+        },
+        "required": [
+          "data",
+          "pagination"
+        ]
+      },
+      "OrderListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platformOrderId": {
+            "type": "string",
+            "example": "1234567890"
+          },
+          "platformOrderNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "TY-987654"
+          },
+          "orderDate": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-15T14:30:00.000Z"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "PROCESSING",
+              "SHIPPED",
+              "DELIVERED",
+              "CANCELLED",
+              "RETURNED"
+            ],
+            "description": "Lifecycle state echoed from the marketplace. PENDING/PROCESSING precede SHIPPED; CANCELLED and RETURNED are terminal. DELIVERED is the gate for the settlement cycle.",
+            "example": "DELIVERED"
+          },
+          "reconciliationStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_SETTLED",
+              "PARTIALLY_SETTLED",
+              "FULLY_SETTLED"
+            ],
+            "description": "Settlement progression. NOT_SETTLED = only ESTIMATE fees written. PARTIALLY_SETTLED = at least one SETTLEMENT/CARGO_INVOICE fee. FULLY_SETTLED = PaymentOrder confirmed + settledNetProfit written.",
+            "example": "PARTIALLY_SETTLED"
+          },
+          "saleSubtotalNet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Net sale total (decimal string) — null until OrderItems are synced.",
+            "example": "249.50"
+          },
+          "saleVatTotal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "KDV total over the sale (decimal string).",
+            "example": "49.90"
+          },
+          "estimatedNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Net profit estimated at T+0 by applyEstimateOnOrderCreate. Write-once; never updated after the order is created.",
+            "example": "78.40"
+          },
+          "settledNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Net profit reconciled with settlement data. Mutable as Return/Discount transactions flow in. Null until the first SETTLEMENT row is processed.",
+            "example": "75.10"
+          },
+          "fastDelivery": {
+            "type": "boolean"
+          },
+          "micro": {
+            "type": "boolean"
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of OrderItems on this order.",
+            "example": 2
+          }
+        },
+        "required": [
+          "id",
+          "platformOrderId",
+          "platformOrderNumber",
+          "orderDate",
+          "status",
+          "reconciliationStatus",
+          "saleSubtotalNet",
+          "saleVatTotal",
+          "estimatedNetProfit",
+          "settledNetProfit",
+          "fastDelivery",
+          "micro",
+          "itemCount"
+        ]
+      },
+      "TableMeta": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "example": 1
+          },
+          "perPage": {
+            "type": "integer",
+            "example": 25
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 137
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 6
+          }
+        },
+        "required": [
+          "page",
+          "perPage",
+          "total",
+          "totalPages"
+        ]
+      },
+      "OrderDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "store": {
+            "$ref": "#/components/schemas/OrderStoreSummary"
+          },
+          "platformOrderId": {
+            "type": "string"
+          },
+          "platformOrderNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orderDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "PROCESSING",
+              "SHIPPED",
+              "DELIVERED",
+              "CANCELLED",
+              "RETURNED"
+            ],
+            "description": "Lifecycle state echoed from the marketplace. PENDING/PROCESSING precede SHIPPED; CANCELLED and RETURNED are terminal. DELIVERED is the gate for the settlement cycle.",
+            "example": "DELIVERED"
+          },
+          "agreedDeliveryDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "actualDeliveryDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveredOnTime": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "fastDelivery": {
+            "type": "boolean"
+          },
+          "micro": {
+            "type": "boolean"
+          },
+          "saleSubtotalNet": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "saleVatTotal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimatedNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settledNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reconciliationStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_SETTLED",
+              "PARTIALLY_SETTLED",
+              "FULLY_SETTLED"
+            ],
+            "description": "Settlement progression. NOT_SETTLED = only ESTIMATE fees written. PARTIALLY_SETTLED = at least one SETTLEMENT/CARGO_INVOICE fee. FULLY_SETTLED = PaymentOrder confirmed + settledNetProfit written.",
+            "example": "PARTIALLY_SETTLED"
+          },
+          "paymentOrderId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "PaymentOrder cycle id (BigInt → string). Null until reconciliation closes."
+          },
+          "paymentDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItemDetail"
+            }
+          },
+          "fees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderFeeDetail"
+            },
+            "description": "Chronologically ordered (capturedAt asc). Renders as the fee timeline."
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderClaimDetail"
+            },
+            "description": "Return claims. Empty until PR-13 GetClaims worker is live."
+          }
+        },
+        "required": [
+          "id",
+          "organizationId",
+          "storeId",
+          "store",
+          "platformOrderId",
+          "platformOrderNumber",
+          "orderDate",
+          "status",
+          "agreedDeliveryDate",
+          "actualDeliveryDate",
+          "deliveredOnTime",
+          "fastDelivery",
+          "micro",
+          "saleSubtotalNet",
+          "saleVatTotal",
+          "estimatedNetProfit",
+          "settledNetProfit",
+          "reconciliationStatus",
+          "paymentOrderId",
+          "paymentDate",
+          "createdAt",
+          "updatedAt",
+          "items",
+          "fees",
+          "claims"
+        ]
+      },
+      "OrderStoreSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "TRENDYOL",
+              "HEPSIBURADA"
+            ],
+            "description": "Marketplace platform of the parent store.",
+            "example": "TRENDYOL"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "platform"
+        ]
+      },
+      "OrderItemDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "unitPriceNet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Decimal string."
+          },
+          "unitVatRate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "VAT rate %, decimal string."
+          },
+          "unitVatAmount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Decimal string."
+          },
+          "grossCommissionAmountNet": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "grossCommissionVatAmount": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "refundedCommissionAmountNet": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "refundedCommissionVatAmount": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "sellerDiscountNet": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "sellerDiscountVatAmount": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "unitCostSnapshotNet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Decimal string."
+          },
+          "unitCostSnapshotVatRate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unitCostSnapshotVatAmount": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionInvoiceSerialNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "DCF2024000123"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/OrderItemVariant"
+          }
+        },
+        "required": [
+          "id",
+          "quantity",
+          "unitPriceNet",
+          "unitVatRate",
+          "unitVatAmount",
+          "grossCommissionAmountNet",
+          "grossCommissionVatAmount",
+          "refundedCommissionAmountNet",
+          "refundedCommissionVatAmount",
+          "sellerDiscountNet",
+          "sellerDiscountVatAmount",
+          "unitCostSnapshotNet",
+          "unitCostSnapshotVatRate",
+          "unitCostSnapshotVatAmount",
+          "commissionInvoiceSerialNumber",
+          "variant"
+        ]
+      },
+      "OrderItemVariant": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "barcode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "8690000000000"
+          },
+          "productName": {
+            "type": "string",
+            "example": "Yetişkin tişört — siyah, M"
+          },
+          "productImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "example": null
+          },
+          "marketplaceProductCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "SKU-XYZ-M"
+          }
+        },
+        "required": [
+          "id",
+          "barcode",
+          "productName",
+          "productImageUrl",
+          "marketplaceProductCode"
+        ],
+        "description": "Joined product variant data. Null if the variant was unlinked."
+      },
+      "OrderFeeDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "feeType": {
+            "type": "string",
+            "enum": [
+              "SHIPPING",
+              "PLATFORM_SERVICE",
+              "PLATFORM_SERVICE_FAST",
+              "STOPPAGE",
+              "RETURN_SHIPPING",
+              "REFUND_DEDUCTION",
+              "COMMISSION_REFUND",
+              "PROVISION_ADJUSTMENT",
+              "MANUAL_REFUND",
+              "REVENUE_ADJUSTMENT",
+              "COMMISSION_ADJUSTMENT",
+              "CUSTOM",
+              "ADVERTISING",
+              "PENALTY_DEFECTIVE",
+              "PENALTY_WRONG_PRODUCT",
+              "PENALTY_MISSING_PRODUCT",
+              "PENALTY_LATE_DELIVERY",
+              "PENALTY_SUPPLY_FAILURE",
+              "NOTIFICATION_FEE",
+              "COMMISSION_INVOICE"
+            ],
+            "description": "Fee category (PLATFORM_SERVICE, SHIPPING, STOPPAGE, COMMISSION_REFUND, …).",
+            "example": "PLATFORM_SERVICE"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "ESTIMATE",
+              "SETTLEMENT",
+              "CARGO_INVOICE",
+              "USER_OVERRIDE",
+              "MANUAL_ENTRY"
+            ],
+            "description": "Origin of the fee row (ESTIMATE deterministic, SETTLEMENT vendor, …).",
+            "example": "ESTIMATE"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "DEBIT",
+              "CREDIT"
+            ],
+            "description": "DEBIT reduces seller revenue; CREDIT refunds/positive adjustments.",
+            "example": "DEBIT"
+          },
+          "amountNet": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "vatRate": {
+            "type": "string",
+            "description": "Decimal string %."
+          },
+          "vatAmount": {
+            "type": "string",
+            "description": "Decimal string."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "Hizmet Bedeli (PSF)"
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the row transitioned from ESTIMATE to its SETTLEMENT pair. PaymentOrder entry triggers this for PSF/STOPPAGE. Null for un-confirmed ESTIMATE rows."
+          }
+        },
+        "required": [
+          "id",
+          "feeType",
+          "source",
+          "direction",
+          "amountNet",
+          "vatRate",
+          "vatAmount",
+          "displayName",
+          "capturedAt",
+          "confirmedAt"
+        ]
+      },
+      "OrderClaimDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trendyolClaimId": {
+            "type": "string"
+          },
+          "claimDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cargoProviderName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cargoTrackingNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cargo tracking number rendered as a string — original DB column is BigInt because Trendyol numbers exceed JS safe-integer range."
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderClaimItemDetail"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "trendyolClaimId",
+          "claimDate",
+          "cargoProviderName",
+          "cargoTrackingNumber",
+          "resolved",
+          "items"
+        ]
+      },
+      "OrderClaimItemDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderItemId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reasonCode": {
+            "type": "string",
+            "example": "DAMAGEDITEM"
+          },
+          "reasonName": {
+            "type": "string",
+            "example": "Üründe hasar var"
+          },
+          "status": {
+            "type": "string"
+          },
+          "acceptedBySeller": {
+            "type": "boolean"
+          },
+          "resolved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "orderItemId",
+          "reasonCode",
+          "reasonName",
+          "status",
+          "acceptedBySeller",
+          "resolved"
+        ]
+      },
       "StartSyncResponse": {
         "type": "object",
         "properties": {
@@ -1099,36 +1795,6 @@
           "shippingCarrierCode",
           "shippingTariffApplied",
           "shippingEstimateStatus"
-        ]
-      },
-      "TableMeta": {
-        "type": "object",
-        "properties": {
-          "page": {
-            "type": "integer",
-            "minimum": 1,
-            "example": 1
-          },
-          "perPage": {
-            "type": "integer",
-            "example": 25
-          },
-          "total": {
-            "type": "integer",
-            "minimum": 0,
-            "example": 137
-          },
-          "totalPages": {
-            "type": "integer",
-            "minimum": 0,
-            "example": 6
-          }
-        },
-        "required": [
-          "page",
-          "perPage",
-          "total",
-          "totalPages"
         ]
       },
       "ProductFacetsResponse": {
@@ -3417,6 +4083,504 @@
           },
           "422": {
             "description": "Platform not supported or credentials corrupted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/orders": {
+      "get": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "List orders for a store",
+        "description": "Returns paginated orders sorted by orderDate desc, with composable filters: status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) over platformOrderNumber and platformOrderId. Designed for the orders table — page + perPage pagination, not cursor.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "1-indexed page number",
+              "example": 1
+            },
+            "required": false,
+            "description": "1-indexed page number",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "description": "Items per page. Locked to {10, 25, 50, 100}.",
+              "example": 25
+            },
+            "required": false,
+            "description": "Items per page. Locked to {10, 25, 50, 100}.",
+            "name": "perPage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "PROCESSING",
+                "SHIPPED",
+                "DELIVERED",
+                "CANCELLED",
+                "RETURNED"
+              ],
+              "description": "Filter by marketplace status. Omit for all statuses.",
+              "example": "DELIVERED"
+            },
+            "required": false,
+            "description": "Filter by marketplace status. Omit for all statuses.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NOT_SETTLED",
+                "PARTIALLY_SETTLED",
+                "FULLY_SETTLED"
+              ],
+              "description": "Filter by settlement progression. Omit for all.",
+              "example": "PARTIALLY_SETTLED"
+            },
+            "required": false,
+            "description": "Filter by settlement progression. Omit for all.",
+            "name": "reconciliationStatus",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
+              "example": "2026-04-01T00:00:00.000Z"
+            },
+            "required": false,
+            "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
+              "example": "2026-05-23T23:59:59.999Z"
+            },
+            "required": false,
+            "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "Substring match on platformOrderNumber or platformOrderId.",
+              "example": "TY-2024"
+            },
+            "required": false,
+            "description": "Substring match on platformOrderNumber or platformOrderId.",
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of orders",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOrdersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}": {
+      "get": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Get a single order with items, fees, and claims",
+        "description": "Returns the full Order graph required by the detail surface: OrderItems with joined variant + product image, OrderFee timeline (capturedAt asc), and OrderClaim list (empty until PR-13 GetClaims worker is wired).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orderId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The order detail",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store or order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/orders/sync": {
+      "post": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Enqueue a Trendyol order sync",
+        "description": "Inserts a PENDING SyncLog row with syncType=ORDERS and returns 202 with the new syncLogId. The sync-worker claims the row via tryClaimNext (typically within ~1 s) and walks the configured backfill window with cursor-based pagination against Trendyol's getShipmentPackagesStream endpoint. Concurrent attempts return 409 SYNC_IN_PROGRESS with meta.existingSyncLogId pointing at the live run. Webhooks continue to ingest new orders in real time independent of this manual trigger.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Sync queued",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSyncResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An order sync is already running for this store",
             "content": {
               "application/json": {
                 "schema": {
