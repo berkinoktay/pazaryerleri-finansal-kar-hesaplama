@@ -22,8 +22,8 @@ import { encryptCredentials } from '@pazarsync/sync-core';
 import type { OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 
 import {
+  computeStreamChunkCount,
   processOrdersChunk,
-  STREAM_CHUNK_COUNT,
   STREAM_CHUNK_DAYS,
   upsertOrderWithSnapshot,
 } from '../../src/handlers/orders';
@@ -37,6 +37,7 @@ import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpe
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const ORIGINAL_ENV = process.env;
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -95,7 +96,7 @@ function makeStreamResponse(args: {
   };
 }
 
-async function setupStoreAndSyncLog(barcodes: string[] = []) {
+async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreatedAt?: Date } = {}) {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -106,6 +107,10 @@ async function setupStoreAndSyncLog(barcodes: string[] = []) {
       platform: 'TRENDYOL',
       environment: 'PRODUCTION',
       externalAccountId: '2738',
+      // Default backdated 100d so the multi-chunk suite (backfill=90) reproduces
+      // the 7-chunk / 14-day-window behavior these tests assert. Forward-only
+      // tests pass an explicit recent createdAt.
+      createdAt: opts.storeCreatedAt ?? new Date(Date.now() - 100 * MS_PER_DAY),
       credentials: encryptCredentials({
         supplierId: '2738',
         apiKey: 'test-key',
@@ -157,12 +162,16 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
   });
 
   beforeEach(async () => {
+    // Multi-chunk suite: 90d backfill + 100d-old store ⇒ ceil(90/14)=7 chunks,
+    // 14-day windows — the behavior these chunk-mechanics tests assert.
+    process.env = { ...ORIGINAL_ENV, SYNC_HISTORICAL_BACKFILL_DAYS: '90' };
     await truncateAll();
     // applyEstimateOnOrderCreate PSF + Stopaj FeeDefinition rows ister.
     await ensureFeeDefinitions();
   });
 
   afterEach(() => {
+    process.env = ORIGINAL_ENV;
     vi.restoreAllMocks();
   });
 
@@ -181,8 +190,8 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     const result = await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // hasMore=false on chunk 0 → continue with chunkIndex=1 (not done yet,
-    // STREAM_CHUNK_COUNT > 1).
+    // hasMore=false on chunk 0 → continue with chunkIndex=1 (not done yet —
+    // multi-chunk backfill, chunkCount=7).
     expect(result.kind).toBe('continue');
     if (result.kind !== 'continue') return;
     const cursor = result.cursor as OrdersStreamWindowCursor;
@@ -370,9 +379,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
   });
 
   it('last chunk exhausted: hasMore=false on chunk N-1 → done', async () => {
-    const { log } = await setupStoreAndSyncLog([]);
-    const lastChunkIndex = STREAM_CHUNK_COUNT - 1;
+    const { store, log } = await setupStoreAndSyncLog([]);
     const endDate = Date.now();
+    const lastChunkIndex =
+      computeStreamChunkCount({ storeCreatedAt: store.createdAt, endDate }) - 1;
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
@@ -500,5 +510,73 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
     expect(item.productVariantId).not.toBeNull();
+  });
+});
+
+describe('processOrdersChunk — forward-only cutoff (PR-A)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    // Production default: no historical backfill. A freshly connected store
+    // ⇒ cutoff = store.createdAt ⇒ a single chunk covering [createdAt, now].
+    process.env = { ...ORIGINAL_ENV, SYNC_HISTORICAL_BACKFILL_DAYS: '0' };
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    vi.restoreAllMocks();
+  });
+
+  it('fresh store + backfill=0 → single chunk → done after first page', async () => {
+    const { log } = await setupStoreAndSyncLog([], { storeCreatedAt: new Date() });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+    );
+
+    const result = await processOrdersChunk({ syncLog: log, cursor: null });
+
+    // Only one chunk exists, so chunk 0 is the last → terminate immediately.
+    expect(result.kind).toBe('done');
+  });
+
+  it('fresh store window floor is store.createdAt, not 14 days back', async () => {
+    const storeCreatedAt = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2h ago
+    const { log } = await setupStoreAndSyncLog([], { storeCreatedAt });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+      );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    const lastModifiedStartDate = Number.parseInt(
+      new URL(url).searchParams.get('lastModifiedStartDate')!,
+      10,
+    );
+    // Window floor is store.createdAt (≈2h ago), NOT now−14d.
+    expect(Math.abs(lastModifiedStartDate - storeCreatedAt.getTime())).toBeLessThan(5000);
+  });
+
+  it('future-dated store.createdAt → no fetch, terminates immediately (chunkCount 0 guard)', async () => {
+    // Pathological: store.createdAt after endDate (clock skew / seed data) ⇒
+    // chunkCount 0. The handler must NOT call the vendor with an inverted window.
+    const { log } = await setupStoreAndSyncLog([], {
+      storeCreatedAt: new Date(Date.now() + 60 * 60 * 1000), // 1h in the future
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await processOrdersChunk({ syncLog: log, cursor: null });
+
+    expect(result.kind).toBe('done');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
