@@ -25,3 +25,4 @@ export {
   type CalcResult,
   type OrderLineForCalcCheck,
 } from './resolve-order-calculability';
+export { buildCalcCheckLines } from './build-calc-check-lines';
