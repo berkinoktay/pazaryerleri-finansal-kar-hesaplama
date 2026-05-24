@@ -40,6 +40,7 @@ import {
   type TrendyolCredentials,
 } from '@pazarsync/marketplace';
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import {
   decryptCredentials,
   parseOrdersCursor,
@@ -222,6 +223,26 @@ export async function processOrdersChunk(input: {
   // Upsert per-order (own transaction). Trendyol can emit duplicate orders
   // across cursor pages on lastModified shifts — upsert is idempotent.
   for (const order of batch) {
+    // Calculability gate — V1 hard skip (PR-B 2026-05-24). An order with any
+    // line missing a resolved variant or a cost snapshot is never written.
+    const calcLines = await buildCalcCheckLines(prisma, {
+      storeId: store.id,
+      lines: order.lines,
+    });
+    const calc = resolveOrderCalculability(calcLines);
+    if (calc.kind === 'skip') {
+      syncLog.info('orders.skipped', {
+        source: 'cron',
+        reason: calc.reason,
+        syncLogId: log.id,
+        storeId: log.storeId,
+        platformOrderId: order.platformOrderId,
+        barcode: calc.barcode,
+        ...(calc.reason === 'cost_missing' ? { variantId: calc.variantId } : {}),
+      });
+      continue;
+    }
+
     try {
       await upsertOrderWithSnapshot(store.id, store.organizationId, order);
     } catch (err) {

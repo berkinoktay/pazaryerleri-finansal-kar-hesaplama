@@ -29,6 +29,7 @@ import {
 } from '../../src/handlers/orders';
 
 import {
+  createCostProfile,
   createMembership,
   createOrganization,
   createUserProfile,
@@ -119,6 +120,9 @@ async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreate
     },
   });
 
+  // PR-B calculability gate: a seeded variant must carry a cost profile or the
+  // handler hard-skips its order. One profile per store, linked to each variant.
+  const costProfile = barcodes.length > 0 ? await createCostProfile(org.id) : null;
   for (const barcode of barcodes) {
     const product = await prisma.product.create({
       data: {
@@ -139,6 +143,9 @@ async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreate
         stockCode: `sk-${barcode}`,
         salePrice: '100',
         listPrice: '120',
+        ...(costProfile !== null
+          ? { costProfileLinks: { create: { organizationId: org.id, profileId: costProfile.id } } }
+          : {}),
       },
     });
   }
@@ -212,9 +219,9 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(order.actualDeliveryDate?.getTime()).toBe(DELIVERED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
     expect(order.reconciliationStatus).toBe('NOT_SETTLED');
-    // No cost profile attached → estimatedNetProfit null but ESTIMATE
-    // OrderFee rows still written.
-    expect(order.estimatedNetProfit).toBeNull();
+    // PR-B: the order is calculable (variant + cost seeded), so the estimate
+    // is computed (non-null) alongside the ESTIMATE OrderFee rows.
+    expect(order.estimatedNetProfit).not.toBeNull();
 
     const fees = await prisma.orderFee.findMany({
       where: { orderId: order.id, source: 'ESTIMATE' },
@@ -266,8 +273,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(item.productVariantId).not.toBeNull();
   });
 
-  it('variant not found: OrderItem.productVariantId null (graceful)', async () => {
-    const { store, log } = await setupStoreAndSyncLog([]); // no variants
+  // PR-B calculability gate: the old "graceful null-variant item" behavior is
+  // gone — an unresolvable variant now hard-skips the whole order.
+  it('calculability gate: variant not found → order skipped (not written)', async () => {
+    const { store, log } = await setupStoreAndSyncLog([]); // no variants seeded
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
@@ -295,10 +304,62 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    const item = await prisma.orderItem.findFirstOrThrow({
-      where: { order: { storeId: store.id } },
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.orderItem.count()).toBe(0);
+  });
+
+  it('calculability gate: variant exists but no cost → order skipped (not written)', async () => {
+    const { org, store, log } = await setupStoreAndSyncLog([]);
+    // Seed a variant WITHOUT a cost profile link.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        productMainId: 'pm-EAN13-NOCOST',
+        title: 'No-cost Product',
+      },
     });
-    expect(item.productVariantId).toBeNull();
+    await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        barcode: 'EAN13-NOCOST',
+        stockCode: 'sk-EAN13-NOCOST',
+        salePrice: '100',
+        listPrice: '120',
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
+          content: [
+            makeShipmentPackage({
+              lines: [
+                {
+                  lineId: 1,
+                  barcode: 'EAN13-NOCOST',
+                  quantity: 1,
+                  lineUnitPrice: 120,
+                  lineGrossAmount: 120,
+                  vatRate: 20,
+                  commission: 10,
+                },
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
   });
 
   it('idempotent: re-sync same page → no duplicate Order/OrderItem rows', async () => {

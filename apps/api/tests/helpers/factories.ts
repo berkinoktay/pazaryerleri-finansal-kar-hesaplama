@@ -318,6 +318,9 @@ export async function createCostProfile(
   organizationId: string,
   overrides: { name?: string; type?: CostProfileType; amount?: string } = {},
 ) {
+  // amount is NET (KDV hariç). vatRate + vatAmount are set so a cost snapshot
+  // captured from this profile is fully specified (net + vat), which is what
+  // the estimate path needs to compute a non-null estimatedNetProfit.
   return prisma.costProfile.create({
     data: {
       organizationId,
@@ -325,6 +328,8 @@ export async function createCostProfile(
       type: overrides.type ?? 'COGS',
       amount: overrides.amount ?? '50.00',
       currency: 'TRY',
+      vatRate: 20,
+      vatAmount: '10.00',
     },
   });
 }
