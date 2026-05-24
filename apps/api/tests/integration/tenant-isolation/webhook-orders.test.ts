@@ -5,7 +5,12 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../../src/app';
 import { _resetRateLimitStoreForTests } from '../../../src/middleware/rate-limit.middleware';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
+import {
+  createCostProfile,
+  createMembership,
+  createOrganization,
+  createUserProfile,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const SUPPLIER_ID_A = '11111';
@@ -76,6 +81,33 @@ async function setupOrgStore(args: { supplierId: string; username: string; passw
       webhookActiveAt: new Date(),
     },
   });
+
+  // Seed a calculable variant for the webhook payload barcode so an order
+  // that passes auth + supplier checks also clears the V1 calculability gate.
+  const costProfile = await createCostProfile(org.id);
+  const product = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-EAN13-T-001-${args.supplierId}`,
+      title: 'Tenant Webhook Test Product',
+    },
+  });
+  await prisma.productVariant.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode: 'EAN13-T-001',
+      stockCode: `sk-EAN13-T-001-${args.supplierId}`,
+      salePrice: '100',
+      listPrice: '120',
+      costProfileLinks: { create: { organizationId: org.id, profileId: costProfile.id } },
+    },
+  });
+
   return { orgId: org.id, storeId: store.id };
 }
 

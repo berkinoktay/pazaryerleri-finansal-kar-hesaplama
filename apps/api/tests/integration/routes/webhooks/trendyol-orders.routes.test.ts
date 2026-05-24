@@ -7,6 +7,7 @@ import { createApp } from '../../../../src/app';
 import { _resetRateLimitStoreForTests } from '../../../../src/middleware/rate-limit.middleware';
 import { ensureDbReachable, truncateAll } from '../../../helpers/db';
 import {
+  createCostProfile,
   createMembership,
   createOrganization,
   createUserProfile,
@@ -89,6 +90,32 @@ async function setupStore(): Promise<{ orgId: string; storeId: string }> {
       webhookId: 'trendyol-wh-uuid-12345',
       webhookSecret,
       webhookActiveAt: new Date(),
+    },
+  });
+
+  // Seed a calculable variant for the default webhook payload barcode so the
+  // happy/idempotency/transfer paths clear the V1 calculability gate (PR-B).
+  const costProfile = await createCostProfile(org.id);
+  const product = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-EAN13-WH-001`,
+      title: 'Webhook Test Product',
+    },
+  });
+  await prisma.productVariant.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode: 'EAN13-WH-001',
+      stockCode: 'sk-EAN13-WH-001',
+      salePrice: '100',
+      listPrice: '120',
+      costProfileLinks: { create: { organizationId: org.id, profileId: costProfile.id } },
     },
   });
 
@@ -332,6 +359,86 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       // Hono @hono/zod-openapi maps schema failure via defaultHook →
       // ValidationError → 422 (RFC 7807). Trendyol won't retry a 4xx.
       expect(res.status).toBe(422);
+    });
+  });
+
+  describe('Calculability gate (PR-B)', () => {
+    it('skips the order (200, no write) when a line has no matching variant', async () => {
+      const { storeId } = await setupStore();
+      const payload = makeWebhookPayload({
+        orderNumber: 'NO-VARIANT-1',
+        shipmentPackageId: 555000001,
+        lines: [
+          {
+            lineId: 1,
+            sellerId: Number.parseInt(SUPPLIER_ID, 10),
+            barcode: 'UNKNOWN-BARCODE-XYZ',
+            quantity: 1,
+            lineUnitPrice: 100,
+            lineGrossAmount: 100,
+            lineSellerDiscount: 0,
+            vatRate: 20,
+            commission: 10,
+          },
+        ],
+      });
+      const res = await postWebhook(storeId, payload, basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS));
+      expect(res.status).toBe(200);
+      expect(await prisma.order.count({ where: { storeId, platformOrderId: '555000001' } })).toBe(
+        0,
+      );
+      const event = await prisma.webhookEvent.findFirstOrThrow({
+        where: { storeId, platformOrderId: '555000001' },
+      });
+      expect(event.processedAt).not.toBeNull();
+    });
+
+    it('skips the order (200, no write) when the variant exists but has no cost profile', async () => {
+      const { orgId, storeId } = await setupStore();
+      // Seed a SECOND variant with NO cost link.
+      const product = await prisma.product.create({
+        data: {
+          organizationId: orgId,
+          storeId,
+          platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+          productMainId: 'pm-EAN13-NOCOST',
+          title: 'No-cost Product',
+        },
+      });
+      await prisma.productVariant.create({
+        data: {
+          organizationId: orgId,
+          storeId,
+          productId: product.id,
+          platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+          barcode: 'EAN13-NOCOST',
+          stockCode: 'sk-EAN13-NOCOST',
+          salePrice: '100',
+          listPrice: '120',
+        },
+      });
+      const payload = makeWebhookPayload({
+        orderNumber: 'NO-COST-1',
+        shipmentPackageId: 555000002,
+        lines: [
+          {
+            lineId: 1,
+            sellerId: Number.parseInt(SUPPLIER_ID, 10),
+            barcode: 'EAN13-NOCOST',
+            quantity: 1,
+            lineUnitPrice: 100,
+            lineGrossAmount: 100,
+            lineSellerDiscount: 0,
+            vatRate: 20,
+            commission: 10,
+          },
+        ],
+      });
+      const res = await postWebhook(storeId, payload, basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS));
+      expect(res.status).toBe(200);
+      expect(await prisma.order.count({ where: { storeId, platformOrderId: '555000002' } })).toBe(
+        0,
+      );
     });
   });
 });
