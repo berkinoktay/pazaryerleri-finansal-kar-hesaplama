@@ -670,9 +670,9 @@
         "description": "Once the first order syncs from the connected store, it will land here."
       }
     },
-    "syncButton": {
-      "label": "Sync",
-      "syncing": "Syncing…"
+    "refreshButton": {
+      "label": "Refresh",
+      "refreshing": "Refreshing…"
     }
   },
   "productsPage": {

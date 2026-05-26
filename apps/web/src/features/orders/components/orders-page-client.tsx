@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 
 import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
-import { useStartOrderSync } from '../hooks/use-start-order-sync';
+import { useRefreshOrders } from '../hooks/use-refresh-orders';
 import {
   type OrderStatusValue,
   type ReconciliationStatusValue,
@@ -71,7 +71,7 @@ export function OrdersPageClient({
         },
   );
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
-  const startSync = useStartOrderSync(orgId, storeId);
+  const refresh = useRefreshOrders(orgId, storeId);
 
   if (noStoreSelected) {
     return (
@@ -100,11 +100,9 @@ export function OrdersPageClient({
   const orderSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
-  // Mirror the products page guard — never POST while a slot is already
-  // taken (the partial unique index would 409, the global toast would fire
-  // but the optimistic write would still flicker). Pre-check is friendlier.
-  const orderSyncInFlight = activeSyncs.some((l) => l.syncType === 'ORDERS');
-  const syncButtonDisabled = startSync.isPending || orderSyncInFlight;
+  // Refresh is a client-side cache invalidate only (no vendor POST), so the
+  // button only guards its own brief in-flight state.
+  const refreshButtonDisabled = refresh.isPending;
 
   const headerSlots = {
     meta: (
@@ -122,12 +120,14 @@ export function OrdersPageClient({
       <Button
         type="button"
         size="sm"
-        onClick={() => startSync.mutate()}
-        disabled={syncButtonDisabled}
+        onClick={() => refresh.mutate()}
+        disabled={refreshButtonDisabled}
         className="gap-xs"
       >
-        <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
-        {syncButtonDisabled ? tOrders('syncButton.syncing') : tOrders('syncButton.label')}
+        <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
+        {refreshButtonDisabled
+          ? tOrders('refreshButton.refreshing')
+          : tOrders('refreshButton.label')}
       </Button>
     ),
   };
@@ -149,13 +149,7 @@ export function OrdersPageClient({
           open={syncCenterOpen}
           onOpenChange={setSyncCenterOpen}
           logs={syncCenterLogs}
-          triggers={[
-            {
-              syncType: 'ORDERS',
-              onClick: () => startSync.mutate(),
-              isPending: startSync.isPending,
-            },
-          ]}
+          triggers={[]}
         />
       </>
     );
@@ -210,13 +204,7 @@ export function OrdersPageClient({
         open={syncCenterOpen}
         onOpenChange={setSyncCenterOpen}
         logs={syncCenterLogs}
-        triggers={[
-          {
-            syncType: 'ORDERS',
-            onClick: () => startSync.mutate(),
-            isPending: startSync.isPending,
-          },
-        ]}
+        triggers={[]}
       />
     </>
   );
