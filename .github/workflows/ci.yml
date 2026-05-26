@@ -5,16 +5,22 @@ on:
   push:
     branches: [main]
 
+# Cancel a superseded run on the same ref. PR pushes supersede the prior
+# in-flight run (saves limited private-repo Actions minutes); main-branch runs
+# are never cancelled so every merge gets a complete, recorded run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  # Detects whether the PR/push touches any non-docs files. The `test`
-  # job below gates on this so that docs-only changes (READMEs, the
-  # docs/ folder) skip the slow Supabase spin-up entirely. typecheck,
-  # lint, and api-spec-sync stay unconditional — they're fast (~45s)
-  # and useful even on docs PRs (format check, broken doc links via
-  # markdown lint in the future, etc).
+  # Detects whether the PR/push touches any non-docs files. The `test` and
+  # `build` jobs gate on this so that docs-only changes skip the slow Supabase
+  # spin-up / build entirely. typecheck, lint, and api-spec-sync stay
+  # unconditional — they're fast and useful even on docs PRs.
   changes:
     name: Detect non-docs changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # dorny/paths-filter calls the GitHub PR-files API to compute the diff.
     # The default GITHUB_TOKEN permissions don't include `pull-requests: read`
     # in repos where the org has tightened defaults — grant it explicitly.
@@ -38,27 +44,12 @@ jobs:
   api-spec-sync:
     name: OpenAPI spec is in sync
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-
-      # Uses the version declared in the root package.json's
-      # packageManager field (pnpm@10.33.0). Avoids corepack
-      # mismatch if that field drifts from a hardcoded version here.
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client (required before typecheck in any downstream job)
-        run: pnpm db:generate
-
-      - name: Sync OpenAPI spec and generated types
-        run: pnpm api:sync
-
+      # Composite runs api:sync; the step below fails if the committed spec
+      # or generated types drifted from what api:sync produces.
+      - uses: ./.github/actions/setup
       - name: Fail if spec or generated types drifted
         run: |
           if ! git diff --exit-code packages/api-client/openapi.json packages/api-client/src/generated/; then
@@ -71,21 +62,79 @@ jobs:
   typecheck:
     name: Typecheck all packages
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm db:generate
-      - run: pnpm api:sync # ensure generated types exist before typecheck
+      - uses: ./.github/actions/setup
       - run: pnpm typecheck
 
   lint:
     name: Lint all packages
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      # Filter forces every workspace package into scope. Without it,
+      # turbo's affected-detection might skip packages it considers unchanged.
+      - run: pnpm turbo run lint --filter='@pazarsync/*'
+      - name: Format check
+        run: pnpm format:check
+
+  build:
+    name: Build all apps
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      - name: Build
+        run: pnpm build
+        env:
+          # next build inlines NEXT_PUBLIC_* at build time; these placeholders
+          # satisfy boot/validation. No real secrets — CI never reaches Supabase.
+          NEXT_PUBLIC_SUPABASE_URL: https://ci.pazarsync.test
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+          NEXT_PUBLIC_API_URL: https://ci.pazarsync.test
+          NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS: 'true'
+
+  pr-title:
+    name: PR title is conventional
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      # Squash-merge uses the PR title as the main commit message; commitlint
+      # only checks local commit messages, not the PR title. This closes the gap.
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # gitleaks scans full commit history
+      # Native GitHub secret scanning needs Advanced Security (paid on private
+      # repos), so this OSS action fills the gap. First pass is non-blocking:
+      # report findings without failing PRs — flip to blocking (remove
+      # continue-on-error) once the initial triage issue is cleared.
+      - uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+
+  deps-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -93,14 +142,11 @@ jobs:
         with:
           node-version: 22
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm db:generate
-      - run: pnpm api:sync # generated types are imported by some packages
-      # Filter forces every workspace package into scope. Without it,
-      # turbo's affected-detection might skip packages it considers unchanged.
-      - run: pnpm turbo run lint --filter='@pazarsync/*'
-      - name: Format check
-        run: pnpm format:check
+      # Non-blocking first pass — see secret-scan note. pnpm audit needs only
+      # the lockfile, so we skip the full install/codegen of the composite.
+      - name: Audit (high and critical)
+        run: pnpm audit --audit-level=high
+        continue-on-error: true
 
   test:
     name: Unit and integration tests
@@ -110,20 +156,10 @@ jobs:
     # required checks pending forever.
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - run: pnpm install --frozen-lockfile
-
-      - run: pnpm db:generate
-      - run: pnpm api:sync
+      - uses: ./.github/actions/setup
 
       # Fast feedback: unit tests first, fail before spinning up DB.
       - name: Run unit tests
@@ -220,3 +256,17 @@ jobs:
       - name: Stop Supabase local
         if: always()
         run: supabase stop
+
+  # Single aggregate status. A future GitHub Pro upgrade can mark just this as
+  # the required check. skipped jobs (build/test on docs-only PRs, pr-title on
+  # push) count as success; only real failures/cancellations fail the gate.
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [api-spec-sync, typecheck, lint, build, pr-title, secret-scan, deps-audit, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any required job failed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: echo "One or more required jobs failed or were cancelled" && exit 1
