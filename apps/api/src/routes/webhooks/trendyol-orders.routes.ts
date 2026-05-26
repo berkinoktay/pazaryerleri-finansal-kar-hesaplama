@@ -40,6 +40,7 @@ import {
   type TrendyolShipmentPackage,
 } from '@pazarsync/marketplace';
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 import { UnauthorizedError, ValidationError } from '../../lib/errors';
@@ -230,6 +231,30 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
       errorMessage: err instanceof Error ? err.message : String(err),
     });
     throw new ValidationError([{ field: '(payload)', code: 'PAYLOAD_MAPPING_FAILED' }]);
+  }
+
+  // ─── Calculability gate — V1 hard skip (PR-B 2026-05-24) ───────────────
+  // An order with any line missing a resolved variant or a cost snapshot is
+  // never written; we still mark the webhook event processed (we handled it).
+  const calcLines = await buildCalcCheckLines(prisma, {
+    storeId: store.id,
+    lines: mapped.lines,
+  });
+  const calc = resolveOrderCalculability(calcLines);
+  if (calc.kind === 'skip') {
+    syncLog.info('orders.skipped', {
+      source: 'webhook',
+      reason: calc.reason,
+      storeId: store.id,
+      platformOrderId,
+      barcode: calc.barcode,
+      ...(calc.reason === 'cost_missing' ? { variantId: calc.variantId } : {}),
+    });
+    await prisma.webhookEvent.update({
+      where: { id: webhookEventId },
+      data: { processedAt: new Date() },
+    });
+    return c.body(null, 200);
   }
 
   try {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type {
+  CostProfileType,
   FeeCalculationKind,
   MemberRole,
   OrderFeeDirection,
@@ -307,6 +308,28 @@ export async function createWebhookEvent(
       processedAt: overrides.processedAt ?? null,
       processingError: overrides.processingError ?? null,
       rawPayload: (overrides.rawPayload ?? { shipmentPackageId: 12345 }) as Prisma.JsonObject,
+    },
+  });
+}
+
+// ─── Cost profile (calculability gate PR-B) ────────────────────────────
+
+export async function createCostProfile(
+  organizationId: string,
+  overrides: { name?: string; type?: CostProfileType; amount?: string } = {},
+) {
+  // amount is NET (KDV hariç). vatRate + vatAmount are set so a cost snapshot
+  // captured from this profile is fully specified (net + vat), which is what
+  // the estimate path needs to compute a non-null estimatedNetProfit.
+  return prisma.costProfile.create({
+    data: {
+      organizationId,
+      name: overrides.name ?? `COGS-${randomUUID().slice(0, 8)}`,
+      type: overrides.type ?? 'COGS',
+      amount: overrides.amount ?? '50.00',
+      currency: 'TRY',
+      vatRate: 20,
+      vatAmount: '10.00',
     },
   });
 }

@@ -4,8 +4,9 @@
  * Order sync flow (Order Sync epic — design §5, BUG #9 migration):
  *   1. Decrypt store credentials
  *   2. Compute current chunk window (`lastModifiedStartDate`/`lastModifiedEndDate`)
- *      from the saved StreamOrdersCursor; fresh sync covers ~90 gün backfill
- *      split into `STREAM_CHUNK_COUNT` sliding 14-day chunks.
+ *      from the saved StreamOrdersCursor; fresh sync walks back from `endDate`
+ *      to the cutoff (`computeOrdersCutoffMs` — store.createdAt by default,
+ *      extended by SYNC_HISTORICAL_BACKFILL_DAYS in dev) in sliding 14-day chunks.
  *   3. fetchShipmentPackagesStream → one StreamPageResult per dispatcher tick
  *      (PR-A KDV-split mapper still applies)
  *   4. For each MappedOrder:
@@ -39,6 +40,7 @@ import {
   type TrendyolCredentials,
 } from '@pazarsync/marketplace';
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import {
   decryptCredentials,
   parseOrdersCursor,
@@ -46,25 +48,71 @@ import {
   type OrdersStreamWindowCursor,
 } from '@pazarsync/sync-core';
 
+import { readSyncEnv } from '../lib/env';
+
 import type { ChunkResult, ModuleHandler } from './types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/**
- * Initial backfill window — V1 hardcoded 90 gün.
- *
- * Trendyol's stream endpoint (`getShipmentPackagesStream`) exposes the last
- * 3 months of orders (`siparis-paketlerini-akis-ile-cekme-getshipmentpackagesstream.md`
- * line 22-25). 90d covers Trendyol's full cycle T+30 payment timing plus
- * buffer — the 30d backfill of BUG #7 was a workaround for the legacy page
- * endpoint's 1-month cap and is reverted now that the stream endpoint is in
- * use. See window math comment in `apps/sync-worker/src/handlers/settlements/cron.ts`
- * for the sound rule (Settlement W ≥ Order backfill + cycle buffer).
- */
-const INITIAL_BACKFILL_DAYS = 90;
 const STREAM_CHUNK_DAYS = STREAM_WINDOW_MAX_DAYS; // 14, vendor enforced per call
-const STREAM_CHUNK_COUNT = Math.ceil(INITIAL_BACKFILL_DAYS / STREAM_CHUNK_DAYS); // 7
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MS_PER_HOUR = 60 * 60 * 1000;
+
+/**
+ * Inclusive lower-bound timestamp (ms) of the initial orders backfill window.
+ *
+ * Forward-only by default: with SYNC_HISTORICAL_BACKFILL_DAYS=0 (production)
+ * the cutoff is `store.createdAt` — we never read orders from before the store
+ * was connected, because their cost snapshots would be inconsistent (supplier
+ * prices have since moved). Dev/stage may set a positive backfill to walk
+ * further back for settlement testing; the result is still clamped so it can
+ * never precede `store.createdAt`. See spec §5.3.
+ *
+ * NOTE: backfill=0 must collapse to `store.createdAt`, NOT `endDate`. The
+ * literal `max(createdAt, endDate - 0)` returns `endDate` — an empty window
+ * `[endDate, endDate]` — which would make a freshly connected store sync zero
+ * chunks. The zero case is handled explicitly.
+ */
+export function computeOrdersCutoffMs(args: { storeCreatedAt: Date; endDate: number }): number {
+  const { historicalBackfillDays } = readSyncEnv();
+  const storeCreatedAtMs = args.storeCreatedAt.getTime();
+  if (historicalBackfillDays === 0) {
+    return storeCreatedAtMs;
+  }
+  const requestedStartMs = args.endDate - historicalBackfillDays * MS_PER_DAY;
+  return Math.max(storeCreatedAtMs, requestedStartMs);
+}
+
+/**
+ * Cutoff for a periodic (delta) sync: only the trailing SYNC_SAFETY_NET_HOURS,
+ * clamped by `store.createdAt`. Webhook is the primary ingest path; the cron
+ * tick is a safety net, so after the initial backfill it sweeps just the
+ * recent hours a webhook delivery may have missed — not the whole history.
+ */
+export function computeDeltaCutoffMs(args: { storeCreatedAt: Date; endDate: number }): number {
+  const { safetyNetHours } = readSyncEnv();
+  const floorMs = args.endDate - safetyNetHours * MS_PER_HOUR;
+  return Math.max(args.storeCreatedAt.getTime(), floorMs);
+}
+
+/**
+ * Number of sliding 14-day stream chunks needed to cover `[cutoff, endDate]`.
+ * Replaces the static STREAM_CHUNK_COUNT (90/14 = 7); now derived per store
+ * from (`store.createdAt`, env). A fresh forward-only store yields 1 chunk.
+ * `cutoffMsOverride` lets the delta path pass a tighter floor.
+ */
+export function computeStreamChunkCount(args: {
+  storeCreatedAt: Date;
+  endDate: number;
+  cutoffMsOverride?: number;
+}): number {
+  const cutoffMs =
+    args.cutoffMsOverride ??
+    computeOrdersCutoffMs({ storeCreatedAt: args.storeCreatedAt, endDate: args.endDate });
+  const spanDays = Math.ceil((args.endDate - cutoffMs) / MS_PER_DAY);
+  if (spanDays <= 0) return 0;
+  return Math.ceil(spanDays / STREAM_CHUNK_DAYS);
+}
 
 // ─── Credentials decryption (products.ts mirror) ─────────────────────────────
 
@@ -87,13 +135,20 @@ interface ChunkBounds {
 
 /**
  * Compute the `lastModifiedStartDate`/`lastModifiedEndDate` window for a
- * given chunk index. Chunks slide newest → oldest; the oldest chunk's
- * start is clamped to `endDate − INITIAL_BACKFILL_DAYS` so non-divisible
- * backfills still respect the configured total.
+ * given chunk index. Chunks slide newest → oldest; the oldest chunk's start
+ * is clamped to `computeOrdersCutoffMs` (store.createdAt by default) so the
+ * window never precedes store connection.
  */
-function computeChunkBounds(endDate: number, chunkIndex: number): ChunkBounds {
+function computeChunkBounds(args: {
+  storeCreatedAt: Date;
+  endDate: number;
+  chunkIndex: number;
+  cutoffMsOverride?: number;
+}): ChunkBounds {
+  const { storeCreatedAt, endDate, chunkIndex } = args;
   const endMs = endDate - chunkIndex * STREAM_CHUNK_DAYS * MS_PER_DAY;
-  const overallStartMs = endDate - INITIAL_BACKFILL_DAYS * MS_PER_DAY;
+  const overallStartMs =
+    args.cutoffMsOverride ?? computeOrdersCutoffMs({ storeCreatedAt, endDate });
   const candidateStart = endMs - STREAM_CHUNK_DAYS * MS_PER_DAY;
   const startMs = Math.max(candidateStart, overallStartMs);
   return { startMs, endMs };
@@ -140,18 +195,52 @@ export async function processOrdersChunk(input: {
     cursor = { kind: 'stream-window', endDate: Date.now(), chunkIndex: 0, streamCursor: null };
   }
 
-  const bounds = computeChunkBounds(cursor.endDate, cursor.chunkIndex);
+  const store = await prisma.store.findUniqueOrThrow({ where: { id: log.storeId } });
+  const credentials = decryptStoreCredentials(store);
+
+  // Initial vs delta window. The first sync for a store (no prior COMPLETED
+  // ORDERS sync) walks the full backfill window from store.createdAt; every
+  // periodic cron tick afterward sweeps only the trailing SYNC_SAFETY_NET_HOURS
+  // — webhook is the primary ingest path, so re-scanning the whole history
+  // hourly is wasteful. The in-flight sync (RUNNING) doesn't count; only a
+  // prior COMPLETED ORDERS sync flips us to delta.
+  const priorCompletedOrdersSync = await prisma.syncLog.findFirst({
+    where: { storeId: log.storeId, syncType: 'ORDERS', status: 'COMPLETED' },
+    select: { id: true },
+  });
+  const cutoffMsOverride =
+    priorCompletedOrdersSync !== null
+      ? computeDeltaCutoffMs({ storeCreatedAt: store.createdAt, endDate: cursor.endDate })
+      : undefined;
+
+  const bounds = computeChunkBounds({
+    storeCreatedAt: store.createdAt,
+    endDate: cursor.endDate,
+    chunkIndex: cursor.chunkIndex,
+    cutoffMsOverride,
+  });
+  const chunkCount = computeStreamChunkCount({
+    storeCreatedAt: store.createdAt,
+    endDate: cursor.endDate,
+    cutoffMsOverride,
+  });
 
   syncLog.info('orders.chunk.start', {
     syncLogId: log.id,
     storeId: log.storeId,
     cursor,
+    mode: cutoffMsOverride !== undefined ? 'delta' : 'initial',
     chunkBounds: { startMs: bounds.startMs, endMs: bounds.endMs },
+    chunkCount,
     progressCurrent: log.progressCurrent,
   });
 
-  const store = await prisma.store.findUniqueOrThrow({ where: { id: log.storeId } });
-  const credentials = decryptStoreCredentials(store);
+  // Empty window — store.createdAt is at/after endDate (clock skew or seed
+  // data). chunkCount 0 means there is nothing to fetch; finish rather than
+  // send the vendor an inverted [startMs > endMs] window.
+  if (chunkCount === 0) {
+    return advanceChunkOrFinish(log, cursor, log.progressCurrent, chunkCount);
+  }
 
   // Generator yields ONE stream page, then we return — dispatcher loops
   // with our advanced cursor (re-creates the generator next tick).
@@ -166,7 +255,7 @@ export async function processOrdersChunk(input: {
 
   if (done === true || value === undefined) {
     // Empty stream for this chunk — advance to the next chunk or finish.
-    return advanceChunkOrFinish(log, cursor, log.progressCurrent);
+    return advanceChunkOrFinish(log, cursor, log.progressCurrent, chunkCount);
   }
 
   const { batch, nextCursor, hasMore } = value;
@@ -174,6 +263,26 @@ export async function processOrdersChunk(input: {
   // Upsert per-order (own transaction). Trendyol can emit duplicate orders
   // across cursor pages on lastModified shifts — upsert is idempotent.
   for (const order of batch) {
+    // Calculability gate — V1 hard skip (PR-B 2026-05-24). An order with any
+    // line missing a resolved variant or a cost snapshot is never written.
+    const calcLines = await buildCalcCheckLines(prisma, {
+      storeId: store.id,
+      lines: order.lines,
+    });
+    const calc = resolveOrderCalculability(calcLines);
+    if (calc.kind === 'skip') {
+      syncLog.info('orders.skipped', {
+        source: 'cron',
+        reason: calc.reason,
+        syncLogId: log.id,
+        storeId: log.storeId,
+        platformOrderId: order.platformOrderId,
+        barcode: calc.barcode,
+        ...(calc.reason === 'cost_missing' ? { variantId: calc.variantId } : {}),
+      });
+      continue;
+    }
+
     try {
       await upsertOrderWithSnapshot(store.id, store.organizationId, order);
     } catch (err) {
@@ -215,7 +324,7 @@ export async function processOrdersChunk(input: {
   }
 
   // Chunk exhausted — advance to next chunk or finish.
-  return advanceChunkOrFinish(log, cursor, newProgress);
+  return advanceChunkOrFinish(log, cursor, newProgress, chunkCount);
 }
 
 /**
@@ -226,8 +335,9 @@ function advanceChunkOrFinish(
   log: SyncLog,
   cursor: OrdersStreamWindowCursor,
   progress: number,
+  chunkCount: number,
 ): ChunkResult {
-  if (cursor.chunkIndex >= STREAM_CHUNK_COUNT - 1) {
+  if (cursor.chunkIndex >= chunkCount - 1) {
     syncLog.info('orders.chunk.done', {
       syncLogId: log.id,
       storeId: log.storeId,
@@ -261,4 +371,4 @@ function advanceChunkOrFinish(
 
 export const ordersHandler: ModuleHandler = { processChunk: processOrdersChunk };
 
-export { INITIAL_BACKFILL_DAYS, STREAM_CHUNK_COUNT, STREAM_CHUNK_DAYS, upsertOrderWithSnapshot };
+export { STREAM_CHUNK_DAYS, upsertOrderWithSnapshot };

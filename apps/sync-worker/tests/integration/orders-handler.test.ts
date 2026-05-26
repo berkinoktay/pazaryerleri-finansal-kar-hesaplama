@@ -22,13 +22,14 @@ import { encryptCredentials } from '@pazarsync/sync-core';
 import type { OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 
 import {
+  computeStreamChunkCount,
   processOrdersChunk,
-  STREAM_CHUNK_COUNT,
   STREAM_CHUNK_DAYS,
   upsertOrderWithSnapshot,
 } from '../../src/handlers/orders';
 
 import {
+  createCostProfile,
   createMembership,
   createOrganization,
   createUserProfile,
@@ -37,6 +38,7 @@ import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpe
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const ORIGINAL_ENV = process.env;
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -95,7 +97,7 @@ function makeStreamResponse(args: {
   };
 }
 
-async function setupStoreAndSyncLog(barcodes: string[] = []) {
+async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreatedAt?: Date } = {}) {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -106,6 +108,10 @@ async function setupStoreAndSyncLog(barcodes: string[] = []) {
       platform: 'TRENDYOL',
       environment: 'PRODUCTION',
       externalAccountId: '2738',
+      // Default backdated 100d so the multi-chunk suite (backfill=90) reproduces
+      // the 7-chunk / 14-day-window behavior these tests assert. Forward-only
+      // tests pass an explicit recent createdAt.
+      createdAt: opts.storeCreatedAt ?? new Date(Date.now() - 100 * MS_PER_DAY),
       credentials: encryptCredentials({
         supplierId: '2738',
         apiKey: 'test-key',
@@ -114,6 +120,9 @@ async function setupStoreAndSyncLog(barcodes: string[] = []) {
     },
   });
 
+  // PR-B calculability gate: a seeded variant must carry a cost profile or the
+  // handler hard-skips its order. One profile per store, linked to each variant.
+  const costProfile = barcodes.length > 0 ? await createCostProfile(org.id) : null;
   for (const barcode of barcodes) {
     const product = await prisma.product.create({
       data: {
@@ -134,6 +143,9 @@ async function setupStoreAndSyncLog(barcodes: string[] = []) {
         stockCode: `sk-${barcode}`,
         salePrice: '100',
         listPrice: '120',
+        ...(costProfile !== null
+          ? { costProfileLinks: { create: { organizationId: org.id, profileId: costProfile.id } } }
+          : {}),
       },
     });
   }
@@ -157,12 +169,16 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
   });
 
   beforeEach(async () => {
+    // Multi-chunk suite: 90d backfill + 100d-old store ⇒ ceil(90/14)=7 chunks,
+    // 14-day windows — the behavior these chunk-mechanics tests assert.
+    process.env = { ...ORIGINAL_ENV, SYNC_HISTORICAL_BACKFILL_DAYS: '90' };
     await truncateAll();
     // applyEstimateOnOrderCreate PSF + Stopaj FeeDefinition rows ister.
     await ensureFeeDefinitions();
   });
 
   afterEach(() => {
+    process.env = ORIGINAL_ENV;
     vi.restoreAllMocks();
   });
 
@@ -181,8 +197,8 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     const result = await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // hasMore=false on chunk 0 → continue with chunkIndex=1 (not done yet,
-    // STREAM_CHUNK_COUNT > 1).
+    // hasMore=false on chunk 0 → continue with chunkIndex=1 (not done yet —
+    // multi-chunk backfill, chunkCount=7).
     expect(result.kind).toBe('continue');
     if (result.kind !== 'continue') return;
     const cursor = result.cursor as OrdersStreamWindowCursor;
@@ -203,9 +219,9 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(order.actualDeliveryDate?.getTime()).toBe(DELIVERED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
     expect(order.reconciliationStatus).toBe('NOT_SETTLED');
-    // No cost profile attached → estimatedNetProfit null but ESTIMATE
-    // OrderFee rows still written.
-    expect(order.estimatedNetProfit).toBeNull();
+    // PR-B: the order is calculable (variant + cost seeded), so the estimate
+    // is computed (non-null) alongside the ESTIMATE OrderFee rows.
+    expect(order.estimatedNetProfit).not.toBeNull();
 
     const fees = await prisma.orderFee.findMany({
       where: { orderId: order.id, source: 'ESTIMATE' },
@@ -257,8 +273,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(item.productVariantId).not.toBeNull();
   });
 
-  it('variant not found: OrderItem.productVariantId null (graceful)', async () => {
-    const { store, log } = await setupStoreAndSyncLog([]); // no variants
+  // PR-B calculability gate: the old "graceful null-variant item" behavior is
+  // gone — an unresolvable variant now hard-skips the whole order.
+  it('calculability gate: variant not found → order skipped (not written)', async () => {
+    const { store, log } = await setupStoreAndSyncLog([]); // no variants seeded
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(
@@ -286,10 +304,62 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    const item = await prisma.orderItem.findFirstOrThrow({
-      where: { order: { storeId: store.id } },
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.orderItem.count()).toBe(0);
+  });
+
+  it('calculability gate: variant exists but no cost → order skipped (not written)', async () => {
+    const { org, store, log } = await setupStoreAndSyncLog([]);
+    // Seed a variant WITHOUT a cost profile link.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        productMainId: 'pm-EAN13-NOCOST',
+        title: 'No-cost Product',
+      },
     });
-    expect(item.productVariantId).toBeNull();
+    await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        barcode: 'EAN13-NOCOST',
+        stockCode: 'sk-EAN13-NOCOST',
+        salePrice: '100',
+        listPrice: '120',
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
+          content: [
+            makeShipmentPackage({
+              lines: [
+                {
+                  lineId: 1,
+                  barcode: 'EAN13-NOCOST',
+                  quantity: 1,
+                  lineUnitPrice: 120,
+                  lineGrossAmount: 120,
+                  vatRate: 20,
+                  commission: 10,
+                },
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
   });
 
   it('idempotent: re-sync same page → no duplicate Order/OrderItem rows', async () => {
@@ -370,9 +440,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
   });
 
   it('last chunk exhausted: hasMore=false on chunk N-1 → done', async () => {
-    const { log } = await setupStoreAndSyncLog([]);
-    const lastChunkIndex = STREAM_CHUNK_COUNT - 1;
+    const { store, log } = await setupStoreAndSyncLog([]);
     const endDate = Date.now();
+    const lastChunkIndex =
+      computeStreamChunkCount({ storeCreatedAt: store.createdAt, endDate }) - 1;
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
@@ -500,5 +571,145 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
     expect(item.productVariantId).not.toBeNull();
+  });
+});
+
+describe('processOrdersChunk — forward-only cutoff (PR-A)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    // Production default: no historical backfill. A freshly connected store
+    // ⇒ cutoff = store.createdAt ⇒ a single chunk covering [createdAt, now].
+    process.env = { ...ORIGINAL_ENV, SYNC_HISTORICAL_BACKFILL_DAYS: '0' };
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    vi.restoreAllMocks();
+  });
+
+  it('fresh store + backfill=0 → single chunk → done after first page', async () => {
+    const { log } = await setupStoreAndSyncLog([], { storeCreatedAt: new Date() });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+    );
+
+    const result = await processOrdersChunk({ syncLog: log, cursor: null });
+
+    // Only one chunk exists, so chunk 0 is the last → terminate immediately.
+    expect(result.kind).toBe('done');
+  });
+
+  it('fresh store window floor is store.createdAt, not 14 days back', async () => {
+    const storeCreatedAt = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2h ago
+    const { log } = await setupStoreAndSyncLog([], { storeCreatedAt });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+      );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    const lastModifiedStartDate = Number.parseInt(
+      new URL(url).searchParams.get('lastModifiedStartDate')!,
+      10,
+    );
+    // Window floor is store.createdAt (≈2h ago), NOT now−14d.
+    expect(Math.abs(lastModifiedStartDate - storeCreatedAt.getTime())).toBeLessThan(5000);
+  });
+
+  it('future-dated store.createdAt → no fetch, terminates immediately (chunkCount 0 guard)', async () => {
+    // Pathological: store.createdAt after endDate (clock skew / seed data) ⇒
+    // chunkCount 0. The handler must NOT call the vendor with an inverted window.
+    const { log } = await setupStoreAndSyncLog([], {
+      storeCreatedAt: new Date(Date.now() + 60 * 60 * 1000), // 1h in the future
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await processOrdersChunk({ syncLog: log, cursor: null });
+
+    expect(result.kind).toBe('done');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('processOrdersChunk — delta window (periodic sync)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    process.env = { ...ORIGINAL_ENV, SYNC_SAFETY_NET_HOURS: '8' };
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    vi.restoreAllMocks();
+  });
+
+  it('prior COMPLETED ORDERS sync → window floor is now − SAFETY_NET_HOURS, not createdAt', async () => {
+    // setupStoreAndSyncLog backdates store.createdAt to 100d ago.
+    const { org, store, log } = await setupStoreAndSyncLog([]);
+    // A prior COMPLETED ORDERS sync flips the handler into delta mode.
+    await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        syncType: 'ORDERS',
+        status: 'COMPLETED',
+        startedAt: new Date(),
+      },
+    });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+      );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    const lastModifiedStartDate = Number.parseInt(
+      new URL(url).searchParams.get('lastModifiedStartDate')!,
+      10,
+    );
+    // 100d-old store, but delta mode ⇒ floor = now − 8h, NOT createdAt.
+    expect(Math.abs(lastModifiedStartDate - (Date.now() - 8 * 60 * 60 * 1000))).toBeLessThan(
+      60_000,
+    );
+  });
+
+  it('no prior COMPLETED sync → initial mode (window floor at store.createdAt)', async () => {
+    // Fresh store, only a RUNNING sync (the in-flight one) ⇒ NOT delta.
+    const recentCreatedAt = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h ago
+    const { log } = await setupStoreAndSyncLog([], { storeCreatedAt: recentCreatedAt });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+      );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    const lastModifiedStartDate = Number.parseInt(
+      new URL(url).searchParams.get('lastModifiedStartDate')!,
+      10,
+    );
+    // Initial mode: floor = createdAt (3h ago), not the 8h safety-net window.
+    expect(Math.abs(lastModifiedStartDate - recentCreatedAt.getTime())).toBeLessThan(5000);
   });
 });

@@ -85,7 +85,7 @@ export const OrdersStreamWindowCursorSchema = z.object({
   kind: z.literal('stream-window'),
   /** Sync başlangıcında set + sabit. Chunk window'ları buradan hesaplanır. */
   endDate: z.number().int().min(0),
-  /** 0..N-1 — newest → oldest. N = ceil(INITIAL_BACKFILL_DAYS / STREAM_CHUNK_DAYS). */
+  /** 0..N-1 — newest → oldest. N = computeStreamChunkCount(store.createdAt, endDate). */
   chunkIndex: z.number().int().min(0),
   /** Trendyol opaque nextCursor; null = chunk başı (yeni stream). */
   streamCursor: z.string().nullable(),

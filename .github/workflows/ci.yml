@@ -193,6 +193,10 @@ jobs:
           TRENDYOL_PROD_BASE_URL: https://apigw.trendyol.com
           TRENDYOL_SANDBOX_BASE_URL: https://stageapigw.trendyol.com
           TRENDYOL_INTEGRATOR_UA_SUFFIX: SelfIntegration
+          # PR-A sync-worker defaults — prod forward-only (0) + 8h cron safety net.
+          # Tests override per-case via process.env; these document the prod baseline.
+          SYNC_HISTORICAL_BACKFILL_DAYS: 0
+          SYNC_SAFETY_NET_HOURS: 8
           # PR-C2 webhook callback URL builder — integration tests mock fetch,
           # so the value never reaches Trendyol. Production sets the real HTTPS
           # tunnel/host. Empty would fail validateRequiredEnv at boot.

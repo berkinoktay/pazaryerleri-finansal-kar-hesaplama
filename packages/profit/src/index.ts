@@ -20,3 +20,9 @@ export {
   isPsfExempt,
   resolveFeeDefinition,
 } from './resolve-fee-definition';
+export {
+  resolveOrderCalculability,
+  type CalcResult,
+  type OrderLineForCalcCheck,
+} from './resolve-order-calculability';
+export { buildCalcCheckLines } from './build-calc-check-lines';

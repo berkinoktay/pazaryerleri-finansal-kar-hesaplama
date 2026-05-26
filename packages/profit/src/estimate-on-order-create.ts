@@ -146,6 +146,11 @@ export async function applyEstimateOnOrderCreate(
   if (!allHaveCostSnapshot || order.saleSubtotalNet === null || order.saleVatTotal === null) {
     // Maliyet snapshot eksik veya satış agregat'ı set'lenmemiş → profit null kalır.
     // Cost profile sonradan eklenirse caller bu fonksiyonu tekrar çağırır.
+    //
+    // NOT dead after PR-B's calculability gate: the gate only guarantees cost
+    // at the sync boundary (webhook + cron). upsertOrderWithSnapshot has direct
+    // callers that bypass it, and this branch also guards the sale-aggregate
+    // nullability the gate never checks. Keep it — fail safe.
     return;
   }
 

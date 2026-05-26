@@ -30,3 +30,44 @@ SELECT cron.schedule(
   );
   $$
 );
+
+-- ─── Orders delta sync (safety-net polling) ───────────────────────────────────
+-- Webhook (real-time, T+0) is the PRIMARY order ingest path. This hourly cron
+-- is the safety net: it enqueues a PENDING ORDERS sync_log for every ACTIVE
+-- store so the worker re-scans and recovers anything a webhook missed
+-- (delivery failure, worker downtime). It does NOT call Trendyol directly —
+-- the polling sync-worker claims the PENDING row and runs the stream fetch.
+--
+-- Schedule: '0 * * * *' — top of every hour (PR-A 2026-05-24, spec §5.4).
+--
+-- Dedupe: a store with an in-flight ORDERS sync (PENDING/RUNNING/
+-- FAILED_RETRYABLE) is skipped so ticks never stack on a slow/stuck sync.
+--
+-- Required columns on the raw INSERT: `id` and `started_at` have NO database
+-- default (Prisma fills them app-side), so they are set explicitly here —
+-- gen_random_uuid() + now(). sync_logs has no created_at/updated_at columns.
+--
+-- NOTE: each enqueued sync currently runs forward-only from the cutoff
+-- (computeOrdersCutoffMs — store.createdAt by default). The intended per-tick
+-- delta window (start from now − SYNC_SAFETY_NET_HOURS) is a follow-up handler
+-- optimization; until then an hourly tick re-scans [cutoff, now] idempotently.
+--
+-- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
+-- (cron.schedule upserts by job name, so re-applying is safe.)
+--
+SELECT cron.schedule(
+  'sync-orders-delta',
+  '0 * * * *',
+  $$
+  INSERT INTO sync_logs (id, organization_id, store_id, sync_type, status, started_at)
+  SELECT gen_random_uuid(), s.organization_id, s.id, 'ORDERS', 'PENDING', now()
+  FROM stores s
+  WHERE s.status = 'ACTIVE'
+    AND NOT EXISTS (
+      SELECT 1 FROM sync_logs sl
+      WHERE sl.store_id = s.id
+        AND sl.sync_type = 'ORDERS'
+        AND sl.status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE')
+    );
+  $$
+);
