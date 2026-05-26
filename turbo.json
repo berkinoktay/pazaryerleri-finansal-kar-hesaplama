@@ -56,6 +56,19 @@
         "SYNC_SAFETY_NET_HOURS"
       ]
     },
+    "test:component": {
+      "outputs": [],
+      "env": [
+        "NODE_ENV",
+        "TRENDYOL_PROD_BASE_URL",
+        "TRENDYOL_SANDBOX_BASE_URL",
+        "TRENDYOL_INTEGRATOR_UA_SUFFIX",
+        "PUBLIC_API_BASE_URL",
+        "ALLOW_SANDBOX_CONNECTIONS",
+        "SYNC_HISTORICAL_BACKFILL_DAYS",
+        "SYNC_SAFETY_NET_HOURS"
+      ]
+    },
     "test:integration": {
       "outputs": [],
       "env": [

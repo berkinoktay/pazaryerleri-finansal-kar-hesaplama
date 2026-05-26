@@ -8,7 +8,7 @@ import type { CostProfileVersion } from '@/features/costs/types/cost-profile.typ
 
 import { FORMATS } from '../../../../src/i18n/formats';
 import trMessages from '../../../../messages/tr.json';
-import { render, screen, createTestQueryClient } from '../../../helpers/render';
+import { render, screen, within, createTestQueryClient } from '../../../helpers/render';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 function Wrapper({ children }: { children: React.ReactNode }) {
@@ -95,10 +95,17 @@ describe('CostProfileHistoryList', () => {
     renderWithIntl(
       <CostProfileHistoryList versions={[V2_VERSION, BASE_VERSION]} isLoading={false} />,
     );
-    expect(screen.getByText('Düzenlendi')).toBeInTheDocument();
-    // amount diff: "25.50" (old) and "30.00" (new) both visible on v2's row
-    expect(screen.getByText('25.50')).toBeInTheDocument();
-    expect(screen.getByText('30.00')).toBeInTheDocument();
+    // "25.50" appears twice in the timeline — once as the v2 diff's "before"
+    // value, and once as v1's initial-create amount. Scope to the UPDATED row
+    // so we assert the before → after diff specifically, not the whole list.
+    const updatedRow = screen.getByText('Düzenlendi').closest('div.gap-sm.flex.items-start');
+    expect(updatedRow).not.toBeNull();
+    const within_updated = within(updatedRow as HTMLElement);
+    // amount diff on v2's row: "25.50" (struck-through old) → "30.00" (new)
+    const beforeValue = within_updated.getByText('25.50');
+    expect(beforeValue).toBeInTheDocument();
+    expect(beforeValue).toHaveClass('line-through');
+    expect(within_updated.getByText('30.00')).toBeInTheDocument();
   });
 
   it('classifies archive event when only archivedAt was set', () => {
