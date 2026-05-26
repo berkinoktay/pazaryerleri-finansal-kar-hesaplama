@@ -1,0 +1,20 @@
+name: 'Setup PazarSync toolchain'
+description: 'pnpm + Node, install deps, generate Prisma client and OpenAPI types. Assumes the repo is already checked out.'
+runs:
+  using: 'composite'
+  steps:
+    # Uses the pnpm version from package.json packageManager (pnpm@10.33.0) —
+    # avoids a corepack mismatch if a hardcoded version drifts.
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 22
+        cache: 'pnpm'
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+    - name: Generate Prisma client
+      run: pnpm db:generate
+      shell: bash
+    - name: Sync OpenAPI spec + generated types
+      run: pnpm api:sync
+      shell: bash
