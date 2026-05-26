@@ -157,21 +157,22 @@ describe('CostCellPopover', () => {
     await user.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => {
-      // The attached profile should appear in the list (not in the combobox)
+      // The attached profile should appear in the list (not in the search results)
       expect(screen.getByText('COGS Profil')).toBeInTheDocument();
     });
 
-    // Open the combobox
-    const comboboxTrigger = screen.getByText('Profil seç…');
-    await user.click(comboboxTrigger);
+    // The flat cmdk search input is always rendered inside the panel. Its
+    // placeholder is products.costCell.popover.searchPlaceholder.
+    const searchInput = screen.getByPlaceholderText('Profil ara veya seç…');
+    await user.click(searchInput);
 
     await waitFor(() => {
-      // Only non-attached profile appears in combobox dropdown
+      // Only the non-attached profile appears in the search results.
       expect(screen.getByText('Paketleme')).toBeInTheDocument();
     });
   });
 
-  it('clicking "+ Yeni maliyet oluştur" closes popover and opens create dialog', async () => {
+  it('clicking the "Yeni profil oluştur" footer closes popover and opens create dialog', async () => {
     server.use(
       http.get(
         `${TEST_API_BASE}/v1/organizations/${ORG_ID}/variants/${VARIANT_ID}/cost-profiles`,
@@ -191,13 +192,14 @@ describe('CostCellPopover', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open' }));
 
+    // The "+" is a PlusSignIcon; the footer label is products.costCell.popover.newProfile.
     await waitFor(() => {
-      expect(screen.getByText('+ Yeni maliyet oluştur')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Yeni profil oluştur' })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText('+ Yeni maliyet oluştur'));
+    await user.click(screen.getByRole('button', { name: 'Yeni profil oluştur' }));
 
-    // Create dialog should open (check dialog title from tr.json)
+    // Create dialog should open (title from costs.createDialog.title in tr.json)
     await waitFor(() => {
       expect(screen.getByText('Yeni maliyet profili')).toBeInTheDocument();
     });
@@ -242,7 +244,9 @@ describe('CostCellPopover', () => {
       expect(screen.getByText('COGS Profil')).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Profili kaldır' }));
+    // The remove button's aria-label is products.costCell.popover.removeLabel
+    // interpolated with the profile name: "{name} profilini kaldır".
+    await user.click(screen.getByRole('button', { name: 'COGS Profil profilini kaldır' }));
 
     await waitFor(() => {
       expect(detachCalled).toBe(true);

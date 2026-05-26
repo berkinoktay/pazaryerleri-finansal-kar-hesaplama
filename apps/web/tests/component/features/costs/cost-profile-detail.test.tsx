@@ -149,8 +149,9 @@ describe('CostProfileDetail', () => {
     const { user } = renderWithIntl(<CostProfileDetail orgId={ORG_ID} profileId={PROFILE_ID} />);
     await screen.findByRole('tab', { name: 'Geçmiş' });
     await user.click(screen.getByRole('tab', { name: 'Geçmiş' }));
-    // Version 1 appears in the history list
-    expect(await screen.findByText('v1')).toBeInTheDocument();
+    // The history timeline classifies version 1 as the "created" event and
+    // renders its label (costs.detail.history.event.created) — not a "v1" string.
+    expect(await screen.findByText('Oluşturuldu')).toBeInTheDocument();
   });
 
   it('switches to the Bağlı varyantlar tab and shows empty state', async () => {

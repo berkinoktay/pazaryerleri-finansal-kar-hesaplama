@@ -1,7 +1,24 @@
 import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// CostProfileAttachedVariants renders next-intl's <Link>, which pulls in
+// next-intl's createNavigation → `next/navigation`. That module doesn't
+// resolve under vitest/happy-dom, so we stub the navigation layer the same
+// way cost-profile-detail.test.tsx does.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/',
+}));
+
+vi.mock('@/i18n/navigation', () => ({
+  Link: ({ href, children, ...props }: { href: unknown; children: React.ReactNode }) => (
+    <a href={typeof href === 'string' ? href : '#'} {...props}>
+      {children}
+    </a>
+  ),
+}));
 
 import { CostProfileAttachedVariants } from '@/features/costs/components/cost-profile-attached-variants';
 

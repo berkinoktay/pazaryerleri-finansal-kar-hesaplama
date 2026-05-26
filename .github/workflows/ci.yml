@@ -129,6 +129,12 @@ jobs:
       - name: Run unit tests
         run: pnpm test:unit
 
+      # Component tests (happy-dom, DB-free) — run before the Supabase spin-up
+      # so a broken component fails fast without paying the DB cost. These live
+      # in apps/web/tests/component and previously ran in NO CI job.
+      - name: Run component tests
+        run: pnpm test:component
+
       # DB integration tests run against a fresh local Supabase instance
       # spun up just for this job. Schema applied via prisma db push so
       # no migration artifacts leak into the run.

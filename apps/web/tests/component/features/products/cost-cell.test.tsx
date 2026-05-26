@@ -47,7 +47,8 @@ describe('CostCell', () => {
   it('state 0: renders add-cost placeholder when profileCount is 0', () => {
     const variant = makeVariant({ profileCount: 0, currentCostTry: null });
     render(<CostCell variant={variant} />);
-    expect(screen.getByText('+ Maliyet ekle')).toBeInTheDocument();
+    // The "+" is a PlusSignIcon; the label is the translation of products.costCell.addCost.
+    expect(screen.getByRole('button', { name: 'Maliyet ekle' })).toBeInTheDocument();
   });
 
   it('state 0: placeholder is a button element', () => {
@@ -65,7 +66,7 @@ describe('CostCell', () => {
     expect(handleClick).toHaveBeenCalledOnce();
   });
 
-  it('state 1: shows currency amount + badge when profileCount is 1', () => {
+  it('state 1: shows currency amount alone (no count chip) when profileCount is 1', () => {
     const variant = makeVariant({
       profileCount: 1,
       currentCostTry: '45.75',
@@ -74,10 +75,11 @@ describe('CostCell', () => {
     render(<CostCell variant={variant} />);
     // formatCurrency(45.75) = "₺45,75"
     expect(screen.getByText(/45/)).toBeInTheDocument();
-    expect(screen.getByText('1 profil')).toBeInTheDocument();
+    // By design a single profile shows no count chip — a "1" pill would be noise.
+    expect(screen.queryByText('1')).not.toBeInTheDocument();
   });
 
-  it('state many: shows currency amount + badge with correct count when profileCount > 1', () => {
+  it('state many: shows currency amount + count chip with the number when profileCount > 1', () => {
     const variant = makeVariant({
       profileCount: 3,
       currentCostTry: '120.00',
@@ -85,7 +87,8 @@ describe('CostCell', () => {
     });
     render(<CostCell variant={variant} />);
     expect(screen.getByText(/120/)).toBeInTheDocument();
-    expect(screen.getByText('3 profil')).toBeInTheDocument();
+    // The chip shows the raw count number, not "3 profil".
+    expect(screen.getByText('3')).toBeInTheDocument();
   });
 
   it('state many: wraps in Tooltip when profileNames is provided (does not crash)', () => {
@@ -107,8 +110,8 @@ describe('CostCell', () => {
     expect(screen.getByRole('button')).toBeInTheDocument();
     // Currency amount is visible in the button
     expect(screen.getByText(/80/)).toBeInTheDocument();
-    // Badge shows correct count
-    expect(screen.getByText('2 profil')).toBeInTheDocument();
+    // Count chip shows the raw count number, not "2 profil".
+    expect(screen.getByText('2')).toBeInTheDocument();
   });
 
   it('no tooltip when profileNames is empty', () => {

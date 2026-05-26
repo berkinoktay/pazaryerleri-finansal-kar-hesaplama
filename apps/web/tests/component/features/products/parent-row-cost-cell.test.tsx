@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { NextIntlClientProvider } from 'next-intl';
 
 import { ParentRowCostCell } from '@/features/products/components/parent-row-cost-cell';
 import type {
@@ -11,37 +10,6 @@ import type {
 import { render, screen } from '../../../helpers/render';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
-
-const messages = {
-  products: {
-    costCell: {
-      addCost: '+ Maliyet ekle',
-      profileCount: '{count} profil',
-      popover: {
-        title: 'Maliyet profilleri',
-        attachPlaceholder: 'Profil seç…',
-        attachSearch: 'Profil ara…',
-        attachEmpty: 'Profil bulunamadı',
-        newProfile: '+ Yeni maliyet oluştur',
-        removeLabel: 'Profili kaldır',
-      },
-    },
-    parentCostCell: {
-      allSame: 'tümü aynı',
-      variantCount: '{count} varyant',
-      popoverTitle: 'Varyant maliyetleri',
-      popoverStats: '{with} / {total} varyant maliyet profiline sahip, {without} eksik',
-      applyToAllLabel: 'Tüm varyantlara maliyet ekle',
-      applyToAllPlaceholder: 'Profil seç…',
-      applyToAllSearch: 'Profil ara…',
-      applyToAllEmpty: 'Profil bulunamadı',
-    },
-  },
-  common: {
-    copy: { copy: '{label} kopyala', copied: '{label} kopyalandı' },
-    combobox: { searchPlaceholder: 'Ara…', empty: 'Sonuç yok', trigger: 'Seç…' },
-  },
-};
 
 function makeVariant(id: string, overrides: Partial<VariantSummary> = {}): VariantSummary {
   return {
@@ -104,11 +72,8 @@ vi.mock('@/features/costs/hooks/use-attach-cost-profiles', () => ({
 }));
 
 function renderCell(product: ProductWithVariants) {
-  return render(
-    <NextIntlClientProvider locale="tr" messages={messages}>
-      <ParentRowCostCell orgId="org-1" product={product} />
-    </NextIntlClientProvider>,
-  );
+  // The shared render wrapper provides the real Turkish catalog + QueryClient.
+  return render(<ParentRowCostCell orgId="org-1" product={product} />);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -121,29 +86,37 @@ describe('<ParentRowCostCell>', () => {
         { profileCount: 0, currentCostTry: null },
       ]);
       renderCell(product);
-      expect(screen.getByText('+ Maliyet ekle')).toBeInTheDocument();
+      // The "+" is a PlusSignIcon; the label is products.costCell.addCost.
+      expect(screen.getByRole('button', { name: 'Maliyet ekle' })).toBeInTheDocument();
     });
   });
 
   describe('all same cost', () => {
-    it('shows "tümü aynı" badge when all variants share the same cost', () => {
+    it('shows the shared currency amount alone (no count chip) when all variants match', () => {
       const product = makeProduct([
         { profileCount: 1, currentCostTry: '142.50', costStatus: 'OK' },
         { profileCount: 1, currentCostTry: '142.50', costStatus: 'OK' },
       ]);
       renderCell(product);
-      expect(screen.getByText('tümü aynı')).toBeInTheDocument();
+      // formatCurrency(142.50) = "₺142,50"
+      expect(screen.getByText(/142/)).toBeInTheDocument();
+      // When all variants share a cost, no variant-count chip is rendered.
+      expect(screen.queryByText('2')).not.toBeInTheDocument();
     });
   });
 
   describe('cost range', () => {
-    it('shows variant count badge when costs differ across variants', () => {
+    it('shows the cost range + a variant-count chip when costs differ across variants', () => {
       const product = makeProduct([
         { profileCount: 1, currentCostTry: '120.00', costStatus: 'OK' },
         { profileCount: 1, currentCostTry: '180.00', costStatus: 'OK' },
       ]);
       renderCell(product);
-      expect(screen.getByText('2 varyant')).toBeInTheDocument();
+      // Range trigger renders "₺120,00 – ₺180,00" across text nodes...
+      expect(screen.getByText(/120/)).toBeInTheDocument();
+      expect(screen.getByText(/180/)).toBeInTheDocument();
+      // ...plus a chip showing the raw variant count number, not "2 varyant".
+      expect(screen.getByText('2')).toBeInTheDocument();
     });
   });
 });
