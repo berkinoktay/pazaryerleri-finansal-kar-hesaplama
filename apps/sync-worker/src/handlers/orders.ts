@@ -56,6 +56,7 @@ import type { ChunkResult, ModuleHandler } from './types';
 
 const STREAM_CHUNK_DAYS = STREAM_WINDOW_MAX_DAYS; // 14, vendor enforced per call
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MS_PER_HOUR = 60 * 60 * 1000;
 
 /**
  * Inclusive lower-bound timestamp (ms) of the initial orders backfill window.
@@ -83,12 +84,31 @@ export function computeOrdersCutoffMs(args: { storeCreatedAt: Date; endDate: num
 }
 
 /**
+ * Cutoff for a periodic (delta) sync: only the trailing SYNC_SAFETY_NET_HOURS,
+ * clamped by `store.createdAt`. Webhook is the primary ingest path; the cron
+ * tick is a safety net, so after the initial backfill it sweeps just the
+ * recent hours a webhook delivery may have missed — not the whole history.
+ */
+export function computeDeltaCutoffMs(args: { storeCreatedAt: Date; endDate: number }): number {
+  const { safetyNetHours } = readSyncEnv();
+  const floorMs = args.endDate - safetyNetHours * MS_PER_HOUR;
+  return Math.max(args.storeCreatedAt.getTime(), floorMs);
+}
+
+/**
  * Number of sliding 14-day stream chunks needed to cover `[cutoff, endDate]`.
  * Replaces the static STREAM_CHUNK_COUNT (90/14 = 7); now derived per store
  * from (`store.createdAt`, env). A fresh forward-only store yields 1 chunk.
+ * `cutoffMsOverride` lets the delta path pass a tighter floor.
  */
-export function computeStreamChunkCount(args: { storeCreatedAt: Date; endDate: number }): number {
-  const cutoffMs = computeOrdersCutoffMs(args);
+export function computeStreamChunkCount(args: {
+  storeCreatedAt: Date;
+  endDate: number;
+  cutoffMsOverride?: number;
+}): number {
+  const cutoffMs =
+    args.cutoffMsOverride ??
+    computeOrdersCutoffMs({ storeCreatedAt: args.storeCreatedAt, endDate: args.endDate });
   const spanDays = Math.ceil((args.endDate - cutoffMs) / MS_PER_DAY);
   if (spanDays <= 0) return 0;
   return Math.ceil(spanDays / STREAM_CHUNK_DAYS);
@@ -123,10 +143,12 @@ function computeChunkBounds(args: {
   storeCreatedAt: Date;
   endDate: number;
   chunkIndex: number;
+  cutoffMsOverride?: number;
 }): ChunkBounds {
   const { storeCreatedAt, endDate, chunkIndex } = args;
   const endMs = endDate - chunkIndex * STREAM_CHUNK_DAYS * MS_PER_DAY;
-  const overallStartMs = computeOrdersCutoffMs({ storeCreatedAt, endDate });
+  const overallStartMs =
+    args.cutoffMsOverride ?? computeOrdersCutoffMs({ storeCreatedAt, endDate });
   const candidateStart = endMs - STREAM_CHUNK_DAYS * MS_PER_DAY;
   const startMs = Math.max(candidateStart, overallStartMs);
   return { startMs, endMs };
@@ -176,20 +198,38 @@ export async function processOrdersChunk(input: {
   const store = await prisma.store.findUniqueOrThrow({ where: { id: log.storeId } });
   const credentials = decryptStoreCredentials(store);
 
+  // Initial vs delta window. The first sync for a store (no prior COMPLETED
+  // ORDERS sync) walks the full backfill window from store.createdAt; every
+  // periodic cron tick afterward sweeps only the trailing SYNC_SAFETY_NET_HOURS
+  // — webhook is the primary ingest path, so re-scanning the whole history
+  // hourly is wasteful. The in-flight sync (RUNNING) doesn't count; only a
+  // prior COMPLETED ORDERS sync flips us to delta.
+  const priorCompletedOrdersSync = await prisma.syncLog.findFirst({
+    where: { storeId: log.storeId, syncType: 'ORDERS', status: 'COMPLETED' },
+    select: { id: true },
+  });
+  const cutoffMsOverride =
+    priorCompletedOrdersSync !== null
+      ? computeDeltaCutoffMs({ storeCreatedAt: store.createdAt, endDate: cursor.endDate })
+      : undefined;
+
   const bounds = computeChunkBounds({
     storeCreatedAt: store.createdAt,
     endDate: cursor.endDate,
     chunkIndex: cursor.chunkIndex,
+    cutoffMsOverride,
   });
   const chunkCount = computeStreamChunkCount({
     storeCreatedAt: store.createdAt,
     endDate: cursor.endDate,
+    cutoffMsOverride,
   });
 
   syncLog.info('orders.chunk.start', {
     syncLogId: log.id,
     storeId: log.storeId,
     cursor,
+    mode: cutoffMsOverride !== undefined ? 'delta' : 'initial',
     chunkBounds: { startMs: bounds.startMs, endMs: bounds.endMs },
     chunkCount,
     progressCurrent: log.progressCurrent,

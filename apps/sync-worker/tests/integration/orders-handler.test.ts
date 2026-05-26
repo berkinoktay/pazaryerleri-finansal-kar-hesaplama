@@ -641,3 +641,75 @@ describe('processOrdersChunk — forward-only cutoff (PR-A)', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('processOrdersChunk — delta window (periodic sync)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    process.env = { ...ORIGINAL_ENV, SYNC_SAFETY_NET_HOURS: '8' };
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    vi.restoreAllMocks();
+  });
+
+  it('prior COMPLETED ORDERS sync → window floor is now − SAFETY_NET_HOURS, not createdAt', async () => {
+    // setupStoreAndSyncLog backdates store.createdAt to 100d ago.
+    const { org, store, log } = await setupStoreAndSyncLog([]);
+    // A prior COMPLETED ORDERS sync flips the handler into delta mode.
+    await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        syncType: 'ORDERS',
+        status: 'COMPLETED',
+        startedAt: new Date(),
+      },
+    });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+      );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    const lastModifiedStartDate = Number.parseInt(
+      new URL(url).searchParams.get('lastModifiedStartDate')!,
+      10,
+    );
+    // 100d-old store, but delta mode ⇒ floor = now − 8h, NOT createdAt.
+    expect(Math.abs(lastModifiedStartDate - (Date.now() - 8 * 60 * 60 * 1000))).toBeLessThan(
+      60_000,
+    );
+  });
+
+  it('no prior COMPLETED sync → initial mode (window floor at store.createdAt)', async () => {
+    // Fresh store, only a RUNNING sync (the in-flight one) ⇒ NOT delta.
+    const recentCreatedAt = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h ago
+    const { log } = await setupStoreAndSyncLog([], { storeCreatedAt: recentCreatedAt });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        jsonResponse(makeStreamResponse({ hasMore: false, nextCursor: null, content: [] })),
+      );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    const lastModifiedStartDate = Number.parseInt(
+      new URL(url).searchParams.get('lastModifiedStartDate')!,
+      10,
+    );
+    // Initial mode: floor = createdAt (3h ago), not the 8h safety-net window.
+    expect(Math.abs(lastModifiedStartDate - recentCreatedAt.getTime())).toBeLessThan(5000);
+  });
+});
