@@ -4,10 +4,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import { syncLog } from '@pazarsync/sync-core';
 
 import { handleDiscount, handleReturn, handleSale } from '../../src/handlers/settlements';
 
@@ -133,7 +134,7 @@ describe('settlement handlers', () => {
   });
 
   afterEach(async () => {
-    // no-op (truncateAll on beforeEach is sufficient)
+    vi.restoreAllMocks();
   });
 
   // ─── handleSale ──────────────────────────────────────────────────────
@@ -214,6 +215,31 @@ describe('settlement handlers', () => {
       // 24 / 1.20 = 20 (item's unitVatRate %20)
       expect(updated.sellerDiscountNet.toFixed(2)).toBe('20.00');
       expect(updated.sellerDiscountVatAmount.toFixed(2)).toBe('4.00');
+    });
+
+    // PR-C orphan invariant: a Discount row whose order was hard-skipped
+    // (PR-B calculability gate) finds no local Order. It must silent-skip —
+    // never throw — and emit a structured worker log (never surfaced to the
+    // seller). Symmetric with the handleSale + handleReturn order_not_found
+    // cases above.
+    it('skips with order_not_found + structured warn when Order is missing', async () => {
+      const { storeId } = await buildOrderWithItem();
+      const row = makeSettlementRow({
+        transactionType: 'İndirim',
+        debt: 24,
+        credit: 0,
+        commissionAmount: 6,
+        shipmentPackageId: 999999,
+      });
+      const warnSpy = vi.spyOn(syncLog, 'warn');
+
+      const result = await prisma.$transaction((tx) => handleDiscount(storeId, row, tx));
+
+      expect(result).toEqual({ applied: false, skipReason: 'order_not_found' });
+      expect(warnSpy).toHaveBeenCalledWith(
+        'settlements.discount.order-not-found',
+        expect.objectContaining({ platformOrderId: '999999' }),
+      );
     });
 
     // CHECK constraint `refunded <= gross` is a schema-level invariant
