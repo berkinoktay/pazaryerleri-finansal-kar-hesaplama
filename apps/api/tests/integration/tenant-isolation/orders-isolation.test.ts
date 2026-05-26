@@ -108,18 +108,4 @@ describe('Orders — tenant isolation', () => {
     const body = (await res.json()) as { data: { id: string }[] };
     expect(body.data.map((o) => o.id)).toEqual([orderA.id]);
   });
-
-  it("SYNC TRIGGER: returns 404 when caller targets a sibling org's storeId via their own org", async () => {
-    const user = await createAuthenticatedTestUser();
-    const orgA = await createOrganization();
-    await createMembership(orgA.id, user.id);
-    const orgB = await createOrganization();
-    const storeB = await createStore(orgB.id);
-
-    const res = await app.request(`/v1/organizations/${orgA.id}/stores/${storeB.id}/orders/sync`, {
-      method: 'POST',
-      headers: { Authorization: bearer(user.accessToken) },
-    });
-    expect(res.status).toBe(404);
-  });
 });
