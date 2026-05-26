@@ -1,0 +1,38 @@
+name: ✨ Enhancement
+description: Yeni özellik veya iyileştirme öner
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivasyon
+      description: Hangi ihtiyaç ya da eksik bunu gerektiriyor?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Önerilen çözüm
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Etkilenen alan
+      multiple: true
+      options: [web, api, db, sync, ci, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Kabul kriteri
+      description: Bu iş "bitti" demek için neler doğru olmalı?
+    validations:
+      required: true
+  - type: input
+    id: refs
+    attributes:
+      label: İlgili docs/plan linki (opsiyonel)
+    validations:
+      required: false
