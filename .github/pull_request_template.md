@@ -2,6 +2,8 @@
 
 <!-- 1-3 bullet points: what changed and why. Link related issues / docs. -->
 
+Closes #<!-- ilgili issue numarası; bağımsız PR ise "N/A — standalone" yaz -->
+
 ## Test plan
 
 <!-- How you verified this works. Mark items as you go. -->

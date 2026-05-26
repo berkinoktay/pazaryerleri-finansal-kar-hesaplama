@@ -1,0 +1,28 @@
+name: 🧹 Tech Debt
+description: Teknik borç, refactor veya bakım işi
+labels: ["tech-debt"]
+body:
+  - type: textarea
+    id: current
+    attributes:
+      label: Mevcut durum
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Neden borç / risk
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Önerilen iyileştirme
+    validations:
+      required: true
+  - type: input
+    id: blocked_by
+    attributes:
+      label: Engelleyen (blocked-by, opsiyonel)
+    validations:
+      required: false
