@@ -98,6 +98,22 @@ export async function createStore(organizationId: string, overrides: CreateStore
   });
 }
 
+/**
+ * Grant a MEMBER/VIEWER access to a specific store. `memberId` is the
+ * OrganizationMember.id (returned by `createMembership`), not the user id.
+ * OWNER/ADMIN see all stores by role and never need these rows.
+ */
+export async function createMemberStoreAccess(
+  organizationId: string,
+  memberId: string,
+  storeId: string,
+  grantedBy: string | null = null,
+) {
+  return prisma.memberStoreAccess.create({
+    data: { organizationId, memberId, storeId, grantedBy },
+  });
+}
+
 export interface CreateOrderOverrides {
   status?: OrderStatus;
   // PR-5c (2026-05-19): eski Order ücret kolonları (totalAmount, commissionAmount,
