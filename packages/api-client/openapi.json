@@ -318,6 +318,159 @@
           "name"
         ]
       },
+      "MembershipContext": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MEMBER",
+              "VIEWER"
+            ],
+            "example": "MEMBER"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "data:read",
+              "data:write",
+              "sync:trigger"
+            ],
+            "description": "The capabilities the caller's role grants (derived from ROLE_CAPABILITIES)."
+          },
+          "accessibleStoreIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Store ids this member may see. `null` = every store in the org (OWNER/ADMIN see all by role); an array = the explicitly granted stores (MEMBER/VIEWER). The management UI hides the per-store grant editor when this is `null`."
+          }
+        },
+        "required": [
+          "role",
+          "capabilities",
+          "accessibleStoreIds"
+        ],
+        "description": "The caller's membership context for an organization: role, the capabilities it grants, and the stores they may see. Drives frontend UI gating and the store switcher."
+      },
+      "MemberListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Member"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "Member": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "00000000-0000-0000-0000-000000000000",
+            "description": "Membership id."
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "00000000-0000-0000-0000-000000000001"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "demo@pazarsync.local"
+          },
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "Demo User"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MEMBER",
+              "VIEWER"
+            ],
+            "example": "MEMBER"
+          },
+          "accessibleStoreIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Store ids this member may see. `null` = every store in the org (OWNER/ADMIN see all by role); an array = the explicitly granted stores (MEMBER/VIEWER). The management UI hides the per-store grant editor when this is `null`."
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "email",
+          "fullName",
+          "role",
+          "accessibleStoreIds"
+        ],
+        "description": "A member of an organization, with the caller-visible store-access summary. Returned by the roster list and by the role/store-access mutations."
+      },
+      "UpdateMemberRoleInput": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MEMBER",
+              "VIEWER"
+            ],
+            "example": "ADMIN"
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "SetMemberStoreAccessInput": {
+        "type": "object",
+        "properties": {
+          "storeIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": [
+              "00000000-0000-0000-0000-000000000000"
+            ],
+            "description": "Replace the member’s granted store set with exactly these ids (full replace, not a delta). Every id must belong to the organization. No-op in effect for OWNER/ADMIN, who see every store by role."
+          }
+        },
+        "required": [
+          "storeIds"
+        ]
+      },
       "StoreListResponse": {
         "type": "object",
         "properties": {
@@ -3499,6 +3652,496 @@
           },
           "404": {
             "description": "Organization not found, or caller is not a member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/me": {
+      "get": {
+        "tags": [
+          "Members"
+        ],
+        "summary": "Get the caller's membership context for an organization",
+        "description": "Returns the role, the capabilities it grants, and the store ids the caller may see (`null` for OWNER/ADMIN = all). The single source the frontend CurrentScopeProvider uses to gate UI and populate the store switcher. Distinct from GET /v1/me (user profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Membership context",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/members": {
+      "get": {
+        "tags": [
+          "Members"
+        ],
+        "summary": "List the organization roster",
+        "description": "Returns every member with their role and store-access summary. Gated on `members:read` (OWNER/ADMIN) — the roster is management information, not visible to MEMBER/VIEWER.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization roster",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot read the roster (not a member, or lacks members:read)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/members/{memberId}": {
+      "patch": {
+        "tags": [
+          "Members"
+        ],
+        "summary": "Change a member's role",
+        "description": "Gated on `members:manage_roles` (OWNER only — ADMIN cannot mint OWNERs, closing the privilege-escalation path). The org must always keep at least one OWNER: demoting the last one returns 422 with field code CANNOT_DEMOTE_LAST_OWNER.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "memberId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemberRoleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated member",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Member"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot manage roles (not a member, or lacks members:manage_roles)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Member not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid role, or demoting the last owner (CANNOT_DEMOTE_LAST_OWNER)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/members/{memberId}/store-access": {
+      "put": {
+        "tags": [
+          "Members"
+        ],
+        "summary": "Replace a member's store-access grants",
+        "description": "Gated on `members:manage_access` (OWNER/ADMIN). Replaces the member’s granted store set with exactly the supplied ids (full replace). Every id must belong to the organization (else 422 INVALID_REFERENCE). No visibility effect for OWNER/ADMIN targets.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "memberId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMemberStoreAccessInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated member with the new store-access summary",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Member"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot manage store access (not a member, or lacks members:manage_access)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Member not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "One or more stores do not belong to this organization (INVALID_REFERENCE)",
             "content": {
               "application/json": {
                 "schema": {
