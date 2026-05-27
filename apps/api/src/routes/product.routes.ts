@@ -1,12 +1,13 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
+import { CAPABILITIES } from '@pazarsync/utils';
 
 import { createSubApp } from '../lib/create-hono-app';
-import { ensureOrgMember } from '../lib/ensure-org-member';
+import { assertCapability } from '../lib/require-capability';
+import { requireStoreAccess } from '../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as productsListService from '../services/products-list.service';
 import * as productVariantService from '../services/product-variant.service';
-import * as storeService from '../services/store.service';
 import {
   BulkUpdateVariantDimensionalWeightBodySchema,
   BulkUpdateVariantDimensionalWeightResponseSchema,
@@ -97,18 +98,18 @@ const startSyncRoute = createRoute({
 app.openapi(startSyncRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  const store = await storeService.requireOwnedStore(organizationId, storeId);
+  const { store, role } = await requireStoreAccess(userId, orgId, storeId);
+  assertCapability(role, CAPABILITIES.SYNC_TRIGGER);
 
   // Pure enqueue: INSERT a PENDING SyncLog row and return. The worker
   // process picks it up via tryClaimNext within ~1 s. P2002 from the
   // partial unique index is mapped to SyncInProgressError(409) with
   // meta.existingSyncLogId by acquireSlot itself.
-  const log = await syncLogService.acquireSlot(organizationId, store.id, 'PRODUCTS');
+  const log = await syncLogService.acquireSlot(orgId, store.id, 'PRODUCTS');
 
   syncLog.info('trigger.enqueued', {
     syncLogId: log.id,
-    organizationId,
+    organizationId: orgId,
     storeId: store.id,
     syncType: 'PRODUCTS',
     userId,
@@ -200,20 +201,18 @@ const listActiveSyncLogsRoute = createRoute({
 app.openapi(listActiveSyncLogsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  await storeService.requireOwnedStore(organizationId, storeId);
-  const logs = await syncLogService.listActiveAndRecent(organizationId, storeId);
+  await requireStoreAccess(userId, orgId, storeId);
+  const logs = await syncLogService.listActiveAndRecent(orgId, storeId);
   return c.json({ data: logs.map(toSyncLogResponse) }, 200);
 });
 
 app.openapi(getSyncLogRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, syncLogId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  // Store-ownership gate before the sync-log lookup, so a cross-tenant
-  // probe of `storeId` returns the same 404 as a missing store.
-  await storeService.requireOwnedStore(organizationId, storeId);
-  const log = await syncLogService.getById(organizationId, storeId, syncLogId);
+  // Store-access gate before the sync-log lookup, so a cross-tenant or
+  // ungranted-store probe of `storeId` returns the same 404 as a missing store.
+  await requireStoreAccess(userId, orgId, storeId);
+  const log = await syncLogService.getById(orgId, storeId, syncLogId);
   return c.json(toSyncLogResponse(log), 200);
 });
 
@@ -266,9 +265,8 @@ app.openapi(listProductsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   const filters = c.req.valid('query');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  await storeService.requireOwnedStore(organizationId, storeId);
-  const result = await productsListService.list({ organizationId, storeId, filters });
+  await requireStoreAccess(userId, orgId, storeId);
+  const result = await productsListService.list({ organizationId: orgId, storeId, filters });
   return c.json(result, 200);
 });
 
@@ -310,9 +308,8 @@ const productFacetsRoute = createRoute({
 app.openapi(productFacetsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  await storeService.requireOwnedStore(organizationId, storeId);
-  const result = await productsListService.facets({ organizationId, storeId });
+  await requireStoreAccess(userId, orgId, storeId);
+  const result = await productsListService.facets({ organizationId: orgId, storeId });
   return c.json(result, 200);
 });
 
@@ -380,11 +377,11 @@ app.openapi(setVariantDimensionalWeightRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, variantId } = c.req.valid('param');
   const { dimensionalWeight } = c.req.valid('json');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  await storeService.requireOwnedStore(organizationId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
+  assertCapability(role, CAPABILITIES.DATA_WRITE);
 
   const updated = await productVariantService.setDimensionalWeight({
-    organizationId,
+    organizationId: orgId,
     storeId,
     variantId,
     value: dimensionalWeight,
@@ -461,11 +458,11 @@ app.openapi(bulkSetVariantDimensionalWeightRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   const { variantIds, dimensionalWeight } = c.req.valid('json');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  await storeService.requireOwnedStore(organizationId, storeId);
+  const { role } = await requireStoreAccess(userId, orgId, storeId);
+  assertCapability(role, CAPABILITIES.DATA_WRITE);
 
   const result = await productVariantService.bulkSetDimensionalWeight({
-    organizationId,
+    organizationId: orgId,
     storeId,
     variantIds,
     value: dimensionalWeight,

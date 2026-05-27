@@ -1,7 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as orderService from '../../services/order.service';
 import { ListOrdersResponseSchema, listOrdersQuerySchema } from '../../validators/order.validator';
@@ -64,9 +64,9 @@ app.openapi(listOrdersRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   const filters = c.req.valid('query');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  await requireStoreAccess(userId, orgId, storeId);
 
-  const { data, total } = await orderService.listOrders(organizationId, storeId, filters);
+  const { data, total } = await orderService.listOrders(orgId, storeId, filters);
 
   const totalPages = total === 0 ? 0 : Math.ceil(total / filters.perPage);
 
