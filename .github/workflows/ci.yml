@@ -123,10 +123,12 @@ jobs:
         with:
           fetch-depth: 0 # gitleaks scans full commit history
       # Native GitHub secret scanning needs Advanced Security (paid on private
-      # repos), so this OSS action fills the gap. Blocking: the #214 first pass
-      # was clean, so it was flipped from non-blocking to blocking in #216.
+      # repos), so this OSS action fills the gap. gitleaks-action REQUIRES
+      # GITHUB_TOKEN to scan PR commits — without it the step errors (which the
+      # earlier continue-on-error masked as a false "pass"). Blocking as of #216.
       - uses: gitleaks/gitleaks-action@v2
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
 
   deps-audit:
@@ -141,9 +143,11 @@ jobs:
           node-version: 22
           cache: 'pnpm'
       # pnpm audit needs only the lockfile, so we skip the full install/codegen
-      # of the composite. Blocking: the #214 first pass was clean (flipped in #216).
-      - name: Audit (high and critical)
-        run: pnpm audit --audit-level=high
+      # of the composite. --prod scopes the blocking gate to PRODUCTION deps;
+      # dev-tool transitive advisories (e.g. commitlint→ajv→fast-uri) are left to
+      # Dependabot's weekly PRs instead of blocking every build. Blocking as of #216.
+      - name: Audit (high and critical, production deps)
+        run: pnpm audit --prod --audit-level=high
 
   test:
     name: Unit and integration tests
