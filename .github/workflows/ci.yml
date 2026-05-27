@@ -123,11 +123,9 @@ jobs:
         with:
           fetch-depth: 0 # gitleaks scans full commit history
       # Native GitHub secret scanning needs Advanced Security (paid on private
-      # repos), so this OSS action fills the gap. First pass is non-blocking:
-      # report findings without failing PRs — flip to blocking (remove
-      # continue-on-error) once the initial triage issue is cleared.
+      # repos), so this OSS action fills the gap. Blocking: the #214 first pass
+      # was clean, so it was flipped from non-blocking to blocking in #216.
       - uses: gitleaks/gitleaks-action@v2
-        continue-on-error: true
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
 
@@ -142,11 +140,10 @@ jobs:
         with:
           node-version: 22
           cache: 'pnpm'
-      # Non-blocking first pass — see secret-scan note. pnpm audit needs only
-      # the lockfile, so we skip the full install/codegen of the composite.
+      # pnpm audit needs only the lockfile, so we skip the full install/codegen
+      # of the composite. Blocking: the #214 first pass was clean (flipped in #216).
       - name: Audit (high and critical)
         run: pnpm audit --audit-level=high
-        continue-on-error: true
 
   test:
     name: Unit and integration tests
