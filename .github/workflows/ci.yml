@@ -118,6 +118,13 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # gitleaks-action calls the PR-commits API. The default GITHUB_TOKEN here
+    # only carries contents/metadata/packages read, so grant pull-requests:read
+    # explicitly (without it the action 403s with "Resource not accessible by
+    # integration") — same reason the `changes` job sets it.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v6
         with:
