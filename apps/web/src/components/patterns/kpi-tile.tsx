@@ -1,5 +1,6 @@
 'use client';
 
+import { formatPercent } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
 import { useFormatter } from 'next-intl';
 
@@ -11,13 +12,16 @@ import { cn } from '@/lib/utils';
 export interface KpiTileProps extends React.HTMLAttributes<HTMLDivElement> {
   label: string;
   /**
-   * The primary value. Currency type renders ₺ via the shared formatter;
-   * count type renders an integer with locale-aware grouping (resolved via
-   * next-intl from the active NextIntlClientProvider locale).
+   * The primary value. `currency` renders ₺ via the shared formatter; `count`
+   * renders an integer with locale-aware grouping; `percent` renders a
+   * locale-aware percentage (placement and separator from the active locale)
+   * where `amount` is in percent units — `24.8` → `%24,8` (tr) / `24.8%` (en).
+   * All resolved via next-intl from the active NextIntlClientProvider locale.
    */
   value:
     | { kind: 'currency'; amount: Decimal | string | number }
-    | { kind: 'count'; amount: number };
+    | { kind: 'count'; amount: number }
+    | { kind: 'percent'; amount: Decimal | string | number };
   /** Period-over-period percent delta to display as a chip next to the value. */
   delta?: { percent: number; goodDirection?: 'up' | 'down' };
   /**
@@ -74,7 +78,11 @@ export function KpiTile({
             data-tabular="true"
             className="text-foreground text-4xl font-semibold tracking-tight tabular-nums"
           >
-            {formatter.number(value.amount, 'integer')}
+            {value.kind === 'percent'
+              ? formatPercent(
+                  typeof value.amount === 'string' ? new Decimal(value.amount) : value.amount,
+                )
+              : formatter.number(value.amount, 'integer')}
           </span>
         )}
         {delta ? <TrendDelta value={delta.percent} goodDirection={delta.goodDirection} /> : null}
