@@ -1,9 +1,10 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { prisma } from '@pazarsync/db';
+import { CAPABILITIES } from '@pazarsync/utils';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireCapability } from '../../lib/require-capability';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import { toCarrierResponse, updateShippingConfig } from '../../services/shipping-config.service';
 import {
@@ -77,13 +78,12 @@ app.openapi(patchShippingConfigRoute, async (c) => {
   const input = c.req.valid('json');
   // Changing the tariff source / default carrier reshapes every downstream
   // shipping estimate (and therefore profit calculation) for this store —
-  // restrict to org owners and admins. Same rationale as POST /stores.
-  const organizationId = await ensureOrgMember(userId, orgId, {
-    allowedRoles: ['OWNER', 'ADMIN'],
-  });
+  // STORES_CONFIGURE (OWNER/ADMIN), who see every store in the org; the
+  // service query enforces store∈org.
+  await requireCapability(userId, orgId, CAPABILITIES.STORES_CONFIGURE);
 
   const updated = await prisma.$transaction((tx) =>
-    updateShippingConfig(organizationId, storeId, input, tx),
+    updateShippingConfig(orgId, storeId, input, tx),
   );
 
   return c.json(

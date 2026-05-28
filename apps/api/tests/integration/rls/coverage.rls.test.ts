@@ -32,6 +32,8 @@ const TENANT_TABLES = [
   'commission_invoices',
   // Trendyol webhook receiver (PR-C1)
   'webhook_events',
+  // Member ↔ store access grants (member/org/store access-control)
+  'member_store_access',
 ] as const;
 
 describe('RLS — coverage', () => {

@@ -220,12 +220,13 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members       OrganizationMember[]
-  stores        Store[]
-  expenses      Expense[]
-  syncLogs      SyncLog[]
-  costProfiles  CostProfile[]
-  webhookEvents WebhookEvent[]
+  members           OrganizationMember[]
+  stores            Store[]
+  expenses          Expense[]
+  syncLogs          SyncLog[]
+  costProfiles      CostProfile[]
+  webhookEvents     WebhookEvent[]
+  memberStoreAccess MemberStoreAccess[]
 
   @@map("organizations")
 }
@@ -241,6 +242,7 @@ model OrganizationMember {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeAccess  MemberStoreAccess[]
 
   @@unique([organizationId, userId])
   @@index([userId, lastAccessedAt(sort: Desc)], map: "idx_org_members_user_last_accessed")
@@ -286,10 +288,37 @@ model Store {
   ownShippingTariffs     OwnShippingTariff[]
   orgPeriodFees          OrgPeriodFee[]
   commissionInvoices     CommissionInvoice[]
+  memberAccess           MemberStoreAccess[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
   @@map("stores")
+}
+
+// ─── Member ↔ Store access grants ──────────────────────────────────────
+// Which stores a MEMBER/VIEWER may see. OWNER/ADMIN see every store in their
+// org by role and need NO rows here (enforced in can_access_store + services).
+// A grant is scoped to a membership: deleting the member cascades its grants.
+// organization_id is denormalized for flat RLS + indexing (same pattern as
+// products / sync_logs). granted_by is an audit pointer to the granting
+// OrganizationMember.id (plain uuid, no FK — avoids a second self-relation).
+model MemberStoreAccess {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  memberId       String   @map("member_id") @db.Uuid
+  storeId        String   @map("store_id") @db.Uuid
+  grantedBy      String?  @map("granted_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  member       OrganizationMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  store        Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, storeId])
+  @@index([storeId])
+  @@index([organizationId])
+  @@map("member_store_access")
 }
 
 // Parent — one row per Trendyol contentId. Shared content fields

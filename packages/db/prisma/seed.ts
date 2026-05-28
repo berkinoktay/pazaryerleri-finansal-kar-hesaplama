@@ -631,10 +631,38 @@ async function seedCommissionRatesFromCapture(): Promise<void> {
   );
 }
 
+async function seedMemberStoreAccess(
+  orgs: { akyildiz: { id: string } },
+  storeIds: { akyildizTrendyol: string },
+): Promise<void> {
+  // Demo is MEMBER of Akyıldız; grant only the PROD store (not the sandbox) so
+  // the dev UI shows partial store access (1 of 2 stores). Yıldırım gets no
+  // grants on purpose — Berkin is VIEWER there with zero access, exercising the
+  // "no store access yet" panel gate. OWNERs (Berkin@Akyıldız, Demo@Yıldırım)
+  // need no rows; they see every store in their org by role.
+  const demoMembership = await prisma.organizationMember.findUniqueOrThrow({
+    where: {
+      organizationId_userId: { organizationId: orgs.akyildiz.id, userId: USERS.demo.id },
+    },
+    select: { id: true },
+  });
+  // Idempotent: clear this member's grants, then re-create the canonical one.
+  await prisma.memberStoreAccess.deleteMany({ where: { memberId: demoMembership.id } });
+  await prisma.memberStoreAccess.create({
+    data: {
+      organizationId: orgs.akyildiz.id,
+      memberId: demoMembership.id,
+      storeId: storeIds.akyildizTrendyol,
+    },
+  });
+  console.log('✓ member_store_access: 1 grant (demo → Akyıldız Trendyol PROD)');
+}
+
 async function main(): Promise<void> {
   await seedUsers();
   const orgs = await seedOrgsAndMemberships();
   const storeIds = await seedStoresProductsOrders(orgs);
+  await seedMemberStoreAccess(orgs, storeIds);
   await seedCommissionRatesFromCapture();
 
   // Surface the RLS policy count as a quick "did db:apply-policies run?"

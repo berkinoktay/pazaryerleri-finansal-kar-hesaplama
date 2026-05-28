@@ -600,6 +600,10 @@
     }
   },
   "dashboard": {
+    "noStoreAccess": {
+      "title": "Henüz mağaza erişimin yok",
+      "description": "Bu organizasyonda görebileceğin bir mağaza yok. Erişim için organizasyon yöneticinle iletişime geç; başka bir organizasyona geçmek için soldaki seçiciyi kullanabilirsin."
+    },
     "quickAccess": {
       "pendingOrders": {
         "label": "Bekleyen Sipariş",
@@ -699,9 +703,61 @@
       },
       "profile": "Profil",
       "team": "Ekip",
+      "members": "Üyeler",
       "billing": "Faturalama",
       "stores": "Mağazalar",
       "notifications": "Bildirimler"
+    },
+    "members": {
+      "loading": "Üyeler yükleniyor…",
+      "table": {
+        "columns": {
+          "member": "Üye",
+          "role": "Rol",
+          "storeAccess": "Mağaza erişimi",
+          "actions": "İşlemler"
+        }
+      },
+      "storeAccess": {
+        "all": "Tüm mağazalar",
+        "count": "{count} mağaza"
+      },
+      "actions": {
+        "editRole": "Rol",
+        "editAccess": "Mağaza erişimi"
+      },
+      "roles": {
+        "owner": "Sahip",
+        "admin": "Yönetici",
+        "member": "Üye",
+        "viewer": "Görüntüleyici"
+      },
+      "roleDialog": {
+        "title": "Rolü değiştir",
+        "description": "{email} için yeni rol seç.",
+        "cancel": "Vazgeç",
+        "save": "Kaydet",
+        "saving": "Kaydediliyor…"
+      },
+      "storeAccessDialog": {
+        "title": "Mağaza erişimi",
+        "description": "{email} kullanıcısının görebileceği mağazaları seç.",
+        "noStores": "Bu organizasyonda henüz mağaza yok.",
+        "cancel": "Vazgeç",
+        "save": "Kaydet",
+        "saving": "Kaydediliyor…"
+      },
+      "errors": {
+        "CANNOT_DEMOTE_LAST_OWNER": "Son sahibi başka bir role düşüremezsin. Önce başka bir üyeyi sahip yap."
+      },
+      "noPermission": {
+        "title": "Bu sayfayı görüntüleyemezsin",
+        "description": "Üye listesini yalnızca organizasyon sahibi veya yöneticisi görebilir."
+      },
+      "error": {
+        "title": "Üyeler yüklenemedi",
+        "description": "Bir şeyler ters gitti. Lütfen tekrar dene."
+      }
     }
   },
   "notificationsPage": {

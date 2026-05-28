@@ -6,9 +6,11 @@
 
 import { createRoute, z } from '@hono/zod-openapi';
 import { syncLogService } from '@pazarsync/sync-core';
+import { CAPABILITIES } from '@pazarsync/utils';
 
 import { createSubApp } from '../lib/create-hono-app';
-import { ensureOrgMember } from '../lib/ensure-org-member';
+import { requireCapability } from '../lib/require-capability';
+import { accessibleStoreIds } from '../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import { SyncLogListResponseSchema, toSyncLogResponse } from '../validators/product.validator';
 
@@ -68,9 +70,14 @@ app.openapi(listOrgSyncLogsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId } = c.req.valid('param');
   const { active } = c.req.valid('query');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  const logs = await syncLogService.listOrgActiveAndRecent(organizationId, {
+  // DATA_READ membership gate that also yields the role; MEMBER/VIEWER then see
+  // only their granted stores' sync logs (OWNER/ADMIN: all). Honours the
+  // route's "every store the user can see" contract.
+  const role = await requireCapability(userId, orgId, CAPABILITIES.DATA_READ);
+  const storeIds = await accessibleStoreIds(userId, orgId, role);
+  const logs = await syncLogService.listOrgActiveAndRecent(orgId, {
     activeOnly: active === 'true',
+    ...(storeIds === null ? {} : { storeIds }),
   });
   return c.json({ data: logs.map(toSyncLogResponse) }, 200);
 });

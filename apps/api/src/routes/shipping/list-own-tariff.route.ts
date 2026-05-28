@@ -3,7 +3,7 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { prisma } from '@pazarsync/db';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import { listOwnShippingTariff } from '../../services/shipping-config.service';
 import { OwnShippingTariffRowSchema } from '../../validators/shipping-config.validator';
@@ -60,11 +60,9 @@ const listOwnTariffRoute = createRoute({
 app.openapi(listOwnTariffRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  await requireStoreAccess(userId, orgId, storeId);
 
-  const rows = await prisma.$transaction((tx) =>
-    listOwnShippingTariff(organizationId, storeId, tx),
-  );
+  const rows = await prisma.$transaction((tx) => listOwnShippingTariff(orgId, storeId, tx));
 
   return c.json(
     {

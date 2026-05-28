@@ -182,18 +182,26 @@ export async function listActiveAndRecent(
  */
 export async function listOrgActiveAndRecent(
   organizationId: string,
-  opts: { activeOnly: boolean; recentLimit?: number } = { activeOnly: false },
+  opts: { activeOnly: boolean; recentLimit?: number; storeIds?: string[] } = { activeOnly: false },
 ): Promise<SyncLog[]> {
   const recentLimit = opts.recentLimit ?? 5;
+  // store-access narrowing: callers pass the store ids the user may see
+  // (OWNER/ADMIN omit it for all stores; MEMBER/VIEWER pass their granted set,
+  // possibly empty → no rows). Mirrors can_access_store at the service layer.
+  const storeFilter = opts.storeIds === undefined ? {} : { storeId: { in: opts.storeIds } };
   const [active, recent] = await Promise.all([
     prisma.syncLog.findMany({
-      where: { organizationId, status: { in: ['PENDING', 'RUNNING', 'FAILED_RETRYABLE'] } },
+      where: {
+        organizationId,
+        ...storeFilter,
+        status: { in: ['PENDING', 'RUNNING', 'FAILED_RETRYABLE'] },
+      },
       orderBy: { startedAt: 'desc' },
     }),
     opts.activeOnly
       ? Promise.resolve<SyncLog[]>([])
       : prisma.syncLog.findMany({
-          where: { organizationId, status: { in: ['COMPLETED', 'FAILED'] } },
+          where: { organizationId, ...storeFilter, status: { in: ['COMPLETED', 'FAILED'] } },
           orderBy: { startedAt: 'desc' },
           take: recentLimit,
         }),

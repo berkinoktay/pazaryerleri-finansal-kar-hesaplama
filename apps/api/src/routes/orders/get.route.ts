@@ -1,7 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as orderService from '../../services/order.service';
 import { OrderDetailSchema } from '../../validators/order.validator';
@@ -59,9 +59,9 @@ const getOrderRoute = createRoute({
 app.openapi(getOrderRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, orderId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  await requireStoreAccess(userId, orgId, storeId);
 
-  const order = await orderService.getOrderById(organizationId, storeId, orderId);
+  const order = await orderService.getOrderById(orgId, storeId, orderId);
   return c.json(order, 200);
 });
 

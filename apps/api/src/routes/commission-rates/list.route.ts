@@ -1,7 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as commissionRateListService from '../../services/commission-rate-list.service';
 import {
@@ -71,9 +71,9 @@ app.openapi(listCommissionRatesRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   const filters = c.req.valid('query');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  await requireStoreAccess(userId, orgId, storeId);
 
-  const result = await commissionRateListService.listCommissionRates(organizationId, storeId, {
+  const result = await commissionRateListService.listCommissionRates(orgId, storeId, {
     ruleKind: filters.ruleKind,
     productScope: filters.productScope,
     q: filters.q,

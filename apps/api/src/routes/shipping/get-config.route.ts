@@ -3,7 +3,7 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { prisma } from '@pazarsync/db';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import { getShippingConfig, toCarrierResponse } from '../../services/shipping-config.service';
 import { ShippingConfigSchema } from '../../validators/shipping-config.validator';
@@ -58,9 +58,9 @@ const getShippingConfigRoute = createRoute({
 app.openapi(getShippingConfigRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  await requireStoreAccess(userId, orgId, storeId);
 
-  const config = await prisma.$transaction((tx) => getShippingConfig(organizationId, storeId, tx));
+  const config = await prisma.$transaction((tx) => getShippingConfig(orgId, storeId, tx));
 
   return c.json(
     {

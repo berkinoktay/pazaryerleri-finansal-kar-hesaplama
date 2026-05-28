@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useState, type ReactElement, type ReactNode } from 'react';
 
+import { CAPABILITIES } from '@pazarsync/utils';
+
 import { AppShell } from '@/components/layout/app-shell';
 import type { Organization as SwitcherOrg } from '@/components/patterns/org-store-switcher';
 import type { Organization as OrgApiData } from '@/features/organization/api/organizations.api';
@@ -11,6 +13,7 @@ import { useStores } from '@/features/stores/hooks/use-stores';
 import { toSwitcherStore } from '@/features/stores/lib/to-ui-store';
 import { setActiveOrgIdAction } from '@/lib/active-org-actions';
 import { setActiveStoreIdAction } from '@/lib/active-store-actions';
+import { useCan } from '@/providers/current-scope';
 
 import { ConnectStoreModal } from './connect-store-modal';
 
@@ -63,6 +66,7 @@ export function DashboardStoreLauncher({
   children,
 }: DashboardStoreLauncherProps): ReactElement {
   const router = useRouter();
+  const canConnectStore = useCan(CAPABILITIES.STORES_CONNECT);
   const [modalOpen, setModalOpen] = useState(false);
   const [activeStoreId, setActiveStoreId] = useState<string | undefined>(initialActiveStoreId);
 
@@ -74,6 +78,11 @@ export function DashboardStoreLauncher({
   function handleSelectStore(storeId: string): void {
     setActiveStoreId(storeId);
     void setActiveStoreIdAction(storeId);
+    // Re-resolve server-rendered pages for the new store — they read the active
+    // store from the cookie on the server. Mirrors the org-switch path; without
+    // it a store switch updated the switcher chrome but left page content on the
+    // previous store until the next navigation.
+    router.refresh();
   }
 
   async function handleSelectOrg(orgId: string): Promise<void> {
@@ -91,7 +100,9 @@ export function DashboardStoreLauncher({
         activeStoreId={effectiveActiveId}
         onSelectOrg={(orgId) => void handleSelectOrg(orgId)}
         onSelectStore={handleSelectStore}
-        onAddStore={activeOrgId !== undefined ? () => setModalOpen(true) : undefined}
+        onAddStore={
+          activeOrgId !== undefined && canConnectStore ? () => setModalOpen(true) : undefined
+        }
       >
         {children}
       </AppShell>

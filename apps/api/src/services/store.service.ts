@@ -1,5 +1,5 @@
 import { prisma } from '@pazarsync/db';
-import type { Store as PrismaStore } from '@pazarsync/db';
+import type { MemberRole, Store as PrismaStore } from '@pazarsync/db';
 import { getAdapter, isTrendyolCredentials } from '@pazarsync/marketplace';
 import {
   decryptCredentials,
@@ -35,11 +35,22 @@ function toStoreResponse(store: PrismaStore): Store {
   };
 }
 
-export async function list(organizationId: string): Promise<Store[]> {
-  const rows = await prisma.store.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: 'desc' },
-  });
+export async function list(
+  organizationId: string,
+  caller: { userId: string; role: MemberRole },
+): Promise<Store[]> {
+  // OWNER/ADMIN see every store in the org; MEMBER/VIEWER see only the stores
+  // they hold a member_store_access grant for. This is the service-layer mirror
+  // of can_access_store — Prisma runs as the postgres role and bypasses RLS, so
+  // the filter must be applied here too.
+  const where =
+    caller.role === 'OWNER' || caller.role === 'ADMIN'
+      ? { organizationId }
+      : {
+          organizationId,
+          memberAccess: { some: { member: { userId: caller.userId, organizationId } } },
+        };
+  const rows = await prisma.store.findMany({ where, orderBy: { createdAt: 'desc' } });
   return rows.map(toStoreResponse);
 }
 

@@ -148,11 +148,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: 'pnpm'
       # pnpm audit needs only the lockfile, so we skip the full install/codegen
-      # of the composite. --prod scopes the blocking gate to PRODUCTION deps;
-      # dev-tool transitive advisories (e.g. commitlint→ajv→fast-uri) are left to
-      # Dependabot's weekly PRs instead of blocking every build. Blocking as of #216.
+      # of the composite — and setup-node's `cache: pnpm` with it. With no install
+      # there is no pnpm store to cache, so the post-run cache save fails with a
+      # "path does not exist" error and fails the whole job whenever a lockfile
+      # change misses the restore cache (e.g. any PR that touches dependencies).
+      # --prod scopes the blocking gate to PRODUCTION deps; dev-tool transitive
+      # advisories (e.g. commitlint→ajv→fast-uri) are left to Dependabot's weekly
+      # PRs instead of blocking every build. Blocking as of #216.
       - name: Audit (high and critical, production deps)
         run: pnpm audit --prod --audit-level=high
 

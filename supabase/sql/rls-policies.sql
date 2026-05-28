@@ -36,6 +36,43 @@ AS $$
   );
 $$;
 
+-- ─── can_access_store helper ───────────────────────────────────────────
+-- Store-scoped tables gate on store ACCESS, not bare org membership.
+-- OWNER/ADMIN of the store's org see every store in it; MEMBER/VIEWER see
+-- only stores they hold a member_store_access grant for. Panel access for a
+-- MEMBER/VIEWER therefore requires >= 1 grant.
+--
+-- Same SECURITY DEFINER STABLE shape as is_org_member: the body runs as its
+-- owner (postgres, RLS-bypassed), so the internal joins on stores /
+-- organization_members / member_store_access do NOT re-trigger RLS — no 42P17
+-- recursion. Being a plain function call (not an inline cross-table EXISTS),
+-- it is also accepted by Supabase Realtime's postgres_changes evaluator on
+-- sync_logs, exactly like is_org_member.
+CREATE OR REPLACE FUNCTION public.can_access_store(_store_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM stores s
+    JOIN organization_members m
+      ON m.organization_id = s.organization_id
+     AND m.user_id = auth.uid()
+    WHERE s.id = _store_id
+      AND (
+        m.role IN ('OWNER', 'ADMIN')
+        OR EXISTS (
+          SELECT 1 FROM member_store_access g
+          WHERE g.store_id = s.id
+            AND g.member_id = m.id
+        )
+      )
+  );
+$$;
+
 -- ─── user_profiles ─────────────────────────────────────────────────────
 -- SELECT is self-only. INSERT is usually handled by the on_auth_user_created
 -- trigger (see supabase/sql/triggers.sql), but we allow a self-INSERT path
@@ -91,18 +128,22 @@ CREATE POLICY organization_members_co_member_read ON organization_members
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
 
--- ─── stores / products / orders / expenses — same org-member pattern ───
+-- ─── store-scoped tables — gated by can_access_store ──────────────────
+-- Store-level operational data. Visibility follows store access (OWNER/ADMIN:
+-- every store in the org; MEMBER/VIEWER: granted stores only), not bare org
+-- membership. `stores` keys on its own id; child tables on store_id, or walk
+-- up to the parent's store_id when they have none.
 ALTER TABLE stores ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS stores_org_member_read ON stores;
 CREATE POLICY stores_org_member_read ON stores
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(id));
 
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS products_org_member_read ON products;
 CREATE POLICY products_org_member_read ON products
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
 -- product_variants and product_images both denormalize organization_id
 -- onto themselves (rather than reaching via Product) so the policy can
@@ -114,29 +155,43 @@ ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS product_variants_org_member_read ON product_variants;
 CREATE POLICY product_variants_org_member_read ON product_variants
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
+-- product_images has no store_id (only product_id); walk up to the parent
+-- product's store_id.
 ALTER TABLE product_images ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS product_images_org_member_read ON product_images;
 CREATE POLICY product_images_org_member_read ON product_images
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (
+    EXISTS (
+      SELECT 1 FROM products
+      WHERE products.id = product_images.product_id
+        AND can_access_store(products.store_id)
+    )
+  );
 
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS orders_org_member_read ON orders;
 CREATE POLICY orders_org_member_read ON orders
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
+-- expenses.store_id is nullable: org-level expenses (NULL) follow org
+-- membership; store-attributed expenses follow store access, so a MEMBER
+-- granted only store A never sees store B's costs.
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS expenses_org_member_read ON expenses;
 CREATE POLICY expenses_org_member_read ON expenses
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (
+    (store_id IS NULL AND is_org_member(organization_id))
+    OR (store_id IS NOT NULL AND can_access_store(store_id))
+  );
 
 -- ─── order_items — reach via parent order ──────────────────────────────
--- order_items has no organization_id column; walk up to orders to find
--- the tenant context, then apply is_org_member.
+-- order_items has no store_id column; walk up to its order and gate on that
+-- order's store access.
 ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS order_items_org_member_read ON order_items;
 CREATE POLICY order_items_org_member_read ON order_items
@@ -145,7 +200,7 @@ CREATE POLICY order_items_org_member_read ON order_items
     EXISTS (
       SELECT 1 FROM orders
       WHERE orders.id = order_items.order_id
-        AND is_org_member(orders.organization_id)
+        AND can_access_store(orders.store_id)
     )
   );
 
@@ -154,7 +209,7 @@ ALTER TABLE settlements ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS settlements_org_member_read ON settlements;
 CREATE POLICY settlements_org_member_read ON settlements
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
 -- ─── settlement_items — reach via parent settlement ────────────────────
 ALTER TABLE settlement_items ENABLE ROW LEVEL SECURITY;
@@ -165,24 +220,22 @@ CREATE POLICY settlement_items_org_member_read ON settlement_items
     EXISTS (
       SELECT 1 FROM settlements
       WHERE settlements.id = settlement_items.settlement_id
-        AND is_org_member(settlements.organization_id)
+        AND can_access_store(settlements.store_id)
     )
   );
 
--- ─── sync_logs — direct check via denormalized organization_id ────────
--- Originally walked to stores via EXISTS; that worked for REST reads
--- (Prisma bypasses RLS as superuser) but Supabase Realtime's
--- postgres_changes evaluator can't reliably handle cross-table EXISTS,
--- so subscriptions crashed with "Unable to subscribe to changes with
--- given parameters". We denormalize organization_id onto sync_logs
--- (kept in sync by syncLogService at insert time) so the policy is a
--- flat is_org_member() check — same pattern as products / variants /
--- images.
+-- ─── sync_logs — store-scoped, Realtime-exposed ───────────────────────
+-- sync_logs carries store_id directly, so the policy gates on
+-- can_access_store(store_id). Supabase Realtime's postgres_changes evaluator
+-- can't handle an inline cross-table EXISTS, but can_access_store — like
+-- is_org_member before it — is a plain SECURITY DEFINER function call, so
+-- subscriptions keep working. A MEMBER only receives sync events for the
+-- stores they were granted.
 ALTER TABLE sync_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS sync_logs_org_member_read ON sync_logs;
 CREATE POLICY sync_logs_org_member_read ON sync_logs
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
 -- ─── sync_logs active-slot uniqueness ────────────────────────
 -- Atomically guarantees one active sync per (store_id, sync_type).
@@ -301,43 +354,54 @@ CREATE POLICY shipping_barem_tariffs_authenticated_read ON shipping_barem_tariff
   FOR SELECT TO authenticated
   USING (true);
 
--- ─── own_shipping_tariffs — org-private ────────────────────────────────
--- A seller's negotiated carrier rates for one of their stores. These
--- reveal commercial cost intelligence and MUST be tenant-isolated; same
--- flat is_org_member() pattern as stores / products / orders.
+-- ─── own_shipping_tariffs — store-scoped, org-private ──────────────────
+-- A seller's negotiated carrier rates for a specific store. Commercial cost
+-- intelligence — gated on store access via store_id, same as stores / orders.
 ALTER TABLE own_shipping_tariffs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS own_shipping_tariffs_org_member_read ON own_shipping_tariffs;
 CREATE POLICY own_shipping_tariffs_org_member_read ON own_shipping_tariffs
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
 -- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
 -- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
 -- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md
 
--- ─── order_fees — org-scoped, denormalized organization_id ────────────
--- Sipariş paket-düzeyi ücret satırları (PSF, Stopaj, Shipping, vs.). Sync
--- worker insert sırasında organizationId'yi stamp eder; flat is_org_member()
--- pattern (products / variants / sync_logs ile aynı, EXISTS recursion riski yok).
+-- ─── order_fees — reach via parent order ───────────────────────────────
+-- Sipariş paket-düzeyi ücret satırları (PSF, Stopaj, Shipping, vs.). No
+-- store_id of its own; walk up to the parent order and gate on that order's
+-- store access.
 ALTER TABLE order_fees ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS order_fees_org_member_read ON order_fees;
 CREATE POLICY order_fees_org_member_read ON order_fees
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (
+    EXISTS (
+      SELECT 1 FROM orders
+      WHERE orders.id = order_fees.order_id
+        AND can_access_store(orders.store_id)
+    )
+  );
 
--- ─── order_claims — org-scoped, denormalized organization_id ─────────
--- İade talep görünürlüğü; getclaims sync worker (PR-13) yazar. Tenant boundary
--- denormalize edilmiş — sayı az olduğu için EXISTS walk overhead'i gereksiz.
+-- ─── order_claims — reach via parent order ─────────────────────────────
+-- İade talep görünürlüğü; getclaims sync worker (PR-13) yazar. No store_id of
+-- its own; walk up to the parent order and gate on that order's store access.
 ALTER TABLE order_claims ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS order_claims_org_member_read ON order_claims;
 CREATE POLICY order_claims_org_member_read ON order_claims
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (
+    EXISTS (
+      SELECT 1 FROM orders
+      WHERE orders.id = order_claims.order_id
+        AND can_access_store(orders.store_id)
+    )
+  );
 
--- ─── order_claim_items — reach via parent claim ────────────────────────
--- order_items pattern: no direct organization_id, walk to parent claim.
--- Recursion risk yok çünkü order_claims kendi policy'sini is_org_member ile
--- evaluate eder (SECURITY DEFINER helper'a sarılı).
+-- ─── order_claim_items — reach via parent claim → order ────────────────
+-- No store_id; walk to the parent claim, then to that claim's order, and gate
+-- on the order's store access. Recursion-safe: can_access_store is a SECURITY
+-- DEFINER helper, same as is_org_member before it.
 ALTER TABLE order_claim_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS order_claim_items_org_member_read ON order_claim_items;
 CREATE POLICY order_claim_items_org_member_read ON order_claim_items
@@ -345,29 +409,31 @@ CREATE POLICY order_claim_items_org_member_read ON order_claim_items
   USING (
     EXISTS (
       SELECT 1 FROM order_claims
+      JOIN orders ON orders.id = order_claims.order_id
       WHERE order_claims.id = order_claim_items.claim_id
-        AND is_org_member(order_claims.organization_id)
+        AND can_access_store(orders.store_id)
     )
   );
 
--- ─── org_period_fees — org-scoped ─────────────────────────────────────
--- Org-düzeyi ücretler (Reklam, Penalty, Notification, PSF/Stopaj audit).
--- Kar hesabını etkilemez; yalnız audit/transparency. Settlement worker (PR-7) yazar.
+-- ─── org_period_fees — store-scoped ────────────────────────────────────
+-- Mağaza-düzeyi dönem ücretleri (Reklam, Penalty, Notification, PSF/Stopaj
+-- audit). Settlement worker (PR-7) yazar; store_id taşır → store access ile
+-- gate'lenir, böylece bir mağazaya erişimi olmayan üye o mağazanın ücretlerini görmez.
 ALTER TABLE org_period_fees ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS org_period_fees_org_member_read ON org_period_fees;
 CREATE POLICY org_period_fees_org_member_read ON org_period_fees
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
--- ─── commission_invoices — org-scoped ──────────────────────────────────
+-- ─── commission_invoices — store-scoped ────────────────────────────────
 -- Trendyol haftalık komisyon faturası aggregate. otherfinancials 'Komisyon
--- Faturası' kayıtlarından oluşturulur (PR-7). OrderItem.commissionInvoiceId
--- FK PR-3'te eklenir; o zaman backfill akışı tamamlanır.
+-- Faturası' kayıtlarından oluşturulur (PR-7). store_id taşır → store access
+-- ile gate'lenir. OrderItem.commissionInvoiceId FK PR-3'te eklenir.
 ALTER TABLE commission_invoices ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS commission_invoices_org_member_read ON commission_invoices;
 CREATE POLICY commission_invoices_org_member_read ON commission_invoices
   FOR SELECT TO authenticated
-  USING (is_org_member(organization_id));
+  USING (can_access_store(store_id));
 
 -- ─── fee_definitions — global reference, public read ──────────────────
 -- Pazaryeri × ücret tipi başına sistem-düzeyi tanım. Tüm seller'lara aynı
@@ -380,15 +446,28 @@ CREATE POLICY fee_definitions_authenticated_read ON fee_definitions
   FOR SELECT TO authenticated
   USING (true);
 
--- ─── webhook_events — org-scoped read (PR-C1) ─────────────────────────────
+-- ─── webhook_events — store-scoped read (PR-C1) ───────────────────────────
 -- Trendyol webhook idempotency log + raw audit trail. Composite unique key
 -- (storeId, platformOrderId, platformStatus, platformLastModifiedDate) →
--- re-delivery'de INSERT P2002 → handler 200 OK döner. SELECT yalnız
--- organization member'lara — debugging/admin için. INSERT/UPDATE/DELETE
+-- re-delivery'de INSERT P2002 → handler 200 OK döner. SELECT yalnız o mağazaya
+-- erişimi olan member'lara — debugging/admin için. INSERT/UPDATE/DELETE
 -- yalnız service role (webhook handler postgres role kullanır); authenticated
 -- mutation policy YOK → default-deny.
 ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS webhook_events_org_member_read ON webhook_events;
 CREATE POLICY webhook_events_org_member_read ON webhook_events
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+-- ─── member_store_access — co-member read; writes API-only ─────────────
+-- The grant rows themselves. Any org member may read their org's grants —
+-- the management UI is capability-gated (members:read / manage_access) at the
+-- route layer, and grants are not competitive intel, so a flat is_org_member()
+-- read is sufficient defense-in-depth. Writes go through the backend with the
+-- postgres role (RLS-bypassed); there is no authenticated INSERT/UPDATE/DELETE
+-- policy, so direct client writes default-deny.
+ALTER TABLE member_store_access ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS member_store_access_org_member_read ON member_store_access;
+CREATE POLICY member_store_access_org_member_read ON member_store_access
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));

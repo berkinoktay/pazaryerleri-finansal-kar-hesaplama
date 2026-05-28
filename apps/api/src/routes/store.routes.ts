@@ -1,9 +1,11 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import type { MemberRole } from '@pazarsync/db';
+import { CAPABILITIES } from '@pazarsync/utils';
 
 import { RATE_LIMITS } from '../config/rate-limits';
 import { createSubApp } from '../lib/create-hono-app';
-import { ensureOrgMember } from '../lib/ensure-org-member';
+import { requireCapability } from '../lib/require-capability';
+import { requireStoreAccess } from '../lib/require-store-access';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as storeService from '../services/store.service';
@@ -74,8 +76,11 @@ const listStoresRoute = createRoute({
 app.openapi(listStoresRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  const data = await storeService.list(organizationId);
+  // DATA_READ is held by every role, so this is a membership gate that also
+  // hands back the role. storeService.list then narrows MEMBER/VIEWER to their
+  // granted stores; OWNER/ADMIN see all.
+  const role = await requireCapability(userId, orgId, CAPABILITIES.DATA_READ);
+  const data = await storeService.list(orgId, { userId, role });
   return c.json({ data }, 200);
 });
 
@@ -141,11 +146,9 @@ app.openapi(connectStoreRoute, async (c) => {
   // Connecting a marketplace account is OWNER/ADMIN territory: it
   // commits the org to billing-bearing API calls and stores credentials
   // that can fetch financial data. Members and viewers cannot do this.
-  const organizationId = await ensureOrgMember(userId, orgId, {
-    allowedRoles: ['OWNER', 'ADMIN'],
-  });
+  await requireCapability(userId, orgId, CAPABILITIES.STORES_CONNECT);
   const input = c.req.valid('json');
-  const store = await storeService.connect(organizationId, input);
+  const store = await storeService.connect(orgId, input);
   return c.json(store, 201);
 });
 
@@ -181,8 +184,8 @@ const getStoreRoute = createRoute({
 app.openapi(getStoreRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  const store = await storeService.getById(organizationId, storeId);
+  await requireStoreAccess(userId, orgId, storeId);
+  const store = await storeService.getById(orgId, storeId);
   return c.json(store, 200);
 });
 
@@ -219,10 +222,8 @@ app.openapi(disconnectStoreRoute, async (c) => {
   const { orgId, storeId } = c.req.valid('param');
   // Disconnect is destructive (cascades to products, orders, settlements,
   // sync_logs) — gate on OWNER/ADMIN. Same rationale as POST /stores.
-  const organizationId = await ensureOrgMember(userId, orgId, {
-    allowedRoles: ['OWNER', 'ADMIN'],
-  });
-  await storeService.disconnect(organizationId, storeId);
+  await requireCapability(userId, orgId, CAPABILITIES.STORES_DISCONNECT);
+  await storeService.disconnect(orgId, storeId);
   return c.body(null, 204);
 });
 
@@ -281,10 +282,8 @@ app.openapi(rotateWebhookSecretRoute, async (c) => {
   const { orgId, storeId } = c.req.valid('param');
   // Rotation calls Trendyol on the user's behalf with stored credentials —
   // OWNER/ADMIN only, same posture as the disconnect path.
-  const organizationId = await ensureOrgMember(userId, orgId, {
-    allowedRoles: ['OWNER', 'ADMIN'],
-  });
-  const result = await storeService.rotateWebhookSecret(organizationId, storeId);
+  await requireCapability(userId, orgId, CAPABILITIES.STORES_CONFIGURE);
+  const result = await storeService.rotateWebhookSecret(orgId, storeId);
   return c.json(result, 200);
 });
 

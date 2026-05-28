@@ -20,6 +20,7 @@ import productsSubRoutes from './routes/products/index';
 import shippingRoutes from './routes/shipping/index';
 import variantRoutes from './routes/variants/index';
 import meRoutes from './routes/me.routes';
+import memberRoutes from './routes/member.routes';
 import organizationRoutes from './routes/organization.routes';
 import productRoutes from './routes/product.routes';
 import storeRoutes from './routes/store.routes';
@@ -145,6 +146,7 @@ export function createApp(): OpenAPIHono {
   // ─── Authenticated routes ──────────────────────────────────────────
   app.route('/', meRoutes);
   app.route('/', organizationRoutes);
+  app.route('/', memberRoutes);
   app.route('/', storeRoutes);
   app.route('/', orderRoutes);
   app.route('/', productRoutes);
