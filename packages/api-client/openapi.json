@@ -1341,6 +1341,324 @@
           "resolved"
         ]
       },
+      "LivePerformanceKpis": {
+        "type": "object",
+        "properties": {
+          "revenueToday": {
+            "type": "string",
+            "description": "Decimal string",
+            "example": "12450.00"
+          },
+          "revenueYesterday": {
+            "type": "string",
+            "example": "11530.00"
+          },
+          "netProfitToday": {
+            "type": "string",
+            "example": "3220.00"
+          },
+          "netProfitYesterday": {
+            "type": "string",
+            "example": "2875.00"
+          },
+          "orderCountToday": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 87
+          },
+          "orderCountYesterday": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 80
+          },
+          "marginToday": {
+            "type": "string",
+            "description": "Net profit / revenue × 100, decimal string",
+            "example": "25.86"
+          },
+          "marginYesterday": {
+            "type": "string",
+            "example": "25.43"
+          }
+        },
+        "required": [
+          "revenueToday",
+          "revenueYesterday",
+          "netProfitToday",
+          "netProfitYesterday",
+          "orderCountToday",
+          "orderCountYesterday",
+          "marginToday",
+          "marginYesterday"
+        ]
+      },
+      "LivePerformanceChart": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "hour": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 23,
+                  "example": 14
+                },
+                "cumulativeProfit": {
+                  "type": "string",
+                  "description": "Decimal string",
+                  "example": "1820.00"
+                }
+              },
+              "required": [
+                "hour",
+                "cumulativeProfit"
+              ]
+            }
+          },
+          "yesterday": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "hour": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 23,
+                  "example": 14
+                },
+                "cumulativeProfit": {
+                  "type": "string",
+                  "description": "Decimal string",
+                  "example": "1820.00"
+                }
+              },
+              "required": [
+                "hour",
+                "cumulativeProfit"
+              ]
+            }
+          }
+        },
+        "required": [
+          "today",
+          "yesterday"
+        ]
+      },
+      "LivePerformanceMissingCost": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "variantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "barcode": {
+                  "type": "string",
+                  "example": "8680000000001"
+                },
+                "productName": {
+                  "type": "string",
+                  "example": "Pamuklu Tişört Beyaz M"
+                },
+                "thumbUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Product image URL or null"
+                },
+                "orderCount": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "example": 3
+                },
+                "revenueImpact": {
+                  "type": "string",
+                  "description": "Decimal string",
+                  "example": "450.00"
+                }
+              },
+              "required": [
+                "variantId",
+                "barcode",
+                "productName",
+                "thumbUrl",
+                "orderCount",
+                "revenueImpact"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "LivePerformanceTopProducts": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "rank": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3,
+                  "example": 1
+                },
+                "variantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "productName": {
+                  "type": "string",
+                  "example": "Pamuklu Tişört Beyaz M"
+                },
+                "thumbUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Product image URL or null"
+                },
+                "orderCount": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "example": 12
+                },
+                "revenue": {
+                  "type": "string",
+                  "description": "Decimal string",
+                  "example": "3600.00"
+                },
+                "profit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Decimal string, null if any contributing order is cost-missing"
+                }
+              },
+              "required": [
+                "rank",
+                "variantId",
+                "productName",
+                "thumbUrl",
+                "orderCount",
+                "revenue",
+                "profit"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "LivePerformanceOrders": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "orders",
+                    "buffer"
+                  ],
+                  "description": "\"orders\" = fully calculated; \"buffer\" = cost-missing, awaiting cost entry"
+                },
+                "platformOrderId": {
+                  "type": "string"
+                },
+                "platformOrderNumber": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "orderDate": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "revenue": {
+                  "type": "string",
+                  "description": "Decimal string"
+                },
+                "profit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Decimal string, null for buffer rows"
+                },
+                "margin": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Decimal string, null for buffer rows"
+                }
+              },
+              "required": [
+                "source",
+                "platformOrderId",
+                "platformOrderNumber",
+                "orderDate",
+                "status",
+                "revenue",
+                "profit",
+                "margin"
+              ]
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "all": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "calculated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pending": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "all",
+              "calculated",
+              "pending"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "counts"
+        ]
+      },
       "StartSyncResponse": {
         "type": "object",
         "properties": {
@@ -5102,6 +5420,641 @@
           },
           "404": {
             "description": "Store or order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/kpis": {
+      "get": {
+        "tags": [
+          "Live Performance"
+        ],
+        "summary": "Live Performance KPI summary (today vs. yesterday)",
+        "description": "Revenue, net profit, order count, and margin for the business day so far, with the previous business day for comparison. Money values are Decimal strings. Reads the orders table only — cost-missing orders sit in the buffer (see /missing-cost).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KPI summary",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivePerformanceKpis"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/chart": {
+      "get": {
+        "tags": [
+          "Live Performance"
+        ],
+        "summary": "Live Performance hourly profit curve (today vs. yesterday)",
+        "description": "Cumulative net profit per business-timezone hour (0–23), for today and yesterday, for a dual-line intraday chart. Each hour holds the running total through that hour. Money values are Decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Hourly cumulative profit",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivePerformanceChart"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/missing-cost": {
+      "get": {
+        "tags": [
+          "Live Performance"
+        ],
+        "summary": "Cost-missing variants blocking today’s buffer",
+        "description": "Variants in today’s PENDING buffer entries that still lack a cost profile, grouped by barcode with the order count and blocked revenue. Attaching a cost here lets the order graduate from the buffer into the calculated orders. Already-costed siblings of a still-missing line are excluded.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cost-missing variant list",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivePerformanceMissingCost"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/top-products": {
+      "get": {
+        "tags": [
+          "Live Performance"
+        ],
+        "summary": "Top 3 products sold today",
+        "description": "The three best-selling product variants of the business day so far, ranked by order count, with revenue and best-effort profit. profit is null when any contributing order has no estimate yet. Money values are Decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Top products list (max 3)",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivePerformanceTopProducts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/orders": {
+      "get": {
+        "tags": [
+          "Live Performance"
+        ],
+        "summary": "Today’s orders (calculated + cost-missing buffer)",
+        "description": "Today’s order feed combining the calculated orders table with the cost-missing buffer, each row tagged by source. `filter` selects the tab: all (default), calculated (orders only), or pending (buffer only). `counts` always reports every tab’s total. Money values are Decimal strings; buffer rows have null profit/margin until they graduate.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "calculated",
+                "pending"
+              ],
+              "description": "Tab filter — all (default), calculated (orders), or pending (buffer)"
+            },
+            "required": false,
+            "description": "Tab filter — all (default), calculated (orders), or pending (buffer)",
+            "name": "filter",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Today’s live orders",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivePerformanceOrders"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
             "content": {
               "application/json": {
                 "schema": {
