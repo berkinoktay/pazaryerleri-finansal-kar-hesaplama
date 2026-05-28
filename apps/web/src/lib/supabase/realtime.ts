@@ -296,3 +296,113 @@ export function subscribeToOrgSyncs(
     void teardown();
   };
 }
+
+export interface SubscribeToLivePerformanceOptions {
+  /**
+   * Fires on any relevant row change. The live-performance aggregates
+   * (KPIs, chart, missing-cost, top-products, orders) are all derived
+   * server-side, so the consumer can't reconstruct them from a single row —
+   * it invalidates and refetches rather than reading the payload. That's why
+   * this callback carries no row data (unlike the sync_logs subscription).
+   */
+  onEvent: () => void;
+  onHealthChange?: (health: RealtimeHealth) => void;
+}
+
+/**
+ * Subscribe to the two tables that drive a store's live-performance surface,
+ * both filtered by `store_id`:
+ *
+ *   - `live_performance_buffer` (event `*`) — a cost-missing order arriving,
+ *     a cost being attached (PENDING → PROMOTING), or a promotion completing
+ *     (row deleted). Refreshes the missing-cost list + orders feed.
+ *   - `orders` (event `INSERT`) — a brand-new fully-calculable order written
+ *     straight to `orders` (cost already known, never buffered), or the
+ *     promote worker writing a promoted order. Refreshes KPIs + top-products +
+ *     orders feed.
+ *
+ * Mirrors {@link subscribeToOrgSyncs}: browser Supabase client (the Realtime
+ * WebSocket authenticates through the cookie session — no `setAuth` on this
+ * path), health reported through `onHealthChange` so the consumer can gate a
+ * polling fallback, and tab-visibility teardown to free the socket in
+ * background tabs. Returns an unsubscribe function.
+ *
+ * Single store channel: `live-performance:${storeId}`.
+ */
+export function subscribeToLivePerformance(
+  storeId: string,
+  options: SubscribeToLivePerformanceOptions,
+): () => void {
+  const { onEvent, onHealthChange } = options;
+  const supabase = createClient();
+  let channel: RealtimeChannel | null = null;
+  let unsubscribed = false;
+
+  const reportHealth = (next: RealtimeHealth): void => {
+    if (onHealthChange !== undefined) onHealthChange(next);
+  };
+
+  const buildChannel = (): RealtimeChannel => {
+    reportHealth('connecting');
+    return supabase
+      .channel(`live-performance:${storeId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'live_performance_buffer',
+          filter: `store_id=eq.${storeId}`,
+        },
+        () => onEvent(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'orders',
+          filter: `store_id=eq.${storeId}`,
+        },
+        () => onEvent(),
+      )
+      .subscribe((status) => {
+        if (unsubscribed) return;
+        if (status === 'SUBSCRIBED') reportHealth('healthy');
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          reportHealth('errored');
+        }
+      });
+  };
+
+  const teardown = async (): Promise<void> => {
+    if (channel === null) return;
+    const c = channel;
+    channel = null;
+    await supabase.removeChannel(c);
+  };
+
+  const handleVisibility = (): void => {
+    if (typeof document === 'undefined') return;
+    if (document.visibilityState === 'hidden') {
+      reportHealth('paused');
+      void teardown();
+    } else if (channel === null) {
+      channel = buildChannel();
+    }
+  };
+
+  channel = buildChannel();
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibility);
+  }
+
+  return () => {
+    unsubscribed = true;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    }
+    void teardown();
+  };
+}
