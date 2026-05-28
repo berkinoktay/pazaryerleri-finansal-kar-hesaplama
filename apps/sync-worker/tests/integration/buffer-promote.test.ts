@@ -1,0 +1,182 @@
+import { prisma } from '@pazarsync/db';
+import type { Prisma } from '@pazarsync/db';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { processBufferPromote } from '../../src/handlers/buffer-promote';
+import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import {
+  createBufferEntry,
+  createCostProfile,
+  createOrganization,
+  createStore,
+} from '../../../../apps/api/tests/helpers/factories';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+
+const BARCODE = 'EAN13-PROMOTE-001';
+
+/**
+ * A MappedOrder-shaped value as stored in buffer.mappedOrder (JSON). Dates are
+ * ISO strings (JSON round-trip — upsertOrderWithSnapshot coerces them). With
+ * `invalid: true` a line carries a non-numeric unitPriceNet so the upsert's
+ * `new Decimal(...)` throws — a deterministic promote failure for the retry path.
+ */
+function buildMappedOrder(over: {
+  platformOrderId: string;
+  platformOrderNumber?: string;
+  barcode?: string;
+  invalid?: boolean;
+}): Prisma.InputJsonValue {
+  const value = {
+    platformOrderId: over.platformOrderId,
+    platformOrderNumber: over.platformOrderNumber ?? `ord-${over.platformOrderId}`,
+    orderDate: new Date().toISOString(),
+    status: 'PROCESSING',
+    saleSubtotalNet: '84.75',
+    saleVatTotal: '15.25',
+    agreedDeliveryDate: null,
+    actualDeliveryDate: null,
+    fastDelivery: false,
+    micro: false,
+    lines: [
+      {
+        barcode: over.barcode ?? BARCODE,
+        quantity: 1,
+        unitPriceNet: over.invalid === true ? 'NOT_A_NUMBER' : '84.75',
+        unitVatRate: '18',
+        unitVatAmount: '15.25',
+        commissionRate: '15',
+        grossCommissionAmountNet: '12.71',
+        grossCommissionVatAmount: '2.29',
+        sellerDiscountNet: '0',
+        sellerDiscountVatAmount: '0',
+      },
+    ],
+  };
+  return value as unknown as Prisma.InputJsonValue;
+}
+
+async function seedCalculableVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+): Promise<void> {
+  const profile = await createCostProfile(organizationId, { amount: '40.00' });
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${barcode}`,
+      title: 'Promote Test Product',
+    },
+  });
+  await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode,
+      stockCode: `sk-${barcode}`,
+      salePrice: '100',
+      listPrice: '120',
+      costProfileLinks: { create: { organizationId, profileId: profile.id } },
+    },
+  });
+}
+
+describe('processBufferPromote', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  it('promotes a PROMOTING entry to orders and deletes the buffer row', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedCalculableVariant(org.id, store.id, BARCODE);
+
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-001',
+      platformOrderNumber: 'ord-001',
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-001', platformOrderNumber: 'ord-001' }),
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('pkg-001');
+    expect(order.estimatedNetProfit).not.toBeNull();
+  });
+
+  it('does not pick up a FAILED entry before its backoff window elapses', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedCalculableVariant(org.id, store.id, BARCODE);
+
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-backoff',
+      status: 'FAILED',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-backoff' }),
+    });
+    // attempts=1 needs a 5-min wait; failed 2 min ago → not yet due.
+    await prisma.livePerformanceBuffer.update({
+      where: { id: entry.id },
+      data: { attempts: 1, lastFailedAt: new Date(Date.now() - 2 * 60_000), lastError: 'x' },
+    });
+
+    await processBufferPromote();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('FAILED');
+    expect(after.attempts).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('marks FAILED + increments attempts when the promote throws', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // No variant needed: the invalid unitPriceNet makes upsert throw.
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-fail',
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-fail', invalid: true }),
+    });
+
+    await processBufferPromote();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('FAILED');
+    expect(after.attempts).toBe(1);
+    expect(after.lastError).toBeTruthy();
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('marks PERMANENT_FAILED when the final (4th) attempt still fails', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-perm',
+      status: 'FAILED',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-perm', invalid: true }),
+    });
+    // attempts=3, failed 60 min ago (> 45) → due for its final retry; it fails.
+    await prisma.livePerformanceBuffer.update({
+      where: { id: entry.id },
+      data: { attempts: 3, lastFailedAt: new Date(Date.now() - 60 * 60_000), lastError: 'x' },
+    });
+
+    await processBufferPromote();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.attempts).toBe(4);
+    expect(after.status).toBe('PERMANENT_FAILED');
+  });
+});
