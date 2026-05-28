@@ -74,6 +74,11 @@ export function DashboardStoreLauncher({
   function handleSelectStore(storeId: string): void {
     setActiveStoreId(storeId);
     void setActiveStoreIdAction(storeId);
+    // Re-resolve server-rendered pages for the new store — they read the active
+    // store from the cookie on the server. Mirrors the org-switch path; without
+    // it a store switch updated the switcher chrome but left page content on the
+    // previous store until the next navigation.
+    router.refresh();
   }
 
   async function handleSelectOrg(orgId: string): Promise<void> {

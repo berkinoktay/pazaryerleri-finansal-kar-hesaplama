@@ -600,6 +600,10 @@
     }
   },
   "dashboard": {
+    "noStoreAccess": {
+      "title": "No store access yet",
+      "description": "You don't have access to any store in this organization. Ask an organization admin to grant you access, or use the switcher on the left to move to another organization."
+    },
     "quickAccess": {
       "pendingOrders": {
         "label": "Pending Orders",

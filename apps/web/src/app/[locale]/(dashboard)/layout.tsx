@@ -1,12 +1,15 @@
+import { redirect } from 'next/navigation';
 import * as React from 'react';
 
 import type { Organization } from '@/features/organization/api/organizations.api';
 import type { Store as ApiStore } from '@/features/stores/api/list-stores.api';
 import { DashboardStoreLauncher } from '@/features/stores/components/dashboard-store-launcher';
+import { StoreAccessGate } from '@/features/stores/components/store-access-gate';
 import { OrgSyncsProvider } from '@/features/sync/providers/org-syncs-provider';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
 import { getServerApiClient } from '@/lib/api-client/server';
+import { CurrentScopeProvider } from '@/providers/current-scope';
 
 /**
  * Dashboard shell — single-sidebar AppShell wrapped around every
@@ -23,6 +26,13 @@ export default async function DashboardLayout({
   const api = await getServerApiClient();
   const { data } = await api.GET('/v1/organizations', {});
   const orgs: Organization[] = data?.data ?? [];
+
+  // A registered user must always belong to an organization to use the panel.
+  // No memberships → route them through onboarding to create their first org.
+  if (orgs.length === 0) {
+    redirect('/onboarding/create-organization');
+  }
+
   const activeOrgId = await resolveActiveOrgId(orgs);
 
   let stores: ApiStore[] = [];
@@ -34,17 +44,27 @@ export default async function DashboardLayout({
   }
   const activeStoreId = await resolveActiveStoreId(stores);
 
+  const activeOrg = orgs.find((o) => o.id === activeOrgId);
+  if (activeOrg === undefined) {
+    // Unreachable in practice — orgs is non-empty and resolveActiveOrgId returns
+    // a member org's id. Guards the type and the stale-cookie edge.
+    redirect('/onboarding/create-organization');
+  }
+  const activeStore = stores.find((s) => s.id === activeStoreId) ?? null;
+
   return (
     <div className="h-screen">
       <OrgSyncsProvider orgId={activeOrgId ?? null}>
-        <DashboardStoreLauncher
-          orgs={orgs}
-          activeOrgId={activeOrgId}
-          initialStores={stores}
-          initialActiveStoreId={activeStoreId}
-        >
-          {children}
-        </DashboardStoreLauncher>
+        <CurrentScopeProvider org={activeOrg} store={activeStore} accessibleStores={stores}>
+          <DashboardStoreLauncher
+            orgs={orgs}
+            activeOrgId={activeOrgId}
+            initialStores={stores}
+            initialActiveStoreId={activeStoreId}
+          >
+            <StoreAccessGate>{children}</StoreAccessGate>
+          </DashboardStoreLauncher>
+        </CurrentScopeProvider>
       </OrgSyncsProvider>
     </div>
   );

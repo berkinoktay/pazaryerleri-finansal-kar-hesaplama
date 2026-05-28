@@ -600,6 +600,10 @@
     }
   },
   "dashboard": {
+    "noStoreAccess": {
+      "title": "Henüz mağaza erişimin yok",
+      "description": "Bu organizasyonda görebileceğin bir mağaza yok. Erişim için organizasyon yöneticinle iletişime geç; başka bir organizasyona geçmek için soldaki seçiciyi kullanabilirsin."
+    },
     "quickAccess": {
       "pendingOrders": {
         "label": "Bekleyen Sipariş",
