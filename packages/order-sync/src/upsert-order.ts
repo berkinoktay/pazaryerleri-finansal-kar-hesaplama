@@ -205,8 +205,14 @@ export async function upsertOrderWithSnapshot(
   storeId: string,
   organizationId: string,
   order: MappedOrder,
+  existingTx?: Prisma.TransactionClient,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  // The transactional body. The default path (webhook / polling sync handlers)
+  // opens its own transaction; the buffer-promote worker (PR-C) passes its own
+  // `tx` so the order write and the buffer-row delete commit atomically — a
+  // promoted order is never left half-written with its buffer placeholder still
+  // present (which would double-count it on the Live Performance page).
+  const run = async (tx: Prisma.TransactionClient): Promise<void> => {
     // 1. UPSERT Order — NEW convention native.
     //    Sale/discount agregat'ı + flagler MappedOrder'dan direkt.
     //    Mutable update: status + actualDeliveryDate + lastModifiedDate-driven values.
@@ -297,5 +303,11 @@ export async function upsertOrderWithSnapshot(
     //    kalır (re-entry idempotent — cost profile sonradan eklenirse caller
     //    yeniden çağırır).
     await applyEstimateOnOrderCreate(upserted.id, tx);
-  });
+  };
+
+  if (existingTx !== undefined) {
+    await run(existingTx);
+    return;
+  }
+  await prisma.$transaction(run);
 }

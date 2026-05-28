@@ -34,6 +34,7 @@ import { SyncErrorCode } from '@pazarsync/db/enums';
 import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
+import { processBufferPromote } from './handlers/buffer-promote';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
 import { advanceCursorPastBadPage } from './skip-bad-page';
@@ -44,6 +45,13 @@ const POLL_BACKOFF_INITIAL_MS = 100;
 const POLL_BACKOFF_MAX_MS = 5_000;
 const POLL_BACKOFF_MULTIPLIER = 1.5;
 const WATCHDOG_INTERVAL_MS = 30_000;
+// Live Performance buffer promote tick — drains cost-attached (PROMOTING) and
+// retry-due buffer entries into `orders`. 5 s cadence keeps the seller's Live
+// Performance page near-real-time after a cost edit. Runs in this long-lived
+// process alongside the watchdog; the handler's FOR UPDATE SKIP LOCKED keeps it
+// correct if more than one worker instance is deployed (and across overlapping
+// ticks if a sweep ever runs longer than the interval).
+const BUFFER_PROMOTE_INTERVAL_MS = 5_000;
 const IDLE_LOG_THROTTLE_MS = 30_000;
 const MAX_ATTEMPTS = 5;
 
@@ -89,6 +97,15 @@ async function main(): Promise<void> {
         });
       });
   }, WATCHDOG_INTERVAL_MS);
+
+  const bufferPromoteTimer = setInterval(() => {
+    void processBufferPromote().catch((err: unknown) => {
+      syncLog.error('buffer.promote-tick-error', {
+        workerId: WORKER_ID,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }, BUFFER_PROMOTE_INTERVAL_MS);
 
   let backoff = POLL_BACKOFF_INITIAL_MS;
   let lastIdleLogAt = 0;
@@ -145,6 +162,7 @@ async function main(): Promise<void> {
   }
 
   clearInterval(watchdogTimer);
+  clearInterval(bufferPromoteTimer);
   syncLog.info('worker.stopped', { workerId: WORKER_ID });
 }
 
