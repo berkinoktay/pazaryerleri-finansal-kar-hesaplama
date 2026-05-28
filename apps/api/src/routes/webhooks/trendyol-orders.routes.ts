@@ -42,7 +42,7 @@ import {
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
-import { getTodayInIstanbul, startOfDayInIstanbul } from '@pazarsync/utils';
+import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { UnauthorizedError, ValidationError } from '../../lib/errors';
 import { createSubApp } from '../../lib/create-hono-app';
@@ -265,10 +265,10 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
     }
 
     // cost_missing → grace-period buffer (today) or late-arrival skip (<today).
-    const todayInIstanbul = getTodayInIstanbul();
-    const orderDayInIstanbul = startOfDayInIstanbul(mapped.orderDate);
+    // Business-day comparison via YYYY-MM-DD strings (chronological sort).
+    const orderBusinessDate = getBusinessDate(mapped.orderDate);
 
-    if (orderDayInIstanbul < todayInIstanbul) {
+    if (orderBusinessDate < getBusinessDate()) {
       // Previous-day order: the buffer is calendar-day-bounded (reset at 00:00),
       // so a late cost-missing arrival has zero recovery window — skip + log.
       syncLog.info('orders.skipped', {
@@ -294,7 +294,7 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
         data: {
           organizationId: store.organizationId,
           storeId: store.id,
-          orderDate: orderDayInIstanbul,
+          orderDate: getBusinessDateAnchor(mapped.orderDate),
           platformOrderId,
           platformOrderNumber: mapped.platformOrderNumber,
           rawPayload: payload as unknown as Prisma.InputJsonValue,
