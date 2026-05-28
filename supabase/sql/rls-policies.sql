@@ -471,3 +471,17 @@ DROP POLICY IF EXISTS member_store_access_org_member_read ON member_store_access
 CREATE POLICY member_store_access_org_member_read ON member_store_access
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
+
+-- ─── live_performance_buffer — store-scoped read (Spec 2 PR-A) ─────────────
+-- Cost-eksik bugünkü siparişlerin grace-period buffer'ı. store_id taşır →
+-- store access ile gate'lenir (orders / sync_logs / webhook_events ile aynı
+-- pattern, #218). OWNER/ADMIN org'daki tüm mağazaları görür; MEMBER/VIEWER
+-- yalnız grant'li mağazaları → erişimi olmayan üye o mağazanın bugünkü
+-- siparişlerini görmez. INSERT/UPDATE/DELETE yalnız service role (webhook
+-- receiver, promote worker, cost-attach service postgres role kullanır,
+-- RLS bypass); authenticated mutation policy YOK → default-deny.
+ALTER TABLE live_performance_buffer ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS live_performance_buffer_org_member_read ON live_performance_buffer;
+CREATE POLICY live_performance_buffer_org_member_read ON live_performance_buffer
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
