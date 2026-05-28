@@ -11,6 +11,7 @@
 export type SettingsItemLabelKey =
   | 'settings.nav.profile'
   | 'settings.nav.team'
+  | 'settings.nav.members'
   | 'settings.nav.billing'
   | 'settings.nav.stores'
   | 'settings.nav.notifications';
@@ -38,6 +39,7 @@ export const SETTINGS_NAV_SECTIONS: readonly SettingsNavSection[] = [
     items: [
       { key: 'profile', labelKey: 'settings.nav.profile', href: '/settings/profile' },
       { key: 'team', labelKey: 'settings.nav.team', href: '/settings/team' },
+      { key: 'members', labelKey: 'settings.nav.members', href: '/settings/members' },
       { key: 'billing', labelKey: 'settings.nav.billing', href: '/settings/billing' },
     ],
   },
