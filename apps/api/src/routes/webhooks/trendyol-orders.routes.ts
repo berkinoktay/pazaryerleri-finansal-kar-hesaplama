@@ -42,6 +42,7 @@ import {
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
+import { getTodayInIstanbul, startOfDayInIstanbul } from '@pazarsync/utils';
 
 import { UnauthorizedError, ValidationError } from '../../lib/errors';
 import { createSubApp } from '../../lib/create-hono-app';
@@ -233,23 +234,98 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
     throw new ValidationError([{ field: '(payload)', code: 'PAYLOAD_MAPPING_FAILED' }]);
   }
 
-  // ─── Calculability gate — V1 hard skip (PR-B 2026-05-24) ───────────────
+  // ─── Calculability gate ────────────────────────────────────────────────
   // An order with any line missing a resolved variant or a cost snapshot is
-  // never written; we still mark the webhook event processed (we handled it).
+  // not upserted. Spec 1 hard-skipped all such orders; Spec 2 (Live Performance)
+  // splits the cost_missing case: TODAY's orderDate (Europe/Istanbul) → write to
+  // live_performance_buffer so the seller has a grace window to add the cost;
+  // an older orderDate (no recovery window) or variant_not_found → still a hard
+  // skip + structured log. We always mark the webhook event processed.
   const calcLines = await buildCalcCheckLines(prisma, {
     storeId: store.id,
     lines: mapped.lines,
   });
   const calc = resolveOrderCalculability(calcLines);
   if (calc.kind === 'skip') {
-    syncLog.info('orders.skipped', {
-      source: 'webhook',
-      reason: calc.reason,
-      storeId: store.id,
-      platformOrderId,
-      barcode: calc.barcode,
-      ...(calc.reason === 'cost_missing' ? { variantId: calc.variantId } : {}),
-    });
+    // variant_not_found → Spec 1 hard skip, unchanged (Live Performance scope
+    // is cost-missing only; an unresolved variant cannot be promoted later).
+    if (calc.reason === 'variant_not_found') {
+      syncLog.info('orders.skipped', {
+        source: 'webhook',
+        reason: 'variant_not_found',
+        storeId: store.id,
+        platformOrderId,
+        barcode: calc.barcode,
+      });
+      await prisma.webhookEvent.update({
+        where: { id: webhookEventId },
+        data: { processedAt: new Date() },
+      });
+      return c.body(null, 200);
+    }
+
+    // cost_missing → grace-period buffer (today) or late-arrival skip (<today).
+    const todayInIstanbul = getTodayInIstanbul();
+    const orderDayInIstanbul = startOfDayInIstanbul(mapped.orderDate);
+
+    if (orderDayInIstanbul < todayInIstanbul) {
+      // Previous-day order: the buffer is calendar-day-bounded (reset at 00:00),
+      // so a late cost-missing arrival has zero recovery window — skip + log.
+      syncLog.info('orders.skipped', {
+        source: 'webhook',
+        reason: 'late_arrival_orderDate_before_today',
+        storeId: store.id,
+        platformOrderId,
+        orderDate: mapped.orderDate.toISOString(),
+        barcode: calc.barcode,
+        variantId: calc.variantId,
+      });
+      await prisma.webhookEvent.update({
+        where: { id: webhookEventId },
+        data: { processedAt: new Date() },
+      });
+      return c.body(null, 200);
+    }
+
+    // Today's cost-missing order → buffer it. Idempotent on (storeId,
+    // platformOrderId): a re-delivery hits the composite unique → P2002 → dedupe.
+    try {
+      await prisma.livePerformanceBuffer.create({
+        data: {
+          organizationId: store.organizationId,
+          storeId: store.id,
+          orderDate: orderDayInIstanbul,
+          platformOrderId,
+          platformOrderNumber: mapped.platformOrderNumber,
+          rawPayload: payload as unknown as Prisma.InputJsonValue,
+          mappedOrder: mapped as unknown as Prisma.InputJsonValue,
+          status: 'PENDING',
+        },
+      });
+      syncLog.info('buffer.entry-created', {
+        storeId: store.id,
+        platformOrderId,
+        orderDate: mapped.orderDate.toISOString(),
+        barcode: calc.barcode,
+        variantId: calc.variantId,
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        syncLog.info('buffer.entry-deduped', {
+          storeId: store.id,
+          platformOrderId,
+        });
+      } else {
+        // Unexpected DB error → log + re-throw so Trendyol retries (5xx).
+        syncLog.error('buffer.entry-create-failed', {
+          storeId: store.id,
+          platformOrderId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    }
+
     await prisma.webhookEvent.update({
       where: { id: webhookEventId },
       data: { processedAt: new Date() },
