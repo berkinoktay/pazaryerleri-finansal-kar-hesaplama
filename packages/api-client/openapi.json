@@ -2717,10 +2717,15 @@
           "attached": {
             "type": "integer",
             "description": "Number of new link rows created."
+          },
+          "bufferEntriesPromoted": {
+            "type": "integer",
+            "description": "Live Performance buffer entries flipped PENDING → PROMOTING because this attach made their order fully calculable."
           }
         },
         "required": [
-          "attached"
+          "attached",
+          "bufferEntriesPromoted"
         ]
       },
       "AttachmentBody": {
@@ -2780,11 +2785,16 @@
           "finalProfilesPerVariant": {
             "type": "integer",
             "description": "Number of cost profiles now attached to each variant."
+          },
+          "bufferEntriesPromoted": {
+            "type": "integer",
+            "description": "Live Performance buffer entries flipped PENDING → PROMOTING because this replace made their order fully calculable."
           }
         },
         "required": [
           "variantsAffected",
-          "finalProfilesPerVariant"
+          "finalProfilesPerVariant",
+          "bufferEntriesPromoted"
         ]
       },
       "ReplaceBody": {

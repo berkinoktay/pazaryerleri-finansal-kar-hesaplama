@@ -1,5 +1,7 @@
 import { prisma } from '@pazarsync/db';
-import type { CostProfile } from '@pazarsync/db';
+import type { CostProfile, Prisma } from '@pazarsync/db';
+import type { MappedOrder } from '@pazarsync/marketplace';
+import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 
 import {
   CostProfileArchivedCannotAttachError,
@@ -55,6 +57,80 @@ async function guardVariants(orgId: string, variantIds: string[]): Promise<void>
   }
 }
 
+/**
+ * Live Performance side-effect: flip PENDING buffer entries to PROMOTING when a
+ * cost attach makes their order FULLY calculable. Runs inside the attach/replace
+ * transaction so the flip commits atomically with the cost-link write.
+ *
+ * Only an entry whose EVERY line barcode now resolves to a cost-attached variant
+ * is flipped (resolveOrderCalculability — the same gate the webhook receiver
+ * uses). A multi-line order with one still-cost-missing line stays PENDING, so a
+ * partially-costed order is never promoted into `orders` (cost-driven storage
+ * discipline). Forward-only — never reverts PROMOTING → PENDING. The PR-C promote
+ * worker then writes the PROMOTING entries to `orders` on its next tick.
+ *
+ * Returns the number of entries flipped (surfaced to the UI as
+ * `bufferEntriesPromoted` for the "X sipariş kâr hesabına eklendi" toast).
+ */
+async function flipBufferForVariants(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  variantIds: string[],
+): Promise<number> {
+  const variants = await tx.productVariant.findMany({
+    where: { id: { in: variantIds }, organizationId: orgId },
+    select: { barcode: true, storeId: true },
+  });
+  if (variants.length === 0) return 0;
+
+  const barcodesByStore = new Map<string, string[]>();
+  for (const v of variants) {
+    const list = barcodesByStore.get(v.storeId) ?? [];
+    list.push(v.barcode);
+    barcodesByStore.set(v.storeId, list);
+  }
+
+  let promoted = 0;
+  for (const [storeId, barcodes] of barcodesByStore.entries()) {
+    // Narrow to PENDING entries in this store whose mapped_order has a line with
+    // one of the just-attached barcodes — the only orders that could have just
+    // become calculable.
+    const candidates = await tx.$queryRaw<Array<{ id: string; mapped_order: unknown }>>`
+      SELECT id, mapped_order
+      FROM live_performance_buffer
+      WHERE store_id = ${storeId}::uuid
+        AND organization_id = ${orgId}::uuid
+        AND status = 'PENDING'::buffer_entry_status
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(mapped_order->'lines') AS line
+          WHERE line->>'barcode' = ANY(${barcodes}::text[])
+        )
+    `;
+
+    const promotableIds: string[] = [];
+    for (const row of candidates) {
+      const mapped = row.mapped_order as unknown as MappedOrder;
+      const calcLines = await buildCalcCheckLines(tx, {
+        storeId,
+        lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+      });
+      if (resolveOrderCalculability(calcLines).kind === 'calculable') {
+        promotableIds.push(row.id);
+      }
+    }
+
+    if (promotableIds.length > 0) {
+      const result = await tx.livePerformanceBuffer.updateMany({
+        where: { id: { in: promotableIds }, status: 'PENDING' },
+        data: { status: 'PROMOTING' },
+      });
+      promoted += result.count;
+    }
+  }
+
+  return promoted;
+}
+
 // ─── Service functions ───────────────────────────────────────────────────────
 
 /**
@@ -72,7 +148,7 @@ export async function attachCostProfiles(
   profileIds: string[],
   variantIds: string[],
   actorId: string,
-): Promise<{ attached: number }> {
+): Promise<{ attached: number; bufferEntriesPromoted: number }> {
   await guardProfiles(orgId, profileIds);
   await guardVariants(orgId, variantIds);
 
@@ -86,12 +162,15 @@ export async function attachCostProfiles(
     })),
   );
 
-  const result = await prisma.productVariantCostProfile.createMany({
-    data,
-    skipDuplicates: true,
+  // One transaction: create the links + flip any now-calculable buffer entries.
+  return await prisma.$transaction(async (tx) => {
+    const result = await tx.productVariantCostProfile.createMany({
+      data,
+      skipDuplicates: true,
+    });
+    const bufferEntriesPromoted = await flipBufferForVariants(tx, orgId, variantIds);
+    return { attached: result.count, bufferEntriesPromoted };
   });
-
-  return { attached: result.count };
 }
 
 /**
@@ -141,13 +220,17 @@ export async function replaceCostProfilesForVariants(
   variantIds: string[],
   profileIds: string[],
   actorId: string,
-): Promise<{ variantsAffected: number; finalProfilesPerVariant: number }> {
+): Promise<{
+  variantsAffected: number;
+  finalProfilesPerVariant: number;
+  bufferEntriesPromoted: number;
+}> {
   if (profileIds.length > 0) {
     await guardProfiles(orgId, profileIds);
   }
   await guardVariants(orgId, variantIds);
 
-  await prisma.$transaction(async (tx) => {
+  const bufferEntriesPromoted = await prisma.$transaction(async (tx) => {
     // Delete all existing links for these variants within the org
     await tx.productVariantCostProfile.deleteMany({
       where: {
@@ -156,24 +239,28 @@ export async function replaceCostProfilesForVariants(
       },
     });
 
-    if (profileIds.length === 0) return;
+    // Insert new Cartesian product (skipped when clearing all profiles).
+    if (profileIds.length > 0) {
+      const data = variantIds.flatMap((productVariantId) =>
+        profileIds.map((profileId) => ({
+          productVariantId,
+          profileId,
+          organizationId: orgId,
+          attachedBy: actorId,
+        })),
+      );
+      await tx.productVariantCostProfile.createMany({ data, skipDuplicates: true });
+    }
 
-    // Insert new Cartesian product
-    const data = variantIds.flatMap((productVariantId) =>
-      profileIds.map((profileId) => ({
-        productVariantId,
-        profileId,
-        organizationId: orgId,
-        attachedBy: actorId,
-      })),
-    );
-
-    await tx.productVariantCostProfile.createMany({ data, skipDuplicates: true });
+    // Re-evaluate buffer calculability after the final link state is set. A
+    // clear (empty profileIds) leaves variants cost-missing → flip is a no-op.
+    return await flipBufferForVariants(tx, orgId, variantIds);
   });
 
   return {
     variantsAffected: variantIds.length,
     finalProfilesPerVariant: profileIds.length,
+    bufferEntriesPromoted,
   };
 }
 
