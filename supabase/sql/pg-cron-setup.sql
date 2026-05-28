@@ -71,3 +71,29 @@ SELECT cron.schedule(
     );
   $$
 );
+
+-- ─── Live Performance buffer daily reset ──────────────────────────────────────
+-- Purges yesterday's leftover buffer entries so the /live-performance surface
+-- starts each business day empty (Spec 2 §10). Calls reset_live_performance_buffer()
+-- from supabase/sql/db-functions.sql — the single source of truth for the DELETE
+-- predicate, so the integration test exercises the exact same logic (pg_cron
+-- cannot run in CI). The predicate is self-correcting: it removes everything
+-- before today's business date whenever it fires, so the fire time only changes
+-- how soon stale rows are purged, never which rows.
+--
+-- Schedule: '0 21 * * *' — 21:00 UTC = 00:00 business time. Türkiye is permanent
+-- GMT+3 (no DST since 2016), so this lands at business midnight, matching the
+-- fx-rates cron convention (hardcode the UTC equivalent of the local wall-clock
+-- time; pg_cron 1.6.4 has no per-job timezone support — verified empirically).
+--
+-- Prerequisite: db-functions.sql must be applied first (it is — apply-policies
+-- runs it ahead of this manual file, and prod applies functions before crons).
+--
+-- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
+-- (cron.schedule upserts by job name, so re-applying is safe.)
+--
+SELECT cron.schedule(
+  'live-performance-buffer-daily-reset',
+  '0 21 * * *',
+  $$ SELECT reset_live_performance_buffer(); $$
+);

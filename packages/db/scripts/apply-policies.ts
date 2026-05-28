@@ -19,6 +19,7 @@ import { Client } from 'pg';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sqlDir = path.resolve(__dirname, '../../../supabase/sql');
 const FILES = [
+  'db-functions.sql',
   'rls-policies.sql',
   'triggers.sql',
   'check-constraints.sql',
