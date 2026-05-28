@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type {
+  BufferEntryStatus,
   CostProfileType,
   FeeCalculationKind,
   MemberRole,
@@ -346,6 +347,32 @@ export async function createCostProfile(
       currency: 'TRY',
       vatRate: 20,
       vatAmount: '10.00',
+    },
+  });
+}
+
+export async function createBufferEntry(
+  organizationId: string,
+  storeId: string,
+  overrides: {
+    orderDate?: Date;
+    platformOrderId?: string;
+    platformOrderNumber?: string;
+    status?: BufferEntryStatus;
+    rawPayload?: Prisma.InputJsonValue;
+    mappedOrder?: Prisma.InputJsonValue;
+  } = {},
+) {
+  return prisma.livePerformanceBuffer.create({
+    data: {
+      organizationId,
+      storeId,
+      orderDate: overrides.orderDate ?? new Date(),
+      platformOrderId: overrides.platformOrderId ?? `pkg-${randomUUID().slice(0, 8)}`,
+      platformOrderNumber: overrides.platformOrderNumber ?? `ord-${randomUUID().slice(0, 8)}`,
+      rawPayload: overrides.rawPayload ?? { test: true },
+      mappedOrder: overrides.mappedOrder ?? { lines: [] },
+      status: overrides.status ?? 'PENDING',
     },
   });
 }

@@ -34,6 +34,8 @@ const TENANT_TABLES = [
   'webhook_events',
   // Member ↔ store access grants (member/org/store access-control)
   'member_store_access',
+  // Live Performance buffer (Spec 2 PR-A)
+  'live_performance_buffer',
 ] as const;
 
 describe('RLS — coverage', () => {

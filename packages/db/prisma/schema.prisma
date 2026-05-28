@@ -194,6 +194,18 @@ enum FeeCalculationKind {
   FORMULA
 }
 
+// Live Performance buffer entry durum makinesi (Spec 2 PR-A).
+// PENDING (cost yok) → PROMOTING (cost geldi, promote worker bekliyor) →
+// orders'a yazılıp buffer'dan DELETE (success) ya da FAILED → PERMANENT_FAILED.
+enum BufferEntryStatus {
+  PENDING
+  PROMOTING
+  FAILED
+  PERMANENT_FAILED
+
+  @@map("buffer_entry_status")
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -220,13 +232,14 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members           OrganizationMember[]
-  stores            Store[]
-  expenses          Expense[]
-  syncLogs          SyncLog[]
-  costProfiles      CostProfile[]
-  webhookEvents     WebhookEvent[]
-  memberStoreAccess MemberStoreAccess[]
+  members               OrganizationMember[]
+  stores                Store[]
+  expenses              Expense[]
+  syncLogs              SyncLog[]
+  costProfiles          CostProfile[]
+  webhookEvents         WebhookEvent[]
+  memberStoreAccess     MemberStoreAccess[]
+  livePerformanceBuffer LivePerformanceBuffer[]
 
   @@map("organizations")
 }
@@ -240,8 +253,8 @@ model OrganizationMember {
   createdAt      DateTime   @default(now()) @map("created_at")
   updatedAt      DateTime   @updatedAt @map("updated_at")
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         UserProfile         @relation(fields: [userId], references: [id], onDelete: Cascade)
   storeAccess  MemberStoreAccess[]
 
   @@unique([organizationId, userId])
@@ -277,18 +290,19 @@ model Store {
   createdAt                DateTime             @default(now()) @map("created_at")
   updatedAt                DateTime             @updatedAt @map("updated_at")
 
-  organization           Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   products               Product[]
   productVariants        ProductVariant[]
   orders                 Order[]
   settlements            Settlement[]
   syncLogs               SyncLog[]
   webhookEvents          WebhookEvent[]
-  defaultShippingCarrier ShippingCarrier?    @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
+  defaultShippingCarrier ShippingCarrier?        @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
   ownShippingTariffs     OwnShippingTariff[]
   orgPeriodFees          OrgPeriodFee[]
   commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
+  livePerformanceBuffer  LivePerformanceBuffer[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -1167,4 +1181,38 @@ model WebhookEvent {
   @@index([organizationId, receivedAt(sort: Desc)])
   @@index([storeId, receivedAt(sort: Desc)])
   @@map("webhook_events")
+}
+
+// ─── Live Performance buffer (Spec 2 PR-A) ─────────────────────────────
+// Cost-eksik bugünkü siparişlerin grace-period buffer'ı (cost-driven storage
+// discipline'ın yumuşatıcısı — bkz docs/superpowers/specs/2026-05-27-...).
+// Webhook receiver (PR-B) buraya yazar; cost-attach (PR-D) cost geldiğinde
+// PROMOTING'e çevirir; promote worker (PR-C) orders'a taşıyıp satırı siler.
+// store_id taşır → RLS can_access_store(store_id) (orders / sync_logs ile
+// aynı, #218). rawPayload + mappedOrder: promote anında orders INSERT'i için
+// webhook payload'u + mapper çıktısı saklanır (yeniden fetch gerekmez).
+model LivePerformanceBuffer {
+  id                  String            @id @default(uuid()) @db.Uuid
+  organizationId      String            @map("organization_id") @db.Uuid
+  storeId             String            @map("store_id") @db.Uuid
+  orderDate           DateTime          @map("order_date") @db.Date
+  platformOrderId     String            @map("platform_order_id")
+  platformOrderNumber String            @map("platform_order_number")
+  rawPayload          Json              @map("raw_payload")
+  mappedOrder         Json              @map("mapped_order")
+  status              BufferEntryStatus @default(PENDING)
+  attempts            Int               @default(0)
+  lastError           String?           @map("last_error")
+  lastFailedAt        DateTime?         @map("last_failed_at")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, platformOrderId])
+  @@index([storeId, orderDate])
+  @@index([status, lastFailedAt])
+  @@index([organizationId])
+  @@map("live_performance_buffer")
 }
