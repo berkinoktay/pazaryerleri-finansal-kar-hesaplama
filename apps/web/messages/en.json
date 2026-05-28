@@ -1403,5 +1403,64 @@
       "notFound": "Order not found or does not belong to this store.",
       "loadFailed": "Failed to load the order. Please try again."
     }
+  },
+  "livePerformance": {
+    "metaTitle": "Live Performance | PazarSync",
+    "title": "Live Performance",
+    "subtitle": "Today's real-time profit, revenue and order performance",
+    "refresh": "Refresh",
+    "status": {
+      "live": "Live",
+      "offline": "Disconnected",
+      "connecting": "Connecting"
+    },
+    "noStore": {
+      "title": "No store selected",
+      "description": "Connect or select a marketplace store to see live performance."
+    },
+    "kpis": {
+      "revenue": "Revenue",
+      "netProfit": "Net Profit",
+      "orderCount": "Orders",
+      "margin": "Margin"
+    },
+    "chart": {
+      "title": "Hourly Cumulative Profit",
+      "todayLabel": "Today",
+      "yesterdayLabel": "Yesterday"
+    },
+    "missingCost": {
+      "title": "Products Missing Cost",
+      "warning": "{count} products across {orderCount} orders are waiting. If cost isn't added before midnight today, they won't be included in profit.",
+      "addCostButton": "Add Cost",
+      "orderCountLabel": "{count} orders",
+      "emptyTitle": "No missing costs today",
+      "emptyDescription": "All orders are being calculated."
+    },
+    "topProducts": {
+      "title": "Today's Best Sellers",
+      "orderCountLabel": "{count} orders",
+      "profitEmpty": "Profit —",
+      "emptyTitle": "No sales yet today"
+    },
+    "orders": {
+      "title": "Today's Orders",
+      "tabs": {
+        "all": "All ({count})",
+        "calculated": "Calculated ({count})",
+        "pending": "Pending ({count})"
+      },
+      "columns": {
+        "orderNumber": "Order No",
+        "time": "Time",
+        "revenue": "Revenue",
+        "profit": "Net Profit",
+        "margin": "Margin",
+        "status": "Status"
+      },
+      "statusCalculated": "Calculated",
+      "statusPending": "Pending",
+      "emptyTitle": "No orders yet today"
+    }
   }
 }

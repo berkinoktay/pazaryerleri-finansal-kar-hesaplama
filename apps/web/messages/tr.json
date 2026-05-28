@@ -1468,5 +1468,64 @@
       "notFound": "Sipariş bulunamadı veya bu mağazaya ait değil.",
       "loadFailed": "Sipariş yüklenemedi. Lütfen tekrar deneyin."
     }
+  },
+  "livePerformance": {
+    "metaTitle": "Canlı Performans | PazarSync",
+    "title": "Canlı Performans",
+    "subtitle": "Bugünün anlık kâr, ciro ve sipariş performansı",
+    "refresh": "Yenile",
+    "status": {
+      "live": "Canlı",
+      "offline": "Bağlantı yok",
+      "connecting": "Bağlanıyor"
+    },
+    "noStore": {
+      "title": "Mağaza seçilmedi",
+      "description": "Canlı performansı görmek için bir pazaryeri mağazası bağlayın veya seçin."
+    },
+    "kpis": {
+      "revenue": "Ciro",
+      "netProfit": "Net Kâr",
+      "orderCount": "Sipariş",
+      "margin": "Marj"
+    },
+    "chart": {
+      "title": "Saatlik Kümülatif Kâr",
+      "todayLabel": "Bugün",
+      "yesterdayLabel": "Dün"
+    },
+    "missingCost": {
+      "title": "Maliyeti Eksik Ürünler",
+      "warning": "{count} ürün, {orderCount} sipariş bekliyor. Bugün gece yarısına kadar maliyet eklenmezse kâr hesabına dahil edilmez.",
+      "addCostButton": "Maliyet Ekle",
+      "orderCountLabel": "{count} sipariş",
+      "emptyTitle": "Bugün eksik maliyet yok",
+      "emptyDescription": "Tüm siparişler hesaplanıyor."
+    },
+    "topProducts": {
+      "title": "Bugünün En Çok Satanları",
+      "orderCountLabel": "{count} sipariş",
+      "profitEmpty": "Kâr —",
+      "emptyTitle": "Bugün henüz satış yok"
+    },
+    "orders": {
+      "title": "Bugünün Siparişleri",
+      "tabs": {
+        "all": "Tümü ({count})",
+        "calculated": "Hesaplanmış ({count})",
+        "pending": "Bekliyor ({count})"
+      },
+      "columns": {
+        "orderNumber": "Sipariş No",
+        "time": "Saat",
+        "revenue": "Ciro",
+        "profit": "Net Kâr",
+        "margin": "Marj",
+        "status": "Durum"
+      },
+      "statusCalculated": "Hesaplandı",
+      "statusPending": "Bekliyor",
+      "emptyTitle": "Bugün henüz sipariş yok"
+    }
   }
 }
