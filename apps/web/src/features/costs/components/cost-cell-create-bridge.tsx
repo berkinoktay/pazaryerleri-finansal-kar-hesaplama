@@ -24,6 +24,10 @@ export interface CostCellCreateBridgeProps {
  *      new profile id + current variant id.
  *   4. Dialog closes. Cache for `costsKeys.variantAttachments(variantId)`
  *      is invalidated by the attach hook, refreshing the popover on next open.
+ *
+ * Lives in the `costs` feature — cost-profile attach/create is a costs-domain
+ * primitive consumed cross-feature (products cost cell, live-performance
+ * missing-cost). See scripts/audit-feature-boundaries.config.ts (`costs` allow).
  */
 export function CostCellCreateBridge({
   orgId,
