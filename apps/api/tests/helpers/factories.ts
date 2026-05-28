@@ -118,8 +118,16 @@ export async function createMemberStoreAccess(
 export interface CreateOrderOverrides {
   status?: OrderStatus;
   // PR-5c (2026-05-19): eski Order ücret kolonları (totalAmount, commissionAmount,
-  // shippingCost) silindi. Yeni override'lar PR-6+'da eklenir (saleSubtotalNet,
-  // saleVatTotal, estimatedNetProfit, paymentOrderId, vs.).
+  // shippingCost) silindi. Yeni convention (saleSubtotalNet / saleVatTotal /
+  // estimatedNetProfit) PR-E (Live Performance) ile override edilebilir hale geldi —
+  // KPI/chart/orders aggregate'leri bu kolonlardan okuyor. Decimal kolonları string
+  // alır (Prisma coerce eder); null = "henüz hesaplanmadı".
+  orderDate?: Date;
+  platformOrderId?: string;
+  platformOrderNumber?: string | null;
+  saleSubtotalNet?: string | null;
+  saleVatTotal?: string | null;
+  estimatedNetProfit?: string | null;
 }
 
 export async function createOrder(
@@ -131,9 +139,13 @@ export async function createOrder(
     data: {
       organizationId,
       storeId,
-      platformOrderId: `test-order-${randomUUID().slice(0, 8)}`,
-      orderDate: new Date(),
+      platformOrderId: overrides.platformOrderId ?? `test-order-${randomUUID().slice(0, 8)}`,
+      platformOrderNumber: overrides.platformOrderNumber ?? null,
+      orderDate: overrides.orderDate ?? new Date(),
       status: overrides.status ?? 'DELIVERED',
+      saleSubtotalNet: overrides.saleSubtotalNet ?? null,
+      saleVatTotal: overrides.saleVatTotal ?? null,
+      estimatedNetProfit: overrides.estimatedNetProfit ?? null,
     },
   });
 }
