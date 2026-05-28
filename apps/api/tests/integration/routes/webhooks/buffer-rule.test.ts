@@ -1,0 +1,217 @@
+import { prisma } from '@pazarsync/db';
+import { encryptCredentials } from '@pazarsync/sync-core';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { createApp } from '../../../../src/app';
+import { _resetRateLimitStoreForTests } from '../../../../src/middleware/rate-limit.middleware';
+import { ensureDbReachable, truncateAll } from '../../../helpers/db';
+import {
+  createMembership,
+  createOrganization,
+  createUserProfile,
+} from '../../../helpers/factories';
+
+/**
+ * PR-B: webhook receiver Live Performance buffer rule.
+ *
+ * A cost-missing order (variant resolves, but no cost profile attached) is no
+ * longer always hard-skipped. If its orderDate is TODAY (Europe/Istanbul) it is
+ * written to live_performance_buffer (seller's grace window). An older orderDate
+ * or an unresolved variant stays a hard skip. Mirrors the proven store/Basic-Auth
+ * setup from trendyol-orders.routes.test.ts.
+ */
+const STORE_PLATFORM = 'TRENDYOL' as const;
+const SUPPLIER_ID = '99999';
+const WEBHOOK_USER = 'pazarsync-deadbeef00000000';
+const WEBHOOK_PASS = 'A'.repeat(43);
+const BARCODE_COST_MISSING = 'EAN13-BUF-001';
+
+interface PayloadOverrides {
+  shipmentPackageId?: number;
+  orderNumber?: string;
+  orderDate?: number;
+  lastModifiedDate?: number;
+  barcode?: string;
+}
+
+function makeWebhookPayload(overrides: PayloadOverrides = {}) {
+  const orderDate = overrides.orderDate ?? Date.now();
+  return {
+    orderNumber: overrides.orderNumber ?? 'buf-ord-1',
+    shipmentPackageId: overrides.shipmentPackageId ?? 700000001,
+    status: 'Created',
+    orderDate,
+    lastModifiedDate: overrides.lastModifiedDate ?? orderDate,
+    fastDelivery: false,
+    micro: false,
+    packageGrossAmount: 100,
+    supplierId: Number.parseInt(SUPPLIER_ID, 10),
+    lines: [
+      {
+        lineId: 1,
+        sellerId: Number.parseInt(SUPPLIER_ID, 10),
+        barcode: overrides.barcode ?? BARCODE_COST_MISSING,
+        quantity: 1,
+        lineUnitPrice: 100,
+        lineGrossAmount: 100,
+        lineSellerDiscount: 0,
+        vatRate: 20,
+        commission: 10,
+      },
+    ],
+  };
+}
+
+/**
+ * Store with webhook Basic-Auth creds + a COST-MISSING variant: the variant
+ * resolves by barcode (so it is not variant_not_found) but has NO costProfileLinks,
+ * so resolveOrderCalculability returns `cost_missing` — the buffer trigger.
+ */
+async function setupStore(): Promise<{ orgId: string; storeId: string }> {
+  const user = await createUserProfile();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+
+  const store = await prisma.store.create({
+    data: {
+      organizationId: org.id,
+      name: 'Buffer Test Store',
+      platform: STORE_PLATFORM,
+      environment: 'PRODUCTION',
+      externalAccountId: SUPPLIER_ID,
+      credentials: encryptCredentials({ supplierId: SUPPLIER_ID, apiKey: 'k', apiSecret: 's' }),
+      webhookId: 'trendyol-wh-uuid-buf',
+      webhookSecret: encryptCredentials({ username: WEBHOOK_USER, password: WEBHOOK_PASS }),
+      webhookActiveAt: new Date(),
+    },
+  });
+
+  const product = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${BARCODE_COST_MISSING}`,
+      title: 'Cost-missing Product',
+    },
+  });
+  await prisma.productVariant.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode: BARCODE_COST_MISSING,
+      stockCode: `sk-${BARCODE_COST_MISSING}`,
+      salePrice: '100',
+      listPrice: '120',
+      // no costProfileLinks → cost_missing
+    },
+  });
+
+  return { orgId: org.id, storeId: store.id };
+}
+
+function basicAuthHeader(user: string, pass: string): string {
+  return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+}
+
+const app = createApp();
+const authOk = basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS);
+
+async function postWebhook(
+  storeId: string,
+  payload: unknown,
+  authHeader: string,
+): Promise<Response> {
+  return app.request(`/v1/webhooks/orders/${storeId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+    body: JSON.stringify(payload),
+  });
+}
+
+describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR-B)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    _resetRateLimitStoreForTests();
+    await truncateAll();
+  });
+
+  afterAll(() => {
+    _resetRateLimitStoreForTests();
+  });
+
+  it("cost-missing + today's orderDate → writes a PENDING buffer entry", async () => {
+    const { orgId, storeId } = await setupStore();
+
+    const res = await postWebhook(storeId, makeWebhookPayload({ orderDate: Date.now() }), authOk);
+    expect(res.status).toBe(200);
+
+    const entries = await prisma.livePerformanceBuffer.findMany({ where: { storeId } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].status).toBe('PENDING');
+    expect(entries[0].organizationId).toBe(orgId);
+    expect(entries[0].platformOrderId).toBe('700000001');
+    expect(entries[0].platformOrderNumber).toBe('buf-ord-1');
+  });
+
+  it('cost-missing + previous-day orderDate → skips, no buffer write', async () => {
+    const { storeId } = await setupStore();
+    const yesterday = Date.now() - 36 * 60 * 60 * 1000;
+
+    const res = await postWebhook(
+      storeId,
+      makeWebhookPayload({
+        shipmentPackageId: 700000002,
+        orderNumber: 'buf-late',
+        orderDate: yesterday,
+      }),
+      authOk,
+    );
+    expect(res.status).toBe(200);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+  });
+
+  it('duplicate webhook for the same package → P2002 dedupe, single buffer entry', async () => {
+    const { storeId } = await setupStore();
+    const today = Date.now();
+    const base = { shipmentPackageId: 700000003, orderNumber: 'buf-dup', orderDate: today };
+
+    const r1 = await postWebhook(
+      storeId,
+      makeWebhookPayload({ ...base, lastModifiedDate: today }),
+      authOk,
+    );
+    expect(r1.status).toBe(200);
+    // Different lastModifiedDate → distinct WebhookEvent (no event dedupe), so the
+    // request reaches the buffer branch again and the buffer composite unique dedupes.
+    const r2 = await postWebhook(
+      storeId,
+      makeWebhookPayload({ ...base, lastModifiedDate: today + 1000 }),
+      authOk,
+    );
+    expect(r2.status).toBe(200);
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(1);
+  });
+
+  it('variant_not_found → hard skip, no buffer write (Spec 1 discipline preserved)', async () => {
+    const { storeId } = await setupStore();
+
+    const res = await postWebhook(
+      storeId,
+      makeWebhookPayload({
+        shipmentPackageId: 700000004,
+        orderNumber: 'buf-novariant',
+        barcode: 'UNKNOWN-BARCODE-XYZ',
+      }),
+      authOk,
+    );
+    expect(res.status).toBe(200);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+  });
+});
