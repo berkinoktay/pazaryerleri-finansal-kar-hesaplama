@@ -18,6 +18,10 @@ const orgIdParam = z.object({
 const attachResponseSchema = z
   .object({
     attached: z.number().int().openapi({ description: 'Number of new link rows created.' }),
+    bufferEntriesPromoted: z.number().int().openapi({
+      description:
+        'Live Performance buffer entries flipped PENDING → PROMOTING because this attach made their order fully calculable.',
+    }),
   })
   .openapi('AttachResponse');
 

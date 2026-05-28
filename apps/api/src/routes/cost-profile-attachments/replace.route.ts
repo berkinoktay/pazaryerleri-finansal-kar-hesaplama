@@ -25,6 +25,10 @@ const replaceResponseSchema = z
       .number()
       .int()
       .openapi({ description: 'Number of cost profiles now attached to each variant.' }),
+    bufferEntriesPromoted: z.number().int().openapi({
+      description:
+        'Live Performance buffer entries flipped PENDING → PROMOTING because this replace made their order fully calculable.',
+    }),
   })
   .openapi('ReplaceResponse');
 
