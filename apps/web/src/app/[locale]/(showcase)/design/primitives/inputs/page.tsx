@@ -317,6 +317,46 @@ export default function InputsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
+        title="Textarea — valid · readOnly · disabled · size · resize"
+        description="valid: success border. readOnly: gri yüzey, hover/glow yok. resize prop ('vertical' default / 'none' / 'both'). sm/lg paylaşılan size. Sayaç maxLength'e yaklaşınca warning rengine döner."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-valid">Açıklama</Label>
+            <Textarea id="tw-valid" valid defaultValue="Geçerli açıklama" rows={2} />
+            <span className="text-2xs text-success">Doğrulandı.</span>
+          </div>
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-ro">Sistem notu (readOnly)</Label>
+            <Textarea
+              id="tw-ro"
+              readOnly
+              defaultValue="Otomatik üretildi — düzenlenemez."
+              rows={2}
+            />
+          </div>
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-disabled">Devre dışı</Label>
+            <Textarea id="tw-disabled" disabled defaultValue="Kapalı" rows={2} />
+          </div>
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-near">Başlık (sayaç warning)</Label>
+            <Textarea
+              id="tw-near"
+              showCount
+              maxLength={20}
+              defaultValue="Limite yakın metin"
+              rows={2}
+            />
+          </div>
+          <div className="gap-xs grid">
+            <Textarea size="sm" resize="none" placeholder="size=sm · resize=none" />
+            <Textarea size="lg" resize="both" placeholder="size=lg · resize=both" rows={2} />
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
         title="Input size (paylaşılan prop)"
         description="sm / md (default) / lg. Button ve Select ile aynı anahtar — formda tutarlı yükseklik ailesi."
       >

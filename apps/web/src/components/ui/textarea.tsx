@@ -21,8 +21,9 @@ const textareaVariants = cva(
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
-    'read-only:bg-muted read-only:text-muted-foreground read-only:cursor-default',
+    'read-only:bg-muted read-only:text-muted-foreground read-only:cursor-default read-only:hover:border-border-input read-only:focus-visible:shadow-none',
     'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none aria-invalid:animate-field-shake',
+    'data-[valid=true]:border-success data-[valid=true]:focus-visible:border-success data-[valid=true]:focus-visible:shadow-none',
   ].join(' '),
   {
     variants: {
@@ -52,7 +53,8 @@ const wrapperVariants = cva(
     'hover:border-border-strong',
     'focus-within:border-ring focus-within:shadow-focus',
     'data-[invalid=true]:border-destructive data-[invalid=true]:focus-within:border-destructive data-[invalid=true]:focus-within:shadow-none data-[invalid=true]:animate-field-shake',
-    'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[textarea:read-only]:bg-muted',
+    'data-[valid=true]:border-success data-[valid=true]:focus-within:border-success data-[valid=true]:focus-within:shadow-none',
+    'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[textarea:read-only]:bg-muted has-[textarea:read-only]:hover:border-border-input has-[textarea:read-only]:focus-within:shadow-none',
   ].join(' '),
   {
     variants: {
@@ -95,6 +97,10 @@ export interface TextareaProps
   maxRows?: number;
   /** Convenience boolean for `aria-invalid="true"`. Triggers destructive border token. */
   invalid?: boolean;
+  /** Marks the field as validated-OK — success-tinted border. Mutually exclusive with `invalid`. */
+  valid?: boolean;
+  /** User resize handle. Defaults to `'vertical'`; the wrapped (counter / autoResize) path is always fixed. */
+  resize?: 'none' | 'vertical' | 'both';
 }
 
 export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
@@ -107,6 +113,8 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       autoResize,
       maxRows,
       invalid,
+      valid,
+      resize = 'vertical',
       maxLength,
       value,
       defaultValue,
@@ -122,6 +130,13 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       defaultValue !== undefined ? String(defaultValue) : '',
     );
     const currentValue = isControlled ? String(value) : internalValue;
+
+    const counterId = React.useId();
+    const overLimit = maxLength !== undefined && currentValue.length > maxLength;
+    const nearLimit =
+      maxLength !== undefined && !overLimit && currentValue.length >= Math.floor(maxLength * 0.9);
+    const resizeClass =
+      resize === 'none' ? 'resize-none' : resize === 'both' ? 'resize' : 'resize-y';
 
     const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>): void => {
       if (!isControlled) setInternalValue(event.target.value);
@@ -142,8 +157,12 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         onChange={handleChange}
         maxLength={maxLength}
         aria-invalid={invalid ?? undefined}
+        data-valid={valid ? 'true' : undefined}
+        aria-describedby={wantsCounter ? counterId : undefined}
         className={
-          needsWrapper ? innerTextareaClass : cn(textareaVariants({ size, radius, className }))
+          needsWrapper
+            ? innerTextareaClass
+            : cn(textareaVariants({ size, radius }), resizeClass, className)
         }
         style={maxHeightStyle}
         {...rest}
@@ -168,6 +187,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <div
         data-invalid={invalid ? 'true' : undefined}
+        data-valid={valid ? 'true' : undefined}
         onPointerDown={handleWrapperPointerDown}
         className={cn(wrapperVariants({ size, radius }), className)}
       >
@@ -189,8 +209,12 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         )}
         {wantsCounter ? (
           <div
+            id={counterId}
             aria-live="polite"
-            className="text-2xs text-muted-foreground pt-xs flex justify-end tabular-nums"
+            className={cn(
+              'text-2xs pt-xs flex justify-end tabular-nums',
+              overLimit ? 'text-destructive' : nearLimit ? 'text-warning' : 'text-muted-foreground',
+            )}
           >
             {currentValue.length}
             {maxLength !== undefined ? `/${maxLength}` : null}
