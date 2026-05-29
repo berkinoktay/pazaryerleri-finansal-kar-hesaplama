@@ -21,10 +21,10 @@ import { cn } from '@/lib/utils';
  */
 
 const toggleVariants = cva(
-  // off-hover lifts to surface-trigger-hover (the segmented-control hover
-  // token) — kept lighter than the on-state's --accent fill so the selected
-  // chip is unambiguously the strongest surface, never confused with hover.
-  'inline-flex cursor-pointer items-center justify-center gap-xs font-medium transition duration-fast ease-out-quart active:scale-[0.97] pointer-coarse:min-h-11 [&_svg]:size-icon-sm [&_svg]:shrink-0 hover:bg-surface-trigger-hover hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:hover:bg-accent',
+  // off-hover lifts to surface-trigger-hover (a neutral lift) — kept lighter
+  // than the on-state's --primary-soft brand-tinted fill so the selected chip
+  // is unambiguously the strongest, branded surface, never confused with hover.
+  'inline-flex cursor-pointer items-center justify-center gap-xs font-medium transition duration-fast ease-out-quart active:scale-[0.97] pointer-coarse:min-h-11 [&_svg]:size-icon-sm [&_svg]:shrink-0 hover:bg-surface-trigger-hover hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-primary-soft data-[state=on]:text-primary-soft-foreground data-[state=on]:hover:bg-primary-soft',
   {
     variants: {
       variant: {

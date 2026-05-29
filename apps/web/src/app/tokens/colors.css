@@ -79,6 +79,13 @@
   --primary: oklch(45% 0.15 265);
   --primary-foreground: oklch(98% 0.004 265);
   --primary-hover: oklch(40% 0.15 265);
+  /* Primary-soft — restrained brand-tinted surface for SELECTED states
+     (toggle on-state, connected ToggleGroup selection). Carries brand
+     identity without the loudness of a full --primary fill; same language
+     as the nav's --sidebar-active. --primary-soft-foreground (brand text)
+     clears AA on it. */
+  --primary-soft: oklch(92% 0.04 265);
+  --primary-soft-foreground: oklch(40% 0.15 265);
 
   --secondary: oklch(93.5% 0.006 265);
   --secondary-foreground: oklch(22% 0.02 265);
@@ -208,6 +215,10 @@
   --primary: oklch(72% 0.13 265);
   --primary-foreground: oklch(15% 0.01 265);
   --primary-hover: oklch(78% 0.11 265);
+  /* Dark primary-soft lifts ABOVE --card (raised = lighter), tinted toward
+     primary; foreground clears AA (~5.4:1). Mirrors --sidebar-active dark. */
+  --primary-soft: oklch(30% 0.05 265);
+  --primary-soft-foreground: oklch(80% 0.11 265);
 
   --secondary: oklch(22% 0.012 265);
   --secondary-foreground: oklch(92% 0.008 265);

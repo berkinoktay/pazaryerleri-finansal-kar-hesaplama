@@ -282,20 +282,45 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="ToggleGroup"
-        description="Segmented control (single/multiple). Döneme göre filtre, hizalama seçici, platform filtresi gibi yerlerde."
+        title="ToggleGroup — connected (segment-bar) · plain"
+        description="Bitişik segment-bar (default 'connected'): tek çerçeve, seçili = primary-soft (brand-tonlu, Tabs'taki segmented'dan ayrı). 'plain' appearance ayrık toggle'lar. type=single/multiple, per-item disabled, dikey; gruba aria-label ver."
       >
         <div className="gap-md flex flex-col">
-          <ToggleGroup type="single" defaultValue="month" variant="outline">
+          <ToggleGroup type="single" defaultValue="month" aria-label="Dönem">
             <ToggleGroupItem value="day">Gün</ToggleGroupItem>
             <ToggleGroupItem value="week">Hafta</ToggleGroupItem>
             <ToggleGroupItem value="month">Ay</ToggleGroupItem>
-            <ToggleGroupItem value="quarter">Çeyrek</ToggleGroupItem>
+            <ToggleGroupItem value="quarter" disabled>
+              Çeyrek
+            </ToggleGroupItem>
           </ToggleGroup>
-          <ToggleGroup type="multiple" defaultValue={['trendyol']}>
+
+          <ToggleGroup type="multiple" defaultValue={['trendyol']} size="sm" aria-label="Platform">
             <ToggleGroupItem value="trendyol">Trendyol</ToggleGroupItem>
             <ToggleGroupItem value="hepsiburada">Hepsiburada</ToggleGroupItem>
             <ToggleGroupItem value="n11">n11</ToggleGroupItem>
+          </ToggleGroup>
+
+          <ToggleGroup
+            type="single"
+            defaultValue="table"
+            appearance="plain"
+            aria-label="Görünüm modu (plain)"
+          >
+            <ToggleGroupItem value="table">Tablo</ToggleGroupItem>
+            <ToggleGroupItem value="grid">Kart</ToggleGroupItem>
+            <ToggleGroupItem value="list">Liste</ToggleGroupItem>
+          </ToggleGroup>
+
+          <ToggleGroup
+            type="single"
+            defaultValue="orta"
+            orientation="vertical"
+            aria-label="Hizalama (dikey)"
+          >
+            <ToggleGroupItem value="sol">Sol</ToggleGroupItem>
+            <ToggleGroupItem value="orta">Orta</ToggleGroupItem>
+            <ToggleGroupItem value="sag">Sağ</ToggleGroupItem>
           </ToggleGroup>
         </div>
       </Preview>
