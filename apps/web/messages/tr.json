@@ -175,7 +175,16 @@
     "support": "Destek",
     "tools": "Maliyet & Araçlar",
     "whatsNew": "Yenilikler",
-    "livePerformance": "Canlı Performans"
+    "livePerformance": "Canlı Performans",
+    "toggleSidebar": "Kenar çubuğunu aç/kapat",
+    "groups": {
+      "overview": "Özet",
+      "operations": "Operasyon",
+      "financeTools": "Finans"
+    },
+    "help": {
+      "label": "Yardım & Destek"
+    }
   },
   "navSections": {
     "orders": {
@@ -950,6 +959,13 @@
     "syncButton": {
       "label": "Eşitle",
       "syncing": "Eşitleniyor…"
+    },
+    "summary": {
+      "totalProducts": "Toplam ürün",
+      "totalContext": "Onaylı · senkron edilmiş",
+      "missingCost": "Maliyeti eksik",
+      "missingVat": "KDV oranı eksik",
+      "ofCatalog": "Katalogun %{pct} kadarı"
     },
     "missingCostBanner": {
       "title": "Maliyetsiz {count} ürün — kâr hesabı yapılamıyor.",

@@ -16,6 +16,7 @@ vi.mock('@/i18n/navigation', () => ({
 }));
 
 import { NotificationBell } from '@/components/patterns/notification-bell';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import { render, screen } from '@/../tests/helpers/render';
 
 const messages = {
@@ -102,5 +103,38 @@ describe('NotificationBell', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Bildirimler' }));
     expect(await screen.findByText(/3 dk · Trendyol/)).toBeInTheDocument();
+  });
+});
+
+function renderBellSidebar(props: Partial<React.ComponentProps<typeof NotificationBell>> = {}) {
+  return render(
+    <NextIntlClientProvider locale="tr" messages={messages}>
+      <SidebarProvider>
+        <NotificationBell entries={[]} unreadCount={0} variant="sidebar" {...props} />
+      </SidebarProvider>
+    </NextIntlClientProvider>,
+  );
+}
+
+describe('NotificationBell — sidebar variant', () => {
+  it('renders a labelled sidebar row with an accessible name', () => {
+    renderBellSidebar({ unreadCount: 3 });
+    expect(screen.getByRole('button', { name: 'Bildirimler' })).toBeInTheDocument();
+  });
+
+  it('surfaces the unread count', () => {
+    // The sidebar row renders the count twice (inline pill for the expanded
+    // rail + corner badge for the collapsed rail); CSS picks one per mode.
+    renderBellSidebar({ unreadCount: 3 });
+    expect(screen.getAllByText('3').length).toBeGreaterThan(0);
+  });
+
+  it('opens the same popover from the sidebar row', async () => {
+    const { user } = renderBellSidebar({
+      entries: [{ id: '1', icon: 'success', title: 'Sync tamam', timestamp: '3 dk' }],
+      unreadCount: 1,
+    });
+    await user.click(screen.getByRole('button', { name: 'Bildirimler' }));
+    expect(await screen.findByText('Sync tamam')).toBeInTheDocument();
   });
 });

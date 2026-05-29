@@ -205,6 +205,12 @@ function SingleSyncBadge({
 
   const baseClassName = cn(
     'gap-3xs text-2xs inline-flex items-center tabular-nums',
+    // Bordered pill — matches the approved design mockup: a hairline
+    // FULL-perimeter border (not a banned side-stripe) + card surface,
+    // rounded-full. Reads as a discrete freshness chip in the header's
+    // action cluster next to the Sync button. The state tone stays on the
+    // icon + label; the border is neutral.
+    'rounded-full border border-border bg-card px-2 py-1',
     toneClass,
     className,
   );
@@ -217,7 +223,7 @@ function SingleSyncBadge({
         aria-label={ariaLabel}
         className={cn(
           baseClassName,
-          'duration-fast cursor-pointer rounded-full px-2 py-1 transition-colors',
+          'duration-fast cursor-pointer transition-colors',
           'hover:bg-muted focus-visible:bg-muted',
           'focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-1 focus-visible:outline-none',
         )}

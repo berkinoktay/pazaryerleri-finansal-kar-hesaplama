@@ -21,6 +21,7 @@ import { aggregateMissingShipping } from '../lib/aggregate-missing-shipping';
 import { MissingCostWarningBanner } from './missing-cost-warning-banner';
 import { MissingShippingBanner } from './missing-shipping-banner';
 import { ProductsEmptyState } from './products-empty-state';
+import { ProductsSummary } from './products-summary';
 import { ProductsTable } from './products-table';
 import { type ProductsOverrideTab } from './products-tab-strip';
 
@@ -138,32 +139,34 @@ export function ProductsPageClient({
         <PageHeader
           title={pageTitle}
           intent={pageIntent}
-          meta={
-            <SyncBadge
-              state={productSyncSnapshot.state}
-              lastSyncedAt={productSyncSnapshot.lastSyncedAt}
-              progress={productSyncSnapshot.progress}
-              activeCount={activeSyncs.length}
-              source="Trendyol"
-              onClick={() => setSyncCenterOpen(true)}
-              ariaLabel={tSync('openLabel')}
-            />
-          }
+          summary={<ProductsSummary counts={facetsQuery.data?.overrideCounts} />}
           actions={
-            // Promoted from a hidden text-link inside the SyncBadge to a
-            // first-class action — sellers expect a top-right "Eşitle"
-            // button (Tiyasis ships the same affordance) and the prior
-            // long meta string was illegible as a clickable target.
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => startSync.mutate()}
-              disabled={syncButtonDisabled}
-              className="gap-xs"
-            >
-              <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
-              {syncButtonDisabled ? tProducts('syncButton.syncing') : tProducts('syncButton.label')}
-            </Button>
+            // SyncBadge (freshness) grouped with the Eşitle action in the
+            // right cluster — freshness + its action read as one unit
+            // (design spec D10) instead of split across meta + actions.
+            <>
+              <SyncBadge
+                state={productSyncSnapshot.state}
+                lastSyncedAt={productSyncSnapshot.lastSyncedAt}
+                progress={productSyncSnapshot.progress}
+                activeCount={activeSyncs.length}
+                source="Trendyol"
+                onClick={() => setSyncCenterOpen(true)}
+                ariaLabel={tSync('openLabel')}
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => startSync.mutate()}
+                disabled={syncButtonDisabled}
+                className="gap-xs"
+              >
+                <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
+                {syncButtonDisabled
+                  ? tProducts('syncButton.syncing')
+                  : tProducts('syncButton.label')}
+              </Button>
+            </>
           }
         />
 

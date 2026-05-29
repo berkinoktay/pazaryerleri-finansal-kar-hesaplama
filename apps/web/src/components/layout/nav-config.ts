@@ -6,7 +6,6 @@ import {
   HelpCircleIcon,
   InvoiceIcon,
   Megaphone01Icon,
-  Notification03Icon,
   PackageIcon,
   ReceiptDollarIcon,
   ShoppingBag01Icon,
@@ -27,19 +26,11 @@ export interface NavItemBadge {
 }
 
 /**
- * Visual divider in the nav scroll body — renders as a horizontal
- * dashed separator.  Used to delimit primary nav from a section like
- * "Yenilikler" that lives below the main scroll.
- */
-export interface NavDivider {
-  type: 'divider';
-  key: string;
-}
-
-/**
- * Shape of a section block inside the ContextRail middle slot.
- * `meta` is an alternative render hint — when set, the rail picks
- * a custom React component instead of rendering a SubNavList.
+ * A section block inside a primary nav item's collapsible body (NavGroup).
+ * Only DESTINATION groups carry sections — i.e. domains whose children are
+ * genuinely distinct pages, not filtered views of one list. Filter-style
+ * views (Orders → Pending, Products → No cost, …) live as in-page tabs on
+ * the page itself, NOT here. See docs/plans/2026-05-29-app-shell-modernization-design.md.
  */
 export interface NavSection {
   key: string;
@@ -52,8 +43,13 @@ export interface NavItemBase {
   labelKey: SubNavItem['labelKey'];
   href: string;
   icon: React.ComponentType<{ className?: string }>;
-  /** When true, IconRail skips this item (visible to ContextRail only). */
-  hideFromIconRail?: boolean;
+  /**
+   * Route prefix that marks this item active. Defaults to `href`. Use when an
+   * item links to a default sub-route but should stay highlighted across its
+   * whole section — e.g. Profitability links to `/profitability/orders` but is
+   * active for any `/profitability/*`, so `activeMatch: '/profitability'`.
+   */
+  activeMatch?: string;
   /** Optional inline badge — Yeni / Beta / count indicator. */
   badge?: NavItemBadge;
 }
@@ -63,309 +59,166 @@ export type NavItem =
   | (NavItemBase & { sections?: never; meta: 'dashboard' })
   | (NavItemBase & { sections?: never; meta?: never });
 
-/** All renderable nav entries — items plus dividers. */
-export type NavEntry = NavItem | NavDivider;
-
-export function isNavDivider(entry: NavEntry): entry is NavDivider {
-  return 'type' in entry && entry.type === 'divider';
+/**
+ * A labelled section of the sidebar (shadcn SidebarGroup + SidebarGroupLabel).
+ * Groups give the nav a scannable information architecture instead of one
+ * flat list. Order here is render order top-to-bottom.
+ */
+export interface NavGroupConfig {
+  key: string;
+  /** Section label shown above the group. */
+  labelKey: SubNavItem['labelKey'];
+  items: readonly NavItem[];
 }
 
-export const NAV_ITEMS = [
+/**
+ * Primary sidebar navigation, grouped.
+ *
+ * Sub-navigation principle (see design spec): the sidebar holds DESTINATIONS
+ * (distinct pages); same-entity VIEWS/FILTERS live in-page (FilterTabs). After
+ * this epic the only domain that still carries sidebar sub-nav is
+ * `Tools & Pricing` (its tools are genuinely distinct pages). Campaigns will
+ * join the same `Finans & Araçlar` group as a destination-with-sub-nav once
+ * its pages exist — the structure is ready.
+ */
+export const NAV_GROUPS: readonly NavGroupConfig[] = [
   {
-    key: 'dashboard',
-    labelKey: 'nav.dashboard',
-    href: '/dashboard',
-    icon: DashboardSquare02Icon,
-    meta: 'dashboard',
-  },
-  {
-    key: 'live-performance',
-    labelKey: 'nav.livePerformance',
-    href: '/live-performance',
-    icon: Activity03Icon,
-    badge: { variant: 'new', label: 'Yeni' },
-  },
-  {
-    key: 'orders',
-    labelKey: 'nav.orders',
-    href: '/orders',
-    icon: ShoppingBag01Icon,
-    sections: [
+    key: 'overview',
+    labelKey: 'nav.groups.overview',
+    items: [
       {
-        key: 'status',
-        labelKey: 'navSections.orders.status.title',
-        items: [
-          { key: 'all', labelKey: 'navSections.orders.status.all', href: '/orders' },
-          {
-            key: 'pending',
-            labelKey: 'navSections.orders.status.pending',
-            href: '/orders?status=pending',
-          },
-          {
-            key: 'shipped',
-            labelKey: 'navSections.orders.status.shipped',
-            href: '/orders?status=shipped',
-          },
-          {
-            key: 'delivered',
-            labelKey: 'navSections.orders.status.delivered',
-            href: '/orders?status=delivered',
-          },
-          {
-            key: 'returned',
-            labelKey: 'navSections.orders.status.returned',
-            href: '/orders?status=returned',
-            tone: 'warning',
-          },
-        ],
+        key: 'dashboard',
+        labelKey: 'nav.dashboard',
+        href: '/dashboard',
+        icon: DashboardSquare02Icon,
+        meta: 'dashboard',
+      },
+      {
+        key: 'live-performance',
+        labelKey: 'nav.livePerformance',
+        href: '/live-performance',
+        icon: Activity03Icon,
+        badge: { variant: 'new', label: 'Yeni' },
       },
     ],
   },
   {
-    key: 'products',
-    labelKey: 'nav.products',
-    href: '/products',
-    icon: PackageIcon,
-    sections: [
+    key: 'operations',
+    labelKey: 'nav.groups.operations',
+    items: [
       {
-        key: 'catalog',
-        labelKey: 'navSections.products.catalog.title',
-        items: [
-          { key: 'active', labelKey: 'navSections.products.catalog.active', href: '/products' },
-          {
-            key: 'draft',
-            labelKey: 'navSections.products.catalog.draft',
-            href: '/products?status=draft',
-          },
-          {
-            key: 'no-cost',
-            labelKey: 'navSections.products.catalog.noCost',
-            href: '/products?filter=no-cost',
-            tone: 'warning',
-          },
-          {
-            key: 'no-desi',
-            labelKey: 'navSections.products.catalog.noDesi',
-            href: '/products?filter=no-desi',
-            tone: 'warning',
-          },
-          {
-            key: 'low-stock',
-            labelKey: 'navSections.products.catalog.lowStock',
-            href: '/products?filter=low-stock',
-          },
-        ],
+        key: 'orders',
+        labelKey: 'nav.orders',
+        href: '/orders',
+        icon: ShoppingBag01Icon,
+      },
+      {
+        key: 'products',
+        labelKey: 'nav.products',
+        href: '/products',
+        icon: PackageIcon,
+      },
+      {
+        key: 'costs',
+        labelKey: 'nav.costs',
+        href: '/costs',
+        icon: Tag01Icon,
       },
     ],
   },
   {
-    key: 'costs',
-    labelKey: 'nav.costs',
-    href: '/costs',
-    icon: Tag01Icon,
-  },
-  {
-    key: 'profitability',
-    labelKey: 'nav.profitability',
-    href: '/profitability/orders',
-    icon: ChartLineData01Icon,
-    badge: { variant: 'beta', label: 'Beta' },
-    sections: [
+    key: 'finance',
+    labelKey: 'nav.groups.financeTools',
+    items: [
       {
-        key: 'reports',
-        labelKey: 'navSections.profitability.reports.title',
-        items: [
-          {
-            key: 'order',
-            labelKey: 'navSections.profitability.reports.order',
-            href: '/profitability/orders',
-          },
-          {
-            key: 'product',
-            labelKey: 'navSections.profitability.reports.product',
-            href: '/profitability/products',
-          },
-          {
-            key: 'category',
-            labelKey: 'navSections.profitability.reports.category',
-            href: '/profitability/categories',
-          },
-          {
-            key: 'return',
-            labelKey: 'navSections.profitability.reports.return',
-            href: '/profitability/returns',
-          },
-          {
-            key: 'campaign',
-            labelKey: 'navSections.profitability.reports.campaign',
-            href: '/profitability/campaigns',
-          },
-        ],
+        key: 'profitability',
+        labelKey: 'nav.profitability',
+        href: '/profitability/orders',
+        // Report types (orders/products/categories/returns/campaigns) become
+        // in-page tabs (separate page work). The sidebar row stays active for
+        // any /profitability/* route while linking to the default report.
+        activeMatch: '/profitability',
+        icon: ChartLineData01Icon,
+        badge: { variant: 'beta', label: 'Beta' },
       },
-    ],
-  },
-  {
-    key: 'reconciliation',
-    labelKey: 'nav.reconciliation',
-    href: '/reconciliation',
-    icon: InvoiceIcon,
-    sections: [
       {
-        key: 'status',
-        labelKey: 'navSections.reconciliation.status.title',
-        items: [
-          {
-            key: 'matched',
-            labelKey: 'navSections.reconciliation.status.matched',
-            href: '/reconciliation?status=matched',
-          },
-          {
-            key: 'pending',
-            labelKey: 'navSections.reconciliation.status.pending',
-            href: '/reconciliation?status=pending',
-          },
-          {
-            key: 'mismatch',
-            labelKey: 'navSections.reconciliation.status.mismatch',
-            href: '/reconciliation?status=mismatch',
-            tone: 'warning',
-          },
-        ],
+        key: 'reconciliation',
+        labelKey: 'nav.reconciliation',
+        href: '/reconciliation',
+        icon: InvoiceIcon,
       },
-    ],
-  },
-  {
-    key: 'tools',
-    labelKey: 'nav.tools',
-    href: '/tools/commission-rates',
-    icon: Calculator01Icon,
-    sections: [
       {
         key: 'tools',
-        labelKey: 'navSections.tools.tools.title',
-        items: [
+        labelKey: 'nav.tools',
+        // No overviewHref this epic: clicking the parent navigates to the first
+        // tool and expands the sub-list (NavGroup's navigate-on-click). Active
+        // across all /tools/* via activeMatch.
+        href: '/tools/commission-rates',
+        activeMatch: '/tools',
+        icon: Calculator01Icon,
+        sections: [
           {
-            key: 'commission-rates',
-            labelKey: 'navSections.tools.tools.commissionRates',
-            href: '/tools/commission-rates',
-          },
-          {
-            key: 'commission-calculator',
-            labelKey: 'navSections.tools.tools.commissionCalculator',
-            href: '/tools/commission-calculator',
-          },
-          {
-            key: 'plus-commission-rates',
-            labelKey: 'navSections.tools.tools.plusCommissionRates',
-            href: '/tools/plus-commission-rates',
-          },
-          {
-            key: 'product-pricing',
-            labelKey: 'navSections.tools.tools.productPricing',
-            href: '/tools/product-pricing',
+            key: 'tools',
+            labelKey: 'navSections.tools.tools.title',
+            items: [
+              {
+                key: 'commission-rates',
+                labelKey: 'navSections.tools.tools.commissionRates',
+                href: '/tools/commission-rates',
+              },
+              {
+                key: 'commission-calculator',
+                labelKey: 'navSections.tools.tools.commissionCalculator',
+                href: '/tools/commission-calculator',
+              },
+              {
+                key: 'plus-commission-rates',
+                labelKey: 'navSections.tools.tools.plusCommissionRates',
+                href: '/tools/plus-commission-rates',
+              },
+              {
+                key: 'product-pricing',
+                labelKey: 'navSections.tools.tools.productPricing',
+                href: '/tools/product-pricing',
+              },
+            ],
           },
         ],
       },
-    ],
-  },
-  {
-    key: 'expenses',
-    labelKey: 'nav.expenses',
-    href: '/expenses',
-    icon: ReceiptDollarIcon,
-    sections: [
       {
-        key: 'category',
-        labelKey: 'navSections.expenses.category.title',
-        items: [
-          { key: 'all', labelKey: 'navSections.expenses.category.all', href: '/expenses' },
-          {
-            key: 'product',
-            labelKey: 'navSections.expenses.category.product',
-            href: '/expenses?category=product',
-          },
-          {
-            key: 'ad',
-            labelKey: 'navSections.expenses.category.ad',
-            href: '/expenses?category=ad',
-          },
-          {
-            key: 'packaging',
-            labelKey: 'navSections.expenses.category.packaging',
-            href: '/expenses?category=packaging',
-          },
-          {
-            key: 'other',
-            labelKey: 'navSections.expenses.category.other',
-            href: '/expenses?category=other',
-          },
-        ],
+        key: 'expenses',
+        labelKey: 'nav.expenses',
+        href: '/expenses',
+        icon: ReceiptDollarIcon,
       },
     ],
   },
-  {
-    key: 'notifications',
-    labelKey: 'nav.notifications',
-    href: '/notifications',
-    icon: Notification03Icon,
-    hideFromIconRail: true,
-    sections: [
-      {
-        key: 'filter',
-        labelKey: 'navSections.notifications.filter.title',
-        items: [
-          { key: 'all', labelKey: 'navSections.notifications.filter.all', href: '/notifications' },
-          {
-            key: 'unread',
-            labelKey: 'navSections.notifications.filter.unread',
-            href: '/notifications?filter=unread',
-          },
-          {
-            key: 'sync',
-            labelKey: 'navSections.notifications.filter.sync',
-            href: '/notifications?filter=sync',
-          },
-          {
-            key: 'orders',
-            labelKey: 'navSections.notifications.filter.orders',
-            href: '/notifications?filter=orders',
-          },
-          {
-            key: 'warning',
-            labelKey: 'navSections.notifications.filter.warning',
-            href: '/notifications?filter=warning',
-            tone: 'warning',
-          },
-        ],
-      },
-    ],
-  },
-] as const satisfies readonly NavItem[];
+] as const satisfies readonly NavGroupConfig[];
 
 /**
- * Renderable primary nav surface — currently equals NAV_ITEMS but kept
- * as a separate export so future divider blocks can be re-introduced
- * without re-wiring the sidebar renderer. `NavEntry` already widens
- * to `NavItem | NavDivider`.
+ * Help menu entries (sidebar footer "Yardım & Destek" dropdown). Replaces the
+ * former AUX_NAV_ITEMS shelf links — consolidating low-frequency, easy-to-miss
+ * destinations under one clearly-labelled menu, leaving the bell as the only
+ * other footer utility. Scales: Dokümanlar / Klavye kısayolları can join once
+ * a docs URL + a shortcuts dialog exist (tracked; omitted now to avoid dead
+ * entries).
  */
-export const NAV_ENTRIES: readonly NavEntry[] = [...NAV_ITEMS];
+export interface HelpMenuItem {
+  key: string;
+  labelKey: SubNavItem['labelKey'];
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** Shows a small "new" dot on the trigger + item when truthy. */
+  hasNewDot?: boolean;
+}
 
-/**
- * Auxiliary nav links rendered in the sidebar footer (BottomDock) — the
- * "utility shelf" for pages that aren't core feature navigation:
- *   - Yenilikler (product news / changelog)
- *   - Destek (support / help)
- *
- * Both share the same render shape as NAV_ITEMS so the AppShell can
- * map them with the exact same SidebarMenuButton + NAV_ITEM_CLASSES
- * pattern, keeping visual treatment identical to primary nav rows.
- */
-export const AUX_NAV_ITEMS = [
+export const HELP_MENU_ITEMS = [
   {
     key: 'whats-new',
     labelKey: 'nav.whatsNew',
     href: '/whats-new',
     icon: Megaphone01Icon,
+    hasNewDot: true,
   },
   {
     key: 'support',
@@ -373,6 +226,6 @@ export const AUX_NAV_ITEMS = [
     href: '/support',
     icon: HelpCircleIcon,
   },
-] as const satisfies readonly NavItem[];
+] as const satisfies readonly HelpMenuItem[];
 
 export type NavIconComponent = NavItem['icon'];
