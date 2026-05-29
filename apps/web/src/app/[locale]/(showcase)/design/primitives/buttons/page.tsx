@@ -147,10 +147,10 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
             <Link href="/design">Panoya git</Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link href="/design/primitives">Primitive'ler</Link>
+            <Link href="/design/primitives">{"Primitive'ler"}</Link>
           </Button>
           <Button variant="ghost" asChild>
-            <Link href="/design/tokens">Token'lar</Link>
+            <Link href="/design/tokens">{"Token'lar"}</Link>
           </Button>
         </div>
       </Preview>
@@ -249,13 +249,35 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Toggle"
-        description="Tek açık/kapalı kontrol. Button varyantı gibi davranır ama on/off state ayırt eder."
+        title="Toggle — variant · size · radius · state"
+        description="Tek açık/kapalı kontrol. on-state accent dolgu (hover surface-trigger'dan net ayrı); size/radius Button ile hizalı (md=40px); icon-only toggle aria-label ister."
       >
-        <div className="gap-xs flex flex-wrap">
-          <Toggle defaultPressed>Kalın</Toggle>
-          <Toggle>İtalik</Toggle>
-          <Toggle variant="outline">Altı çizili</Toggle>
+        <div className="gap-md flex flex-col">
+          <div className="gap-xs flex flex-wrap items-center">
+            <Toggle defaultPressed>Kalın</Toggle>
+            <Toggle>İtalik</Toggle>
+            <Toggle variant="outline">Altı çizili</Toggle>
+            <Toggle disabled>Devre dışı</Toggle>
+            <Toggle defaultPressed disabled>
+              Devre dışı (on)
+            </Toggle>
+          </div>
+          <div className="gap-xs flex flex-wrap items-center">
+            {SIZE_KEYS.map((size) => (
+              <Toggle key={size} size={size} defaultPressed>
+                {size}
+              </Toggle>
+            ))}
+            <Toggle size="icon" aria-label="Beğen" defaultPressed>
+              <Tick02Icon className="size-icon-sm" />
+            </Toggle>
+            <Toggle size="icon-sm" variant="outline" aria-label="Kapat">
+              <Cancel01Icon className="size-icon-sm" />
+            </Toggle>
+            <Toggle radius="full" defaultPressed>
+              Pill
+            </Toggle>
+          </div>
         </div>
       </Preview>
 
