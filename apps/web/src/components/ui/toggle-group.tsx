@@ -40,16 +40,22 @@ const ToggleGroupContext = React.createContext<ToggleGroupContextValue>({
 });
 
 const groupRootClasses: Record<ToggleGroupAppearance, string> = {
+  // `group` so items can read the group's data-orientation for the divider
+  // side. The frame is the outer border; items draw the inner dividers
+  // themselves (Tailwind `divide-x` proved unreliable for the border width
+  // on Radix item buttons here, so the divider is explicit on each item).
   connected:
-    'inline-flex w-fit items-center divide-x divide-border rounded-md border border-border data-[orientation=vertical]:flex-col data-[orientation=vertical]:divide-x-0 data-[orientation=vertical]:divide-y',
+    'group inline-flex w-fit items-center rounded-md border border-border data-[orientation=vertical]:flex-col',
   plain: 'gap-3xs inline-flex items-center data-[orientation=vertical]:flex-col',
 };
 
-// Connected item overrides — twMerge resolves these over toggleVariants:
-// drop the per-item border + radius (the frame owns them; the ends round via
-// first/last). The selected fill (--primary-soft) is inherited from the shared
-// toggle base. No overflow-clip on the frame so the focus glow is never cut off.
-const CONNECTED_ITEM = 'rounded-none border-0 first:rounded-l-md last:rounded-r-md';
+// Connected item overrides — twMerge resolves these over toggleVariants. Square
+// off the per-item radius (the frame owns it; ends round via first/last) and
+// draw the inner divider as the item's leading border (left in a row, top in a
+// column). The selected fill (--primary-soft) is inherited from the shared
+// toggle base. No overflow-clip on the frame so the focus glow survives.
+const CONNECTED_ITEM =
+  'rounded-none border-l border-border first:rounded-l-md last:rounded-r-md first:border-l-0 group-data-[orientation=vertical]:border-l-0 group-data-[orientation=vertical]:border-t group-data-[orientation=vertical]:first:border-t-0 group-data-[orientation=vertical]:first:rounded-l-none group-data-[orientation=vertical]:first:rounded-t-md group-data-[orientation=vertical]:last:rounded-r-none group-data-[orientation=vertical]:last:rounded-b-md';
 
 export const ToggleGroup = React.forwardRef<
   React.ElementRef<typeof ToggleGroupPrimitive.Root>,
