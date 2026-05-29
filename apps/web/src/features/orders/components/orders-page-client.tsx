@@ -104,31 +104,33 @@ export function OrdersPageClient({
   // button only guards its own brief in-flight state.
   const refreshButtonDisabled = refresh.isPending;
 
+  // SyncBadge (freshness) grouped with the refresh action in the right
+  // cluster — one unit (design spec D10), no separate meta row.
   const headerSlots = {
-    meta: (
-      <SyncBadge
-        state={orderSyncSnapshot.state}
-        lastSyncedAt={orderSyncSnapshot.lastSyncedAt}
-        progress={orderSyncSnapshot.progress}
-        activeCount={activeSyncs.length}
-        source="Trendyol"
-        onClick={() => setSyncCenterOpen(true)}
-        ariaLabel={tSync('openLabel')}
-      />
-    ),
     actions: (
-      <Button
-        type="button"
-        size="sm"
-        onClick={() => refresh.mutate()}
-        disabled={refreshButtonDisabled}
-        className="gap-xs"
-      >
-        <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
-        {refreshButtonDisabled
-          ? tOrders('refreshButton.refreshing')
-          : tOrders('refreshButton.label')}
-      </Button>
+      <>
+        <SyncBadge
+          state={orderSyncSnapshot.state}
+          lastSyncedAt={orderSyncSnapshot.lastSyncedAt}
+          progress={orderSyncSnapshot.progress}
+          activeCount={activeSyncs.length}
+          source="Trendyol"
+          onClick={() => setSyncCenterOpen(true)}
+          ariaLabel={tSync('openLabel')}
+        />
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => refresh.mutate()}
+          disabled={refreshButtonDisabled}
+          className="gap-xs"
+        >
+          <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
+          {refreshButtonDisabled
+            ? tOrders('refreshButton.refreshing')
+            : tOrders('refreshButton.label')}
+        </Button>
+      </>
     ),
   };
 
@@ -138,12 +140,7 @@ export function OrdersPageClient({
   if (!ordersQuery.isLoading && !hasAnyFilter && rows.length === 0 && pagination.total === 0) {
     return (
       <>
-        <PageHeader
-          title={pageTitle}
-          intent={pageIntent}
-          meta={headerSlots.meta}
-          actions={headerSlots.actions}
-        />
+        <PageHeader title={pageTitle} intent={pageIntent} actions={headerSlots.actions} />
         <OrdersEmptyState variant="no-orders" />
         <SyncCenter
           open={syncCenterOpen}
@@ -158,12 +155,7 @@ export function OrdersPageClient({
   return (
     <>
       <div className="gap-lg flex flex-col">
-        <PageHeader
-          title={pageTitle}
-          intent={pageIntent}
-          meta={headerSlots.meta}
-          actions={headerSlots.actions}
-        />
+        <PageHeader title={pageTitle} intent={pageIntent} actions={headerSlots.actions} />
         <OrdersTable
           rows={rows}
           loading={ordersQuery.isLoading}

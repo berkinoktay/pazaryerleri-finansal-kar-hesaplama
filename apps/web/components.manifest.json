@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 91,
+  "count": 93,
   "components": [
     {
       "name": "Accordion",
@@ -157,6 +157,13 @@
       "useWhen": "attaching a right-click contextual menu to a region (always pair with a DropdownMenu equivalent for touch users)"
     },
     {
+      "name": "CopyableValue",
+      "path": "apps/web/src/components/patterns/copyable-value.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "surfacing a short identifier the user is likely to paste"
+    },
+    {
       "name": "Currency",
       "path": "apps/web/src/components/patterns/currency.tsx",
       "category": "molecule",
@@ -276,6 +283,13 @@
       "useWhen": "rendering a fixed-footprint image inside a table cell or list row with a built-in fallback for missing / failed loads (use ImageCell with shape=circle + fallback=initials for avatar-style cells)"
     },
     {
+      "name": "ImageModal",
+      "path": "apps/web/src/components/ui/image-modal.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "wrapping a thumbnail cell so users can inspect a product / asset image at original resolution (pair with a clickable button around the thumbnail and a useState for open / onOpenChange)"
+    },
+    {
       "name": "InlineEdit",
       "path": "apps/web/src/components/patterns/inline-edit.tsx",
       "category": "molecule",
@@ -357,7 +371,7 @@
       "path": "apps/web/src/components/patterns/nav-group.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "rendering a primary sidebar nav row that has children (sub-routes) and should both navigate and reveal the sub-list on click"
+      "useWhen": "rendering a primary sidebar nav row that has children (sub-routes) — inline accordion when expanded, right-side flyout when the rail is collapsed"
     },
     {
       "name": "NavigationMenu",
@@ -371,7 +385,7 @@
       "path": "apps/web/src/components/patterns/notification-bell.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "mounting a global notification surface in PageHeader.actions for high-frequency events (sync results, alerts) — full history lives at /notifications"
+      "useWhen": "mounting a notification surface — high-frequency events (sync results, alerts) — in PageHeader.actions (icon) or the sidebar footer (sidebar); full history lives at /notifications"
     },
     {
       "name": "OrgStoreSwitcher",
@@ -392,7 +406,7 @@
       "path": "apps/web/src/components/patterns/page-header.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb / store chip), trailing actions, and meta row (typically SyncBadge)"
+      "useWhen": "anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb), trailing actions, and a meta row (typically SyncBadge)"
     },
     {
       "name": "Pagination",

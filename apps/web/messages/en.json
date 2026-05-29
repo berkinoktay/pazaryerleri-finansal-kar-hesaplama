@@ -175,7 +175,16 @@
     "support": "Support",
     "tools": "Tools & Pricing",
     "whatsNew": "What's New",
-    "livePerformance": "Live Performance"
+    "livePerformance": "Live Performance",
+    "toggleSidebar": "Toggle sidebar",
+    "groups": {
+      "overview": "Overview",
+      "operations": "Operations",
+      "financeTools": "Finance"
+    },
+    "help": {
+      "label": "Help & Support"
+    }
   },
   "navSections": {
     "orders": {
@@ -950,6 +959,13 @@
     "syncButton": {
       "label": "Sync",
       "syncing": "Syncing…"
+    },
+    "summary": {
+      "totalProducts": "Total products",
+      "totalContext": "Approved · synced",
+      "missingCost": "Missing cost",
+      "missingVat": "Missing VAT rate",
+      "ofCatalog": "{pct}% of catalog"
     },
     "missingCostBanner": {
       "title": "{count} products missing cost — profit cannot be calculated.",

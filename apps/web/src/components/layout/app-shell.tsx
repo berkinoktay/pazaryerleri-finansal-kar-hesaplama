@@ -4,20 +4,23 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Wordmark } from '@/components/brand/wordmark';
-import { AUX_NAV_ITEMS, isNavDivider, NAV_ENTRIES } from '@/components/layout/nav-config';
+import { HelpMenu } from '@/components/layout/help-menu';
+import { HELP_MENU_ITEMS, NAV_GROUPS } from '@/components/layout/nav-config';
 import { BottomDock } from '@/components/patterns/bottom-dock';
-import { NavGroup } from '@/components/patterns/nav-group';
+import { NavGroup, NAV_BADGE_TONE } from '@/components/patterns/nav-group';
 import { NotificationBell, type NotificationEntry } from '@/components/patterns/notification-bell';
 import {
   OrgStoreSwitcher,
   type Organization,
   type Store,
 } from '@/components/patterns/org-store-switcher';
+import { Badge } from '@/components/ui/badge';
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -33,10 +36,9 @@ import { UserMenu } from '@/features/auth/components/user-menu';
 import { Link, usePathname } from '@/i18n/navigation';
 import { cn } from '@/lib/utils';
 
-// MOCK ENTRIES — same fixture pattern as the previous shell.  Both
-// surfaces (mobile inline header bell + future bell consumers) should
-// converge on a `useNotifications()` hook when the /v1/notifications
-// endpoint ships.  For now the mock keeps the bell visible.
+// MOCK ENTRIES — same fixture pattern as before. The desktop footer bell and
+// the mobile header bell should converge on a `useNotifications()` hook when
+// the /v1/notifications endpoint ships. For now the mock keeps both visible.
 // TODO: replace MOCK with useNotifications() when the feed endpoint lands.
 const MOCK_NOTIFICATIONS: NotificationEntry[] = [
   { id: '1', icon: 'success', title: 'Sipariş senkronizasyonu tamam', timestamp: '3 dk' },
@@ -44,79 +46,68 @@ const MOCK_NOTIFICATIONS: NotificationEntry[] = [
 ];
 
 /**
- * Consumer-level overrides for primary sidebar nav buttons.
+ * Active-state + sizing overrides for a LEAF primary nav row (a destination
+ * with no children: Dashboard, Orders, Products, …).
  *
- * Three concerns layered into a single class string so every nav row
- * (NAV_ENTRIES + Help in the footer) stays visually identical:
- *
- *   1. Active-state fill — the Sidebar primitive's default
- *      `data-[active=true]:bg-sidebar-accent` resolves to muted, which is
- *      indistinguishable from hover. We replace it with `bg-primary`
- *      + `text-primary-foreground`; the SVG icon inherits via
- *      `currentColor`. The `data-[active=true]:hover:*` pair keeps the
- *      primary fill stable on hover of an already-active row — without
- *      it the row would flicker back to muted on mouse-over.
- *
- *   2. Bigger icons — the primitive's CVA pins `[&>svg]:size-4` (16px)
- *      via a descendant selector that out-specifies a class on the SVG
- *      itself. We override with `[&>svg]:size-icon-lg!` (20px) for
- *      better glanceability in both modes.
- *
- *   3. Collapsed-mode sizing — the primitive forces
- *      `group-data-[collapsible=icon]:size-8!` (32px button, 8px
- *      padding). With our 56px-wide collapsed rail (set on
- *      SidebarProvider via `--sidebar-width-icon`), 40px buttons with
- *      6px padding sit centered with 8px gutter on each side and
- *      comfortably fit 20px icons. Expanded rows bump from h-8 to h-9
- *      so 20px icons keep ~2px vertical breathing room.
+ *   1. Active fill — the Sidebar primitive's default
+ *      `data-[active=true]:bg-sidebar-accent` resolves to a near-neutral that
+ *      reads like hover. We replace it with the dedicated
+ *      `bg-sidebar-active` (primary-tinted surface) + brand foreground — a
+ *      restrained "you are here" that's calmer than the old full bg-primary
+ *      fill. The `data-[active=true]:hover:*` pair keeps the surface stable on
+ *      hover of an already-active row.
+ *   2. Bigger icons — 20px (`size-icon-lg`) over the primitive's 16px.
+ *   3. Collapsed sizing — 40px button + 6px padding to sit centered in the
+ *      56px icon rail (`--sidebar-width-icon` on SidebarProvider), label hidden.
  */
 const NAV_ITEM_CLASSES = cn(
-  // bg-primary/90 (slight alpha) softens the loud full-fill of the
-  // active nav row — still glanceable as "selected" but less aggressive
-  // against the surrounding muted nav. Token-stable across light/dark.
-  'data-[active=true]:bg-primary data-[active=true]:text-primary-foreground',
-  'data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground',
+  'data-[active=true]:bg-sidebar-active data-[active=true]:text-sidebar-active-foreground',
+  'data-[active=true]:hover:bg-sidebar-active data-[active=true]:hover:text-sidebar-active-foreground',
   'h-9 [&>svg]:size-icon-lg!',
   'group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-1.5!',
-  // Collapsed-mode label hide + center. Without justify-center the icon
-  // sits flex-start (left-aligned) because the now-hidden label span no
-  // longer pushes it; with the label hidden, gap-2 has no effect (only
-  // one child). The org-switcher chip uses the same justify-center +
-  // hidden-label combo, keeping every collapsed element centered in its
-  // 40px box.
   'group-data-[collapsible=icon]:justify-center',
   'group-data-[collapsible=icon]:[&>span]:hidden',
 );
 
 /**
- * Submenu link styling — used by NavGroup children in the AppShell
- * mapper. Bumped from `text-2xs` to `text-xs` (13px) and from
- * `py-3xs` to `py-2xs` (4px) for readability per the design refresh.
- * Active state is a primary-tinted surface (`bg-primary/10`) with
- * `text-primary` to align with the parent active row's primary fill,
- * but at lower intensity so the parent stays the dominant signal.
- * The alpha lives on the primary token (theme-aware in both light and
- * dark), not on a flat color.
+ * Active-state + sizing for a GROUP PARENT row (a destination WITH children:
+ * Tools & Pricing). Branch-active treatment: when a child route is active the
+ * parent shows brand text/icon but NO surface fill — the active leaf carries
+ * the `bg-sidebar-active` surface, so we avoid a double-filled parent+child.
+ *
+ * Exception: in collapsed (icon-only) mode the sub-list is hidden, so the
+ * parent itself must carry the surface to signal active — hence the
+ * `group-data-[collapsible=icon]:data-[active=true]:bg-sidebar-active` add-back.
  */
-// Sub-nav rows use the sidebar-namespaced tokens so they adapt cleanly
-// to the rail's color (--sidebar-foreground for full-strength text,
-// --sidebar-foreground-dim for at-rest, --sidebar-accent for hover).
-// Active state lifts the row to a primary-tinted surface with brand
-// text — pairs with the parent row's full bg-primary fill at lower
-// intensity so the parent stays the dominant "you are here" cue.
+const NAV_GROUP_PARENT_CLASSES = cn(
+  'data-[active=true]:bg-transparent data-[active=true]:text-sidebar-active-foreground',
+  'data-[active=true]:hover:bg-sidebar-accent data-[active=true]:hover:text-sidebar-active-foreground',
+  'group-data-[collapsible=icon]:data-[active=true]:bg-sidebar-active',
+  'h-9 [&>svg]:size-icon-lg!',
+  'group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-1.5!',
+  'group-data-[collapsible=icon]:justify-center',
+  'group-data-[collapsible=icon]:[&>span]:hidden',
+);
+
+/**
+ * Submenu link styling (NavGroup children). Indented (no left guide line),
+ * sidebar-namespaced at rest. Active leaf lifts to the primary-soft surface
+ * (`bg-sidebar-active`) + brand text — the SAME token the parent uses, so the
+ * active branch reads as one connected highlight without a rule.
+ */
 const SUB_NAV_LINK_CLASSES = cn(
   'duration-fast px-xs py-2xs text-xs rounded-sm transition-colors',
   'text-sidebar-foreground-dim hover:bg-sidebar-accent hover:text-sidebar-foreground',
 );
-const SUB_NAV_LINK_ACTIVE_CLASSES =
-  'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary font-medium';
+const SUB_NAV_LINK_ACTIVE_CLASSES = cn(
+  'bg-sidebar-active text-sidebar-active-foreground font-medium',
+  'hover:bg-sidebar-active hover:text-sidebar-active-foreground',
+);
 
 /**
- * Collapsed-rail width override. The shadcn primitive's default 48px
- * leaves no room for a 40px button + 8px gutter, forcing icons to
- * 32px / 16px. Bumping to 56px gives every collapsed element (org
- * chip, nav buttons, user avatar) the same 40px hit target with even
- * margins — addressing the "all icons aligned and centered" ask.
+ * Collapsed-rail width override. The shadcn default 48px leaves no room for a
+ * 40px button + gutter; 56px gives every collapsed element (org chip, nav
+ * buttons, footer utilities, avatar) the same 40px hit target with even margins.
  */
 const COLLAPSED_RAIL_STYLE = {
   '--sidebar-width-icon': '56px',
@@ -141,23 +132,19 @@ export interface AppShellProps {
 }
 
 /**
- * Single-sidebar shell built on the shadcn Sidebar primitive — replaces
- * the previous 3-rail (IconRail + ContextRail + Main) layout. Composes
- * four Phase-1 patterns:
+ * Single-sidebar shell on the shadcn Sidebar primitive. Composes:
  *
  *   - SidebarHeader → Wordmark + SidebarTrigger + OrgStoreSwitcher
- *   - SidebarContent → NAV_ENTRIES rendered as SidebarMenu items, with
- *     groups (NavGroup) for nested feature routes and dividers as
- *     dashed separators.
- *   - SidebarFooter → BottomDock with Destek + Ayarlar links,
- *     ThemeToggleInline, divider, and the UserMenu.
- *   - SidebarInset → mobile-only inline header with a SidebarTrigger,
- *     the Wordmark mark (no text), bell, user menu; plus the <main>
- *     content region.
+ *   - SidebarContent → NAV_GROUPS rendered as labelled SidebarGroups; leaf
+ *     rows as SidebarMenuButtons, destination groups (Tools) as NavGroup
+ *     accordions.
+ *   - SidebarFooter → BottomDock with the bottom utility cluster: a labelled
+ *     Bildirimler row (NotificationBell), the Yardım & Destek menu, and the
+ *     UserMenu.
+ *   - SidebarInset → mobile-only inline header + the <main> content region.
  *
- * The shadcn Sidebar handles desktop expand/collapse to icon-only mode,
- * mobile drawer behavior, and keyboard shortcut (⌘B / Ctrl+B) out of
- * the box.
+ * The shadcn Sidebar handles desktop expand/collapse to icon-only mode, mobile
+ * drawer behavior, and the ⌘B / Ctrl+B shortcut out of the box.
  */
 export function AppShell({
   orgs,
@@ -168,6 +155,7 @@ export function AppShell({
   onSelectStore,
   children,
 }: AppShellProps): React.ReactElement {
+  const t = useTranslations();
   return (
     <SidebarProvider defaultOpen style={COLLAPSED_RAIL_STYLE}>
       <AppSidebar
@@ -179,17 +167,14 @@ export function AppShell({
         onSelectStore={onSelectStore}
       />
       {/*
-        SidebarInset itself renders a <main role="main"> landmark —
-        that's the page's primary content region. Inside it we place a
-        mobile-only inline header (hamburger + brand + bell + user menu)
-        followed by the actual page content. The shadcn Sidebar's drawer
-        mode handles small viewports out of the box; the inline header
-        only needs to keep the bell + user menu reachable.
+        SidebarInset renders the <main role="main"> landmark. Inside it: a
+        mobile-only inline header (hamburger + brand + bell + user menu),
+        followed by the page content. The drawer mode covers small viewports.
       */}
       <SidebarInset id="main">
         <header className="border-border gap-xs px-sm py-3xs flex h-12 items-center justify-between border-b md:hidden">
           <div className="gap-xs flex items-center">
-            <SidebarTrigger />
+            <SidebarTrigger aria-label={t('nav.toggleSidebar')} />
             <Wordmark withText={false} />
           </div>
           <div className="gap-xs flex items-center">
@@ -198,12 +183,9 @@ export function AppShell({
           </div>
         </header>
         {/*
-          No `max-w-content-max` here — the dashboard is data-dense
-          (tables, KPI grids, charts) and benefits from filling 4K /
-          ultra-wide viewports rather than reserving 2000+px of empty
-          gutter. Pages that genuinely need a reading-width cap
-          (settings forms, prose, marketing-style content) opt in
-          per-page with `max-w-prose-max` / `max-w-form` / etc.
+          No `max-w-content-max` — the dashboard is data-dense and benefits
+          from filling wide viewports. Pages that need a reading-width cap opt
+          in per-page (max-w-prose-max / max-w-form / …).
         */}
         <div className="gap-lg px-md py-md md:px-2xl md:py-xl flex w-full flex-1 flex-col overflow-y-auto">
           {children}
@@ -236,23 +218,17 @@ function AppSidebar({
   const collapsed = state === 'collapsed';
 
   return (
-    // Default 'sidebar' variant — the dark brand-tinted rail (see
-    // tokens/colors.css) carries the visual identity on its own; no
-    // floating-card inset trick needed. The high-contrast boundary
-    // between dark sidebar and bright main content is the separation.
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-xs">
         <div className="gap-xs px-xs py-3xs flex items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          {/*
-            text-sidebar-foreground keeps the wordmark synced with the
-            rail's foreground token in both light AND dark mode — the
-            mark reads correctly whichever theme is active.
-          */}
           <Wordmark
             withText
             className="text-sidebar-foreground group-data-[collapsible=icon]:hidden"
           />
-          <SidebarTrigger className="[&>svg]:size-icon-lg ml-auto size-9 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:size-10" />
+          <SidebarTrigger
+            aria-label={t('nav.toggleSidebar')}
+            className="[&>svg]:size-icon-lg ml-auto size-9 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:size-10"
+          />
         </div>
         <div className="px-xs group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
           <OrgStoreSwitcher
@@ -266,112 +242,112 @@ function AppSidebar({
           />
         </div>
         {/*
-          Zone divider — visually closes the "context selector" header
-          and opens the navigation list below. Without it the switcher
-          chip risks reading as just another nav row; with it, the
-          information architecture is explicit (header zone vs. nav zone),
-          matching Linear/Stripe/Vercel sidebar patterns.
+          Zone divider — closes the "context selector" header and opens the
+          navigation list below, matching Linear/Stripe/Vercel sidebar IA.
         */}
         <SidebarSeparator className="bg-border/60 mt-2xs mx-0" />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarMenu>
-            {NAV_ENTRIES.map((entry) => {
-              if (isNavDivider(entry)) {
-                return (
-                  <li key={entry.key} className="my-2xs px-xs group-data-[collapsible=icon]:hidden">
-                    <SidebarSeparator className="bg-border/60 mx-0" />
-                  </li>
-                );
-              }
-              const isActive = pathname === entry.href || pathname.startsWith(`${entry.href}/`);
-              const Icon = entry.icon;
-              if ('sections' in entry && entry.sections) {
+        {NAV_GROUPS.map((group) => (
+          <SidebarGroup key={group.key}>
+            <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel>
+            <SidebarMenu>
+              {group.items.map((entry) => {
+                const match = entry.activeMatch ?? entry.href;
+                const isActive = pathname === match || pathname.startsWith(`${match}/`);
+                const Icon = entry.icon;
+
+                if ('sections' in entry && entry.sections) {
+                  return (
+                    <SidebarMenuItem key={entry.key}>
+                      <NavGroup
+                        label={t(entry.labelKey)}
+                        icon={<Icon />}
+                        badge={entry.badge}
+                        href={entry.href}
+                        isActive={isActive}
+                        defaultExpanded={isActive}
+                        buttonClassName={NAV_GROUP_PARENT_CLASSES}
+                      >
+                        {entry.sections.flatMap((section) =>
+                          section.items.map((item) => {
+                            const subActive =
+                              pathname === item.href || pathname.startsWith(`${item.href}/`);
+                            return (
+                              <Link
+                                key={item.key}
+                                href={item.href}
+                                aria-current={subActive ? 'page' : undefined}
+                                className={cn(
+                                  SUB_NAV_LINK_CLASSES,
+                                  subActive && SUB_NAV_LINK_ACTIVE_CLASSES,
+                                )}
+                              >
+                                {t(item.labelKey)}
+                              </Link>
+                            );
+                          }),
+                        )}
+                      </NavGroup>
+                    </SidebarMenuItem>
+                  );
+                }
+
                 return (
                   <SidebarMenuItem key={entry.key}>
-                    <NavGroup
-                      label={t(entry.labelKey)}
-                      icon={<Icon />}
-                      badge={entry.badge}
-                      href={entry.href}
+                    <SidebarMenuButton
+                      asChild
                       isActive={isActive}
-                      defaultExpanded={isActive}
-                      buttonClassName={NAV_ITEM_CLASSES}
+                      tooltip={t(entry.labelKey)}
+                      aria-label={t(entry.labelKey)}
+                      className={NAV_ITEM_CLASSES}
                     >
-                      {entry.sections.flatMap((section) =>
-                        section.items.map((item) => {
-                          const subActive = pathname.startsWith(item.href);
-                          return (
-                            <Link
-                              key={item.key}
-                              href={item.href}
-                              className={cn(
-                                SUB_NAV_LINK_CLASSES,
-                                subActive && SUB_NAV_LINK_ACTIVE_CLASSES,
-                              )}
-                            >
-                              {t(item.labelKey)}
-                            </Link>
-                          );
-                        }),
-                      )}
-                    </NavGroup>
+                      <Link href={entry.href}>
+                        <Icon />
+                        <span className="flex-1">{t(entry.labelKey)}</span>
+                        {entry.badge ? (
+                          <Badge
+                            tone={NAV_BADGE_TONE[entry.badge.variant]}
+                            size="sm"
+                            radius="sm"
+                            className="group-data-[collapsible=icon]:hidden"
+                          >
+                            {entry.badge.label}
+                          </Badge>
+                        ) : null}
+                      </Link>
+                    </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
-              }
-              return (
-                <SidebarMenuItem key={entry.key}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive}
-                    tooltip={t(entry.labelKey)}
-                    className={NAV_ITEM_CLASSES}
-                  >
-                    <Link href={entry.href}>
-                      <Icon />
-                      <span>{t(entry.labelKey)}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              );
-            })}
-          </SidebarMenu>
-        </SidebarGroup>
+              })}
+            </SidebarMenu>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
       <SidebarFooter>
         <BottomDock>
           {/*
-            Auxiliary nav cluster — "Yenilikler" + "Destek" share the
-            same bottom shelf as utility links (matches the Linear /
-            Vercel pattern of grouping non-feature pages with the user
-            menu, separate from the main nav scroll).
+            Bottom utility cluster (design spec §4.7): a labelled Bildirimler
+            row + the Yardım & Destek menu sit above the user identity card.
+            The bell lives here (not the header) to keep the top row — Wordmark
+            + collapse toggle — uncrowded and unambiguous.
           */}
           <SidebarMenu>
-            {AUX_NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <SidebarMenuItem key={item.key}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive}
-                    tooltip={t(item.labelKey)}
-                    className={NAV_ITEM_CLASSES}
-                  >
-                    <Link href={item.href}>
-                      <Icon />
-                      <span>{t(item.labelKey)}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              );
-            })}
+            <SidebarMenuItem>
+              <NotificationBell
+                entries={MOCK_NOTIFICATIONS}
+                unreadCount={MOCK_NOTIFICATIONS.length}
+                variant="sidebar"
+              />
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <HelpMenu items={HELP_MENU_ITEMS} />
+            </SidebarMenuItem>
           </SidebarMenu>
           <UserMenu />
         </BottomDock>
       </SidebarFooter>
-      <SidebarRail />
+      <SidebarRail aria-label={t('nav.toggleSidebar')} title={t('nav.toggleSidebar')} />
     </Sidebar>
   );
 }

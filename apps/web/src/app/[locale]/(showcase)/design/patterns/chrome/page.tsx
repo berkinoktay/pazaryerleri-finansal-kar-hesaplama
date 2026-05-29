@@ -28,14 +28,14 @@ export default function ChromePatternsPage(): React.ReactElement {
 
       <Preview
         title="PageHeader"
-        description="Sayfa başlık + intent + meta + aksiyonlar. intent başlığı tekrarlamaz — bağlam, dönem veya scope verir. SyncBadge `meta` slot'unda; aksiyonlar `actions` slot'unda."
+        description="Sayfa başlık + intent + aksiyonlar. intent başlığı tekrarlamaz — bağlam, dönem veya scope verir. SyncBadge (tazelik) sağdaki `actions` kümesinde aksiyonla birlikte gruplanır; opsiyonel `summary` slotu metrik-yoğun sayfalarda KPI şeridi taşır, metriksiz sayfalarda hiç render edilmez."
       >
         <PageHeader
           title="Sipariş mutabakatı"
           intent="Nisan 2026 dönemi · Trendyol Ana Mağaza · Hakediş karşılığını sipariş bazında doğrula."
-          meta={<SyncBadge state="fresh" lastSyncedAt={MOCK.syncMeta} source="Trendyol" />}
           actions={
             <>
+              <SyncBadge state="fresh" lastSyncedAt={MOCK.syncMeta} source="Trendyol" />
               <Button variant="outline" size="sm">
                 Dışa aktar
               </Button>

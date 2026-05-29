@@ -1,57 +1,56 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  AUX_NAV_ITEMS,
-  NAV_ENTRIES,
-  NAV_ITEMS,
-  isNavDivider,
-} from '@/components/layout/nav-config';
+import { HELP_MENU_ITEMS, NAV_GROUPS } from '@/components/layout/nav-config';
+
+const allItems = NAV_GROUPS.flatMap((group) => group.items);
+const keys = allItems.map((item) => item.key);
 
 describe('nav-config', () => {
-  it('mevcut tüm primary nav itemlarını içerir', () => {
-    const keys = NAV_ITEMS.flatMap((item) => ('key' in item ? [item.key] : []));
+  it('groups the primary nav into Özet / Operasyon / Finans & Araçlar', () => {
+    expect(NAV_GROUPS.map((group) => group.key)).toEqual(['overview', 'operations', 'finance']);
+  });
+
+  it('keeps every primary destination, drops Notifications + Settings from the rail', () => {
     expect(keys).toContain('dashboard');
     expect(keys).toContain('live-performance');
     expect(keys).toContain('orders');
     expect(keys).toContain('products');
+    expect(keys).toContain('costs');
     expect(keys).toContain('profitability');
     expect(keys).toContain('reconciliation');
-    expect(keys).toContain('expenses');
     expect(keys).toContain('tools');
-    expect(keys).toContain('notifications');
-    // Settings moved to BottomDock — no longer a primary item.
+    expect(keys).toContain('expenses');
+    // Notifications now lives behind the footer bell + /notifications page.
+    expect(keys).not.toContain('notifications');
+    // Settings lives in the user menu, not the primary rail.
     expect(keys).not.toContain('settings');
   });
 
-  it('badge alanı opsiyoneldir — eski itemlarda undefined, yeni eklenenler badge taşıyabilir', () => {
-    const dashboard = NAV_ITEMS.find((item) => 'key' in item && item.key === 'dashboard');
-    expect(dashboard).toBeDefined();
-    if (dashboard && 'badge' in dashboard) {
-      expect(dashboard.badge).toBeUndefined();
-    }
-
-    const livePerformance = NAV_ITEMS.find(
-      (item) => 'key' in item && item.key === 'live-performance',
-    );
-    expect(livePerformance).toBeDefined();
-    if (livePerformance && 'badge' in livePerformance) {
-      expect(livePerformance.badge).toEqual({ variant: 'new', label: 'Yeni' });
-    }
+  it('only Tools keeps sidebar sub-nav — filter views moved to in-page tabs', () => {
+    const withSections = allItems.filter((item) => 'sections' in item && item.sections);
+    expect(withSections.map((item) => item.key)).toEqual(['tools']);
   });
 
-  it('isNavDivider type guard primary itemlar için false döner', () => {
-    for (const item of NAV_ITEMS) {
-      expect(isNavDivider(item)).toBe(false);
-    }
+  it('carries the expected inline badges', () => {
+    const live = allItems.find((item) => item.key === 'live-performance');
+    expect(live?.badge).toEqual({ variant: 'new', label: 'Yeni' });
+
+    const profitability = allItems.find((item) => item.key === 'profitability');
+    expect(profitability?.badge).toEqual({ variant: 'beta', label: 'Beta' });
+
+    const dashboard = allItems.find((item) => item.key === 'dashboard');
+    expect(dashboard?.badge).toBeUndefined();
   });
 
-  it('NAV_ENTRIES no longer carries whats-new — it moved to AUX_NAV_ITEMS', () => {
-    const keys = NAV_ENTRIES.flatMap((entry) => ('key' in entry ? [entry.key] : []));
-    expect(keys).not.toContain('whats-new');
+  it('uses activeMatch so default-sub-route items stay highlighted across their section', () => {
+    const profitability = allItems.find((item) => item.key === 'profitability');
+    expect(profitability?.activeMatch).toBe('/profitability');
+
+    const tools = allItems.find((item) => item.key === 'tools');
+    expect(tools?.activeMatch).toBe('/tools');
   });
 
-  it('AUX_NAV_ITEMS groups whats-new and support together for the footer shelf', () => {
-    const keys = AUX_NAV_ITEMS.map((item) => item.key);
-    expect(keys).toEqual(['whats-new', 'support']);
+  it('groups whats-new + support into the footer Help menu', () => {
+    expect(HELP_MENU_ITEMS.map((item) => item.key)).toEqual(['whats-new', 'support']);
   });
 });
