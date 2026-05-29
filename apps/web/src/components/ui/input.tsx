@@ -24,9 +24,10 @@ const inputVariants = cva(
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
-    'read-only:bg-muted read-only:text-muted-foreground read-only:cursor-default',
+    'read-only:bg-muted read-only:text-muted-foreground read-only:cursor-default read-only:hover:border-border-input read-only:focus-visible:shadow-none',
     'file:border-0 file:bg-transparent file:text-sm file:font-medium',
     'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none aria-invalid:animate-field-shake',
+    'data-[valid=true]:border-success data-[valid=true]:focus-visible:border-success data-[valid=true]:focus-visible:shadow-none',
   ].join(' '),
   {
     variants: {
@@ -56,7 +57,8 @@ const wrapperVariants = cva(
     'hover:border-border-strong',
     'focus-within:border-ring focus-within:shadow-focus',
     'data-[invalid=true]:border-destructive data-[invalid=true]:focus-within:border-destructive data-[invalid=true]:focus-within:shadow-none data-[invalid=true]:animate-field-shake',
-    'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[input:read-only]:bg-muted',
+    'data-[valid=true]:border-success data-[valid=true]:focus-within:border-success data-[valid=true]:focus-within:shadow-none',
+    'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[input:read-only]:bg-muted has-[input:read-only]:hover:border-border-input has-[input:read-only]:focus-within:shadow-none',
   ].join(' '),
   {
     variants: {
@@ -110,6 +112,10 @@ export interface InputProps
   loadingLabel?: string;
   /** Convenience boolean for `aria-invalid="true"`. Triggers destructive border. */
   invalid?: boolean;
+  /** Marks the field as validated-OK — success-tinted border. Mutually exclusive with `invalid` (invalid wins). */
+  valid?: boolean;
+  /** Shows a live `length / maxLength` counter on the right (pairs with `maxLength`). */
+  showCount?: boolean;
   /**
    * Adds a show/hide toggle for password-masked fields. Only active when
    * `type="password"` — the Input owns the visibility state internally
@@ -139,6 +145,9 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     loading,
     loadingLabel = 'Loading',
     invalid,
+    valid,
+    showCount,
+    maxLength,
     reveal,
     value,
     defaultValue,
@@ -161,7 +170,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
       aria-pressed={revealed}
       onClick={() => setRevealed((prev) => !prev)}
       className={cn(
-        'text-muted-foreground hover:text-foreground p-3xs rounded-xs',
+        'text-muted-foreground hover:text-foreground p-3xs pointer-coarse:p-sm rounded-xs',
         'duration-fast transition-colors',
         'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
         '[&_svg]:size-icon-sm cursor-pointer',
@@ -174,7 +183,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
   const effectiveTrailing = revealSlot ?? trailing;
   const hasLeading = leadingIcon !== undefined || leading !== undefined;
   const hasTrailing = trailingIcon !== undefined || effectiveTrailing !== undefined;
-  const needsWrapper = hasLeading || hasTrailing || onClear !== undefined || loading === true;
+  const needsWrapper =
+    hasLeading || hasTrailing || onClear !== undefined || loading === true || showCount === true;
 
   const isControlled = value !== undefined;
   const [internalValue, setInternalValue] = React.useState<string>(
@@ -224,7 +234,9 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
         onChange={handleChange}
         disabled={disabled}
         readOnly={readOnly}
+        maxLength={maxLength}
         aria-invalid={invalid ?? undefined}
+        data-valid={valid ? 'true' : undefined}
         aria-busy={loading ?? undefined}
         className={cn(inputVariants({ size, radius, className }))}
         {...rest}
@@ -249,6 +261,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
   return (
     <div
       data-invalid={invalid ? 'true' : undefined}
+      data-valid={valid ? 'true' : undefined}
       onPointerDown={handleWrapperPointerDown}
       className={cn(wrapperVariants({ size, radius }), className)}
     >
@@ -265,13 +278,20 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
         onChange={handleChange}
         disabled={disabled}
         readOnly={readOnly}
+        maxLength={maxLength}
         aria-invalid={invalid ?? undefined}
         aria-busy={loading ?? undefined}
         className={innerInputClass}
         {...rest}
       />
-      {hasTrailing || showClearButton || loading ? (
+      {hasTrailing || showClearButton || loading || showCount === true ? (
         <div className="gap-xs flex shrink-0 items-center">
+          {showCount === true ? (
+            <span className="text-2xs text-muted-foreground shrink-0 tabular-nums">
+              {currentValue.length}
+              {maxLength !== undefined ? `/${maxLength}` : null}
+            </span>
+          ) : null}
           {loading ? <Spinner label={loadingLabel} className="text-muted-foreground" /> : null}
           {!loading && trailingIcon !== undefined ? (
             <span className="text-muted-foreground [&_svg]:size-icon-sm pointer-events-none flex items-center">

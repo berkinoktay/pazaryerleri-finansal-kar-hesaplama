@@ -71,8 +71,33 @@ export default function InputsPrimitivePage(): React.ReactElement {
             <Input id="price" type="number" placeholder="0,00" className="tabular-nums" />
           </div>
           <div className="gap-3xs flex flex-col">
-            <Label htmlFor="disabled-input">Salt okunur</Label>
+            <Label htmlFor="disabled-input">Devre dışı</Label>
             <Input id="disabled-input" disabled defaultValue="Değiştirilemez" />
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Input — valid · readOnly · sayaç · radius"
+        description="valid = success border (invalid'in eşi; hatada shake, başarıda sakin). readOnly = gri yüzey + hover/glow YOK (düzenlenemez sinyali). showCount = sağda canlı length/maxLength. radius Button/Badge ile aynı eksen."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="iban-valid">IBAN</Label>
+            <Input id="iban-valid" valid defaultValue="TR12 0006 1005 ..." />
+            <span className="text-2xs text-success">Doğrulandı.</span>
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="store-id-ro">Mağaza kimliği (readOnly)</Label>
+            <Input id="store-id-ro" readOnly defaultValue="str_8f3a91c2" />
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="title-count">Başlık (showCount + maxLength)</Label>
+            <Input id="title-count" showCount maxLength={50} defaultValue="PazarSync demo" />
+          </div>
+          <div className="gap-xs flex flex-wrap items-center">
+            <Input radius="full" size="sm" placeholder="radius=full" />
+            <Input radius="lg" size="sm" placeholder="radius=lg" />
           </div>
         </div>
       </Preview>
