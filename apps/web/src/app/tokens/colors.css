@@ -61,6 +61,11 @@
   /* Softer than --border for incidental accents (active tab ring, inner
      dividers) where a full border reads too heavy. */
   --border-muted: oklch(92% 0.006 265);
+  /* Form-control resting border — Input / Select / Textarea. In light it
+     matches --border (a hairline on the white field is enough); the token
+     exists so dark mode can carry MORE contrast than the generic --border
+     (a 24%-on-22% field border was near-invisible). See .dark below. */
+  --border-input: oklch(89% 0.007 265);
   /* Form-control fill — matches --card. Inputs become the brightest
      surface so they pop against the slightly tinted --background, while
      reading as the same surface as a Card they sit inside (border +
@@ -184,6 +189,11 @@
   --border: oklch(24% 0.014 265);
   --border-strong: oklch(32% 0.018 265);
   --border-muted: oklch(28% 0.012 265);
+  /* Form-control border carries MORE contrast than --border in dark — the
+     generic 24% sat only ~2% above --input (22%) and read as edgeless. 30%
+     gives the field a clear edge against both --input (22%) and --card (17%)
+     while staying just under hover's --border-strong (32%). */
+  --border-input: oklch(30% 0.015 265);
   --input: oklch(22% 0.014 265);
   --ring: oklch(68% 0.12 265);
 

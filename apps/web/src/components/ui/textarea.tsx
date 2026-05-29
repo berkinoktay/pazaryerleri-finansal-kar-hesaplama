@@ -16,12 +16,12 @@ import { cn } from '@/lib/utils';
 
 const textareaVariants = cva(
   [
-    'flex w-full border border-border bg-input text-foreground shadow-xs transition-colors duration-fast',
+    'flex w-full border border-border-input bg-input text-foreground shadow-xs transition duration-fast ease-out-quart',
     'placeholder:text-muted-foreground',
     'hover:border-border-strong',
-    'focus-visible:border-ring focus-visible:outline-none',
+    'focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
-    'aria-invalid:border-destructive',
+    'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none',
   ].join(' '),
   {
     variants: {
@@ -47,10 +47,10 @@ const textareaVariants = cva(
 
 const wrapperVariants = cva(
   [
-    'flex w-full flex-col border border-border bg-input text-foreground shadow-xs transition-colors duration-fast',
+    'flex w-full flex-col border border-border-input bg-input text-foreground shadow-xs transition duration-fast ease-out-quart',
     'hover:border-border-strong',
-    'focus-within:border-ring',
-    'data-[invalid=true]:border-destructive data-[invalid=true]:focus-within:border-destructive',
+    'focus-within:border-ring focus-within:shadow-focus',
+    'data-[invalid=true]:border-destructive data-[invalid=true]:focus-within:border-destructive data-[invalid=true]:focus-within:shadow-none',
     'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50',
   ].join(' '),
   {

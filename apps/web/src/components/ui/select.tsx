@@ -25,12 +25,12 @@ export const SelectValue = SelectPrimitive.Value;
 
 const selectTriggerVariants = cva(
   [
-    'flex w-full items-center gap-xs border border-border bg-input text-foreground shadow-xs transition-colors duration-fast',
+    'flex w-full items-center gap-xs border border-border-input bg-input text-foreground shadow-xs transition duration-fast ease-out-quart',
     'placeholder:text-muted-foreground',
     'hover:border-border-strong',
-    'focus-visible:border-ring focus-visible:outline-none',
+    'focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
-    'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive',
+    'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none',
     '[&>span]:line-clamp-1',
   ].join(' '),
   {
