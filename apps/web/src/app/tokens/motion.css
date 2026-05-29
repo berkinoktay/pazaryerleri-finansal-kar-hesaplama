@@ -29,6 +29,12 @@
   --duration-base: 220ms;
   --duration-slow: 360ms;
   --duration-entrance: 480ms;
+
+  /* Field error shake (transitions-dev #12) — restrained 6px swing with a
+     single 4px overshoot recovery. NOT elastic/bounce; the overshoot is one
+     small leg, not a spring. Per-segment ease lives in the @keyframes. */
+  --shake-distance: 6px;
+  --shake-overshoot: 4px;
 }
 
 /**
@@ -50,6 +56,32 @@
 
 .animate-sync-pulse {
   animation: sync-pulse 2.4s ease-in-out infinite;
+}
+
+/* Field error shake — fires once when a field flips to aria-invalid /
+   data-invalid (wired via the field cva as `animate-field-shake`). %-stops
+   are cumulative leg durations (80,80,60,60 = 280ms). The shake-ease matches
+   --ease-out-quint. prefers-reduced-motion collapses it below. */
+@keyframes field-shake {
+  0% {
+    transform: translateX(0);
+    animation-timing-function: var(--ease-out-quint);
+  }
+  28.57% {
+    transform: translateX(var(--shake-distance));
+    animation-timing-function: var(--ease-out-quint);
+  }
+  57.14% {
+    transform: translateX(calc(var(--shake-distance) * -1));
+    animation-timing-function: var(--ease-out-quint);
+  }
+  78.57% {
+    transform: translateX(var(--shake-overshoot));
+    animation-timing-function: var(--ease-out-quint);
+  }
+  100% {
+    transform: translateX(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -30,7 +30,7 @@ const selectTriggerVariants = cva(
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none',
     'disabled:cursor-not-allowed disabled:opacity-50',
-    'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none',
+    'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none aria-invalid:animate-field-shake',
     '[&>span]:line-clamp-1',
   ].join(' '),
   {

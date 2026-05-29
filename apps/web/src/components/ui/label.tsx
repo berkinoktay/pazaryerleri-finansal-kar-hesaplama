@@ -11,21 +11,36 @@ import { cn } from '@/lib/utils';
  * `<Label htmlFor>` — placeholders are not labels (they vanish when the
  * field has a value, leaving screen readers without context). The
  * `peer-disabled:` state automatically dims the label when its peer
- * input is disabled.
+ * input is disabled. Pass `required` for a decorative `*` marker; the
+ * error tone is applied by FormLabel (it adds `text-destructive`) and eases
+ * in via the base `transition-colors`. An "optional" hint is language-
+ * specific — pass that copy in `children` or a FormDescription so the
+ * primitive stays i18n-neutral.
  *
  * @useWhen attaching an accessible text caption to a form control via htmlFor (placeholders are not labels)
  */
-export const Label = React.forwardRef<
-  React.ElementRef<typeof LabelPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
->(({ className, ...props }, ref) => (
-  <LabelPrimitive.Root
-    ref={ref}
-    className={cn(
-      'text-foreground text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
-      className,
-    )}
-    {...props}
-  />
-));
+export interface LabelProps extends React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root> {
+  /** Appends a decorative required marker (`*`). Presentation only — the field must still set `required` / `aria-required`. */
+  required?: boolean;
+}
+
+export const Label = React.forwardRef<React.ElementRef<typeof LabelPrimitive.Root>, LabelProps>(
+  ({ className, required, children, ...props }, ref) => (
+    <LabelPrimitive.Root
+      ref={ref}
+      className={cn(
+        'text-foreground duration-fast ease-out-quart text-sm leading-none font-medium transition-colors peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      {required === true ? (
+        <span aria-hidden="true" className="text-destructive ml-3xs">
+          *
+        </span>
+      ) : null}
+    </LabelPrimitive.Root>
+  ),
+);
 Label.displayName = LabelPrimitive.Root.displayName;

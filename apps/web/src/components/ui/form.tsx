@@ -166,7 +166,16 @@ export const FormMessage = React.forwardRef<
     <p
       ref={ref}
       id={formMessageId}
-      className={cn('text-2xs text-destructive font-medium', className)}
+      // role="alert" announces the message when it mounts (error appears);
+      // aria-atomic reads the whole line. It also auto-wires to the field via
+      // FormControl's aria-describedby for on-focus context.
+      role="alert"
+      aria-atomic="true"
+      className={cn(
+        'text-2xs text-destructive font-medium',
+        'animate-in fade-in-0 slide-in-from-top-1 duration-fast ease-out-quart',
+        className,
+      )}
       {...props}
     >
       {body}

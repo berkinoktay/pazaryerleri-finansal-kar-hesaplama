@@ -237,6 +237,11 @@
   --animate-duration-base: var(--duration-base);
   --animate-duration-slow: var(--duration-slow);
   --animate-duration-entrance: var(--duration-entrance);
+
+  /* Field error shake — keyframe in tokens/motion.css; total 280ms, outer
+     timing linear (per-segment ease is inside the keyframe). Consumed by the
+     field primitives as `aria-invalid:animate-field-shake`. */
+  --animate-field-shake: field-shake 280ms linear;
 }
 
 /* Base layer — HTML elements */
