@@ -34,7 +34,7 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Button varyantları"
-        description="Default, Secondary, Outline, Ghost, Link, Destructive. Varyant hiyerarşiyi taşır — sayfada sadece bir primary olmalı."
+        description="Default, Secondary, Outline, Ghost, Link, Destructive, Success, Warning. Dolu varyantlar düz (gölgesiz) — global :focus-visible glow'u engellenmeden okunur; basışta hafif scale-down. Varyant hiyerarşiyi taşır — sayfada tek primary olmalı."
       >
         <div className="gap-xs flex flex-wrap">
           <Button>Default</Button>
@@ -43,6 +43,8 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
           <Button variant="ghost">Ghost</Button>
           <Button variant="link">Link</Button>
           <Button variant="destructive">Destructive</Button>
+          <Button variant="success">Success</Button>
+          <Button variant="warning">Warning</Button>
         </div>
       </Preview>
 

@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
  */
 
 const toggleVariants = cva(
-  'inline-flex items-center justify-center gap-xs rounded-md text-sm font-medium transition-colors duration-fast [&_svg]:size-icon-sm [&_svg]:shrink-0 hover:bg-muted hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground',
+  'inline-flex cursor-pointer items-center justify-center gap-xs rounded-md text-sm font-medium transition duration-fast ease-out-quart active:scale-[0.97] pointer-coarse:min-h-11 [&_svg]:size-icon-sm [&_svg]:shrink-0 hover:bg-muted hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground',
   {
     variants: {
       variant: {

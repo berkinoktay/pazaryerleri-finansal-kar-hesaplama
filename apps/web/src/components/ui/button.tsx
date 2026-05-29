@@ -14,30 +14,36 @@ import { cn } from '@/lib/utils';
  * element — typically `<a>` from next/link).
  *
  * Sizes `sm | md | lg` align with Input and SelectTrigger; `icon` and
- * `icon-sm` are square dimensions for icon-only buttons.
+ * `icon-sm` are square dimensions for icon-only buttons (which MUST be
+ * given an `aria-label`). Variants: `default | secondary | outline |
+ * ghost | link | destructive | success | warning` — filled variants are
+ * flat (no shadow) so the global `:focus-visible` glow reads unobstructed;
+ * a restrained `active:scale` carries the press state.
  *
  * @useWhen rendering an interactive trigger that may need a loading state, leading or trailing icon, or asChild composition into a link
  */
 
 const buttonVariants = cva(
-  'inline-flex cursor-pointer items-center justify-center gap-xs whitespace-nowrap font-medium transition-colors duration-fast focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-icon-sm [&_svg]:shrink-0',
+  'inline-flex cursor-pointer items-center justify-center gap-xs whitespace-nowrap font-medium transition duration-fast ease-out-quart active:scale-[0.97] pointer-coarse:min-h-11 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-icon-sm [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary-hover shadow-sm',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-accent shadow-sm',
+        default: 'bg-primary text-primary-foreground hover:bg-primary-hover',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-accent',
         outline:
           'border border-border bg-background text-foreground hover:bg-muted hover:border-border-strong',
         ghost: 'text-foreground hover:bg-muted',
         link: 'text-primary underline-offset-4 hover:underline',
-        destructive: 'bg-destructive text-destructive-foreground hover:opacity-90 shadow-sm',
+        destructive: 'bg-destructive text-destructive-foreground hover:opacity-90',
+        success: 'bg-success text-success-foreground hover:opacity-90',
+        warning: 'bg-warning text-warning-foreground hover:opacity-90',
       },
       size: {
         sm: 'h-8 px-sm text-xs',
         md: 'h-10 px-md text-sm',
         lg: 'h-11 px-lg text-base',
-        icon: 'size-10',
-        'icon-sm': 'size-8',
+        icon: 'size-10 min-w-10 pointer-coarse:size-11',
+        'icon-sm': 'size-8 min-w-8 pointer-coarse:size-11',
       },
       radius: {
         none: 'rounded-none',
@@ -67,7 +73,7 @@ export interface ButtonProps
   trailingIcon?: React.ReactNode;
   /** Shows a spinner in place of the leading icon; sets `aria-busy="true"`; auto-disables the button. Ignored when `asChild` is true. */
   loading?: boolean;
-  /** Translated aria-label for the loading spinner. Defaults to `'Loading'`. */
+  /** Translated aria-label for the loading spinner. When omitted the spinner is decorative (`aria-hidden`) — the button's `aria-busy` carries the busy state, so no untranslated string is ever announced. */
   loadingLabel?: string;
   /** Optional label rendered in place of children while `loading` is true. */
   loadingText?: React.ReactNode;
@@ -83,7 +89,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>((props, r
     leadingIcon,
     trailingIcon,
     loading,
-    loadingLabel = 'Loading',
+    loadingLabel,
     loadingText,
     disabled,
     children,
@@ -111,7 +117,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>((props, r
       {...rest}
     >
       {loading === true ? (
-        <Spinner label={loadingLabel} />
+        <Spinner label={loadingLabel} aria-hidden={!loadingLabel || undefined} />
       ) : leadingIcon !== undefined ? (
         leadingIcon
       ) : null}

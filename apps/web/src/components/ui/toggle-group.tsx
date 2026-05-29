@@ -48,8 +48,10 @@ export const ToggleGroupItem = React.forwardRef<
       ref={ref}
       className={cn(
         toggleVariants({
-          variant: context.variant ?? variant,
-          size: context.size ?? size,
+          // An explicit item-level prop overrides the group default; fall
+          // back to the shared context only when the item omits it.
+          variant: variant ?? context.variant,
+          size: size ?? context.size,
           className,
         }),
       )}
