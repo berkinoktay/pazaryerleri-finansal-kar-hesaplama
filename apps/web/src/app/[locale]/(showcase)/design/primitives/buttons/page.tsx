@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Link } from '@/i18n/navigation';
 import { RADIUS_KEYS, SIZE_KEYS } from '@/lib/variants';
 
 export default function ButtonsPrimitivePage(): React.ReactElement {
@@ -92,20 +93,64 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
           <Button size="icon-sm" variant="outline" aria-label="Ara">
             <Search01Icon className="size-icon-sm" />
           </Button>
+          <Button size="icon-sm" variant="ghost" aria-label="Kapat">
+            <Cancel01Icon className="size-icon-sm" />
+          </Button>
           <Button size="icon" radius="full" variant="outline" aria-label="Ara (dairesel)">
             <Search01Icon className="size-icon-sm" />
+          </Button>
+          <Button size="icon" loading aria-label="Yenileniyor">
+            <PlusSignIcon className="size-icon-sm" />
+          </Button>
+          <Button size="icon" disabled aria-label="Devre dışı">
+            <PlusSignIcon className="size-icon-sm" />
           </Button>
         </div>
       </Preview>
 
-      <Preview title="Button durumları" description="Disabled, loading (custom), active focus.">
+      <Preview
+        title="Button durumları — disabled (tüm variant)"
+        description="opacity-50 + pointer-events-none. Her variant'ın disabled okunabilirliğini doğrula (link dahil)."
+      >
         <div className="gap-xs flex flex-wrap">
-          <Button disabled>Disabled</Button>
+          <Button disabled>Default</Button>
+          <Button variant="secondary" disabled>
+            Secondary
+          </Button>
           <Button variant="outline" disabled>
-            Disabled
+            Outline
+          </Button>
+          <Button variant="ghost" disabled>
+            Ghost
+          </Button>
+          <Button variant="link" disabled>
+            Link
           </Button>
           <Button variant="destructive" disabled>
-            Disabled
+            Destructive
+          </Button>
+          <Button variant="success" disabled>
+            Success
+          </Button>
+          <Button variant="warning" disabled>
+            Warning
+          </Button>
+        </div>
+      </Preview>
+
+      <Preview
+        title="asChild — buton stili bir Link'e"
+        description="asChild ile Button stilleri gerçek bir <Link>/<a>'ya uygulanır (navigasyon). variant='link' GÖRÜNÜM içindir; asChild DAVRANIŞ (gerçek bağlantı) içindir — en çok kullanılan kompozisyon."
+      >
+        <div className="gap-xs flex flex-wrap items-center">
+          <Button asChild>
+            <Link href="/design">Panoya git</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/design/primitives">Primitive'ler</Link>
+          </Button>
+          <Button variant="ghost" asChild>
+            <Link href="/design/tokens">Token'lar</Link>
           </Button>
         </div>
       </Preview>

@@ -20,23 +20,37 @@ import { cn } from '@/lib/utils';
  * flat (no shadow) so the global `:focus-visible` glow reads unobstructed;
  * a restrained `active:scale` carries the press state.
  *
+ * Let the Button own the loading UX — don't hand-roll `disabled={pending}` +
+ * a ternary label; that drops the Spinner, `aria-busy`, and the leading-icon
+ * swap:
+ *
+ * @example
+ * <Button loading={mutation.isPending} loadingText={t('common.saving')}>
+ *   {t('common.save')}
+ * </Button>
+ *
  * @useWhen rendering an interactive trigger that may need a loading state, leading or trailing icon, or asChild composition into a link
  */
 
 const buttonVariants = cva(
-  'inline-flex cursor-pointer items-center justify-center gap-xs whitespace-nowrap font-medium transition duration-fast ease-out-quart active:scale-[0.97] pointer-coarse:min-h-11 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-icon-sm [&_svg]:shrink-0',
+  'inline-flex cursor-pointer items-center justify-center gap-xs whitespace-nowrap font-medium transition duration-fast ease-out-quart pointer-coarse:min-h-11 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-icon-sm [&_svg]:shrink-0',
   {
     variants: {
+      // Filled variants use a dedicated *-hover token (real lightness shift,
+      // like --primary-hover) rather than opacity-90. The restrained press
+      // (active:scale) lives on every variant EXCEPT `link` — scaling a text
+      // link reads as a glitch, not a press.
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary-hover',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-accent',
+        default: 'bg-primary text-primary-foreground hover:bg-primary-hover active:scale-[0.97]',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-accent active:scale-[0.97]',
         outline:
-          'border border-border bg-background text-foreground hover:bg-muted hover:border-border-strong',
-        ghost: 'text-foreground hover:bg-muted',
+          'border border-border bg-background text-foreground hover:bg-muted hover:border-border-strong active:scale-[0.97]',
+        ghost: 'text-foreground hover:bg-muted active:scale-[0.97]',
         link: 'text-primary underline-offset-4 hover:underline',
-        destructive: 'bg-destructive text-destructive-foreground hover:opacity-90',
-        success: 'bg-success text-success-foreground hover:opacity-90',
-        warning: 'bg-warning text-warning-foreground hover:opacity-90',
+        destructive:
+          'bg-destructive text-destructive-foreground hover:bg-destructive-hover active:scale-[0.97]',
+        success: 'bg-success text-success-foreground hover:bg-success-hover active:scale-[0.97]',
+        warning: 'bg-warning text-warning-foreground hover:bg-warning-hover active:scale-[0.97]',
       },
       size: {
         sm: 'h-8 px-sm text-xs',
@@ -108,16 +122,23 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>((props, r
 
   const isDisabled = loading === true || disabled === true;
 
+  // For an icon-only button (no visible text label) fall back to the button's
+  // own aria-label so the loading announcement still has a verb; otherwise the
+  // spinner stays decorative and aria-busy carries the state.
+  const ariaLabel = typeof rest['aria-label'] === 'string' ? rest['aria-label'] : undefined;
+  const spinnerLabel =
+    loadingLabel ?? (typeof size === 'string' && size.startsWith('icon') ? ariaLabel : undefined);
+
   return (
     <button
       ref={ref}
       className={classes}
       disabled={isDisabled}
-      aria-busy={loading ?? undefined}
+      aria-busy={loading === true ? true : undefined}
       {...rest}
     >
       {loading === true ? (
-        <Spinner label={loadingLabel} aria-hidden={!loadingLabel || undefined} />
+        <Spinner label={spinnerLabel} aria-hidden={!spinnerLabel || undefined} />
       ) : leadingIcon !== undefined ? (
         leadingIcon
       ) : null}

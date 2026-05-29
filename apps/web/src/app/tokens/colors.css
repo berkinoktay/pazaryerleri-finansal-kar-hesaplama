@@ -95,6 +95,14 @@
   --destructive-foreground: oklch(98% 0.004 27);
   --destructive-surface: oklch(96% 0.025 27);
 
+  /* Solid-button hover shifts for the filled semantic variants. Match the
+     --primary-hover direction (darker in light) so a filled destructive /
+     success / warning button gets a real state change on hover instead of
+     the near-invisible opacity-90 it had before. */
+  --success-hover: oklch(48% 0.13 155);
+  --destructive-hover: oklch(50% 0.19 27);
+  --warning-hover: oklch(51% 0.15 75);
+
   /* --warning: darker amber than the classic 70% so `text-warning` on any
      neutral or light-amber surface still clears ≥4.5:1. Solid `bg-warning`
      uses --warning-foreground (near-white) on top. */
@@ -214,6 +222,11 @@
   --destructive: oklch(66% 0.18 27);
   --destructive-foreground: oklch(14% 0.02 27);
   --destructive-surface: oklch(24% 0.06 27);
+
+  /* Solid-button hover shifts — lighter in dark (mirrors --primary-hover). */
+  --success-hover: oklch(69% 0.12 155);
+  --destructive-hover: oklch(71% 0.18 27);
+  --warning-hover: oklch(80% 0.14 75);
 
   --warning: oklch(76% 0.14 75);
   --warning-foreground: oklch(16% 0.04 75);

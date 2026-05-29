@@ -79,6 +79,10 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-warning-surface: var(--warning-surface);
 
+  --color-success-hover: var(--success-hover);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-warning-hover: var(--warning-hover);
+
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
   --color-info-surface: var(--info-surface);
