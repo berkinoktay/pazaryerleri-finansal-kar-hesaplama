@@ -56,7 +56,7 @@ const wrapperVariants = cva(
     'hover:border-border-strong',
     'focus-within:border-ring focus-within:shadow-focus',
     'data-[invalid=true]:border-destructive data-[invalid=true]:focus-within:border-destructive data-[invalid=true]:focus-within:shadow-none data-[invalid=true]:animate-field-shake',
-    'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:read-only]:bg-muted',
+    'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[input:read-only]:bg-muted',
   ].join(' '),
   {
     variants: {
