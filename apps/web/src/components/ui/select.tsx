@@ -277,16 +277,23 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'py-3xs pl-lg pr-xs gap-xs relative flex w-full cursor-default items-center rounded-sm text-sm outline-none select-none',
-      'focus:bg-muted focus:text-foreground',
+      'py-2xs pl-lg pr-sm gap-xs relative flex w-full cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors',
+      // Clean full-row highlight via Radix data-highlighted (pointer hover +
+      // keyboard). Suppress the global :focus-visible brand glow — a ring
+      // around a list row reads as a heavy box; the fill IS the focus
+      // affordance here. Selected row reads slightly stronger (medium weight).
+      'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+      'focus:shadow-none focus-visible:shadow-none',
+      'data-[state=checked]:font-medium',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     {...props}
   >
-    <span className="left-xs absolute inset-y-0 my-auto flex size-3 items-center justify-center">
+    <span className="left-2xs size-icon-sm absolute inset-y-0 my-auto flex items-center justify-center">
       <SelectPrimitive.ItemIndicator>
-        <Tick02Icon className="size-3" strokeWidth={3} />
+        <Tick02Icon className="text-primary size-3.5" strokeWidth={2.5} />
       </SelectPrimitive.ItemIndicator>
     </span>
     {leadingIcon !== undefined ? (
