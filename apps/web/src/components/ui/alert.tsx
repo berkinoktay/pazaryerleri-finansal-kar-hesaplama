@@ -7,6 +7,7 @@ import {
 } from 'hugeicons-react';
 import * as React from 'react';
 
+import { Button, type ButtonProps } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 /**
@@ -65,13 +66,29 @@ const DEFAULT_TONE_ICONS: Record<AlertTone, React.ComponentType<{ className?: st
   destructive: AlertCircleIcon,
 };
 
+// Dedicated tone-border tokens exist only for the high-stakes tones — so
+// `hasBorder` only firms up warning / destructive (the others stay calm).
+const ALERT_TONE_BORDER: Partial<Record<AlertTone, string>> = {
+  warning: 'border-warning-border',
+  destructive: 'border-destructive-border',
+};
+
 export interface AlertProps
   extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof alertVariants> {
-  /** Icon rendered on the left. If omitted, a tone-based default is used. Pass `null` to opt out. */
+  /** Icon rendered on the left. If omitted, a tone-based default is used. Pass `null` to opt out. Size your custom icon to `size-icon-sm` to align with the text. */
   icon?: React.ReactNode | null;
+  /**
+   * Firms up the surface with a visible tone border (warning / destructive
+   * only — the tones that ship a dedicated `-border` token). Default off: the
+   * calm surface tint + leading icon carry the signal. Reserve `true` for
+   * genuinely irreversible / high-stakes notices.
+   */
+  hasBorder?: boolean;
+  /** Optional CTA rendered under the content. Owns its own Button so focus + layout stay in the primitive. */
+  action?: { label: React.ReactNode; onClick: () => void; variant?: ButtonProps['variant'] };
   /** When provided, renders an accessible dismiss button on the top right of the alert. */
   onDismiss?: () => void;
-  /** Translated aria-label for the dismiss button. Defaults to `'Dismiss'`. */
+  /** Translated aria-label for the dismiss button (no translated default — pass a next-intl string). */
   dismissLabel?: string;
 }
 
@@ -82,6 +99,8 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>((props, ref) =
     size,
     radius,
     icon,
+    hasBorder = false,
+    action,
     onDismiss,
     dismissLabel = 'Dismiss',
     children,
@@ -100,7 +119,11 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>((props, ref) =
     <div
       ref={ref}
       role="alert"
-      className={cn(alertVariants({ tone, size, radius, className }))}
+      className={cn(
+        alertVariants({ tone, size, radius }),
+        hasBorder ? ALERT_TONE_BORDER[resolvedTone] : undefined,
+        className,
+      )}
       {...rest}
     >
       {iconToRender !== null ? (
@@ -108,7 +131,16 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>((props, ref) =
           {iconToRender}
         </span>
       ) : null}
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1">
+        {children}
+        {action !== undefined ? (
+          <div className="mt-sm">
+            <Button size="sm" variant={action.variant ?? 'outline'} onClick={action.onClick}>
+              {action.label}
+            </Button>
+          </div>
+        ) : null}
+      </div>
       {onDismiss !== undefined ? (
         <button
           type="button"
@@ -117,8 +149,8 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>((props, ref) =
           className={cn(
             'inline-flex shrink-0 cursor-pointer items-center justify-center',
             'rounded-xs opacity-70 hover:opacity-100',
-            'duration-fast transition-opacity',
-            'focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-0 focus-visible:outline-none',
+            'duration-fast ease-out-quart transition-opacity',
+            'focus-visible:shadow-focus focus-visible:outline-none',
             'p-2xs pointer-coarse:p-sm',
             '[&_svg]:size-icon-sm',
           )}

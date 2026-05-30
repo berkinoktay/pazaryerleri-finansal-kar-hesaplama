@@ -76,6 +76,26 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
+        title="Alert — hasBorder + action"
+        description="Varsayılan kenarlıksız (sakin yüzen bilgi). hasBorder YALNIZ warning/destructive'te ton-kenarlık firmleştirir (yüksek-riskli/geri-dönüşsüz uyarılar için). action slot'u CTA Button'ı bileşen içinde tutar — focus + layout primitive'de."
+      >
+        <div className="gap-sm flex flex-col">
+          <Alert tone="warning" hasBorder>
+            <AlertTitle>3 ürünün maliyeti eksik</AlertTitle>
+            <AlertDescription>Bu ürünler kâr raporuna dahil edilmiyor.</AlertDescription>
+          </Alert>
+          <Alert
+            tone="destructive"
+            hasBorder
+            action={{ label: 'Ayarlara git', onClick: () => undefined }}
+          >
+            <AlertTitle>Hepsiburada API bağlantısı başarısız</AlertTitle>
+            <AlertDescription>401 Unauthorized — API bilgilerini güncelle.</AlertDescription>
+          </Alert>
+        </div>
+      </Preview>
+
+      <Preview
         title="Toast (Sonner)"
         description="Kısa, kendiliğinden kapanan bildirimler. Optimistic update sonrası onay + undo için."
       >
