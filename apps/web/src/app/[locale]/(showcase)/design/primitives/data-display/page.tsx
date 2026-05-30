@@ -10,6 +10,7 @@ import {
   MoreVerticalIcon,
   Refresh01Icon,
 } from 'hugeicons-react';
+import { useState } from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
 import { PrimitiveNav } from '@/components/showcase/primitive-nav';
@@ -26,6 +27,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ImageModal } from '@/components/ui/image-modal';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 import { StatusDot } from '@/components/ui/status-dot';
@@ -341,6 +344,50 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
           </div>
         </div>
       </Preview>
+
+      <Preview
+        title="ScrollArea"
+        description="Sabit-yükseklikli bölge için OS-bağımsız ince scrollbar (thumb hover'da parlar). Overlay / panel içinde kullanılır — sayfa gövdesinde değil (o zaten globals'ta tokenli)."
+      >
+        <ScrollArea className="border-border h-44 w-64 rounded-md border">
+          <div className="p-sm gap-2xs flex flex-col">
+            {Array.from({ length: 18 }).map((_, i) => (
+              <div
+                key={i}
+                className="bg-surface-subtle text-foreground px-sm py-xs rounded-sm text-sm tabular-nums"
+              >
+                Sipariş #{(2948120 + i).toLocaleString('tr-TR')}
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </Preview>
+
+      <Preview
+        title="ImageModal"
+        description="Görsel lightbox'ı. Küçük resme tıkla → tam çözünürlükte açılır (sinema scrim + her fotoğrafta okunan sabit-koyu kapat chip'i). Esc / arka plan / chip ile kapanır."
+      >
+        <ImageModalDemo />
+      </Preview>
+    </>
+  );
+}
+
+function ImageModalDemo(): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const src = 'https://picsum.photos/seed/pazarsync/1000/700';
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Görseli büyüt"
+        className="border-border focus-visible:ring-ring ring-offset-background size-20 overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="Örnek ürün görseli" className="size-full object-cover" />
+      </button>
+      <ImageModal src={src} alt="Örnek ürün görseli" open={open} onOpenChange={setOpen} />
     </>
   );
 }

@@ -18,7 +18,7 @@ import { PrimitiveNav } from '@/components/showcase/primitive-nav';
 import { Preview } from '@/components/showcase/preview';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Kbd } from '@/components/ui/kbd';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   InputOTP,
   InputOTPGroup,
@@ -803,6 +803,24 @@ export default function InputsPrimitivePage(): React.ReactElement {
             </InputOTP>
             <span className="text-2xs text-destructive">invalid — geçersiz kod</span>
           </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Kbd"
+        description="Klavye tuş kapağı — token-driven üniform kare. Tek tuşlar (⌘ K ? Esc) hizalanır; KbdGroup ile akor (⌘⇧P). Komut paleti ipuçları ve dokümantasyon için."
+      >
+        <div className="gap-md flex flex-wrap items-center">
+          <Kbd>⌘</Kbd>
+          <Kbd>K</Kbd>
+          <Kbd>?</Kbd>
+          <Kbd>Esc</Kbd>
+          <Kbd>⏎</Kbd>
+          <KbdGroup>
+            <Kbd>⌘</Kbd>
+            <Kbd>⇧</Kbd>
+            <Kbd>P</Kbd>
+          </KbdGroup>
         </div>
       </Preview>
     </>
