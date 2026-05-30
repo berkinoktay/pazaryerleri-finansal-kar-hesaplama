@@ -84,6 +84,23 @@
   }
 }
 
+/* Indeterminate progress sweep — a 40%-wide bar crossing the track for
+   unknown-duration work (e.g. a modal upload before chunked progress starts).
+   The track clips overflow. Under reduced-motion the component swaps to a
+   static full-width fill (motion-reduce: utilities), so the bar stays visible. */
+@keyframes progress-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.animate-progress-indeterminate {
+  animation: progress-indeterminate 1.3s var(--ease-in-out-quad) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

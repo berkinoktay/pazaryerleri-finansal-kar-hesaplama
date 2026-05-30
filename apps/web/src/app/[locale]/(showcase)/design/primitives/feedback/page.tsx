@@ -129,8 +129,8 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Progress"
-        description="Determinate progress — senkronizasyon, dosya yükleme gibi ilerlemesi ölçülebilir işler için."
+        title="Progress — determinate · indeterminate · tone · size"
+        description="value bilinince determinate (220ms ease-out-quart geçiş); value yok = indeterminate sweep (bilinmeyen süre, reduced-motion'da statik dolu). radius varsayılan md (form chrome ailesi). tone eşik sinyali (100%=success, eşik üstü=warning); size bar yüksekliği."
       >
         <div className="max-w-form gap-sm grid">
           <Progress value={progress} />
@@ -153,6 +153,18 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
             >
               +10
             </Button>
+          </div>
+          <div className="border-border mt-sm gap-sm pt-sm grid border-t">
+            <span className="text-2xs text-muted-foreground font-mono">
+              indeterminate (value yok)
+            </span>
+            <Progress aria-label="Yükleniyor" />
+            <span className="text-2xs text-muted-foreground font-mono">
+              tone=success @100% · sm · lg+warning
+            </span>
+            <Progress value={100} tone="success" />
+            <Progress value={60} size="sm" />
+            <Progress value={60} size="lg" tone="warning" />
           </div>
         </div>
       </Preview>
