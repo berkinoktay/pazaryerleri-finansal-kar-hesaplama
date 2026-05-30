@@ -34,9 +34,13 @@ export const SheetOverlay = React.forwardRef<
   <SheetPrimitive.Overlay
     ref={ref}
     className={cn(
-      'bg-foreground/30 fixed inset-0 z-50 backdrop-blur-sm',
+      // Shared --overlay-scrim token, NO blur: a Sheet's whole purpose is
+      // comparing the panel with the page beneath, and blur fights that. Fade
+      // rides the duration-slow clock so scrim + panel move on one timeline.
+      'bg-overlay-scrim fixed inset-0 z-50',
       'data-[state=open]:animate-in data-[state=closed]:animate-out',
       'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'duration-slow ease-out-quart',
       className,
     )}
     {...props}
@@ -45,14 +49,17 @@ export const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = SheetPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  'fixed z-50 gap-md bg-card p-lg shadow-lg transition ease-out-quart data-[state=open]:animate-in data-[state=closed]:animate-out duration-slow',
+  // No bare `transition` here — it would animate every property; the slide is
+  // driven by the data-state animate-in/out keyframes, tuned by duration-slow
+  // + ease-out-quart only.
+  'fixed z-50 gap-md bg-card p-lg shadow-lg ease-out-quart data-[state=open]:animate-in data-[state=closed]:animate-out duration-slow',
   {
     variants: {
       side: {
         top: 'inset-x-0 top-0 border-b border-border data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top',
         bottom:
           'inset-x-0 bottom-0 border-t border-border data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
-        left: 'inset-y-0 left-0 h-full w-3/4 max-w-sheet border-r border-border data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left',
+        left: 'inset-y-0 left-0 h-full w-3/4 max-w-sheet border-r border-border data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sheet-wide',
         right:
           'inset-y-0 right-0 h-full w-3/4 max-w-sheet border-l border-border data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sheet-wide',
       },
@@ -80,7 +87,7 @@ export const SheetContent = React.forwardRef<
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="right-md top-md absolute rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none">
+        <SheetPrimitive.Close className="text-muted-foreground hover:text-foreground right-md top-md p-2xs duration-fast ease-out-quart pointer-coarse:p-sm focus-visible:ring-ring absolute inline-flex items-center justify-center rounded-sm transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50">
           <Cancel01Icon className="size-icon-sm" />
           <span className="sr-only">{t('close')}</span>
         </SheetPrimitive.Close>
