@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 /**
  * Raw HTML table primitives with shadcn defaults — sticky header,
  * tokenized row hover (`bg-surface-row-hover` from Phase 0), selected-
- * row state (`data-[state=selected]:bg-accent`), `data-numeric`
+ * row state (`data-[state=selected]:bg-primary-soft`), `data-numeric`
  * attribute for right-aligned tabular columns, and `data-pinned-side`
  * / `data-pinned-edge` attributes that turn cells into sticky pinned
  * columns with directional shadow. Use the DataTable pattern from
@@ -89,7 +89,7 @@ export const TableRow = React.forwardRef<
     // unpinned content from showing through) can mirror the row state
     // via group-hover/row:* and group-data-[state=selected]/row:*.
     className={cn(
-      'group/row border-border duration-fast hover:bg-surface-row-hover data-[state=selected]:bg-accent border-b transition-colors',
+      'group/row border-border duration-fast hover:bg-surface-row-hover data-[state=selected]:bg-primary-soft border-b transition-colors',
       className,
     )}
     {...props}
@@ -147,7 +147,7 @@ export const TableCell = React.forwardRef<
       // selected state via group/row variants on TableRow.
       'data-[pinned-side]:bg-card data-[pinned-side]:sticky data-[pinned-side]:z-10',
       'data-[pinned-side]:group-hover/row:bg-surface-row-hover',
-      'data-[pinned-side]:group-data-[state=selected]/row:bg-accent',
+      'data-[pinned-side]:group-data-[state=selected]/row:bg-primary-soft',
       'data-[pinned-edge=last-left]:shadow-pin-left-edge data-[pinned-edge=first-right]:shadow-pin-right-edge',
       className,
     )}
