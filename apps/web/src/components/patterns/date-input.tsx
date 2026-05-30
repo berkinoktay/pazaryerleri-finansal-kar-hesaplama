@@ -65,7 +65,9 @@ export function DateInput({
           size="md"
           disabled={disabled}
           className={cn(
-            'justify-start font-normal',
+            // active:scale-100 cancels the Button press-shrink — this trigger
+            // reads as an input field, not an action button.
+            'justify-start font-normal active:scale-100',
             value === null || value === undefined ? 'text-muted-foreground' : undefined,
             className,
           )}

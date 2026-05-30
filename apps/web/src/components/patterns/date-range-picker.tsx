@@ -50,7 +50,9 @@ export function DateRangePicker({
           variant="outline"
           size="md"
           className={cn(
-            'justify-start font-normal',
+            // active:scale-100 cancels the Button press-shrink — this trigger
+            // reads as an input field, not an action button.
+            'justify-start font-normal active:scale-100',
             !value?.from && 'text-muted-foreground',
             className,
           )}

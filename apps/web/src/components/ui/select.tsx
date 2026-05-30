@@ -37,7 +37,9 @@ const selectTriggerVariants = cva(
     'pointer-coarse:min-h-11',
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none',
-    'active:scale-[0.97]',
+    // No active:scale press here — a Select reads as an input FIELD, not an
+    // action button; the button-press shrink feels wrong on an input-styled
+    // "open a panel" trigger. (Action buttons keep their press-scale.)
     'disabled:cursor-not-allowed disabled:opacity-50',
     'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none aria-invalid:animate-field-shake',
     'data-[valid=true]:border-success data-[valid=true]:focus-visible:border-success data-[valid=true]:focus-visible:shadow-none',

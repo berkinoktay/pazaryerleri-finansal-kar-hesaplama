@@ -28,7 +28,7 @@ export default function DateTimePrimitivePage(): React.ReactElement {
         title="Calendar — tek tarih"
         description="Türkçe ay ve haftanın günleri. tr-TR hafta başlangıcı Pazartesi."
       >
-        <div className="border-border rounded-md border">
+        <div className="border-border w-fit rounded-md border">
           <Calendar mode="single" selected={singleDate} onSelect={setSingleDate} />
         </div>
         <p className="mt-sm text-2xs text-muted-foreground">
@@ -40,7 +40,7 @@ export default function DateTimePrimitivePage(): React.ReactElement {
         title="Calendar — aralık (2 ay)"
         description="Profitabilite ve rapor filtrelerinde 2-aylık range picker'ın canlı preview'ı."
       >
-        <div className="border-border rounded-md border">
+        <div className="border-border w-fit rounded-md border">
           <Calendar
             mode="range"
             numberOfMonths={2}
