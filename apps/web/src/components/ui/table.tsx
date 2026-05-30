@@ -39,13 +39,17 @@ export const TableHeader = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <thead
     ref={ref}
-    // bg-muted is the design system's canonical "raised band" neutral
-    // (--muted: oklch(94% 0.006 265) — tinted toward the brand hue at
-    // the design-system-mandated 0.005-0.01 chroma). On a bg-card table
-    // surface it gives the header zone clear visual separation from the
-    // body without reading as a heavy gray panel. Same hue family as
-    // every other neutral in the system.
-    className={cn('bg-muted [&_tr]:border-border sticky top-0 z-10 [&_tr]:border-b', className)}
+    // bg-surface-subtle is the light "header band" neutral
+    // (--surface-subtle: oklch(96% 0.005 265) — one step below --muted,
+    // tinted toward the brand hue). On a bg-card table surface it lifts the
+    // header zone just enough to separate it from the body WITHOUT the
+    // heavier `bg-muted` panel — the "başlığı biraz ayır, içerikle
+    // karışmasın" call. It mirrors TableFooter (also bg-surface-subtle), so
+    // header and footer read as symmetric light bands bracketing the rows.
+    className={cn(
+      'bg-surface-subtle [&_tr]:border-border sticky top-0 z-10 [&_tr]:border-b',
+      className,
+    )}
     {...props}
   />
 ));
@@ -112,10 +116,10 @@ export const TableHead = React.forwardRef<
     className={cn(
       'px-sm text-2xs text-muted-foreground h-10 text-left align-middle font-medium tracking-wide uppercase',
       'data-[numeric=true]:text-right',
-      // Pinned cells use bg-muted to match the surrounding TableHeader
-      // band, so a sticky pinned header column doesn't break out of the
-      // header zone visually.
-      'data-[pinned-side]:bg-muted data-[pinned-side]:sticky data-[pinned-side]:z-20',
+      // Pinned cells use bg-surface-subtle to match the surrounding
+      // TableHeader band, so a sticky pinned header column doesn't break out
+      // of the header zone visually.
+      'data-[pinned-side]:bg-surface-subtle data-[pinned-side]:sticky data-[pinned-side]:z-20',
       'data-[pinned-edge=last-left]:shadow-pin-left-edge data-[pinned-edge=first-right]:shadow-pin-right-edge',
       className,
     )}
