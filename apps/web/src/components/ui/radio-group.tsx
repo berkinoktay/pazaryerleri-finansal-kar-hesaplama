@@ -36,7 +36,9 @@ RadioGroup.displayName = RadioGroupPrimitive.Root.displayName;
 
 const radioGroupItemVariants = cva(
   [
-    'border-border-strong bg-background shrink-0 rounded-full border shadow-xs',
+    // `peer` so a disabled item dims its sibling <Label> (peer-disabled:),
+    // making the whole row read as disabled — not just the faint circle.
+    'peer border-border-strong bg-background shrink-0 rounded-full border shadow-xs',
     'transition duration-fast ease-out-quart',
     'hover:border-primary',
     'active:scale-[0.95]',

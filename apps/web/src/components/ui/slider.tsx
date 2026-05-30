@@ -23,7 +23,7 @@ import { type RadiusKey, radiusClass, type SizeKey } from '@/lib/variants';
  */
 
 const SLIDER_TRACK_HEIGHT: Record<SizeKey, string> = { sm: 'h-1', md: 'h-1.5', lg: 'h-2' };
-const SLIDER_THUMB_SIZE: Record<SizeKey, string> = { sm: 'size-4', md: 'size-5', lg: 'size-6' };
+const SLIDER_THUMB_SIZE: Record<SizeKey, string> = { sm: 'size-3.5', md: 'size-4', lg: 'size-5' };
 
 export interface SliderProps extends Omit<
   React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root>,
@@ -59,7 +59,9 @@ export const Slider = React.forwardRef<React.ElementRef<typeof SliderPrimitive.R
         <SliderPrimitive.Thumb
           key={i}
           className={cn(
-            'bg-primary block shrink-0 shadow-sm',
+            // border-background = a thin page-bg halo so the filled thumb reads
+            // as a distinct handle floating over the range (Stripe/Linear style).
+            'bg-primary border-background block shrink-0 border-2 shadow-sm',
             'duration-fast ease-out-quart transition-colors',
             'hover:bg-primary-hover',
             'pointer-coarse:size-11',

@@ -28,12 +28,16 @@ const switchVariants = cva(
     'active:scale-[0.95]',
     // A 3px glow on a 20px control reads boxy — swap it for a tight offset ring
     // (still a visible focus affordance when unchecked, where there is no fill).
-    'focus-visible:ring-ring focus-visible:ring-offset-background focus-visible:shadow-none focus-visible:ring-2 focus-visible:ring-offset-2',
+    'focus-visible:shadow-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:ring-ring',
     'disabled:cursor-not-allowed disabled:opacity-50',
     'data-[state=unchecked]:bg-muted data-[state=unchecked]:hover:bg-surface-trigger-hover',
     'data-[state=checked]:bg-primary data-[state=checked]:hover:bg-primary-hover',
-    'aria-invalid:border-destructive',
-    'data-[valid=true]:border-success',
+    // Validation uses an OFFSET ring, not a 1px border — a red border merges
+    // into the filled (primary) track; the offset ring sits on the page bg and
+    // stays legible on any track color. Ordered after focus so the error/ok
+    // color wins while the control is also focused.
+    'data-[valid=true]:ring-2 data-[valid=true]:ring-offset-2 data-[valid=true]:ring-offset-background data-[valid=true]:ring-success',
+    'aria-invalid:ring-2 aria-invalid:ring-offset-2 aria-invalid:ring-offset-background aria-invalid:ring-destructive',
   ].join(' '),
   {
     variants: {
