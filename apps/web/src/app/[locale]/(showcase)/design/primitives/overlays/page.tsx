@@ -184,25 +184,47 @@ export default function OverlaysPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Sheet"
-        description="Yan taraftan kayan panel. 4 yön: top, bottom, left, right. Mağaza detayı, filtre paneli gibi uzun içerikler için."
+        description="Yan taraftan kayan panel. variant=docked (varsayılan) kenara yapışık + iç-köşe radius; variant=floating dar boşlukla içeri çekilir + tam radius. 4 yön: top, bottom, left, right."
       >
-        <div className="gap-xs flex flex-wrap">
-          {(['right', 'left', 'bottom', 'top'] as const).map((side) => (
-            <Sheet key={side}>
-              <SheetTrigger asChild>
-                <Button variant="outline">{side}</Button>
-              </SheetTrigger>
-              <SheetContent side={side}>
-                <SheetHeader>
-                  <SheetTitle>Sheet ({side})</SheetTitle>
-                  <SheetDescription>
-                    Yan taraftan kayar. ContextRail&apos;in mobil karşılığı olarak da
-                    kullanılabilir.
-                  </SheetDescription>
-                </SheetHeader>
-              </SheetContent>
-            </Sheet>
-          ))}
+        <div className="gap-md flex flex-col">
+          <div className="gap-xs flex flex-wrap items-center">
+            <span className="text-2xs text-muted-foreground w-16 font-mono">docked</span>
+            {(['right', 'left', 'bottom', 'top'] as const).map((side) => (
+              <Sheet key={side}>
+                <SheetTrigger asChild>
+                  <Button variant="outline">{side}</Button>
+                </SheetTrigger>
+                <SheetContent side={side}>
+                  <SheetHeader>
+                    <SheetTitle>Sheet — docked ({side})</SheetTitle>
+                    <SheetDescription>
+                      Kenara yapışık, içeri bakan köşeler yuvarlak. Navigasyon / mobil sidebar için
+                      doğru seçim.
+                    </SheetDescription>
+                  </SheetHeader>
+                </SheetContent>
+              </Sheet>
+            ))}
+          </div>
+          <div className="gap-xs flex flex-wrap items-center">
+            <span className="text-2xs text-muted-foreground w-16 font-mono">floating</span>
+            {(['right', 'left', 'bottom', 'top'] as const).map((side) => (
+              <Sheet key={side}>
+                <SheetTrigger asChild>
+                  <Button variant="outline">{side}</Button>
+                </SheetTrigger>
+                <SheetContent side={side} variant="floating">
+                  <SheetHeader>
+                    <SheetTitle>Sheet — floating ({side})</SheetTitle>
+                    <SheetDescription>
+                      Dar boşlukla içeri çekilmiş, tüm köşeler yuvarlak. Detay paneli için modern
+                      &quot;yüzen kart&quot; görünümü.
+                    </SheetDescription>
+                  </SheetHeader>
+                </SheetContent>
+              </Sheet>
+            ))}
+          </div>
         </div>
       </Preview>
 
