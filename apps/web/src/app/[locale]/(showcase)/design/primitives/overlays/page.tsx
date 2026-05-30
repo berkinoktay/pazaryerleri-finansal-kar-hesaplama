@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertCircleIcon, Delete02Icon, EditUser02Icon, MailAdd01Icon } from 'hugeicons-react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/patterns/page-header';
@@ -20,10 +21,23 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from '@/components/ui/command';
+import {
   ContextMenu,
+  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
   ContextMenuTrigger,
@@ -48,15 +62,37 @@ import {
 } from '@/components/ui/drawer';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Menubar,
+  MenubarCheckboxItem,
+  MenubarContent,
+  MenubarItem,
+  MenubarMenu,
+  MenubarRadioGroup,
+  MenubarRadioItem,
+  MenubarSeparator,
+  MenubarShortcut,
+  MenubarSub,
+  MenubarSubContent,
+  MenubarSubTrigger,
+  MenubarTrigger,
+} from '@/components/ui/menubar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Sheet,
@@ -69,6 +105,17 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export default function OverlaysPrimitivePage(): React.ReactElement {
+  // Local state so the checkbox / radio menu demos toggle live — showing the
+  // selection vocabulary (text-primary tick, bg-primary radio dot, checked-row
+  // medium weight) across the menu family.
+  const [showProfit, setShowProfit] = useState(true);
+  const [showDesi, setShowDesi] = useState(false);
+  const [sort, setSort] = useState('date');
+  const [pinned, setPinned] = useState(true);
+  const [tag, setTag] = useState('normal');
+  const [statusBar, setStatusBar] = useState(true);
+  const [density, setDensity] = useState('comfortable');
+
   return (
     <>
       <PageHeader
@@ -242,13 +289,34 @@ export default function OverlaysPrimitivePage(): React.ReactElement {
             <DropdownMenuSeparator />
             <DropdownMenuItem>
               <EditUser02Icon className="size-icon-sm" /> Müşteri bilgisini düzenle
+              <DropdownMenuShortcut>⌘E</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem>
               <MailAdd01Icon className="size-icon-sm" /> E-posta gönder
             </DropdownMenuItem>
-            <DropdownMenuItem>
-              <AlertCircleIcon className="size-icon-sm" /> Sorun bildir
-            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>Dışa aktar</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuItem>CSV</DropdownMenuItem>
+                <DropdownMenuItem>Excel</DropdownMenuItem>
+                <DropdownMenuItem>PDF</DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Görünür sütunlar</DropdownMenuLabel>
+            <DropdownMenuCheckboxItem checked={showProfit} onCheckedChange={setShowProfit}>
+              Kâr sütunu
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={showDesi} onCheckedChange={setShowDesi}>
+              Desi sütunu
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Sıralama</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={sort} onValueChange={setSort}>
+              <DropdownMenuRadioItem value="date">Tarihe göre</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="amount">Tutara göre</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="profit">Kâra göre</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive">Siparişi iptal et</DropdownMenuItem>
           </DropdownMenuContent>
@@ -276,10 +344,99 @@ export default function OverlaysPrimitivePage(): React.ReactElement {
               Kopyala
               <ContextMenuShortcut>⌘C</ContextMenuShortcut>
             </ContextMenuItem>
+            <ContextMenuCheckboxItem checked={pinned} onCheckedChange={setPinned}>
+              Sabitle
+            </ContextMenuCheckboxItem>
+            <ContextMenuSeparator />
+            <ContextMenuLabel>Etiket</ContextMenuLabel>
+            <ContextMenuRadioGroup value={tag} onValueChange={setTag}>
+              <ContextMenuRadioItem value="urgent">Acil</ContextMenuRadioItem>
+              <ContextMenuRadioItem value="normal">Normal</ContextMenuRadioItem>
+              <ContextMenuRadioItem value="low">Düşük öncelik</ContextMenuRadioItem>
+            </ContextMenuRadioGroup>
             <ContextMenuSeparator />
             <ContextMenuItem className="text-destructive">İptal et</ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
+      </Preview>
+
+      <Preview
+        title="Menubar"
+        description="Masaüstü tarzı yatay menü çubuğu (Dosya · Düzen · Görünüm). SaaS panellerinde nadir — çoğu yerde sidebar + dropdown daha iyi erişim sunar; düzenleyici/IDE tarzı uygulamalar için."
+      >
+        <Menubar>
+          <MenubarMenu>
+            <MenubarTrigger>Dosya</MenubarTrigger>
+            <MenubarContent>
+              <MenubarItem>
+                Yeni sekme
+                <MenubarShortcut>⌘T</MenubarShortcut>
+              </MenubarItem>
+              <MenubarItem>
+                Yeni pencere
+                <MenubarShortcut>⌘N</MenubarShortcut>
+              </MenubarItem>
+              <MenubarSub>
+                <MenubarSubTrigger>Paylaş</MenubarSubTrigger>
+                <MenubarSubContent>
+                  <MenubarItem>E-posta</MenubarItem>
+                  <MenubarItem>Bağlantı kopyala</MenubarItem>
+                </MenubarSubContent>
+              </MenubarSub>
+              <MenubarSeparator />
+              <MenubarItem>
+                Yazdır
+                <MenubarShortcut>⌘P</MenubarShortcut>
+              </MenubarItem>
+            </MenubarContent>
+          </MenubarMenu>
+          <MenubarMenu>
+            <MenubarTrigger>Görünüm</MenubarTrigger>
+            <MenubarContent>
+              <MenubarCheckboxItem checked={statusBar} onCheckedChange={setStatusBar}>
+                Durum çubuğu
+              </MenubarCheckboxItem>
+              <MenubarSeparator />
+              <MenubarRadioGroup value={density} onValueChange={setDensity}>
+                <MenubarRadioItem value="comfortable">Ferah yoğunluk</MenubarRadioItem>
+                <MenubarRadioItem value="compact">Yoğun</MenubarRadioItem>
+              </MenubarRadioGroup>
+            </MenubarContent>
+          </MenubarMenu>
+        </Menubar>
+      </Preview>
+
+      <Preview
+        title="Command"
+        description="cmdk tabanlı komut paleti — typeahead filtreli aksiyon listesi. CommandDialog ile Cmd+K paletine sarılır; inline olarak Popover/Sheet içinde de yaşar. (Yazarak süz.)"
+      >
+        <div className="border-border max-w-input w-full overflow-hidden rounded-md border">
+          <Command>
+            <CommandInput placeholder="Komut ara…" />
+            <CommandList>
+              <CommandEmpty>Sonuç bulunamadı.</CommandEmpty>
+              <CommandGroup heading="Hızlı işlemler">
+                <CommandItem>
+                  Yeni mağaza bağla
+                  <CommandShortcut>⌘N</CommandShortcut>
+                </CommandItem>
+                <CommandItem>
+                  Siparişleri ara
+                  <CommandShortcut>⌘F</CommandShortcut>
+                </CommandItem>
+                <CommandItem>
+                  Maliyet düzenle
+                  <CommandShortcut>⌘⇧E</CommandShortcut>
+                </CommandItem>
+              </CommandGroup>
+              <CommandSeparator />
+              <CommandGroup heading="Gezinme">
+                <CommandItem>Panele git</CommandItem>
+                <CommandItem>Ayarlar</CommandItem>
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </div>
       </Preview>
 
       <Preview
