@@ -636,17 +636,41 @@ export default function InputsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Switch"
-        description="Arka planı boolean açık/kapalı için. Checkbox'tan semantik olarak ayrılır."
+        title="Switch — durumlar · size"
+        description="Anlık açık/kapalı (Checkbox = formda commit). Binary → açık full --primary, 150ms ease-out-quart thumb kayması. Odakta dar offset ring (20px'te kutu-glow yerine). invalid/valid track border; sm/md/lg size (thumb + mesafe orantılı)."
       >
-        <div className="gap-md flex flex-col">
-          <div className="gap-xs flex items-center">
-            <Switch id="s1" />
-            <Label htmlFor="s1">Canlı sipariş feed&apos;i</Label>
+        <div className="gap-lg flex flex-col">
+          <div className="gap-md flex flex-wrap items-center">
+            <div className="gap-xs flex items-center">
+              <Switch id="s1" />
+              <Label htmlFor="s1">Kapalı</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s2" defaultChecked />
+              <Label htmlFor="s2">Açık</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s3" disabled />
+              <Label htmlFor="s3">Devre dışı</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s4" invalid />
+              <Label htmlFor="s4">Hatalı (invalid)</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s5" valid defaultChecked />
+              <Label htmlFor="s5">Doğrulandı (valid)</Label>
+            </div>
           </div>
-          <div className="gap-xs flex items-center">
-            <Switch id="s2" defaultChecked />
-            <Label htmlFor="s2">Haftalık özet e-posta</Label>
+          <div className="gap-md flex items-center">
+            {SIZE_KEYS.map((size) => (
+              <div key={size} className="gap-xs flex items-center">
+                <Switch id={`sw-${size}`} size={size} defaultChecked />
+                <Label htmlFor={`sw-${size}`} className="text-2xs text-muted-foreground font-mono">
+                  {size}
+                </Label>
+              </div>
+            ))}
           </div>
         </div>
       </Preview>
