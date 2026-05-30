@@ -76,9 +76,11 @@ export function Toaster(props: ToasterProps): React.ReactElement | null {
           error:
             'group-[.toaster]:bg-destructive-surface! group-[.toaster]:text-destructive! group-[.toaster]:border-destructive-border!',
           info: 'group-[.toaster]:bg-info-surface! group-[.toaster]:text-info! group-[.toaster]:border-info-border!',
-          // Sonner colors the icon slot itself — force it to inherit the toast's
-          // tone (text-<tone>) so a success toast gets a green check, etc.
-          icon: 'group-[.toast]:mt-px group-[.toast]:text-inherit!',
+          // Sonner colors the icon slot AND pins it to 16px — force it to
+          // inherit the toast's tone (so a success toast gets a green check) and
+          // size to its content (so a larger custom soft-square icon fits
+          // without overflowing the slot).
+          icon: 'group-[.toast]:mt-px group-[.toast]:size-auto! group-[.toast]:shrink-0 group-[.toast]:text-inherit!',
           title: 'group-[.toast]:text-sm group-[.toast]:font-semibold!',
           // Inherit the toast's tone color (never gray-on-tint), dimmed.
           description: 'group-[.toast]:text-2xs group-[.toast]:opacity-80',
