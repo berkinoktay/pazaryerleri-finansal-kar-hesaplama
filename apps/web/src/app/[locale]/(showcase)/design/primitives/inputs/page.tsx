@@ -740,6 +740,36 @@ export default function InputsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
+        title="Slider — tooltip + formatValue"
+        description="tooltip = thumb üstünde değer balonu (hover / sürükleme / klavye odağı). formatValue hem balonu hem aria-valuetext'i biçimler (₺, %). Range'de her thumb kendi balonunu taşır."
+      >
+        <div className="max-w-input gap-xl pt-lg grid">
+          <div className="gap-3xs grid">
+            <Label>Komisyon eşiği (üzerine gel)</Label>
+            <Slider
+              tooltip
+              formatValue={(v) => `₺${v}`}
+              defaultValue={[180]}
+              min={0}
+              max={500}
+              step={5}
+            />
+          </div>
+          <div className="gap-3xs grid">
+            <Label className="text-2xs text-muted-foreground">Kâr marjı aralığı (%)</Label>
+            <Slider
+              tooltip
+              formatValue={(v) => `%${v}`}
+              defaultValue={[15, 40]}
+              min={0}
+              max={100}
+              step={1}
+            />
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
         title="InputOTP"
         description="2FA / SMS kodu doğrulama. Tabular-nums, auto-focus ilerleme, Paste desteği."
       >
