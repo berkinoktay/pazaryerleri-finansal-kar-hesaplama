@@ -241,8 +241,8 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Skeleton"
-        description="İlk yüklemede spinner yerine içerik iskeleti göster. Perceived performance'ı artırır."
+        title="Skeleton — radius sm · animated · label"
+        description="İlk yüklemede spinner yerine içerik iskeleti. radius varsayılan sm (input/text-line köşeleri); şekli className ile ez (avatar=rounded-full). animated=false statik placeholder; label region'ı role=status aria-busy yapar. Perceived performance'ı artırır."
       >
         <div className="max-w-form gap-sm grid">
           <div className="gap-sm flex items-center">
@@ -257,6 +257,13 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
             <Skeleton className="h-3 w-full" />
             <Skeleton className="h-3 w-4/5" />
             <Skeleton className="h-3 w-3/5" />
+          </div>
+          <div className="border-border mt-sm gap-3xs pt-sm grid border-t">
+            <span className="text-2xs text-muted-foreground font-mono">
+              animated=false (statik)
+            </span>
+            <Skeleton animated={false} className="h-3 w-full" />
+            <Skeleton animated={false} className="h-3 w-2/3" />
           </div>
         </div>
       </Preview>
