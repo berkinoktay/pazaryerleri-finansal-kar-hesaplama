@@ -21,13 +21,14 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarGroup } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
+import { StatusDot } from '@/components/ui/status-dot';
 import {
   Table,
   TableBody,
@@ -84,9 +85,9 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Avatar"
-        description="Profil fotoğrafı / inisyalli fallback. Button/Input ile paylaşılan size ailesi (sm/md/lg)."
+        description="Profil fotoğrafı / inisyalli fallback. Paylaşılan size ailesi (sm/md/lg); tone ile fallback tonlu; indicator ile köşe işareti (StatusDot/rozet); AvatarGroup ile üst üste yığın + +N taşma."
       >
-        <div className="gap-md flex flex-col">
+        <div className="gap-lg flex flex-col">
           <div className="gap-md flex flex-wrap items-center">
             <Avatar size="sm">
               <AvatarFallback>BO</AvatarFallback>
@@ -97,20 +98,51 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
             <Avatar size="lg">
               <AvatarFallback>BO</AvatarFallback>
             </Avatar>
+            <span className="text-muted-foreground text-sm">sm · md · lg</span>
           </div>
-          <div className="flex items-center -space-x-2">
-            <Avatar className="ring-card ring-2">
+          <div className="gap-sm flex flex-wrap items-center">
+            <Avatar>
+              <AvatarFallback tone="neutral">BO</AvatarFallback>
+            </Avatar>
+            <Avatar>
+              <AvatarFallback tone="primary">AY</AvatarFallback>
+            </Avatar>
+            <Avatar>
+              <AvatarFallback tone="success">MK</AvatarFallback>
+            </Avatar>
+            <Avatar>
+              <AvatarFallback tone="warning">FŞ</AvatarFallback>
+            </Avatar>
+            <span className="text-muted-foreground text-sm">tone</span>
+          </div>
+          <div className="gap-md flex flex-wrap items-center">
+            <Avatar indicator={<StatusDot tone="success" size="lg" />}>
               <AvatarFallback>BO</AvatarFallback>
             </Avatar>
-            <Avatar className="ring-card ring-2">
-              <AvatarFallback>AY</AvatarFallback>
+            <Avatar indicator={<StatusDot tone="warning" size="lg" />}>
+              <AvatarFallback tone="primary">AY</AvatarFallback>
             </Avatar>
-            <Avatar className="ring-card ring-2">
-              <AvatarFallback>MK</AvatarFallback>
-            </Avatar>
-            <Avatar className="ring-card ring-2">
-              <AvatarFallback>+3</AvatarFallback>
-            </Avatar>
+            <span className="text-muted-foreground text-sm">indicator (StatusDot)</span>
+          </div>
+          <div className="gap-md flex flex-wrap items-center">
+            <AvatarGroup max={3} overflowLabel={(n) => `+${n} kişi daha`}>
+              <Avatar>
+                <AvatarFallback>BO</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback tone="primary">AY</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback tone="success">MK</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback>DK</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback>EŞ</AvatarFallback>
+              </Avatar>
+            </AvatarGroup>
+            <span className="text-muted-foreground text-sm">AvatarGroup max=3 → +2</span>
           </div>
         </div>
       </Preview>
