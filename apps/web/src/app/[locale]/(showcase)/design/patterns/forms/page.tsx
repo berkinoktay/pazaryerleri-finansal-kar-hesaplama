@@ -75,14 +75,14 @@ export default function FormsPatternsPage(): React.ReactElement {
         description="Tek tarih seçimi — DateRangePicker'ın kardeşi. Trigger geometry aynı (outline buton + Calendar01Icon + tr-TR formatlı label) ki yan yana kullanıldığında görsel tutarlılık bozulmasın. Tarih seçilince popover kendi kapanır."
       >
         <div className="gap-md grid sm:grid-cols-2">
-          <div className="gap-3xs flex flex-col">
+          <div className="gap-3xs flex flex-col items-start">
             <span className="text-2xs text-muted-foreground font-medium">Fatura tarihi</span>
             <DateInput value={invoiceDate} onChange={setInvoiceDate} />
             <span className="text-2xs text-muted-foreground tabular-nums">
               ISO: {invoiceDate ? invoiceDate.toISOString().split('T')[0] : '— (boş)'}
             </span>
           </div>
-          <div className="gap-3xs flex flex-col">
+          <div className="gap-3xs flex flex-col items-start">
             <span className="text-2xs text-muted-foreground font-medium">Vade tarihi (boş)</span>
             <DateInput value={dueDate} onChange={setDueDate} />
             <span className="text-2xs text-muted-foreground">
@@ -110,7 +110,7 @@ export default function FormsPatternsPage(): React.ReactElement {
         title="DateRangePicker"
         description="Popover içinde Calendar (mode='range', tr-TR locale, 2 ay yan yana). Trigger outline buton — Input gibi durur. Range tamamlandığında popover kendi kapanır. Tek tarih için DateInput kullan."
       >
-        <div className="gap-3xs flex flex-col">
+        <div className="gap-3xs flex flex-col items-start">
           <DateRangePicker value={range} onChange={setRange} />
           <span className="text-2xs text-muted-foreground">
             Seçim: {range?.from?.toISOString().split('T')[0] ?? '—'} →{' '}

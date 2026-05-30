@@ -55,7 +55,7 @@ export default function DateTimePrimitivePage(): React.ReactElement {
         title="DateRangePicker pattern"
         description="Calendar + Popover kompozisyonu. Dashboard sayfalarının filtre barında kullanılacak."
       >
-        <div className="gap-sm grid">
+        <div className="gap-sm flex flex-col items-start">
           <DateRangePicker value={range} onChange={setRange} />
           <p className="text-2xs text-muted-foreground">
             Aralık seçildiğinde popover otomatik kapanır. Değeri parent state tutar.
