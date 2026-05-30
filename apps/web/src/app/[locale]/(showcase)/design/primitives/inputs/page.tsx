@@ -709,15 +709,33 @@ export default function InputsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Slider"
-        description="Fiyat aralığı, komisyon eşiği gibi sürekli değerler için. Değer tabular-nums ile hizalı gösterilir."
+        title="Slider — flat thumb · range · disabled · size"
+        description="Flat dolu --primary thumb (artık tek 'outlined' primitive değil). İki-elemanlı value = range picker. disabled tüm kontrolü soldurur; sm/md/lg track+thumb ölçekler; dokunmada thumb 44px'e açılır."
       >
-        <div className="max-w-input gap-sm grid">
-          <div className="flex items-center justify-between text-sm">
-            <Label>Net kar hedefi</Label>
-            <span className="text-foreground font-mono tabular-nums">₺{price[0]?.toFixed(0)}</span>
+        <div className="max-w-input gap-lg grid">
+          <div className="gap-sm grid">
+            <div className="flex items-center justify-between text-sm">
+              <Label>Net kar hedefi</Label>
+              <span className="text-foreground font-mono tabular-nums">
+                ₺{price[0]?.toFixed(0)}
+              </span>
+            </div>
+            <Slider value={price} onValueChange={setPrice} min={0} max={500} step={5} />
           </div>
-          <Slider value={price} onValueChange={setPrice} min={0} max={500} step={5} />
+          <div className="gap-3xs grid">
+            <Label className="text-2xs text-muted-foreground">Range (iki thumb)</Label>
+            <Slider defaultValue={[120, 360]} min={0} max={500} step={5} />
+          </div>
+          <div className="gap-3xs grid">
+            <Label className="text-2xs text-muted-foreground">Devre dışı</Label>
+            <Slider defaultValue={[200]} min={0} max={500} disabled />
+          </div>
+          {SIZE_KEYS.map((size) => (
+            <div key={size} className="gap-3xs grid">
+              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
+              <Slider size={size} defaultValue={[180]} min={0} max={500} />
+            </div>
+          ))}
         </div>
       </Preview>
 
