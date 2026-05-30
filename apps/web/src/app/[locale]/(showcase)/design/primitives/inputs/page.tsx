@@ -771,21 +771,39 @@ export default function InputsPrimitivePage(): React.ReactElement {
 
       <Preview
         title="InputOTP"
-        description="2FA / SMS kodu doğrulama. Tabular-nums, auto-focus ilerleme, Paste desteği."
+        description="2FA / SMS kodu doğrulama. Tabular-nums, auto-focus ilerleme, Paste desteği. Aktif slot field-focus (border-ring + glow), caret hard-blink. invalid → destructive border + shake."
       >
-        <InputOTP maxLength={6}>
-          <InputOTPGroup>
-            <InputOTPSlot index={0} />
-            <InputOTPSlot index={1} />
-            <InputOTPSlot index={2} />
-          </InputOTPGroup>
-          <InputOTPSeparator />
-          <InputOTPGroup>
-            <InputOTPSlot index={3} />
-            <InputOTPSlot index={4} />
-            <InputOTPSlot index={5} />
-          </InputOTPGroup>
-        </InputOTP>
+        <div className="gap-md flex flex-col">
+          <InputOTP maxLength={6}>
+            <InputOTPGroup>
+              <InputOTPSlot index={0} />
+              <InputOTPSlot index={1} />
+              <InputOTPSlot index={2} />
+            </InputOTPGroup>
+            <InputOTPSeparator />
+            <InputOTPGroup>
+              <InputOTPSlot index={3} />
+              <InputOTPSlot index={4} />
+              <InputOTPSlot index={5} />
+            </InputOTPGroup>
+          </InputOTP>
+          <div className="gap-2xs flex flex-col">
+            <InputOTP maxLength={6} invalid defaultValue="123">
+              <InputOTPGroup>
+                <InputOTPSlot index={0} />
+                <InputOTPSlot index={1} />
+                <InputOTPSlot index={2} />
+              </InputOTPGroup>
+              <InputOTPSeparator />
+              <InputOTPGroup>
+                <InputOTPSlot index={3} />
+                <InputOTPSlot index={4} />
+                <InputOTPSlot index={5} />
+              </InputOTPGroup>
+            </InputOTP>
+            <span className="text-2xs text-destructive">invalid — geçersiz kod</span>
+          </div>
+        </div>
       </Preview>
     </>
   );

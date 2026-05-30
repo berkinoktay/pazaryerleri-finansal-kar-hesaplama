@@ -2,16 +2,12 @@ import { cn } from '@/lib/utils';
 
 /**
  * Display a single keyboard key or shortcut hint (`⌘K`, `Esc`, `?`).
- * The styling adapts when nested inside a Tooltip content slot so the
- * hint stays legible against the tooltip's inverted surface. Compose
- * multi-chord shortcuts (e.g. `⌘ + K`) inside a `KbdGroup` so the
- * separator characters get consistent spacing.
- *
- * NOTE: the tooltip-context override currently uses `bg-background/20`
- * + `dark:bg-background/10` alpha shortcuts. These are CLAUDE.md rule
- * violations that need a tokenized fix paired with Tooltip's surface
- * contract — left for a focused Kbd / Tooltip follow-up rather than
- * touched in this Phase 1 annotation pass.
+ * Renders as a uniform square cap (≈20px min-width, token-driven) so
+ * single keys line up regardless of glyph width. The base
+ * `bg-muted` / `text-muted-foreground` surface reads correctly
+ * everywhere, including inside the now-`bg-card` Tooltip content slot.
+ * Compose multi-chord shortcuts (e.g. `⌘ + K`) inside a `KbdGroup` so
+ * the separator characters get consistent spacing.
  *
  * @useWhen displaying a keyboard key or chord hint inline (use KbdGroup to compose multi-key shortcuts with consistent spacing)
  */
@@ -20,9 +16,8 @@ function Kbd({ className, ...props }: React.ComponentProps<'kbd'>) {
     <kbd
       data-slot="kbd"
       className={cn(
-        'bg-muted text-muted-foreground pointer-events-none inline-flex h-5 w-fit min-w-5 items-center justify-center gap-1 rounded-sm px-1 font-sans text-xs font-medium select-none',
-        "[&_svg:not([class*='size-'])]:size-3",
-        '[[data-slot=tooltip-content]_&]:bg-background/20 [[data-slot=tooltip-content]_&]:text-background dark:[[data-slot=tooltip-content]_&]:bg-background/10',
+        'border-border bg-muted text-muted-foreground min-w-icon-lg px-3xs py-3xs text-2xs pointer-events-none inline-flex items-center justify-center rounded-xs border align-middle font-medium select-none',
+        "[&_svg:not([class*='size-'])]:size-icon-xs",
         className,
       )}
       {...props}
@@ -30,11 +25,11 @@ function Kbd({ className, ...props }: React.ComponentProps<'kbd'>) {
   );
 }
 
-function KbdGroup({ className, ...props }: React.ComponentProps<'div'>) {
+function KbdGroup({ className, ...props }: React.ComponentProps<'span'>) {
   return (
-    <kbd
+    <span
       data-slot="kbd-group"
-      className={cn('inline-flex items-center gap-1', className)}
+      className={cn('gap-2xs inline-flex items-center', className)}
       {...props}
     />
   );
