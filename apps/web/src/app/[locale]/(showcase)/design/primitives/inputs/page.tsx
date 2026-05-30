@@ -3,6 +3,7 @@
 import {
   Building03Icon,
   Calendar01Icon,
+  InformationCircleIcon,
   Mail01Icon,
   Search01Icon,
   UserIcon,
@@ -39,6 +40,7 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SIZE_KEYS } from '@/lib/variants';
 
 export default function InputsPrimitivePage(): React.ReactElement {
@@ -76,6 +78,49 @@ export default function InputsPrimitivePage(): React.ReactElement {
           <div className="gap-3xs flex flex-col">
             <Label htmlFor="disabled-input">Devre dışı</Label>
             <Input id="disabled-input" disabled defaultValue="Değiştirilemez" />
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Label — required · hata tonu · hint · peer-disabled"
+        description="required dekoratif * ekler (alan ayrıca required taşımalı — aria-required). Hata tonu FormLabel'in text-destructive'i, transition-colors ile yumuşar. hint = etiket yanına Tooltip'li bilgi ikonu. peer-disabled YALNIZ checkbox/radio satırında (kontrol önce gelir) söner; üstte-yığılı alanlarda form düzeyinde."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="store-name" required>
+              Mağaza adı
+            </Label>
+            <Input id="store-name" required placeholder="Zorunlu alan" />
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="store-name-err" required className="text-destructive">
+              Mağaza adı
+            </Label>
+            <Input id="store-name-err" required aria-invalid />
+            <span className="text-2xs text-destructive">Bu alan zorunlu.</span>
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label
+              htmlFor="desi"
+              hint={
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0} role="img" aria-label="Desi nedir?" className="cursor-help">
+                      <InformationCircleIcon />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Desi = (en × boy × yükseklik) / 3000</TooltipContent>
+                </Tooltip>
+              }
+            >
+              Desi
+            </Label>
+            <Input id="desi" type="number" placeholder="0" className="tabular-nums" />
+          </div>
+          <div className="gap-xs flex items-center">
+            <Checkbox id="peer-cb" disabled className="peer" />
+            <Label htmlFor="peer-cb">Pasif seçenek (peer-disabled söner)</Label>
           </div>
         </div>
       </Preview>
