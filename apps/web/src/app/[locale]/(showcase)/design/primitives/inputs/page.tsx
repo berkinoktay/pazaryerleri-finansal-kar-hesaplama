@@ -589,19 +589,48 @@ export default function InputsPrimitivePage(): React.ReactElement {
         </div>
       </Preview>
 
-      <Preview title="Checkbox" description="Bağımsız checkbox ve form içinde checkbox.">
-        <div className="gap-md flex flex-col">
-          <div className="gap-xs flex items-center">
-            <Checkbox id="c1" />
-            <Label htmlFor="c1">Otomatik senkronizasyon</Label>
+      <Preview
+        title="Checkbox — durumlar · tri-state · size"
+        description={
+          'Binary kontrol → checked full --primary (Toggle’ın primary-soft’undan ayrı). checked="indeterminate" tablo "tümünü seç" başlığı için minus gösterir; tik fade-in ile gelir. invalid/valid form doğrulama, sm/md/lg size ekseni.'
+        }
+      >
+        <div className="gap-lg flex flex-col">
+          <div className="gap-md flex flex-wrap items-center">
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c1" />
+              <Label htmlFor="c1">Varsayılan</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c2" defaultChecked />
+              <Label htmlFor="c2">İşaretli</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c3" checked="indeterminate" />
+              <Label htmlFor="c3">Kısmi (indeterminate)</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c4" disabled />
+              <Label htmlFor="c4">Devre dışı</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c5" invalid />
+              <Label htmlFor="c5">Hatalı (invalid)</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c6" valid defaultChecked />
+              <Label htmlFor="c6">Doğrulandı (valid)</Label>
+            </div>
           </div>
-          <div className="gap-xs flex items-center">
-            <Checkbox id="c2" defaultChecked />
-            <Label htmlFor="c2">Hata bildirimlerini al</Label>
-          </div>
-          <div className="gap-xs flex items-center">
-            <Checkbox id="c3" disabled />
-            <Label htmlFor="c3">Pasif (disabled)</Label>
+          <div className="gap-md flex items-center">
+            {SIZE_KEYS.map((size) => (
+              <div key={size} className="gap-xs flex items-center">
+                <Checkbox id={`cb-${size}`} size={size} defaultChecked />
+                <Label htmlFor={`cb-${size}`} className="text-2xs text-muted-foreground font-mono">
+                  {size}
+                </Label>
+              </div>
+            ))}
           </div>
         </div>
       </Preview>
