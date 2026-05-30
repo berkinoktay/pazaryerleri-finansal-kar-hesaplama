@@ -170,8 +170,8 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="StatusDot"
-        description="Sadece renkli nokta — etiket istemediğinde Badge'den hafif. Tonlar Alert / Badge / TrendDelta ile aynı kelimeye sahip; sm (6px) sıkı satırlar için, md (8px) varsayılan. Renk asla tek sinyal değildir; çevresinde her zaman bir etiket / ikon olmalı."
+        title="StatusDot — size · animatePulse · label"
+        description="Renkli nokta + opsiyonel inline label (label slot'u → text erişilebilir ad, nokta dekoratif). sm (6px) / md (8px, default) / lg (12px). animatePulse aktif-senkron 'alive' göstergesi (org-switcher artık bunu kullanıyor). Renk asla tek sinyal değil — yanında daima etiket/ikon."
       >
         <div className="gap-md flex flex-col">
           <div className="gap-xs flex items-center">
@@ -196,17 +196,23 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
             <StatusDot tone="neutral" />
             <span className="text-muted-foreground text-sm">Pasif mağaza</span>
           </div>
-          <div className="gap-md pt-md flex items-center">
-            <span className="text-2xs text-muted-foreground font-mono">size = sm</span>
+          <div className="gap-md pt-md flex flex-wrap items-center">
+            <span className="text-2xs text-muted-foreground font-mono">sm</span>
             <StatusDot tone="success" size="sm" />
             <StatusDot tone="warning" size="sm" />
-            <StatusDot tone="destructive" size="sm" />
-            <StatusDot tone="info" size="sm" />
-            <span className="text-2xs text-muted-foreground font-mono">size = md (default)</span>
+            <span className="text-2xs text-muted-foreground font-mono">md</span>
             <StatusDot tone="success" />
             <StatusDot tone="warning" />
-            <StatusDot tone="destructive" />
-            <StatusDot tone="info" />
+            <span className="text-2xs text-muted-foreground font-mono">lg</span>
+            <StatusDot tone="success" size="lg" />
+            <StatusDot tone="warning" size="lg" />
+          </div>
+          <div className="gap-md flex flex-wrap items-center">
+            <span className="text-2xs text-muted-foreground font-mono">animatePulse</span>
+            <StatusDot tone="success" animatePulse />
+            <span className="text-2xs text-muted-foreground font-mono">label slot</span>
+            <StatusDot tone="success" label={<span className="text-sm">Senkronize</span>} />
+            <StatusDot tone="destructive" label={<span className="text-sm">Başarısız</span>} />
           </div>
         </div>
       </Preview>

@@ -8,6 +8,7 @@ import * as React from 'react';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getOrgAvatarPalette, type OrgAvatarPalette } from '@/lib/org-avatar-color';
 import { cn } from '@/lib/utils';
@@ -58,10 +59,10 @@ const PALETTE_BG: Record<OrgAvatarPalette, string> = {
   accent: 'bg-accent text-accent-foreground',
 };
 
-const SYNC_BG: Record<SyncState, string> = {
-  fresh: 'bg-success',
-  stale: 'bg-warning',
-  failed: 'bg-destructive',
+const SYNC_TONE: Record<SyncState, StatusDotProps['tone']> = {
+  fresh: 'success',
+  stale: 'warning',
+  failed: 'destructive',
 };
 
 /** Border tint applied to the chip itself when the active store has a
@@ -196,13 +197,7 @@ export function OrgStoreSwitcher({
             </span>
             {activeStore ? (
               <span className="text-muted-foreground gap-3xs text-2xs flex w-full items-center truncate text-left leading-tight">
-                <span
-                  aria-hidden
-                  className={cn(
-                    'animate-sync-pulse size-2 shrink-0 rounded-full',
-                    SYNC_BG[activeStore.syncState],
-                  )}
-                />
+                <StatusDot tone={SYNC_TONE[activeStore.syncState]} animatePulse />
                 <span className="truncate">{activeStore.name}</span>
               </span>
             ) : null}

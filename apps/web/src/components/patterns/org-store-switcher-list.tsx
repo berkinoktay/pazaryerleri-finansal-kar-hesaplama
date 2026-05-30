@@ -9,6 +9,7 @@ import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Command,
@@ -62,10 +63,10 @@ const PALETTE_BG: Record<OrgAvatarPalette, string> = {
   accent: 'bg-accent text-accent-foreground',
 };
 
-const SYNC_BG: Record<SyncState, string> = {
-  fresh: 'bg-success',
-  stale: 'bg-warning',
-  failed: 'bg-destructive',
+const SYNC_TONE: Record<SyncState, StatusDotProps['tone']> = {
+  fresh: 'success',
+  stale: 'warning',
+  failed: 'destructive',
 };
 
 const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember' | 'roleViewer'> = {
@@ -504,13 +505,7 @@ function StoreRow({
           <HighlightedText text={store.name} />
         </span>
         <span className="text-muted-foreground gap-3xs text-2xs flex items-center truncate">
-          <span
-            aria-hidden
-            className={cn(
-              'animate-sync-pulse size-2 shrink-0 rounded-full',
-              SYNC_BG[store.syncState],
-            )}
-          />
+          <StatusDot tone={SYNC_TONE[store.syncState]} animatePulse />
           <span className="truncate">{meta}</span>
         </span>
       </span>
