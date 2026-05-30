@@ -11,6 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
 import { StatusDot } from '@/components/ui/status-dot';
 
 export default function FeedbackPrimitivePage(): React.ReactElement {
@@ -166,6 +167,28 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
             <Progress value={60} size="sm" />
             <Progress value={60} size="lg" tone="warning" />
           </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Spinner — size · tone"
+        description="CSS dönen yay. Varsayılan currentColor miras alır (Button/Select loading'de 16px değişmeden oturur). size sm(12)/md(16)/lg(20); tone bağımsız durum göstergesi için (async başarı = success spinner). prefers-reduced-motion global olarak dönüşü durdurur (fonksiyonel sürekli motion)."
+      >
+        <div className="gap-lg flex flex-wrap items-center">
+          <div className="gap-md flex items-center">
+            <Spinner size="sm" label="Yükleniyor" />
+            <Spinner size="md" label="Yükleniyor" />
+            <Spinner size="lg" label="Yükleniyor" />
+          </div>
+          <div className="gap-md flex items-center">
+            <Spinner tone="primary" label="Yükleniyor" />
+            <Spinner tone="success" label="Yükleniyor" />
+            <Spinner tone="warning" label="Yükleniyor" />
+            <Spinner tone="destructive" label="Yükleniyor" />
+          </div>
+          <Button loading loadingText="Kaydediliyor…">
+            Kaydet
+          </Button>
         </div>
       </Preview>
 
