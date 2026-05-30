@@ -483,7 +483,7 @@
       "path": "apps/web/src/components/ui/separator.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "drawing a thin horizontal or vertical line between sibling content groups that need a visible boundary beyond plain spacing"
+      "useWhen": "drawing a thin horizontal or vertical line between sibling content groups that need a visible boundary beyond plain spacing (pick `variant` to match how hard the separation should read)"
     },
     {
       "name": "Sheet",

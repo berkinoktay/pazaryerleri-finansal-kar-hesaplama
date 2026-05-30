@@ -146,25 +146,37 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Collapsible"
-        description="Tek seferlik show/hide. Accordion'un basit versiyonu."
+        description="Tek seferlik show/hide. Styled trigger (chevron + nötr surface hover) + height-animasyonlu içerik (collapsible-down/up). asChild ile tamamen özel tetikleyici de verilebilir."
       >
-        <Collapsible className="max-w-form gap-sm grid">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Gelişmiş ayarlar</span>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm">
-                Aç / kapa
-              </Button>
-            </CollapsibleTrigger>
-          </div>
-          <CollapsibleContent className="border-border p-md text-muted-foreground rounded-md border border-dashed text-sm">
-            Burada gelişmiş senkronizasyon ayarları yer alır. Özel tarih aralığı, hangi statüdeki
-            siparişlerin çekileceği, retry politikası…
-          </CollapsibleContent>
-        </Collapsible>
+        <div className="gap-lg flex flex-col">
+          <Collapsible className="max-w-form">
+            <CollapsibleTrigger>Gelişmiş ayarlar</CollapsibleTrigger>
+            <CollapsibleContent className="text-muted-foreground px-sm pt-2xs pb-sm text-sm">
+              Burada gelişmiş senkronizasyon ayarları yer alır. Özel tarih aralığı, hangi statüdeki
+              siparişlerin çekileceği, retry politikası…
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible className="max-w-form">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">asChild — özel tetikleyici</span>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  Aç / kapa
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+            <CollapsibleContent className="border-border mt-sm p-md text-muted-foreground rounded-md border border-dashed text-sm">
+              asChild pass-through: tetikleyici tamamen senin (Button), chevron enjekte edilmez.
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
       </Preview>
 
-      <Preview title="Separator" description="İnce yatay / dikey ayraç.">
+      <Preview
+        title="Separator"
+        description="İnce yatay / dikey ayraç. variant ağırlığı bağlama göre ayarlar: muted (kart-içi ince) · default · strong (ana bölümler arası) — hepsi border token ailesinden."
+      >
         <div className="gap-md flex flex-col">
           <div>
             <span className="text-sm">Üst içerik</span>
@@ -177,6 +189,14 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
             <span className="text-sm">Orta</span>
             <Separator orientation="vertical" />
             <span className="text-sm">Sağ</span>
+          </div>
+          <div className="gap-xs flex flex-col">
+            {(['muted', 'default', 'strong'] as const).map((variant) => (
+              <div key={variant} className="gap-sm flex items-center">
+                <span className="text-2xs text-muted-foreground w-12 font-mono">{variant}</span>
+                <Separator variant={variant} className="flex-1" />
+              </div>
+            ))}
           </div>
         </div>
       </Preview>
