@@ -29,16 +29,16 @@ interface DeliveryBadgeProps {
  *   standard → outline — calmest tone, the default lead time, no signal
  *              the seller needs to act on.
  */
-const TONE: Record<DeliveryType, NonNullable<BadgeProps['tone']>> = {
-  sameDay: 'success',
-  fast: 'info',
-  standard: 'outline',
+const BADGE: Record<DeliveryType, { tone: BadgeProps['tone']; variant?: BadgeProps['variant'] }> = {
+  sameDay: { tone: 'success' },
+  fast: { tone: 'info' },
+  standard: { tone: 'neutral', variant: 'outline' },
 };
 
 export function DeliveryBadge({ type, mixed = false }: DeliveryBadgeProps): React.ReactElement {
   const t = useTranslations('products.delivery');
   if (mixed) {
-    return <Badge tone="outline">{t('mixed')}</Badge>;
+    return <Badge variant="outline">{t('mixed')}</Badge>;
   }
   if (type === null) {
     return <span className="text-muted-foreground">—</span>;
@@ -47,5 +47,9 @@ export function DeliveryBadge({ type, mixed = false }: DeliveryBadgeProps): Reac
   // same shape as the i18n keys under `products.delivery.*`, so we can
   // pass the type directly as the message key — no separate label map
   // needed (and next-intl's literal-keyed `t()` typecheck stays happy).
-  return <Badge tone={TONE[type]}>{t(type)}</Badge>;
+  return (
+    <Badge tone={BADGE[type].tone} variant={BADGE[type].variant}>
+      {t(type)}
+    </Badge>
+  );
 }

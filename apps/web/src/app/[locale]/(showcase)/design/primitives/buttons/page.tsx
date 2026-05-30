@@ -16,12 +16,12 @@ import * as React from 'react';
 import { PageHeader } from '@/components/patterns/page-header';
 import { PrimitiveNav } from '@/components/showcase/primitive-nav';
 import { Preview } from '@/components/showcase/preview';
-import { Badge } from '@/components/ui/badge';
+import { Badge, BADGE_VARIANTS } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Link } from '@/i18n/navigation';
-import { RADIUS_KEYS, SIZE_KEYS } from '@/lib/variants';
+import { RADIUS_KEYS, SIZE_KEYS, TONE_KEYS } from '@/lib/variants';
 
 export default function ButtonsPrimitivePage(): React.ReactElement {
   const t = useTranslations('common');
@@ -185,17 +185,22 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Badge tonları"
-        description="Neutral, Primary, Outline, Success, Destructive, Warning, Info. Ton rengi yüzeyle taşınır; yan-şerit border yasak."
+        title="Badge — tone × variant"
+        description="Orthogonal: tone (renk) × variant. surface (soluk tint) = varsayılan, 60-30-10'un sakin '30'u; solid (dolu) = nadir '10' aksan; outline (kenarlık) = alternatif. Yan-şerit border yasak; radius varsayılan md."
       >
-        <div className="gap-xs flex flex-wrap">
-          <Badge>Neutral</Badge>
-          <Badge tone="primary">Primary</Badge>
-          <Badge tone="outline">Outline</Badge>
-          <Badge tone="success">Teslim edildi</Badge>
-          <Badge tone="destructive">İade</Badge>
-          <Badge tone="warning">Bekleyen</Badge>
-          <Badge tone="info">Kargoda</Badge>
+        <div className="gap-md flex flex-col">
+          {BADGE_VARIANTS.map((variant) => (
+            <div key={variant} className="gap-2xs flex flex-col">
+              <span className="text-2xs text-muted-foreground font-mono">variant = {variant}</span>
+              <div className="gap-xs flex flex-wrap">
+                {TONE_KEYS.map((tone) => (
+                  <Badge key={tone} tone={tone} variant={variant}>
+                    {tone}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </Preview>
 

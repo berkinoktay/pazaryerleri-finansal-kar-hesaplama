@@ -75,11 +75,12 @@ const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember' | 'role
   VIEWER: 'roleViewer',
 };
 
-const ROLE_TONE: Record<OrgRole, NonNullable<BadgeProps['tone']>> = {
-  OWNER: 'primary',
-  ADMIN: 'neutral',
-  MEMBER: 'outline',
-  VIEWER: 'outline',
+// OWNER stands out (solid primary); MEMBER/VIEWER stay low-emphasis (outline).
+const ROLE_BADGE: Record<OrgRole, { tone: BadgeProps['tone']; variant?: BadgeProps['variant'] }> = {
+  OWNER: { tone: 'primary', variant: 'solid' },
+  ADMIN: { tone: 'neutral' },
+  MEMBER: { tone: 'neutral', variant: 'outline' },
+  VIEWER: { tone: 'neutral', variant: 'outline' },
 };
 
 /** When the user belongs to this many orgs the dropdown splits into a
@@ -439,7 +440,13 @@ function OrgRow({
         </span>
         {meta ? <span className="text-muted-foreground text-2xs truncate">{meta}</span> : null}
       </span>
-      <Badge tone={ROLE_TONE[org.role]} size="sm" radius="sm" className="shrink-0">
+      <Badge
+        tone={ROLE_BADGE[org.role].tone}
+        variant={ROLE_BADGE[org.role].variant}
+        size="sm"
+        radius="sm"
+        className="shrink-0"
+      >
         {t(ROLE_KEY[org.role])}
       </Badge>
       {isActive ? (

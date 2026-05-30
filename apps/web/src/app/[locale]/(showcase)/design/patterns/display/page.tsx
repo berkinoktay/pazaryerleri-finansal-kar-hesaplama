@@ -120,7 +120,7 @@ export default function DisplayPatternsPage(): React.ReactElement {
           <BadgeWithOverflow tone="destructive" overflowCount={1}>
             Engellenmiş
           </BadgeWithOverflow>
-          <BadgeWithOverflow tone="outline">Pasif</BadgeWithOverflow>
+          <BadgeWithOverflow variant="outline">Pasif</BadgeWithOverflow>
         </div>
       </Preview>
 
@@ -136,8 +136,9 @@ export default function DisplayPatternsPage(): React.ReactElement {
               archived: 'neutral',
               locked: 'warning',
               blacklisted: 'destructive',
-              inactive: 'outline',
+              inactive: 'neutral',
             }}
+            variantMap={{ inactive: 'outline' }}
             labelMap={{
               onSale: 'Satışta',
               archived: 'Arşiv',
@@ -153,8 +154,9 @@ export default function DisplayPatternsPage(): React.ReactElement {
               archived: 'neutral',
               locked: 'warning',
               blacklisted: 'destructive',
-              inactive: 'outline',
+              inactive: 'neutral',
             }}
+            variantMap={{ inactive: 'outline' }}
             labelMap={{
               onSale: 'Satışta',
               archived: 'Arşiv',

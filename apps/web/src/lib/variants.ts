@@ -67,3 +67,76 @@ export const sizePaddingXClass: Record<SizeKey, string> = {
   md: 'px-sm',
   lg: 'px-md',
 };
+
+/**
+ * Canonical semantic-tone vocabulary — the SINGLE source for which tones
+ * exist and which token pairing each "shape" of a tone-bearing primitive
+ * uses (Badge, Alert, Sonner, Progress, Spinner, StatusDot all key off this).
+ *
+ * The load-bearing contract (caused the 2026-05 badge-warning revert, see
+ * apps/web/CLAUDE.md "Dark-mode discipline"):
+ *   tinted surface = `bg-<tone>-surface` + `text-<tone>`
+ *   solid fill     = `bg-<tone>`         + `text-<tone>-foreground`
+ *   NEVER `text-<tone>-foreground` on `bg-<tone>-surface`.
+ * Every `text-<tone>` here clears 4.5:1 on both neutral bg and its own
+ * `-surface` in light + dark. Change one tone → change all six.
+ */
+export const TONE_KEYS = [
+  'neutral',
+  'primary',
+  'success',
+  'warning',
+  'destructive',
+  'info',
+] as const;
+export type ToneKey = (typeof TONE_KEYS)[number];
+
+/** Tinted surface (chip / alert / toast): pale bg + readable tone text. */
+export const toneSurfaceClass: Record<ToneKey, string> = {
+  neutral: 'bg-muted text-foreground',
+  primary: 'bg-primary-soft text-primary-soft-foreground',
+  success: 'bg-success-surface text-success',
+  warning: 'bg-warning-surface text-warning',
+  destructive: 'bg-destructive-surface text-destructive',
+  info: 'bg-info-surface text-info',
+};
+
+/** Solid fill (high-contrast chip / filled bar): saturated bg + foreground text. */
+export const toneSolidClass: Record<ToneKey, string> = {
+  neutral: 'bg-foreground text-background',
+  primary: 'bg-primary text-primary-foreground',
+  success: 'bg-success text-success-foreground',
+  warning: 'bg-warning text-warning-foreground',
+  destructive: 'bg-destructive text-destructive-foreground',
+  info: 'bg-info text-info-foreground',
+};
+
+/** Outline (tone border + tone text on a transparent surface). */
+export const toneOutlineClass: Record<ToneKey, string> = {
+  neutral: 'border-border text-foreground',
+  primary: 'border-primary text-primary',
+  success: 'border-success text-success',
+  warning: 'border-warning text-warning',
+  destructive: 'border-destructive text-destructive',
+  info: 'border-info text-info',
+};
+
+/** Bare tone fill (progress range, status dot) — background only. */
+export const toneFillClass: Record<ToneKey, string> = {
+  neutral: 'bg-muted-foreground',
+  primary: 'bg-primary',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  destructive: 'bg-destructive',
+  info: 'bg-info',
+};
+
+/** Bare tone text/icon color (spinner, standalone icon). */
+export const toneTextClass: Record<ToneKey, string> = {
+  neutral: 'text-muted-foreground',
+  primary: 'text-primary',
+  success: 'text-success',
+  warning: 'text-warning',
+  destructive: 'text-destructive',
+  info: 'text-info',
+};
