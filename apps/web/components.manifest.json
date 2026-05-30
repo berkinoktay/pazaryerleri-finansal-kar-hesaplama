@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 95,
+  "count": 96,
   "components": [
     {
       "name": "Accordion",
@@ -162,6 +162,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "surfacing a short identifier the user is likely to paste"
+    },
+    {
+      "name": "CountBadge",
+      "path": "apps/web/src/components/ui/count-badge.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "showing a small solid numeric count pill (unread / pending / tab counts) — use Badge for labelled status chips"
     },
     {
       "name": "Currency",

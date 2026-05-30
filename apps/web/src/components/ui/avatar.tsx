@@ -25,9 +25,9 @@ import { cn } from '@/lib/utils';
  * @useWhen rendering a single user or organization avatar with image + initials fallback (the fallback shows automatically on image load failure)
  */
 
-// Avatar uses the shared size ladder (sm/md/lg) — same keys as Button/Input/Badge.
-// The default `md` (40px) is a comfortable target for profile chips and user rows;
-// 24px was an icon-scale holdover and too small for a recognizable avatar.
+// Avatar uses the shared size ladder (sm/md/lg = 32/40/48px) — same keys as
+// Button / Input / Badge so user rows stay rhythmically consistent. The
+// default `md` (40px) is a comfortable target for profile chips and user rows.
 const avatarVariants = cva('relative flex shrink-0 overflow-hidden rounded-full', {
   variants: {
     size: {

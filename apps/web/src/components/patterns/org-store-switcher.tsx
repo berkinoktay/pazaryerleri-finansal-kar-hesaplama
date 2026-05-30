@@ -344,7 +344,7 @@ function SwitcherAvatar({
   return (
     <span className="relative shrink-0">
       <Avatar size="md" className={cn('rounded-md', PALETTE_BG[palette])}>
-        <AvatarFallback className={cn('rounded-md text-sm font-semibold', PALETTE_BG[palette])}>
+        <AvatarFallback className={cn('rounded-md text-sm', PALETTE_BG[palette])}>
           {initial}
         </AvatarFallback>
       </Avatar>

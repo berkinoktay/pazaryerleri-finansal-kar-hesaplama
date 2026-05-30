@@ -10,6 +10,7 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -100,29 +101,23 @@ export function NotificationBell({
             {unreadCount > 0 ? (
               <>
                 {/* Expanded: inline count pill on the right. */}
-                <span
-                  className={cn(
-                    'text-2xs ml-auto flex min-w-4 items-center justify-center rounded-full px-1 font-semibold tabular-nums',
-                    'bg-destructive text-destructive-foreground',
-                    'animate-in fade-in zoom-in-75 duration-fast',
-                    'group-data-[collapsible=icon]:hidden',
-                  )}
+                <CountBadge
+                  tone="destructive"
+                  animate
+                  className="ml-auto group-data-[collapsible=icon]:hidden"
                 >
                   {display}
-                </span>
+                </CountBadge>
                 {/* Collapsed: badge pinned to the bell-icon corner (kept inside
                     the 40px button bounds so the menu-button overflow-hidden
                     doesn't clip it); ring matches the rail so it reads as a dot. */}
-                <span
-                  className={cn(
-                    'text-2xs absolute top-1 right-1 hidden min-w-4 items-center justify-center rounded-full px-1 font-semibold tabular-nums',
-                    'bg-destructive text-destructive-foreground ring-sidebar ring-2',
-                    'animate-in fade-in zoom-in-75 duration-fast',
-                    'group-data-[collapsible=icon]:flex',
-                  )}
+                <CountBadge
+                  tone="destructive"
+                  animate
+                  className="ring-sidebar absolute top-1 right-1 hidden ring-2 group-data-[collapsible=icon]:flex"
                 >
                   {display}
-                </span>
+                </CountBadge>
               </>
             ) : null}
           </SidebarMenuButton>
@@ -130,18 +125,9 @@ export function NotificationBell({
           <Button variant="outline" size="icon-sm" aria-label={t('label')} className="relative">
             <Notification03Icon className="size-icon-sm" />
             {unreadCount > 0 ? (
-              <span
-                className={cn(
-                  'right-3xs top-3xs text-2xs absolute flex min-w-4 items-center justify-center rounded-full px-1 font-semibold',
-                  'bg-destructive text-destructive-foreground',
-                  // Restrained pop-in on appear (no bounce) — fades + scales
-                  // from 75% over --duration-fast. Global prefers-reduced-motion
-                  // collapses it.
-                  'animate-in fade-in zoom-in-75 duration-fast',
-                )}
-              >
+              <CountBadge tone="destructive" animate className="right-3xs top-3xs absolute">
                 {display}
-              </span>
+              </CountBadge>
             ) : null}
           </Button>
         )}

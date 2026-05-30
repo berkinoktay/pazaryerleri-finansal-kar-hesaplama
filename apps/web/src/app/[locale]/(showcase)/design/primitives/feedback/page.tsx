@@ -10,6 +10,7 @@ import { PrimitiveNav } from '@/components/showcase/primitive-nav';
 import { Preview } from '@/components/showcase/preview';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
@@ -311,6 +312,20 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
             <Skeleton animated={false} className="h-3 w-full" />
             <Skeleton animated={false} className="h-3 w-2/3" />
           </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="CountBadge"
+        description="Kompakt sayısal sayaç pili (okunmamış / bekleyen / sekme sayısı). Tek hane daire, çok hane pill; tabular-nums. tone solid dolgu; animate + key={String(value)} ile değişimde zoom-pop. NotificationBell ve Tabs bunu kullanır."
+      >
+        <div className="gap-md flex flex-wrap items-center">
+          <CountBadge tone="primary">3</CountBadge>
+          <CountBadge tone="destructive">9+</CountBadge>
+          <CountBadge tone="success">12</CountBadge>
+          <CountBadge tone="warning">128</CountBadge>
+          <CountBadge tone="neutral">5</CountBadge>
+          <span className="text-muted-foreground text-sm">tone · 1–3 hane</span>
         </div>
       </Preview>
     </>

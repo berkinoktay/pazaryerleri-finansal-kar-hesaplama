@@ -4,6 +4,7 @@ import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cva, type VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 
+import { CountBadge } from '@/components/ui/count-badge';
 import { cn } from '@/lib/utils';
 
 /**
@@ -158,16 +159,11 @@ export const TabsTrigger = React.forwardRef<
     >
       {children}
       {count !== undefined ? (
-        // Keyed by the value so a changing count remounts and replays the
-        // pop (mount + every update). The pop reuses the same restrained
-        // `animate-in zoom-in-75` enter as the NotificationBell count badge —
-        // no bounce, reduced-motion-collapsed globally. Stays solid-primary.
-        <span
-          key={String(count)}
-          className="animate-in fade-in zoom-in-75 duration-fast bg-primary text-primary-foreground px-3xs text-2xs inline-flex h-5 min-w-5 items-center justify-center rounded-full font-semibold tabular-nums"
-        >
+        // Keyed by the value so a changing count remounts and replays the pop
+        // (mount + every update); the shared CountBadge solid-primary pill.
+        <CountBadge key={String(count)} tone="primary" animate>
           {count}
-        </span>
+        </CountBadge>
       ) : null}
     </TabsPrimitive.Trigger>
   );

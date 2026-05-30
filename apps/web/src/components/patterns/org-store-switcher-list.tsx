@@ -431,9 +431,7 @@ function OrgRow({
       )}
     >
       <Avatar size="sm" className={cn('size-7 rounded-md', PALETTE_BG[palette])}>
-        <AvatarFallback className={cn('text-2xs rounded-md font-semibold', PALETTE_BG[palette])}>
-          {initial}
-        </AvatarFallback>
+        <AvatarFallback className={cn('rounded-md', PALETTE_BG[palette])}>{initial}</AvatarFallback>
       </Avatar>
       <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
         <span className="text-foreground truncate text-xs font-medium">
