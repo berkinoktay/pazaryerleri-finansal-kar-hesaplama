@@ -24,7 +24,14 @@ export const AccordionItem = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AccordionPrimitive.Item
     ref={ref}
-    className={cn('border-border border-b', className)}
+    // last:border-b-0 drops the trailing divider so the list closes cleanly;
+    // an open item gets a soft bg-surface-subtle tint that anchors the
+    // expanded section without a left-stripe (BAN 1) — the whole item
+    // (trigger + content) reads as "this one is open".
+    className={cn(
+      'border-border data-[state=open]:bg-surface-subtle border-b last:border-b-0',
+      className,
+    )}
     {...props}
   />
 ));
@@ -39,7 +46,10 @@ export const AccordionTrigger = React.forwardRef<
       ref={ref}
       className={cn(
         'gap-sm py-sm duration-fast flex flex-1 items-center justify-between text-left text-sm font-medium transition-colors',
-        'hover:text-primary focus-visible:outline-none',
+        // Neutral row-surface hover (not text-primary): brand color is reserved
+        // for genuine selection, not hover. Open state is carried by the item's
+        // surface tint above.
+        'hover:bg-surface-subtle focus-visible:outline-none',
         '[&[data-state=open]>svg]:rotate-180',
         className,
       )}
