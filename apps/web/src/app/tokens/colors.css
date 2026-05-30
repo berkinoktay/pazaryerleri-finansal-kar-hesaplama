@@ -135,6 +135,8 @@
      "transparency is a signal, not a style" intact. */
   --warning-border: oklch(70% 0.13 75);
   --destructive-border: oklch(70% 0.18 27);
+  --success-border: oklch(72% 0.12 155);
+  --info-border: oklch(70% 0.12 240);
 
   /* Sidebar surface contract — required by the shadcn Sidebar primitive
      (`bg-sidebar`, `bg-sidebar-accent`, `text-sidebar-foreground`, …).
@@ -256,6 +258,8 @@
 
   --warning-border: oklch(50% 0.1 75);
   --destructive-border: oklch(48% 0.14 27);
+  --success-border: oklch(50% 0.09 155);
+  --info-border: oklch(50% 0.1 240);
 
   /* Sidebar surface contract — see :root for full rationale. In dark
      mode the rail sits ~3% darker than the main content panel so it

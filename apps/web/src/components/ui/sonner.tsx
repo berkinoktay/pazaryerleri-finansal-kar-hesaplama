@@ -1,7 +1,14 @@
 'use client';
 
+import {
+  Alert02Icon,
+  AlertCircleIcon,
+  CheckmarkCircle02Icon,
+  InformationCircleIcon,
+} from 'hugeicons-react';
 import { Toaster as Sonner } from 'sonner';
 
+import { Spinner } from '@/components/ui/spinner';
 import { useIsMounted } from '@/lib/use-is-mounted';
 import { useTheme } from '@/providers/theme-provider';
 
@@ -14,21 +21,23 @@ type ToasterProps = React.ComponentProps<typeof Sonner>;
  *   import { toast } from '@/components/ui/sonner';
  *   toast.success('Saved.');
  *
- * The toaster is mount-gated (returns null on the server and during the
- * first client render) because Sonner's portal carries a `theme` class
- * that would otherwise produce a hydration mismatch — users never see a
- * toast on first paint anyway, so the gate is invisible.
+ * Each toast is a card with a tone icon (left) + bold title + muted
+ * description, optional action / cancel buttons and a close affordance.
+ * Per-tone toasts mirror Alert exactly: `toast.success()` is a tinted card
+ * (`bg-success-surface` + `text-success` + a soft `border-success-border`)
+ * with a green check, so a success toast and a success Alert read the same.
+ * `toast.error()` maps to the **destructive** tone; the neutral `toast()` is a
+ * framed `bg-card` with no icon. Custom icons / soft-square badges go per call:
+ * `toast('…', { icon: <TruckIcon /> })`.
  *
- * Per-tone toasts mirror Alert exactly: `toast.success()` is a
- * `bg-success-surface` + `text-success` tinted card (transparent border), so a
- * success toast and a success Alert read identically. `toast.error()` maps to
- * the **destructive** tone (not a fifth tone); the neutral `toast()` keeps the
- * framed `bg-card` + border. The base `toast` class carries layout only and
- * the per-type class carries the single color pairing, so the tone always wins
- * (two competing `bg-*` utilities on one element are order-dependent).
+ * The base `toast` class carries layout only and the per-type class carries the
+ * single color pairing, so the tone always wins (two competing `bg-*`/`border-*`
+ * utilities on one element are order-dependent). The toaster is mount-gated
+ * (Sonner's portal carries a `theme` class that would otherwise hydration-
+ * mismatch); users never see a toast on first paint anyway.
  *
- * For inline page-level messages use Alert; for app-spanning system
- * messages (maintenance, billing past-due) use the future Banner.
+ * For inline page-level messages use Alert; for app-spanning system messages
+ * (maintenance, billing past-due) use the future Banner.
  *
  * @useWhen mounting the global toast container at the app root (call the exported toast() from feature code to fire a toast)
  */
@@ -36,12 +45,6 @@ export function Toaster(props: ToasterProps): React.ReactElement | null {
   const { resolvedTheme } = useTheme();
   const mounted = useIsMounted();
 
-  // `resolvedTheme` is undefined on the server and during the first client
-  // render. Sonner's root carries a theme class on its portal wrapper — if
-  // we rendered during SSR we would bake in `theme="light"` and then swap
-  // to the user's actual theme at hydration, producing a mismatch. Waiting
-  // for mount keeps the hydrated tree empty for the toaster (users never
-  // see a toast on first paint anyway).
   if (!mounted) return null;
 
   return (
@@ -49,28 +52,42 @@ export function Toaster(props: ToasterProps): React.ReactElement | null {
       theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
       className="toaster group"
       position="bottom-right"
+      closeButton
+      icons={{
+        success: <CheckmarkCircle02Icon className="size-icon-sm" />,
+        error: <AlertCircleIcon className="size-icon-sm" />,
+        warning: <Alert02Icon className="size-icon-sm" />,
+        info: <InformationCircleIcon className="size-icon-sm" />,
+        loading: <Spinner size="sm" />,
+      }}
       toastOptions={{
         classNames: {
-          // Layout only — color is owned by the per-type class below so the
-          // tone reliably wins over the neutral default.
+          // `default` is applied to EVERY toast (not only neutral ones), so the
+          // per-type color must win deterministically — hence the `!` important
+          // modifier (Sonner's own injected styles also fix the source order).
           toast:
-            'group toast group-[.toaster]:rounded-md group-[.toaster]:border group-[.toaster]:shadow-md',
+            'group toast group-[.toaster]:gap-sm group-[.toaster]:rounded-lg group-[.toaster]:border group-[.toaster]:p-md group-[.toaster]:shadow-md',
           default:
             'group-[.toaster]:bg-card group-[.toaster]:text-foreground group-[.toaster]:border-border',
           success:
-            'group-[.toaster]:bg-success-surface group-[.toaster]:text-success group-[.toaster]:border-transparent',
+            'group-[.toaster]:bg-success-surface! group-[.toaster]:text-success! group-[.toaster]:border-success-border!',
           warning:
-            'group-[.toaster]:bg-warning-surface group-[.toaster]:text-warning group-[.toaster]:border-transparent',
+            'group-[.toaster]:bg-warning-surface! group-[.toaster]:text-warning! group-[.toaster]:border-warning-border!',
           error:
-            'group-[.toaster]:bg-destructive-surface group-[.toaster]:text-destructive group-[.toaster]:border-transparent',
-          info: 'group-[.toaster]:bg-info-surface group-[.toaster]:text-info group-[.toaster]:border-transparent',
-          // Inherit the toast's tone color (never gray-on-tint), dimmed — matches
-          // AlertDescription's opacity treatment.
-          description: 'group-[.toast]:opacity-80',
+            'group-[.toaster]:bg-destructive-surface! group-[.toaster]:text-destructive! group-[.toaster]:border-destructive-border!',
+          info: 'group-[.toaster]:bg-info-surface! group-[.toaster]:text-info! group-[.toaster]:border-info-border!',
+          // Sonner colors the icon slot itself — force it to inherit the toast's
+          // tone (text-<tone>) so a success toast gets a green check, etc.
+          icon: 'group-[.toast]:mt-px group-[.toast]:text-inherit!',
+          title: 'group-[.toast]:text-sm group-[.toast]:font-semibold!',
+          // Inherit the toast's tone color (never gray-on-tint), dimmed.
+          description: 'group-[.toast]:text-2xs group-[.toast]:opacity-80',
           actionButton:
-            'group-[.toast]:bg-primary group-[.toast]:text-primary-foreground group-[.toast]:rounded-sm',
+            'group-[.toast]:bg-primary group-[.toast]:text-primary-foreground group-[.toast]:rounded-md group-[.toast]:px-sm group-[.toast]:text-2xs group-[.toast]:font-medium',
           cancelButton:
-            'group-[.toast]:bg-muted group-[.toast]:text-muted-foreground group-[.toast]:rounded-sm',
+            'group-[.toast]:bg-muted group-[.toast]:text-muted-foreground group-[.toast]:rounded-md group-[.toast]:px-sm group-[.toast]:text-2xs',
+          closeButton:
+            'group-[.toast]:border-border group-[.toast]:bg-card group-[.toast]:text-muted-foreground group-[.toast]:hover:text-foreground',
         },
       }}
       {...props}

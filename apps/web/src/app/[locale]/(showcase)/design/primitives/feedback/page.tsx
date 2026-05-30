@@ -1,5 +1,6 @@
 'use client';
 
+import { DeliveryBox01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
@@ -98,33 +99,78 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Toast (Sonner)"
-        description="Kısa, kendiliğinden kapanan bildirimler. Tona göre tinted — success toast = success Alert ile birebir (bg-success-surface + text-success). .error() → destructive; nötr toast(): bg-card + border. Optimistic update sonrası onay + undo için."
+        description="İkon + kalın başlık + sönük açıklama. Tona göre tinted + ton-kenarlık (success toast = success Alert): success=yeşil check, error=destructive, warning=üçgen, info=i, loading=spinner. Nötr toast(): bg-card. Custom icon (soft-square) + action + close butonu. Butona tıkla → sağ altta toast."
       >
         <div className="gap-xs flex flex-wrap">
-          <Button variant="outline" onClick={() => toast('Standart bildirim')}>
-            Info
-          </Button>
-          <Button variant="outline" onClick={() => toast.success('Senkronizasyon başlatıldı')}>
-            Success
-          </Button>
-          <Button variant="outline" onClick={() => toast.warning('3 satır eksik veri')}>
-            Warning
-          </Button>
-          <Button variant="outline" onClick={() => toast.error('Senkronizasyon başarısız')}>
-            Error
+          <Button
+            variant="outline"
+            onClick={() => toast('Taslak otomatik kaydedildi', { description: 'Dilersen kapat.' })}
+          >
+            Neutral
           </Button>
           <Button
             variant="outline"
             onClick={() =>
-              toast('Ürün maliyeti güncellendi', {
-                action: {
-                  label: 'Geri al',
-                  onClick: () => toast.info('Geri alındı'),
-                },
+              toast.success('Senkronizasyon tamamlandı', {
+                description: '142 yeni sipariş çekildi.',
+              })
+            }
+          >
+            Success
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              toast.warning('3 satır eksik veri', { description: 'Maliyetler eksik kalır.' })
+            }
+          >
+            Warning
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              toast.error('Bağlantı başarısız', { description: 'İnternet bağlantını kontrol et.' })
+            }
+          >
+            Error
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => toast.info('Bakım planlandı', { description: 'Bu gece 02:00.' })}
+          >
+            Info
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => toast.loading('Proje verileri senkronize ediliyor…', { duration: 3000 })}
+          >
+            Loading
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              toast('Mesaj arşivlendi', {
+                description: 'Konuşma arşiv klasörüne taşındı.',
+                action: { label: 'Geri al', onClick: () => toast.info('Geri alındı') },
               })
             }
           >
             With action
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              toast('Sipariş yola çıktı', {
+                description: 'Kuryeniz birkaç blok uzakta.',
+                icon: (
+                  <span className="bg-warning-surface text-warning flex size-7 items-center justify-center rounded-md">
+                    <DeliveryBox01Icon className="size-icon-sm" />
+                  </span>
+                ),
+              })
+            }
+          >
+            Custom icon
           </Button>
         </div>
       </Preview>

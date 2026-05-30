@@ -98,6 +98,8 @@
 
   --color-warning-border: var(--warning-border);
   --color-destructive-border: var(--destructive-border);
+  --color-success-border: var(--success-border);
+  --color-info-border: var(--info-border);
 
   /* Sidebar surface — wires the shadcn Sidebar primitive utilities
      (bg-sidebar, hover:bg-sidebar-accent, text-sidebar-foreground, …)
