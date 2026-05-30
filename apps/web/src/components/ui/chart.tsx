@@ -116,16 +116,14 @@ export const ChartTooltipContent = React.forwardRef<HTMLDivElement, ChartTooltip
             return (
               <div key={entry.name} className="gap-xs flex items-center">
                 <span
-                  className="size-2 shrink-0 rounded-sm"
+                  className="size-xs shrink-0 rounded-sm"
                   // runtime-dynamic: chart entry color is data-driven
                   style={{
                     backgroundColor: itemConfig?.color ?? entry.color ?? 'var(--muted-foreground)',
                   }}
                 />
                 <span className="text-muted-foreground">{itemConfig?.label ?? entry.name}</span>
-                <span className="text-foreground ml-auto font-mono tabular-nums">
-                  {entry.value}
-                </span>
+                <span className="text-foreground ml-auto tabular-nums">{entry.value}</span>
               </div>
             );
           })}

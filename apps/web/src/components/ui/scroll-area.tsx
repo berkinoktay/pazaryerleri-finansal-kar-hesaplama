@@ -30,7 +30,7 @@ export const ScrollArea = React.forwardRef<
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />
-    <ScrollAreaPrimitive.Corner />
+    <ScrollAreaPrimitive.Corner className="bg-transparent" />
   </ScrollAreaPrimitive.Root>
 ));
 ScrollArea.displayName = ScrollAreaPrimitive.Root.displayName;
@@ -43,14 +43,17 @@ export const ScrollBar = React.forwardRef<
     ref={ref}
     orientation={orientation}
     className={cn(
-      'duration-fast flex touch-none transition-colors select-none',
-      orientation === 'vertical' && 'h-full w-2 border-l border-transparent p-px',
-      orientation === 'horizontal' && 'h-2 flex-col border-t border-transparent p-px',
+      'flex touch-none select-none',
+      orientation === 'vertical' && 'h-full w-2 border-l border-transparent',
+      orientation === 'horizontal' && 'h-2 flex-col border-t border-transparent',
       className,
     )}
     {...props}
   >
-    <ScrollAreaPrimitive.ScrollAreaThumb className="bg-border-strong relative flex-1 rounded-full" />
+    {/* Mirror the global page scrollbar: a 2px transparent border + bg-clip-content
+        gives the appearance of a thinner pill with breathing room from content, and
+        the thumb (not the wrapper) is what brightens on hover. */}
+    <ScrollAreaPrimitive.ScrollAreaThumb className="bg-border-strong duration-fast ease-out-quart hover:bg-muted-foreground relative flex-1 rounded-full border-2 border-transparent bg-clip-content transition-colors" />
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ));
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName;
