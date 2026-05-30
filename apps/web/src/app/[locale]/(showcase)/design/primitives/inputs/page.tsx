@@ -651,21 +651,37 @@ export default function InputsPrimitivePage(): React.ReactElement {
         </div>
       </Preview>
 
-      <Preview title="RadioGroup" description="Tek bir seçeneğin zorunlu olduğu listeler için.">
-        <RadioGroup defaultValue="monthly" className="gap-sm">
-          <div className="gap-xs flex items-center">
-            <RadioGroupItem value="weekly" id="r1" />
-            <Label htmlFor="r1">Haftalık rapor</Label>
-          </div>
-          <div className="gap-xs flex items-center">
-            <RadioGroupItem value="monthly" id="r2" />
-            <Label htmlFor="r2">Aylık rapor</Label>
-          </div>
-          <div className="gap-xs flex items-center">
-            <RadioGroupItem value="quarterly" id="r3" />
-            <Label htmlFor="r3">Çeyrek dönem</Label>
-          </div>
-        </RadioGroup>
+      <Preview
+        title="RadioGroup — size · disabled · orientation"
+        description="Binary kontrol → nokta full --primary (toggle’ın soft’undan ayrı). size ekseni (nokta orantılı ölçeklenir, seçince zoom-in pop); item bazında disabled; orientation='horizontal' satır düzeni + ok-tuşu yönü."
+      >
+        <div className="gap-lg flex flex-col">
+          <RadioGroup defaultValue="monthly" className="gap-sm">
+            <div className="gap-xs flex items-center">
+              <RadioGroupItem value="weekly" id="r1" />
+              <Label htmlFor="r1">Haftalık rapor</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <RadioGroupItem value="monthly" id="r2" />
+              <Label htmlFor="r2">Aylık rapor</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <RadioGroupItem value="quarterly" id="r3" disabled />
+              <Label htmlFor="r3">Çeyrek dönem (disabled)</Label>
+            </div>
+          </RadioGroup>
+
+          <RadioGroup defaultValue="md-r" orientation="horizontal" className="gap-md grid-flow-col">
+            {SIZE_KEYS.map((size) => (
+              <div key={size} className="gap-xs flex items-center">
+                <RadioGroupItem value={`${size}-r`} id={`r-${size}`} size={size} />
+                <Label htmlFor={`r-${size}`} className="text-2xs text-muted-foreground font-mono">
+                  {size}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+        </div>
       </Preview>
 
       <Preview
