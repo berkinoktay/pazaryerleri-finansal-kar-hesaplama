@@ -56,7 +56,7 @@ export default function NavigationPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Tabs — pill (default)"
-        description="Muted konteyner içinde segmented kontrol. Kart veya toolbar içinde kullanın."
+        description="Açık gri pill track içinde segmented kontrol. Aktif sekme beyaz chip (shadow-sm ile hafif yüzer) + marka-renkli etiket (text-primary) — dolgu değil. Kart veya toolbar içinde kullanın."
       >
         <Tabs defaultValue="orders">
           <TabsList>
@@ -72,6 +72,34 @@ export default function NavigationPrimitivePage(): React.ReactElement {
           </TabsContent>
           <TabsContent value="settlements" className="text-muted-foreground text-sm">
             Pazaryeri hakediş kalemleri burada eşleşir.
+          </TabsContent>
+        </Tabs>
+      </Preview>
+
+      <Preview
+        title="Tabs — sayaç rozeti (count)"
+        description="TabsTrigger count prop'u: etiketin yanına dolu-primary sayaç rozeti. Sekme bir metrik taşıdığında (bekleyen / kargoda / teslim). Rozet aktif ve pasif sekmede aynı okunur; aktiflik beyaz chip + marka metniyle gelir."
+      >
+        <Tabs defaultValue="pending">
+          <TabsList>
+            <TabsTrigger value="pending" count={3}>
+              Bekleyen
+            </TabsTrigger>
+            <TabsTrigger value="shipped" count={12}>
+              Kargoda
+            </TabsTrigger>
+            <TabsTrigger value="delivered" count={48}>
+              Teslim
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="pending" className="text-muted-foreground text-sm">
+            Hazırlanmayı bekleyen 3 sipariş.
+          </TabsContent>
+          <TabsContent value="shipped" className="text-muted-foreground text-sm">
+            Kargoya verilmiş 12 sipariş.
+          </TabsContent>
+          <TabsContent value="delivered" className="text-muted-foreground text-sm">
+            Teslim edilmiş 48 sipariş.
           </TabsContent>
         </Tabs>
       </Preview>

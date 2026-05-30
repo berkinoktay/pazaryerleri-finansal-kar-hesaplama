@@ -15,9 +15,11 @@ import { cn } from '@/lib/utils';
  *
  * Two visual variants cover the common dashboard needs:
  *
- *   - `pill` (default): segmented control inside a muted container. Used
- *     when the tabs live inside a constrained card or toolbar. Active
- *     tab becomes a surfaced card-colored pill.
+ *   - `pill` (default): segmented control inside a muted rounded-full track.
+ *     Used when the tabs live inside a constrained card or toolbar. The
+ *     active tab is a clean white chip (subtle shadow-sm lift) with a
+ *     brand-colored `text-primary` label — the color is in the label, not a
+ *     fill. `TabsTrigger count={n}` adds a solid-primary metric badge.
  *
  *   - `underline`: airier, content-integrated. Used when tabs introduce
  *     a full page section. No container — just a bottom divider with
@@ -32,7 +34,7 @@ import { cn } from '@/lib/utils';
 const tabsListVariants = cva('inline-flex items-center text-muted-foreground', {
   variants: {
     variant: {
-      pill: 'gap-3xs rounded-lg border border-border bg-muted p-3xs',
+      pill: 'gap-3xs rounded-full bg-muted p-3xs',
       underline: 'gap-lg w-full justify-start border-b border-border',
     },
     size: {
@@ -46,7 +48,7 @@ const tabsListVariants = cva('inline-flex items-center text-muted-foreground', {
 
 const tabsTriggerVariants = cva(
   cn(
-    'inline-flex items-center justify-center whitespace-nowrap font-medium',
+    'inline-flex items-center justify-center gap-2xs whitespace-nowrap font-medium',
     'transition-colors duration-fast',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     'disabled:pointer-events-none disabled:opacity-50',
@@ -55,22 +57,21 @@ const tabsTriggerVariants = cva(
   {
     variants: {
       variant: {
-        // Pill: fills the muted container's inner height (minus p-3xs padding) via h-full.
-        // Active reads as a surfaced card lifted with a stronger shadow (the dark-mode
-        // inset highlight in --shadow-md keeps the lift legible in both themes — the
-        // earlier shadow-sm was invisible against a near-black backdrop). The active
-        // state picks up `text-foreground` (ink black) plus a 1px ring at full --border
-        // strength for a sharper segmented-control feel, à la Linear / Mercury.
-        // Inactive hover surfaces a faint background so non-primary tabs still
-        // signal "clickable".
+        // Pill: fills the muted pill track's inner height (minus p-3xs) via h-full.
+        // Active reads as a clean WHITE chip that lifts off the track with a
+        // subtle shadow-sm (not the old heavy shadow-md / ring), and the BRAND
+        // color lives in the active LABEL (`text-primary`), never a fill — the
+        // refined segmented look (white chip + primary text, Linear / Vercel
+        // tier). Inactive hover surfaces a faint background so non-active tabs
+        // still signal "clickable". Active weight stays `font-medium` (no
+        // semibold swap) to avoid width jitter when switching tabs.
         pill: cn(
-          'h-full rounded-md',
+          'h-full rounded-full',
           'hover:text-foreground',
           'data-[state=inactive]:hover:bg-surface-trigger-hover',
           'data-[state=active]:bg-card',
-          'data-[state=active]:text-foreground',
-          'data-[state=active]:shadow-md',
-          'data-[state=active]:ring-1 data-[state=active]:ring-border',
+          'data-[state=active]:text-primary',
+          'data-[state=active]:shadow-sm',
         ),
         // Underline: container has border-b; trigger overlaps it with its own border-b-2 via -mb-px.
         // Weight stays constant (no semibold swap) to prevent width jitter when switching tabs.
@@ -132,17 +133,43 @@ export const TabsList = React.forwardRef<
 });
 TabsList.displayName = TabsPrimitive.List.displayName;
 
+export interface TabsTriggerProps extends React.ComponentPropsWithoutRef<
+  typeof TabsPrimitive.Trigger
+> {
+  /**
+   * Optional count badge after the label (pending orders, unread, …). Renders
+   * a solid-primary numeric pill that reads the same on active and inactive
+   * triggers — the metric lives in the tab, the active state is carried by the
+   * chip + `text-primary` label. Pass a number or a node like `99+`.
+   */
+  count?: React.ReactNode;
+}
+
 export const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
->(({ className, ...props }, ref) => {
+  TabsTriggerProps
+>(({ className, count, children, ...props }, ref) => {
   const { variant, size } = React.useContext(TabsContext);
   return (
     <TabsPrimitive.Trigger
       ref={ref}
       className={cn(tabsTriggerVariants({ variant, size }), className)}
       {...props}
-    />
+    >
+      {children}
+      {count !== undefined ? (
+        // Keyed by the value so a changing count remounts and replays the
+        // pop (mount + every update). The pop reuses the same restrained
+        // `animate-in zoom-in-75` enter as the NotificationBell count badge —
+        // no bounce, reduced-motion-collapsed globally. Stays solid-primary.
+        <span
+          key={String(count)}
+          className="animate-in fade-in zoom-in-75 duration-fast bg-primary text-primary-foreground px-3xs text-2xs inline-flex h-5 min-w-5 items-center justify-center rounded-full font-semibold tabular-nums"
+        >
+          {count}
+        </span>
+      ) : null}
+    </TabsPrimitive.Trigger>
   );
 });
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
