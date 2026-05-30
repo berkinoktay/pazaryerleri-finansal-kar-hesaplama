@@ -15,9 +15,12 @@ import { cn } from '@/lib/utils';
  * @useWhen rendering a hierarchical location trail on a detail page where the parent context matters (skip on flat list or single-level pages)
  */
 export const Breadcrumb = React.forwardRef<HTMLElement, React.ComponentPropsWithoutRef<'nav'>>(
-  ({ className, ...props }, ref) => (
-    <nav ref={ref} aria-label="breadcrumb" className={className} {...props} />
-  ),
+  ({ className, ...props }, ref) => {
+    const t = useTranslations('common');
+    return (
+      <nav ref={ref} aria-label={t('breadcrumb.label')} className={cn(className)} {...props} />
+    );
+  },
 );
 Breadcrumb.displayName = 'Breadcrumb';
 
@@ -47,7 +50,7 @@ export const BreadcrumbLink = React.forwardRef<
   <a
     ref={ref}
     className={cn(
-      'px-3xs duration-fast hover:text-foreground rounded-sm transition-colors focus-visible:outline-none',
+      'px-3xs duration-fast ease-out-quart hover:text-foreground inline-flex items-center rounded-sm transition-colors focus-visible:outline-none pointer-coarse:min-h-11',
       className,
     )}
     {...props}
@@ -94,10 +97,10 @@ export function BreadcrumbEllipsis({
     <span
       role="presentation"
       aria-hidden="true"
-      className={cn('size-icon-sm inline-flex items-center justify-center', className)}
+      className={cn('[&>svg]:size-icon-sm inline-flex items-center justify-center', className)}
       {...props}
     >
-      <MoreHorizontalCircle01Icon className="size-icon-sm" />
+      <MoreHorizontalCircle01Icon />
       <span className="sr-only">{t('more')}</span>
     </span>
   );
