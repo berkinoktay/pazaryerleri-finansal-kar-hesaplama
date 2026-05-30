@@ -97,7 +97,7 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Toast (Sonner)"
-        description="Kısa, kendiliğinden kapanan bildirimler. Optimistic update sonrası onay + undo için."
+        description="Kısa, kendiliğinden kapanan bildirimler. Tona göre tinted — success toast = success Alert ile birebir (bg-success-surface + text-success). .error() → destructive; nötr toast(): bg-card + border. Optimistic update sonrası onay + undo için."
       >
         <div className="gap-xs flex flex-wrap">
           <Button variant="outline" onClick={() => toast('Standart bildirim')}>
