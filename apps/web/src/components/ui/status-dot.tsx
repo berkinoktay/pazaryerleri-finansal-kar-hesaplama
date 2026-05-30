@@ -13,10 +13,11 @@ import { cn } from '@/lib/utils';
  * decorative. Omit `label` for a bare dot (decorative; the caller must provide
  * an adjacent label/icon — color is never the only signal in PazarSync).
  *
- * `animatePulse` opts into the gentle sync-pulse (the "alive" indicator for an
- * actively-syncing store). Sizes: `sm` (6px) for tight rows, `md` (8px,
- * default), `lg` (12px) for standalone prominence. Tones use the same semantic
- * vocabulary as Badge / Alert / TrendDelta.
+ * `animatePulse` layers an expanding "live" ring behind a solid dot — the
+ * recognisable active-indicator for an actively-syncing store (collapses under
+ * prefers-reduced-motion to just the solid dot). Sizes: `sm` (6px) for tight
+ * rows, `md` (8px, default), `lg` (12px) for standalone prominence. Tones use
+ * the same semantic vocabulary as Badge / Alert / TrendDelta.
  *
  * @useWhen marking inline status with a colored dot (+ optional label); use Badge when the status needs a full chip surface
  */
@@ -56,13 +57,31 @@ export function StatusDot({
   className,
   ...props
 }: StatusDotProps): React.ReactElement {
-  const dotClass = cn(statusDotVariants({ tone, size }), animatePulse && 'animate-sync-pulse');
+  const dotClass = statusDotVariants({ tone, size });
+
+  // When pulsing, stack an expanding ping ring (same tone) behind the solid dot.
+  const indicator = animatePulse ? (
+    <span className="relative inline-flex shrink-0">
+      <span aria-hidden className={cn(dotClass, 'absolute inset-0 animate-ping')} />
+      <span aria-hidden className={cn(dotClass, 'relative')} />
+    </span>
+  ) : (
+    <span aria-hidden className={dotClass} />
+  );
 
   if (label !== undefined) {
     return (
       <span className={cn('gap-xs inline-flex items-center', className)} {...props}>
-        <span aria-hidden className={dotClass} />
+        {indicator}
         {label}
+      </span>
+    );
+  }
+  if (animatePulse) {
+    return (
+      <span className={cn('relative inline-flex shrink-0', className)} {...props}>
+        <span aria-hidden className={cn(dotClass, 'absolute inset-0 animate-ping')} />
+        <span aria-hidden className={cn(dotClass, 'relative')} />
       </span>
     );
   }
