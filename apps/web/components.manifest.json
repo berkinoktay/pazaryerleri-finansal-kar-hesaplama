@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 93,
+  "count": 95,
   "components": [
     {
       "name": "Accordion",
@@ -119,7 +119,7 @@
       "path": "apps/web/src/components/ui/checkbox.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "rendering a single boolean choice that commits on form submit (use Switch for immediate-effect toggles)"
+      "useWhen": "rendering a single boolean or tri-state choice that commits on form submit (use Switch for immediate-effect toggles)"
     },
     {
       "name": "Collapsible",
@@ -441,7 +441,7 @@
       "path": "apps/web/src/components/ui/progress.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "showing determinate 0-100 progress (use Spinner when the percentage is unknown)"
+      "useWhen": "showing determinate 0-100 progress or an indeterminate unknown-duration sweep (use Spinner for a small inline busy region)"
     },
     {
       "name": "RadioGroup",
@@ -514,6 +514,13 @@
       "useWhen": "rendering a single or range numeric input over a continuous scale where relative position matters more than exact value"
     },
     {
+      "name": "SoftSquareIcon",
+      "path": "apps/web/src/components/ui/soft-square-icon.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "fronting a KPI status row / quota tile / panel item with a small semantic icon chip (use Badge for a text chip, StatusDot for a bare dot)"
+    },
+    {
       "name": "Sparkline",
       "path": "apps/web/src/components/patterns/sparkline.tsx",
       "category": "molecule",
@@ -535,11 +542,18 @@
       "useWhen": "wrapping a row of KpiTile siblings that should self-tile responsively without breakpoint ladders"
     },
     {
+      "name": "StatRow",
+      "path": "apps/web/src/components/patterns/stat-row.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "adding a nested icon + label + status row inside a KPI / summary Card (wrap in a Link for navigation; use DefinitionList for plain key/value pairs)"
+    },
+    {
       "name": "StatusDot",
       "path": "apps/web/src/components/ui/status-dot.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "marking inline status with just a colored dot (use Badge when the dot needs an inline label, SyncBadge for the canonical sync-state surface)"
+      "useWhen": "marking inline status with a colored dot (+ optional label); use Badge when the status needs a full chip surface"
     },
     {
       "name": "Stepper",
@@ -630,7 +644,7 @@
       "path": "apps/web/src/components/ui/toggle-group.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "rendering a small set of related Toggles that should look unified and share a single-or-multiple selection rule"
+      "useWhen": "rendering a small set of related toggles that should look unified and share a single-or-multiple selection rule"
     },
     {
       "name": "Tooltip",

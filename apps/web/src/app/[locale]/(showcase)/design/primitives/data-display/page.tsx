@@ -1,6 +1,15 @@
 'use client';
 
-import { Building03Icon, MoreVerticalIcon, Refresh01Icon } from 'hugeicons-react';
+import {
+  Alert02Icon,
+  AlertCircleIcon,
+  Building03Icon,
+  CheckmarkCircle02Icon,
+  DatabaseIcon,
+  InformationCircleIcon,
+  MoreVerticalIcon,
+  Refresh01Icon,
+} from 'hugeicons-react';
 
 import { PageHeader } from '@/components/patterns/page-header';
 import { PrimitiveNav } from '@/components/showcase/primitive-nav';
@@ -18,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
+import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 import {
   Table,
   TableBody,
@@ -225,6 +235,59 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
             Son 7 günde 142 sipariş, ₺18.240 brüt ciro. Net kâr marjı %22.
           </CardContent>
         </Card>
+      </Preview>
+
+      <Preview
+        title="SoftSquareIcon"
+        description="Semantic-dolu yuvarlak kare ikon chip'i — KPI durum satırı / kota tile'ı / panel öğesinin önünde. solid = doygun dolgu + foreground ikon; soft = soluk yüzey + tonlu ikon (nötr soft = monokrom). Dekoratif (aria-hidden); anlam yan etiketten gelir. Gölgesiz — kart içinde düz durur."
+      >
+        <div className="gap-lg flex flex-col">
+          <div className="gap-sm flex flex-wrap items-center">
+            <SoftSquareIcon tone="success">
+              <CheckmarkCircle02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="warning">
+              <Alert02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="destructive">
+              <AlertCircleIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="info">
+              <InformationCircleIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="primary">
+              <Building03Icon />
+            </SoftSquareIcon>
+            <span className="text-muted-foreground text-sm">solid</span>
+          </div>
+          <div className="gap-sm flex flex-wrap items-center">
+            <SoftSquareIcon tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="success" variant="soft">
+              <CheckmarkCircle02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="warning" variant="soft">
+              <Alert02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="info" variant="soft">
+              <InformationCircleIcon />
+            </SoftSquareIcon>
+            <span className="text-muted-foreground text-sm">soft</span>
+          </div>
+          <div className="gap-sm flex flex-wrap items-center">
+            <SoftSquareIcon size="sm" tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon size="md" tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon size="lg" tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <span className="text-muted-foreground text-sm">sm · md · lg</span>
+          </div>
+        </div>
       </Preview>
     </>
   );
