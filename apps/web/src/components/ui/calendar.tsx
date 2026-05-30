@@ -113,13 +113,16 @@ export function Calendar({
         month: 'flex flex-col gap-sm',
         month_grid: 'w-full border-collapse',
         weekdays: 'flex mb-3xs',
-        weekday:
-          'text-muted-foreground w-calendar-cell text-2xs font-medium uppercase tracking-wide',
+        // w-9 / size-9 = the 36px fixed grid cell (a core Tailwind utility, not a
+        // custom @theme token — so the column width is always generated and never
+        // depends on a theme rebuild; the cells must have an explicit width or the
+        // flex weekday/week rows collapse to content width).
+        weekday: 'text-muted-foreground w-9 text-2xs font-medium uppercase tracking-wide',
         week: 'flex w-full',
         // react-day-picker v9 puts state modifiers (`aria-selected`, `data-selected`) on the TD cell,
         // not the inner button — so all visual state (bg, radius, hover) lives here.
         day: cn(
-          'relative size-calendar-cell p-0 text-center text-sm',
+          'relative size-9 p-0 text-center text-sm',
           'rounded-md transition-colors duration-fast ease-out-quart',
           'focus-within:relative focus-within:z-20',
           // hover only when NOT selected — keeps selected cells from flashing muted on hover
@@ -128,7 +131,7 @@ export function Calendar({
         // Button stays transparent so the cell's background shows through; only focus + layout here.
         // Suppress the global :focus-visible glow — the explicit ring below is the focus affordance.
         day_button: cn(
-          'relative inline-flex size-calendar-cell items-center justify-center rounded-md p-0 text-sm font-normal tabular-nums',
+          'relative inline-flex size-9 items-center justify-center rounded-md p-0 text-sm font-normal tabular-nums',
           'pointer-coarse:min-h-11',
           'bg-transparent',
           'transition-colors duration-fast ease-out-quart',

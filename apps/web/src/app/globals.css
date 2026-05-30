@@ -180,8 +180,6 @@
   --spacing-icon-lg: var(--size-icon-lg);
   --spacing-icon-xl: var(--size-icon-xl);
 
-  --spacing-calendar-cell: var(--size-calendar-cell);
-
   --spacing-rail-icon: var(--size-rail-icon);
   --spacing-rail-context: var(--size-rail-context);
   --spacing-settings-aside: var(--size-settings-aside);
