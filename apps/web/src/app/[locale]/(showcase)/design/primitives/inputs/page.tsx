@@ -29,7 +29,10 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -425,6 +428,119 @@ export default function InputsPrimitivePage(): React.ReactElement {
             </Select>
             <span className="text-2xs text-destructive">Bu alan zorunlu.</span>
           </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Select — valid + disabled"
+        description="valid başarıyla doğrulanmış seçimi success border ile işaretler (invalid'in karşılığı). disabled trigger opacity-50 + cursor-not-allowed."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs flex flex-col">
+            <Label>Pazaryeri (valid)</Label>
+            <Select defaultValue="trendyol">
+              <SelectTrigger valid>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="trendyol">Trendyol</SelectItem>
+                <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-2xs text-success">Bağlantı doğrulandı.</span>
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label>Pazaryeri (disabled)</Label>
+            <Select disabled defaultValue="trendyol">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="trendyol">Trendyol</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Select — size (paylaşılan prop)"
+        description="sm (h-8) / md (h-10, default) / lg (h-11). Input ve Button ile aynı yükseklik ailesi — formda hizalı satırlar."
+      >
+        <div className="max-w-form gap-md grid">
+          {SIZE_KEYS.map((size) => (
+            <div key={size} className="gap-3xs flex flex-col">
+              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
+              <Select>
+                <SelectTrigger size={size}>
+                  <SelectValue placeholder="Bir pazaryeri seç" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="trendyol">Trendyol</SelectItem>
+                  <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+      </Preview>
+
+      <Preview
+        title="Select — leadingIcon + description item"
+        description="SelectItem leadingIcon (logo/durum) ve description (ikincil satır) alır. İkisi de ItemText dışında render edilir — ekran okuyucu yalnız ana etiketi okur."
+      >
+        <div className="max-w-input gap-3xs grid">
+          <Label>Mağaza</Label>
+          <Select defaultValue="store-1">
+            <SelectTrigger leadingIcon={<Building03Icon />}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                value="store-1"
+                leadingIcon={<Building03Icon />}
+                description="Trendyol — Mağaza #1234"
+              >
+                Ana Mağaza
+              </SelectItem>
+              <SelectItem
+                value="store-2"
+                leadingIcon={<Building03Icon />}
+                description="Hepsiburada — Mağaza #5678"
+              >
+                İkincil Mağaza
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Select — gruplu + ayraç + disabled item"
+        description="SelectGroup + SelectLabel başlık, SelectSeparator gruplar arası çizgi, item bazında disabled. >6 seçeneği duruma göre kategorize etmenin standart deseni."
+      >
+        <div className="max-w-input-narrow gap-3xs grid">
+          <Label>Mağaza durumu</Label>
+          <Select defaultValue="active-1">
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Aktif Mağazalar</SelectLabel>
+                <SelectItem value="active-1">Trendyol — Ana</SelectItem>
+                <SelectItem value="active-2">Hepsiburada — Ana</SelectItem>
+              </SelectGroup>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel>Pasif Mağazalar</SelectLabel>
+                <SelectItem value="passive-1" disabled>
+                  n11 — Askıda
+                </SelectItem>
+                <SelectItem value="passive-2">Amazon — Bağlantı kesik</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
       </Preview>
 

@@ -10,11 +10,18 @@ import { cn } from '@/lib/utils';
 
 /**
  * Single-choice dropdown picker. The trigger owns its own `loading`,
- * `invalid`, `leadingIcon`, and `onClear` props. The clear affordance is a
- * `<span role="button">` rather than a real button — the trigger itself is
- * already a `<button>` and HTML forbids nested buttons (browsers silently
- * re-parent them, breaking hydration). For a searchable / typeahead picker
- * use Combobox instead (Phase 1, not yet built).
+ * `invalid`, `valid`, `leadingIcon`, and `onClear` props and shares the
+ * Button interaction language (cursor-pointer, press-scale, touch floor,
+ * focus glow, error shake). The chevron rotates 180° while the panel is
+ * open. The clear affordance is a `<span role="button">` rather than a real
+ * button — the trigger itself is already a `<button>` and HTML forbids
+ * nested buttons (browsers silently re-parent them, breaking hydration).
+ *
+ * `SelectItem` accepts `leadingIcon` (icon/logo/status dot left of the
+ * label) and `description` (a muted secondary line) — both render OUTSIDE
+ * `SelectPrimitive.ItemText` so only the primary label is spoken / used for
+ * typeahead. For a searchable / typeahead picker use Combobox instead
+ * (Phase 1, not yet built).
  *
  * @useWhen rendering a single-choice picker with a fixed list of options and no need for typeahead search
  */
@@ -25,12 +32,20 @@ export const SelectValue = SelectPrimitive.Value;
 
 const selectTriggerVariants = cva(
   [
-    'flex w-full items-center gap-xs border border-border-input bg-input text-foreground shadow-xs transition duration-fast ease-out-quart',
-    'placeholder:text-muted-foreground',
+    // `group` so the chevron can read the trigger's data-[state=open] to rotate.
+    'group flex w-full cursor-pointer items-center gap-xs border border-border-input bg-input text-foreground shadow-xs transition duration-fast ease-out-quart',
+    'pointer-coarse:min-h-11',
     'hover:border-border-strong',
     'focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none',
+    'active:scale-[0.97]',
     'disabled:cursor-not-allowed disabled:opacity-50',
     'aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:shadow-none aria-invalid:animate-field-shake',
+    'data-[valid=true]:border-success data-[valid=true]:focus-visible:border-success data-[valid=true]:focus-visible:shadow-none',
+    // Radix sets `data-placeholder` on the trigger button itself while the
+    // placeholder is shown (not on a descendant span, and `:placeholder` does
+    // not apply to a <button>) — so mute the trigger; it clears to foreground
+    // automatically once a value is selected.
+    'data-[placeholder]:text-muted-foreground',
     '[&>span]:line-clamp-1',
   ].join(' '),
   {
@@ -71,6 +86,8 @@ export interface SelectTriggerProps
   clearLabel?: string;
   /** Convenience boolean for `aria-invalid="true"` on the trigger. Triggers destructive border. */
   invalid?: boolean;
+  /** Marks the selection as validated-OK — success-tinted border. Mutually exclusive with `invalid`. */
+  valid?: boolean;
 }
 
 export const SelectTrigger = React.forwardRef<
@@ -88,6 +105,7 @@ export const SelectTrigger = React.forwardRef<
     onClear,
     clearLabel = 'Clear',
     invalid,
+    valid,
     ...rest
   } = props;
 
@@ -113,7 +131,8 @@ export const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Trigger
       ref={ref}
       aria-invalid={invalid ?? undefined}
-      aria-busy={loading ?? undefined}
+      aria-busy={loading === true ? true : undefined}
+      data-valid={valid === true ? 'true' : undefined}
       className={cn(selectTriggerVariants({ size, radius, className }))}
       {...rest}
     >
@@ -148,7 +167,7 @@ export const SelectTrigger = React.forwardRef<
           </span>
         ) : null}
         <SelectPrimitive.Icon asChild>
-          <ArrowDown01Icon className="size-icon-sm opacity-50" />
+          <ArrowDown01Icon className="size-icon-sm duration-fast ease-out-quart opacity-50 transition-transform group-data-[state=open]:rotate-180" />
         </SelectPrimitive.Icon>
       </div>
     </SelectPrimitive.Trigger>
@@ -195,8 +214,17 @@ export const SelectContent = React.forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        'border-border bg-popover text-popover-foreground relative z-50 max-h-96 min-w-32 overflow-hidden rounded-md border shadow-md',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
+        // Viewport-aware height cap (Radix exposes the available height as a CSS
+        // var) so the panel never overflows a short viewport on tablet/mobile.
+        'border-border bg-popover text-popover-foreground relative z-50 max-h-[var(--radix-select-content-available-height)] min-w-32 overflow-hidden rounded-md border shadow-md',
+        // Combined zoom + side-anchored slide, matching Popover / DropdownMenu —
+        // gives the panel spatial continuity from its trigger instead of a flat fade.
+        'duration-base ease-out-quart',
+        'data-[state=open]:animate-in data-[state=closed]:animate-out',
+        'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+        'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
+        'data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2',
         position === 'popper' && 'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
         className,
       )}
@@ -233,26 +261,45 @@ export const SelectLabel = React.forwardRef<
 ));
 SelectLabel.displayName = SelectPrimitive.Label.displayName;
 
+export interface SelectItemProps extends React.ComponentPropsWithoutRef<
+  typeof SelectPrimitive.Item
+> {
+  /** Decorative icon / logo / status dot left of the label. Auto-sized to `size-icon-sm`. */
+  leadingIcon?: React.ReactNode;
+  /** Muted secondary line below the label. Kept outside `ItemText` so only the label is spoken / used for typeahead. */
+  description?: React.ReactNode;
+}
+
 export const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
+  SelectItemProps
+>(({ className, children, leadingIcon, description, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'py-3xs pl-lg pr-xs relative flex w-full cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'py-3xs pl-lg pr-xs gap-xs relative flex w-full cursor-default items-center rounded-sm text-sm outline-none select-none',
       'focus:bg-muted focus:text-foreground',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     {...props}
   >
-    <span className="left-xs absolute flex size-3 items-center justify-center">
+    <span className="left-xs absolute inset-y-0 my-auto flex size-3 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
         <Tick02Icon className="size-3" strokeWidth={3} />
       </SelectPrimitive.ItemIndicator>
     </span>
-    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    {leadingIcon !== undefined ? (
+      <span className="text-muted-foreground [&_svg]:size-icon-sm flex shrink-0 items-center">
+        {leadingIcon}
+      </span>
+    ) : null}
+    <span className="flex min-w-0 flex-col">
+      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {description !== undefined ? (
+        <span className="text-2xs text-muted-foreground truncate">{description}</span>
+      ) : null}
+    </span>
   </SelectPrimitive.Item>
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;
