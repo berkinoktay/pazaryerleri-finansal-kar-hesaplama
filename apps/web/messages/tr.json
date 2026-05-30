@@ -13,6 +13,14 @@
     "close": "Kapat",
     "commandPalette": "Komut paleti",
     "more": "Daha fazla",
+    "breadcrumb": {
+      "label": "Gezinme yolu"
+    },
+    "sidebar": {
+      "label": "Kenar çubuğu",
+      "description": "Mobil kenar çubuğunu gösterir.",
+      "toggle": "Kenar çubuğunu aç/kapat"
+    },
     "pagination": {
       "label": "Sayfalama",
       "previous": "Önceki",

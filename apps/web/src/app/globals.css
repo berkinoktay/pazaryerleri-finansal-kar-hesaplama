@@ -51,6 +51,9 @@
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-overlay-scrim: var(--overlay-scrim);
+  --color-overlay-scrim-image: var(--overlay-scrim-image);
+  --color-scrim-chip: var(--scrim-chip);
+  --color-scrim-chip-foreground: var(--scrim-chip-foreground);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-border-muted: var(--border-muted);
@@ -176,6 +179,8 @@
   --spacing-icon: var(--size-icon);
   --spacing-icon-lg: var(--size-icon-lg);
   --spacing-icon-xl: var(--size-icon-xl);
+
+  --spacing-calendar-cell: var(--size-calendar-cell);
 
   --spacing-rail-icon: var(--size-rail-icon);
   --spacing-rail-context: var(--size-rail-context);

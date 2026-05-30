@@ -62,6 +62,15 @@
      the blur so the page behind stays comparable); only the alpha lives here. */
   --overlay-scrim: oklch(20% 0.02 265 / 0.3);
 
+  /* Lightbox (ImageModal) over user imagery — a HEAVIER cinema dim than the
+     modal scrim, since the focus is the photo itself. --scrim-chip is
+     theme-INDEPENDENT (a fixed dark disc, defined only here, inherited into
+     .dark) so the close control stays legible over ANY photo; its foreground
+     is a fixed near-white. This is the one sanctioned dynamic-alpha case. */
+  --overlay-scrim-image: oklch(8% 0.01 265 / 0.55);
+  --scrim-chip: oklch(12% 0 0 / 0.55);
+  --scrim-chip-foreground: oklch(98% 0 0);
+
   /* Lines — pulled slightly darker so they stay legible against the new
      gray --background (which is closer to where borders used to sit). */
   --border: oklch(89% 0.007 265);
@@ -215,6 +224,8 @@
      0.3 that dims a white page barely registers, so dim harder (0.5) on a
      deeper near-black base for comparable perceived darkening. */
   --overlay-scrim: oklch(6% 0.01 265 / 0.5);
+  /* Dark lightbox dims harder still (a photo on a dark page needs more). */
+  --overlay-scrim-image: oklch(4% 0.005 265 / 0.72);
 
   --border: oklch(24% 0.014 265);
   --border-strong: oklch(32% 0.018 265);

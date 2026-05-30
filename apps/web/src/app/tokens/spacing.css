@@ -30,6 +30,10 @@
   --size-icon-lg: 20px;
   --size-icon-xl: 24px;
 
+  /* Calendar day / month-nav cell — a 36px grid square (not 4pt spacing, so
+     it earns its own named size token rather than a raw size-9). */
+  --size-calendar-cell: 36px;
+
   /* Thumbnail sizes for ImageCell — square footprints used inside table
    * cells and list rows. sm fits dense tables (32px), md is the default
    * for product / customer rows (40px), lg is for header avatars or
