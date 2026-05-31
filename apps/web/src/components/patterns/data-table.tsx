@@ -314,6 +314,10 @@ export function DataTable<TData, TValue>({
     pageCount: isPaginationControlled ? pageCount : undefined,
     rowCount: isPaginationControlled ? rowCount : undefined,
     enableRowSelection,
+    // Single-column sort only. Shift-click multi-sort is off because the server
+    // marshalling keeps just the first key — leaving it on would let a user
+    // build a multi-sort the backend silently truncates.
+    enableMultiSort: false,
     getRowId,
     getRowCanExpand,
     getSubRows,
@@ -385,6 +389,9 @@ export function DataTable<TData, TValue>({
                             onClick={header.column.getToggleSortingHandler()}
                             className={cn(
                               'gap-3xs px-3xs py-3xs -mx-3xs duration-fast inline-flex items-center rounded-sm transition-colors',
+                              // Touch floor: a 44px tap target under a coarse pointer
+                              // (the header row grows to fit on touch devices).
+                              'pointer-coarse:min-h-11',
                               'hover:bg-background',
                               // Inset ring — the table's nested overflow containers
                               // clip the global outset focus glow; matches the row +

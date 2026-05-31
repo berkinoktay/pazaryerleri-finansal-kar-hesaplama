@@ -193,7 +193,7 @@ export default function DataShowcasePage(): React.ReactElement {
 
       <Preview
         title="DataTablePagination"
-        description="DataTable'ın altına oturan kanonik sayfalama altbiti. Solda &quot;1–10 / 50 satır&quot; özet, sağda perPage Select [10/25/50/100] + &quot;Sayfa X / Y&quot; caption + ilk/önceki/sonraki/son. Tüm sayılar useFormatter().number üstünden — tr-TR'de 1.472 olarak gruplanır. Server-side aware: manualPagination + pageCount/rowCount geçildiğinde aynı UI çalışır. Boş seride graceful fallback (Sayfa 1 / 1, tüm nav disabled). DataTable'ın `pagination` slot'una geçilir."
+        description="DataTable'ın altına oturan kanonik sayfalama altbiti. Solda &quot;1–10 / 50 satır&quot; özet, sağda perPage Select [10/25/50] + &quot;Sayfa X / Y&quot; caption + ilk/önceki/sonraki/son. Tüm sayılar useFormatter().number üstünden — tr-TR'de 1.472 olarak gruplanır. Server-side aware: manualPagination + pageCount/rowCount geçildiğinde aynı UI çalışır. Boş seride graceful fallback (Sayfa 1 / 1, tüm nav disabled). DataTable'ın `pagination` slot'una geçilir."
       >
         <DataTablePaginationShowcase />
       </Preview>

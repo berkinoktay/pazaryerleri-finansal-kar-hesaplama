@@ -20,12 +20,17 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
-const DEFAULT_PAGE_SIZES = [10, 25, 50, 100] as const;
+// Top option capped at 50: the body is paginated, NOT virtualized, so an
+// un-windowed page of 100 rows (multiplied further by expandable sub-rows) is
+// where a large grid starts to jank. The scaling strategy is paginate — reserve
+// virtualization for a future un-paginated feed, where it can be opt-in without
+// fighting the sticky header, spanning sub-rows, and pinned columns.
+const DEFAULT_PAGE_SIZES = [10, 25, 50] as const;
 
 export interface DataTablePaginationProps<TData> {
   /** TanStack table instance — fed by DataTable's `pagination` slot. */
   table: Table<TData>;
-  /** Choices for the per-page Select. Defaults to [10, 25, 50, 100]. */
+  /** Choices for the per-page Select. Defaults to [10, 25, 50]. */
   pageSizes?: readonly number[];
   className?: string;
 }

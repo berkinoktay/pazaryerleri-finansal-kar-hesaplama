@@ -182,7 +182,7 @@ export function DataTableToolbar<TData>({
                           aria-pressed={pinned === 'left'}
                           onClick={() => column.pin(pinned === 'left' ? false : 'left')}
                           className={cn(
-                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors',
+                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors pointer-coarse:size-11',
                             'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
                             pinned === 'left'
                               ? 'bg-muted text-foreground'
@@ -197,7 +197,7 @@ export function DataTableToolbar<TData>({
                           aria-pressed={pinned === 'right'}
                           onClick={() => column.pin(pinned === 'right' ? false : 'right')}
                           className={cn(
-                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors',
+                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors pointer-coarse:size-11',
                             'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
                             pinned === 'right'
                               ? 'bg-muted text-foreground'
