@@ -10,6 +10,7 @@ import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
 
+import { enumInWhere, rangeWhere } from '../lib/where-builders';
 import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CostStatus,
@@ -121,6 +122,13 @@ export async function list(opts: {
   if (filters.overrideMissing !== undefined) {
     variantConditions.push(variantOverrideMissingWhere(filters.overrideMissing));
   }
+  // vatRateIn (Advanced Filtering) is variant-level too: a product matches when
+  // ≥1 variant carries one of the listed rates — composes with status/override
+  // via the same AND of variant conditions.
+  const vatRateIn = enumInWhere(filters.vatRateIn);
+  if (vatRateIn !== undefined) {
+    variantConditions.push({ vatRate: vatRateIn });
+  }
   const variantWhere: Prisma.ProductVariantWhereInput | undefined =
     variantConditions.length === 0
       ? undefined
@@ -131,12 +139,38 @@ export async function list(opts: {
   const productWhere: Prisma.ProductWhereInput = {
     organizationId,
     storeId,
-    ...(filters.brandId !== undefined ? { brandId: filters.brandId } : {}),
-    ...(filters.categoryId !== undefined ? { categoryId: filters.categoryId } : {}),
     ...(filters.productId !== undefined ? { id: filters.productId } : {}),
     ...(variantWhere !== undefined ? { variants: { some: variantWhere } } : {}),
     ...(filters.q !== undefined ? buildSearchWhere(filters.q) : {}),
   };
+
+  // brandId / categoryId: the advanced multi-select (`*In`) wins when present,
+  // otherwise the existing single-value facet param applies. Both map to the
+  // same Prisma field, so one `??` picks the active one and we assign only when
+  // a filter is actually set.
+  const brandFilter = enumInWhere(filters.brandIdIn) ?? filters.brandId;
+  if (brandFilter !== undefined) productWhere.brandId = brandFilter;
+
+  const categoryFilter = enumInWhere(filters.categoryIdIn) ?? filters.categoryId;
+  if (categoryFilter !== undefined) productWhere.categoryId = categoryFilter;
+
+  // salePrice overlap via the denormalized B1 columns (PR-B1): a product's price
+  // interval [minSalePrice, maxSalePrice] overlaps the requested [min, max] iff
+  // maxSalePrice >= min AND minSalePrice <= max. Each bound maps to one column,
+  // so gte-only / lte-only / between all fall out naturally. Decimal columns
+  // accept decimal-string bounds — Postgres compares them numerically.
+  if (filters.salePriceMin !== undefined) {
+    productWhere.maxSalePrice = { gte: filters.salePriceMin };
+  }
+  if (filters.salePriceMax !== undefined) {
+    productWhere.minSalePrice = { lte: filters.salePriceMax };
+  }
+
+  // totalStock range via the shared builder.
+  const stockRange = rangeWhere(filters.stockMin, filters.stockMax);
+  if (stockRange !== undefined) {
+    productWhere.totalStock = stockRange;
+  }
 
   const skip = (filters.page - 1) * filters.perPage;
 
