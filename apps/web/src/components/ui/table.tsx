@@ -1,3 +1,5 @@
+'use client';
+
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
@@ -5,7 +7,8 @@ import { cn } from '@/lib/utils';
 /**
  * Raw HTML table primitives with shadcn defaults — sticky header,
  * tokenized row hover (`bg-surface-row-hover` from Phase 0), selected-
- * row state (`data-[state=selected]:bg-primary-soft`), `data-numeric`
+ * row state (`data-[state=selected]:bg-surface-row-selected` — a calm
+ * low-chroma neutral, not the brand `--primary-soft`), `data-numeric`
  * attribute for right-aligned tabular columns, and `data-pinned-side`
  * / `data-pinned-edge` attributes that turn cells into sticky pinned
  * columns with directional shadow. Use the DataTable pattern from
@@ -24,12 +27,54 @@ import { cn } from '@/lib/utils';
  * @useWhen rendering a static HTML table with no sorting or filtering needs (use the DataTable pattern from components/patterns for anything dynamic)
  */
 
-export const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
-    </div>
-  ),
+export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
+  /**
+   * Wires the horizontal-scroll container to expose `data-can-scroll-left` /
+   * `data-can-scroll-right` on its `group/tablescroll`, so pinned-column edge
+   * shadows can react to the real scroll position — the shadow shows only on
+   * the side where unpinned content actually slides under the pin (none at the
+   * start/end of the scroll). Off for static tables; the DataTable pattern
+   * turns it on.
+   */
+  scrollAware?: boolean;
+}
+
+export const Table = React.forwardRef<HTMLTableElement, TableProps>(
+  ({ className, scrollAware = false, ...props }, ref) => {
+    const scrollRef = React.useRef<HTMLDivElement>(null);
+
+    React.useEffect(() => {
+      if (!scrollAware) return;
+      const el = scrollRef.current;
+      if (el === null) return;
+      const update = (): void => {
+        const max = el.scrollWidth - el.clientWidth;
+        el.toggleAttribute('data-can-scroll-left', el.scrollLeft > 1);
+        el.toggleAttribute('data-can-scroll-right', max > 1 && el.scrollLeft < max - 1);
+      };
+      update();
+      el.addEventListener('scroll', update, { passive: true });
+      // Observe the container AND the inner table so a column-count change
+      // (which alters scrollWidth without resizing the container) re-evaluates.
+      const observer = new ResizeObserver(update);
+      observer.observe(el);
+      const inner = el.firstElementChild;
+      if (inner !== null) observer.observe(inner);
+      return () => {
+        el.removeEventListener('scroll', update);
+        observer.disconnect();
+      };
+    }, [scrollAware]);
+
+    return (
+      <div
+        ref={scrollRef}
+        className={cn('relative w-full overflow-auto', scrollAware && 'group/tablescroll')}
+      >
+        <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
+      </div>
+    );
+  },
 );
 Table.displayName = 'Table';
 
@@ -89,7 +134,7 @@ export const TableRow = React.forwardRef<
     // unpinned content from showing through) can mirror the row state
     // via group-hover/row:* and group-data-[state=selected]/row:*.
     className={cn(
-      'group/row border-border duration-fast hover:bg-surface-row-hover data-[state=selected]:bg-primary-soft border-b transition-colors',
+      'group/row border-border duration-fast hover:bg-surface-row-hover data-[state=selected]:bg-surface-row-selected border-b transition-colors',
       className,
     )}
     {...props}
@@ -114,13 +159,20 @@ export const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      'px-sm text-2xs text-muted-foreground h-10 text-left align-middle font-medium tracking-wide uppercase',
+      // Sentence-case, muted, medium weight — uppercase + wide tracking read as
+      // an admin-panel tell (and CSS-uppercasing mangles Turkish İ/ı); the
+      // header band already separates the header zone from the body.
+      'px-sm text-muted-foreground duration-fast h-10 text-left align-middle text-xs font-medium transition',
       'data-[numeric=true]:text-right',
       // Pinned cells use bg-surface-subtle to match the surrounding
       // TableHeader band, so a sticky pinned header column doesn't break out
       // of the header zone visually.
       'data-[pinned-side]:bg-surface-subtle data-[pinned-side]:sticky data-[pinned-side]:z-20',
-      'data-[pinned-edge=last-left]:shadow-pin-left-edge data-[pinned-edge=first-right]:shadow-pin-right-edge',
+      // Edge shadow is SCROLL-AWARE and lives in tokens/components.css as an
+      // ::after overlay, NOT here: a box-shadow set on a <td>/<th> is silently
+      // dropped under border-collapse: collapse (the table default), so a cell
+      // utility class would render nothing. The CSS keys off data-pinned-edge
+      // plus the Table's group/tablescroll data-can-scroll-* flags (scrollAware).
       className,
     )}
     {...props}
@@ -140,15 +192,22 @@ export const TableCell = React.forwardRef<
       // without padding the image would touch the row's border-b.
       // h-table-row-h still acts as the minimum so text-only rows
       // (price, stock, status) keep the established 44px row rhythm.
-      'h-table-row-h px-sm py-sm text-foreground align-middle text-sm',
+      // transition-colors/duration-fast MATCHES TableRow so a pinned cell's own
+      // opaque background fades in lockstep with the row on hover/selection — it
+      // was snapping instantly while the row faded, leaving a ~150ms seam.
+      'h-table-row-h px-sm py-sm text-foreground duration-fast align-middle text-sm transition',
       'data-[numeric=true]:text-right data-[numeric=true]:tabular-nums',
       // Pinned body cells stay opaque so unpinned columns scrolling
       // beneath them don't show through; mirror the row's hover +
       // selected state via group/row variants on TableRow.
       'data-[pinned-side]:bg-card data-[pinned-side]:sticky data-[pinned-side]:z-10',
       'data-[pinned-side]:group-hover/row:bg-surface-row-hover',
-      'data-[pinned-side]:group-data-[state=selected]/row:bg-primary-soft',
-      'data-[pinned-edge=last-left]:shadow-pin-left-edge data-[pinned-edge=first-right]:shadow-pin-right-edge',
+      'data-[pinned-side]:group-data-[state=selected]/row:bg-surface-row-selected',
+      // Edge shadow is SCROLL-AWARE and lives in tokens/components.css as an
+      // ::after overlay, NOT here: a box-shadow set on a <td>/<th> is silently
+      // dropped under border-collapse: collapse (the table default), so a cell
+      // utility class would render nothing. The CSS keys off data-pinned-edge
+      // plus the Table's group/tablescroll data-can-scroll-* flags (scrollAware).
       className,
     )}
     {...props}

@@ -24,13 +24,14 @@
   --shadow-ring-strong: inset 0 0 0 1px var(--border-strong);
   --shadow-focus: 0 0 0 3px oklch(55% 0.14 265 / 0.35);
 
-  /* Pinned-column edge shadows for DataTable. The shadow falls on the
-   * "open" side of the pinned column, signalling that scrolling content
-   * slides under. Direction is encoded in the token name — left-edge
-   * means "edge of a left-pinned column where unpinned content scrolls";
-   * the visible shadow points to the right. Mirror for right-pinned. */
-  --shadow-pin-left-edge: 4px 0 6px -2px oklch(22% 0.02 265 / 0.08);
-  --shadow-pin-right-edge: -4px 0 6px -2px oklch(22% 0.02 265 / 0.08);
+  /* Pinned-column edge shadow COLOR for DataTable, consumed by the ::after
+   * gradient in tokens/components.css. It is a flat color, not a box-shadow:
+   * the cue is drawn as a directional linear-gradient strip just OUTSIDE the
+   * pinned cell's inner edge, so it only ever falls on the scrolling-content
+   * side. (A box-shadow blurs symmetrically and bled onto the cell's OUTER
+   * edge; a one-sided gradient can't.) Alpha is tuned for a gradient — denser
+   * at the edge than a blurred shadow — so it sits just below the old value. */
+  --pin-edge-shadow: oklch(22% 0.02 265 / 0.22);
 }
 
 .dark {
@@ -56,10 +57,9 @@
 
   --shadow-focus: 0 0 0 3px oklch(68% 0.12 265 / 0.45);
 
-  /* Dark-mode pin shadows: stronger black, no inset highlight (the
-   * shadow points sideways into scrolling content, not downward off
-   * the surface, so the "ambient light from above" recipe doesn't
-   * apply here). */
-  --shadow-pin-left-edge: 4px 0 8px -2px oklch(0% 0 0 / 0.4);
-  --shadow-pin-right-edge: -4px 0 8px -2px oklch(0% 0 0 / 0.4);
+  /* Dark-mode pin edge shadow: black against the dark surface. Dark-on-dark
+   * is inherently low-contrast, so this is a best-effort cue — deeper dark
+   * emphasis would come from a lighter pinned-surface tint, not a darker
+   * shadow. */
+  --pin-edge-shadow: oklch(0% 0 0 / 0.6);
 }

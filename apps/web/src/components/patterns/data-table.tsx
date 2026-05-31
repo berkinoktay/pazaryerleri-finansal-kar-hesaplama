@@ -21,10 +21,11 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { ArrowDown01Icon, ArrowUp01Icon, SortingDownIcon } from 'hugeicons-react';
+import { ArrowDataTransferVerticalIcon, ArrowDown01Icon, ArrowUp01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { ROW_ACTIONS_COLUMN_ID } from '@/components/patterns/data-table-row-actions';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -36,6 +37,41 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+
+/** Conventional id for a row-selection checkbox column (auto-pinned left). */
+const SELECT_COLUMN_ID = 'select';
+
+/**
+ * useLayoutEffect on the client so measured pin offsets are corrected BEFORE
+ * paint (no visible jump); useEffect on the server where there is nothing to
+ * measure — sidesteps React's "useLayoutEffect does nothing on the server"
+ * SSR warning. `typeof document` is stable per environment, so this never
+ * changes the hook called within a single environment (no hook-order break).
+ */
+const useIsomorphicLayoutEffect =
+  typeof document !== 'undefined' ? React.useLayoutEffect : React.useEffect;
+
+/**
+ * Keeps the utility columns anchored at the OUTER edges of each pinned side:
+ * the select checkbox stays the far-left pinned column, the row-actions kebab
+ * stays the far-right one. TanStack's `column.pin('right')` APPENDS, so pinning
+ * a data column right would otherwise land it OUTSIDE the actions anchor (to
+ * its right, pushing the kebab inward). Re-sorting on every pinning change keeps
+ * the anchors outermost. The array order encodes the edge: in `right` the LAST
+ * id renders at the far edge (so actions goes last); in `left` the FIRST id is
+ * the far edge (so select goes first).
+ */
+function normalizePinning(pinning: ColumnPinningState): ColumnPinningState {
+  const left = pinning.left ?? [];
+  const right = pinning.right ?? [];
+  const nextLeft = left.includes(SELECT_COLUMN_ID)
+    ? [SELECT_COLUMN_ID, ...left.filter((id) => id !== SELECT_COLUMN_ID)]
+    : left;
+  const nextRight = right.includes(ROW_ACTIONS_COLUMN_ID)
+    ? [...right.filter((id) => id !== ROW_ACTIONS_COLUMN_ID), ROW_ACTIONS_COLUMN_ID]
+    : right;
+  return { left: nextLeft, right: nextRight };
+}
 
 export interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -224,7 +260,7 @@ export function DataTable<TData, TValue>({
   rowCount,
   fab,
 }: DataTableProps<TData, TValue>): React.ReactElement {
-  const t = useTranslations('common.dataTable.empty');
+  const t = useTranslations('common.dataTable');
   // Each of these triples follows the same controlled-when-supplied
   // contract: presence of the prop hands ownership to the parent and
   // flips the matching `manualX` flag on TanStack so it stops doing
@@ -242,9 +278,18 @@ export function DataTable<TData, TValue>({
   // Internal pinning state used only when caller didn't lift it. Seed
   // from `initialColumnPinning` so a feature page can declare "select
   // column starts pinned-left" once at mount.
-  const [internalPinning, setInternalPinning] = React.useState<ColumnPinningState>(
-    () => initialColumnPinning ?? { left: [], right: [] },
-  );
+  const [internalPinning, setInternalPinning] = React.useState<ColumnPinningState>(() => {
+    if (initialColumnPinning !== undefined) return normalizePinning(initialColumnPinning);
+    // Default: pin the UTILITY columns so the row checkbox stays on the left and
+    // the row-actions kebab on the right during horizontal scroll. Identity /
+    // data columns are opt-in — a feature passes `initialColumnPinning` to add
+    // its own anchor column (which then overrides this default entirely).
+    const left = columns.some((column) => column.id === SELECT_COLUMN_ID) ? [SELECT_COLUMN_ID] : [];
+    const right = columns.some((column) => column.id === ROW_ACTIONS_COLUMN_ID)
+      ? [ROW_ACTIONS_COLUMN_ID]
+      : [];
+    return { left, right };
+  });
 
   const isPinningControlled = columnPinning !== undefined;
   const isSortingControlled = sorting !== undefined;
@@ -252,10 +297,15 @@ export function DataTable<TData, TValue>({
   const isPaginationControlled = paginationState !== undefined;
 
   const handlePinningChange: OnChangeFn<ColumnPinningState> = (updater) => {
+    // Resolve the updater, then re-anchor the utility columns to the outer edges
+    // (TanStack's column.pin() appends, which would drop a freshly-pinned column
+    // outside the select/actions anchors).
+    const resolve = (prev: ColumnPinningState): ColumnPinningState =>
+      normalizePinning(typeof updater === 'function' ? updater(prev) : updater);
     if (isPinningControlled) {
-      onColumnPinningChange?.(updater);
+      onColumnPinningChange?.(resolve(columnPinning ?? { left: [], right: [] }));
     } else {
-      setInternalPinning(updater);
+      setInternalPinning(resolve);
     }
   };
   const handleSortingChange: OnChangeFn<SortingState> = (updater) => {
@@ -314,10 +364,81 @@ export function DataTable<TData, TValue>({
     pageCount: isPaginationControlled ? pageCount : undefined,
     rowCount: isPaginationControlled ? rowCount : undefined,
     enableRowSelection,
+    // Single-column sort only. Shift-click multi-sort is off because the server
+    // marshalling keeps just the first key — leaving it on would let a user
+    // build a multi-sort the backend silently truncates.
+    enableMultiSort: false,
     getRowId,
     getRowCanExpand,
     getSubRows,
   });
+
+  // Single source for cell-count math: the visible LEAF columns. Drives the
+  // empty-state + expanded-row colSpan AND the loading skeleton, so hiding a
+  // column can never desync the three against the rendered header/rows.
+  const visibleLeafColumns = table.getVisibleLeafColumns();
+  const visibleLeafCount = visibleLeafColumns.length;
+  const selectedCount = Object.keys(rowSelection).length;
+  // Skeleton fills the page rhythm without flooding the DOM on large page sizes.
+  const skeletonRowCount = Math.min(table.getState().pagination.pageSize, 12);
+
+  // Pinned-column sticky offsets are MEASURED from real rendered widths
+  // rather than trusting TanStack's column-size model. getStart('left') /
+  // getAfter('right') accumulate each column's getSize() (default 150px),
+  // which is wrong for our content-width columns: the 2nd+ pinned column on
+  // a side would stick at a 150px multiple instead of right after its
+  // neighbour, opening a gap that scrolling content shows through. The layout
+  // effect reads each pinned header cell's offsetWidth and accumulates the
+  // true offset; computePinningProps falls back to getStart/getAfter for the
+  // first paint and SSR (corrected pre-paint by the effect, so no jump).
+  const tableRef = React.useRef<HTMLTableElement>(null);
+  const [pinOffsets, setPinOffsets] = React.useState<Record<string, number>>({});
+  const activePinning = isPinningControlled ? columnPinning : internalPinning;
+  const pinSignature = `${activePinning.left?.join(',') ?? ''}|${activePinning.right?.join(',') ?? ''}`;
+
+  useIsomorphicLayoutEffect(() => {
+    const el = tableRef.current;
+    if (el === null) return;
+    const measure = (): void => {
+      const headRow = el.querySelector('thead tr');
+      if (headRow === null) return;
+      const cells = Array.from(headRow.children);
+      const next: Record<string, number> = {};
+      // Accumulate FRACTIONAL widths (getBoundingClientRect, not the integer
+      // offsetWidth): rounding each column to a whole pixel drifts the running
+      // offset, so a 2nd/3rd pinned column on a side lands a fraction of a pixel
+      // short of its neighbour and a hairline of table background shows through
+      // the seam. A 1px overlap would mask it, but exact fractional offsets fix
+      // it properly.
+      let leftAcc = 0;
+      for (const cell of cells) {
+        if (!(cell instanceof HTMLElement) || cell.dataset.pinnedSide !== 'left') continue;
+        if (cell.dataset.colId !== undefined) next[`l:${cell.dataset.colId}`] = leftAcc;
+        leftAcc += cell.getBoundingClientRect().width;
+      }
+      let rightAcc = 0;
+      for (let i = cells.length - 1; i >= 0; i -= 1) {
+        const cell = cells[i];
+        if (!(cell instanceof HTMLElement) || cell.dataset.pinnedSide !== 'right') continue;
+        if (cell.dataset.colId !== undefined) next[`r:${cell.dataset.colId}`] = rightAcc;
+        rightAcc += cell.getBoundingClientRect().width;
+      }
+      // Only commit when something actually moved — setState in a layout effect
+      // would otherwise loop (re-render → effect → setState → …).
+      setPinOffsets((prev) => {
+        const keys = Object.keys(next);
+        const unchanged =
+          keys.length === Object.keys(prev).length && keys.every((k) => prev[k] === next[k]);
+        return unchanged ? prev : next;
+      });
+    };
+    measure();
+    // Re-measure when a column's content width changes (the inner table
+    // resizing) without a pinning/column/data change of its own.
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [pinSignature, columns.length, data.length]);
 
   return (
     // Integrated table shell — `tabs` (optional) → `toolbar` (optional) →
@@ -329,143 +450,218 @@ export function DataTable<TData, TValue>({
     // gives the panel its outer lift.
     <>
       <div className="border-border bg-card overflow-hidden rounded-lg border">
+        {/* Polite live regions: a screen reader hears the selection count and
+            the loading state change without a visible duplicate. One status per
+            concern; both empty when inactive so nothing is announced at rest. */}
+        {enableRowSelection ? (
+          <div role="status" aria-live="polite" className="sr-only">
+            {selectedCount > 0 ? t('selection.selectedCount', { count: selectedCount }) : ''}
+          </div>
+        ) : null}
+        <div role="status" aria-live="polite" className="sr-only">
+          {loading ? t('loading') : ''}
+        </div>
         {tabs ? <div className="border-border px-md pt-sm pb-2xs border-b">{tabs}</div> : null}
         {toolbar ? (
           <div className="border-border px-md py-sm border-b">{toolbar(table)}</div>
         ) : null}
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => {
-                    const isNumeric = header.column.columnDef.meta?.numeric === true;
-                    const canSort = header.column.getCanSort();
-                    const sortDir = header.column.getIsSorted();
-                    const pinning = computePinningProps(header.column);
+        {/* Table owns the single horizontal-scroll container (scrollAware wires
+            the scroll-position data attributes the pinned-edge shadows react
+            to). No extra overflow wrapper — a second one would double-clip and
+            steal the sticky-pinning scroll context. */}
+        <Table ref={tableRef} scrollAware aria-busy={loading || undefined}>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => {
+                  const isNumeric = header.column.columnDef.meta?.numeric === true;
+                  const canSort = header.column.getCanSort();
+                  const sortDir = header.column.getIsSorted();
+                  const pinning = computePinningProps(header.column, pinOffsets);
+                  return (
+                    <TableHead
+                      key={header.id}
+                      data-numeric={isNumeric || undefined}
+                      aria-sort={
+                        canSort
+                          ? sortDir === 'asc'
+                            ? 'ascending'
+                            : sortDir === 'desc'
+                              ? 'descending'
+                              : 'none'
+                          : undefined
+                      }
+                      className={cn(
+                        isNumeric && 'text-right',
+                        // Active-sorted column carries a faint persistent tile
+                        // (one step under the header band) so the sorted column
+                        // is legible at a glance.
+                        sortDir !== false && 'bg-muted',
+                        // Sortable header drops its cell padding so the button
+                        // can fill the WHOLE cell (the entire header is the hit
+                        // target); the button re-adds px-sm.
+                        canSort && 'p-0',
+                      )}
+                      {...pinning}
+                    >
+                      {header.isPlaceholder ? null : canSort ? (
+                        <button
+                          type="button"
+                          onClick={header.column.getToggleSortingHandler()}
+                          className={cn(
+                            // Fill the entire header cell so the WHOLE header is
+                            // the sort hit target (the th drops its padding; the
+                            // button re-adds px-sm).
+                            'group/sortbtn px-sm gap-3xs duration-fast flex h-10 w-full items-center transition-colors',
+                            // Touch floor: a 44px tap target under a coarse pointer
+                            // (the header row grows to fit on touch devices).
+                            'pointer-coarse:min-h-11',
+                            // Hover tile = bg-muted, one step darker than the
+                            // bg-surface-subtle band; bg-background was lighter
+                            // than the band and read as a hole punched in it.
+                            'hover:bg-muted',
+                            // Inset ring — the table's nested overflow containers
+                            // clip the global outset focus glow; matches the row +
+                            // pin-button focus idiom so the focused header is visible.
+                            'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+                            // The sort indicator ALWAYS trails the label (same
+                            // side on every column); numeric headers just
+                            // right-align the label+icon group over their figures.
+                            isNumeric ? 'justify-end' : 'justify-start',
+                          )}
+                        >
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {sortDir === 'asc' ? (
+                            <ArrowUp01Icon className="size-icon-xs text-foreground shrink-0" />
+                          ) : sortDir === 'desc' ? (
+                            <ArrowDown01Icon className="size-icon-xs text-foreground shrink-0" />
+                          ) : (
+                            // Reveal-on-intent: an up/down "sortable both ways"
+                            // hint — hidden at rest, shown at FULL strength on
+                            // hover or keyboard focus (muted-foreground, matching
+                            // the label). The active column keeps a solid,
+                            // foreground-strength arrow so the sort pops.
+                            <ArrowDataTransferVerticalIcon className="size-icon-xs shrink-0 opacity-0 transition-opacity group-hover/sortbtn:opacity-100 group-focus-visible/sortbtn:opacity-100" />
+                          )}
+                          <span className="sr-only">
+                            {sortDir === 'asc'
+                              ? t('sort.ascending')
+                              : sortDir === 'desc'
+                                ? t('sort.descending')
+                                : t('sort.sortable')}
+                          </span>
+                        </button>
+                      ) : (
+                        flexRender(header.column.columnDef.header, header.getContext())
+                      )}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: skeletonRowCount }).map((_, rowIdx) => (
+                <TableRow key={`skeleton-${rowIdx}`}>
+                  {visibleLeafColumns.map((column) => {
+                    const isNumeric = column.columnDef.meta?.numeric === true;
                     return (
-                      <TableHead
-                        key={header.id}
+                      <TableCell
+                        key={column.id}
                         data-numeric={isNumeric || undefined}
                         className={cn(isNumeric && 'text-right')}
-                        {...pinning}
                       >
-                        {header.isPlaceholder ? null : canSort ? (
-                          <button
-                            type="button"
-                            onClick={header.column.getToggleSortingHandler()}
-                            className={cn(
-                              'gap-3xs px-3xs py-3xs -mx-3xs duration-fast inline-flex items-center rounded-sm transition-colors',
-                              'hover:bg-background',
-                              'focus-visible:outline-none',
-                              isNumeric && 'ml-auto',
-                            )}
-                          >
-                            {flexRender(header.column.columnDef.header, header.getContext())}
-                            {sortDir === 'asc' ? (
-                              <ArrowUp01Icon className="size-icon-xs" />
-                            ) : sortDir === 'desc' ? (
-                              <ArrowDown01Icon className="size-icon-xs" />
-                            ) : (
-                              <SortingDownIcon className="size-icon-xs opacity-40" />
-                            )}
-                          </button>
-                        ) : (
-                          flexRender(header.column.columnDef.header, header.getContext())
-                        )}
-                      </TableHead>
+                        <Skeleton className={cn('h-4', isNumeric ? 'ml-auto w-12' : 'w-full')} />
+                      </TableCell>
                     );
                   })}
                 </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                Array.from({ length: 6 }).map((_, i) => (
-                  <TableRow key={`skeleton-${i}`}>
-                    {columns.map((_col, colIdx) => (
-                      <TableCell key={colIdx}>
-                        <Skeleton className="h-4 w-full" />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : table.getRowModel().rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={columns.length} className="p-0">
-                    {empty ?? (
-                      <EmptyState
-                        title={t('title')}
-                        description={t('description')}
-                        className="border-0"
-                      />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                table.getRowModel().rows.map((row) => {
-                  const handleRowClick = onRowClick
-                    ? (event: React.MouseEvent<HTMLTableRowElement>) => {
-                        if (isInteractiveDescendant(event.target, event.currentTarget)) return;
-                        onRowClick(row.original, event);
-                      }
-                    : undefined;
-                  const handleRowKeyDown = onRowClick
-                    ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                        if (isInteractiveDescendant(event.target, event.currentTarget)) return;
-                        // Stop Space from scrolling and Enter from re-activating
-                        // the focused row twice via bubbling.
-                        event.preventDefault();
-                        onRowClick(row.original, event);
-                      }
-                    : undefined;
-                  return (
-                    <React.Fragment key={row.id}>
-                      <TableRow
-                        data-state={row.getIsSelected() ? 'selected' : undefined}
-                        data-depth={row.depth || undefined}
-                        role={onRowClick ? 'button' : undefined}
-                        tabIndex={onRowClick ? 0 : undefined}
-                        onClick={handleRowClick}
-                        onKeyDown={handleRowKeyDown}
-                        className={cn(
-                          onRowClick &&
-                            'focus-visible:ring-ring cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
-                        )}
-                      >
-                        {row.getVisibleCells().map((cell) => {
-                          const isNumeric = cell.column.columnDef.meta?.numeric === true;
-                          const pinning = computePinningProps(cell.column);
-                          return (
-                            <TableCell
-                              key={cell.id}
-                              data-numeric={isNumeric || undefined}
-                              className={cn(isNumeric && 'text-right')}
-                              {...pinning}
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </TableCell>
-                          );
-                        })}
-                      </TableRow>
-                      {row.getIsExpanded() && renderSubComponent !== undefined ? (
-                        <TableRow data-expanded-content="true" className="hover:bg-transparent">
+              ))
+            ) : table.getRowModel().rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={visibleLeafCount} className="p-0">
+                  {empty ?? (
+                    <EmptyState
+                      title={t('empty.title')}
+                      description={t('empty.description')}
+                      className="border-0"
+                    />
+                  )}
+                </TableCell>
+              </TableRow>
+            ) : (
+              table.getRowModel().rows.map((row) => {
+                const handleRowClick = onRowClick
+                  ? (event: React.MouseEvent<HTMLTableRowElement>) => {
+                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                      onRowClick(row.original, event);
+                    }
+                  : undefined;
+                const handleRowKeyDown = onRowClick
+                  ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                      // Stop Space from scrolling and Enter from re-activating
+                      // the focused row twice via bubbling.
+                      event.preventDefault();
+                      onRowClick(row.original, event);
+                    }
+                  : undefined;
+                return (
+                  <React.Fragment key={row.id}>
+                    <TableRow
+                      data-state={row.getIsSelected() ? 'selected' : undefined}
+                      data-depth={row.depth || undefined}
+                      role={onRowClick ? 'button' : undefined}
+                      tabIndex={onRowClick ? 0 : undefined}
+                      onClick={handleRowClick}
+                      onKeyDown={handleRowKeyDown}
+                      className={cn(
+                        onRowClick &&
+                          // The focus ring is painted on an overlay pseudo-element
+                          // ABOVE the sticky pinned cells (z-10) so it wraps the
+                          // whole row continuously instead of being clipped by the
+                          // opaque select / actions cell backgrounds at the edges.
+                          // shadow-none suppresses the GLOBAL :focus-visible glow
+                          // (globals.css box-shadow: var(--shadow-focus)) so only
+                          // the crisp ::after ring shows — without it the row got a
+                          // second, softer border stacked over the ring. The ring
+                          // is square (rows are rectangular); a rounded ring reads
+                          // wrong mid-table. A bare table's last row can be sliced
+                          // by the shell's rounded overflow, but every real table
+                          // has a toolbar / pagination occupying those corners.
+                          "focus-visible:after:ring-ring relative cursor-pointer focus-visible:shadow-none focus-visible:outline-none focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:z-20 focus-visible:after:ring-2 focus-visible:after:content-[''] focus-visible:after:ring-inset",
+                      )}
+                    >
+                      {row.getVisibleCells().map((cell) => {
+                        const isNumeric = cell.column.columnDef.meta?.numeric === true;
+                        const pinning = computePinningProps(cell.column, pinOffsets);
+                        return (
                           <TableCell
-                            colSpan={row.getVisibleCells().length}
-                            className="bg-muted p-0"
+                            key={cell.id}
+                            data-numeric={isNumeric || undefined}
+                            className={cn(isNumeric && 'text-right')}
+                            {...pinning}
                           >
-                            {renderSubComponent(row)}
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </TableCell>
-                        </TableRow>
-                      ) : null}
-                    </React.Fragment>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                        );
+                      })}
+                    </TableRow>
+                    {row.getIsExpanded() && renderSubComponent !== undefined ? (
+                      <TableRow data-expanded-content="true" className="hover:bg-transparent">
+                        <TableCell colSpan={visibleLeafCount} className="bg-muted p-0">
+                          {renderSubComponent(row)}
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
         {pagination ? (
           <div className="border-border px-md py-sm border-t">{pagination(table)}</div>
         ) : null}
@@ -516,29 +712,36 @@ function isInteractiveDescendant(target: EventTarget | null, rowEl: HTMLElement)
  * column isn't pinned, so the spread is a no-op for unpinned cells.
  *
  * The offset (`left:` for left-pinned, `right:` for right-pinned) is
- * runtime-dynamic — it depends on the cumulative width of pinned
- * columns earlier in the stack — so it goes via inline style rather
- * than a token. See CLAUDE.md "no one-off magic values" → "the one
- * exception" for why this is the right place for inline style.
+ * runtime-dynamic — it depends on the cumulative width of pinned columns
+ * earlier in the stack. It comes from `pinOffsets` (measured real widths,
+ * keyed `l:<id>` / `r:<id>`), falling back to TanStack's getStart/getAfter
+ * for the first paint + SSR. `data-col-id` lets the measuring layout effect
+ * map each pinned header cell back to its column. See CLAUDE.md "no one-off
+ * magic values" → "the one exception" for why inline style is right here.
  */
 function computePinningProps<TData, TValue>(
   column: Column<TData, TValue>,
+  pinOffsets: Record<string, number>,
 ): {
   'data-pinned-side'?: 'left' | 'right';
   'data-pinned-edge'?: 'last-left' | 'first-right';
+  'data-col-id'?: string;
   style?: React.CSSProperties;
 } {
   const side = column.getIsPinned();
   if (side === false) return {};
   const isLastLeft = side === 'left' && column.getIsLastColumn('left');
   const isFirstRight = side === 'right' && column.getIsFirstColumn('right');
-  // runtime-dynamic: sticky offset comes from cumulative widths of
-  // earlier pinned columns; can't be tokenized.
-  const style: React.CSSProperties =
-    side === 'left' ? { left: column.getStart('left') } : { right: column.getAfter('right') };
+  // runtime-dynamic: sticky offset is the measured cumulative width of
+  // earlier pinned columns; can't be tokenized. Fall back to the size-model
+  // start/after until the layout effect measures (pre-paint, so no jump).
+  const measured = pinOffsets[`${side === 'left' ? 'l' : 'r'}:${column.id}`];
+  const offset = measured ?? (side === 'left' ? column.getStart('left') : column.getAfter('right'));
+  const style: React.CSSProperties = side === 'left' ? { left: offset } : { right: offset };
   return {
     'data-pinned-side': side,
     'data-pinned-edge': isLastLeft ? 'last-left' : isFirstRight ? 'first-right' : undefined,
+    'data-col-id': column.id,
     style,
   };
 }
@@ -551,5 +754,13 @@ declare module '@tanstack/react-table' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface ColumnMeta<TData extends RowData, TValue> {
     numeric?: boolean;
+    /**
+     * Human-readable column name for the column-visibility menu and any
+     * a11y label. Required when `header` is not a plain string (e.g. a
+     * function/element header) — otherwise the menu would fall back to the
+     * raw machine `id` (`grossAmount`) instead of a localized label (`Ciro`).
+     * See `resolveColumnLabel` in data-table-toolbar.tsx.
+     */
+    label?: string;
   }
 }

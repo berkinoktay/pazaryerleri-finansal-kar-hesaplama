@@ -207,8 +207,8 @@ export function DataTablePaginationShowcase(): React.ReactElement {
         </span>
         <DefaultExample />
         <span className="text-2xs text-muted-foreground">
-          Solda satır özeti (1–10 / 50), sağda perPage [10, 25, 50, 100] + sayfa caption + ilk /
-          önceki / sonraki / son. Sınırlarda ilgili düğmeler disable.
+          Solda satır özeti (1–10 / 50), sağda perPage [10, 25, 50] + sayfa caption + ilk / önceki /
+          sonraki / son. Sınırlarda ilgili düğmeler disable.
         </span>
       </div>
 
@@ -218,7 +218,7 @@ export function DataTablePaginationShowcase(): React.ReactElement {
         </span>
         <CustomPageSizesExample />
         <span className="text-2xs text-muted-foreground">
-          Default [10, 25, 50, 100] yerine [5, 15, 30, 60]. 120 satır + initialPageSize 15 ile
+          Default [10, 25, 50] yerine [5, 15, 30, 60]. 120 satır + initialPageSize 15 ile
           başlatıldı.
         </span>
       </div>
