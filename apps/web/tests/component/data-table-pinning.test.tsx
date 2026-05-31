@@ -77,9 +77,11 @@ describe('DataTable column pinning', () => {
       const edgeCells = container.querySelectorAll('[data-pinned-edge="last-left"]');
       // 1 header + 2 body rows for column "b" = 3
       expect(edgeCells.length).toBe(3);
-      // None of column "a"'s cells should carry the edge marker.
+      // None of column "a"'s cells should carry the edge marker. Match on the
+      // unique column-"a" body values (a1/a2) — the sortable header now carries
+      // an sr-only "Sıralanabilir" phrase that also contains a bare "a".
       for (const el of edgeCells) {
-        expect(el.textContent).not.toContain('a');
+        expect(el.textContent).not.toMatch(/a[12]/);
       }
     });
 
@@ -143,9 +145,11 @@ describe('DataTable column pinning', () => {
       const { user, container } = renderWithIntl(<Harness />);
       // Open the column-management dropdown.
       await user.click(screen.getByRole('button', { name: 'Kolonları düzenle' }));
-      // Click "Sağa sabitle" for column "b".
-      const bRowLabel = await screen.findByText('b');
-      const bRow = bRowLabel.closest('[role="menuitem"]') as HTMLElement;
+      // Click "Sağa sabitle" for column "b". The menu now shows the human label
+      // ("B", the header) — scope to the menu so it doesn't collide with the
+      // "B" header cell rendered in the table itself.
+      const menu = await screen.findByRole('menu');
+      const bRow = within(menu).getByText('B').closest('[role="menuitem"]') as HTMLElement;
       const pinRightBtn = within(bRow).getByRole('button', { name: 'Sağa sabitle' });
       await user.click(pinRightBtn);
       // The pinning callback should have fired with column b on the right.

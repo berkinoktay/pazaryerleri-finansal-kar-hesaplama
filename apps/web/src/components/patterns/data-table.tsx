@@ -224,7 +224,7 @@ export function DataTable<TData, TValue>({
   rowCount,
   fab,
 }: DataTableProps<TData, TValue>): React.ReactElement {
-  const t = useTranslations('common.dataTable.empty');
+  const t = useTranslations('common.dataTable');
   // Each of these triples follows the same controlled-when-supplied
   // contract: presence of the prop hands ownership to the parent and
   // flips the matching `manualX` flag on TanStack so it stops doing
@@ -319,6 +319,15 @@ export function DataTable<TData, TValue>({
     getSubRows,
   });
 
+  // Single source for cell-count math: the visible LEAF columns. Drives the
+  // empty-state + expanded-row colSpan AND the loading skeleton, so hiding a
+  // column can never desync the three against the rendered header/rows.
+  const visibleLeafColumns = table.getVisibleLeafColumns();
+  const visibleLeafCount = visibleLeafColumns.length;
+  const selectedCount = Object.keys(rowSelection).length;
+  // Skeleton fills the page rhythm without flooding the DOM on large page sizes.
+  const skeletonRowCount = Math.min(table.getState().pagination.pageSize, 12);
+
   return (
     // Integrated table shell — `tabs` (optional) → `toolbar` (optional) →
     // table rows → `pagination` (optional) all live inside one bordered,
@@ -329,12 +338,23 @@ export function DataTable<TData, TValue>({
     // gives the panel its outer lift.
     <>
       <div className="border-border bg-card overflow-hidden rounded-lg border">
+        {/* Polite live regions: a screen reader hears the selection count and
+            the loading state change without a visible duplicate. One status per
+            concern; both empty when inactive so nothing is announced at rest. */}
+        {enableRowSelection ? (
+          <div role="status" aria-live="polite" className="sr-only">
+            {selectedCount > 0 ? t('selection.selectedCount', { count: selectedCount }) : ''}
+          </div>
+        ) : null}
+        <div role="status" aria-live="polite" className="sr-only">
+          {loading ? t('loading') : ''}
+        </div>
         {tabs ? <div className="border-border px-md pt-sm pb-2xs border-b">{tabs}</div> : null}
         {toolbar ? (
           <div className="border-border px-md py-sm border-b">{toolbar(table)}</div>
         ) : null}
         <div className="overflow-x-auto">
-          <Table>
+          <Table aria-busy={loading || undefined}>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
@@ -347,6 +367,15 @@ export function DataTable<TData, TValue>({
                       <TableHead
                         key={header.id}
                         data-numeric={isNumeric || undefined}
+                        aria-sort={
+                          canSort
+                            ? sortDir === 'asc'
+                              ? 'ascending'
+                              : sortDir === 'desc'
+                                ? 'descending'
+                                : 'none'
+                            : undefined
+                        }
                         className={cn(isNumeric && 'text-right')}
                         {...pinning}
                       >
@@ -357,7 +386,10 @@ export function DataTable<TData, TValue>({
                             className={cn(
                               'gap-3xs px-3xs py-3xs -mx-3xs duration-fast inline-flex items-center rounded-sm transition-colors',
                               'hover:bg-background',
-                              'focus-visible:outline-none',
+                              // Inset ring — the table's nested overflow containers
+                              // clip the global outset focus glow; matches the row +
+                              // pin-button focus idiom so the focused header is visible.
+                              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
                               isNumeric && 'ml-auto',
                             )}
                           >
@@ -369,6 +401,13 @@ export function DataTable<TData, TValue>({
                             ) : (
                               <SortingDownIcon className="size-icon-xs opacity-40" />
                             )}
+                            <span className="sr-only">
+                              {sortDir === 'asc'
+                                ? t('sort.ascending')
+                                : sortDir === 'desc'
+                                  ? t('sort.descending')
+                                  : t('sort.sortable')}
+                            </span>
                           </button>
                         ) : (
                           flexRender(header.column.columnDef.header, header.getContext())
@@ -381,22 +420,29 @@ export function DataTable<TData, TValue>({
             </TableHeader>
             <TableBody>
               {loading ? (
-                Array.from({ length: 6 }).map((_, i) => (
-                  <TableRow key={`skeleton-${i}`}>
-                    {columns.map((_col, colIdx) => (
-                      <TableCell key={colIdx}>
-                        <Skeleton className="h-4 w-full" />
-                      </TableCell>
-                    ))}
+                Array.from({ length: skeletonRowCount }).map((_, rowIdx) => (
+                  <TableRow key={`skeleton-${rowIdx}`}>
+                    {visibleLeafColumns.map((column) => {
+                      const isNumeric = column.columnDef.meta?.numeric === true;
+                      return (
+                        <TableCell
+                          key={column.id}
+                          data-numeric={isNumeric || undefined}
+                          className={cn(isNumeric && 'text-right')}
+                        >
+                          <Skeleton className={cn('h-4', isNumeric ? 'ml-auto w-12' : 'w-full')} />
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
                 ))
               ) : table.getRowModel().rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={columns.length} className="p-0">
+                  <TableCell colSpan={visibleLeafCount} className="p-0">
                     {empty ?? (
                       <EmptyState
-                        title={t('title')}
-                        description={t('description')}
+                        title={t('empty.title')}
+                        description={t('empty.description')}
                         className="border-0"
                       />
                     )}
@@ -451,10 +497,7 @@ export function DataTable<TData, TValue>({
                       </TableRow>
                       {row.getIsExpanded() && renderSubComponent !== undefined ? (
                         <TableRow data-expanded-content="true" className="hover:bg-transparent">
-                          <TableCell
-                            colSpan={row.getVisibleCells().length}
-                            className="bg-muted p-0"
-                          >
+                          <TableCell colSpan={visibleLeafCount} className="bg-muted p-0">
                             {renderSubComponent(row)}
                           </TableCell>
                         </TableRow>
@@ -551,5 +594,13 @@ declare module '@tanstack/react-table' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface ColumnMeta<TData extends RowData, TValue> {
     numeric?: boolean;
+    /**
+     * Human-readable column name for the column-visibility menu and any
+     * a11y label. Required when `header` is not a plain string (e.g. a
+     * function/element header) — otherwise the menu would fall back to the
+     * raw machine `id` (`grossAmount`) instead of a localized label (`Ciro`).
+     * See `resolveColumnLabel` in data-table-toolbar.tsx.
+     */
+    label?: string;
   }
 }

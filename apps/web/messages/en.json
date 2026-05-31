@@ -48,6 +48,15 @@
         "title": "No records to display",
         "description": "Clear the filters or refresh the sync."
       },
+      "loading": "Loading…",
+      "sort": {
+        "ascending": "Sorted ascending",
+        "descending": "Sorted descending",
+        "sortable": "Sortable"
+      },
+      "selection": {
+        "selectedCount": "{count, plural, one {# row selected} other {# rows selected}}"
+      },
       "toolbar": {
         "searchPlaceholder": "Search…",
         "clear": "Clear",

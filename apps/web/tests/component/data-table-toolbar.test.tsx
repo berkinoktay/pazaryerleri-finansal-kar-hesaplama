@@ -1,4 +1,5 @@
 import { type ColumnDef, getCoreRowModel, useReactTable } from '@tanstack/react-table';
+import { within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -64,5 +65,50 @@ describe('DataTableToolbar controlled-search mode', () => {
     const { user } = renderWithIntl(<Harness searchValue="" onSearchChange={onSearchChange} />);
     await user.type(screen.getByPlaceholderText('Ara…'), 'a');
     expect(onSearchChange).toHaveBeenCalledWith('a');
+  });
+});
+
+describe('DataTableToolbar column-visibility menu', () => {
+  interface MenuRow {
+    id: string;
+    customer: string;
+    grossAmount: number;
+  }
+  const MENU_COLUMNS: ColumnDef<MenuRow>[] = [
+    // Utility column: function header + not hideable → excluded from the menu
+    // (its machine id must never surface to the user).
+    {
+      id: 'select',
+      header: () => <input type="checkbox" aria-label="all" />,
+      enableHiding: false,
+    },
+    // Plain-string header → label resolves to the header text.
+    { accessorKey: 'customer', header: 'Müşteri' },
+    // Function header → must fall back to meta.label, never the machine id.
+    { accessorKey: 'grossAmount', header: () => <span>↕</span>, meta: { label: 'Ciro' } },
+  ];
+  const MENU_DATA: MenuRow[] = [{ id: '1', customer: 'Foo', grossAmount: 100 }];
+
+  function MenuHarness(): React.ReactElement {
+    const table = useReactTable({
+      data: MENU_DATA,
+      columns: MENU_COLUMNS,
+      getCoreRowModel: getCoreRowModel(),
+    });
+    return <DataTableToolbar table={table} />;
+  }
+
+  it('shows human labels (meta.label / header), never raw column ids, and hides utility columns', async () => {
+    const { user } = renderWithIntl(<MenuHarness />);
+    await user.click(screen.getByRole('button', { name: 'Kolonları düzenle' }));
+    const menu = await screen.findByRole('menu');
+
+    expect(within(menu).getByText('Müşteri')).toBeInTheDocument();
+    expect(within(menu).getByText('Ciro')).toBeInTheDocument();
+    // The machine ids must never appear.
+    expect(within(menu).queryByText('grossAmount')).not.toBeInTheDocument();
+    expect(within(menu).queryByText('customer')).not.toBeInTheDocument();
+    // The non-hideable utility column is excluded entirely.
+    expect(within(menu).queryByText('select')).not.toBeInTheDocument();
   });
 });

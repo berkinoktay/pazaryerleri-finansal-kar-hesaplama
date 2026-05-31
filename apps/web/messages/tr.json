@@ -48,6 +48,15 @@
         "title": "Gösterilecek kayıt yok",
         "description": "Filtreleri temizleyin veya senkronizasyonu yenileyin."
       },
+      "loading": "Yükleniyor…",
+      "sort": {
+        "ascending": "Artan sıralı",
+        "descending": "Azalan sıralı",
+        "sortable": "Sıralanabilir"
+      },
+      "selection": {
+        "selectedCount": "{count} satır seçili"
+      },
       "toolbar": {
         "searchPlaceholder": "Ara…",
         "clear": "Temizle",
