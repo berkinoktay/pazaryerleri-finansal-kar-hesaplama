@@ -367,6 +367,15 @@ model Product {
   // products-list sort=totalStock workflow (pricing + restock review).
   totalStock Int @default(0) @map("total_stock")
 
+  // Denormalized MIN/MAX(variants[*].salePrice) for the store, updated in the
+  // same upsertBatch transaction as totalStock (NOT a trigger — the sync worker
+  // stays the single writer). Prisma 7 cannot MAX() over a Decimal child
+  // relation in orderBy, so products-list sort=salePrice reads these columns,
+  // and the salePrice range filter (PR-B2) tests overlap against both bounds.
+  // NULL only for a product with zero variants. No @updatedAt (data columns).
+  minSalePrice Decimal? @map("min_sale_price") @db.Decimal(12, 2)
+  maxSalePrice Decimal? @map("max_sale_price") @db.Decimal(12, 2)
+
   store    Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   variants ProductVariant[]
   images   ProductImage[]
@@ -376,6 +385,7 @@ model Product {
   @@index([storeId, productMainId])
   @@index([storeId, brandId])
   @@index([storeId, totalStock])
+  @@index([storeId, minSalePrice, maxSalePrice])
   @@index([storeId, categoryId])
   @@map("products")
 }
