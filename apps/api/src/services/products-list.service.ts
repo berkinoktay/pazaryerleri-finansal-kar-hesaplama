@@ -84,13 +84,17 @@ function buildOrderBy(sort: ProductListSort): Prisma.ProductOrderByWithRelationI
     case '-title':
       return { title: 'desc' };
     case 'salePrice':
+      // Ascending = "cheapest products first" → order by the product's lowest
+      // variant price (its "from ₺X" representative at the cheap end).
+      return { minSalePrice: { sort: 'asc', nulls: 'last' } };
     case '-salePrice':
-      // Prisma can't natively MAX over a decimal child relation without
-      // raw SQL or a denormalized column. Until we ship Product.minSalePrice
-      // (follow-up), sort by platformCreatedAt as a deterministic fallback
-      // when the user picks salePrice. Surfaced as a known limitation in
-      // the validator's openapi description.
-      return { platformCreatedAt: { sort: sort.startsWith('-') ? 'desc' : 'asc', nulls: 'last' } };
+      // Descending = "priciest products first" → order by the product's highest
+      // variant price. Intentionally NOT a strict reverse of the asc case: a
+      // multi-variant product has no single price, so each direction surfaces
+      // the extreme the seller means. Both columns are denormalized
+      // transactionally in the sync worker (mirrors totalStock) — see
+      // apps/sync-worker/src/handlers/products.ts.
+      return { maxSalePrice: { sort: 'desc', nulls: 'last' } };
     case 'totalStock':
       return { totalStock: 'asc' };
     case '-totalStock':

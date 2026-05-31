@@ -390,6 +390,61 @@ describe('processProductsChunk', () => {
     expect(product.totalStock).toBe(20);
   });
 
+  it('upserts Product with min/maxSalePrice spanning the variant sale prices', async () => {
+    // Denormalized min_sale_price / max_sale_price are written transactionally
+    // in the same upsertBatch update as total_stock — they back the
+    // products-list sort=salePrice and the salePrice range filter (PR-B1).
+    // Prisma's Decimal.toString() strips trailing zeros (89.50 → "89.5").
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 910_001,
+            productMainId: 'TS-SALEPRICE-1',
+            title: 'SalePrice Bounds Product',
+            variants: [
+              { variantId: 910_101, barcode: 'sp-bc-1', stockCode: 'sp-sk-1', salePrice: 89.5 },
+              { variantId: 910_102, barcode: 'sp-bc-2', stockCode: 'sp-sk-2', salePrice: 249.9 },
+              { variantId: 910_103, barcode: 'sp-bc-3', stockCode: 'sp-sk-3', salePrice: 129.0 },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+
+    await processProductsChunk({ syncLog: log, cursor: null });
+
+    const product = await prisma.product.findFirstOrThrow({
+      where: { storeId, platformContentId: BigInt(910_001) },
+    });
+    expect(product.minSalePrice?.toString()).toBe('89.5');
+    expect(product.maxSalePrice?.toString()).toBe('249.9');
+  });
+
   it('seeds syncedDimensionalWeight from Trendyol response on first sync, leaving user override null', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
