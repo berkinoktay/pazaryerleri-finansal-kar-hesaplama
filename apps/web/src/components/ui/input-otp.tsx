@@ -96,7 +96,14 @@ export const InputOTPSlot = React.forwardRef<HTMLDivElement, InputOTPSlotProps>(
         aria-invalid={isInvalid === true ? true : undefined}
         data-valid={isValid === true ? 'true' : undefined}
         className={cn(
-          'border-border-input bg-input duration-fast ease-out-quart relative flex size-10 items-center justify-center border-y border-r text-sm font-semibold tabular-nums shadow-xs transition-colors first:rounded-l-md first:border-l last:rounded-r-md',
+          // Every slot carries a FULL border; `-ml-px` (cancelled on the first)
+          // collapses each slot's left border onto its neighbor's right border so
+          // the resting row still reads as single 1px dividers. This is what makes
+          // the focus state correct: a collapsed `border-r`-only slot can never
+          // recolor its left edge, so a focused middle/last slot kept the
+          // neighbor's grey line. With a full border + `z-10`, the active slot's
+          // 4-side `border-ring` paints over the shared edges on every side.
+          'border-border-input bg-input duration-fast ease-out-quart relative -ml-px flex size-10 items-center justify-center border text-sm font-semibold tabular-nums shadow-xs transition-colors first:ml-0 first:rounded-l-md last:rounded-r-md',
           'pointer-coarse:size-11',
           // Active slot is FOCUS, not selection — match the Input/Select field
           // focus idiom (ring border + focus shadow), never the --primary ring.

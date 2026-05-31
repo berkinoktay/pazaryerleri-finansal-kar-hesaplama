@@ -45,7 +45,10 @@ export const AccordionTrigger = React.forwardRef<
     <AccordionPrimitive.Trigger
       ref={ref}
       className={cn(
-        'gap-sm py-sm duration-fast flex flex-1 items-center justify-between text-left text-sm font-medium transition-colors',
+        // px-sm insets the label + chevron from the item edges so the text never
+        // touches the full-width divider / hover tint (the tint fills the row
+        // edge-to-edge; the content breathes inside it).
+        'gap-sm px-sm py-sm duration-fast flex flex-1 items-center justify-between text-left text-sm font-medium transition-colors',
         // Neutral row-surface hover (not text-primary): brand color is reserved
         // for genuine selection, not hover. Open state is carried by the item's
         // surface tint above.
@@ -71,7 +74,8 @@ export const AccordionContent = React.forwardRef<
     className="text-muted-foreground data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up overflow-hidden text-sm"
     {...props}
   >
-    <div className={cn('pb-sm pt-3xs', className)}>{children}</div>
+    {/* px-sm matches the trigger inset so body text aligns under the label. */}
+    <div className={cn('px-sm pb-sm pt-3xs', className)}>{children}</div>
   </AccordionPrimitive.Content>
 ));
 AccordionContent.displayName = AccordionPrimitive.Content.displayName;

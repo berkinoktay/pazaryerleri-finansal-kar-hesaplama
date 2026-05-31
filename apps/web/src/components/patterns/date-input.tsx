@@ -6,9 +6,9 @@ import { Calendar01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { selectTriggerVariants } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 /**
@@ -60,21 +60,29 @@ export function DateInput({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="md"
+        <button
+          type="button"
           disabled={disabled}
+          // Shares the SelectTrigger field recipe (bg-input, border-input, hover
+          // border-strong, focus glow) so the date field matches sibling inputs
+          // instead of reading as an outline button — fixes the bg-background vs
+          // bg-input mismatch (most visible in dark mode, where bg-background sat
+          // darker than the card while real fields sit lighter).
+          // `inline-flex w-auto` overrides the recipe's `flex w-full` (meant for
+          // form-column fields) so the picker hugs its label by default — matching
+          // the previous outline-button behavior and inline / toolbar use. Pass
+          // className="w-full" to fill a form column.
           className={cn(
-            // active:scale-100 cancels the Button press-shrink — this trigger
-            // reads as an input field, not an action button.
-            'justify-start font-normal active:scale-100',
-            value === null || value === undefined ? 'text-muted-foreground' : undefined,
+            selectTriggerVariants({ size: 'md' }),
+            'inline-flex w-auto',
+            // a Date is always truthy → `!value` is true only when null/undefined.
+            !value && 'text-muted-foreground',
             className,
           )}
         >
-          <Calendar01Icon className="size-icon-sm" />
-          {label ?? placeholder ?? t('placeholder')}
-        </Button>
+          <Calendar01Icon className="size-icon-sm text-muted-foreground shrink-0" />
+          <span className="truncate">{label ?? placeholder ?? t('placeholder')}</span>
+        </button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align={align}>
         <Calendar
