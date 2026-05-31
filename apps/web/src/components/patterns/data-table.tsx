@@ -25,6 +25,7 @@ import { ArrowDataTransferVerticalIcon, ArrowDown01Icon, ArrowUp01Icon } from 'h
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { ROW_ACTIONS_COLUMN_ID } from '@/components/patterns/data-table-row-actions';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -36,6 +37,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+
+/** Conventional id for a row-selection checkbox column (auto-pinned left). */
+const SELECT_COLUMN_ID = 'select';
 
 export interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -242,9 +246,18 @@ export function DataTable<TData, TValue>({
   // Internal pinning state used only when caller didn't lift it. Seed
   // from `initialColumnPinning` so a feature page can declare "select
   // column starts pinned-left" once at mount.
-  const [internalPinning, setInternalPinning] = React.useState<ColumnPinningState>(
-    () => initialColumnPinning ?? { left: [], right: [] },
-  );
+  const [internalPinning, setInternalPinning] = React.useState<ColumnPinningState>(() => {
+    if (initialColumnPinning !== undefined) return initialColumnPinning;
+    // Default: pin the UTILITY columns so the row checkbox stays on the left and
+    // the row-actions kebab on the right during horizontal scroll. Identity /
+    // data columns are opt-in — a feature passes `initialColumnPinning` to add
+    // its own anchor column (which then overrides this default entirely).
+    const left = columns.some((column) => column.id === SELECT_COLUMN_ID) ? [SELECT_COLUMN_ID] : [];
+    const right = columns.some((column) => column.id === ROW_ACTIONS_COLUMN_ID)
+      ? [ROW_ACTIONS_COLUMN_ID]
+      : [];
+    return { left, right };
+  });
 
   const isPinningControlled = columnPinning !== undefined;
   const isSortingControlled = sorting !== undefined;
@@ -357,201 +370,203 @@ export function DataTable<TData, TValue>({
         {toolbar ? (
           <div className="border-border px-md py-sm border-b">{toolbar(table)}</div>
         ) : null}
-        <div className="overflow-x-auto">
-          <Table aria-busy={loading || undefined}>
-            <TableHeader>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => {
-                    const isNumeric = header.column.columnDef.meta?.numeric === true;
-                    const canSort = header.column.getCanSort();
-                    const sortDir = header.column.getIsSorted();
-                    const pinning = computePinningProps(header.column);
-                    return (
-                      <TableHead
-                        key={header.id}
-                        data-numeric={isNumeric || undefined}
-                        aria-sort={
-                          canSort
-                            ? sortDir === 'asc'
-                              ? 'ascending'
+        {/* Table owns the single horizontal-scroll container (scrollAware wires
+            the scroll-position data attributes the pinned-edge shadows react
+            to). No extra overflow wrapper — a second one would double-clip and
+            steal the sticky-pinning scroll context. */}
+        <Table scrollAware aria-busy={loading || undefined}>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => {
+                  const isNumeric = header.column.columnDef.meta?.numeric === true;
+                  const canSort = header.column.getCanSort();
+                  const sortDir = header.column.getIsSorted();
+                  const pinning = computePinningProps(header.column);
+                  return (
+                    <TableHead
+                      key={header.id}
+                      data-numeric={isNumeric || undefined}
+                      aria-sort={
+                        canSort
+                          ? sortDir === 'asc'
+                            ? 'ascending'
+                            : sortDir === 'desc'
+                              ? 'descending'
+                              : 'none'
+                          : undefined
+                      }
+                      className={cn(
+                        isNumeric && 'text-right',
+                        // Active-sorted column carries a faint persistent tile
+                        // (one step under the header band) so the sorted column
+                        // is legible at a glance.
+                        sortDir !== false && 'bg-muted',
+                        // Sortable header drops its cell padding so the button
+                        // can fill the WHOLE cell (the entire header is the hit
+                        // target); the button re-adds px-sm.
+                        canSort && 'p-0',
+                      )}
+                      {...pinning}
+                    >
+                      {header.isPlaceholder ? null : canSort ? (
+                        <button
+                          type="button"
+                          onClick={header.column.getToggleSortingHandler()}
+                          className={cn(
+                            // Fill the entire header cell so the WHOLE header is
+                            // the sort hit target (the th drops its padding; the
+                            // button re-adds px-sm).
+                            'group/sortbtn px-sm gap-3xs duration-fast flex h-10 w-full items-center transition-colors',
+                            // Touch floor: a 44px tap target under a coarse pointer
+                            // (the header row grows to fit on touch devices).
+                            'pointer-coarse:min-h-11',
+                            // Hover tile = bg-muted, one step darker than the
+                            // bg-surface-subtle band; bg-background was lighter
+                            // than the band and read as a hole punched in it.
+                            'hover:bg-muted',
+                            // Inset ring — the table's nested overflow containers
+                            // clip the global outset focus glow; matches the row +
+                            // pin-button focus idiom so the focused header is visible.
+                            'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+                            // The sort indicator ALWAYS trails the label (same
+                            // side on every column); numeric headers just
+                            // right-align the label+icon group over their figures.
+                            isNumeric ? 'justify-end' : 'justify-start',
+                          )}
+                        >
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {sortDir === 'asc' ? (
+                            <ArrowUp01Icon className="size-icon-xs text-foreground shrink-0" />
+                          ) : sortDir === 'desc' ? (
+                            <ArrowDown01Icon className="size-icon-xs text-foreground shrink-0" />
+                          ) : (
+                            // Reveal-on-intent: an up/down "sortable both ways"
+                            // hint — hidden at rest, shown at FULL strength on
+                            // hover or keyboard focus (muted-foreground, matching
+                            // the label). The active column keeps a solid,
+                            // foreground-strength arrow so the sort pops.
+                            <ArrowDataTransferVerticalIcon className="size-icon-xs shrink-0 opacity-0 transition-opacity group-hover/sortbtn:opacity-100 group-focus-visible/sortbtn:opacity-100" />
+                          )}
+                          <span className="sr-only">
+                            {sortDir === 'asc'
+                              ? t('sort.ascending')
                               : sortDir === 'desc'
-                                ? 'descending'
-                                : 'none'
-                            : undefined
-                        }
-                        className={cn(
-                          isNumeric && 'text-right',
-                          // Active-sorted column carries a faint persistent tile
-                          // (one step under the header band) so the sorted column
-                          // is legible at a glance.
-                          sortDir !== false && 'bg-muted',
-                          // Sortable header drops its cell padding so the button
-                          // can fill the WHOLE cell (the entire header is the hit
-                          // target); the button re-adds px-sm.
-                          canSort && 'p-0',
-                        )}
-                        {...pinning}
+                                ? t('sort.descending')
+                                : t('sort.sortable')}
+                          </span>
+                        </button>
+                      ) : (
+                        flexRender(header.column.columnDef.header, header.getContext())
+                      )}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: skeletonRowCount }).map((_, rowIdx) => (
+                <TableRow key={`skeleton-${rowIdx}`}>
+                  {visibleLeafColumns.map((column) => {
+                    const isNumeric = column.columnDef.meta?.numeric === true;
+                    return (
+                      <TableCell
+                        key={column.id}
+                        data-numeric={isNumeric || undefined}
+                        className={cn(isNumeric && 'text-right')}
                       >
-                        {header.isPlaceholder ? null : canSort ? (
-                          <button
-                            type="button"
-                            onClick={header.column.getToggleSortingHandler()}
-                            className={cn(
-                              // Fill the entire header cell so the WHOLE header is
-                              // the sort hit target (the th drops its padding; the
-                              // button re-adds px-sm).
-                              'group/sortbtn px-sm gap-3xs duration-fast flex h-10 w-full items-center transition-colors',
-                              // Touch floor: a 44px tap target under a coarse pointer
-                              // (the header row grows to fit on touch devices).
-                              'pointer-coarse:min-h-11',
-                              // Hover tile = bg-muted, one step darker than the
-                              // bg-surface-subtle band; bg-background was lighter
-                              // than the band and read as a hole punched in it.
-                              'hover:bg-muted',
-                              // Inset ring — the table's nested overflow containers
-                              // clip the global outset focus glow; matches the row +
-                              // pin-button focus idiom so the focused header is visible.
-                              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
-                              // The sort indicator ALWAYS trails the label (same
-                              // side on every column); numeric headers just
-                              // right-align the label+icon group over their figures.
-                              isNumeric ? 'justify-end' : 'justify-start',
-                            )}
-                          >
-                            {flexRender(header.column.columnDef.header, header.getContext())}
-                            {sortDir === 'asc' ? (
-                              <ArrowUp01Icon className="size-icon-xs text-foreground shrink-0" />
-                            ) : sortDir === 'desc' ? (
-                              <ArrowDown01Icon className="size-icon-xs text-foreground shrink-0" />
-                            ) : (
-                              // Reveal-on-intent: an up/down "sortable both ways"
-                              // hint — hidden at rest, shown at FULL strength on
-                              // hover or keyboard focus (muted-foreground, matching
-                              // the label). The active column keeps a solid,
-                              // foreground-strength arrow so the sort pops.
-                              <ArrowDataTransferVerticalIcon className="size-icon-xs shrink-0 opacity-0 transition-opacity group-hover/sortbtn:opacity-100 group-focus-visible/sortbtn:opacity-100" />
-                            )}
-                            <span className="sr-only">
-                              {sortDir === 'asc'
-                                ? t('sort.ascending')
-                                : sortDir === 'desc'
-                                  ? t('sort.descending')
-                                  : t('sort.sortable')}
-                            </span>
-                          </button>
-                        ) : (
-                          flexRender(header.column.columnDef.header, header.getContext())
-                        )}
-                      </TableHead>
+                        <Skeleton className={cn('h-4', isNumeric ? 'ml-auto w-12' : 'w-full')} />
+                      </TableCell>
                     );
                   })}
                 </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                Array.from({ length: skeletonRowCount }).map((_, rowIdx) => (
-                  <TableRow key={`skeleton-${rowIdx}`}>
-                    {visibleLeafColumns.map((column) => {
-                      const isNumeric = column.columnDef.meta?.numeric === true;
-                      return (
-                        <TableCell
-                          key={column.id}
-                          data-numeric={isNumeric || undefined}
-                          className={cn(isNumeric && 'text-right')}
-                        >
-                          <Skeleton className={cn('h-4', isNumeric ? 'ml-auto w-12' : 'w-full')} />
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))
-              ) : table.getRowModel().rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={visibleLeafCount} className="p-0">
-                    {empty ?? (
-                      <EmptyState
-                        title={t('empty.title')}
-                        description={t('empty.description')}
-                        className="border-0"
-                      />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                table.getRowModel().rows.map((row) => {
-                  const handleRowClick = onRowClick
-                    ? (event: React.MouseEvent<HTMLTableRowElement>) => {
-                        if (isInteractiveDescendant(event.target, event.currentTarget)) return;
-                        onRowClick(row.original, event);
-                      }
-                    : undefined;
-                  const handleRowKeyDown = onRowClick
-                    ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                        if (isInteractiveDescendant(event.target, event.currentTarget)) return;
-                        // Stop Space from scrolling and Enter from re-activating
-                        // the focused row twice via bubbling.
-                        event.preventDefault();
-                        onRowClick(row.original, event);
-                      }
-                    : undefined;
-                  return (
-                    <React.Fragment key={row.id}>
-                      <TableRow
-                        data-state={row.getIsSelected() ? 'selected' : undefined}
-                        data-depth={row.depth || undefined}
-                        role={onRowClick ? 'button' : undefined}
-                        tabIndex={onRowClick ? 0 : undefined}
-                        onClick={handleRowClick}
-                        onKeyDown={handleRowKeyDown}
-                        className={cn(
-                          onRowClick &&
-                            // The focus ring is painted on an overlay pseudo-element
-                            // ABOVE the sticky pinned cells (z-10) so it wraps the
-                            // whole row continuously instead of being clipped by the
-                            // opaque select / actions cell backgrounds at the edges.
-                            // shadow-none suppresses the GLOBAL :focus-visible glow
-                            // (globals.css box-shadow: var(--shadow-focus)) so only
-                            // the crisp ::after ring shows — without it the row got a
-                            // second, softer border stacked over the ring. The ring
-                            // is square (rows are rectangular); a rounded ring reads
-                            // wrong mid-table. A bare table's last row can be sliced
-                            // by the shell's rounded overflow, but every real table
-                            // has a toolbar / pagination occupying those corners.
-                            "focus-visible:after:ring-ring relative cursor-pointer focus-visible:shadow-none focus-visible:outline-none focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:z-20 focus-visible:after:ring-2 focus-visible:after:content-[''] focus-visible:after:ring-inset",
-                        )}
-                      >
-                        {row.getVisibleCells().map((cell) => {
-                          const isNumeric = cell.column.columnDef.meta?.numeric === true;
-                          const pinning = computePinningProps(cell.column);
-                          return (
-                            <TableCell
-                              key={cell.id}
-                              data-numeric={isNumeric || undefined}
-                              className={cn(isNumeric && 'text-right')}
-                              {...pinning}
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </TableCell>
-                          );
-                        })}
-                      </TableRow>
-                      {row.getIsExpanded() && renderSubComponent !== undefined ? (
-                        <TableRow data-expanded-content="true" className="hover:bg-transparent">
-                          <TableCell colSpan={visibleLeafCount} className="bg-muted p-0">
-                            {renderSubComponent(row)}
+              ))
+            ) : table.getRowModel().rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={visibleLeafCount} className="p-0">
+                  {empty ?? (
+                    <EmptyState
+                      title={t('empty.title')}
+                      description={t('empty.description')}
+                      className="border-0"
+                    />
+                  )}
+                </TableCell>
+              </TableRow>
+            ) : (
+              table.getRowModel().rows.map((row) => {
+                const handleRowClick = onRowClick
+                  ? (event: React.MouseEvent<HTMLTableRowElement>) => {
+                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                      onRowClick(row.original, event);
+                    }
+                  : undefined;
+                const handleRowKeyDown = onRowClick
+                  ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      if (isInteractiveDescendant(event.target, event.currentTarget)) return;
+                      // Stop Space from scrolling and Enter from re-activating
+                      // the focused row twice via bubbling.
+                      event.preventDefault();
+                      onRowClick(row.original, event);
+                    }
+                  : undefined;
+                return (
+                  <React.Fragment key={row.id}>
+                    <TableRow
+                      data-state={row.getIsSelected() ? 'selected' : undefined}
+                      data-depth={row.depth || undefined}
+                      role={onRowClick ? 'button' : undefined}
+                      tabIndex={onRowClick ? 0 : undefined}
+                      onClick={handleRowClick}
+                      onKeyDown={handleRowKeyDown}
+                      className={cn(
+                        onRowClick &&
+                          // The focus ring is painted on an overlay pseudo-element
+                          // ABOVE the sticky pinned cells (z-10) so it wraps the
+                          // whole row continuously instead of being clipped by the
+                          // opaque select / actions cell backgrounds at the edges.
+                          // shadow-none suppresses the GLOBAL :focus-visible glow
+                          // (globals.css box-shadow: var(--shadow-focus)) so only
+                          // the crisp ::after ring shows — without it the row got a
+                          // second, softer border stacked over the ring. The ring
+                          // is square (rows are rectangular); a rounded ring reads
+                          // wrong mid-table. A bare table's last row can be sliced
+                          // by the shell's rounded overflow, but every real table
+                          // has a toolbar / pagination occupying those corners.
+                          "focus-visible:after:ring-ring relative cursor-pointer focus-visible:shadow-none focus-visible:outline-none focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:z-20 focus-visible:after:ring-2 focus-visible:after:content-[''] focus-visible:after:ring-inset",
+                      )}
+                    >
+                      {row.getVisibleCells().map((cell) => {
+                        const isNumeric = cell.column.columnDef.meta?.numeric === true;
+                        const pinning = computePinningProps(cell.column);
+                        return (
+                          <TableCell
+                            key={cell.id}
+                            data-numeric={isNumeric || undefined}
+                            className={cn(isNumeric && 'text-right')}
+                            {...pinning}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </TableCell>
-                        </TableRow>
-                      ) : null}
-                    </React.Fragment>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                        );
+                      })}
+                    </TableRow>
+                    {row.getIsExpanded() && renderSubComponent !== undefined ? (
+                      <TableRow data-expanded-content="true" className="hover:bg-transparent">
+                        <TableCell colSpan={visibleLeafCount} className="bg-muted p-0">
+                          {renderSubComponent(row)}
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
         {pagination ? (
           <div className="border-border px-md py-sm border-t">{pagination(table)}</div>
         ) : null}

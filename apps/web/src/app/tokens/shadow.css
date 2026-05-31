@@ -28,9 +28,11 @@
    * "open" side of the pinned column, signalling that scrolling content
    * slides under. Direction is encoded in the token name — left-edge
    * means "edge of a left-pinned column where unpinned content scrolls";
-   * the visible shadow points to the right. Mirror for right-pinned. */
-  --shadow-pin-left-edge: 4px 0 6px -2px oklch(22% 0.02 265 / 0.08);
-  --shadow-pin-right-edge: -4px 0 6px -2px oklch(22% 0.02 265 / 0.08);
+   * the visible shadow points to the right. Mirror for right-pinned.
+   * Strengthened (0.08 → 0.13, deeper blur) so the pinned column reads as
+   * a clear raised layer over the scrolling content, not a faint hairline. */
+  --shadow-pin-left-edge: 5px 0 9px -3px oklch(22% 0.02 265 / 0.13);
+  --shadow-pin-right-edge: -5px 0 9px -3px oklch(22% 0.02 265 / 0.13);
 }
 
 .dark {
@@ -60,6 +62,6 @@
    * shadow points sideways into scrolling content, not downward off
    * the surface, so the "ambient light from above" recipe doesn't
    * apply here). */
-  --shadow-pin-left-edge: 4px 0 8px -2px oklch(0% 0 0 / 0.4);
-  --shadow-pin-right-edge: -4px 0 8px -2px oklch(0% 0 0 / 0.4);
+  --shadow-pin-left-edge: 5px 0 11px -3px oklch(0% 0 0 / 0.5);
+  --shadow-pin-right-edge: -5px 0 11px -3px oklch(0% 0 0 / 0.5);
 }

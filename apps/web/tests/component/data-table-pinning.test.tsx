@@ -163,11 +163,49 @@ describe('DataTable column pinning', () => {
   });
 
   describe('uncontrolled (default) mode', () => {
-    it('starts with no pinned columns when no initial state is supplied', () => {
+    it('starts with no pinned columns when only data columns are supplied', () => {
       const { container } = renderWithIntl(
         <DataTable columns={COLUMNS} data={ROWS} getRowId={(r) => r.id} />,
       );
+      // None of a/b/c/d match the auto-pin id convention, so nothing pins.
       expect(container.querySelectorAll('[data-pinned-side]').length).toBe(0);
+    });
+
+    it('auto-pins the select column left and the actions column right by id convention', () => {
+      const withUtilityColumns: ColumnDef<Row>[] = [
+        { id: 'select', header: 'Seç', cell: () => null },
+        ...COLUMNS,
+        { id: 'actions', header: 'Eylemler', cell: () => null },
+      ];
+      const { container } = renderWithIntl(
+        <DataTable columns={withUtilityColumns} data={ROWS} getRowId={(r) => r.id} />,
+      );
+      // 'select' auto-pinned left: 1 header th + 2 body td = 3.
+      expect(container.querySelectorAll('[data-pinned-side="left"]').length).toBe(3);
+      // 'actions' auto-pinned right: 1 header th + 2 body td = 3.
+      expect(container.querySelectorAll('[data-pinned-side="right"]').length).toBe(3);
+    });
+
+    it('lets an explicit initialColumnPinning override the auto-pin default', () => {
+      const withUtilityColumns: ColumnDef<Row>[] = [
+        { id: 'select', header: 'Seç', cell: () => null },
+        ...COLUMNS,
+        { id: 'actions', header: 'Eylemler', cell: () => null },
+      ];
+      const { container } = renderWithIntl(
+        <DataTable
+          columns={withUtilityColumns}
+          data={ROWS}
+          getRowId={(r) => r.id}
+          // Explicit pinning replaces the auto default entirely — the select
+          // and actions columns are NOT auto-pinned once the caller opts in.
+          initialColumnPinning={{ left: ['a'], right: [] }}
+        />,
+      );
+      // Only column 'a' is left-pinned (1 header + 2 body = 3); select is NOT.
+      expect(container.querySelectorAll('[data-pinned-side="left"]').length).toBe(3);
+      // Nothing right-pinned — actions is NOT auto-pinned under explicit control.
+      expect(container.querySelectorAll('[data-pinned-side="right"]').length).toBe(0);
     });
   });
 });

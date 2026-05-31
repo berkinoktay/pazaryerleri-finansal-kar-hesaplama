@@ -8,10 +8,7 @@ import { toast } from 'sonner';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
-import {
-  ROW_ACTIONS_COLUMN_ID,
-  createRowActionsColumn,
-} from '@/components/patterns/data-table-row-actions';
+import { createRowActionsColumn } from '@/components/patterns/data-table-row-actions';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
@@ -107,12 +104,14 @@ export function DataTableRowClickShowcase(): React.ReactElement {
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
           Satıra tıklayınca detay açılır — checkbox / menu butonları tıklamayı yutmaz
         </span>
+        {/* No initialColumnPinning: DataTable auto-pins the `select` column
+            left and the `actions` column right by id convention, so the
+            checkbox + kebab stay put while the middle columns scroll. */}
         <DataTable
           columns={COLUMNS}
           data={rows}
           getRowId={(row) => row.id}
           enableRowSelection
-          initialColumnPinning={{ right: [ROW_ACTIONS_COLUMN_ID] }}
           onRowClick={(row) => {
             setLastOpened(row.orderNumber);
             toast.success(`${row.orderNumber} detayı açıldı`);
