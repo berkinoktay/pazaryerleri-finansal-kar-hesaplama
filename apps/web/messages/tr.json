@@ -57,6 +57,10 @@
       "selection": {
         "selectedCount": "{count} satır seçili"
       },
+      "rowActions": {
+        "trigger": "Satır işlemleri",
+        "columnHeader": "İşlemler"
+      },
       "toolbar": {
         "searchPlaceholder": "Ara…",
         "clear": "Temizle",

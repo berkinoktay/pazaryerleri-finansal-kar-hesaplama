@@ -57,6 +57,10 @@
       "selection": {
         "selectedCount": "{count, plural, one {# row selected} other {# rows selected}}"
       },
+      "rowActions": {
+        "trigger": "Row actions",
+        "columnHeader": "Actions"
+      },
       "toolbar": {
         "searchPlaceholder": "Search…",
         "clear": "Clear",

@@ -1,14 +1,17 @@
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
-import { ArrowDown01Icon } from 'hugeicons-react';
+import { Delete02Icon, Edit02Icon, ViewIcon } from 'hugeicons-react';
 import * as React from 'react';
 import { toast } from 'sonner';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
+import {
+  ROW_ACTIONS_COLUMN_ID,
+  createRowActionsColumn,
+} from '@/components/patterns/data-table-row-actions';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
 
@@ -72,22 +75,25 @@ const COLUMNS: ColumnDef<MockOrder>[] = [
     meta: { numeric: true },
     cell: ({ row }) => <Currency value={row.original.netProfit} emphasis />,
   },
-  {
-    id: 'actions',
-    enableSorting: false,
-    enableHiding: false,
-    header: () => <span className="sr-only">İşlemler</span>,
-    cell: ({ row }) => (
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label={`${row.original.orderNumber} menüsü`}
-        onClick={() => toast.info(`${row.original.orderNumber} menüsü açıldı`)}
-      >
-        <ArrowDown01Icon className="size-icon-sm" />
-      </Button>
-    ),
-  },
+  createRowActionsColumn<MockOrder>([
+    {
+      label: 'Detayları gör',
+      icon: <ViewIcon />,
+      onSelect: (row) => toast.info(`${row.orderNumber} detayı açıldı`),
+    },
+    {
+      label: 'Düzenle',
+      icon: <Edit02Icon />,
+      onSelect: (row) => toast.info(`${row.orderNumber} düzenleniyor`),
+    },
+    {
+      label: 'Sil',
+      icon: <Delete02Icon />,
+      tone: 'destructive',
+      separatorBefore: true,
+      onSelect: (row) => toast.error(`${row.orderNumber} silindi`),
+    },
+  ]),
 ];
 
 export function DataTableRowClickShowcase(): React.ReactElement {
@@ -105,6 +111,7 @@ export function DataTableRowClickShowcase(): React.ReactElement {
           data={rows}
           getRowId={(row) => row.id}
           enableRowSelection
+          initialColumnPinning={{ right: [ROW_ACTIONS_COLUMN_ID] }}
           onRowClick={(row) => {
             setLastOpened(row.orderNumber);
             toast.success(`${row.orderNumber} detayı açıldı`);
