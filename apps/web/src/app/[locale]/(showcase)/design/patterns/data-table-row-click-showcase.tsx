@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
+import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import {
   ROW_ACTIONS_COLUMN_ID,
   createRowActionsColumn,
@@ -116,6 +117,7 @@ export function DataTableRowClickShowcase(): React.ReactElement {
             setLastOpened(row.orderNumber);
             toast.success(`${row.orderNumber} detayı açıldı`);
           }}
+          pagination={(table) => <DataTablePagination table={table} />}
         />
         <span className="text-2xs text-muted-foreground">
           Son açılan: <span className="text-foreground font-mono">{lastOpened ?? '—'}</span>

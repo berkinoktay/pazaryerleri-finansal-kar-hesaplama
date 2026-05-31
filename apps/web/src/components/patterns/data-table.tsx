@@ -512,7 +512,15 @@ export function DataTable<TData, TValue>({
                             // ABOVE the sticky pinned cells (z-10) so it wraps the
                             // whole row continuously instead of being clipped by the
                             // opaque select / actions cell backgrounds at the edges.
-                            "focus-visible:after:ring-ring relative cursor-pointer focus-visible:outline-none focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:z-20 focus-visible:after:ring-2 focus-visible:after:content-[''] focus-visible:after:ring-inset",
+                            // shadow-none suppresses the GLOBAL :focus-visible glow
+                            // (globals.css box-shadow: var(--shadow-focus)) so only
+                            // the crisp ::after ring shows — without it the row got a
+                            // second, softer border stacked over the ring. The ring
+                            // is square (rows are rectangular); a rounded ring reads
+                            // wrong mid-table. A bare table's last row can be sliced
+                            // by the shell's rounded overflow, but every real table
+                            // has a toolbar / pagination occupying those corners.
+                            "focus-visible:after:ring-ring relative cursor-pointer focus-visible:shadow-none focus-visible:outline-none focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:z-20 focus-visible:after:ring-2 focus-visible:after:content-[''] focus-visible:after:ring-inset",
                         )}
                       >
                         {row.getVisibleCells().map((cell) => {
