@@ -54,6 +54,23 @@
   --popover: oklch(100% 0 0);
   --popover-foreground: var(--foreground);
 
+  /* Overlay scrim — the single source for the page dim behind a modal /
+     sheet / drawer. A brand-tinted near-black that DARKENS in both modes
+     (the old per-overlay `bg-foreground/30` went near-WHITE in dark mode —
+     foreground is near-white there — washing the page out instead of dimming
+     it). Blur is decided per-overlay (modals stay frosted; sheet/drawer drop
+     the blur so the page behind stays comparable); only the alpha lives here. */
+  --overlay-scrim: oklch(20% 0.02 265 / 0.3);
+
+  /* Lightbox (ImageModal) over user imagery — a HEAVIER cinema dim than the
+     modal scrim, since the focus is the photo itself. --scrim-chip is
+     theme-INDEPENDENT (a fixed dark disc, defined only here, inherited into
+     .dark) so the close control stays legible over ANY photo; its foreground
+     is a fixed near-white. This is the one sanctioned dynamic-alpha case. */
+  --overlay-scrim-image: oklch(8% 0.01 265 / 0.55);
+  --scrim-chip: oklch(12% 0 0 / 0.55);
+  --scrim-chip-foreground: oklch(98% 0 0);
+
   /* Lines — pulled slightly darker so they stay legible against the new
      gray --background (which is closer to where borders used to sit). */
   --border: oklch(89% 0.007 265);
@@ -61,6 +78,11 @@
   /* Softer than --border for incidental accents (active tab ring, inner
      dividers) where a full border reads too heavy. */
   --border-muted: oklch(92% 0.006 265);
+  /* Form-control resting border — Input / Select / Textarea. In light it
+     matches --border (a hairline on the white field is enough); the token
+     exists so dark mode can carry MORE contrast than the generic --border
+     (a 24%-on-22% field border was near-invisible). See .dark below. */
+  --border-input: oklch(89% 0.007 265);
   /* Form-control fill — matches --card. Inputs become the brightest
      surface so they pop against the slightly tinted --background, while
      reading as the same surface as a Card they sit inside (border +
@@ -74,6 +96,13 @@
   --primary: oklch(45% 0.15 265);
   --primary-foreground: oklch(98% 0.004 265);
   --primary-hover: oklch(40% 0.15 265);
+  /* Primary-soft — restrained brand-tinted surface for SELECTED states
+     (toggle on-state, connected ToggleGroup selection). Carries brand
+     identity without the loudness of a full --primary fill; same language
+     as the nav's --sidebar-active. --primary-soft-foreground (brand text)
+     clears AA on it. */
+  --primary-soft: oklch(92% 0.04 265);
+  --primary-soft-foreground: oklch(40% 0.15 265);
 
   --secondary: oklch(93.5% 0.006 265);
   --secondary-foreground: oklch(22% 0.02 265);
@@ -89,6 +118,14 @@
   --destructive: oklch(54% 0.19 27);
   --destructive-foreground: oklch(98% 0.004 27);
   --destructive-surface: oklch(96% 0.025 27);
+
+  /* Solid-button hover shifts for the filled semantic variants. Match the
+     --primary-hover direction (darker in light) so a filled destructive /
+     success / warning button gets a real state change on hover instead of
+     the near-invisible opacity-90 it had before. */
+  --success-hover: oklch(48% 0.13 155);
+  --destructive-hover: oklch(50% 0.19 27);
+  --warning-hover: oklch(51% 0.15 75);
 
   /* --warning: darker amber than the classic 70% so `text-warning` on any
      neutral or light-amber surface still clears ≥4.5:1. Solid `bg-warning`
@@ -115,6 +152,8 @@
      "transparency is a signal, not a style" intact. */
   --warning-border: oklch(70% 0.13 75);
   --destructive-border: oklch(70% 0.18 27);
+  --success-border: oklch(72% 0.12 155);
+  --info-border: oklch(70% 0.12 240);
 
   /* Sidebar surface contract — required by the shadcn Sidebar primitive
      (`bg-sidebar`, `bg-sidebar-accent`, `text-sidebar-foreground`, …).
@@ -181,15 +220,31 @@
   --popover: oklch(17% 0.012 265);
   --popover-foreground: var(--foreground);
 
+  /* Dark scrim carries MORE alpha than light: over an already-dark page the
+     0.3 that dims a white page barely registers, so dim harder (0.5) on a
+     deeper near-black base for comparable perceived darkening. */
+  --overlay-scrim: oklch(6% 0.01 265 / 0.5);
+  /* Dark lightbox dims harder still (a photo on a dark page needs more). */
+  --overlay-scrim-image: oklch(4% 0.005 265 / 0.72);
+
   --border: oklch(24% 0.014 265);
   --border-strong: oklch(32% 0.018 265);
   --border-muted: oklch(28% 0.012 265);
+  /* Form-control border carries MORE contrast than --border in dark — the
+     generic 24% sat only ~2% above --input (22%) and read as edgeless. 30%
+     gives the field a clear edge against both --input (22%) and --card (17%)
+     while staying just under hover's --border-strong (32%). */
+  --border-input: oklch(30% 0.015 265);
   --input: oklch(22% 0.014 265);
   --ring: oklch(68% 0.12 265);
 
   --primary: oklch(72% 0.13 265);
   --primary-foreground: oklch(15% 0.01 265);
   --primary-hover: oklch(78% 0.11 265);
+  /* Dark primary-soft lifts ABOVE --card (raised = lighter), tinted toward
+     primary; foreground clears AA (~5.4:1). Mirrors --sidebar-active dark. */
+  --primary-soft: oklch(30% 0.05 265);
+  --primary-soft-foreground: oklch(80% 0.11 265);
 
   --secondary: oklch(22% 0.012 265);
   --secondary-foreground: oklch(92% 0.008 265);
@@ -204,6 +259,11 @@
   --destructive: oklch(66% 0.18 27);
   --destructive-foreground: oklch(14% 0.02 27);
   --destructive-surface: oklch(24% 0.06 27);
+
+  /* Solid-button hover shifts — lighter in dark (mirrors --primary-hover). */
+  --success-hover: oklch(69% 0.12 155);
+  --destructive-hover: oklch(71% 0.18 27);
+  --warning-hover: oklch(80% 0.14 75);
 
   --warning: oklch(76% 0.14 75);
   --warning-foreground: oklch(16% 0.04 75);
@@ -222,6 +282,8 @@
 
   --warning-border: oklch(50% 0.1 75);
   --destructive-border: oklch(48% 0.14 27);
+  --success-border: oklch(50% 0.09 155);
+  --info-border: oklch(50% 0.1 240);
 
   /* Sidebar surface contract — see :root for full rationale. In dark
      mode the rail sits ~3% darker than the main content panel so it

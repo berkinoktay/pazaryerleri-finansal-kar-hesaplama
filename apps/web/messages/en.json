@@ -11,7 +11,16 @@
     "remove": "Remove",
     "dismiss": "Dismiss",
     "close": "Close",
+    "commandPalette": "Command palette",
     "more": "More",
+    "breadcrumb": {
+      "label": "Breadcrumb"
+    },
+    "sidebar": {
+      "label": "Sidebar",
+      "description": "Displays the mobile sidebar.",
+      "toggle": "Toggle sidebar"
+    },
     "pagination": {
       "label": "Pagination",
       "previous": "Previous",

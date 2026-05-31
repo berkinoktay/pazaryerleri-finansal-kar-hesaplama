@@ -3,6 +3,7 @@
 import {
   Building03Icon,
   Calendar01Icon,
+  InformationCircleIcon,
   Mail01Icon,
   Search01Icon,
   UserIcon,
@@ -17,7 +18,7 @@ import { PrimitiveNav } from '@/components/showcase/primitive-nav';
 import { Preview } from '@/components/showcase/preview';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Kbd } from '@/components/ui/kbd';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   InputOTP,
   InputOTPGroup,
@@ -29,13 +30,17 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SIZE_KEYS } from '@/lib/variants';
 
 export default function InputsPrimitivePage(): React.ReactElement {
@@ -71,8 +76,76 @@ export default function InputsPrimitivePage(): React.ReactElement {
             <Input id="price" type="number" placeholder="0,00" className="tabular-nums" />
           </div>
           <div className="gap-3xs flex flex-col">
-            <Label htmlFor="disabled-input">Salt okunur</Label>
+            <Label htmlFor="disabled-input">Devre dışı</Label>
             <Input id="disabled-input" disabled defaultValue="Değiştirilemez" />
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Label — required · hata tonu · hint · peer-disabled"
+        description="required dekoratif * ekler (alan ayrıca required taşımalı — aria-required). Hata tonu FormLabel'in text-destructive'i, transition-colors ile yumuşar. hint = etiket yanına Tooltip'li bilgi ikonu. peer-disabled YALNIZ checkbox/radio satırında (kontrol önce gelir) söner; üstte-yığılı alanlarda form düzeyinde."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="store-name" required>
+              Mağaza adı
+            </Label>
+            <Input id="store-name" required placeholder="Zorunlu alan" />
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="store-name-err" required className="text-destructive">
+              Mağaza adı
+            </Label>
+            <Input id="store-name-err" required aria-invalid />
+            <span className="text-2xs text-destructive">Bu alan zorunlu.</span>
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label
+              htmlFor="desi"
+              hint={
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0} role="img" aria-label="Desi nedir?" className="cursor-help">
+                      <InformationCircleIcon />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Desi = (en × boy × yükseklik) / 3000</TooltipContent>
+                </Tooltip>
+              }
+            >
+              Desi
+            </Label>
+            <Input id="desi" type="number" placeholder="0" className="tabular-nums" />
+          </div>
+          <div className="gap-xs flex items-center">
+            <Checkbox id="peer-cb" disabled className="peer" />
+            <Label htmlFor="peer-cb">Pasif seçenek (peer-disabled söner)</Label>
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Input — valid · readOnly · sayaç · radius"
+        description="valid = success border (invalid'in eşi; hatada shake, başarıda sakin). readOnly = gri yüzey + hover/glow YOK (düzenlenemez sinyali). showCount = sağda canlı length/maxLength. radius Button/Badge ile aynı eksen."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="iban-valid">IBAN</Label>
+            <Input id="iban-valid" valid defaultValue="TR12 0006 1005 ..." />
+            <span className="text-2xs text-success">Doğrulandı.</span>
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="store-id-ro">Mağaza kimliği (readOnly)</Label>
+            <Input id="store-id-ro" readOnly defaultValue="str_8f3a91c2" />
+          </div>
+          <div className="gap-3xs flex flex-col">
+            <Label htmlFor="title-count">Başlık (showCount + maxLength)</Label>
+            <Input id="title-count" showCount maxLength={50} defaultValue="PazarSync demo" />
+          </div>
+          <div className="gap-xs flex flex-wrap items-center">
+            <Input radius="full" size="sm" placeholder="radius=full" />
+            <Input radius="lg" size="sm" placeholder="radius=lg" />
           </div>
         </div>
       </Preview>
@@ -292,6 +365,46 @@ export default function InputsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
+        title="Textarea — valid · readOnly · disabled · size · resize"
+        description="valid: success border. readOnly: gri yüzey, hover/glow yok. resize prop ('vertical' default / 'none' / 'both'). sm/lg paylaşılan size. Sayaç maxLength'e yaklaşınca warning rengine döner."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-valid">Açıklama</Label>
+            <Textarea id="tw-valid" valid defaultValue="Geçerli açıklama" rows={2} />
+            <span className="text-2xs text-success">Doğrulandı.</span>
+          </div>
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-ro">Sistem notu (readOnly)</Label>
+            <Textarea
+              id="tw-ro"
+              readOnly
+              defaultValue="Otomatik üretildi — düzenlenemez."
+              rows={2}
+            />
+          </div>
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-disabled">Devre dışı</Label>
+            <Textarea id="tw-disabled" disabled defaultValue="Kapalı" rows={2} />
+          </div>
+          <div className="gap-3xs grid">
+            <Label htmlFor="tw-near">Başlık (sayaç warning)</Label>
+            <Textarea
+              id="tw-near"
+              showCount
+              maxLength={20}
+              defaultValue="Limite yakın metin"
+              rows={2}
+            />
+          </div>
+          <div className="gap-xs grid">
+            <Textarea size="sm" resize="none" placeholder="size=sm · resize=none" />
+            <Textarea size="lg" resize="both" placeholder="size=lg · resize=both" rows={2} />
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
         title="Input size (paylaşılan prop)"
         description="sm / md (default) / lg. Button ve Select ile aynı anahtar — formda tutarlı yükseklik ailesi."
       >
@@ -363,86 +476,352 @@ export default function InputsPrimitivePage(): React.ReactElement {
         </div>
       </Preview>
 
-      <Preview title="Checkbox" description="Bağımsız checkbox ve form içinde checkbox.">
-        <div className="gap-md flex flex-col">
-          <div className="gap-xs flex items-center">
-            <Checkbox id="c1" />
-            <Label htmlFor="c1">Otomatik senkronizasyon</Label>
+      <Preview
+        title="Select — valid + disabled"
+        description="valid başarıyla doğrulanmış seçimi success border ile işaretler (invalid'in karşılığı). disabled trigger opacity-50 + cursor-not-allowed."
+      >
+        <div className="max-w-form gap-md grid">
+          <div className="gap-3xs flex flex-col">
+            <Label>Pazaryeri (valid)</Label>
+            <Select defaultValue="trendyol">
+              <SelectTrigger valid>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="trendyol">Trendyol</SelectItem>
+                <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-2xs text-success">Bağlantı doğrulandı.</span>
           </div>
-          <div className="gap-xs flex items-center">
-            <Checkbox id="c2" defaultChecked />
-            <Label htmlFor="c2">Hata bildirimlerini al</Label>
-          </div>
-          <div className="gap-xs flex items-center">
-            <Checkbox id="c3" disabled />
-            <Label htmlFor="c3">Pasif (disabled)</Label>
+          <div className="gap-3xs flex flex-col">
+            <Label>Pazaryeri (disabled)</Label>
+            <Select disabled defaultValue="trendyol">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="trendyol">Trendyol</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </Preview>
 
       <Preview
-        title="Switch"
-        description="Arka planı boolean açık/kapalı için. Checkbox'tan semantik olarak ayrılır."
+        title="Select — size (paylaşılan prop)"
+        description="sm (h-8) / md (h-10, default) / lg (h-11). Input ve Button ile aynı yükseklik ailesi — formda hizalı satırlar."
       >
-        <div className="gap-md flex flex-col">
-          <div className="gap-xs flex items-center">
-            <Switch id="s1" />
-            <Label htmlFor="s1">Canlı sipariş feed&apos;i</Label>
+        <div className="max-w-form gap-md grid">
+          {SIZE_KEYS.map((size) => (
+            <div key={size} className="gap-3xs flex flex-col">
+              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
+              <Select>
+                <SelectTrigger size={size}>
+                  <SelectValue placeholder="Bir pazaryeri seç" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="trendyol">Trendyol</SelectItem>
+                  <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+      </Preview>
+
+      <Preview
+        title="Select — leadingIcon + description item"
+        description="SelectItem leadingIcon (logo/durum) ve description (ikincil satır) alır. İkisi de ItemText dışında render edilir — ekran okuyucu yalnız ana etiketi okur."
+      >
+        <div className="max-w-input gap-3xs grid">
+          <Label>Mağaza</Label>
+          <Select defaultValue="store-1">
+            <SelectTrigger leadingIcon={<Building03Icon />}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                value="store-1"
+                leadingIcon={<Building03Icon />}
+                description="Trendyol — Mağaza #1234"
+              >
+                Ana Mağaza
+              </SelectItem>
+              <SelectItem
+                value="store-2"
+                leadingIcon={<Building03Icon />}
+                description="Hepsiburada — Mağaza #5678"
+              >
+                İkincil Mağaza
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Select — gruplu + ayraç + disabled item"
+        description="SelectGroup + SelectLabel başlık, SelectSeparator gruplar arası çizgi, item bazında disabled. >6 seçeneği duruma göre kategorize etmenin standart deseni."
+      >
+        <div className="max-w-input-narrow gap-3xs grid">
+          <Label>Mağaza durumu</Label>
+          <Select defaultValue="active-1">
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Aktif Mağazalar</SelectLabel>
+                <SelectItem value="active-1">Trendyol — Ana</SelectItem>
+                <SelectItem value="active-2">Hepsiburada — Ana</SelectItem>
+              </SelectGroup>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel>Pasif Mağazalar</SelectLabel>
+                <SelectItem value="passive-1" disabled>
+                  n11 — Askıda
+                </SelectItem>
+                <SelectItem value="passive-2">Amazon — Bağlantı kesik</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Checkbox — durumlar · tri-state · size"
+        description={
+          'Binary kontrol → checked full --primary (Toggle’ın primary-soft’undan ayrı). checked="indeterminate" tablo "tümünü seç" başlığı için minus gösterir; tik fade-in ile gelir. invalid/valid form doğrulama, sm/md/lg size ekseni.'
+        }
+      >
+        <div className="gap-lg flex flex-col">
+          <div className="gap-md flex flex-wrap items-center">
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c1" />
+              <Label htmlFor="c1">Varsayılan</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c2" defaultChecked />
+              <Label htmlFor="c2">İşaretli</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c3" checked="indeterminate" />
+              <Label htmlFor="c3">Kısmi (indeterminate)</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c4" disabled />
+              <Label htmlFor="c4">Devre dışı</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c5" invalid />
+              <Label htmlFor="c5">Hatalı (invalid)</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="c6" valid defaultChecked />
+              <Label htmlFor="c6">Doğrulandı (valid)</Label>
+            </div>
           </div>
-          <div className="gap-xs flex items-center">
-            <Switch id="s2" defaultChecked />
-            <Label htmlFor="s2">Haftalık özet e-posta</Label>
+          <div className="gap-md flex items-center">
+            {SIZE_KEYS.map((size) => (
+              <div key={size} className="gap-xs flex items-center">
+                <Checkbox id={`cb-${size}`} size={size} defaultChecked />
+                <Label htmlFor={`cb-${size}`} className="text-2xs text-muted-foreground font-mono">
+                  {size}
+                </Label>
+              </div>
+            ))}
           </div>
         </div>
       </Preview>
 
-      <Preview title="RadioGroup" description="Tek bir seçeneğin zorunlu olduğu listeler için.">
-        <RadioGroup defaultValue="monthly" className="gap-sm">
-          <div className="gap-xs flex items-center">
-            <RadioGroupItem value="weekly" id="r1" />
-            <Label htmlFor="r1">Haftalık rapor</Label>
+      <Preview
+        title="Switch — durumlar · size"
+        description="Anlık açık/kapalı (Checkbox = formda commit). Binary → açık full --primary, 150ms ease-out-quart thumb kayması. Odakta dar offset ring (20px'te kutu-glow yerine). invalid/valid track border; sm/md/lg size (thumb + mesafe orantılı)."
+      >
+        <div className="gap-lg flex flex-col">
+          <div className="gap-md flex flex-wrap items-center">
+            <div className="gap-xs flex items-center">
+              <Switch id="s1" />
+              <Label htmlFor="s1">Kapalı</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s2" defaultChecked />
+              <Label htmlFor="s2">Açık</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s3" disabled />
+              <Label htmlFor="s3">Devre dışı</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s4" invalid />
+              <Label htmlFor="s4">Hatalı (invalid)</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Switch id="s5" valid defaultChecked />
+              <Label htmlFor="s5">Doğrulandı (valid)</Label>
+            </div>
           </div>
-          <div className="gap-xs flex items-center">
-            <RadioGroupItem value="monthly" id="r2" />
-            <Label htmlFor="r2">Aylık rapor</Label>
+          <div className="gap-md flex items-center">
+            {SIZE_KEYS.map((size) => (
+              <div key={size} className="gap-xs flex items-center">
+                <Switch id={`sw-${size}`} size={size} defaultChecked />
+                <Label htmlFor={`sw-${size}`} className="text-2xs text-muted-foreground font-mono">
+                  {size}
+                </Label>
+              </div>
+            ))}
           </div>
-          <div className="gap-xs flex items-center">
-            <RadioGroupItem value="quarterly" id="r3" />
-            <Label htmlFor="r3">Çeyrek dönem</Label>
-          </div>
-        </RadioGroup>
+        </div>
       </Preview>
 
       <Preview
-        title="Slider"
-        description="Fiyat aralığı, komisyon eşiği gibi sürekli değerler için. Değer tabular-nums ile hizalı gösterilir."
+        title="RadioGroup — size · disabled · orientation"
+        description="Binary kontrol → nokta full --primary (toggle’ın soft’undan ayrı). size ekseni (nokta orantılı ölçeklenir, seçince zoom-in pop); item bazında disabled; orientation='horizontal' satır düzeni + ok-tuşu yönü."
       >
-        <div className="max-w-input gap-sm grid">
-          <div className="flex items-center justify-between text-sm">
-            <Label>Net kar hedefi</Label>
-            <span className="text-foreground font-mono tabular-nums">₺{price[0]?.toFixed(0)}</span>
+        <div className="gap-lg flex flex-col">
+          <RadioGroup defaultValue="monthly" className="gap-sm">
+            <div className="gap-xs flex items-center">
+              <RadioGroupItem value="weekly" id="r1" />
+              <Label htmlFor="r1">Haftalık rapor</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <RadioGroupItem value="monthly" id="r2" />
+              <Label htmlFor="r2">Aylık rapor</Label>
+            </div>
+            <div className="gap-xs flex items-center">
+              <RadioGroupItem value="quarterly" id="r3" disabled />
+              <Label htmlFor="r3">Çeyrek dönem (disabled)</Label>
+            </div>
+          </RadioGroup>
+
+          <RadioGroup defaultValue="md-r" orientation="horizontal" className="gap-md grid-flow-col">
+            {SIZE_KEYS.map((size) => (
+              <div key={size} className="gap-xs flex items-center">
+                <RadioGroupItem value={`${size}-r`} id={`r-${size}`} size={size} />
+                <Label htmlFor={`r-${size}`} className="text-2xs text-muted-foreground font-mono">
+                  {size}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Slider — flat thumb · range · disabled · size"
+        description="Flat dolu --primary thumb (artık tek 'outlined' primitive değil). İki-elemanlı value = range picker. disabled tüm kontrolü soldurur; sm/md/lg track+thumb ölçekler; dokunmada thumb 44px'e açılır."
+      >
+        <div className="max-w-input gap-lg grid">
+          <div className="gap-sm grid">
+            <div className="flex items-center justify-between text-sm">
+              <Label>Net kar hedefi</Label>
+              <span className="text-foreground font-mono tabular-nums">
+                ₺{price[0]?.toFixed(0)}
+              </span>
+            </div>
+            <Slider value={price} onValueChange={setPrice} min={0} max={500} step={5} />
           </div>
-          <Slider value={price} onValueChange={setPrice} min={0} max={500} step={5} />
+          <div className="gap-3xs grid">
+            <Label className="text-2xs text-muted-foreground">Range (iki thumb)</Label>
+            <Slider defaultValue={[120, 360]} min={0} max={500} step={5} />
+          </div>
+          <div className="gap-3xs grid">
+            <Label className="text-2xs text-muted-foreground">Devre dışı</Label>
+            <Slider defaultValue={[200]} min={0} max={500} disabled />
+          </div>
+          {SIZE_KEYS.map((size) => (
+            <div key={size} className="gap-3xs grid">
+              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
+              <Slider size={size} defaultValue={[180]} min={0} max={500} />
+            </div>
+          ))}
+        </div>
+      </Preview>
+
+      <Preview
+        title="Slider — tooltip + formatValue"
+        description="tooltip = thumb üstünde değer balonu (hover / sürükleme / klavye odağı). formatValue hem balonu hem aria-valuetext'i biçimler (₺, %). Range'de her thumb kendi balonunu taşır."
+      >
+        <div className="max-w-input gap-xl pt-lg grid">
+          <div className="gap-3xs grid">
+            <Label>Komisyon eşiği (üzerine gel)</Label>
+            <Slider
+              tooltip
+              formatValue={(v) => `₺${v}`}
+              defaultValue={[180]}
+              min={0}
+              max={500}
+              step={5}
+            />
+          </div>
+          <div className="gap-3xs grid">
+            <Label className="text-2xs text-muted-foreground">Kâr marjı aralığı (%)</Label>
+            <Slider
+              tooltip
+              formatValue={(v) => `%${v}`}
+              defaultValue={[15, 40]}
+              min={0}
+              max={100}
+              step={1}
+            />
+          </div>
         </div>
       </Preview>
 
       <Preview
         title="InputOTP"
-        description="2FA / SMS kodu doğrulama. Tabular-nums, auto-focus ilerleme, Paste desteği."
+        description="2FA / SMS kodu doğrulama. Tabular-nums, auto-focus ilerleme, Paste desteği. Aktif slot field-focus (border-ring + glow), caret hard-blink. invalid → destructive border + shake."
       >
-        <InputOTP maxLength={6}>
-          <InputOTPGroup>
-            <InputOTPSlot index={0} />
-            <InputOTPSlot index={1} />
-            <InputOTPSlot index={2} />
-          </InputOTPGroup>
-          <InputOTPSeparator />
-          <InputOTPGroup>
-            <InputOTPSlot index={3} />
-            <InputOTPSlot index={4} />
-            <InputOTPSlot index={5} />
-          </InputOTPGroup>
-        </InputOTP>
+        <div className="gap-md flex flex-col">
+          <InputOTP maxLength={6}>
+            <InputOTPGroup>
+              <InputOTPSlot index={0} />
+              <InputOTPSlot index={1} />
+              <InputOTPSlot index={2} />
+            </InputOTPGroup>
+            <InputOTPSeparator />
+            <InputOTPGroup>
+              <InputOTPSlot index={3} />
+              <InputOTPSlot index={4} />
+              <InputOTPSlot index={5} />
+            </InputOTPGroup>
+          </InputOTP>
+          <div className="gap-2xs flex flex-col">
+            <InputOTP maxLength={6} invalid defaultValue="123">
+              <InputOTPGroup>
+                <InputOTPSlot index={0} />
+                <InputOTPSlot index={1} />
+                <InputOTPSlot index={2} />
+              </InputOTPGroup>
+              <InputOTPSeparator />
+              <InputOTPGroup>
+                <InputOTPSlot index={3} />
+                <InputOTPSlot index={4} />
+                <InputOTPSlot index={5} />
+              </InputOTPGroup>
+            </InputOTP>
+            <span className="text-2xs text-destructive">invalid — geçersiz kod</span>
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="Kbd"
+        description="Klavye tuş kapağı — token-driven üniform kare. Tek tuşlar (⌘ K ? Esc) hizalanır; KbdGroup ile akor (⌘⇧P). Komut paleti ipuçları ve dokümantasyon için."
+      >
+        <div className="gap-md flex flex-wrap items-center">
+          <Kbd>⌘</Kbd>
+          <Kbd>K</Kbd>
+          <Kbd>?</Kbd>
+          <Kbd>Esc</Kbd>
+          <Kbd>⏎</Kbd>
+          <KbdGroup>
+            <Kbd>⌘</Kbd>
+            <Kbd>⇧</Kbd>
+            <Kbd>P</Kbd>
+          </KbdGroup>
+        </div>
       </Preview>
     </>
   );

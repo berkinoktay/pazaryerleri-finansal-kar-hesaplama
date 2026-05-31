@@ -50,15 +50,22 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-overlay-scrim: var(--overlay-scrim);
+  --color-overlay-scrim-image: var(--overlay-scrim-image);
+  --color-scrim-chip: var(--scrim-chip);
+  --color-scrim-chip-foreground: var(--scrim-chip-foreground);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-border-muted: var(--border-muted);
+  --color-border-input: var(--border-input);
   --color-input: var(--input);
   --color-ring: var(--ring);
 
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft-foreground: var(--primary-soft-foreground);
 
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -78,6 +85,10 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-warning-surface: var(--warning-surface);
 
+  --color-success-hover: var(--success-hover);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-warning-hover: var(--warning-hover);
+
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
   --color-info-surface: var(--info-surface);
@@ -91,6 +102,8 @@
 
   --color-warning-border: var(--warning-border);
   --color-destructive-border: var(--destructive-border);
+  --color-success-border: var(--success-border);
+  --color-info-border: var(--info-border);
 
   /* Sidebar surface — wires the shadcn Sidebar primitive utilities
      (bg-sidebar, hover:bg-sidebar-accent, text-sidebar-foreground, …)
@@ -236,6 +249,11 @@
   --animate-duration-base: var(--duration-base);
   --animate-duration-slow: var(--duration-slow);
   --animate-duration-entrance: var(--duration-entrance);
+
+  /* Field error shake — keyframe in tokens/motion.css; total 280ms, outer
+     timing linear (per-segment ease is inside the keyframe). Consumed by the
+     field primitives as `aria-invalid:animate-field-shake`. */
+  --animate-field-shake: field-shake 280ms linear;
 }
 
 /* Base layer — HTML elements */

@@ -1,6 +1,7 @@
 'use client';
 
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
+import { cva, type VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
@@ -9,7 +10,19 @@ import { cn } from '@/lib/utils';
  * Single-choice picker among 2–7 mutually exclusive, fully-visible options.
  * Beyond 7 options use Select (or Combobox once it lands) instead — a long
  * radio list buries the choice in scroll. Each `RadioGroupItem` should be
- * paired with a `<Label htmlFor>` for hit-area + screen-reader association.
+ * paired with a `<Label htmlFor>` for hit-area + screen-reader association
+ * (the control is a `pointer-coarse:size-5` safety net; the label carries the
+ * 44px touch target).
+ *
+ * Binary control → the checked dot is full --primary (decisive), NOT the
+ * --primary-soft used by soft press-toggles (Toggle/ToggleGroup). The circle
+ * IS the radio's identity, so there is intentionally NO `radius` axis (a
+ * square radio is a semantic anti-pattern) — only a `size` axis. Focus uses
+ * the global :focus-visible brand glow; the compact circle absorbs the
+ * proportional ring cleanly (no per-component override).
+ *
+ * `orientation` ('vertical' default | 'horizontal') and `loop` (keyboard wrap,
+ * default true) pass through to Radix.
  *
  * @useWhen rendering 2-7 mutually exclusive options that benefit from being all visible at once (use Select for longer lists)
  */
@@ -21,25 +34,57 @@ export const RadioGroup = React.forwardRef<
 ));
 RadioGroup.displayName = RadioGroupPrimitive.Root.displayName;
 
+const radioGroupItemVariants = cva(
+  [
+    // `peer` so a disabled item dims its sibling <Label> (peer-disabled:),
+    // making the whole row read as disabled — not just the faint circle.
+    'peer border-border-strong bg-background shrink-0 rounded-full border shadow-xs',
+    'transition duration-fast ease-out-quart',
+    'hover:border-primary',
+    'active:scale-[0.95]',
+    'disabled:cursor-not-allowed disabled:opacity-50',
+    'data-[state=checked]:border-primary',
+  ].join(' '),
+  {
+    variants: {
+      size: {
+        sm: 'size-3.5 pointer-coarse:size-5',
+        md: 'size-4 pointer-coarse:size-5',
+        lg: 'size-5 pointer-coarse:size-6',
+      },
+    },
+    defaultVariants: { size: 'md' },
+  },
+);
+
+// Inner dot scales with the ring so the checked mark stays proportional.
+const RADIO_DOT_SIZE = { sm: 'size-1.5', md: 'size-2', lg: 'size-2.5' } as const;
+
+export interface RadioGroupItemProps
+  extends
+    Omit<React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item>, 'size'>,
+    VariantProps<typeof radioGroupItemVariants> {}
+
 export const RadioGroupItem = React.forwardRef<
   React.ElementRef<typeof RadioGroupPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item>
->(({ className, ...props }, ref) => (
+  RadioGroupItemProps
+>(({ className, size, ...props }, ref) => (
   <RadioGroupPrimitive.Item
     ref={ref}
-    className={cn(
-      'border-border-strong text-primary duration-fast aspect-square size-4 rounded-full border shadow-xs transition-colors',
-      'hover:border-primary',
-      'focus-visible:outline-none',
-      'disabled:cursor-not-allowed disabled:opacity-50',
-      'data-[state=checked]:border-primary',
-      className,
-    )}
+    className={cn(radioGroupItemVariants({ size }), className)}
     {...props}
   >
     <RadioGroupPrimitive.Indicator className="flex items-center justify-center">
-      <span className="bg-primary size-2 rounded-full" />
+      {/* Dot pops in on select (scale entrance, no bounce); reduced-motion handled globally. */}
+      <span
+        className={cn(
+          'bg-primary animate-in zoom-in-75 duration-fast ease-out-quart rounded-full',
+          RADIO_DOT_SIZE[size ?? 'md'],
+        )}
+      />
     </RadioGroupPrimitive.Indicator>
   </RadioGroupPrimitive.Item>
 ));
 RadioGroupItem.displayName = RadioGroupPrimitive.Item.displayName;
+
+export { radioGroupItemVariants };

@@ -30,6 +30,10 @@ export const PopoverContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         'border-border bg-popover p-md text-popover-foreground z-50 w-72 rounded-md border shadow-md',
+        // Scale + slide grow FROM the trigger-anchored popper origin (Radix
+        // exposes it as a CSS var), so the panel reads as emerging from its
+        // trigger rather than popping from its own centre — the tooltip recipe.
+        'origin-[var(--radix-popover-content-transform-origin)]',
         'duration-base ease-out-quart',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',

@@ -1,6 +1,16 @@
 'use client';
 
-import { Building03Icon, MoreVerticalIcon, Refresh01Icon } from 'hugeicons-react';
+import {
+  Alert02Icon,
+  AlertCircleIcon,
+  Building03Icon,
+  CheckmarkCircle02Icon,
+  DatabaseIcon,
+  InformationCircleIcon,
+  MoreVerticalIcon,
+  Refresh01Icon,
+} from 'hugeicons-react';
+import { useState } from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
 import { PrimitiveNav } from '@/components/showcase/primitive-nav';
@@ -12,12 +22,16 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarGroup } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ImageModal } from '@/components/ui/image-modal';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
+import { StatusDot } from '@/components/ui/status-dot';
 import {
   Table,
   TableBody,
@@ -74,9 +88,9 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Avatar"
-        description="Profil fotoğrafı / inisyalli fallback. Button/Input ile paylaşılan size ailesi (sm/md/lg)."
+        description="Profil fotoğrafı / inisyalli fallback. Paylaşılan size ailesi (sm/md/lg); tone ile fallback tonlu; indicator ile köşe işareti (StatusDot/rozet); AvatarGroup ile üst üste yığın + +N taşma."
       >
-        <div className="gap-md flex flex-col">
+        <div className="gap-lg flex flex-col">
           <div className="gap-md flex flex-wrap items-center">
             <Avatar size="sm">
               <AvatarFallback>BO</AvatarFallback>
@@ -87,20 +101,51 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
             <Avatar size="lg">
               <AvatarFallback>BO</AvatarFallback>
             </Avatar>
+            <span className="text-muted-foreground text-sm">sm · md · lg</span>
           </div>
-          <div className="flex items-center -space-x-2">
-            <Avatar className="ring-card ring-2">
+          <div className="gap-sm flex flex-wrap items-center">
+            <Avatar>
+              <AvatarFallback tone="neutral">BO</AvatarFallback>
+            </Avatar>
+            <Avatar>
+              <AvatarFallback tone="primary">AY</AvatarFallback>
+            </Avatar>
+            <Avatar>
+              <AvatarFallback tone="success">MK</AvatarFallback>
+            </Avatar>
+            <Avatar>
+              <AvatarFallback tone="warning">FŞ</AvatarFallback>
+            </Avatar>
+            <span className="text-muted-foreground text-sm">tone</span>
+          </div>
+          <div className="gap-md flex flex-wrap items-center">
+            <Avatar indicator={<StatusDot tone="success" size="lg" />}>
               <AvatarFallback>BO</AvatarFallback>
             </Avatar>
-            <Avatar className="ring-card ring-2">
-              <AvatarFallback>AY</AvatarFallback>
+            <Avatar indicator={<StatusDot tone="warning" size="lg" />}>
+              <AvatarFallback tone="primary">AY</AvatarFallback>
             </Avatar>
-            <Avatar className="ring-card ring-2">
-              <AvatarFallback>MK</AvatarFallback>
-            </Avatar>
-            <Avatar className="ring-card ring-2">
-              <AvatarFallback>+3</AvatarFallback>
-            </Avatar>
+            <span className="text-muted-foreground text-sm">indicator (StatusDot)</span>
+          </div>
+          <div className="gap-md flex flex-wrap items-center">
+            <AvatarGroup max={3} overflowLabel={(n) => `+${n} kişi daha`}>
+              <Avatar>
+                <AvatarFallback>BO</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback tone="primary">AY</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback tone="success">MK</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback>DK</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback>EŞ</AvatarFallback>
+              </Avatar>
+            </AvatarGroup>
+            <span className="text-muted-foreground text-sm">AvatarGroup max=3 → +2</span>
           </div>
         </div>
       </Preview>
@@ -136,25 +181,37 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Collapsible"
-        description="Tek seferlik show/hide. Accordion'un basit versiyonu."
+        description="Tek seferlik show/hide. Styled trigger (chevron + nötr surface hover) + height-animasyonlu içerik (collapsible-down/up). asChild ile tamamen özel tetikleyici de verilebilir."
       >
-        <Collapsible className="max-w-form gap-sm grid">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Gelişmiş ayarlar</span>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm">
-                Aç / kapa
-              </Button>
-            </CollapsibleTrigger>
-          </div>
-          <CollapsibleContent className="border-border p-md text-muted-foreground rounded-md border border-dashed text-sm">
-            Burada gelişmiş senkronizasyon ayarları yer alır. Özel tarih aralığı, hangi statüdeki
-            siparişlerin çekileceği, retry politikası…
-          </CollapsibleContent>
-        </Collapsible>
+        <div className="gap-lg flex flex-col">
+          <Collapsible className="max-w-form">
+            <CollapsibleTrigger>Gelişmiş ayarlar</CollapsibleTrigger>
+            <CollapsibleContent className="text-muted-foreground px-sm pt-2xs pb-sm text-sm">
+              Burada gelişmiş senkronizasyon ayarları yer alır. Özel tarih aralığı, hangi statüdeki
+              siparişlerin çekileceği, retry politikası…
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible className="max-w-form">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">asChild — özel tetikleyici</span>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  Aç / kapa
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+            <CollapsibleContent className="border-border mt-sm p-md text-muted-foreground rounded-md border border-dashed text-sm">
+              asChild pass-through: tetikleyici tamamen senin (Button), chevron enjekte edilmez.
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
       </Preview>
 
-      <Preview title="Separator" description="İnce yatay / dikey ayraç.">
+      <Preview
+        title="Separator"
+        description="İnce yatay / dikey ayraç. variant ağırlığı bağlama göre ayarlar: muted (kart-içi ince) · default · strong (ana bölümler arası) — hepsi border token ailesinden."
+      >
         <div className="gap-md flex flex-col">
           <div>
             <span className="text-sm">Üst içerik</span>
@@ -167,6 +224,14 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
             <span className="text-sm">Orta</span>
             <Separator orientation="vertical" />
             <span className="text-sm">Sağ</span>
+          </div>
+          <div className="gap-xs flex flex-col">
+            {(['muted', 'default', 'strong'] as const).map((variant) => (
+              <div key={variant} className="gap-sm flex items-center">
+                <span className="text-2xs text-muted-foreground w-12 font-mono">{variant}</span>
+                <Separator variant={variant} className="flex-1" />
+              </div>
+            ))}
           </div>
         </div>
       </Preview>
@@ -226,6 +291,103 @@ export default function DataDisplayPrimitivePage(): React.ReactElement {
           </CardContent>
         </Card>
       </Preview>
+
+      <Preview
+        title="SoftSquareIcon"
+        description="Semantic-dolu yuvarlak kare ikon chip'i — KPI durum satırı / kota tile'ı / panel öğesinin önünde. solid = doygun dolgu + foreground ikon; soft = soluk yüzey + tonlu ikon (nötr soft = monokrom). Dekoratif (aria-hidden); anlam yan etiketten gelir. Gölgesiz — kart içinde düz durur."
+      >
+        <div className="gap-lg flex flex-col">
+          <div className="gap-sm flex flex-wrap items-center">
+            <SoftSquareIcon tone="success">
+              <CheckmarkCircle02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="warning">
+              <Alert02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="destructive">
+              <AlertCircleIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="info">
+              <InformationCircleIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="primary">
+              <Building03Icon />
+            </SoftSquareIcon>
+            <span className="text-muted-foreground text-sm">solid</span>
+          </div>
+          <div className="gap-sm flex flex-wrap items-center">
+            <SoftSquareIcon tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="success" variant="soft">
+              <CheckmarkCircle02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="warning" variant="soft">
+              <Alert02Icon />
+            </SoftSquareIcon>
+            <SoftSquareIcon tone="info" variant="soft">
+              <InformationCircleIcon />
+            </SoftSquareIcon>
+            <span className="text-muted-foreground text-sm">soft</span>
+          </div>
+          <div className="gap-sm flex flex-wrap items-center">
+            <SoftSquareIcon size="sm" tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon size="md" tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <SoftSquareIcon size="lg" tone="neutral" variant="soft">
+              <DatabaseIcon />
+            </SoftSquareIcon>
+            <span className="text-muted-foreground text-sm">sm · md · lg</span>
+          </div>
+        </div>
+      </Preview>
+
+      <Preview
+        title="ScrollArea"
+        description="Sabit-yükseklikli bölge için OS-bağımsız ince scrollbar (thumb hover'da parlar). Overlay / panel içinde kullanılır — sayfa gövdesinde değil (o zaten globals'ta tokenli)."
+      >
+        <ScrollArea className="border-border h-44 w-64 rounded-md border">
+          <div className="p-sm gap-2xs flex flex-col">
+            {Array.from({ length: 18 }).map((_, i) => (
+              <div
+                key={i}
+                className="bg-surface-subtle text-foreground px-sm py-xs rounded-sm text-sm tabular-nums"
+              >
+                Sipariş #{(2948120 + i).toLocaleString('tr-TR')}
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </Preview>
+
+      <Preview
+        title="ImageModal"
+        description="Görsel lightbox'ı. Küçük resme tıkla → tam çözünürlükte açılır (sinema scrim + her fotoğrafta okunan sabit-koyu kapat chip'i). Esc / arka plan / chip ile kapanır."
+      >
+        <ImageModalDemo />
+      </Preview>
+    </>
+  );
+}
+
+function ImageModalDemo(): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const src = 'https://picsum.photos/seed/pazarsync/1000/700';
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Görseli büyüt"
+        className="border-border focus-visible:ring-ring ring-offset-background size-20 overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="Örnek ürün görseli" className="size-full object-cover" />
+      </button>
+      <ImageModal src={src} alt="Örnek ürün görseli" open={open} onOpenChange={setOpen} />
     </>
   );
 }

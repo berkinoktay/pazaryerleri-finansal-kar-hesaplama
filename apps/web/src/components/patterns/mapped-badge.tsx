@@ -23,6 +23,8 @@ export interface MappedBadgeProps<K extends string> {
   value: K;
   /** Enum value → Badge tone. Must cover every member of `K`. */
   toneMap: Record<K, BadgeProps['tone']>;
+  /** Optional enum value → Badge variant (surface / solid / outline). Unset keys fall back to Badge's `surface` default. */
+  variantMap?: Partial<Record<K, BadgeProps['variant']>>;
   /**
    * Enum value → translated label node. Must cover every member of
    * `K`. Pass already-translated strings (or React nodes) so this
@@ -37,12 +39,18 @@ export interface MappedBadgeProps<K extends string> {
 export function MappedBadge<K extends string>({
   value,
   toneMap,
+  variantMap,
   labelMap,
   overflowCount,
   className,
 }: MappedBadgeProps<K>): React.ReactElement {
   return (
-    <BadgeWithOverflow tone={toneMap[value]} overflowCount={overflowCount} className={className}>
+    <BadgeWithOverflow
+      tone={toneMap[value]}
+      variant={variantMap?.[value]}
+      overflowCount={overflowCount}
+      className={className}
+    >
       {labelMap[value]}
     </BadgeWithOverflow>
   );

@@ -16,11 +16,12 @@ import * as React from 'react';
 import { PageHeader } from '@/components/patterns/page-header';
 import { PrimitiveNav } from '@/components/showcase/primitive-nav';
 import { Preview } from '@/components/showcase/preview';
-import { Badge } from '@/components/ui/badge';
+import { Badge, BADGE_VARIANTS } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { RADIUS_KEYS, SIZE_KEYS } from '@/lib/variants';
+import { Link } from '@/i18n/navigation';
+import { RADIUS_KEYS, SIZE_KEYS, TONE_KEYS } from '@/lib/variants';
 
 export default function ButtonsPrimitivePage(): React.ReactElement {
   const t = useTranslations('common');
@@ -34,7 +35,7 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
 
       <Preview
         title="Button varyantları"
-        description="Default, Secondary, Outline, Ghost, Link, Destructive. Varyant hiyerarşiyi taşır — sayfada sadece bir primary olmalı."
+        description="Default, Secondary, Outline, Ghost, Link, Destructive, Success, Warning. Dolu varyantlar düz (gölgesiz) — global :focus-visible glow'u engellenmeden okunur; basışta hafif scale-down. Varyant hiyerarşiyi taşır — sayfada tek primary olmalı."
       >
         <div className="gap-xs flex flex-wrap">
           <Button>Default</Button>
@@ -43,6 +44,8 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
           <Button variant="ghost">Ghost</Button>
           <Button variant="link">Link</Button>
           <Button variant="destructive">Destructive</Button>
+          <Button variant="success">Success</Button>
+          <Button variant="warning">Warning</Button>
         </div>
       </Preview>
 
@@ -90,20 +93,64 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
           <Button size="icon-sm" variant="outline" aria-label="Ara">
             <Search01Icon className="size-icon-sm" />
           </Button>
+          <Button size="icon-sm" variant="ghost" aria-label="Kapat">
+            <Cancel01Icon className="size-icon-sm" />
+          </Button>
           <Button size="icon" radius="full" variant="outline" aria-label="Ara (dairesel)">
             <Search01Icon className="size-icon-sm" />
+          </Button>
+          <Button size="icon" loading aria-label="Yenileniyor">
+            <PlusSignIcon className="size-icon-sm" />
+          </Button>
+          <Button size="icon" disabled aria-label="Devre dışı">
+            <PlusSignIcon className="size-icon-sm" />
           </Button>
         </div>
       </Preview>
 
-      <Preview title="Button durumları" description="Disabled, loading (custom), active focus.">
+      <Preview
+        title="Button durumları — disabled (tüm variant)"
+        description="opacity-50 + pointer-events-none. Her variant'ın disabled okunabilirliğini doğrula (link dahil)."
+      >
         <div className="gap-xs flex flex-wrap">
-          <Button disabled>Disabled</Button>
+          <Button disabled>Default</Button>
+          <Button variant="secondary" disabled>
+            Secondary
+          </Button>
           <Button variant="outline" disabled>
-            Disabled
+            Outline
+          </Button>
+          <Button variant="ghost" disabled>
+            Ghost
+          </Button>
+          <Button variant="link" disabled>
+            Link
           </Button>
           <Button variant="destructive" disabled>
-            Disabled
+            Destructive
+          </Button>
+          <Button variant="success" disabled>
+            Success
+          </Button>
+          <Button variant="warning" disabled>
+            Warning
+          </Button>
+        </div>
+      </Preview>
+
+      <Preview
+        title="asChild — buton stili bir Link'e"
+        description="asChild ile Button stilleri gerçek bir <Link>/<a>'ya uygulanır (navigasyon). variant='link' GÖRÜNÜM içindir; asChild DAVRANIŞ (gerçek bağlantı) içindir — en çok kullanılan kompozisyon."
+      >
+        <div className="gap-xs flex flex-wrap items-center">
+          <Button asChild>
+            <Link href="/design">Panoya git</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/design/primitives">{"Primitive'ler"}</Link>
+          </Button>
+          <Button variant="ghost" asChild>
+            <Link href="/design/tokens">{"Token'lar"}</Link>
           </Button>
         </div>
       </Preview>
@@ -138,17 +185,22 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Badge tonları"
-        description="Neutral, Primary, Outline, Success, Destructive, Warning, Info. Ton rengi yüzeyle taşınır; yan-şerit border yasak."
+        title="Badge — tone × variant"
+        description="Orthogonal: tone (renk) × variant. surface (soluk tint) = varsayılan, 60-30-10'un sakin '30'u; solid (dolu) = nadir '10' aksan; outline (kenarlık) = alternatif. Yan-şerit border yasak; radius varsayılan md."
       >
-        <div className="gap-xs flex flex-wrap">
-          <Badge>Neutral</Badge>
-          <Badge tone="primary">Primary</Badge>
-          <Badge tone="outline">Outline</Badge>
-          <Badge tone="success">Teslim edildi</Badge>
-          <Badge tone="destructive">İade</Badge>
-          <Badge tone="warning">Bekleyen</Badge>
-          <Badge tone="info">Kargoda</Badge>
+        <div className="gap-md flex flex-col">
+          {BADGE_VARIANTS.map((variant) => (
+            <div key={variant} className="gap-2xs flex flex-col">
+              <span className="text-2xs text-muted-foreground font-mono">variant = {variant}</span>
+              <div className="gap-xs flex flex-wrap">
+                {TONE_KEYS.map((tone) => (
+                  <Badge key={tone} tone={tone} variant={variant}>
+                    {tone}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </Preview>
 
@@ -202,31 +254,78 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
       </Preview>
 
       <Preview
-        title="Toggle"
-        description="Tek açık/kapalı kontrol. Button varyantı gibi davranır ama on/off state ayırt eder."
+        title="Toggle — variant · size · radius · state"
+        description="Tek açık/kapalı kontrol. on-state accent dolgu (hover surface-trigger'dan net ayrı); size/radius Button ile hizalı (md=40px); icon-only toggle aria-label ister."
       >
-        <div className="gap-xs flex flex-wrap">
-          <Toggle defaultPressed>Kalın</Toggle>
-          <Toggle>İtalik</Toggle>
-          <Toggle variant="outline">Altı çizili</Toggle>
+        <div className="gap-md flex flex-col">
+          <div className="gap-xs flex flex-wrap items-center">
+            <Toggle defaultPressed>Kalın</Toggle>
+            <Toggle>İtalik</Toggle>
+            <Toggle variant="outline">Altı çizili</Toggle>
+            <Toggle disabled>Devre dışı</Toggle>
+            <Toggle defaultPressed disabled>
+              Devre dışı (on)
+            </Toggle>
+          </div>
+          <div className="gap-xs flex flex-wrap items-center">
+            {SIZE_KEYS.map((size) => (
+              <Toggle key={size} size={size} defaultPressed>
+                {size}
+              </Toggle>
+            ))}
+            <Toggle size="icon" aria-label="Beğen" defaultPressed>
+              <Tick02Icon className="size-icon-sm" />
+            </Toggle>
+            <Toggle size="icon-sm" variant="outline" aria-label="Kapat">
+              <Cancel01Icon className="size-icon-sm" />
+            </Toggle>
+            <Toggle radius="full" defaultPressed>
+              Pill
+            </Toggle>
+          </div>
         </div>
       </Preview>
 
       <Preview
-        title="ToggleGroup"
-        description="Segmented control (single/multiple). Döneme göre filtre, hizalama seçici, platform filtresi gibi yerlerde."
+        title="ToggleGroup — connected (segment-bar) · plain"
+        description="Bitişik segment-bar (default 'connected'): tek çerçeve, seçili = primary-soft (brand-tonlu, Tabs'taki segmented'dan ayrı). 'plain' appearance ayrık toggle'lar. type=single/multiple, per-item disabled, dikey; gruba aria-label ver."
       >
         <div className="gap-md flex flex-col">
-          <ToggleGroup type="single" defaultValue="month" variant="outline">
+          <ToggleGroup type="single" defaultValue="month" aria-label="Dönem">
             <ToggleGroupItem value="day">Gün</ToggleGroupItem>
             <ToggleGroupItem value="week">Hafta</ToggleGroupItem>
             <ToggleGroupItem value="month">Ay</ToggleGroupItem>
-            <ToggleGroupItem value="quarter">Çeyrek</ToggleGroupItem>
+            <ToggleGroupItem value="quarter" disabled>
+              Çeyrek
+            </ToggleGroupItem>
           </ToggleGroup>
-          <ToggleGroup type="multiple" defaultValue={['trendyol']}>
+
+          <ToggleGroup type="multiple" defaultValue={['trendyol']} size="sm" aria-label="Platform">
             <ToggleGroupItem value="trendyol">Trendyol</ToggleGroupItem>
             <ToggleGroupItem value="hepsiburada">Hepsiburada</ToggleGroupItem>
             <ToggleGroupItem value="n11">n11</ToggleGroupItem>
+          </ToggleGroup>
+
+          <ToggleGroup
+            type="single"
+            defaultValue="table"
+            appearance="plain"
+            aria-label="Görünüm modu (plain)"
+          >
+            <ToggleGroupItem value="table">Tablo</ToggleGroupItem>
+            <ToggleGroupItem value="grid">Kart</ToggleGroupItem>
+            <ToggleGroupItem value="list">Liste</ToggleGroupItem>
+          </ToggleGroup>
+
+          <ToggleGroup
+            type="single"
+            defaultValue="orta"
+            orientation="vertical"
+            aria-label="Hizalama (dikey)"
+          >
+            <ToggleGroupItem value="sol">Sol</ToggleGroupItem>
+            <ToggleGroupItem value="orta">Orta</ToggleGroupItem>
+            <ToggleGroupItem value="sag">Sağ</ToggleGroupItem>
           </ToggleGroup>
         </div>
       </Preview>

@@ -7,9 +7,9 @@ import type { DateRange } from 'react-day-picker';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
-import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { selectTriggerVariants } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 export interface DateRangePickerProps {
@@ -46,18 +46,24 @@ export function DateRangePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="md"
+        <button
+          type="button"
+          // Shares the SelectTrigger field recipe (bg-input, border-input, hover
+          // border-strong, focus glow) — kept identical to DateInput so the two
+          // date triggers stay visually paired and match sibling inputs.
+          // `inline-flex w-auto` overrides the recipe's `flex w-full` so the picker
+          // hugs its label by default (toolbar / inline use); pass className="w-full"
+          // to fill a form column.
           className={cn(
-            'justify-start font-normal',
+            selectTriggerVariants({ size: 'md' }),
+            'inline-flex w-auto',
             !value?.from && 'text-muted-foreground',
             className,
           )}
         >
-          <Calendar01Icon className="size-icon-sm" />
-          {label ?? placeholder ?? t('placeholder')}
-        </Button>
+          <Calendar01Icon className="size-icon-sm text-muted-foreground shrink-0" />
+          <span className="truncate">{label ?? placeholder ?? t('placeholder')}</span>
+        </button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align={align}>
         <Calendar

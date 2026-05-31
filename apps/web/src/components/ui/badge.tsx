@@ -3,37 +3,49 @@ import { Cancel01Icon } from 'hugeicons-react';
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
+import { type ToneKey, toneOutlineClass, toneSolidClass, toneSurfaceClass } from '@/lib/variants';
 
 /**
  * Badge — compact status / label chip.
  *
- * `tone` carries the semantic meaning (success, warning, etc.); `size`
- * scales vertical weight (sm is for table cells, lg is for hero stats).
- * `radius` is shared with the rest of the design system — set `full`
- * for pill, `md` for square-ish, etc.
+ * Tone and variant are ORTHOGONAL: `tone` is the semantic color
+ * (neutral / primary / success / warning / destructive / info) and
+ * `variant` is the treatment:
+ *   - `surface` (default) — pale tinted chip (`bg-<tone>-surface` + `text-<tone>`).
+ *     The dashboard default — the restrained "30" in 60-30-10.
+ *   - `solid` — saturated fill (`bg-<tone>` + `text-<tone>-foreground`). The
+ *     sparing "10" accent; reserve for the one chip that must dominate.
+ *   - `outline` — tone border + tone text on a transparent surface.
+ * All three read from the shared tone vocabulary in `@/lib/variants`, so
+ * Badge is the template the other tone-bearing primitives copy.
  *
- * `leadingIcon` / `trailingIcon` auto-size their SVG to `size-icon-xs`
- * so the chip stays compact. `onRemove` renders an accessible dismiss
- * button on the right — use for filter chips, tags, etc. For badges
- * paired with a "+N others" overflow chip, use BadgeWithOverflow from
- * patterns/ instead.
+ * `radius` defaults to `md` (shared with Button/Input). Use `radius="full"`
+ * for a dismissible filter/pill chip; keep `md` for inline status badges in
+ * lists and tables. `size` scales vertical weight. `leadingIcon` /
+ * `trailingIcon` auto-size their SVG to `size-icon-xs`. `onRemove` renders an
+ * accessible dismiss button. For a "+N others" overflow chip use
+ * BadgeWithOverflow from patterns/.
+ *
+ * Badge is display-only (a `<span>`); for status announcements wrap it in a
+ * `role="status" aria-live="polite"` container — the reactivity is the
+ * consumer's concern, not the chip's.
  *
  * @useWhen rendering a compact status, label, or filter chip with optional leading or trailing icon and optional dismiss button
  */
 
+export const BADGE_VARIANTS = ['surface', 'solid', 'outline'] as const;
+export type BadgeVariant = (typeof BADGE_VARIANTS)[number];
+
+function badgeToneClass(tone: ToneKey, variant: BadgeVariant): string {
+  if (variant === 'solid') return cn('border-transparent', toneSolidClass[tone]);
+  if (variant === 'outline') return cn('bg-transparent', toneOutlineClass[tone]);
+  return cn('border-transparent', toneSurfaceClass[tone]);
+}
+
 const badgeVariants = cva(
-  'inline-flex items-center gap-3xs border font-medium transition-colors [&_svg]:size-icon-xs [&_svg]:shrink-0',
+  'inline-flex items-center gap-3xs border font-medium transition-colors duration-fast ease-out-quart [&_svg]:size-icon-xs [&_svg]:shrink-0',
   {
     variants: {
-      tone: {
-        neutral: 'border-border bg-muted text-foreground',
-        primary: 'border-transparent bg-primary text-primary-foreground',
-        outline: 'border-border bg-transparent text-foreground',
-        success: 'border-transparent bg-success-surface text-success',
-        destructive: 'border-transparent bg-destructive-surface text-destructive',
-        warning: 'border-transparent bg-warning-surface text-warning',
-        info: 'border-transparent bg-info-surface text-info',
-      },
       size: {
         sm: 'px-xs py-3xs text-2xs',
         md: 'px-sm py-3xs text-xs',
@@ -50,12 +62,16 @@ const badgeVariants = cva(
         full: 'rounded-full',
       },
     },
-    defaultVariants: { tone: 'neutral', size: 'md', radius: 'full' },
+    defaultVariants: { size: 'md', radius: 'md' },
   },
 );
 
 export interface BadgeProps
-  extends React.HTMLAttributes<HTMLSpanElement>, VariantProps<typeof badgeVariants> {
+  extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'color'>, VariantProps<typeof badgeVariants> {
+  /** Semantic color. Defaults to `neutral`. */
+  tone?: ToneKey;
+  /** Treatment: `surface` (pale, default), `solid` (saturated), `outline`. */
+  variant?: BadgeVariant;
   /** Decorative icon on the left. Inherits the badge's tone color. */
   leadingIcon?: React.ReactNode;
   /** Decorative icon on the right (hidden when `onRemove` is also provided). */
@@ -69,7 +85,8 @@ export interface BadgeProps
 export function Badge(props: BadgeProps): React.ReactElement {
   const {
     className,
-    tone,
+    tone = 'neutral',
+    variant = 'surface',
     size,
     radius,
     leadingIcon,
@@ -81,7 +98,10 @@ export function Badge(props: BadgeProps): React.ReactElement {
   } = props;
 
   return (
-    <span className={cn(badgeVariants({ tone, size, radius, className }))} {...rest}>
+    <span
+      className={cn(badgeVariants({ size, radius }), badgeToneClass(tone, variant), className)}
+      {...rest}
+    >
       {leadingIcon !== undefined ? <span className="flex items-center">{leadingIcon}</span> : null}
       {children}
       {onRemove === undefined && trailingIcon !== undefined ? (
@@ -95,8 +115,10 @@ export function Badge(props: BadgeProps): React.ReactElement {
           className={cn(
             'inline-flex shrink-0 cursor-pointer items-center justify-center',
             'rounded-full opacity-70 hover:opacity-100',
-            'duration-fast transition-opacity',
-            'focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-0 focus-visible:outline-none',
+            'duration-fast ease-out-quart transition-opacity',
+            // The brand glow reads on any tone (ring-current was near-invisible
+            // on neutral/muted chips).
+            'focus-visible:shadow-focus focus-visible:outline-none',
             'p-3xs pointer-coarse:p-xs',
             '-mr-3xs pointer-coarse:-mr-xs',
           )}

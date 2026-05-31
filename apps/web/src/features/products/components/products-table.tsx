@@ -268,7 +268,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           // Count chip + caret. Wider click target than a bare arrow,
           // and the count surfaces "this row has N variants" without
           // forcing the user to expand to find out. Styling mirrors
-          // Badge tone="outline" size="sm" radius="md" — kept inline
+          // Badge variant="outline" size="sm" radius="md" — kept inline
           // because Badge is a <span>, not interactive.
           return (
             <button

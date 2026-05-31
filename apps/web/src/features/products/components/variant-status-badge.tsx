@@ -20,6 +20,11 @@ const TONE_FOR_STATUS: Record<VariantSummary['status'], NonNullable<BadgeProps['
   archived: 'neutral',
   locked: 'warning',
   blacklisted: 'destructive',
+  inactive: 'neutral',
+};
+
+// `inactive` is the calmest state — render it as a low-emphasis outline.
+const VARIANT_FOR_STATUS: Partial<Record<VariantSummary['status'], BadgeProps['variant']>> = {
   inactive: 'outline',
 };
 
@@ -44,6 +49,7 @@ export function VariantStatusBadge({
     <MappedBadge
       value={status}
       toneMap={TONE_FOR_STATUS}
+      variantMap={VARIANT_FOR_STATUS}
       labelMap={labelMap}
       overflowCount={overflowCount}
       className={className}

@@ -34,9 +34,13 @@ export const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'bg-foreground/30 fixed inset-0 z-50 backdrop-blur-sm',
+      // Scrim from the shared --overlay-scrim token; blur stays (a modal pulls
+      // full attention off the page). Fade rides the modal's own duration-base
+      // clock so scrim + content breathe as one event, not two.
+      'bg-overlay-scrim fixed inset-0 z-50 backdrop-blur-sm',
       'data-[state=open]:animate-in data-[state=closed]:animate-out',
       'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'duration-base ease-out-quart',
       className,
     )}
     {...props}
@@ -65,7 +69,7 @@ export const DialogContent = React.forwardRef<
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="right-md top-md absolute rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none disabled:pointer-events-none">
+        <DialogPrimitive.Close className="text-muted-foreground hover:text-foreground right-md top-md p-2xs duration-fast ease-out-quart pointer-coarse:p-sm focus-visible:ring-ring absolute inline-flex items-center justify-center rounded-sm transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50">
           <Cancel01Icon className="size-icon-sm" />
           <span className="sr-only">{t('close')}</span>
         </DialogPrimitive.Close>

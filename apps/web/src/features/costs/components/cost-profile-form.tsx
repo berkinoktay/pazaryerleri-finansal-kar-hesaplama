@@ -12,10 +12,9 @@ import {
   FormField,
   FormItem,
   FormLabel,
-  useFormField,
+  FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
@@ -67,26 +66,6 @@ function knownValidationCode(value: string | undefined): ValidationCode | undefi
   return VALIDATION_CODES.has(value as ValidationCode) ? (value as ValidationCode) : undefined;
 }
 
-/**
- * FormMessage variant that translates the schema's error code via next-intl
- * (`costs.form.validation.<code>`). Falls back to the raw message for any
- * unrecognized code so we don't silently swallow zod-internal errors.
- */
-function TranslatedFormMessage({ className }: { className?: string }): React.ReactElement | null {
-  const { error, formMessageId } = useFormField();
-  const tValidation = useTranslations('costs.form.validation');
-  if (error === undefined) return null;
-  const raw = error.message;
-  const code = knownValidationCode(typeof raw === 'string' ? raw : undefined);
-  const body = code !== undefined ? tValidation(code) : (raw ?? '');
-  if (body === '') return null;
-  return (
-    <p id={formMessageId} className={cn('text-2xs text-destructive font-medium', className)}>
-      {body}
-    </p>
-  );
-}
-
 interface CostProfileFormProps {
   /** Active organization id — required to fetch live TCMB FX rates. */
   orgId: string | null;
@@ -114,6 +93,14 @@ export function CostProfileForm({
   const t = useTranslations('costs.form');
   const tTypes = useTranslations('costs.types');
   const tFxMode = useTranslations('costs.fxMode');
+  const tValidation = useTranslations('costs.form.validation');
+
+  // Translate the schema's error code (costs.form.validation.<code>) for the
+  // canonical FormMessage; unknown codes pass through (zod-internal messages).
+  const renderValidation = (code: string): string => {
+    const known = knownValidationCode(code);
+    return known !== undefined ? tValidation(known) : code;
+  };
 
   const { data: fxData } = useFxRatesLatest(orgId);
 
@@ -179,7 +166,7 @@ export function CostProfileForm({
               <FormControl>
                 <Input placeholder={t('fields.namePlaceholder')} autoComplete="off" {...field} />
               </FormControl>
-              <TranslatedFormMessage />
+              <FormMessage render={renderValidation} />
             </FormItem>
           )}
         />
@@ -208,7 +195,7 @@ export function CostProfileForm({
                   ))}
                 </SelectContent>
               </Select>
-              <TranslatedFormMessage />
+              <FormMessage render={renderValidation} />
             </FormItem>
           )}
         />
@@ -235,7 +222,7 @@ export function CostProfileForm({
                     ))}
                   </SelectContent>
                 </Select>
-                <TranslatedFormMessage />
+                <FormMessage render={renderValidation} />
               </FormItem>
             )}
           />
@@ -263,7 +250,7 @@ export function CostProfileForm({
                   autoFxRate={autoFxRate}
                   fxRateSource={autoFxRateSource}
                 />
-                <TranslatedFormMessage />
+                <FormMessage render={renderValidation} />
               </FormItem>
             )}
           />
@@ -290,7 +277,7 @@ export function CostProfileForm({
                   ))}
                 </SelectContent>
               </Select>
-              <TranslatedFormMessage />
+              <FormMessage render={renderValidation} />
             </FormItem>
           )}
         />
@@ -319,7 +306,7 @@ export function CostProfileForm({
                     </label>
                   </RadioGroup>
                 </FormControl>
-                <TranslatedFormMessage />
+                <FormMessage render={renderValidation} />
               </FormItem>
             )}
           />
@@ -342,7 +329,7 @@ export function CostProfileForm({
                     onChange={(e) => field.onChange(e.target.value || null)}
                   />
                 </FormControl>
-                <TranslatedFormMessage />
+                <FormMessage render={renderValidation} />
               </FormItem>
             )}
           />
@@ -363,7 +350,7 @@ export function CostProfileForm({
                   onChange={(e) => field.onChange(e.target.value || null)}
                 />
               </FormControl>
-              <TranslatedFormMessage />
+              <FormMessage render={renderValidation} />
             </FormItem>
           )}
         />

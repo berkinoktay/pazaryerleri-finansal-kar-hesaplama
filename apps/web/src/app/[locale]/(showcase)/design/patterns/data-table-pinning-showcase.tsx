@@ -68,7 +68,7 @@ const COLUMNS: ColumnDef<MockOrder>[] = [
     accessorKey: 'platform',
     header: 'Pazaryeri',
     cell: ({ row }) => (
-      <Badge tone="outline">
+      <Badge variant="outline">
         {row.original.platform === 'TRENDYOL' ? 'Trendyol' : 'Hepsiburada'}
       </Badge>
     ),

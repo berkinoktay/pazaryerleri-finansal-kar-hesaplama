@@ -9,6 +9,7 @@ import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Command,
@@ -62,10 +63,10 @@ const PALETTE_BG: Record<OrgAvatarPalette, string> = {
   accent: 'bg-accent text-accent-foreground',
 };
 
-const SYNC_BG: Record<SyncState, string> = {
-  fresh: 'bg-success',
-  stale: 'bg-warning',
-  failed: 'bg-destructive',
+const SYNC_TONE: Record<SyncState, StatusDotProps['tone']> = {
+  fresh: 'success',
+  stale: 'warning',
+  failed: 'destructive',
 };
 
 const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember' | 'roleViewer'> = {
@@ -75,11 +76,12 @@ const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember' | 'role
   VIEWER: 'roleViewer',
 };
 
-const ROLE_TONE: Record<OrgRole, NonNullable<BadgeProps['tone']>> = {
-  OWNER: 'primary',
-  ADMIN: 'neutral',
-  MEMBER: 'outline',
-  VIEWER: 'outline',
+// OWNER stands out (solid primary); MEMBER/VIEWER stay low-emphasis (outline).
+const ROLE_BADGE: Record<OrgRole, { tone: BadgeProps['tone']; variant?: BadgeProps['variant'] }> = {
+  OWNER: { tone: 'primary', variant: 'solid' },
+  ADMIN: { tone: 'neutral' },
+  MEMBER: { tone: 'neutral', variant: 'outline' },
+  VIEWER: { tone: 'neutral', variant: 'outline' },
 };
 
 /** When the user belongs to this many orgs the dropdown splits into a
@@ -429,9 +431,7 @@ function OrgRow({
       )}
     >
       <Avatar size="sm" className={cn('size-7 rounded-md', PALETTE_BG[palette])}>
-        <AvatarFallback className={cn('text-2xs rounded-md font-semibold', PALETTE_BG[palette])}>
-          {initial}
-        </AvatarFallback>
+        <AvatarFallback className={cn('rounded-md', PALETTE_BG[palette])}>{initial}</AvatarFallback>
       </Avatar>
       <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
         <span className="text-foreground truncate text-xs font-medium">
@@ -439,7 +439,13 @@ function OrgRow({
         </span>
         {meta ? <span className="text-muted-foreground text-2xs truncate">{meta}</span> : null}
       </span>
-      <Badge tone={ROLE_TONE[org.role]} size="sm" radius="sm" className="shrink-0">
+      <Badge
+        tone={ROLE_BADGE[org.role].tone}
+        variant={ROLE_BADGE[org.role].variant}
+        size="sm"
+        radius="sm"
+        className="shrink-0"
+      >
         {t(ROLE_KEY[org.role])}
       </Badge>
       {isActive ? (
@@ -497,13 +503,7 @@ function StoreRow({
           <HighlightedText text={store.name} />
         </span>
         <span className="text-muted-foreground gap-3xs text-2xs flex items-center truncate">
-          <span
-            aria-hidden
-            className={cn(
-              'animate-sync-pulse size-2 shrink-0 rounded-full',
-              SYNC_BG[store.syncState],
-            )}
-          />
+          <StatusDot tone={SYNC_TONE[store.syncState]} animatePulse />
           <span className="truncate">{meta}</span>
         </span>
       </span>

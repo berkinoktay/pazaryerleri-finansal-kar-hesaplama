@@ -91,9 +91,7 @@ export function UserMenu(): React.ReactElement {
           tooltip={triggerLabel}
         >
           <Avatar size="sm" className="rounded-md">
-            <AvatarFallback className="text-2xs rounded-md font-semibold">
-              {initials}
-            </AvatarFallback>
+            <AvatarFallback className="rounded-md">{initials}</AvatarFallback>
           </Avatar>
           <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight group-data-[collapsible=icon]:hidden">
             <span className="text-foreground truncate text-xs font-medium">{displayName}</span>
@@ -115,7 +113,7 @@ export function UserMenu(): React.ReactElement {
       >
         <div className="gap-xs p-sm flex items-center">
           <Avatar size="md" className="rounded-md">
-            <AvatarFallback className="rounded-md text-xs font-semibold">{initials}</AvatarFallback>
+            <AvatarFallback className="rounded-md">{initials}</AvatarFallback>
           </Avatar>
           <div className="flex min-w-0 flex-1 flex-col leading-tight">
             {fullName ? (

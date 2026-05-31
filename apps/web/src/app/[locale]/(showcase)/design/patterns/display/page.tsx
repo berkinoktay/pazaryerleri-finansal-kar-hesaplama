@@ -1,7 +1,13 @@
 'use client';
 
 import Decimal from 'decimal.js';
-import { DatabaseIcon, ShoppingBag01Icon } from 'hugeicons-react';
+import {
+  Alert02Icon,
+  AlertCircleIcon,
+  CheckmarkCircle02Icon,
+  DatabaseIcon,
+  ShoppingBag01Icon,
+} from 'hugeicons-react';
 
 import { BadgeWithOverflow } from '@/components/patterns/badge-with-overflow';
 import { Currency } from '@/components/patterns/currency';
@@ -9,6 +15,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { KpiTile } from '@/components/patterns/kpi-tile';
 import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
+import { StatRow } from '@/components/patterns/stat-row';
 
 import { DefinitionListShowcase } from '../definition-list-showcase';
 import { ImageCellShowcase } from '../image-cell-showcase';
@@ -21,6 +28,8 @@ import { TrendDelta } from '@/components/patterns/trend-delta';
 import { PatternNav } from '@/components/showcase/pattern-nav';
 import { Preview } from '@/components/showcase/preview';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
 const MOCK = {
   revenue: new Decimal('284390.45'),
@@ -120,7 +129,7 @@ export default function DisplayPatternsPage(): React.ReactElement {
           <BadgeWithOverflow tone="destructive" overflowCount={1}>
             Engellenmiş
           </BadgeWithOverflow>
-          <BadgeWithOverflow tone="outline">Pasif</BadgeWithOverflow>
+          <BadgeWithOverflow variant="outline">Pasif</BadgeWithOverflow>
         </div>
       </Preview>
 
@@ -136,8 +145,9 @@ export default function DisplayPatternsPage(): React.ReactElement {
               archived: 'neutral',
               locked: 'warning',
               blacklisted: 'destructive',
-              inactive: 'outline',
+              inactive: 'neutral',
             }}
+            variantMap={{ inactive: 'outline' }}
             labelMap={{
               onSale: 'Satışta',
               archived: 'Arşiv',
@@ -153,8 +163,9 @@ export default function DisplayPatternsPage(): React.ReactElement {
               archived: 'neutral',
               locked: 'warning',
               blacklisted: 'destructive',
-              inactive: 'outline',
+              inactive: 'neutral',
             }}
+            variantMap={{ inactive: 'outline' }}
             labelMap={{
               onSale: 'Satışta',
               archived: 'Arşiv',
@@ -255,6 +266,74 @@ export default function DisplayPatternsPage(): React.ReactElement {
                 Filtreleri temizle
               </Button>
             }
+          />
+        </div>
+      </Preview>
+
+      <Preview
+        title="StatRow"
+        description="Düz bir Card'ı yükselmeden zengin gösteren nested aksiyon satırı: surface-subtle şerit + SoftSquareIcon + iki-satır etiket (başlık + tonlu status) + chevron. Gölgesiz (nested oturur, yüzmez) — Card-ailesi shadow dili korunur. Sunumsal; gerçek gezinme için bir Link/button ile sarılır."
+      >
+        <div className="gap-lg grid sm:grid-cols-2">
+          <Card className="gap-md p-lg flex flex-col">
+            <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+              Bu ay net kâr
+            </span>
+            <span className="text-foreground text-4xl font-semibold tracking-tight tabular-nums">
+              ₺512.800
+            </span>
+            <StatRow
+              interactive
+              icon={
+                <SoftSquareIcon tone="success">
+                  <CheckmarkCircle02Icon />
+                </SoftSquareIcon>
+              }
+              title="6/6 mağaza"
+              meta="Güncel"
+              metaTone="success"
+            />
+          </Card>
+          <Card className="gap-md p-lg flex flex-col">
+            <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+              Bekleyen tahsilat
+            </span>
+            <span className="text-foreground text-4xl font-semibold tracking-tight tabular-nums">
+              ₺74.120
+            </span>
+            <StatRow
+              interactive
+              icon={
+                <SoftSquareIcon tone="destructive">
+                  <AlertCircleIcon />
+                </SoftSquareIcon>
+              }
+              title="1/6 mağaza"
+              meta="Riskli"
+              metaTone="destructive"
+            />
+          </Card>
+        </div>
+        <div className="gap-sm pt-md flex flex-col">
+          <StatRow
+            interactive
+            icon={
+              <SoftSquareIcon tone="warning">
+                <Alert02Icon />
+              </SoftSquareIcon>
+            }
+            title="3/6 mağaza maliyeti eksik"
+            meta="İzlemede"
+            metaTone="warning"
+          />
+          <StatRow
+            icon={
+              <SoftSquareIcon tone="neutral" variant="soft">
+                <DatabaseIcon />
+              </SoftSquareIcon>
+            }
+            title="Son senkron 4 sa önce"
+            meta="Trendyol · 1.284 sipariş"
           />
         </div>
       </Preview>

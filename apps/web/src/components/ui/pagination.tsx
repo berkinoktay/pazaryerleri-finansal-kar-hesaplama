@@ -39,26 +39,39 @@ export const PaginationContent = React.forwardRef<HTMLUListElement, React.Compon
 PaginationContent.displayName = 'PaginationContent';
 
 export const PaginationItem = React.forwardRef<HTMLLIElement, React.ComponentProps<'li'>>(
-  ({ className, ...props }, ref) => <li ref={ref} className={cn('', className)} {...props} />,
+  ({ className, ...props }, ref) => <li ref={ref} className={cn(className)} {...props} />,
 );
 PaginationItem.displayName = 'PaginationItem';
 
 interface PaginationLinkProps extends Pick<ButtonProps, 'size'>, React.ComponentProps<'a'> {
   isActive?: boolean;
+  /** Renders the link inert: `aria-disabled`, removed from the tab order, `href` dropped (an `<a>` can't be natively disabled). */
+  disabled?: boolean;
 }
 
 export function PaginationLink({
   className,
   isActive,
+  disabled,
   size = 'icon-sm',
+  href,
   ...props
 }: PaginationLinkProps): React.ReactElement {
   return (
     <a
       aria-current={isActive ? 'page' : undefined}
+      aria-disabled={disabled ? 'true' : undefined}
+      tabIndex={disabled ? -1 : undefined}
+      href={disabled ? undefined : href}
       className={cn(
-        buttonVariants({ variant: isActive ? 'outline' : 'ghost', size }),
+        buttonVariants({ variant: 'ghost', size }),
+        // Active page reads as a genuine selection: a soft primary surface with
+        // medium weight. Suppress the ghost hover so it doesn't flip its fill
+        // on hover the way a navigable page does.
+        isActive &&
+          'bg-primary-soft text-primary-soft-foreground hover:bg-primary-soft font-medium',
         'tabular-nums',
+        'aria-disabled:pointer-events-none aria-disabled:opacity-50',
         className,
       )}
       {...props}
@@ -110,7 +123,7 @@ export function PaginationEllipsis({
   return (
     <span
       aria-hidden
-      className={cn('text-muted-foreground flex size-9 items-center justify-center', className)}
+      className={cn('text-muted-foreground flex size-8 items-center justify-center', className)}
       {...props}
     >
       <MoreHorizontalCircle01Icon className="size-icon-sm" />

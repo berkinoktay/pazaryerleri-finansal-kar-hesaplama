@@ -1,6 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { toast } from 'sonner';
@@ -41,6 +42,13 @@ const connectStoreSchema = z.object({
 
 type ConnectStoreInput = z.infer<typeof connectStoreSchema>;
 
+const statesSchema = z.object({
+  sku: z.string().min(3, 'SKU en az 3 karakter olmalı'),
+  description: z.string(),
+  storeId: z.string(),
+});
+type StatesInput = z.infer<typeof statesSchema>;
+
 export default function FormsPrimitivePage(): React.ReactElement {
   const form = useForm<ConnectStoreInput>({
     resolver: zodResolver(connectStoreSchema),
@@ -52,6 +60,16 @@ export default function FormsPrimitivePage(): React.ReactElement {
       autoSync: true,
     },
   });
+
+  // Second form whose only field is pre-seeded invalid + validated on mount so
+  // the error state is pinned statically (no manual blur needed to QA it).
+  const statesForm = useForm<StatesInput>({
+    resolver: zodResolver(statesSchema),
+    defaultValues: { sku: 'a', description: 'Yalnız açıklamalı alan', storeId: 'str_8f3a91c2' },
+  });
+  useEffect(() => {
+    void statesForm.trigger();
+  }, [statesForm]);
 
   function onSubmit(values: ConnectStoreInput): void {
     toast.success('Form gönderildi (mock)', {
@@ -78,9 +96,9 @@ export default function FormsPrimitivePage(): React.ReactElement {
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Mağaza adı</FormLabel>
+                  <FormLabel required>Mağaza adı</FormLabel>
                   <FormControl>
-                    <Input placeholder="Ör. Ana Mağaza" {...field} />
+                    <Input placeholder="Ör. Ana Mağaza" required {...field} />
                   </FormControl>
                   <FormDescription>Panelde mağazayı tanımakta kullanılır.</FormDescription>
                   <FormMessage />
@@ -143,7 +161,7 @@ export default function FormsPrimitivePage(): React.ReactElement {
               control={form.control}
               name="autoSync"
               render={({ field }) => (
-                <FormItem className="border-border p-sm flex-row items-center justify-between rounded-md border">
+                <FormItem direction="row" className="border-border p-sm rounded-md border">
                   <div className="gap-3xs flex flex-col">
                     <FormLabel>Otomatik senkronizasyon</FormLabel>
                     <FormDescription>Yeni siparişleri otomatik olarak al.</FormDescription>
@@ -159,6 +177,65 @@ export default function FormsPrimitivePage(): React.ReactElement {
               <Button type="submit">Mağazayı kaydet</Button>
               <Button type="button" variant="ghost" onClick={() => form.reset()}>
                 Sıfırla
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </Preview>
+
+      <Preview
+        title="Form — durumlar (hata · zorunlu · devre dışı · gönderiliyor)"
+        description="QA için sabitlenmiş durumlar: required (* + aria-required), mount'ta tetiklenen hata (destructive label + role=alert mesaj + shake), açıklamalı-hatasız alan (aria-describedby yalnız açıklamayı içerir, dangling IDREF yok), devre dışı alan ve loading submit."
+      >
+        <Form {...statesForm}>
+          <form
+            onSubmit={statesForm.handleSubmit(() => undefined)}
+            className="max-w-form gap-md grid"
+          >
+            <FormField
+              control={statesForm.control}
+              name="sku"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel required>Stok kodu (SKU)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="En az 3 karakter" required {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={statesForm.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Açıklama (hatasız)</FormLabel>
+                  <FormControl>
+                    <Input readOnly {...field} />
+                  </FormControl>
+                  <FormDescription>aria-describedby yalnız bu açıklamaya bağlanır.</FormDescription>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={statesForm.control}
+              name="storeId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Mağaza kimliği (devre dışı)</FormLabel>
+                  <FormControl>
+                    <Input disabled {...field} />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            <div className="gap-xs flex items-center">
+              <Button type="submit" loading loadingText="Kaydediliyor…">
+                Kaydet
               </Button>
             </div>
           </form>

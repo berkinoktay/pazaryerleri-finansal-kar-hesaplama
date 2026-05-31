@@ -40,7 +40,7 @@ export function ImageModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPortal>
-        <DialogOverlay className="bg-foreground/60" />
+        <DialogOverlay className="bg-overlay-scrim-image backdrop-blur-sm" />
         <DialogPrimitive.Content
           className={cn(
             'fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
@@ -68,12 +68,12 @@ export function ImageModal({
             <DialogPrimitive.Close
               aria-label={t('close')}
               className={cn(
-                'top-sm right-sm absolute size-9 rounded-full',
-                // Scrim over user-generated imagery — alpha is acceptable
-                // here per the design system rule (real backdrop, not a
-                // palette shortcut). Stays legible against any photo.
-                'bg-foreground/50 text-background hover:bg-foreground/70 backdrop-blur-md',
-                'duration-fast flex items-center justify-center transition-colors',
+                'top-sm right-sm p-xs absolute rounded-full pointer-coarse:size-11',
+                // Fixed-dark over-photo chip — theme-independent so it stays
+                // legible against ANY image (a theme-reactive scrim could go
+                // near-white in dark mode and vanish over a bright photo).
+                'bg-scrim-chip text-scrim-chip-foreground backdrop-blur-md',
+                'duration-fast ease-out-quart flex items-center justify-center transition-colors',
                 'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
               )}
             >
