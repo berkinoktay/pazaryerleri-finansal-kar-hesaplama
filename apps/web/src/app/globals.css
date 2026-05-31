@@ -236,8 +236,9 @@
   --shadow-ring: var(--shadow-ring);
   --shadow-ring-strong: var(--shadow-ring-strong);
   --shadow-focus: var(--shadow-focus);
-  --shadow-pin-left-edge: var(--shadow-pin-left-edge);
-  --shadow-pin-right-edge: var(--shadow-pin-right-edge);
+  /* --pin-edge-shadow is a flat color consumed directly via var() by the
+     DataTable pinned-edge ::after gradient in tokens/components.css — it is
+     NOT a --shadow-* box-shadow utility, so it needs no @theme mapping. */
 
   /* Motion */
   --ease-out-quart: var(--ease-out-quart);

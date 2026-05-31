@@ -41,6 +41,38 @@ import { cn } from '@/lib/utils';
 /** Conventional id for a row-selection checkbox column (auto-pinned left). */
 const SELECT_COLUMN_ID = 'select';
 
+/**
+ * useLayoutEffect on the client so measured pin offsets are corrected BEFORE
+ * paint (no visible jump); useEffect on the server where there is nothing to
+ * measure — sidesteps React's "useLayoutEffect does nothing on the server"
+ * SSR warning. `typeof document` is stable per environment, so this never
+ * changes the hook called within a single environment (no hook-order break).
+ */
+const useIsomorphicLayoutEffect =
+  typeof document !== 'undefined' ? React.useLayoutEffect : React.useEffect;
+
+/**
+ * Keeps the utility columns anchored at the OUTER edges of each pinned side:
+ * the select checkbox stays the far-left pinned column, the row-actions kebab
+ * stays the far-right one. TanStack's `column.pin('right')` APPENDS, so pinning
+ * a data column right would otherwise land it OUTSIDE the actions anchor (to
+ * its right, pushing the kebab inward). Re-sorting on every pinning change keeps
+ * the anchors outermost. The array order encodes the edge: in `right` the LAST
+ * id renders at the far edge (so actions goes last); in `left` the FIRST id is
+ * the far edge (so select goes first).
+ */
+function normalizePinning(pinning: ColumnPinningState): ColumnPinningState {
+  const left = pinning.left ?? [];
+  const right = pinning.right ?? [];
+  const nextLeft = left.includes(SELECT_COLUMN_ID)
+    ? [SELECT_COLUMN_ID, ...left.filter((id) => id !== SELECT_COLUMN_ID)]
+    : left;
+  const nextRight = right.includes(ROW_ACTIONS_COLUMN_ID)
+    ? [...right.filter((id) => id !== ROW_ACTIONS_COLUMN_ID), ROW_ACTIONS_COLUMN_ID]
+    : right;
+  return { left: nextLeft, right: nextRight };
+}
+
 export interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
@@ -247,7 +279,7 @@ export function DataTable<TData, TValue>({
   // from `initialColumnPinning` so a feature page can declare "select
   // column starts pinned-left" once at mount.
   const [internalPinning, setInternalPinning] = React.useState<ColumnPinningState>(() => {
-    if (initialColumnPinning !== undefined) return initialColumnPinning;
+    if (initialColumnPinning !== undefined) return normalizePinning(initialColumnPinning);
     // Default: pin the UTILITY columns so the row checkbox stays on the left and
     // the row-actions kebab on the right during horizontal scroll. Identity /
     // data columns are opt-in — a feature passes `initialColumnPinning` to add
@@ -265,10 +297,15 @@ export function DataTable<TData, TValue>({
   const isPaginationControlled = paginationState !== undefined;
 
   const handlePinningChange: OnChangeFn<ColumnPinningState> = (updater) => {
+    // Resolve the updater, then re-anchor the utility columns to the outer edges
+    // (TanStack's column.pin() appends, which would drop a freshly-pinned column
+    // outside the select/actions anchors).
+    const resolve = (prev: ColumnPinningState): ColumnPinningState =>
+      normalizePinning(typeof updater === 'function' ? updater(prev) : updater);
     if (isPinningControlled) {
-      onColumnPinningChange?.(updater);
+      onColumnPinningChange?.(resolve(columnPinning ?? { left: [], right: [] }));
     } else {
-      setInternalPinning(updater);
+      setInternalPinning(resolve);
     }
   };
   const handleSortingChange: OnChangeFn<SortingState> = (updater) => {
@@ -345,6 +382,64 @@ export function DataTable<TData, TValue>({
   // Skeleton fills the page rhythm without flooding the DOM on large page sizes.
   const skeletonRowCount = Math.min(table.getState().pagination.pageSize, 12);
 
+  // Pinned-column sticky offsets are MEASURED from real rendered widths
+  // rather than trusting TanStack's column-size model. getStart('left') /
+  // getAfter('right') accumulate each column's getSize() (default 150px),
+  // which is wrong for our content-width columns: the 2nd+ pinned column on
+  // a side would stick at a 150px multiple instead of right after its
+  // neighbour, opening a gap that scrolling content shows through. The layout
+  // effect reads each pinned header cell's offsetWidth and accumulates the
+  // true offset; computePinningProps falls back to getStart/getAfter for the
+  // first paint and SSR (corrected pre-paint by the effect, so no jump).
+  const tableRef = React.useRef<HTMLTableElement>(null);
+  const [pinOffsets, setPinOffsets] = React.useState<Record<string, number>>({});
+  const activePinning = isPinningControlled ? columnPinning : internalPinning;
+  const pinSignature = `${activePinning.left?.join(',') ?? ''}|${activePinning.right?.join(',') ?? ''}`;
+
+  useIsomorphicLayoutEffect(() => {
+    const el = tableRef.current;
+    if (el === null) return;
+    const measure = (): void => {
+      const headRow = el.querySelector('thead tr');
+      if (headRow === null) return;
+      const cells = Array.from(headRow.children);
+      const next: Record<string, number> = {};
+      // Accumulate FRACTIONAL widths (getBoundingClientRect, not the integer
+      // offsetWidth): rounding each column to a whole pixel drifts the running
+      // offset, so a 2nd/3rd pinned column on a side lands a fraction of a pixel
+      // short of its neighbour and a hairline of table background shows through
+      // the seam. A 1px overlap would mask it, but exact fractional offsets fix
+      // it properly.
+      let leftAcc = 0;
+      for (const cell of cells) {
+        if (!(cell instanceof HTMLElement) || cell.dataset.pinnedSide !== 'left') continue;
+        if (cell.dataset.colId !== undefined) next[`l:${cell.dataset.colId}`] = leftAcc;
+        leftAcc += cell.getBoundingClientRect().width;
+      }
+      let rightAcc = 0;
+      for (let i = cells.length - 1; i >= 0; i -= 1) {
+        const cell = cells[i];
+        if (!(cell instanceof HTMLElement) || cell.dataset.pinnedSide !== 'right') continue;
+        if (cell.dataset.colId !== undefined) next[`r:${cell.dataset.colId}`] = rightAcc;
+        rightAcc += cell.getBoundingClientRect().width;
+      }
+      // Only commit when something actually moved — setState in a layout effect
+      // would otherwise loop (re-render → effect → setState → …).
+      setPinOffsets((prev) => {
+        const keys = Object.keys(next);
+        const unchanged =
+          keys.length === Object.keys(prev).length && keys.every((k) => prev[k] === next[k]);
+        return unchanged ? prev : next;
+      });
+    };
+    measure();
+    // Re-measure when a column's content width changes (the inner table
+    // resizing) without a pinning/column/data change of its own.
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [pinSignature, columns.length, data.length]);
+
   return (
     // Integrated table shell — `tabs` (optional) → `toolbar` (optional) →
     // table rows → `pagination` (optional) all live inside one bordered,
@@ -374,7 +469,7 @@ export function DataTable<TData, TValue>({
             the scroll-position data attributes the pinned-edge shadows react
             to). No extra overflow wrapper — a second one would double-clip and
             steal the sticky-pinning scroll context. */}
-        <Table scrollAware aria-busy={loading || undefined}>
+        <Table ref={tableRef} scrollAware aria-busy={loading || undefined}>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
@@ -382,7 +477,7 @@ export function DataTable<TData, TValue>({
                   const isNumeric = header.column.columnDef.meta?.numeric === true;
                   const canSort = header.column.getCanSort();
                   const sortDir = header.column.getIsSorted();
-                  const pinning = computePinningProps(header.column);
+                  const pinning = computePinningProps(header.column, pinOffsets);
                   return (
                     <TableHead
                       key={header.id}
@@ -541,7 +636,7 @@ export function DataTable<TData, TValue>({
                     >
                       {row.getVisibleCells().map((cell) => {
                         const isNumeric = cell.column.columnDef.meta?.numeric === true;
-                        const pinning = computePinningProps(cell.column);
+                        const pinning = computePinningProps(cell.column, pinOffsets);
                         return (
                           <TableCell
                             key={cell.id}
@@ -617,29 +712,36 @@ function isInteractiveDescendant(target: EventTarget | null, rowEl: HTMLElement)
  * column isn't pinned, so the spread is a no-op for unpinned cells.
  *
  * The offset (`left:` for left-pinned, `right:` for right-pinned) is
- * runtime-dynamic — it depends on the cumulative width of pinned
- * columns earlier in the stack — so it goes via inline style rather
- * than a token. See CLAUDE.md "no one-off magic values" → "the one
- * exception" for why this is the right place for inline style.
+ * runtime-dynamic — it depends on the cumulative width of pinned columns
+ * earlier in the stack. It comes from `pinOffsets` (measured real widths,
+ * keyed `l:<id>` / `r:<id>`), falling back to TanStack's getStart/getAfter
+ * for the first paint + SSR. `data-col-id` lets the measuring layout effect
+ * map each pinned header cell back to its column. See CLAUDE.md "no one-off
+ * magic values" → "the one exception" for why inline style is right here.
  */
 function computePinningProps<TData, TValue>(
   column: Column<TData, TValue>,
+  pinOffsets: Record<string, number>,
 ): {
   'data-pinned-side'?: 'left' | 'right';
   'data-pinned-edge'?: 'last-left' | 'first-right';
+  'data-col-id'?: string;
   style?: React.CSSProperties;
 } {
   const side = column.getIsPinned();
   if (side === false) return {};
   const isLastLeft = side === 'left' && column.getIsLastColumn('left');
   const isFirstRight = side === 'right' && column.getIsFirstColumn('right');
-  // runtime-dynamic: sticky offset comes from cumulative widths of
-  // earlier pinned columns; can't be tokenized.
-  const style: React.CSSProperties =
-    side === 'left' ? { left: column.getStart('left') } : { right: column.getAfter('right') };
+  // runtime-dynamic: sticky offset is the measured cumulative width of
+  // earlier pinned columns; can't be tokenized. Fall back to the size-model
+  // start/after until the layout effect measures (pre-paint, so no jump).
+  const measured = pinOffsets[`${side === 'left' ? 'l' : 'r'}:${column.id}`];
+  const offset = measured ?? (side === 'left' ? column.getStart('left') : column.getAfter('right'));
+  const style: React.CSSProperties = side === 'left' ? { left: offset } : { right: offset };
   return {
     'data-pinned-side': side,
     'data-pinned-edge': isLastLeft ? 'last-left' : isFirstRight ? 'first-right' : undefined,
+    'data-col-id': column.id,
     style,
   };
 }

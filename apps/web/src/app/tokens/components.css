@@ -55,3 +55,56 @@ table tr[data-depth='1'] > td:first-child {
 [data-slot='sidebar-container'][data-side='left'] {
   border-right-color: var(--sidebar-border);
 }
+
+/* DataTable pinned-column edge shadow — driven by patterns/data-table.tsx,
+   which sets data-pinned-edge on the last left-pinned / first right-pinned
+   cell, and ui/table.tsx, which toggles data-can-scroll-left / -right on the
+   group/tablescroll container.
+
+   Drawn as a real Gaussian box-shadow on an ::after overlay, then clipped to a
+   single side with clip-path. Three constraints shaped this:
+
+   1. A box-shadow set on a <td>/<th> is NOT painted under `border-collapse:
+      collapse` (Tailwind Preflight's default for every <table>) — the collapsed
+      model keeps cell backgrounds but drops cell box-shadows. An ::after is a
+      normal box, not a table cell, so it renders fine.
+   2. A box-shadow blurs symmetrically, so on its own it bled onto the cell's
+      OUTER edge too (a shadow on both sides of the pinned column).
+   3. A linear-gradient killed the bleed but read as a hard band — too sharp.
+
+   So: keep the box-shadow's soft diffuse blur, and let clip-path trim it flush
+   to the cell box on three sides, leaving only the blur that spills onto the
+   scrolling-content edge. The cell is position: sticky with overflow visible,
+   so the inset:0 ::after anchors to it.
+
+   Scroll-aware: transparent at rest, fades in only when unpinned content can
+   actually slide under that edge — left once scrolled off the start, right
+   until scrolled to the end. data-pinned-edge is only ever set by the
+   DataTable pattern, so static <Table> usages are untouched. */
+[data-pinned-edge='last-left']::after,
+[data-pinned-edge='first-right']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+  /* Symmetric Gaussian blur, no offset → darkest at the cell edge, soft falloff. */
+  box-shadow: 0 0 11px 0 var(--pin-edge-shadow);
+}
+
+/* Keep only the blur spilling to the RIGHT — clip left/top/bottom flush to the
+   cell box so nothing bleeds onto the outer edge or into adjacent rows. */
+[data-pinned-edge='last-left']::after {
+  clip-path: inset(0 -16px 0 0);
+}
+
+/* Mirror: keep only the blur spilling to the LEFT. */
+[data-pinned-edge='first-right']::after {
+  clip-path: inset(0 0 0 -16px);
+}
+
+.group\/tablescroll[data-can-scroll-left] [data-pinned-edge='last-left']::after,
+.group\/tablescroll[data-can-scroll-right] [data-pinned-edge='first-right']::after {
+  opacity: 1;
+}

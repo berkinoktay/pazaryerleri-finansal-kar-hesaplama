@@ -168,12 +168,11 @@ export const TableHead = React.forwardRef<
       // TableHeader band, so a sticky pinned header column doesn't break out
       // of the header zone visually.
       'data-[pinned-side]:bg-surface-subtle data-[pinned-side]:sticky data-[pinned-side]:z-20',
-      // Edge shadow is SCROLL-AWARE: it appears only where unpinned content
-      // actually slides under the pin — left-edge once scrolled off the start,
-      // right-edge until scrolled to the end. Gated on the Table's
-      // group/tablescroll data attributes (scrollAware). data-pinned-edge is
-      // only ever set by DataTable, so static tables are unaffected.
-      'group-data-[can-scroll-left]/tablescroll:data-[pinned-edge=last-left]:shadow-pin-left-edge group-data-[can-scroll-right]/tablescroll:data-[pinned-edge=first-right]:shadow-pin-right-edge',
+      // Edge shadow is SCROLL-AWARE and lives in tokens/components.css as an
+      // ::after overlay, NOT here: a box-shadow set on a <td>/<th> is silently
+      // dropped under border-collapse: collapse (the table default), so a cell
+      // utility class would render nothing. The CSS keys off data-pinned-edge
+      // plus the Table's group/tablescroll data-can-scroll-* flags (scrollAware).
       className,
     )}
     {...props}
@@ -204,12 +203,11 @@ export const TableCell = React.forwardRef<
       'data-[pinned-side]:bg-card data-[pinned-side]:sticky data-[pinned-side]:z-10',
       'data-[pinned-side]:group-hover/row:bg-surface-row-hover',
       'data-[pinned-side]:group-data-[state=selected]/row:bg-surface-row-selected',
-      // Edge shadow is SCROLL-AWARE: it appears only where unpinned content
-      // actually slides under the pin — left-edge once scrolled off the start,
-      // right-edge until scrolled to the end. Gated on the Table's
-      // group/tablescroll data attributes (scrollAware). data-pinned-edge is
-      // only ever set by DataTable, so static tables are unaffected.
-      'group-data-[can-scroll-left]/tablescroll:data-[pinned-edge=last-left]:shadow-pin-left-edge group-data-[can-scroll-right]/tablescroll:data-[pinned-edge=first-right]:shadow-pin-right-edge',
+      // Edge shadow is SCROLL-AWARE and lives in tokens/components.css as an
+      // ::after overlay, NOT here: a box-shadow set on a <td>/<th> is silently
+      // dropped under border-collapse: collapse (the table default), so a cell
+      // utility class would render nothing. The CSS keys off data-pinned-edge
+      // plus the Table's group/tablescroll data-can-scroll-* flags (scrollAware).
       className,
     )}
     {...props}

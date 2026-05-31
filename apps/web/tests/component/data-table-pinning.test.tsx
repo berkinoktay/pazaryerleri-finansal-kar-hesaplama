@@ -160,6 +160,42 @@ describe('DataTable column pinning', () => {
       const rightPinnedHeads = container.querySelectorAll('th[data-pinned-side="right"]');
       expect(rightPinnedHeads.length).toBeGreaterThan(0);
     });
+
+    it('keeps the actions column anchored far-right when another column is pinned right', async () => {
+      const onChange = vi.fn();
+      const columnsWithActions: ColumnDef<Row>[] = [
+        ...COLUMNS,
+        { id: 'actions', header: 'Eylemler', cell: () => null, enableHiding: false },
+      ];
+      function Harness() {
+        const [pinning, setPinning] = React.useState<ColumnPinningState>({
+          left: [],
+          right: ['actions'],
+        });
+        return (
+          <DataTable
+            columns={columnsWithActions}
+            data={ROWS}
+            getRowId={(r) => r.id}
+            columnPinning={pinning}
+            onColumnPinningChange={(updater) => {
+              const next = typeof updater === 'function' ? updater(pinning) : updater;
+              onChange(next);
+              setPinning(next);
+            }}
+            toolbar={(table) => <DataTableToolbar table={table} />}
+          />
+        );
+      }
+      const { user } = renderWithIntl(<Harness />);
+      await user.click(screen.getByRole('button', { name: 'Kolonları düzenle' }));
+      const menu = await screen.findByRole('menu');
+      const bRow = within(menu).getByText('B').closest('[role="menuitem"]') as HTMLElement;
+      await user.click(within(bRow).getByRole('button', { name: 'Sağa sabitle' }));
+      // TanStack appends → ['actions', 'b']; normalizePinning re-anchors the
+      // kebab to the outermost slot → 'b' lands LEFT of the far-right actions.
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ right: ['b', 'actions'] }));
+    });
   });
 
   describe('uncontrolled (default) mode', () => {
