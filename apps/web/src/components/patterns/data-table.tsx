@@ -21,7 +21,7 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { ArrowDown01Icon, ArrowUp01Icon, SortingDownIcon } from 'hugeicons-react';
+import { ArrowDataTransferVerticalIcon, ArrowDown01Icon, ArrowUp01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -380,7 +380,17 @@ export function DataTable<TData, TValue>({
                                 : 'none'
                             : undefined
                         }
-                        className={cn(isNumeric && 'text-right')}
+                        className={cn(
+                          isNumeric && 'text-right',
+                          // Active-sorted column carries a faint persistent tile
+                          // (one step under the header band) so the sorted column
+                          // is legible at a glance.
+                          sortDir !== false && 'bg-muted',
+                          // Sortable header drops its cell padding so the button
+                          // can fill the WHOLE cell (the entire header is the hit
+                          // target); the button re-adds px-sm.
+                          canSort && 'p-0',
+                        )}
                         {...pinning}
                       >
                         {header.isPlaceholder ? null : canSort ? (
@@ -388,25 +398,39 @@ export function DataTable<TData, TValue>({
                             type="button"
                             onClick={header.column.getToggleSortingHandler()}
                             className={cn(
-                              'gap-3xs px-3xs py-3xs -mx-3xs duration-fast inline-flex items-center rounded-sm transition-colors',
+                              // Fill the entire header cell so the WHOLE header is
+                              // the sort hit target (the th drops its padding; the
+                              // button re-adds px-sm).
+                              'group/sortbtn px-sm gap-3xs duration-fast flex h-10 w-full items-center transition-colors',
                               // Touch floor: a 44px tap target under a coarse pointer
                               // (the header row grows to fit on touch devices).
                               'pointer-coarse:min-h-11',
-                              'hover:bg-background',
+                              // Hover tile = bg-muted, one step darker than the
+                              // bg-surface-subtle band; bg-background was lighter
+                              // than the band and read as a hole punched in it.
+                              'hover:bg-muted',
                               // Inset ring — the table's nested overflow containers
                               // clip the global outset focus glow; matches the row +
                               // pin-button focus idiom so the focused header is visible.
                               'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
-                              isNumeric && 'ml-auto',
+                              // The sort indicator ALWAYS trails the label (same
+                              // side on every column); numeric headers just
+                              // right-align the label+icon group over their figures.
+                              isNumeric ? 'justify-end' : 'justify-start',
                             )}
                           >
                             {flexRender(header.column.columnDef.header, header.getContext())}
                             {sortDir === 'asc' ? (
-                              <ArrowUp01Icon className="size-icon-xs" />
+                              <ArrowUp01Icon className="size-icon-xs text-foreground shrink-0" />
                             ) : sortDir === 'desc' ? (
-                              <ArrowDown01Icon className="size-icon-xs" />
+                              <ArrowDown01Icon className="size-icon-xs text-foreground shrink-0" />
                             ) : (
-                              <SortingDownIcon className="size-icon-xs opacity-40" />
+                              // Reveal-on-intent: an up/down "sortable both ways"
+                              // hint — hidden at rest, shown at FULL strength on
+                              // hover or keyboard focus (muted-foreground, matching
+                              // the label). The active column keeps a solid,
+                              // foreground-strength arrow so the sort pops.
+                              <ArrowDataTransferVerticalIcon className="size-icon-xs shrink-0 opacity-0 transition-opacity group-hover/sortbtn:opacity-100 group-focus-visible/sortbtn:opacity-100" />
                             )}
                             <span className="sr-only">
                               {sortDir === 'asc'

@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 /**
  * Raw HTML table primitives with shadcn defaults — sticky header,
  * tokenized row hover (`bg-surface-row-hover` from Phase 0), selected-
- * row state (`data-[state=selected]:bg-primary-soft`), `data-numeric`
+ * row state (`data-[state=selected]:bg-surface-row-selected` — a calm
+ * low-chroma neutral, not the brand `--primary-soft`), `data-numeric`
  * attribute for right-aligned tabular columns, and `data-pinned-side`
  * / `data-pinned-edge` attributes that turn cells into sticky pinned
  * columns with directional shadow. Use the DataTable pattern from
@@ -89,7 +90,7 @@ export const TableRow = React.forwardRef<
     // unpinned content from showing through) can mirror the row state
     // via group-hover/row:* and group-data-[state=selected]/row:*.
     className={cn(
-      'group/row border-border duration-fast hover:bg-surface-row-hover data-[state=selected]:bg-primary-soft border-b transition-colors',
+      'group/row border-border duration-fast hover:bg-surface-row-hover data-[state=selected]:bg-surface-row-selected border-b transition-colors',
       className,
     )}
     {...props}
@@ -114,7 +115,10 @@ export const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      'px-sm text-2xs text-muted-foreground h-10 text-left align-middle font-medium tracking-wide uppercase',
+      // Sentence-case, muted, medium weight — uppercase + wide tracking read as
+      // an admin-panel tell (and CSS-uppercasing mangles Turkish İ/ı); the
+      // header band already separates the header zone from the body.
+      'px-sm text-muted-foreground h-10 text-left align-middle text-xs font-medium',
       'data-[numeric=true]:text-right',
       // Pinned cells use bg-surface-subtle to match the surrounding
       // TableHeader band, so a sticky pinned header column doesn't break out
@@ -147,7 +151,7 @@ export const TableCell = React.forwardRef<
       // selected state via group/row variants on TableRow.
       'data-[pinned-side]:bg-card data-[pinned-side]:sticky data-[pinned-side]:z-10',
       'data-[pinned-side]:group-hover/row:bg-surface-row-hover',
-      'data-[pinned-side]:group-data-[state=selected]/row:bg-primary-soft',
+      'data-[pinned-side]:group-data-[state=selected]/row:bg-surface-row-selected',
       'data-[pinned-edge=last-left]:shadow-pin-left-edge data-[pinned-edge=first-right]:shadow-pin-right-edge',
       className,
     )}
