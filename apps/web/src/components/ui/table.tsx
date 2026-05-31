@@ -118,7 +118,7 @@ export const TableHead = React.forwardRef<
       // Sentence-case, muted, medium weight — uppercase + wide tracking read as
       // an admin-panel tell (and CSS-uppercasing mangles Turkish İ/ı); the
       // header band already separates the header zone from the body.
-      'px-sm text-muted-foreground h-10 text-left align-middle text-xs font-medium',
+      'px-sm text-muted-foreground duration-fast h-10 text-left align-middle text-xs font-medium transition-colors',
       'data-[numeric=true]:text-right',
       // Pinned cells use bg-surface-subtle to match the surrounding
       // TableHeader band, so a sticky pinned header column doesn't break out
@@ -144,7 +144,10 @@ export const TableCell = React.forwardRef<
       // without padding the image would touch the row's border-b.
       // h-table-row-h still acts as the minimum so text-only rows
       // (price, stock, status) keep the established 44px row rhythm.
-      'h-table-row-h px-sm py-sm text-foreground align-middle text-sm',
+      // transition-colors/duration-fast MATCHES TableRow so a pinned cell's own
+      // opaque background fades in lockstep with the row on hover/selection — it
+      // was snapping instantly while the row faded, leaving a ~150ms seam.
+      'h-table-row-h px-sm py-sm text-foreground duration-fast align-middle text-sm transition-colors',
       'data-[numeric=true]:text-right data-[numeric=true]:tabular-nums',
       // Pinned body cells stay opaque so unpinned columns scrolling
       // beneath them don't show through; mirror the row's hover +

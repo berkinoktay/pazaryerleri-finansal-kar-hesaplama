@@ -508,7 +508,11 @@ export function DataTable<TData, TValue>({
                         onKeyDown={handleRowKeyDown}
                         className={cn(
                           onRowClick &&
-                            'focus-visible:ring-ring cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+                            // The focus ring is painted on an overlay pseudo-element
+                            // ABOVE the sticky pinned cells (z-10) so it wraps the
+                            // whole row continuously instead of being clipped by the
+                            // opaque select / actions cell backgrounds at the edges.
+                            "focus-visible:after:ring-ring relative cursor-pointer focus-visible:outline-none focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:z-20 focus-visible:after:ring-2 focus-visible:after:content-[''] focus-visible:after:ring-inset",
                         )}
                       >
                         {row.getVisibleCells().map((cell) => {
