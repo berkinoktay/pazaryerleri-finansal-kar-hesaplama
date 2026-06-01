@@ -10,6 +10,8 @@ import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { AdvancedFilterMenu } from '@/components/patterns/advanced-filter-menu';
+import type { FilterFieldDef, FilterRow } from '@/lib/advanced-filter';
 import { CopyableValue } from '@/components/patterns/copyable-value';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
@@ -139,6 +141,13 @@ interface ProductsTableProps {
   overrideCounts?: ProductFacetsResponse['overrideCounts'];
   facetsLoading?: boolean;
   onOverrideTabChange: (next: ProductsOverrideTab) => void;
+
+  // Advanced Filtering (PR-F1) — the per-table catalog, the committed
+  // FilterRow[], and the Apply commit handler. Rendered as the `+ Filtre ekle`
+  // menu in the toolbar alongside the quick facet chips.
+  filterFields: FilterFieldDef[];
+  filterRows: FilterRow[];
+  onFiltersApply: (rows: FilterRow[]) => void;
 
   onSearchChange: (next: string) => void;
   onStatusChange: (next: ProductVariantStatus) => void;
@@ -660,24 +669,31 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           onSearchChange={props.onSearchChange}
           searchPlaceholder={t('filters.searchPlaceholder')}
           facets={
-            <ProductsFacetChips
-              brand={props.brandId}
-              category={props.categoryId}
-              status={props.status}
-              brandOptions={(props.facets?.brands ?? []).map((b) => ({
-                value: b.id,
-                label: b.name,
-                count: b.count,
-              }))}
-              categoryOptions={(props.facets?.categories ?? []).map((c) => ({
-                value: c.id,
-                label: c.name,
-                count: c.count,
-              }))}
-              onBrandChange={props.onBrandChange}
-              onCategoryChange={props.onCategoryChange}
-              onStatusChange={props.onStatusChange}
-            />
+            <>
+              <ProductsFacetChips
+                brand={props.brandId}
+                category={props.categoryId}
+                status={props.status}
+                brandOptions={(props.facets?.brands ?? []).map((b) => ({
+                  value: b.id,
+                  label: b.name,
+                  count: b.count,
+                }))}
+                categoryOptions={(props.facets?.categories ?? []).map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  count: c.count,
+                }))}
+                onBrandChange={props.onBrandChange}
+                onCategoryChange={props.onCategoryChange}
+                onStatusChange={props.onStatusChange}
+              />
+              <AdvancedFilterMenu
+                fields={props.filterFields}
+                value={props.filterRows}
+                onApply={props.onFiltersApply}
+              />
+            </>
           }
         />
       )}

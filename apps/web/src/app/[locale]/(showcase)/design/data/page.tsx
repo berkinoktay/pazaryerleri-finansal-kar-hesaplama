@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { Preview } from '@/components/showcase/preview';
 import { ShowcaseSection } from '@/components/showcase/section';
 
+import { AdvancedFilterShowcase } from '../patterns/advanced-filter-showcase';
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
 import { DataTableExpandableRowsShowcase } from '../patterns/data-table-expandable-rows-showcase';
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
@@ -271,6 +272,18 @@ export default function DataShowcasePage(): React.ReactElement {
           description="Seçili satırlar üstünde çoklu aksiyon. Floating mod viewport tabanına yapışır (fade+slide, motion-reduce honored); inline mod toolbar yerine durur. Per-action tone + disabled."
         >
           <BulkActionBarShowcase />
+        </Preview>
+      </ShowcaseSection>
+
+      <ShowcaseSection
+        title="Gelişmiş filtreleme (Advanced Filtering)"
+        description="Option A — tek `+ Filtre ekle` cmdk menüsü → tip-duyarlı interaktif chip'ler (operatör seçici + değer editörü) → tümü AND ile birleşir, `Uygula` butonuyla commit. Aralık alanları RangeInput, çoklu-seçim Command, sabit-set Select. Generic motor (`FilterFieldDef[]` ile her tabloya)."
+      >
+        <Preview
+          title="Tabloda canlı filtreleme"
+          description="Gerçek DataTable + toolbar'da AdvancedFilterMenu. Filtre ekle (Satış fiyatı ₺ / Stok / KDV / Marka / Kategori) → chip'e tıkla → operatör + değer → Uygula; tablo anında filtrelenir. Aralıklar RangeInput, çoklu-seçim Command. Boş/yarım chip'ler elenir. Backend'in yaptığı filtrelemenin client-side aynası."
+        >
+          <AdvancedFilterShowcase />
         </Preview>
       </ShowcaseSection>
     </>

@@ -81,15 +81,13 @@ export function FilterTabs<V extends string = string>({
       {...rest}
     >
       {/*
-        Override the base pill TabsList chrome so the strip blends with
-        whatever surface it's mounted on (typically the integrated
-        DataTable shell). Without the override, the inherited
-        `bg-muted border rounded-lg` produced a "floating widget inside
-        a card" effect — visual nesting that read as noise. Triggers
-        keep their own surface for the active state, so differentiation
-        still works.
+        Use the base `pill` TabsList chrome (a muted rounded-full track) so the
+        strip looks identical everywhere it appears — standalone AND inside the
+        DataTable shell. The active trigger lifts to a clean card-surface chip
+        with a text-primary label; the muted track is the resting surface, so
+        the control reads as a proper segmented control rather than bare text.
       */}
-      <TabsList className="gap-xs h-auto rounded-none border-none bg-transparent p-0">
+      <TabsList>
         {options.map((option) => (
           // `group` lets the count chip swap styles when the parent trigger
           // flips to data-state="active" — no parallel state tracking needed.
@@ -97,7 +95,7 @@ export function FilterTabs<V extends string = string>({
             key={option.value}
             value={option.value}
             disabled={option.disabled}
-            className="group h-9"
+            className="group"
           >
             <span className="gap-2xs flex items-center">
               <span>{option.label}</span>

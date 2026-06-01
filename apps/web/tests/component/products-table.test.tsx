@@ -177,6 +177,9 @@ const baseProps = {
   overrideMissing: null,
   sort: '-platformModifiedAt' as const,
   facets: undefined,
+  filterFields: [],
+  filterRows: [],
+  onFiltersApply: noop,
   // Override-state tab strip lives inside the DataTable shell now —
   // the table owns rendering, the page client owns URL state.
   overrideTab: 'all' as const,
