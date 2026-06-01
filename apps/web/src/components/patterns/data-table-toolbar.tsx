@@ -106,6 +106,7 @@ export function DataTableToolbar<TData>({
           <div className="max-w-input relative flex-1">
             <Search01Icon className="left-sm size-icon-sm text-muted-foreground pointer-events-none absolute top-1/2 -translate-y-1/2" />
             <Input
+              size="sm"
               value={inputValue}
               onChange={(event) => handleSearchInput(event.target.value)}
               placeholder={searchPlaceholder ?? t('searchPlaceholder')}

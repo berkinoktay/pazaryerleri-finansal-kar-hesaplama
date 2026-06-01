@@ -16,6 +16,15 @@ export interface ListProductsArgs {
   categoryId?: string;
   productId?: string;
   overrideMissing?: 'cost' | 'vat';
+  // Advanced Filtering (PR-B2 backend / PR-F1 frontend). Multi-selects are
+  // comma-separated strings (the wire format the backend csvParam expects).
+  salePriceMin?: string;
+  salePriceMax?: string;
+  stockMin?: number;
+  stockMax?: number;
+  vatRateIn?: string;
+  brandIdIn?: string;
+  categoryIdIn?: string;
   page: number;
   perPage: number;
   sort:
@@ -53,6 +62,13 @@ export async function listProducts(args: ListProductsArgs): Promise<ListProducts
           ...(query.overrideMissing !== undefined
             ? { overrideMissing: query.overrideMissing }
             : {}),
+          ...(query.salePriceMin !== undefined ? { salePriceMin: query.salePriceMin } : {}),
+          ...(query.salePriceMax !== undefined ? { salePriceMax: query.salePriceMax } : {}),
+          ...(query.stockMin !== undefined ? { stockMin: query.stockMin } : {}),
+          ...(query.stockMax !== undefined ? { stockMax: query.stockMax } : {}),
+          ...(query.vatRateIn !== undefined ? { vatRateIn: query.vatRateIn } : {}),
+          ...(query.brandIdIn !== undefined ? { brandIdIn: query.brandIdIn } : {}),
+          ...(query.categoryIdIn !== undefined ? { categoryIdIn: query.categoryIdIn } : {}),
           page: query.page,
           perPage: query.perPage,
           sort: query.sort,

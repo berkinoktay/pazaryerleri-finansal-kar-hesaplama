@@ -1,5 +1,33 @@
 {
   "common": {
+    "advancedFilter": {
+      "addFilter": "Add filter",
+      "apply": "Apply",
+      "cancel": "Cancel",
+      "rangeHint": "Set either or both bounds; leaving one empty is one-sided.",
+      "searchFields": "Search filters…",
+      "noFields": "No filters",
+      "minLabel": "Min",
+      "maxLabel": "Max",
+      "valuePlaceholder": "Value",
+      "selectValues": "Search…",
+      "noValues": "No results",
+      "removeFilter": "Remove filter",
+      "any": "Any",
+      "chooseValue": "set value",
+      "valuesSelected": "{count} selected",
+      "operators": {
+        "eq": "Equals",
+        "gte": "Min",
+        "lte": "Max",
+        "between": "Between",
+        "contains": "Contains",
+        "equals": "Equals",
+        "startsWith": "Starts with",
+        "in": "In",
+        "isTrue": "Yes"
+      }
+    },
     "appName": "PazarSync",
     "loading": "Loading",
     "empty": "No data",
@@ -874,6 +902,20 @@
       "title": "Products",
       "description": "Approved products and variants from your store",
       "intent": "Approved products synced from your Trendyol store"
+    },
+    "advancedFilters": {
+      "groups": {
+        "range": "Range",
+        "attribute": "Attribute"
+      },
+      "fields": {
+        "salePrice": "Sale price",
+        "stock": "Stock",
+        "vatRate": "VAT rate",
+        "brand": "Brand",
+        "category": "Category"
+      },
+      "vatRateOption": "{rate}%"
     },
     "filters": {
       "searchPlaceholder": "Search by product name, model code, stock code, barcode…",

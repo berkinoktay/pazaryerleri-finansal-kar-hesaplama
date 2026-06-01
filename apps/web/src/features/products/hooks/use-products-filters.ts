@@ -31,6 +31,7 @@ export function useProductsFilters(): {
       'brandId' in next ||
       'categoryId' in next ||
       'overrideMissing' in next ||
+      'filters' in next ||
       'sort' in next;
     // Any deliberate filter change clears a deep-link productId — landing
     // on /products?productId=X is meant as a starting view, not a sticky

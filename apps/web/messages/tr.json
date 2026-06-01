@@ -1,5 +1,33 @@
 {
   "common": {
+    "advancedFilter": {
+      "addFilter": "Filtre ekle",
+      "apply": "Uygula",
+      "cancel": "İptal",
+      "rangeHint": "İki uçtan birini ya da ikisini de ayarla; biri boş = tek yönlü.",
+      "searchFields": "Filtre ara…",
+      "noFields": "Filtre yok",
+      "minLabel": "En az",
+      "maxLabel": "En çok",
+      "valuePlaceholder": "Değer",
+      "selectValues": "Ara…",
+      "noValues": "Sonuç yok",
+      "removeFilter": "Filtreyi kaldır",
+      "any": "Hepsi",
+      "chooseValue": "değer seç",
+      "valuesSelected": "{count} seçili",
+      "operators": {
+        "eq": "Eşit",
+        "gte": "En az",
+        "lte": "En çok",
+        "between": "Arasında",
+        "contains": "İçerir",
+        "equals": "Eşittir",
+        "startsWith": "Başlar",
+        "in": "İçinde",
+        "isTrue": "Evet"
+      }
+    },
     "appName": "PazarSync",
     "loading": "Yükleniyor",
     "empty": "Veri yok",
@@ -874,6 +902,20 @@
       "title": "Ürünler",
       "description": "Mağazanın onaylı ürünleri ve varyantları",
       "intent": "Trendyol mağazandan senkronize edilen onaylı ürünler"
+    },
+    "advancedFilters": {
+      "groups": {
+        "range": "Aralık",
+        "attribute": "Özellik"
+      },
+      "fields": {
+        "salePrice": "Satış fiyatı",
+        "stock": "Stok",
+        "vatRate": "KDV oranı",
+        "brand": "Marka",
+        "category": "Kategori"
+      },
+      "vatRateOption": "%{rate}"
     },
     "filters": {
       "searchPlaceholder": "Ürün adı, model kodu, stok kodu, barkod ile ara…",
