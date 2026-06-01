@@ -51,7 +51,12 @@ export function Toaster(props: ToasterProps): React.ReactElement | null {
     <Sonner
       theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
       className="toaster group"
-      position="bottom-right"
+      position="top-right"
+      // Desktop has no top chrome over the content's top-right, so the default
+      // 24px offset is fine; on mobile the `md:hidden` app-shell header is 48px
+      // (`--space-2xl`), so push toasts below it there to keep the bell / user
+      // menu reachable.
+      mobileOffset={{ top: 'calc(var(--space-2xl) + var(--space-sm))' }}
       closeButton
       icons={{
         success: <CheckmarkCircle02Icon className="size-icon-sm" />,

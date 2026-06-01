@@ -141,6 +141,15 @@ export function OrdersTable({
     pageSize: pagination.perPage,
   };
 
+  // Server-filtered: filters live in props (not TanStack columnFilters), so the
+  // table can't detect "filtered" on its own. Telling it lets the zero-row body
+  // render the no-results state (clear-filters CTA) instead of the first-run
+  // empty — the page-client already routes the genuine no-orders case to its own
+  // empty state before this table renders.
+  const hasActiveFilters = Boolean(
+    filters.q || filters.status || filters.reconciliationStatus || filters.from || filters.to,
+  );
+
   const handlePaginationChange = (
     updater: PaginationState | ((prev: PaginationState) => PaginationState),
   ): void => {
@@ -161,6 +170,10 @@ export function OrdersTable({
       onPaginationChange={handlePaginationChange}
       pageCount={pagination.totalPages}
       rowCount={pagination.total}
+      hasActiveFilters={hasActiveFilters}
+      onClearFilters={() =>
+        onFiltersChange({ q: '', status: null, reconciliationStatus: null, from: '', to: '' })
+      }
       toolbar={() => (
         <OrdersToolbar
           q={filters.q}

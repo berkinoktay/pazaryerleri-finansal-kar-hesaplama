@@ -183,11 +183,13 @@ export function AdvancedFilterShowcase(): React.ReactElement {
       columns={columns}
       data={data}
       getRowId={(row) => row.id}
-      empty={
-        <p className="text-muted-foreground py-lg text-center text-sm">
-          Bu filtrelere uyan ürün yok.
-        </p>
-      }
+      // Models the two-slot empty contract: the consumer owns the filter state,
+      // so it tells the table whether filters are active and how to clear them.
+      // DataTable then renders the shared no-results state (filter-off icon +
+      // "Clear filters") when filtered, or the first-run empty otherwise — no
+      // hand-rolled paragraph.
+      hasActiveFilters={filters.length > 0}
+      onClearFilters={() => setFilters([])}
       toolbar={(table) => (
         <DataTableToolbar
           table={table}

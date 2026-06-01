@@ -190,6 +190,7 @@
   --spacing-tile-min: var(--size-tile-min);
   --spacing-tile-min-sm: var(--size-tile-min-sm);
   --spacing-table-row-h: var(--size-table-row-h);
+  --spacing-table-empty: var(--size-table-empty);
   --spacing-content-max: var(--size-content-max);
   --spacing-prose-max: var(--size-prose-max);
   --spacing-shell-demo: var(--size-shell-demo);

@@ -6,18 +6,26 @@ import { Link } from '@/i18n/navigation';
 import * as React from 'react';
 
 import { EmptyState } from '@/components/patterns/empty-state';
+import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { Button } from '@/components/ui/button';
 
 interface ProductsEmptyStateProps {
   variant: 'no-store' | 'no-products' | 'filtered' | 'missing-cost-none' | 'missing-vat-none';
+  /** Resets every active search / filter. Wires the `filtered` variant's
+   *  "Clear filters" button (the shared no-results state). */
+  onClearFilters?: () => void;
 }
 
-export function ProductsEmptyState({ variant }: ProductsEmptyStateProps): React.ReactElement {
+export function ProductsEmptyState({
+  variant,
+  onClearFilters,
+}: ProductsEmptyStateProps): React.ReactElement {
   const t = useTranslations('products.empty');
 
   if (variant === 'no-store') {
     return (
       <EmptyState
+        embedded
         icon={StoreLocation01Icon}
         title={t('noStore.title')}
         description={t('noStore.description')}
@@ -32,6 +40,7 @@ export function ProductsEmptyState({ variant }: ProductsEmptyStateProps): React.
   if (variant === 'no-products') {
     return (
       <EmptyState
+        embedded
         icon={PackageIcon}
         title={t('noProducts.title')}
         description={t('noProducts.description')}
@@ -39,10 +48,13 @@ export function ProductsEmptyState({ variant }: ProductsEmptyStateProps): React.
     );
   }
   if (variant === 'missing-cost-none') {
-    return <EmptyState title={t('missingCostNone')} className="border-0" />;
+    return <EmptyState embedded title={t('missingCostNone')} />;
   }
   if (variant === 'missing-vat-none') {
-    return <EmptyState title={t('missingVatNone')} className="border-0" />;
+    return <EmptyState embedded title={t('missingVatNone')} />;
   }
-  return <EmptyState title={t('filtered')} />;
+  // Filtered-to-zero → the shared no-results preset (filter-off icon + a real
+  // "Clear filters" button), so products gets the same premium no-results
+  // treatment as every other table instead of a bare title.
+  return <TableNoResultsState onClearFilters={onClearFilters} />;
 }

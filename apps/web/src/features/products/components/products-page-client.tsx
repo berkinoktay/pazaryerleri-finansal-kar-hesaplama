@@ -115,7 +115,11 @@ export function ProductsPageClient({
     filters.q.length > 0 ||
     filters.status !== 'onSale' ||
     filters.brandId.length > 0 ||
-    filters.categoryId.length > 0;
+    filters.categoryId.length > 0 ||
+    // Advanced-filter chips (PR-F1) are a filter dimension too — without this a
+    // table filtered to zero by ONLY advanced chips was misclassified as
+    // genuinely-empty ("no products") instead of filtered ("no matches").
+    filters.filters.length > 0;
 
   const productSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
@@ -200,7 +204,21 @@ export function ProductsPageClient({
           data={data}
           loading={isInitialLoad}
           empty={
-            emptyVariant !== undefined ? <ProductsEmptyState variant={emptyVariant} /> : undefined
+            emptyVariant !== undefined ? (
+              <ProductsEmptyState
+                variant={emptyVariant}
+                onClearFilters={() =>
+                  void setFilters({
+                    q: '',
+                    status: 'onSale',
+                    brandId: '',
+                    categoryId: '',
+                    filters: [],
+                    page: 1,
+                  })
+                }
+              />
+            ) : undefined
           }
           pagination={pagination}
           q={filters.q}

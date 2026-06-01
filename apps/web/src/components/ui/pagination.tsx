@@ -43,38 +43,78 @@ export const PaginationItem = React.forwardRef<HTMLLIElement, React.ComponentPro
 );
 PaginationItem.displayName = 'PaginationItem';
 
-interface PaginationLinkProps extends Pick<ButtonProps, 'size'>, React.ComponentProps<'a'> {
+type PaginationLinkOwnProps = Pick<ButtonProps, 'size'> & {
   isActive?: boolean;
-  /** Renders the link inert: `aria-disabled`, removed from the tab order, `href` dropped (an `<a>` can't be natively disabled). */
   disabled?: boolean;
+  className?: string;
+};
+
+/**
+ * Renders an `<a>` for URL-driven navigation (pass `href`) or a `<button>` for
+ * state-driven navigation (omit `href`, pass `onClick` — e.g. a TanStack table
+ * footer). Both are natively focusable + disable-able; the `<a>` fallback can't
+ * be natively disabled, so it uses `aria-disabled` + tab removal instead.
+ */
+export type PaginationLinkProps = PaginationLinkOwnProps &
+  // The two members are kept mutually exclusive: each omits the OTHER
+  // element's branch-specific attributes (anchor drops `type`; button drops
+  // `href` / `download`) so a miswritten call site (e.g. `type` on the anchor
+  // branch) is a type error, not a silent stray DOM attribute.
+  (| ({ href: string } & Omit<React.ComponentProps<'a'>, 'href' | 'className' | 'type'>)
+    | ({ href?: undefined } & Omit<
+        React.ComponentProps<'button'>,
+        'className' | 'disabled' | 'type' | 'href' | 'download'
+      >)
+  );
+
+function paginationLinkClasses(
+  { isActive, size }: Pick<PaginationLinkOwnProps, 'isActive' | 'size'>,
+  inert: string,
+  className: string | undefined,
+): string {
+  return cn(
+    buttonVariants({ variant: 'ghost', size: size ?? 'icon-sm' }),
+    // Active page reads as a genuine selection: a soft primary surface with
+    // medium weight. Suppress the ghost hover so it doesn't flip its fill on
+    // hover the way a navigable page does.
+    isActive && 'bg-primary-soft text-primary-soft-foreground hover:bg-primary-soft font-medium',
+    'tabular-nums',
+    inert,
+    className,
+  );
 }
 
-export function PaginationLink({
-  className,
-  isActive,
-  disabled,
-  size = 'icon-sm',
-  href,
-  ...props
-}: PaginationLinkProps): React.ReactElement {
+export function PaginationLink(props: PaginationLinkProps): React.ReactElement {
+  if (props.href !== undefined) {
+    const { isActive, disabled, size, className, href, ...anchorProps } = props;
+    return (
+      <a
+        aria-current={isActive ? 'page' : undefined}
+        aria-disabled={disabled ? 'true' : undefined}
+        tabIndex={disabled ? -1 : undefined}
+        href={disabled ? undefined : href}
+        className={paginationLinkClasses(
+          { isActive, size },
+          'aria-disabled:pointer-events-none aria-disabled:opacity-50',
+          className,
+        )}
+        {...anchorProps}
+      />
+    );
+  }
+
+  const { isActive, disabled, size, className, ...buttonProps } = props;
   return (
-    <a
+    <button
+      type="button"
       aria-current={isActive ? 'page' : undefined}
-      aria-disabled={disabled ? 'true' : undefined}
-      tabIndex={disabled ? -1 : undefined}
-      href={disabled ? undefined : href}
-      className={cn(
-        buttonVariants({ variant: 'ghost', size }),
-        // Active page reads as a genuine selection: a soft primary surface with
-        // medium weight. Suppress the ghost hover so it doesn't flip its fill
-        // on hover the way a navigable page does.
-        isActive &&
-          'bg-primary-soft text-primary-soft-foreground hover:bg-primary-soft font-medium',
-        'tabular-nums',
-        'aria-disabled:pointer-events-none aria-disabled:opacity-50',
+      disabled={disabled}
+      className={paginationLinkClasses(
+        { isActive, size },
+        'disabled:pointer-events-none disabled:opacity-50',
         className,
       )}
-      {...props}
+      {...buttonProps}
     />
   );
 }
