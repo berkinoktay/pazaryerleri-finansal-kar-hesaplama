@@ -120,6 +120,34 @@
   animation: caret-blink 1.2s step-end infinite;
 }
 
+/* Live-edge "now" pulse — an expanding, fading halo behind the leading-edge
+   dot of a live / in-progress time chart (LineChart `liveDot`). transform +
+   opacity only. `transform-box: fill-box` re-bases transform-origin onto the
+   circle's own box so it scales from its center wherever recharts places it in
+   the SVG. The 100% frame is opacity:0, so the global reduced-motion rule below
+   (which freezes any animation to its end frame) collapses the halo to nothing,
+   leaving just the static core dot. 2s cadence matches the calm "Canlı"
+   register — never a jittery blink. */
+@keyframes chart-live-ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+.animate-chart-live-ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: chart-live-ping 2s var(--ease-out-quart) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

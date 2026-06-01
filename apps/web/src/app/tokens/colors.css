@@ -154,6 +154,17 @@
   --chart-5: oklch(58% 0.17 27);
   --chart-6: oklch(52% 0.13 310);
 
+  /* Chart system — grid line + P&L semantic aliases. Grid is intentionally
+     softer than --border in light; the .dark override below makes it MORE
+     visible than --border so it still reads on the dark card (a hairline at
+     --border's dark value disappears). --chart-positive/-negative alias the
+     semantic tones so chart code reads intent ("positive" not "success") and
+     can diverge later without touching call sites; they resolve --success /
+     --destructive contextually, so they need no .dark redefinition. */
+  --chart-grid: oklch(90% 0.006 265);
+  --chart-positive: var(--success);
+  --chart-negative: var(--destructive);
+
   /* Semantic tone borders — explicit named tokens instead of `border-tone/40`
      alpha shortcuts. Live in tandem with --warning, --warning-surface,
      --warning-foreground (and the destructive triplet). Keeps the rule
@@ -292,6 +303,9 @@
   --chart-4: oklch(76% 0.14 75);
   --chart-5: oklch(70% 0.16 27);
   --chart-6: oklch(66% 0.12 310);
+
+  /* Dark grid lifts to 31% (vs --border 24%) so it reads on the dark card. */
+  --chart-grid: oklch(31% 0.015 265);
 
   --warning-border: oklch(50% 0.1 75);
   --destructive-border: oklch(48% 0.14 27);

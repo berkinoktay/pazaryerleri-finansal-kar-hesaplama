@@ -11,6 +11,7 @@ const PATTERN_CATEGORIES = [
   { href: '/design/patterns/forms', label: 'Form girdileri' },
   { href: '/design/patterns/status', label: 'Durum & sync' },
   { href: '/design/patterns/chrome', label: 'Layout & gezinme' },
+  { href: '/design/patterns/charts', label: 'Grafikler' },
   { href: '/design/data', label: 'Tablolar' },
 ];
 

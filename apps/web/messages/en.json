@@ -72,6 +72,33 @@
       "searchPlaceholder": "Search…",
       "empty": "No results"
     },
+    "chart": {
+      "empty": "No data for this period",
+      "loading": "Loading…",
+      "live": "Live",
+      "legend": "Legend",
+      "error": {
+        "title": "Couldn't load data",
+        "description": "Something went wrong. Please try again.",
+        "retry": "Try again"
+      },
+      "lastSynced": "Updated {time}",
+      "source": "Source: {source}",
+      "a11y": {
+        "chart": "Chart",
+        "crosshair": "Crosshair"
+      },
+      "periods": {
+        "today": "Today",
+        "7d": "7D",
+        "30d": "30D",
+        "90d": "90D",
+        "6m": "6M",
+        "12m": "12M",
+        "ytd": "YTD",
+        "all": "All"
+      }
+    },
     "dataTable": {
       "empty": {
         "title": "No records to display",

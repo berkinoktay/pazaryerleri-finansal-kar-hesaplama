@@ -72,6 +72,33 @@
       "searchPlaceholder": "Ara…",
       "empty": "Sonuç bulunamadı"
     },
+    "chart": {
+      "empty": "Bu dönemde veri yok",
+      "loading": "Yükleniyor…",
+      "live": "Canlı",
+      "legend": "Açıklama",
+      "error": {
+        "title": "Veriler yüklenemedi",
+        "description": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+        "retry": "Tekrar dene"
+      },
+      "lastSynced": "Son güncelleme {time}",
+      "source": "Kaynak: {source}",
+      "a11y": {
+        "chart": "Grafik",
+        "crosshair": "İmleç"
+      },
+      "periods": {
+        "today": "Bugün",
+        "7d": "7G",
+        "30d": "30G",
+        "90d": "90G",
+        "6m": "6A",
+        "12m": "12A",
+        "ytd": "Yıl",
+        "all": "Tümü"
+      }
+    },
     "dataTable": {
       "empty": {
         "title": "Gösterilecek kayıt yok",

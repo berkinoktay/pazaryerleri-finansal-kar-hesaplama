@@ -19,6 +19,12 @@ import { cn } from '@/lib/utils';
  * @useWhen rendering a recharts chart whose series colors must swap correctly in dark mode (always pair with ChartConfig keyed by series name)
  */
 
+// Positive first-render size so recharts' ResponsiveContainer doesn't start at
+// its default {-1,-1} — that logs a "width/height(-1)" warning and flashes
+// blank when a chart mounts in place of a skeleton. The ResizeObserver swaps in
+// the real size (from the sized parent) on the next frame.
+const CHART_INITIAL_DIMENSION = { width: 320, height: 200 };
+
 export type ChartConfig = Record<
   string,
   {
@@ -63,9 +69,13 @@ export const ChartContainer = React.forwardRef<
         style={{ ...cssVars, ...style }}
         className={cn(
           'text-2xs flex aspect-video justify-center',
-          '[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground',
-          '[&_.recharts-cartesian-grid_line]:stroke-border',
-          '[&_.recharts-tooltip-cursor]:stroke-border',
+          '[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-axis-tick_text]:tabular-nums',
+          // Grid reads from the chart-system token so it stays a hairline in
+          // light but lifts to a visible value in dark (see --chart-grid).
+          '[&_.recharts-cartesian-grid_line]:stroke-chart-grid',
+          // Crosshair cursor: a touch stronger than the grid so the hovered
+          // column reads. Dash pattern is set per-chart via the cursor prop.
+          '[&_.recharts-tooltip-cursor]:stroke-border-strong',
           '[&_.recharts-layer]:outline-none',
           '[&_.recharts-sector]:outline-none',
           '[&_.recharts-surface]:outline-none',
@@ -73,7 +83,9 @@ export const ChartContainer = React.forwardRef<
         )}
         {...props}
       >
-        <RechartsPrimitive.ResponsiveContainer>{children}</RechartsPrimitive.ResponsiveContainer>
+        <RechartsPrimitive.ResponsiveContainer initialDimension={CHART_INITIAL_DIMENSION}>
+          {children}
+        </RechartsPrimitive.ResponsiveContainer>
       </div>
     </ChartContext.Provider>
   );
@@ -82,22 +94,70 @@ ChartContainer.displayName = 'ChartContainer';
 
 export const ChartTooltip = RechartsPrimitive.Tooltip;
 
-interface ChartTooltipContentProps extends React.ComponentProps<'div'> {
+interface ChartTooltipPayloadEntry {
+  name: string;
+  value: number | string;
+  color?: string;
+  dataKey?: string;
+}
+
+// recharts injects `active` / `payload` / `label` into the element passed as
+// `<Tooltip content={...}>`. We type only what we read and DELIBERATELY do not
+// spread the rest onto the DOM — recharts also injects ~15 internal props
+// (contentStyle, wrapperStyle, isAnimationActive, allowEscapeViewBox, …) that
+// would otherwise hit the <div> and trigger "React does not recognize the prop"
+// warnings.
+interface ChartTooltipContentProps {
   active?: boolean;
-  payload?: Array<{
-    name: string;
-    value: number | string;
-    color?: string;
-    dataKey?: string;
-  }>;
+  payload?: Array<ChartTooltipPayloadEntry>;
   label?: string;
   hideLabel?: boolean;
+  /**
+   * `card` (default) — popover-style card, one swatch+label+value row per
+   * series; for multi-series / categorical charts.
+   * `inverted` — a compact high-contrast bar on the `--foreground` surface
+   * showing label + value inline; the D-language crosshair readout for a
+   * single-series time chart.
+   */
+  variant?: 'card' | 'inverted';
+  /**
+   * Formats each entry's value (e.g. ₺ via the series format). When omitted
+   * the raw value is shown — keeps the primitive usable without a formatter.
+   */
+  valueFormatter?: (value: number | string, dataKey?: string) => string;
+  className?: string;
 }
 
 export const ChartTooltipContent = React.forwardRef<HTMLDivElement, ChartTooltipContentProps>(
-  ({ active, payload, label, hideLabel = false, className, ...props }, ref) => {
+  (
+    { active, payload, label, hideLabel = false, variant = 'card', valueFormatter, className },
+    ref,
+  ) => {
     const { config } = useChart();
     if (!active || !payload?.length) return null;
+
+    const formatValue = (entry: ChartTooltipPayloadEntry): string =>
+      valueFormatter ? valueFormatter(entry.value, entry.dataKey) : String(entry.value);
+
+    if (variant === 'inverted') {
+      return (
+        <div
+          ref={ref}
+          className={cn(
+            'bg-foreground text-background px-sm py-2xs gap-xs text-2xs flex items-center rounded-md font-medium shadow-md',
+            className,
+          )}
+        >
+          {!hideLabel && label ? <span className="opacity-70">{label}</span> : null}
+          {payload.map((entry) => (
+            <span key={entry.name} className="font-semibold tabular-nums">
+              {formatValue(entry)}
+            </span>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div
         ref={ref}
@@ -105,7 +165,6 @@ export const ChartTooltipContent = React.forwardRef<HTMLDivElement, ChartTooltip
           'border-border bg-popover px-sm py-xs text-2xs text-popover-foreground rounded-md border shadow-md',
           className,
         )}
-        {...props}
       >
         {!hideLabel && label ? (
           <div className="mb-3xs text-foreground font-medium">{label}</div>
@@ -123,7 +182,7 @@ export const ChartTooltipContent = React.forwardRef<HTMLDivElement, ChartTooltip
                   }}
                 />
                 <span className="text-muted-foreground">{itemConfig?.label ?? entry.name}</span>
-                <span className="text-foreground ml-auto tabular-nums">{entry.value}</span>
+                <span className="text-foreground ml-auto tabular-nums">{formatValue(entry)}</span>
               </div>
             );
           })}
@@ -136,23 +195,23 @@ ChartTooltipContent.displayName = 'ChartTooltipContent';
 
 export const ChartLegend = RechartsPrimitive.Legend;
 
-interface ChartLegendContentProps extends React.ComponentProps<'div'> {
+interface ChartLegendContentProps {
   payload?: Array<{
     value: string;
     color?: string;
     dataKey?: string;
   }>;
+  className?: string;
 }
 
 export const ChartLegendContent = React.forwardRef<HTMLDivElement, ChartLegendContentProps>(
-  ({ payload, className, ...props }, ref) => {
+  ({ payload, className }, ref) => {
     const { config } = useChart();
     if (!payload?.length) return null;
     return (
       <div
         ref={ref}
         className={cn('gap-md pt-md flex flex-wrap items-center justify-center', className)}
-        {...props}
       >
         {payload.map((entry) => {
           const itemConfig = entry.dataKey ? config[String(entry.dataKey)] : undefined;

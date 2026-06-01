@@ -100,6 +100,9 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
   --color-chart-6: var(--chart-6);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-positive: var(--chart-positive);
+  --color-chart-negative: var(--chart-negative);
 
   --color-warning-border: var(--warning-border);
   --color-destructive-border: var(--destructive-border);
@@ -191,6 +194,7 @@
   --spacing-tile-min-sm: var(--size-tile-min-sm);
   --spacing-table-row-h: var(--size-table-row-h);
   --spacing-table-empty: var(--size-table-empty);
+  --spacing-chart: var(--size-chart);
   --spacing-content-max: var(--size-content-max);
   --spacing-prose-max: var(--size-prose-max);
   --spacing-shell-demo: var(--size-shell-demo);
