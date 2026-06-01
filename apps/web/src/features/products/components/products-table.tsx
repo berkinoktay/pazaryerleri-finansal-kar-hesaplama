@@ -698,18 +698,18 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         />
       )}
       pagination={(table) => <DataTablePagination table={table} />}
-      fab={(table) => {
-        const selected = getSelectedRowOriginals(table);
-        if (selected.length < 2) return null;
-        return (
-          <ProductsBulkCostActionBar
-            orgId={props.orgId}
-            storeId={props.storeId}
-            selectedRows={selected}
-            onClearSelection={() => table.resetRowSelection()}
-          />
-        );
-      }}
+      // Always mounted (not gated on selection) so BulkActionBar's own presence
+      // machine can play the exit animation when the selection clears — gating
+      // here would unmount it mid-transition. The bar self-hides below its
+      // minSelected (2 for bulk cost ops, set inside ProductsBulkCostActionBar).
+      fab={(table) => (
+        <ProductsBulkCostActionBar
+          orgId={props.orgId}
+          storeId={props.storeId}
+          selectedRows={getSelectedRowOriginals(table)}
+          onClearSelection={() => table.resetRowSelection()}
+        />
+      )}
     />
   );
 }

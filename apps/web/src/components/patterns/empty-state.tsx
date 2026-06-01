@@ -8,6 +8,23 @@ export interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
   description?: string;
   action?: React.ReactNode;
   /**
+   * Tone of the circular icon chip. `muted` (default) for data-absent
+   * states (first-run, no-results); `destructive` for an error/failure
+   * state so a fetch failure reads distinctly from "nothing here yet".
+   * Uses the semantic-tone contract (`bg-<tone>-surface` + `text-<tone>`),
+   * never `text-<tone>-foreground` on a surface.
+   */
+  iconTone?: 'muted' | 'destructive';
+  /**
+   * `embedded` drops the standalone card chrome (dashed border, surface
+   * background, rounding) and spans the full width of its container — for use
+   * INSIDE a surface that already has its own frame, e.g. a DataTable body cell.
+   * Without it the centered card shrinks to its content width and reads as a
+   * floating inner card against the table body. Default `false` keeps the
+   * standalone dashed-card look for page-level / hero empties.
+   */
+  embedded?: boolean;
+  /**
    * Optional slot rendered beneath the action. Useful for secondary
    * context (supported integrations, "learn more" links, freshness
    * timestamps). Kept separate from `action` so the primary CTA stays
@@ -15,6 +32,11 @@ export interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
    */
   footer?: React.ReactNode;
 }
+
+const ICON_CHIP_TONE: Record<NonNullable<EmptyStateProps['iconTone']>, string> = {
+  muted: 'bg-muted text-muted-foreground',
+  destructive: 'bg-destructive-surface text-destructive',
+};
 
 /**
  * Empty state — shown in place of a table, chart, or list when there is
@@ -31,6 +53,8 @@ export function EmptyState({
   title,
   description,
   action,
+  iconTone = 'muted',
+  embedded = false,
   footer,
   className,
   ...props
@@ -38,14 +62,22 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'gap-sm border-border bg-background p-2xl flex flex-col items-center justify-center rounded-lg border border-dashed text-center',
+        'gap-sm p-2xl flex flex-col items-center justify-center text-center',
+        // Standalone → dashed card; embedded → chromeless, full-width so it
+        // never shrinks into a floating inner card inside a framed surface.
+        embedded ? 'w-full' : 'border-border bg-background rounded-lg border border-dashed',
         className,
       )}
       {...props}
     >
       {Icon ? (
-        <div className="size-icon-xl bg-muted text-muted-foreground flex items-center justify-center rounded-full">
-          <Icon className="size-icon" />
+        <div
+          className={cn(
+            'size-2xl flex items-center justify-center rounded-full',
+            ICON_CHIP_TONE[iconTone],
+          )}
+        >
+          <Icon className="size-icon-xl" />
         </div>
       ) : null}
       <div className="gap-3xs flex flex-col">

@@ -149,12 +149,13 @@ function renderBar(rows: ProductRow[], onClear = vi.fn()) {
 
 describe('<ProductsBulkCostActionBar>', () => {
   describe('visibility', () => {
-    it('shows count label when rows are selected', () => {
+    it('stays hidden at a single selected row (bulk cost ops are a ≥2 affordance)', () => {
       renderBar([makeParentRow('p1', ['v1'])]);
-      // The component passes selectedRows.length directly to BulkActionBar.
-      // The caller (products-table) gates on >= 2 before rendering this component.
-      // With 1 row the bar is still rendered (since selectedCount=1 > 0 in BulkActionBar).
-      expect(screen.getByText('1 ürün seçili')).toBeInTheDocument();
+      // BulkActionBar gets minSelected={2}, so one selected product keeps the bar
+      // hidden — single-product cost edits live in the row's own kebab. (The bar
+      // is always mounted in products-table so its exit animation can play; the
+      // ≥2 threshold now lives on the bar, not a caller gate.)
+      expect(screen.queryByText('1 ürün seçili')).not.toBeInTheDocument();
     });
 
     it('renders the bar when 2+ rows are selected', () => {

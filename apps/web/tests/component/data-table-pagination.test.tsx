@@ -92,12 +92,32 @@ describe('<DataTablePagination>', () => {
       expect(screen.getByText(/Sayfa.+1.+\/.+5/)).toBeInTheDocument();
     });
 
-    it('disables first / previous on page 1', () => {
+    it('disables previous on page 1 and marks page 1 active', () => {
       renderWithIntl(<Harness rows={makeRows(50)} />);
-      expect(screen.getByRole('button', { name: 'İlk sayfa' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Önceki sayfa' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Sonraki sayfa' })).not.toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Son sayfa' })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Sayfa 1' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+    });
+
+    it('renders a numbered strip (5 pages, all shown) with the active page highlighted', () => {
+      renderWithIntl(<Harness rows={makeRows(50)} />);
+      expect(screen.getByRole('button', { name: 'Sayfa 3' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sayfa 5' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sayfa 1' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+    });
+
+    it('collapses a long range with an ellipsis (20 pages, near the start)', () => {
+      renderWithIntl(<Harness rows={makeRows(200)} />);
+      // 1 2 3 4 5 … 20 — first + last always present, the middle collapsed.
+      expect(screen.getByRole('button', { name: 'Sayfa 1' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sayfa 20' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Sayfa 10' })).not.toBeInTheDocument();
     });
 
     it('advances to page 2 when "Sonraki" is clicked', async () => {
@@ -107,20 +127,22 @@ describe('<DataTablePagination>', () => {
       expect(screen.getByText(/11.+20.+\/.+50/)).toBeInTheDocument();
     });
 
-    it('jumps to the last page when "Son sayfa" is clicked', async () => {
+    it('jumps straight to a page when its number is clicked', async () => {
       const { user } = renderWithIntl(<Harness rows={makeRows(50)} />);
-      await user.click(screen.getByRole('button', { name: 'Son sayfa' }));
+      await user.click(screen.getByRole('button', { name: 'Sayfa 5' }));
       expect(screen.getByText(/Sayfa.+5.+\/.+5/)).toBeInTheDocument();
       expect(screen.getByText(/41.+50.+\/.+50/)).toBeInTheDocument();
-      // Both forward controls disable at the boundary.
       expect(screen.getByRole('button', { name: 'Sonraki sayfa' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Son sayfa' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Sayfa 5' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
     });
 
-    it('returns to page 1 when "İlk sayfa" is clicked from the last page', async () => {
+    it('returns to page 1 when its number is clicked from the last page', async () => {
       const { user } = renderWithIntl(<Harness rows={makeRows(50)} />);
-      await user.click(screen.getByRole('button', { name: 'Son sayfa' }));
-      await user.click(screen.getByRole('button', { name: 'İlk sayfa' }));
+      await user.click(screen.getByRole('button', { name: 'Sayfa 5' }));
+      await user.click(screen.getByRole('button', { name: 'Sayfa 1' }));
       expect(screen.getByText(/Sayfa.+1.+\/.+5/)).toBeInTheDocument();
     });
   });
@@ -149,12 +171,15 @@ describe('<DataTablePagination>', () => {
       expect(screen.getByText(/Sayfa.+1.+\/.+1/)).toBeInTheDocument();
     });
 
-    it('disables every nav button when there is nothing to paginate', () => {
+    it('disables prev + next when there is nothing to paginate', () => {
       renderWithIntl(<Harness rows={[]} />);
-      expect(screen.getByRole('button', { name: 'İlk sayfa' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Önceki sayfa' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Sonraki sayfa' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Son sayfa' })).toBeDisabled();
+      // The single clamped page still renders as an active "Sayfa 1".
+      expect(screen.getByRole('button', { name: 'Sayfa 1' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
     });
   });
 
@@ -177,9 +202,8 @@ describe('<DataTablePagination>', () => {
 
     it('reflects table.getCanNextPage() correctly under manualPagination', () => {
       renderWithIntl(<Harness rows={makeRows(5)} manualPagination pageCount={1} rowCount={5} />);
-      // Only one server-side page → forward controls disabled.
+      // Only one server-side page → forward control disabled.
       expect(screen.getByRole('button', { name: 'Sonraki sayfa' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Son sayfa' })).toBeDisabled();
     });
   });
 });

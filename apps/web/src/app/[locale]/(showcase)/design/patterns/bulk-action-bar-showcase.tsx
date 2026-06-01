@@ -1,10 +1,18 @@
 'use client';
 
-import { Delete02Icon, DownloadCircle02Icon, Tag01Icon } from 'hugeicons-react';
+import {
+  Archive02Icon,
+  Delete02Icon,
+  DownloadCircle02Icon,
+  Mail01Icon,
+  PrinterIcon,
+  Tag01Icon,
+} from 'hugeicons-react';
 import * as React from 'react';
 
 import { BulkActionBar, type BulkAction } from '@/components/patterns/bulk-action-bar';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 
 interface MockOrder {
   id: string;
@@ -25,6 +33,8 @@ export function BulkActionBarShowcase(): React.ReactElement {
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [inlineSelected, setInlineSelected] = React.useState<Set<string>>(new Set(['1', '2']));
+  const [busy, setBusy] = React.useState(false);
+  const [overflowSelected, setOverflowSelected] = React.useState<Set<string>>(new Set(['1', '2']));
 
   const toggle = (id: string): void => {
     setSelected((prev) => {
@@ -140,17 +150,23 @@ export function BulkActionBarShowcase(): React.ReactElement {
 
       <div className="gap-sm flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Inline — kart / split pane içinde
+          Inline — kart / split pane içinde · busy (in-flight) durumu
         </span>
         <div className="border-border bg-card p-md gap-sm flex flex-col rounded-md border">
           <div className="text-foreground text-sm">
-            Burada inline BulkActionBar hep render edilir; toolbar yerine kullanılan varyant.
+            Inline BulkActionBar hep render edilir. <strong>busy</strong> açıkken bir toplu işlem
+            sürüyormuş gibi spinner görünür ve tüm aksiyonlar + temizle düğmesi devre dışı kalır.
           </div>
+          <label className="gap-xs text-foreground flex items-center text-sm">
+            <Switch checked={busy} onCheckedChange={setBusy} />
+            İşlem sürüyor (busy)
+          </label>
           <BulkActionBar
             position="inline"
             selectedCount={inlineSelected.size}
             onClear={() => setInlineSelected(new Set())}
             actions={buildActions(inlineSelected.size)}
+            busy={busy}
             countLabel={(count) => `${count} ürün seçili`}
           />
           <Button
@@ -163,6 +179,70 @@ export function BulkActionBarShowcase(): React.ReactElement {
           </Button>
         </div>
       </div>
+
+      <div className="gap-sm flex flex-col">
+        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+          overflowAfter — fazla aksiyon &quot;Daha fazla&quot; menüsüne taşınır
+        </span>
+        <div className="border-border bg-card p-md gap-sm flex flex-col rounded-md border">
+          <div className="text-foreground text-sm">
+            5 aksiyon, <code className="text-xs">overflowAfter=2</code> → ilk 2 satır içinde,
+            kalanlar bir dropdown&apos;a toplanır. Dar ekranlarda aksiyon etiketleri ikon-only olur.
+          </div>
+          <BulkActionBar
+            position="inline"
+            selectedCount={overflowSelected.size}
+            onClear={() => setOverflowSelected(new Set())}
+            actions={buildManyActions(overflowSelected.size, setLastAction)}
+            overflowAfter={2}
+            countLabel={(count) => `${count} kayıt seçili`}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setOverflowSelected(new Set(['1', '2']))}
+          >
+            Seç (demo)
+          </Button>
+        </div>
+      </div>
     </div>
   );
+}
+
+function buildManyActions(count: number, onAction: (label: string) => void): BulkAction[] {
+  return [
+    {
+      id: 'tag',
+      label: 'Etiketle',
+      icon: <Tag01Icon className="size-icon-sm" aria-hidden />,
+      onClick: () => onAction(`Etiketle (${count})`),
+    },
+    {
+      id: 'export',
+      label: 'CSV indir',
+      icon: <DownloadCircle02Icon className="size-icon-sm" aria-hidden />,
+      onClick: () => onAction(`CSV indir (${count})`),
+    },
+    {
+      id: 'mail',
+      label: 'E-posta gönder',
+      icon: <Mail01Icon className="size-icon-sm" aria-hidden />,
+      onClick: () => onAction(`E-posta (${count})`),
+    },
+    {
+      id: 'print',
+      label: 'Yazdır',
+      icon: <PrinterIcon className="size-icon-sm" aria-hidden />,
+      onClick: () => onAction(`Yazdır (${count})`),
+    },
+    {
+      id: 'archive',
+      label: 'Arşivle',
+      icon: <Archive02Icon className="size-icon-sm" aria-hidden />,
+      tone: 'destructive',
+      onClick: () => onAction(`Arşivle (${count})`),
+    },
+  ];
 }

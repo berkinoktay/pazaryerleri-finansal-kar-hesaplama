@@ -50,6 +50,11 @@
   --size-tile-min: 280px;
   --size-tile-min-sm: 220px;
   --size-table-row-h: 44px;
+  /* Min-height for the DataTable body when it shows a single full-width state
+   * (loading skeleton block, error, first-run empty, filtered no-results) so
+   * the region never looks cramped and never jumps height as it transitions
+   * between those four states (320px). */
+  --size-table-empty: 20rem;
 
   --size-content-max: 1440px;
   --size-prose-max: 68ch;

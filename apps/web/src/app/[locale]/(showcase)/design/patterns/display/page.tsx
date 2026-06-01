@@ -11,6 +11,11 @@ import {
 
 import { BadgeWithOverflow } from '@/components/patterns/badge-with-overflow';
 import { Currency } from '@/components/patterns/currency';
+import {
+  TableEmptyState,
+  TableErrorState,
+  TableNoResultsState,
+} from '@/components/patterns/data-table-states';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { KpiTile } from '@/components/patterns/kpi-tile';
 import { MappedBadge } from '@/components/patterns/mapped-badge';
@@ -267,6 +272,29 @@ export default function DisplayPatternsPage(): React.ReactElement {
               </Button>
             }
           />
+        </div>
+      </Preview>
+
+      <Preview
+        title="DataTable durumları (first-run · no-results · error)"
+        description="DataTable gövdesi tek bir öncelik merdivenine indirgenir: loading → error → (filtreliyse no-results, değilse first-run) → satırlar. Üç durumun ayrı ikonu / copy'si / CTA'sı var — eski tek 'empty' slot'un harmanladığı 'filtreleri temizle VEYA senkronu yenile' çelişkisi kalktı. Hepsi min-h-table-empty ile aynı yükseklikte, böylece durumlar arası geçişte zıplama olmaz. Server-filtreli tablolar hasActiveFilters + onClearFilters geçer; error/onRetry gövde içi hata durumunu açar."
+      >
+        <div className="gap-lg grid sm:grid-cols-3">
+          <div className="border-border overflow-hidden rounded-md border">
+            <div className="min-h-table-empty flex items-center justify-center">
+              <TableEmptyState action={<Button size="sm">Eşitle</Button>} />
+            </div>
+          </div>
+          <div className="border-border overflow-hidden rounded-md border">
+            <div className="min-h-table-empty flex items-center justify-center">
+              <TableNoResultsState onClearFilters={() => undefined} />
+            </div>
+          </div>
+          <div className="border-border overflow-hidden rounded-md border">
+            <div className="min-h-table-empty flex items-center justify-center">
+              <TableErrorState onRetry={() => undefined} />
+            </div>
+          </div>
         </div>
       </Preview>
 

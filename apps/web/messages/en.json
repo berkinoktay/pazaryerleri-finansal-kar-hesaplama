@@ -54,7 +54,8 @@
       "previous": "Previous",
       "previousPage": "Previous page",
       "next": "Next",
-      "nextPage": "Next page"
+      "nextPage": "Next page",
+      "page": "Page {page}"
     },
     "calendar": {
       "previousMonth": "Previous month",
@@ -74,7 +75,17 @@
     "dataTable": {
       "empty": {
         "title": "No records to display",
-        "description": "Clear the filters or refresh the sync."
+        "description": "Records will appear here once your data is synced."
+      },
+      "noResults": {
+        "title": "No matching records",
+        "description": "Try adjusting your search or filters.",
+        "clearFilters": "Clear filters"
+      },
+      "error": {
+        "title": "Couldn't load data",
+        "description": "Something went wrong. Please try again.",
+        "retry": "Try again"
       },
       "loading": "Loading…",
       "sort": {
@@ -83,7 +94,10 @@
         "sortable": "Sortable"
       },
       "selection": {
-        "selectedCount": "{count, plural, one {# row selected} other {# rows selected}}"
+        "selectedCount": "{count, plural, one {# row selected} other {# rows selected}}",
+        "clear": "Clear selection",
+        "processing": "Working…",
+        "more": "More"
       },
       "rowActions": {
         "trigger": "Row actions",
@@ -102,11 +116,7 @@
       "pagination": {
         "rowsPerPage": "Per page",
         "rowsOf": "{shown} of {total} rows",
-        "pageOf": "Page {page} of {total}",
-        "first": "First page",
-        "previous": "Previous page",
-        "next": "Next page",
-        "last": "Last page"
+        "pageOf": "Page {page} of {total}"
       }
     },
     "lastSynced": "Last synced",

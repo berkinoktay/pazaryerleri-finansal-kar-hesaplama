@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BulkActionBar, type BulkAction } from '@/components/patterns/bulk-action-bar';
 
-import { render, screen } from '../helpers/render';
+import { render, screen, waitFor } from '../helpers/render';
 
 function makeActions(overrides: Partial<BulkAction>[] = []): BulkAction[] {
   const defaults: BulkAction[] = [
@@ -29,9 +29,10 @@ describe('<BulkActionBar>', () => {
   });
 
   describe('count label', () => {
-    it('uses the default Turkish "{N} seçili" copy when no countLabel given', () => {
+    it('uses the shared i18n selection count copy when no countLabel given', () => {
       render(<BulkActionBar selectedCount={5} onClear={vi.fn()} actions={[]} />);
-      expect(screen.getByText('5 seçili')).toBeInTheDocument();
+      // Default reads common.dataTable.selection.selectedCount ("{count} satır seçili").
+      expect(screen.getByText('5 satır seçili')).toBeInTheDocument();
     });
 
     it('uses the supplied countLabel function for custom copy', () => {
@@ -159,6 +160,125 @@ describe('<BulkActionBar>', () => {
       const wrapper = container.firstElementChild;
       expect(wrapper?.className).not.toMatch(/\bfixed\b/);
       expect(wrapper?.getAttribute('role')).toBe('region');
+    });
+  });
+
+  describe('minSelected threshold', () => {
+    it('stays hidden until selectedCount reaches minSelected', () => {
+      const { container } = render(
+        <BulkActionBar selectedCount={1} onClear={vi.fn()} actions={[]} minSelected={2} />,
+      );
+      expect(container.firstChild).toBeNull();
+    });
+
+    it('shows once selectedCount meets minSelected', () => {
+      render(<BulkActionBar selectedCount={2} onClear={vi.fn()} actions={[]} minSelected={2} />);
+      expect(screen.getByRole('region')).toBeInTheDocument();
+    });
+  });
+
+  describe('busy state', () => {
+    it('marks the region aria-busy and disables every action + the clear button', () => {
+      render(
+        <BulkActionBar
+          selectedCount={3}
+          onClear={vi.fn()}
+          actions={makeActions()}
+          busy
+          clearLabel="Temizle"
+        />,
+      );
+      expect(screen.getByRole('region')).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getByRole('button', { name: 'Temizle' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Dışa aktar' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Sil' })).toBeDisabled();
+    });
+
+    it('does not clear on Escape while busy', async () => {
+      const onClear = vi.fn();
+      const { user } = render(
+        <BulkActionBar selectedCount={3} onClear={onClear} actions={[]} busy />,
+      );
+      await user.keyboard('{Escape}');
+      expect(onClear).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('escape to clear', () => {
+    it('fires onClear when Escape is pressed', async () => {
+      const onClear = vi.fn();
+      const { user } = render(<BulkActionBar selectedCount={2} onClear={onClear} actions={[]} />);
+      await user.keyboard('{Escape}');
+      expect(onClear).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('exit animation', () => {
+    it('carries symmetric enter/exit animation classes driven by data-state', () => {
+      render(<BulkActionBar selectedCount={2} onClear={vi.fn()} actions={[]} position="inline" />);
+      const region = screen.getByRole('region');
+      expect(region).toHaveAttribute('data-state', 'open');
+      expect(region.className).toMatch(/data-\[state=open\]:motion-safe:animate-in/);
+      expect(region.className).toMatch(/data-\[state=closed\]:motion-safe:animate-out/);
+    });
+
+    it('lingers in the closed state, then unmounts after the selection clears', async () => {
+      const { rerender, container } = render(
+        <BulkActionBar selectedCount={2} onClear={vi.fn()} actions={[]} position="inline" />,
+      );
+      expect(screen.getByRole('region')).toBeInTheDocument();
+      rerender(
+        <BulkActionBar selectedCount={0} onClear={vi.fn()} actions={[]} position="inline" />,
+      );
+      // Still mounted during the exit, now flagged closed so animate-out plays.
+      expect(screen.getByRole('region')).toHaveAttribute('data-state', 'closed');
+      // Unmounts once the exit window elapses.
+      await waitFor(() => expect(container.firstChild).toBeNull());
+    });
+  });
+
+  describe('overflow', () => {
+    it('collapses actions beyond overflowAfter into a More dropdown', async () => {
+      const onClickFourth = vi.fn();
+      const { user } = render(
+        <BulkActionBar
+          selectedCount={1}
+          onClear={vi.fn()}
+          overflowAfter={2}
+          actions={[
+            { id: 'a1', label: 'Bir', onClick: vi.fn() },
+            { id: 'a2', label: 'İki', onClick: vi.fn() },
+            { id: 'a3', label: 'Üç', onClick: vi.fn() },
+            { id: 'a4', label: 'Dört', onClick: onClickFourth },
+          ]}
+        />,
+      );
+      // First two inline; the rest hidden behind a "More" menu.
+      expect(screen.getByRole('button', { name: 'Bir' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'İki' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Üç' })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Daha fazla' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Dört' }));
+      expect(onClickFourth).toHaveBeenCalledOnce();
+    });
+
+    it('disables the More trigger while busy (overflow path is suspended too)', () => {
+      render(
+        <BulkActionBar
+          selectedCount={3}
+          onClear={vi.fn()}
+          busy
+          overflowAfter={2}
+          actions={[
+            { id: 'a1', label: 'Bir', onClick: vi.fn() },
+            { id: 'a2', label: 'İki', onClick: vi.fn() },
+            { id: 'a3', label: 'Üç', onClick: vi.fn() },
+            { id: 'a4', label: 'Dört', onClick: vi.fn() },
+          ]}
+        />,
+      );
+      expect(screen.getByRole('button', { name: 'Daha fazla' })).toBeDisabled();
     });
   });
 });

@@ -26,7 +26,11 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { ROW_ACTIONS_COLUMN_ID } from '@/components/patterns/data-table-row-actions';
-import { EmptyState } from '@/components/patterns/empty-state';
+import {
+  TableEmptyState,
+  TableErrorState,
+  TableNoResultsState,
+} from '@/components/patterns/data-table-states';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -94,8 +98,59 @@ export interface DataTableProps<TData, TValue> {
   pagination?: (table: TanstackTable<TData>) => React.ReactNode;
   /** Show loading skeletons in place of rows. */
   loading?: boolean;
-  /** Custom content when the table has zero rows post-filter. */
+  /**
+   * The body resolves to exactly ONE state via a fixed precedence ladder:
+   * `loading` → `error` → zero-rows (no-results when filtered, else first-run)
+   * → rows. Each state has its own slot + a sensible default; the slots below
+   * let a feature override copy/CTA without re-implementing the ladder.
+   *
+   * `empty` is the FIRST-RUN state — shown when there are zero rows AND no
+   * active filters (genuinely no data yet). Defaults to `TableEmptyState`
+   * (inbox icon + sync/connect copy). Back-compat: a table that passes only
+   * `empty` and no filter signal keeps the old "any zero rows → empty"
+   * behaviour, because `noResultsState` then falls through to `empty`.
+   */
   empty?: React.ReactNode;
+  /**
+   * The NO-RESULTS state — shown when there are zero rows AND filters/search
+   * are active. Defaults to `TableNoResultsState` (filter-off icon + a
+   * "Clear filters" button wired to `onClearFilters`). DataTable detects the
+   * filtered condition from `hasActiveFilters` when supplied, else from
+   * TanStack's `columnFilters` (which only reflects CLIENT-side filters — a
+   * server-paginated table MUST pass `hasActiveFilters`).
+   */
+  noResultsState?: React.ReactNode;
+  /**
+   * Whether the table currently has any active search / filter. Server-filtered
+   * tables own this state in URL/props (not in TanStack's `columnFilters`), so
+   * they MUST pass it for the no-results vs first-run split to work. Omitted →
+   * DataTable falls back to `columnFilters.length > 0` (correct for client-side
+   * filtering only).
+   */
+  hasActiveFilters?: boolean;
+  /**
+   * Resets the active search + filters. Used by the default no-results state's
+   * "Clear filters" button. Omitted → falls back to `table.resetColumnFilters()`
+   * (correct only for client-side filtering); server-filtered tables pass their
+   * own URL/state reset.
+   */
+  onClearFilters?: () => void;
+  /**
+   * Renders an in-body error state (alert icon + retry) ABOVE the zero-rows
+   * branch, so a failed fetch never shows the misleading first-run/empty copy.
+   * Pair with `onRetry`.
+   */
+  error?: boolean;
+  /** Re-runs the failed query. Wires the error state's "Try again" button. */
+  onRetry?: () => void;
+  /**
+   * Hide the `toolbar` in the genuine first-run state only (zero rows, no
+   * filters, not loading, not error) — search/filter controls over a "connect
+   * your store" screen read as broken. The toolbar STAYS mounted in loading,
+   * error, and no-results (where the user needs it to retry / clear filters).
+   * Default `false` (toolbar always shown) to avoid surprising existing layouts.
+   */
+  hideToolbarOnEmpty?: boolean;
   /** Enable row selection checkboxes (column must be defined separately). */
   enableRowSelection?: boolean;
   /** Row id accessor for stable selection state across re-renders. */
@@ -241,6 +296,12 @@ export function DataTable<TData, TValue>({
   pagination,
   loading = false,
   empty,
+  noResultsState,
+  hasActiveFilters,
+  onClearFilters,
+  error = false,
+  onRetry,
+  hideToolbarOnEmpty = false,
   enableRowSelection = false,
   getRowId,
   getRowCanExpand,
@@ -382,6 +443,25 @@ export function DataTable<TData, TValue>({
   // Skeleton fills the page rhythm without flooding the DOM on large page sizes.
   const skeletonRowCount = Math.min(table.getState().pagination.pageSize, 12);
 
+  // Body precedence ladder, resolved ONCE so the toolbar-hide rule and the
+  // TableBody render agree on a single state: loading > error > zero-rows
+  // (no-results when filtered, else first-run) > rows.
+  const rowsCount = table.getRowModel().rows.length;
+  const isFiltered = hasActiveFilters ?? table.getState().columnFilters.length > 0;
+  const bodyState: 'loading' | 'error' | 'noResults' | 'empty' | 'rows' = loading
+    ? 'loading'
+    : error
+      ? 'error'
+      : rowsCount === 0
+        ? isFiltered
+          ? 'noResults'
+          : 'empty'
+        : 'rows';
+  // First-run only: hide the toolbar so dead search/filter controls don't sit
+  // over a "connect your store" screen. Opt-in (default off) to avoid surprising
+  // existing layouts; the toolbar stays mounted in loading / error / no-results.
+  const showToolbar = toolbar !== undefined && !(hideToolbarOnEmpty && bodyState === 'empty');
+
   // Pinned-column sticky offsets are MEASURED from real rendered widths
   // rather than trusting TanStack's column-size model. getStart('left') /
   // getAfter('right') accumulate each column's getSize() (default 150px),
@@ -462,8 +542,8 @@ export function DataTable<TData, TValue>({
           {loading ? t('loading') : ''}
         </div>
         {tabs ? <div className="border-border px-md pt-sm pb-2xs border-b">{tabs}</div> : null}
-        {toolbar ? (
-          <div className="border-border px-md py-sm border-b">{toolbar(table)}</div>
+        {showToolbar ? (
+          <div className="border-border px-md py-sm border-b">{toolbar?.(table)}</div>
         ) : null}
         {/* Table owns the single horizontal-scroll container (scrollAware wires
             the scroll-position data attributes the pinned-edge shadows react
@@ -561,7 +641,7 @@ export function DataTable<TData, TValue>({
             ))}
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {bodyState === 'loading' ? (
               Array.from({ length: skeletonRowCount }).map((_, rowIdx) => (
                 <TableRow key={`skeleton-${rowIdx}`}>
                   {visibleLeafColumns.map((column) => {
@@ -578,16 +658,32 @@ export function DataTable<TData, TValue>({
                   })}
                 </TableRow>
               ))
-            ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow>
+            ) : bodyState === 'error' ? (
+              <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={visibleLeafCount} className="p-0">
-                  {empty ?? (
-                    <EmptyState
-                      title={t('empty.title')}
-                      description={t('empty.description')}
-                      className="border-0"
-                    />
-                  )}
+                  <div className="min-h-table-empty flex items-center justify-center">
+                    <TableErrorState onRetry={onRetry} />
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : bodyState === 'noResults' ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={visibleLeafCount} className="p-0">
+                  <div className="min-h-table-empty flex items-center justify-center">
+                    {noResultsState ?? empty ?? (
+                      <TableNoResultsState
+                        onClearFilters={onClearFilters ?? (() => table.resetColumnFilters())}
+                      />
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : bodyState === 'empty' ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={visibleLeafCount} className="p-0">
+                  <div className="min-h-table-empty flex items-center justify-center">
+                    {empty ?? <TableEmptyState />}
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (

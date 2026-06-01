@@ -54,7 +54,8 @@
       "previous": "Önceki",
       "previousPage": "Önceki sayfa",
       "next": "Sonraki",
-      "nextPage": "Sonraki sayfa"
+      "nextPage": "Sonraki sayfa",
+      "page": "Sayfa {page}"
     },
     "calendar": {
       "previousMonth": "Önceki ay",
@@ -74,7 +75,17 @@
     "dataTable": {
       "empty": {
         "title": "Gösterilecek kayıt yok",
-        "description": "Filtreleri temizleyin veya senkronizasyonu yenileyin."
+        "description": "Veri senkronize edildiğinde burada görünecek."
+      },
+      "noResults": {
+        "title": "Eşleşen kayıt yok",
+        "description": "Aramanı veya filtrelerini değiştirmeyi dene.",
+        "clearFilters": "Filtreleri temizle"
+      },
+      "error": {
+        "title": "Veriler yüklenemedi",
+        "description": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+        "retry": "Tekrar dene"
       },
       "loading": "Yükleniyor…",
       "sort": {
@@ -83,7 +94,10 @@
         "sortable": "Sıralanabilir"
       },
       "selection": {
-        "selectedCount": "{count} satır seçili"
+        "selectedCount": "{count} satır seçili",
+        "clear": "Seçimi temizle",
+        "processing": "İşleniyor…",
+        "more": "Daha fazla"
       },
       "rowActions": {
         "trigger": "Satır işlemleri",
@@ -102,11 +116,7 @@
       "pagination": {
         "rowsPerPage": "Sayfa başına",
         "rowsOf": "{shown} / {total} satır",
-        "pageOf": "Sayfa {page} / {total}",
-        "first": "İlk sayfa",
-        "previous": "Önceki sayfa",
-        "next": "Sonraki sayfa",
-        "last": "Son sayfa"
+        "pageOf": "Sayfa {page} / {total}"
       }
     },
     "lastSynced": "Son senkronizasyon",
