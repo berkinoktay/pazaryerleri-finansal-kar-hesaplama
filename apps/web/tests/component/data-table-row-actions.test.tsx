@@ -70,4 +70,17 @@ describe('DataTableRowActions', () => {
     const menu = await screen.findByRole('menu');
     expect(within(menu).getByText('Aç Ayşe')).toBeInTheDocument();
   });
+
+  it('tints a warning-tone item amber (e.g. archive)', async () => {
+    const { user } = renderWithIntl(
+      <DataTableRowActions
+        row={ROW}
+        actions={[{ label: 'Arşivle', tone: 'warning', onSelect: vi.fn() }]}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Satır işlemleri' }));
+    const menu = await screen.findByRole('menu');
+    const item = within(menu).getByText('Arşivle').closest('[role="menuitem"]') as HTMLElement;
+    expect(item).toHaveClass('text-warning');
+  });
 });

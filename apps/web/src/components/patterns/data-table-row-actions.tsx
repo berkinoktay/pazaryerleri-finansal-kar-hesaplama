@@ -25,8 +25,11 @@ export interface RowAction<TData> {
   icon?: React.ReactNode;
   /** Fired when the item is chosen. */
   onSelect: (row: TData) => void;
-  /** `destructive` tints the item red (delete / remove). */
-  tone?: 'default' | 'destructive';
+  /**
+   * `destructive` tints the item red (delete / remove); `warning` tints it
+   * amber for reversible caution actions (archive / suspend). Default is neutral.
+   */
+  tone?: 'default' | 'destructive' | 'warning';
   /** Per-row disabled predicate (e.g. hide delete on a locked row). */
   disabled?: (row: TData) => boolean;
   /** Inserts a separator above this item to mark a group boundary. */
@@ -83,6 +86,8 @@ export function DataTableRowActions<TData>({
                   '[&_svg]:size-icon-sm',
                   action.tone === 'destructive' &&
                     'text-destructive data-[highlighted]:bg-destructive-surface data-[highlighted]:text-destructive',
+                  action.tone === 'warning' &&
+                    'text-warning data-[highlighted]:bg-warning-surface data-[highlighted]:text-warning',
                 )}
               >
                 {action.icon}
