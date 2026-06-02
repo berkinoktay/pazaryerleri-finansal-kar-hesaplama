@@ -56,6 +56,11 @@
    * between those four states (320px). */
   --size-table-empty: 20rem;
 
+  /* Default plot height for a ChartFrame. Charts get a FIXED height (width is
+   * responsive) — an aspect-ratio would balloon to 700px+ on a wide card. A
+   * caller can override per-chart via the ChartFrame `height` prop. */
+  --size-chart: 20rem;
+
   --size-content-max: 1440px;
   --size-prose-max: 68ch;
 
