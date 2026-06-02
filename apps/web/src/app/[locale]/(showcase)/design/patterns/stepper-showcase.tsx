@@ -2,12 +2,13 @@
 
 import * as React from 'react';
 
+import { Playground, control } from '@/components/showcase/playground';
 import { Stepper, type StepperStep } from '@/components/patterns/stepper';
 
 /**
  * Realistic content: the four stages of connecting a marketplace
- * store. The Wizard organism (not built yet) will compose Stepper
- * with these exact step definitions plus a per-step content pane.
+ * store. The Wizard organism composes a Stepper with these exact
+ * step definitions plus a per-step content pane (see WizardShowcase).
  */
 const CONNECT_STORE_STEPS: StepperStep[] = [
   {
@@ -32,92 +33,38 @@ const CONNECT_STORE_STEPS: StepperStep[] = [
   },
 ];
 
-/**
- * Settlement reconciliation flow — vertical Stepper variant fits a
- * sidebar / context-rail layout where steps stack and need full-text
- * descriptions next to each indicator.
- */
-const RECONCILIATION_STEPS: StepperStep[] = [
-  {
-    id: 'upload',
-    label: 'Hakediş dosyasını yükle',
-    description: 'Trendyol panelinden CSV indir, sürükle-bırak.',
-  },
-  {
-    id: 'parse',
-    label: 'Satırları eşleştir',
-    description: 'Sipariş numaralarını PazarSync verisiyle eşle.',
-  },
-  {
-    id: 'review',
-    label: 'Sapmaları gözden geçir',
-    description: 'Mismatch bulunan satırları tek tek onayla.',
-  },
-  {
-    id: 'commit',
-    label: 'Mutabakatı tamamla',
-    description: 'Hakediş raporu finalize edilir.',
-  },
-];
+// cursor seçenekleri: 0–3 adım indeksleri + 4 = "tümü tamamlandı".
+const CURSOR_OPTIONS = ['0', '1', '2', '3', '4'] as const;
+// API-anahtarı adımının (index 1) state'ini error'a çevirir.
+const ERROR_STEP_INDEX = 1;
 
 export function StepperShowcase(): React.ReactElement {
   return (
-    <div className="gap-lg flex flex-col">
-      <div className="gap-sm flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Yatay · cursor 2 (Doğrulama adımında)
-        </span>
-        <Stepper steps={CONNECT_STORE_STEPS} current={2} aria-label="Mağaza bağlama adımları" />
-      </div>
-
-      <div className="gap-sm flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Yatay · API anahtarı adımında hata
-        </span>
+    <Playground
+      title="Stepper — cursor · orientation · hideLabels · adım hatası"
+      description="Per-step state cursor'dan türetilir: index < cursor → completed (yeşil tik), == cursor → current (vurgulu numara), > cursor → upcoming (muted). 'errorAtStep' API-anahtarı adımını error'a (X) çevirir — kullanıcı ileri gitse bile görünür kalır. Dikey = kontekst rail; yatay = wizard üstü."
+      controls={{
+        cursor: control.segment(CURSOR_OPTIONS, '2'),
+        orientation: control.segment(['horizontal', 'vertical'], 'horizontal'),
+        hideLabels: control.bool(false, 'hideLabels'),
+        errorAtStep: control.bool(false, 'errorAtStep'),
+      }}
+      render={(v) => (
         <Stepper
-          steps={CONNECT_STORE_STEPS.map((step, index) =>
-            index === 1 ? { ...step, state: 'error' } : step,
-          )}
-          current={2}
-          aria-label="Mağaza bağlama — geçersiz API anahtarı"
+          steps={
+            v.errorAtStep
+              ? CONNECT_STORE_STEPS.map((step, index) =>
+                  index === ERROR_STEP_INDEX ? { ...step, state: 'error' } : step,
+                )
+              : CONNECT_STORE_STEPS
+          }
+          current={Number(v.cursor)}
+          orientation={v.orientation}
+          hideLabels={v.hideLabels}
+          aria-label="Mağaza bağlama adımları"
+          className={v.orientation === 'vertical' ? 'max-w-input' : 'w-full'}
         />
-      </div>
-
-      <div className="gap-sm flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Yatay · tüm adımlar tamamlandı
-        </span>
-        <Stepper
-          steps={CONNECT_STORE_STEPS}
-          current={CONNECT_STORE_STEPS.length}
-          aria-label="Mağaza bağlama tamamlandı"
-        />
-      </div>
-
-      <div className="gap-sm flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Yatay · etiketler gizli (kompakt)
-        </span>
-        <Stepper
-          steps={CONNECT_STORE_STEPS}
-          current={1}
-          hideLabels
-          aria-label="Mağaza bağlama — kompakt"
-        />
-      </div>
-
-      <div className="gap-sm flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Dikey · mutabakat akışı (cursor 1)
-        </span>
-        <Stepper
-          steps={RECONCILIATION_STEPS}
-          current={1}
-          orientation="vertical"
-          aria-label="Hakediş mutabakatı adımları"
-          className="max-w-input"
-        />
-      </div>
-    </div>
+      )}
+    />
   );
 }

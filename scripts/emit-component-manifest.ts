@@ -58,6 +58,21 @@ const SOURCES: SourceDir[] = [
   { dir: resolve(WEB_ROOT, 'src/components/patterns'), category: 'molecule' },
 ];
 
+/**
+ * Internal `.tsx` modules that live in ui/ or patterns/ but are NOT
+ * independently-selectable catalog components — they export render helpers /
+ * constants consumed by a parent composite. Excluding them keeps the manifest a
+ * list of components an author would actually choose (and stops the old
+ * filename→export fallback from minting fake entries like `BAR_RADIUS`).
+ * (The pure-`.ts` helpers — chart-cartesian/chart-colors/chart-format/
+ * chart.types — are already excluded by the `.tsx`-only walk below.)
+ */
+const EXCLUDE_BASENAMES = new Set<string>([
+  'chart-shapes.tsx', // bar/line mark constants (BAR_RADIUS, …)
+  'chart-states.tsx', // ChartSkeleton / empty-state helpers rendered by ChartFrame
+  'data-table-states.tsx', // TableEmptyState/NoResults/Error rendered by DataTable
+]);
+
 async function listTsxFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir);
   const out: string[] = [];
@@ -65,7 +80,9 @@ async function listTsxFiles(dir: string): Promise<string[]> {
     const full = join(dir, entry);
     const info = await stat(full);
     if (info.isDirectory()) continue;
-    if (!/\.(tsx?)$/.test(entry)) continue;
+    // `.tsx` only — pure `.ts` modules in these dirs are helpers/types, not components.
+    if (!/\.tsx$/.test(entry)) continue;
+    if (EXCLUDE_BASENAMES.has(entry)) continue;
     out.push(full);
   }
   return out.sort();

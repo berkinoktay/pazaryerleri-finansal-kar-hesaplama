@@ -1,22 +1,23 @@
 'use client';
 
-import { type ColumnDef } from '@tanstack/react-table';
 import * as React from 'react';
 import { toast } from 'sonner';
 
-import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
-import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
-import { Badge } from '@/components/ui/badge';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+
+import { buildOrderColumns, buildShowcaseRows } from './showcase-table';
 
 /**
  * Interactive demo of DataTable's four body states resolved by its precedence
  * ladder (loading → error → no-results → first-run → rows). One ToggleGroup
  * flips between them against a SINGLE table — self-contained state, so toggling
  * never re-renders the rest of the (table-heavy) showcase page.
+ *
+ * This is a BEHAVIOR demo (live state machine), not a static prop grid — it
+ * stays a Preview-mounted component rather than collapsing into a Playground.
  */
 
 type StateKey = 'rows' | 'loading' | 'firstRun' | 'noResults' | 'error';
@@ -29,56 +30,11 @@ const STATE_OPTIONS: { key: StateKey; label: string }[] = [
   { key: 'error', label: 'Hata' },
 ];
 
-const STATUS_TONE = {
-  delivered: 'success',
-  shipped: 'info',
-  pending: 'warning',
-  returned: 'destructive',
-} as const;
-
-const STATUS_LABEL = {
-  delivered: 'Teslim',
-  shipped: 'Kargoda',
-  pending: 'Bekleyen',
-  returned: 'İade',
-} as const;
-
-const columns: ColumnDef<MockOrder>[] = [
-  {
-    accessorKey: 'orderNumber',
-    header: 'Sipariş No',
-    cell: ({ row }) => (
-      <span className="text-foreground font-mono text-xs">{row.original.orderNumber}</span>
-    ),
-  },
-  { accessorKey: 'customer', header: 'Müşteri' },
-  {
-    accessorKey: 'platform',
-    header: 'Pazaryeri',
-    cell: ({ row }) => (
-      <Badge variant="outline">
-        {row.original.platform === 'TRENDYOL' ? 'Trendyol' : 'Hepsiburada'}
-      </Badge>
-    ),
-  },
-  {
-    accessorKey: 'status',
-    header: 'Durum',
-    cell: ({ row }) => (
-      <Badge tone={STATUS_TONE[row.original.status]}>{STATUS_LABEL[row.original.status]}</Badge>
-    ),
-  },
-  {
-    accessorKey: 'netProfit',
-    header: 'Net kar',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.netProfit} emphasis />,
-  },
-];
+const columns = buildOrderColumns(['orderNumber', 'customer', 'platform', 'status', 'netProfit']);
 
 export function DataTableStatesShowcase(): React.ReactElement {
   const [state, setState] = React.useState<StateKey>('rows');
-  const rows = React.useMemo(() => buildMockOrders(6), []);
+  const rows = React.useMemo(() => buildShowcaseRows(6), []);
   const data = state === 'rows' ? rows : [];
 
   return (

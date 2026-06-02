@@ -1,19 +1,9 @@
 import Link from 'next/link';
 
 import { Wordmark } from '@/components/brand/wordmark';
+import { SHOWCASE_TOP_NAV } from '@/components/showcase/showcase-registry';
 import { ThemeToggle } from '@/components/showcase/theme-toggle';
 import { Separator } from '@/components/ui/separator';
-
-const SHOWCASE_NAV = [
-  { href: '/design', label: 'Genel' },
-  { href: '/design/tokens', label: 'Token' },
-  { href: '/design/primitives', label: 'Primitive' },
-  { href: '/design/patterns', label: 'Pattern' },
-  { href: '/design/data', label: 'Veri' },
-  { href: '/design/layout-demo', label: 'Layout' },
-  { href: '/design/manifest', label: 'Manifest' },
-  { href: '/design/checklist', label: 'Checklist' },
-];
 
 export default function ShowcaseLayout({
   children,
@@ -31,7 +21,7 @@ export default function ShowcaseLayout({
             Design System
           </span>
           <nav aria-label="Showcase" className="gap-3xs ml-auto flex items-center">
-            {SHOWCASE_NAV.map((item) => (
+            {SHOWCASE_TOP_NAV.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}

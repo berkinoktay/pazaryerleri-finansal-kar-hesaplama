@@ -1,101 +1,46 @@
 'use client';
 
-import { type ColumnDef } from '@tanstack/react-table';
 import { Delete02Icon, Edit02Icon, ViewIcon } from 'hugeicons-react';
 import * as React from 'react';
 import { toast } from 'sonner';
 
-import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { createRowActionsColumn } from '@/components/patterns/data-table-row-actions';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
-import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
 
-const STATUS_TONE: Record<MockOrder['status'], 'success' | 'info' | 'warning' | 'destructive'> = {
-  delivered: 'success',
-  shipped: 'info',
-  pending: 'warning',
-  returned: 'destructive',
-};
+import { buildOrderColumns, buildShowcaseRows, type MockOrder } from './showcase-table';
 
-const STATUS_LABEL: Record<MockOrder['status'], string> = {
-  delivered: 'Teslim',
-  shipped: 'Kargoda',
-  pending: 'Bekleyen',
-  returned: 'İade',
-};
+const ROW_ACTIONS_COLUMN = createRowActionsColumn<MockOrder>([
+  {
+    label: 'Detayları gör',
+    icon: <ViewIcon />,
+    onSelect: (row) => toast.info(`${row.orderNumber} detayı açıldı`),
+  },
+  {
+    label: 'Düzenle',
+    icon: <Edit02Icon />,
+    onSelect: (row) => toast.info(`${row.orderNumber} düzenleniyor`),
+  },
+  {
+    label: 'Sil',
+    icon: <Delete02Icon />,
+    tone: 'destructive',
+    separatorBefore: true,
+    onSelect: (row) => toast.error(`${row.orderNumber} silindi`),
+  },
+]);
 
-const COLUMNS: ColumnDef<MockOrder>[] = [
-  {
-    id: 'select',
-    enableSorting: false,
-    enableHiding: false,
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate')
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Tümünü seç"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Satırı seç"
-      />
-    ),
-  },
-  {
-    accessorKey: 'orderNumber',
-    header: 'Sipariş No',
-    cell: ({ row }) => (
-      <span className="text-foreground font-mono text-xs">{row.original.orderNumber}</span>
-    ),
-  },
-  {
-    accessorKey: 'customer',
-    header: 'Müşteri',
-  },
-  {
-    accessorKey: 'status',
-    header: 'Durum',
-    cell: ({ row }) => (
-      <Badge tone={STATUS_TONE[row.original.status]}>{STATUS_LABEL[row.original.status]}</Badge>
-    ),
-  },
-  {
-    accessorKey: 'netProfit',
-    header: 'Net kar',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.netProfit} emphasis />,
-  },
-  createRowActionsColumn<MockOrder>([
-    {
-      label: 'Detayları gör',
-      icon: <ViewIcon />,
-      onSelect: (row) => toast.info(`${row.orderNumber} detayı açıldı`),
-    },
-    {
-      label: 'Düzenle',
-      icon: <Edit02Icon />,
-      onSelect: (row) => toast.info(`${row.orderNumber} düzenleniyor`),
-    },
-    {
-      label: 'Sil',
-      icon: <Delete02Icon />,
-      tone: 'destructive',
-      separatorBefore: true,
-      onSelect: (row) => toast.error(`${row.orderNumber} silindi`),
-    },
-  ]),
-];
+// Full interactive column set: select left, kebab actions right.
+const COLUMNS = buildOrderColumns(
+  ['select', 'orderNumber', 'customer', 'status', 'netProfit'],
+  [ROW_ACTIONS_COLUMN],
+);
+
+// Passive variant — the four data columns only (no select, no actions).
+const PASSIVE_COLUMNS = buildOrderColumns(['orderNumber', 'customer', 'status', 'netProfit']);
 
 export function DataTableRowClickShowcase(): React.ReactElement {
-  const [rows] = React.useState(() => buildMockOrders(8));
+  const [rows] = React.useState(() => buildShowcaseRows(8));
   const [lastOpened, setLastOpened] = React.useState<string | null>(null);
 
   return (
@@ -129,11 +74,7 @@ export function DataTableRowClickShowcase(): React.ReactElement {
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
           onRowClick atlanırsa — pasif satırlar (eski davranış)
         </span>
-        <DataTable
-          columns={COLUMNS.slice(1, 5)}
-          data={rows.slice(0, 4)}
-          getRowId={(row) => row.id}
-        />
+        <DataTable columns={PASSIVE_COLUMNS} data={rows.slice(0, 4)} getRowId={(row) => row.id} />
         <span className="text-2xs text-muted-foreground">
           Aynı tablo, onRowClick yok. Satır role / tabIndex / cursor / focus ring almaz — eski
           tüketicilerle birebir uyumlu.

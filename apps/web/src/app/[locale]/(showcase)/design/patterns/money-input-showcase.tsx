@@ -5,12 +5,47 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { MoneyInput } from '@/components/patterns/money-input';
+import { Playground, control } from '@/components/showcase/playground';
+import { Preview } from '@/components/showcase/preview';
 import { Label } from '@/components/ui/label';
 
 export function MoneyInputShowcase(): React.ReactElement {
+  return (
+    <div className="gap-lg flex flex-col">
+      <Playground
+        title="MoneyInput — scale · nonNegative · invalid · symbol"
+        description="Tek etkileşimli yüzey: kontrolleri çevir, ₺ leading slot + tr-TR ayrıştırmasını canlı gör. Değeri sen yazarsın; aşağıdaki şerit yalnız config prop'larını döndürür. scale=0 tam TRY, sembol prop'u TRY dışı pazarlar için."
+        controls={{
+          scale: control.segment(['0', '2'], '2'),
+          nonNegative: control.bool(false),
+          invalid: control.bool(false),
+          symbol: control.text('₺', 'symbol', '₺ / $ / €'),
+        }}
+        render={(v) => (
+          <MoneyInput
+            scale={Number(v.scale)}
+            nonNegative={v.nonNegative}
+            invalid={v.invalid}
+            symbol={v.symbol === '' ? '₺' : v.symbol}
+            defaultValue={new Decimal('1234.5')}
+            placeholder="0,00"
+          />
+        )}
+      />
+
+      <Preview
+        title="MoneyInput — null/empty kontratı (etkileşimli)"
+        description="Boş alan null'a çözülür ('user 0 yazdı' ≠ 'user temizledi'). Değer Decimal'a çevrilir ve Currency display ile aynı kontratı paylaşır — buraya girdiğin tutar <Currency /> ile aynen okunur. Alanları doldur/temizle, çıktıyı canlı izle."
+      >
+        <MoneyInputContractDemo />
+      </Preview>
+    </div>
+  );
+}
+
+function MoneyInputContractDemo(): React.ReactElement {
   const [productCost, setProductCost] = React.useState<Decimal | null>(new Decimal('1234.5'));
   const [shippingCost, setShippingCost] = React.useState<Decimal | null>(null);
-  const [adSpend, setAdSpend] = React.useState<Decimal | null>(new Decimal('249.9'));
 
   return (
     <div className="gap-md grid sm:grid-cols-2">
@@ -18,7 +53,7 @@ export function MoneyInputShowcase(): React.ReactElement {
         <Label htmlFor="cost">Ürün maliyeti</Label>
         <MoneyInput id="cost" value={productCost} onChange={setProductCost} placeholder="0,00" />
         <span className="text-2xs text-muted-foreground">
-          Decimal.js: <Currency value={productCost ?? 0} dimWhenZero />
+          Currency display: <Currency value={productCost ?? 0} dimWhenZero />
         </span>
       </div>
 
@@ -32,43 +67,6 @@ export function MoneyInputShowcase(): React.ReactElement {
         />
         <span className="text-2xs text-muted-foreground">
           Değer: {shippingCost === null ? 'null' : shippingCost.toString()}
-        </span>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <Label htmlFor="ads">Reklam gideri (nonNegative)</Label>
-        <MoneyInput id="ads" value={adSpend} onChange={setAdSpend} nonNegative placeholder="0,00" />
-        <span className="text-2xs text-muted-foreground">
-          Negatif girersen otomatik pozitife çevrilir.
-        </span>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <Label htmlFor="ads-invalid">Hatalı alan örneği</Label>
-        <MoneyInput
-          id="ads-invalid"
-          defaultValue={new Decimal('99.99')}
-          invalid
-          placeholder="0,00"
-        />
-        <span className="text-2xs text-destructive">
-          Bu maliyet için bir kategori seçmen gerekiyor.
-        </span>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <Label htmlFor="usd">USD (özel sembol)</Label>
-        <MoneyInput id="usd" symbol="$" defaultValue={new Decimal('299')} placeholder="0.00" />
-        <span className="text-2xs text-muted-foreground">
-          Sembol prop&apos;u TRY dışı pazarlar / ileride için.
-        </span>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <Label htmlFor="whole">Tam TRY (scale=0)</Label>
-        <MoneyInput id="whole" scale={0} defaultValue={new Decimal('150000')} placeholder="0" />
-        <span className="text-2xs text-muted-foreground">
-          Ondalıksız tutarlar için (örn. komisyon eşiği).
         </span>
       </div>
     </div>

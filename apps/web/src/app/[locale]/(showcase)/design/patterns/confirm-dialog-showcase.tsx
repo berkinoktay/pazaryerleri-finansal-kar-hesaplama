@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 
 export function ConfirmDialogShowcase(): React.ReactElement {
   const [controlledOpen, setControlledOpen] = React.useState(false);
-  const [asyncOpen, setAsyncOpen] = React.useState(false);
   const [confirmedAction, setConfirmedAction] = React.useState<string | null>(null);
 
   const simulateAsync = React.useCallback(async (label: string) => {
@@ -17,7 +16,7 @@ export function ConfirmDialogShowcase(): React.ReactElement {
   }, []);
 
   return (
-    <div className="gap-md grid sm:grid-cols-2">
+    <div className="gap-md grid sm:grid-cols-3">
       <div className="gap-3xs flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
           Trigger-based — destructive (default)
@@ -36,21 +35,22 @@ export function ConfirmDialogShowcase(): React.ReactElement {
 
       <div className="gap-3xs flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Controlled — caller open state
+          Controlled + async (caller open · 1.2s spinner)
         </span>
         <Button variant="outline" onClick={() => setControlledOpen(true)}>
-          Komisyon profilini sil…
+          Mutabakatı kapat…
         </Button>
         <ConfirmDialog
           open={controlledOpen}
           onOpenChange={setControlledOpen}
-          title="Komisyon profilini sil?"
-          description="Bu profile bağlı 14 ürün varsayılan kategori komisyonuna geri döner."
-          confirmLabel="Profili sil"
-          onConfirm={() => simulateAsync('Komisyon profili silindi')}
+          title="Nisan 2026 mutabakatını kapat?"
+          description="Tüm sipariş hakediş kayıtları finalize edilir; sonradan satır eklenemez."
+          confirmLabel="Mutabakatı kapat"
+          onConfirm={() => simulateAsync('Mutabakat kapatıldı')}
         />
         <span className="text-2xs text-muted-foreground">
-          open + onOpenChange caller&apos;ın elinde — URL state ile birleştirilebilir.
+          open + onOpenChange caller&apos;da (URL state ile birleştirilebilir); confirm sırasında
+          iki buton disabled, confirm spinner ile değişir.
         </span>
       </div>
 
@@ -72,28 +72,8 @@ export function ConfirmDialogShowcase(): React.ReactElement {
         </span>
       </div>
 
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Async + spinner (1.2s gecikme)
-        </span>
-        <Button variant="outline" onClick={() => setAsyncOpen(true)}>
-          Mutabakatı kapat…
-        </Button>
-        <ConfirmDialog
-          open={asyncOpen}
-          onOpenChange={setAsyncOpen}
-          title="Nisan 2026 mutabakatını kapat?"
-          description="Tüm sipariş hakediş kayıtları finalize edilir; sonradan satır eklenemez."
-          confirmLabel="Mutabakatı kapat"
-          onConfirm={() => simulateAsync('Mutabakat kapatıldı')}
-        />
-        <span className="text-2xs text-muted-foreground">
-          Confirm butonu loading sırasında spinner ile değişir; iki buton da disabled.
-        </span>
-      </div>
-
       {confirmedAction !== null ? (
-        <div className="border-success/20 bg-success-surface text-success p-sm rounded-md text-sm sm:col-span-2">
+        <div className="border-success/20 bg-success-surface text-success p-sm rounded-md text-sm sm:col-span-3">
           Son onaylanan: <strong>{confirmedAction}</strong>
           <button
             type="button"

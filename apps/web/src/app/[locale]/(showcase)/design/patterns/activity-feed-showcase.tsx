@@ -6,12 +6,12 @@ import {
   Database01Icon,
   Loading03Icon,
   RefreshIcon,
-  ShoppingBag01Icon,
 } from 'hugeicons-react';
 import * as React from 'react';
 
 import { ActivityFeed, type ActivityFeedEntry } from '@/components/patterns/activity-feed';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { Playground, control } from '@/components/showcase/playground';
 
 const SYNC_HISTORY: ActivityFeedEntry[] = [
   {
@@ -66,106 +66,43 @@ const SYNC_HISTORY: ActivityFeedEntry[] = [
   },
 ];
 
-const COMPACT_AUDIT: ActivityFeedEntry[] = [
-  {
-    id: 'cost-update',
-    tone: 'info',
-    title: 'Ürün maliyeti güncellendi',
-    description: '12 ürünün maliyet bilgisi yeniden hesaplandı.',
-    timestamp: '3 dk önce',
-  },
-  {
-    id: 'expense-added',
-    tone: 'success',
-    title: 'Reklam gideri eklendi',
-    description: '₺3.250,00 — Trendyol kampanya bütçesi.',
-    timestamp: '12 dk önce',
-  },
-  {
-    id: 'commission-edit',
-    tone: 'warning',
-    title: 'Komisyon oranı düzenlendi',
-    description: 'Elektronik kategorisi: %23,64 → %25,00.',
-    timestamp: '1 saat önce',
-  },
-];
-
 export function ActivityFeedShowcase(): React.ReactElement {
   return (
     <div className="gap-lg flex flex-col">
-      <div className="gap-sm flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Senkron geçmişi — full (icon + tone + detail)
-        </span>
-        <div className="border-border bg-card p-md rounded-md border">
-          <ActivityFeed entries={SYNC_HISTORY} aria-label="Senkronizasyon geçmişi" />
-        </div>
-      </div>
-
-      <div className="gap-md grid lg:grid-cols-2">
-        <div className="gap-sm flex flex-col">
-          <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-            Kompakt — sidebar / context-rail için
-          </span>
-          <div className="border-border bg-card p-md rounded-md border">
-            <ActivityFeed entries={COMPACT_AUDIT} compact aria-label="Son aktivite (kompakt)" />
-          </div>
-        </div>
-
-        <div className="gap-sm flex flex-col">
-          <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-            Boş durum — yedek node verilirse render edilir
-          </span>
-          <div className="border-border bg-card p-md rounded-md border">
+      <Playground
+        title="ActivityFeed — compact · showConnector"
+        description="Per-entry tone + icon-in-circle + opsiyonel detail paneli içerik tarafında yaşar (config değil). compact sidebar/context-rail ritmine geçirir; showConnector entryler arası dikey çizgiyi açar/kapar."
+        controls={{
+          compact: control.bool(false, 'compact'),
+          showConnector: control.bool(true, 'showConnector'),
+        }}
+        render={(v) => (
+          <div className="border-border bg-card p-md w-full rounded-md border">
             <ActivityFeed
-              entries={[]}
-              aria-label="Aktivite yok"
-              emptyState={
-                <EmptyState
-                  icon={Database01Icon}
-                  title="Henüz aktivite yok"
-                  description="İlk senkron tamamlandığında burada görünecek."
-                />
-              }
+              entries={SYNC_HISTORY}
+              compact={v.compact}
+              showConnector={v.showConnector}
+              aria-label="Senkronizasyon geçmişi"
             />
           </div>
-        </div>
-      </div>
+        )}
+      />
 
       <div className="gap-sm flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Connector kapalı — düz liste varyantı
+          Boş durum — emptyState slotu (EmptyState ile birleşir)
         </span>
         <div className="border-border bg-card p-md rounded-md border">
           <ActivityFeed
-            showConnector={false}
-            entries={[
-              {
-                id: 'a',
-                tone: 'success',
-                icon: <ShoppingBag01Icon />,
-                title: 'Yeni sipariş alındı',
-                description: 'TY-2948021 · ₺249,90',
-                timestamp: '2 dk önce',
-              },
-              {
-                id: 'b',
-                tone: 'success',
-                icon: <ShoppingBag01Icon />,
-                title: 'Yeni sipariş alındı',
-                description: 'TY-2948020 · ₺139,50',
-                timestamp: '4 dk önce',
-              },
-              {
-                id: 'c',
-                tone: 'success',
-                icon: <ShoppingBag01Icon />,
-                title: 'Yeni sipariş alındı',
-                description: 'TY-2948019 · ₺89,00',
-                timestamp: '6 dk önce',
-              },
-            ]}
-            aria-label="Son siparişler"
+            entries={[]}
+            aria-label="Aktivite yok"
+            emptyState={
+              <EmptyState
+                icon={Database01Icon}
+                title="Henüz aktivite yok"
+                description="İlk senkron tamamlandığında burada görünecek."
+              />
+            }
           />
         </div>
       </div>

@@ -149,55 +149,6 @@ function EmptyExample(): React.ReactElement {
   );
 }
 
-function ServerModeExample(): React.ReactElement {
-  // Simulate a server: total of 1.472 rows across 30 pages of 50; the
-  // "API" returns a slice for the current page on demand.
-  const TOTAL_ROWS = 1472;
-  const PAGE_SIZE = 50;
-  const PAGE_COUNT = Math.ceil(TOTAL_ROWS / PAGE_SIZE);
-
-  const [pagination, setPagination] = React.useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: PAGE_SIZE,
-  });
-  const [pageRows, setPageRows] = React.useState<OrderRow[]>(() => buildOrders(PAGE_SIZE, 0));
-  const [loading, setLoading] = React.useState(false);
-
-  // "Fetch" the slice when pagination changes — mirrors the React Query
-  // hook a real feature would wire up. setTimeout simulates network latency.
-  React.useEffect(() => {
-    setLoading(true);
-    const timer = setTimeout(() => {
-      const offset = pagination.pageIndex * pagination.pageSize;
-      const rowsThisPage = Math.min(pagination.pageSize, TOTAL_ROWS - offset);
-      setPageRows(buildOrders(rowsThisPage, offset));
-      setLoading(false);
-    }, 320);
-    return () => clearTimeout(timer);
-  }, [pagination.pageIndex, pagination.pageSize]);
-
-  const table = useReactTable({
-    data: pageRows,
-    columns: COLUMNS,
-    state: { pagination },
-    onPaginationChange: setPagination,
-    getCoreRowModel: getCoreRowModel(),
-    manualPagination: true,
-    pageCount: PAGE_COUNT,
-    rowCount: TOTAL_ROWS,
-  });
-
-  return (
-    <div className="gap-md flex flex-col">
-      <span className="text-2xs text-muted-foreground">
-        {loading ? 'Sayfa getiriliyor…' : 'Hazır.'}
-      </span>
-      <MiniTable table={table} />
-      <DataTablePagination table={table} />
-    </div>
-  );
-}
-
 export function DataTablePaginationShowcase(): React.ReactElement {
   return (
     <div className="gap-lg flex flex-col">
@@ -234,17 +185,11 @@ export function DataTablePaginationShowcase(): React.ReactElement {
         </span>
       </div>
 
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Server-side mode — manualPagination + pageCount + rowCount
-        </span>
-        <ServerModeExample />
-        <span className="text-2xs text-muted-foreground">
-          1.472 satırlık &quot;sunucu&quot;, sayfa başına 50, 30 sayfa. Aynı UI; sayfa değiştikçe
-          parent fetch tetikler. Component table.getPageCount() / getRowCount()&apos;u okur — kim
-          paginate ediyor bilmez.
-        </span>
-      </div>
+      <p className="text-2xs text-muted-foreground">
+        Server-side mode (manualPagination + pageCount + rowCount) için &quot;Sayfalama &amp; sunucu
+        modu&quot; bölümündeki Sunucu modu demosuna bak — aynı pagination UI&apos;ı, slice
+        parent&apos;tan fetch edilir.
+      </p>
     </div>
   );
 }

@@ -4,9 +4,43 @@ import Decimal from 'decimal.js';
 import * as React from 'react';
 
 import { PercentageInput } from '@/components/patterns/percentage-input';
+import { Playground, control } from '@/components/showcase/playground';
+import { Preview } from '@/components/showcase/preview';
 import { Label } from '@/components/ui/label';
 
 export function PercentageInputShowcase(): React.ReactElement {
+  return (
+    <div className="gap-lg flex flex-col">
+      <Playground
+        title="PercentageInput — scale · nonNegative · invalid"
+        description="MoneyInput'un kardeşi: % leading slot (Türkçe konvansiyonu '%23,64', '23,64%' değil), aynı tr-TR parser, Decimal çıktı. Sınır YOK varsayılan — komisyon %100'ü geçebilir, marj negatif olabilir. nonNegative aç → negatif girişi pozitife çevirir. scale=0 tam yüzde (KDV, stopaj)."
+        controls={{
+          scale: control.segment(['0', '2'], '2'),
+          nonNegative: control.bool(false),
+          invalid: control.bool(false),
+        }}
+        render={(v) => (
+          <PercentageInput
+            scale={Number(v.scale)}
+            nonNegative={v.nonNegative}
+            invalid={v.invalid}
+            defaultValue={new Decimal('23.64')}
+            placeholder="0,00"
+          />
+        )}
+      />
+
+      <Preview
+        title="PercentageInput — komisyon, marj, indirim (etkileşimli)"
+        description="Komisyon, vergi, marj, indirim için. Zarar pozisyonunda negatif marj normaldir; nonNegative yalnız indirim gibi pozitif-zorunlu alanlarda. Yaz, çıktıyı canlı izle."
+      >
+        <PercentageInputContractDemo />
+      </Preview>
+    </div>
+  );
+}
+
+function PercentageInputContractDemo(): React.ReactElement {
   const [commission, setCommission] = React.useState<Decimal | null>(new Decimal('23.64'));
   const [margin, setMargin] = React.useState<Decimal | null>(new Decimal('-5.2'));
   const [discount, setDiscount] = React.useState<Decimal | null>(null);
@@ -30,7 +64,7 @@ export function PercentageInputShowcase(): React.ReactElement {
         <Label htmlFor="margin">Kar marjı (negatif olabilir)</Label>
         <PercentageInput id="margin" value={margin} onChange={setMargin} placeholder="0,00" />
         <span className="text-2xs text-muted-foreground">
-          Zarar pozisyonunda negatif marj normaldir.
+          Değer: {margin === null ? 'null' : `%${margin.toString()}`}
         </span>
       </div>
 
@@ -45,14 +79,6 @@ export function PercentageInputShowcase(): React.ReactElement {
         />
         <span className="text-2xs text-muted-foreground">
           Negatif girersen otomatik pozitife çevrilir.
-        </span>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <Label htmlFor="vat">KDV (scale=0)</Label>
-        <PercentageInput id="vat" scale={0} defaultValue={new Decimal('20')} placeholder="0" />
-        <span className="text-2xs text-muted-foreground">
-          Tam yüzde değerleri (KDV, stopaj) için ondalıksız.
         </span>
       </div>
     </div>

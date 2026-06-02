@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import { BarChart } from '@/components/patterns/chart-bar';
 import { ChartFrame } from '@/components/patterns/chart-frame';
-import type { ChartStatus } from '@/components/patterns/chart.types';
+import type { ChartColorMode, ChartStatus } from '@/components/patterns/chart.types';
 import { Currency } from '@/components/patterns/currency';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -23,7 +23,18 @@ const DAILY_NET = [
   { day: 'Paz', net: 510, prev: 560 },
 ] as const;
 
+// Category breakdown for brand / categorical modes — all-positive, no sign drama
+// (`brand` = one color count, `categorical` = palette per bar).
+const CATEGORY_PROFIT = [
+  { category: 'Elektronik', profit: 1840 },
+  { category: 'Giyim', profit: 1260 },
+  { category: 'Ev & Yaşam', profit: 920 },
+  { category: 'Kozmetik', profit: 740 },
+  { category: 'Kitap', profit: 380 },
+] as const;
+
 const WEEK_NET = 2210;
+const CATEGORY_TOTAL = 5140;
 const LAST_SYNC = new Date('2026-06-01T18:07:00Z');
 
 const STATUS_OPTIONS = [
@@ -33,20 +44,37 @@ const STATUS_OPTIONS = [
   { value: 'error', label: 'Hata' },
 ] as const;
 
+const COLOR_MODES = [
+  { value: 'semantic', label: 'semantic' },
+  { value: 'brand', label: 'brand' },
+  { value: 'categorical', label: 'categorical' },
+] as const;
+
 const PERIODS = [
   { value: '7d', label: '7G' },
   { value: '30d', label: '30G' },
   { value: '90d', label: '90G' },
 ] as const;
 
-/** Primary demo: daily net P&L (semantic per-bar sign) + optional comparison. */
+/**
+ * Primary demo: daily net P&L (semantic per-bar sign) with the colorMode
+ * dimension folded into one control strip. `semantic` (default) colors each bar
+ * by its OWN sign — kâr günü yeşil, zarar günü kırmızı — and unlocks the "Geçen
+ * haftayla karşılaştır" grouped comparison bar (delta + context + legend).
+ * Switching to `brand` / `categorical` reuses the SAME BarChart for a
+ * non-P&L breakdown (kategoriye göre net kâr): one brand color, or the
+ * qualitative palette per bar. Status + period stay component-owned.
+ */
 export function ChartBarShowcase(): React.ReactElement {
   const [status, setStatus] = React.useState<ChartStatus>('ready');
+  const [colorMode, setColorMode] = React.useState<ChartColorMode>('semantic');
   const [period, setPeriod] = React.useState<string>('7d');
   const [compare, setCompare] = React.useState<boolean>(false);
 
-  const data = status === 'ready' ? DAILY_NET : [];
-  const comparing = compare && status === 'ready';
+  const ready = status === 'ready';
+  const isSemantic = colorMode === 'semantic';
+  // The grouped comparison bar belongs to the daily P&L story only.
+  const comparing = compare && isSemantic && ready;
 
   return (
     <div className="gap-md flex flex-col">
@@ -69,110 +97,96 @@ export function ChartBarShowcase(): React.ReactElement {
         </ToggleGroup>
 
         <div className="gap-xs flex items-center">
-          <Switch id="bar-compare" checked={compare} onCheckedChange={setCompare} />
-          <Label htmlFor="bar-compare" className="text-muted-foreground">
-            Geçen haftayla karşılaştır
-          </Label>
+          <Label className="text-muted-foreground">colorMode</Label>
+          <ToggleGroup
+            type="single"
+            value={colorMode}
+            onValueChange={(next) => {
+              const option = COLOR_MODES.find((candidate) => candidate.value === next);
+              if (option) setColorMode(option.value);
+            }}
+            size="sm"
+            aria-label="Renk modu"
+          >
+            {COLOR_MODES.map((option) => (
+              <ToggleGroupItem key={option.value} value={option.value}>
+                {option.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
+
+        {isSemantic ? (
+          <div className="gap-xs flex items-center">
+            <Switch id="bar-compare" checked={compare} onCheckedChange={setCompare} />
+            <Label htmlFor="bar-compare" className="text-muted-foreground">
+              Geçen haftayla karşılaştır
+            </Label>
+          </div>
+        ) : null}
       </div>
 
-      <ChartFrame
-        title="Bu Hafta Net Kâr"
-        value={<Currency value={WEEK_NET} />}
-        delta={comparing ? { percent: 6, goodDirection: 'up' } : undefined}
-        context={comparing ? 'Geçen haftadan +₺130 · 2 zarar günü' : undefined}
-        legend={
-          comparing
-            ? [
-                {
-                  label: 'Bu hafta',
-                  value: <Currency value={2210} />,
-                  swatch: 'var(--color-chart-positive)',
-                },
-                {
-                  label: 'Geçen hafta',
-                  value: <Currency value={2570} />,
-                  swatch: 'var(--color-muted-foreground)',
-                  reference: true,
-                },
-              ]
-            : undefined
-        }
-        liveBadge
-        lastSyncedAt={LAST_SYNC}
-        source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
-        status={status}
-        chartKind="bar"
-        onRetry={() => setStatus('ready')}
-        period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
-      >
-        <BarChart
-          data={data}
-          xKey="day"
-          series={{ key: 'net', label: 'Bu hafta', format: 'currency' }}
-          comparison={
-            compare ? { key: 'prev', label: 'Geçen hafta', format: 'currency' } : undefined
+      {isSemantic ? (
+        <ChartFrame
+          title="Bu Hafta Net Kâr"
+          value={<Currency value={WEEK_NET} />}
+          delta={comparing ? { percent: 6, goodDirection: 'up' } : undefined}
+          context={comparing ? 'Geçen haftadan +₺130 · 2 zarar günü' : undefined}
+          legend={
+            comparing
+              ? [
+                  {
+                    label: 'Bu hafta',
+                    value: <Currency value={2210} />,
+                    swatch: 'var(--color-chart-positive)',
+                  },
+                  {
+                    label: 'Geçen hafta',
+                    value: <Currency value={2570} />,
+                    swatch: 'var(--color-muted-foreground)',
+                    reference: true,
+                  },
+                ]
+              : undefined
           }
-        />
-      </ChartFrame>
+          liveBadge
+          lastSyncedAt={LAST_SYNC}
+          source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
+          status={status}
+          chartKind="bar"
+          onRetry={() => setStatus('ready')}
+          period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
+        >
+          <BarChart
+            data={ready ? DAILY_NET : []}
+            xKey="day"
+            series={{ key: 'net', label: 'Bu hafta', format: 'currency' }}
+            comparison={
+              comparing ? { key: 'prev', label: 'Geçen hafta', format: 'currency' } : undefined
+            }
+            colorMode="semantic"
+          />
+        </ChartFrame>
+      ) : (
+        <ChartFrame
+          title="Kategoriye Göre Net Kâr — bu ay"
+          value={<Currency value={CATEGORY_TOTAL} />}
+          lastSyncedAt={LAST_SYNC}
+          source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
+          status={status}
+          chartKind="bar"
+          onRetry={() => setStatus('ready')}
+          period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
+        >
+          <BarChart
+            data={ready ? CATEGORY_PROFIT : []}
+            xKey="category"
+            series={{ key: 'profit', label: 'Net Kâr', format: 'currency' }}
+            colorMode={colorMode}
+          />
+        </ChartFrame>
+      )}
     </div>
-  );
-}
-
-// Profit by category — `colorMode="categorical"` paints each bar from the
-// qualitative palette. A breakdown, not a P&L, so no zero baseline drama.
-const CATEGORY_PROFIT = [
-  { category: 'Elektronik', profit: 1840 },
-  { category: 'Giyim', profit: 1260 },
-  { category: 'Ev & Yaşam', profit: 920 },
-  { category: 'Kozmetik', profit: 740 },
-  { category: 'Kitap', profit: 380 },
-] as const;
-
-/** Reuse demo: categorical breakdown (palette per bar). */
-export function ChartBarCategoricalShowcase(): React.ReactElement {
-  return (
-    <ChartFrame
-      title="Kategoriye Göre Net Kâr — bu ay"
-      value={<Currency value={5140} />}
-      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
-    >
-      <BarChart
-        data={CATEGORY_PROFIT}
-        xKey="category"
-        series={{ key: 'profit', label: 'Net Kâr', format: 'currency' }}
-        colorMode="categorical"
-      />
-    </ChartFrame>
-  );
-}
-
-// Daily order count — `colorMode="brand"`: one brand color, neutral metric.
-const DAILY_ORDERS = [
-  { day: 'Pzt', orders: 42 },
-  { day: 'Sal', orders: 51 },
-  { day: 'Çar', orders: 38 },
-  { day: 'Per', orders: 64 },
-  { day: 'Cum', orders: 72 },
-  { day: 'Cmt', orders: 95 },
-  { day: 'Paz', orders: 88 },
-] as const;
-
-/** Reuse demo: a neutral count in brand mode. */
-export function ChartBarBrandShowcase(): React.ReactElement {
-  return (
-    <ChartFrame
-      title="Günlük Sipariş Adedi — son 7 gün"
-      value={450}
-      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
-    >
-      <BarChart
-        data={DAILY_ORDERS}
-        xKey="day"
-        series={{ key: 'orders', label: 'Sipariş', format: 'number' }}
-        colorMode="brand"
-      />
-    </ChartFrame>
   );
 }
 

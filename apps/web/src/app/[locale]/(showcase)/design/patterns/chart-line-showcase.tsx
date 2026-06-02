@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import { ChartFrame } from '@/components/patterns/chart-frame';
 import { LineChart } from '@/components/patterns/chart-line';
-import type { ChartStatus } from '@/components/patterns/chart.types';
+import type { ChartColorMode, ChartStatus } from '@/components/patterns/chart.types';
 import { Currency } from '@/components/patterns/currency';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -34,15 +34,34 @@ const TODAY_NET = [
   { hour: '23:00', prev: 730 },
 ] as const;
 
+// Neutral metric (order count) for the brand / categorical color modes — no +/-
+// meaning, so no zero-split and no comparison story.
+const ORDERS_7D = [
+  { day: 'Pzt', orders: 42 },
+  { day: 'Sal', orders: 51 },
+  { day: 'Çar', orders: 38 },
+  { day: 'Per', orders: 64 },
+  { day: 'Cum', orders: 72 },
+  { day: 'Cmt', orders: 95 },
+  { day: 'Paz', orders: 88 },
+] as const;
+
 // Deterministic ISO string (not Date.now) so SSR and client agree.
 const LAST_SYNC = new Date('2026-06-01T18:07:00Z');
 const NET_TODAY = 644;
+const ORDERS_TOTAL = 450;
 
 const STATUS_OPTIONS = [
   { value: 'ready', label: 'Dolu' },
   { value: 'loading', label: 'Yükleniyor' },
   { value: 'empty', label: 'Boş' },
   { value: 'error', label: 'Hata' },
+] as const;
+
+const COLOR_MODES = [
+  { value: 'semantic', label: 'semantic' },
+  { value: 'brand', label: 'brand' },
+  { value: 'categorical', label: 'categorical' },
 ] as const;
 
 const PERIODS = [
@@ -52,20 +71,28 @@ const PERIODS = [
 ] as const;
 
 /**
- * Interactive P&L demo. The card stays lean by default (title · value · period);
- * toggling "Dün ile karşılaştır" reveals the chart-intrinsic comparison story —
- * a delta chip, a context sub-line, and an inline legend — without ever pulling
- * in secondary KPIs (those compose as sibling StatCards at the page level).
+ * Interactive P&L demo + the colorMode dimension folded into one control strip.
+ * `semantic` (default) plots today's cumulative net profit with the zero-split,
+ * the live-edge dot, and an optional "Dün ile karşılaştır" reveal (delta chip +
+ * context sub-line + inline legend). Switching to `brand` / `categorical` reuses
+ * the SAME LineChart for a neutral metric (order count) — no zero-split, no
+ * comparison story — proving the component spans P&L and non-P&L charts. Status
+ * and period stay component-owned (live, interactive).
  */
 export function ChartLineShowcase(): React.ReactElement {
   const [status, setStatus] = React.useState<ChartStatus>('ready');
+  const [colorMode, setColorMode] = React.useState<ChartColorMode>('semantic');
   const [period, setPeriod] = React.useState<string>('today');
   const [compare, setCompare] = React.useState<boolean>(false);
 
+  const isSemantic = colorMode === 'semantic';
+  // Comparison is intrinsic to the P&L narrative; a neutral count has no
+  // period-over-period story, so the reveal only exists in semantic mode.
+  const comparing = compare && isSemantic && status === 'ready';
+
   // The plot renders its real (empty) axes for non-ready states; ChartFrame
   // overlays the loading shimmer / empty hint / error on top.
-  const data = status === 'ready' ? TODAY_NET : [];
-  const comparing = compare && status === 'ready';
+  const ready = status === 'ready';
 
   return (
     <div className="gap-md flex flex-col">
@@ -88,83 +115,93 @@ export function ChartLineShowcase(): React.ReactElement {
         </ToggleGroup>
 
         <div className="gap-xs flex items-center">
-          <Switch id="chart-compare" checked={compare} onCheckedChange={setCompare} />
-          <Label htmlFor="chart-compare" className="text-muted-foreground">
-            Dün ile karşılaştır
-          </Label>
+          <Label className="text-muted-foreground">colorMode</Label>
+          <ToggleGroup
+            type="single"
+            value={colorMode}
+            onValueChange={(next) => {
+              const option = COLOR_MODES.find((candidate) => candidate.value === next);
+              if (option) setColorMode(option.value);
+            }}
+            size="sm"
+            aria-label="Renk modu"
+          >
+            {COLOR_MODES.map((option) => (
+              <ToggleGroupItem key={option.value} value={option.value}>
+                {option.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
+
+        {isSemantic ? (
+          <div className="gap-xs flex items-center">
+            <Switch id="chart-compare" checked={compare} onCheckedChange={setCompare} />
+            <Label htmlFor="chart-compare" className="text-muted-foreground">
+              Dün ile karşılaştır
+            </Label>
+          </div>
+        ) : null}
       </div>
 
-      <ChartFrame
-        title="Bugünkü Net Kâr"
-        value={<Currency value={NET_TODAY} />}
-        delta={comparing ? { percent: -7, goodDirection: 'up' } : undefined}
-        context={comparing ? 'Dün aynı saatte ₺690 · ₺46 geride' : undefined}
-        legend={
-          comparing
-            ? [
-                {
-                  label: 'Bugün',
-                  value: <Currency value={644} />,
-                  swatch: 'var(--color-chart-positive)',
-                },
-                {
-                  label: 'Dün',
-                  value: <Currency value={690} />,
-                  swatch: 'var(--color-muted-foreground)',
-                  reference: true,
-                },
-              ]
-            : undefined
-        }
-        liveBadge
-        lastSyncedAt={LAST_SYNC}
-        source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
-        status={status}
-        onRetry={() => setStatus('ready')}
-        period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
-      >
-        <LineChart
-          data={data}
-          xKey="hour"
-          series={{ key: 'net', label: 'Bugün', format: 'currency' }}
-          comparison={compare ? { key: 'prev', label: 'Dün', format: 'currency' } : undefined}
-          liveDot
-        />
-      </ChartFrame>
+      {isSemantic ? (
+        <ChartFrame
+          title="Bugünkü Net Kâr"
+          value={<Currency value={NET_TODAY} />}
+          delta={comparing ? { percent: -7, goodDirection: 'up' } : undefined}
+          context={comparing ? 'Dün aynı saatte ₺690 · ₺46 geride' : undefined}
+          legend={
+            comparing
+              ? [
+                  {
+                    label: 'Bugün',
+                    value: <Currency value={644} />,
+                    swatch: 'var(--color-chart-positive)',
+                  },
+                  {
+                    label: 'Dün',
+                    value: <Currency value={690} />,
+                    swatch: 'var(--color-muted-foreground)',
+                    reference: true,
+                  },
+                ]
+              : undefined
+          }
+          liveBadge
+          lastSyncedAt={LAST_SYNC}
+          source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
+          status={status}
+          onRetry={() => setStatus('ready')}
+          period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
+        >
+          <LineChart
+            data={ready ? TODAY_NET : []}
+            xKey="hour"
+            series={{ key: 'net', label: 'Bugün', format: 'currency' }}
+            comparison={comparing ? { key: 'prev', label: 'Dün', format: 'currency' } : undefined}
+            colorMode="semantic"
+            liveDot
+          />
+        </ChartFrame>
+      ) : (
+        <ChartFrame
+          title="Sipariş Adedi — son 7 gün"
+          value={ORDERS_TOTAL}
+          lastSyncedAt={LAST_SYNC}
+          source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
+          status={status}
+          onRetry={() => setStatus('ready')}
+          period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
+        >
+          <LineChart
+            data={ready ? ORDERS_7D : []}
+            xKey="day"
+            series={{ key: 'orders', label: 'Sipariş', format: 'number' }}
+            colorMode={colorMode}
+          />
+        </ChartFrame>
+      )}
     </div>
-  );
-}
-
-// Same component, a neutral metric: `colorMode="brand"` drops the zero-split and
-// paints one brand line — proving LineChart reuses across non-P&L charts too.
-const ORDERS_7D = [
-  { day: 'Pzt', orders: 42 },
-  { day: 'Sal', orders: 51 },
-  { day: 'Çar', orders: 38 },
-  { day: 'Per', orders: 64 },
-  { day: 'Cum', orders: 72 },
-  { day: 'Cmt', orders: 95 },
-  { day: 'Paz', orders: 88 },
-] as const;
-
-const ORDERS_TOTAL = 450;
-
-/** Reuse demo: the same LineChart in `brand` mode for a neutral (non-P&L) metric. */
-export function ChartLineBrandShowcase(): React.ReactElement {
-  return (
-    <ChartFrame
-      title="Sipariş Adedi — son 7 gün"
-      value={ORDERS_TOTAL}
-      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
-    >
-      <LineChart
-        data={ORDERS_7D}
-        xKey="day"
-        series={{ key: 'orders', label: 'Sipariş', format: 'number' }}
-        colorMode="brand"
-      />
-    </ChartFrame>
   );
 }
 
