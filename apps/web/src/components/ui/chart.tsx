@@ -128,6 +128,35 @@ interface ChartTooltipContentProps {
   className?: string;
 }
 
+/**
+ * The single colour swatch used by EVERY chart legend + tooltip across the kit
+ * (recharts tooltip/legend, ChartFrame's inline legend, the donut/ranking
+ * legends) so a series colour reads identically everywhere — one shape, one
+ * size. A `reference` swatch is hollow (a ring) for a comparison series.
+ */
+export function ChartSwatch({
+  color,
+  reference,
+  className,
+}: {
+  color?: string;
+  reference?: boolean;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <span
+      className={cn(
+        'size-2.5 shrink-0 rounded-full',
+        reference && 'border-2 bg-transparent',
+        className,
+      )}
+      // runtime-dynamic: swatch colour is data-driven
+      style={reference ? { borderColor: color } : { backgroundColor: color }}
+      aria-hidden
+    />
+  );
+}
+
 export const ChartTooltipContent = React.forwardRef<HTMLDivElement, ChartTooltipContentProps>(
   (
     { active, payload, label, hideLabel = false, variant = 'card', valueFormatter, className },
@@ -174,12 +203,8 @@ export const ChartTooltipContent = React.forwardRef<HTMLDivElement, ChartTooltip
             const itemConfig = entry.dataKey ? config[entry.dataKey] : undefined;
             return (
               <div key={entry.name} className="gap-xs flex items-center">
-                <span
-                  className="size-xs shrink-0 rounded-sm"
-                  // runtime-dynamic: chart entry color is data-driven
-                  style={{
-                    backgroundColor: itemConfig?.color ?? entry.color ?? 'var(--muted-foreground)',
-                  }}
+                <ChartSwatch
+                  color={itemConfig?.color ?? entry.color ?? 'var(--muted-foreground)'}
                 />
                 <span className="text-muted-foreground">{itemConfig?.label ?? entry.name}</span>
                 <span className="text-foreground ml-auto tabular-nums">{formatValue(entry)}</span>
@@ -220,13 +245,7 @@ export const ChartLegendContent = React.forwardRef<HTMLDivElement, ChartLegendCo
               key={entry.value}
               className="gap-xs text-2xs text-muted-foreground flex items-center"
             >
-              <span
-                className="size-2 shrink-0 rounded-sm"
-                // runtime-dynamic: legend color is data-driven
-                style={{
-                  backgroundColor: itemConfig?.color ?? entry.color ?? 'var(--muted-foreground)',
-                }}
-              />
+              <ChartSwatch color={itemConfig?.color ?? entry.color ?? 'var(--muted-foreground)'} />
               <span>{itemConfig?.label ?? entry.value}</span>
             </div>
           );

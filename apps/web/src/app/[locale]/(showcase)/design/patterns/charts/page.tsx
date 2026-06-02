@@ -13,6 +13,7 @@ import {
   ChartLineMetricShowcase,
   ChartLineShowcase,
 } from '../chart-line-showcase';
+import { ChartDonutShareShowcase, ChartDonutShowcase } from '../chart-donut-showcase';
 import {
   ChartRankingPnlShowcase,
   ChartRankingShareShowcase,
@@ -96,6 +97,20 @@ export default function ChartsPatternsPage(): React.ReactElement {
         description="colorMode='categorical': her satır nitel paletten (--chart-1..6) bir renk. Pazaryeri / kanal / kategori kırılımı sıralaması için."
       >
         <ChartRankingShareShowcase />
+      </Preview>
+
+      <Preview
+        title="DonutChart — gider dağılımı (pay) + durumlar"
+        description="İlk Cartesian-OLMAYAN tip (recharts Pie). Halka: nitel palet dilimler (yuvarlak cap + paddingAngle), MERKEZDE toplam + alt-başlık; sağda legend (renk · etiket · değer · %). Dilim üstüne gel → tooltip (etiket · değer · %). Durum (Dolu/Yükleniyor/Boş/Hata) → dairesel skeleton + boş halka."
+      >
+        <ChartDonutShowcase />
+      </Preview>
+
+      <Preview
+        title="DonutChart — pazaryeri payı (combined kaynak)"
+        description="Pazaryerlerine göre ciro payı. Footer kaynağı combined (Trendyol + Hepsiburada mağazaları → logo'lar + 'N mağaza')."
+      >
+        <ChartDonutShareShowcase />
       </Preview>
     </>
   );

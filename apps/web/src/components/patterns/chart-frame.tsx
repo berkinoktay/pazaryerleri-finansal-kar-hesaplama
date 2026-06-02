@@ -5,6 +5,7 @@ import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Card } from '@/components/ui/card';
+import { ChartSwatch } from '@/components/ui/chart';
 import { StatusDot } from '@/components/ui/status-dot';
 import { cn } from '@/lib/utils';
 
@@ -162,12 +163,7 @@ function ChartLegend({
     <div className="gap-md flex flex-wrap items-center">
       {items.map((item) => (
         <span key={item.label} className="gap-2xs text-2xs text-muted-foreground flex items-center">
-          <span
-            className={cn('size-2xs rounded-full', item.reference && 'border-2 bg-transparent')}
-            // runtime-dynamic: legend swatch color is series-driven
-            style={item.reference ? { borderColor: item.swatch } : { backgroundColor: item.swatch }}
-            aria-hidden
-          />
+          <ChartSwatch color={item.swatch} reference={item.reference} />
           {item.label}
           <span className="text-foreground font-medium tabular-nums">{item.value}</span>
         </span>

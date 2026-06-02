@@ -13,16 +13,16 @@ import { EmptyState } from './empty-state';
 
 /**
  * The non-data states a ChartFrame swaps the plot for. Both the loading skeleton
- * and the empty frame match the chart's `shape` (`line` | `bar` | `ranking`) so
- * each chart's non-data states keep its own orientation (a column chart never
- * shows a line silhouette; a horizontal ranking never shows columns):
+ * and the empty frame match the chart's `shape` (`line` | `bar` | `ranking` |
+ * `donut`) so each chart's non-data states keep its own orientation (a column
+ * chart never shows a line silhouette; a donut shows a ring, not bars):
  * - `ChartSkeleton shape` — the LOADING placeholder: for `line` / `bar`, a value
  *   y-gutter + hairline gridlines + a pulsing area silhouette / pulsing columns;
- *   for `ranking`, sorted pulsing pill rows. Reads as "the chart, data coming",
- *   never a generic grey box.
+ *   for `ranking`, sorted pulsing pill rows; for `donut`, a pulsing ring + legend
+ *   stubs. Reads as "the chart, data coming", never a generic grey box.
  * - `ChartEmptyFrame shape` — for `line` / `bar`, the chart's real empty axes
  *   (labels + gridlines, plus faint columns for `bar`); for `ranking`, faint
- *   sorted pill rows (no value axis).
+ *   sorted pill rows; for `donut`, a faint ring + legend stubs (no value axis).
  * - `ChartEmptyHint` — the quiet "no data" pill overlaid on the empty frame.
  * - `ChartError` — a destructive-tone block with a retry action.
  */
@@ -106,6 +106,51 @@ function RankingRows({
   );
 }
 
+// Legend-row count for the donut skeleton / empty figure.
+const DONUT_LEGEND_ROWS = [0, 1, 2, 3];
+
+/**
+ * Ring + side-legend placeholder for the donut shape — a pulsing / faint ring (a
+ * full circle with a card-coloured hole) beside a few legend-row stubs, matching
+ * the live donut's layout.
+ */
+function DonutFigure({
+  animated,
+  faint,
+}: {
+  animated: boolean;
+  faint?: boolean;
+}): React.ReactElement {
+  return (
+    <div className="gap-lg flex h-full items-center">
+      <div className="relative aspect-square h-full shrink-0 self-stretch">
+        <Skeleton
+          radius="full"
+          animated={animated}
+          className={cn('h-full w-full', faint && 'opacity-50')}
+        />
+        <div className="bg-card absolute inset-1/4 rounded-full" aria-hidden />
+      </div>
+      <div className="gap-sm flex flex-1 flex-col">
+        {DONUT_LEGEND_ROWS.map((row) => (
+          <div key={row} className="gap-sm flex items-center">
+            <Skeleton
+              radius="full"
+              animated={animated}
+              className={cn('size-2xs shrink-0', faint && 'opacity-50')}
+            />
+            <Skeleton
+              radius="xs"
+              animated={animated}
+              className={cn('h-2xs flex-1', faint && 'opacity-50')}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ChartSkeleton({ shape = 'line' }: { shape?: ChartShape }): React.ReactElement {
   const t = useTranslations('common.chart');
   // Ranking is horizontal: skip the value y-gutter + gridlines and show sorted
@@ -114,6 +159,13 @@ export function ChartSkeleton({ shape = 'line' }: { shape?: ChartShape }): React
     return (
       <div className="w-full" role="status" aria-busy aria-label={t('loading')}>
         <RankingRows animated />
+      </div>
+    );
+  }
+  if (shape === 'donut') {
+    return (
+      <div className="h-full w-full" role="status" aria-busy aria-label={t('loading')}>
+        <DonutFigure animated />
       </div>
     );
   }
@@ -188,6 +240,13 @@ export function ChartEmptyFrame({
     return (
       <div className={cn('w-full', className)} role="img" aria-label={ariaLabel}>
         <RankingRows animated={false} faint />
+      </div>
+    );
+  }
+  if (shape === 'donut') {
+    return (
+      <div className={cn('h-full w-full', className)} role="img" aria-label={ariaLabel}>
+        <DonutFigure animated={false} faint />
       </div>
     );
   }
