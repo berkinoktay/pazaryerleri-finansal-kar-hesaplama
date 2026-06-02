@@ -32,38 +32,26 @@
 Feature-based folder structure. Each route module has its own route, service, validator, and types:
 
 ```
-src/
-├── routes/
-│   ├── order.routes.ts          # Route definitions, delegates to service
-│   ├── product.routes.ts
-│   ├── store.routes.ts
-│   └── ...
-├── services/
-│   ├── order.service.ts         # Business logic, uses Prisma
-│   ├── product.service.ts
-│   └── ...
-├── validators/
-│   ├── order.validator.ts       # Zod schemas for request validation
-│   ├── store.validator.ts
-│   └── ...
-├── integrations/
-│   └── marketplace/             # Marketplace API adapters
-│       ├── types.ts             # Common MarketplaceAdapter interface
-│       ├── trendyol/
-│       │   ├── client.ts
-│       │   ├── mapper.ts
-│       │   └── types.ts
-│       └── hepsiburada/
-│           ├── client.ts
-│           ├── mapper.ts
-│           └── types.ts
-├── openapi/                     # Shared OpenAPI components (errors, pagination, rate-limit, security)
-├── scripts/
-│   └── dump-openapi.ts          # Build-time spec writer → packages/api-client/openapi.json
-├── middleware/
-├── lib/
-└── index.ts
+apps/api/
+├── src/
+│   ├── app.ts                   # createApp() factory — registers every route; imported by index.ts AND the spec dumper
+│   ├── index.ts                 # Runtime entry: builds the app, hands it to @hono/node-server's serve()
+│   ├── routes/                  # Route modules — flat `*.routes.ts`, or a folder per feature for larger areas
+│   │   ├── store.routes.ts      #   (e.g. orders/, products/, commission-rates/, shipping/, webhooks/, live-performance/)
+│   │   └── ...                  #   each route delegates to a service; never holds business logic
+│   ├── services/                # Business logic, owns all Prisma access
+│   │   └── order.service.ts
+│   ├── validators/              # Zod request/response schemas (with `.openapi()` metadata)
+│   │   └── order.validator.ts
+│   ├── openapi/                 # Shared OpenAPI components (errors, pagination, rate-limit, security)
+│   ├── middleware/              # auth, org-context, rate-limit, request-id
+│   ├── config/                  # Static backend config (e.g. rate-limits.ts)
+│   └── lib/                     # Backend-only utilities (crypto, errors, problem-details, map-prisma-error, …)
+└── scripts/
+    └── dump-openapi.ts          # Build-time spec writer → packages/api-client/openapi.json
 ```
+
+> **Marketplace adapters do NOT live in this app.** Trendyol/Hepsiburada HTTP clients, mappers, the `MarketplaceAdapter` interface, and the `getAdapter` registry are in **`@pazarsync/marketplace`** (`packages/marketplace`), shared with `apps/sync-worker`. The api imports from there: `import { getAdapter } from '@pazarsync/marketplace'`.
 
 ```typescript
 // ❌ Bad — business logic in route handler
@@ -307,10 +295,10 @@ return c.json({ orderDate: '2026-04-15T14:30:00.000Z' });
 
 ## Marketplace Adapters (Strategy Pattern)
 
-Each marketplace implements a common interface. New marketplaces are added by implementing this interface:
+Adapters live in **`@pazarsync/marketplace`** (`packages/marketplace`), not in this app — they're shared with `apps/sync-worker`. Each marketplace implements a common interface; new marketplaces are added by implementing it and registering the platform in the package registry:
 
 ```typescript
-// integrations/marketplace/types.ts
+// @pazarsync/marketplace — packages/marketplace/src/types.ts
 export interface MarketplaceAdapter {
   testConnection(): Promise<boolean>;
   fetchOrders(params: SyncParams): Promise<MarketplaceOrder[]>;
@@ -325,15 +313,9 @@ if (store.platform === 'TRENDYOL') {
   const orders = await fetchHepsiburadaOrders(store.credentials);
 }
 
-// ✅ Good — adapter pattern
-function getAdapter(store: Store): MarketplaceAdapter {
-  const adapters: Record<Platform, (creds: Json) => MarketplaceAdapter> = {
-    TRENDYOL: (creds) => new TrendyolAdapter(creds),
-    HEPSIBURADA: (creds) => new HepsiburadaAdapter(creds),
-  };
-  const credentials = decryptCredentials(store.credentials);
-  return adapters[store.platform](credentials);
-}
+// ✅ Good — adapter pattern. `getAdapter` is the registry in @pazarsync/marketplace;
+//   it picks the platform implementation and decrypts the store's credentials internally.
+import { getAdapter } from '@pazarsync/marketplace';
 
 const adapter = getAdapter(store);
 const orders = await adapter.fetchOrders({ since: lastSyncAt });
@@ -430,13 +412,13 @@ apps/api/tests/
 
 ### When tests are required
 
-| Change                                                 | Required test                                                          |
-| ------------------------------------------------------ | ---------------------------------------------------------------------- |
-| New utility function (`apps/api/src/lib/`)             | Unit test, TDD                                                         |
-| New service function (`apps/api/src/services/`)        | Integration test (real DB via factories)                               |
-| New route (`apps/api/src/routes/`)                     | Integration test in `tests/integration/routes/`                        |
-| New org-scoped route                                   | Above + tenant-isolation test in `tests/integration/tenant-isolation/` |
-| New marketplace adapter (`apps/api/src/integrations/`) | Unit test for mapper logic; mock the HTTP client                       |
+| Change                                            | Required test                                                          |
+| ------------------------------------------------- | ---------------------------------------------------------------------- |
+| New utility function (`apps/api/src/lib/`)        | Unit test, TDD                                                         |
+| New service function (`apps/api/src/services/`)   | Integration test (real DB via factories)                               |
+| New route (`apps/api/src/routes/`)                | Integration test in `tests/integration/routes/`                        |
+| New org-scoped route                              | Above + tenant-isolation test in `tests/integration/tenant-isolation/` |
+| New marketplace adapter (`packages/marketplace/`) | Unit test for mapper logic in that package; mock the HTTP client       |
 
 ### Pattern reference
 

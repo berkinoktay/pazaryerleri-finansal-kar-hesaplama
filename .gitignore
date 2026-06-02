@@ -56,3 +56,6 @@ packages/db/prisma/generated/
 
 # scratch / one-off data captures (may contain commercially sensitive marketplace data)
 tmp/
+
+# docs/ personal knowledge base (research, plans, integration notes) — local-only
+docs/
