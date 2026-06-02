@@ -4,140 +4,49 @@ import { type ColumnDef } from '@tanstack/react-table';
 import { MoreVerticalIcon } from 'hugeicons-react';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
 
-const STATUS_TONE: Record<MockOrder['status'], 'success' | 'info' | 'warning' | 'destructive'> = {
-  delivered: 'success',
-  shipped: 'info',
-  pending: 'warning',
-  returned: 'destructive',
-};
+import { buildOrderColumns, buildShowcaseRows, type MockOrder } from './showcase-table';
 
-const STATUS_LABEL: Record<MockOrder['status'], string> = {
-  delivered: 'Teslim',
-  shipped: 'Kargoda',
-  pending: 'Bekleyen',
-  returned: 'İade',
-};
-
-// Eleven columns (with `whitespace-nowrap` identity/date cells) so the
-// table's intrinsic width (~1044px) genuinely exceeds the constrained
-// max-w-headline showcase frame (~894px) and overflows horizontally —
-// WITHOUT that overflow there is no horizontal scroll and the scroll-aware
-// pin shadow has nothing to react to (the table just stretches to fit and
-// the shadow never fires). `select` (id) and `actions` (id) are what the
-// DataTable auto-pin default keys off: present → pinned left / right with
+// Eleven columns (the `whitespace-nowrap` identity/date cells live in the
+// shared ORDER_COLUMNS) so the table's intrinsic width (~1044px) genuinely
+// exceeds the constrained max-w-headline showcase frame (~894px) and overflows
+// horizontally — WITHOUT that overflow there is no horizontal scroll and the
+// scroll-aware pin shadow has nothing to react to (the table just stretches to
+// fit and the shadow never fires). `select` (id) and `actions` (id) are what
+// the DataTable auto-pin default keys off: present → pinned left / right with
 // no initialColumnPinning.
-const COLUMNS: ColumnDef<MockOrder>[] = [
-  {
-    id: 'select',
-    enableHiding: false,
-    enableSorting: false,
-    enablePinning: true,
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate')
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Tümünü seç"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Satırı seç"
-      />
-    ),
-  },
-  {
-    accessorKey: 'orderNumber',
-    header: 'Sipariş No',
-    cell: ({ row }) => (
-      <span className="text-foreground font-mono text-xs whitespace-nowrap">
-        {row.original.orderNumber}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'customer',
-    header: 'Müşteri',
-    cell: ({ row }) => <span className="whitespace-nowrap">{row.original.customer}</span>,
-  },
-  {
-    accessorKey: 'platform',
-    header: 'Pazaryeri',
-    cell: ({ row }) => (
-      <Badge variant="outline">
-        {row.original.platform === 'TRENDYOL' ? 'Trendyol' : 'Hepsiburada'}
-      </Badge>
-    ),
-  },
-  {
-    accessorKey: 'status',
-    header: 'Durum',
-    cell: ({ row }) => (
-      <Badge tone={STATUS_TONE[row.original.status]}>{STATUS_LABEL[row.original.status]}</Badge>
-    ),
-  },
-  {
-    accessorKey: 'orderDate',
-    header: 'Tarih',
-    cell: ({ row }) => (
-      <span className="text-muted-foreground text-xs whitespace-nowrap">
-        {row.original.orderDate.slice(0, 10)}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'grossAmount',
-    header: 'Ciro',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.grossAmount} />,
-  },
-  {
-    accessorKey: 'commissionAmount',
-    header: 'Komisyon',
-    meta: { numeric: true },
-    cell: ({ row }) => (
-      <Currency value={row.original.commissionAmount} className="text-muted-foreground" />
-    ),
-  },
-  {
-    accessorKey: 'shippingCost',
-    header: 'Kargo',
-    meta: { numeric: true },
-    cell: ({ row }) => (
-      <Currency value={row.original.shippingCost} className="text-muted-foreground" />
-    ),
-  },
-  {
-    accessorKey: 'netProfit',
-    header: 'Net kar',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.netProfit} emphasis />,
-  },
-  {
-    id: 'actions',
-    enableHiding: false,
-    enableSorting: false,
-    enablePinning: true,
-    header: () => <span className="sr-only">İşlemler</span>,
-    cell: () => (
-      <Button variant="ghost" size="icon-sm" aria-label="Sipariş menüsü">
-        <MoreVerticalIcon className="size-icon-sm" />
-      </Button>
-    ),
-  },
-];
+const ACTIONS_COLUMN: ColumnDef<MockOrder> = {
+  id: 'actions',
+  enableHiding: false,
+  enableSorting: false,
+  enablePinning: true,
+  header: () => <span className="sr-only">İşlemler</span>,
+  cell: () => (
+    <Button variant="ghost" size="icon-sm" aria-label="Sipariş menüsü">
+      <MoreVerticalIcon className="size-icon-sm" />
+    </Button>
+  ),
+};
+
+const COLUMNS = buildOrderColumns(
+  [
+    'select',
+    'orderNumber',
+    'customer',
+    'platform',
+    'status',
+    'orderDate',
+    'grossAmount',
+    'commissionAmount',
+    'shippingCost',
+    'netProfit',
+  ],
+  [ACTIONS_COLUMN],
+);
 
 function SubLabel({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
@@ -148,13 +57,13 @@ function SubLabel({ children }: { children: React.ReactNode }): React.ReactEleme
 }
 
 export function DataTablePinningShowcase(): React.ReactElement {
-  const [rows] = React.useState(() => buildMockOrders(20));
+  const [rows] = React.useState(() => buildShowcaseRows(20));
 
   return (
     <div className="gap-lg flex flex-col">
       {/* A — auto-pin: NO initialColumnPinning. `select` pins left and
           `actions` pins right by id convention (the C5 default). The
-          max-w-headline (56rem) cap forces the 9-column table to overflow
+          max-w-headline (56rem) cap forces the 11-column table to overflow
           so the scroll-aware edge shadow is actually exercisable. */}
       <div className="gap-3xs flex flex-col">
         <SubLabel>Otomatik sabitleme — initialColumnPinning yok</SubLabel>

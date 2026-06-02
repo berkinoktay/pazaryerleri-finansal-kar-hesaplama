@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 
 import { PageHeader } from '@/components/patterns/page-header';
-import { PrimitiveNav } from '@/components/showcase/primitive-nav';
+import { CategoryNav } from '@/components/showcase/category-nav';
 import { Preview } from '@/components/showcase/preview';
 import {
   ChartContainer,
@@ -23,6 +23,17 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart';
+import { Link } from '@/i18n/navigation';
+
+// recharts introspects its grid/axis children BY TYPE (it scans for
+// `CartesianGrid`/`XAxis`/`YAxis`), so the shared scaffolding can't be wrapped
+// in a custom component without breaking axis detection — instead the three
+// Previews share these spreadable default prop objects. Same pattern the chart
+// KIT uses (see components/patterns/chart-cartesian.ts); kept local here because
+// the raw-recharts demos deliberately don't depend on the kit.
+const GRID_PROPS = { strokeDasharray: '3 3', vertical: false } as const;
+const X_AXIS_PROPS = { tickLine: false, axisLine: false } as const;
+const Y_AXIS_PROPS = { tickLine: false, axisLine: false } as const;
 
 const REVENUE_CONFIG = {
   revenue: { label: 'Ciro', color: 'var(--chart-1)' },
@@ -65,9 +76,19 @@ export default function ChartPrimitivePage(): React.ReactElement {
     <>
       <PageHeader
         title="Grafik"
-        intent="Recharts + token-aware ChartContainer. Renkler --chart-1..6 token'larından gelir, tooltip ChartTooltipContent ile sistemle uyumlu."
+        intent="Recharts + token-aware ChartContainer — ham primitive katmanı. Renkler --chart-1..6 token'larından gelir, tooltip ChartTooltipContent ile sistemle uyumlu. Grid/eksen scaffolding'i tek prop seti üzerinden paylaşılır."
       />
-      <PrimitiveNav />
+      <CategoryNav section="primitives" />
+
+      <p className="text-2xs text-muted-foreground">
+        {
+          'Bu sayfa ham recharts katmanını gösterir. Üretim grafikleri için kompozit kit (ChartFrame + arketipler: Line / Bar / Ranking / Donut / Combo) '
+        }
+        <Link href="/design/patterns/charts" className="text-foreground underline">
+          /design/patterns/charts
+        </Link>{' '}
+        sayfasında — durumlar, legend/tooltip standardı ve realtime bağlama orada.
+      </p>
 
       <Preview
         title="Line chart — dönemlik kar"
@@ -75,9 +96,9 @@ export default function ChartPrimitivePage(): React.ReactElement {
       >
         <ChartContainer config={MARGIN_CONFIG} className="aspect-[16/5]">
           <LineChart data={MARGIN_DATA} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="day" tickLine={false} axisLine={false} />
-            <YAxis tickLine={false} axisLine={false} width={30} domain={[8, 20]} />
+            <CartesianGrid {...GRID_PROPS} />
+            <XAxis dataKey="day" {...X_AXIS_PROPS} />
+            <YAxis {...Y_AXIS_PROPS} width={30} domain={[8, 20]} />
             <ChartTooltip content={<ChartTooltipContent />} />
             <Line
               type="monotone"
@@ -96,11 +117,10 @@ export default function ChartPrimitivePage(): React.ReactElement {
       >
         <ChartContainer config={REVENUE_CONFIG} className="aspect-[16/6]">
           <AreaChart data={REVENUE_DATA}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="month" tickLine={false} axisLine={false} />
+            <CartesianGrid {...GRID_PROPS} />
+            <XAxis dataKey="month" {...X_AXIS_PROPS} />
             <YAxis
-              tickLine={false}
-              axisLine={false}
+              {...Y_AXIS_PROPS}
               width={50}
               tickFormatter={(value: number) => `${Math.round(value / 1000)}K`}
             />
@@ -132,9 +152,9 @@ export default function ChartPrimitivePage(): React.ReactElement {
       >
         <ChartContainer config={ORDERS_CONFIG} className="aspect-[16/6]">
           <BarChart data={ORDERS_DATA}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="week" tickLine={false} axisLine={false} />
-            <YAxis tickLine={false} axisLine={false} width={30} />
+            <CartesianGrid {...GRID_PROPS} />
+            <XAxis dataKey="week" {...X_AXIS_PROPS} />
+            <YAxis {...Y_AXIS_PROPS} width={30} />
             <ChartTooltip content={<ChartTooltipContent />} />
             <ChartLegend content={<ChartLegendContent />} />
             <Bar dataKey="trendyol" fill="var(--color-trendyol)" radius={[4, 4, 0, 0]} />

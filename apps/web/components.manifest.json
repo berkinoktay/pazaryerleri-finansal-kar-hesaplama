@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 97,
+  "count": 109,
   "components": [
     {
       "name": "Accordion",
@@ -15,6 +15,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering a chronological list of events with per-entry tone, title, description, optional detail, and optional timestamp/source meta (use NotificationBell for the popover surface, SyncBadge for single-state freshness)"
+    },
+    {
+      "name": "AdvancedFilterMenu",
+      "path": "apps/web/src/components/patterns/advanced-filter-menu.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "building a multi-dimension, operator-aware filter bar above a table"
     },
     {
       "name": "Alert",
@@ -66,6 +73,13 @@
       "useWhen": "surfacing a system-wide event that affects every screen until resolved (use Alert for page-level inline messages, Toast for transient confirmations)"
     },
     {
+      "name": "BarChart",
+      "path": "apps/web/src/components/patterns/chart-bar.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "plotting a value across discrete categories — daily P&L (semantic),"
+    },
+    {
       "name": "BottomDock",
       "path": "apps/web/src/components/patterns/bottom-dock.tsx",
       "category": "molecule",
@@ -115,6 +129,20 @@
       "useWhen": "rendering a recharts chart whose series colors must swap correctly in dark mode (always pair with ChartConfig keyed by series name)"
     },
     {
+      "name": "ChartFrame",
+      "path": "apps/web/src/components/patterns/chart-frame.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "wrapping any chart archetype to give it consistent chrome + states"
+    },
+    {
+      "name": "ChartPeriodSelector",
+      "path": "apps/web/src/components/patterns/chart-period-selector.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "letting the user switch a chart's time window from its header"
+    },
+    {
       "name": "Checkbox",
       "path": "apps/web/src/components/ui/checkbox.tsx",
       "category": "atom",
@@ -134,6 +162,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering a searchable single-select picker over a finite list of options (use Select for short fixed lists, RadioGroup for 2-7 visible options, future MultiCombobox for multi-select)"
+    },
+    {
+      "name": "ComboChart",
+      "path": "apps/web/src/components/patterns/chart-combo.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing an absolute value and the rate it drives together — ciro +"
     },
     {
       "name": "Command",
@@ -234,6 +269,20 @@
       "useWhen": "interrupting flow with a focused task or confirmation that requires the page to stop (use AlertDialog for destructive confirmations, Sheet to preserve context)"
     },
     {
+      "name": "DistributionBar",
+      "path": "apps/web/src/components/patterns/distribution-bar.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing a total's composition inline under a metric (use DonutChart for a standalone share chart)"
+    },
+    {
+      "name": "DonutChart",
+      "path": "apps/web/src/components/patterns/chart-donut.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing how a total splits into parts — a cost/expense breakdown, a"
+    },
+    {
       "name": "Drawer",
       "path": "apps/web/src/components/ui/drawer.tsx",
       "category": "atom",
@@ -304,6 +353,13 @@
       "useWhen": "wrapping a thumbnail cell so users can inspect a product / asset image at original resolution (pair with a clickable button around the thumbnail and a useState for open / onOpenChange)"
     },
     {
+      "name": "InfoHint",
+      "path": "apps/web/src/components/patterns/info-hint.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "annotating a label with an optional explanation tooltip (use Popover for touch-critical or interactive content)"
+    },
+    {
       "name": "InlineEdit",
       "path": "apps/web/src/components/patterns/inline-edit.tsx",
       "category": "molecule",
@@ -332,18 +388,18 @@
       "useWhen": "displaying a keyboard key or chord hint inline (use KbdGroup to compose multi-key shortcuts with consistent spacing)"
     },
     {
-      "name": "KpiTile",
-      "path": "apps/web/src/components/patterns/kpi-tile.tsx",
-      "category": "molecule",
-      "status": "stable",
-      "useWhen": "rendering a single headline metric with optional period-delta and context line (compose into a StatGroup row for primary KPI strip)"
-    },
-    {
       "name": "Label",
       "path": "apps/web/src/components/ui/label.tsx",
       "category": "atom",
       "status": "stable",
       "useWhen": "attaching an accessible text caption to a form control via htmlFor (placeholders are not labels)"
+    },
+    {
+      "name": "LineChart",
+      "path": "apps/web/src/components/patterns/chart-line.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "plotting a metric over time — P&L (default), a neutral trend"
     },
     {
       "name": "MappedBadge",
@@ -448,7 +504,7 @@
       "path": "apps/web/src/components/patterns/profit-cell.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "rendering a Currency value paired with a TrendDelta chip in a table cell or row summary (use KpiTile for the standalone hero, Currency alone when there is no trend)"
+      "useWhen": "rendering a Currency value paired with a TrendDelta chip in a table cell or row summary (use StatCard for the standalone hero, Currency alone when there is no trend)"
     },
     {
       "name": "Progress",
@@ -470,6 +526,20 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "surfacing an actionable issue inline in the ContextRail (use Alert for page-width inline messages, future Banner for app-spanning system messages)"
+    },
+    {
+      "name": "RangeInput",
+      "path": "apps/web/src/components/ui/range-input.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "editing an inclusive numeric range (min–max) in a filter or form"
+    },
+    {
+      "name": "RankingChart",
+      "path": "apps/web/src/components/patterns/chart-ranking.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "ranking discrete items by a value — top products by profit, best"
     },
     {
       "name": "ScrollArea",
@@ -549,11 +619,18 @@
       "useWhen": "indicating in-flight async work inline within a small UI region (use Skeleton for page or region-level loading where the eventual layout matters)"
     },
     {
+      "name": "StatCard",
+      "path": "apps/web/src/components/patterns/stat-card.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a single headline metric with optional icon, delta, inline trend, breakdown, or drill-down (compose into a StatGroup grid or a StatStrip row)"
+    },
+    {
       "name": "StatGroup",
       "path": "apps/web/src/components/patterns/stat-group.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "wrapping a row of KpiTile siblings that should self-tile responsively without breakpoint ladders"
+      "useWhen": "wrapping a row of StatCard siblings that should self-tile responsively without breakpoint ladders"
     },
     {
       "name": "StatRow",
@@ -561,6 +638,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "adding a nested icon + label + status row inside a KPI / summary Card (wrap in a Link for navigation; use DefinitionList for plain key/value pairs)"
+    },
+    {
+      "name": "StatStrip",
+      "path": "apps/web/src/components/patterns/stat-strip.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing a dense at-a-glance KPI summary band across the top of a page (use StatGroup + StatCard for richer, individually-surfaced metrics)"
     },
     {
       "name": "StatusDot",

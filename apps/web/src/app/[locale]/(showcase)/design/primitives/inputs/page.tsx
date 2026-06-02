@@ -1,21 +1,14 @@
 'use client';
 
-import {
-  Building03Icon,
-  Calendar01Icon,
-  InformationCircleIcon,
-  Mail01Icon,
-  Search01Icon,
-  UserIcon,
-  ViewIcon,
-  ViewOffIcon,
-} from 'hugeicons-react';
+import { Building03Icon, Calendar01Icon, Search01Icon, UserIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
-import { PrimitiveNav } from '@/components/showcase/primitive-nav';
+import { CategoryNav } from '@/components/showcase/category-nav';
+import { Playground, control } from '@/components/showcase/playground';
 import { Preview } from '@/components/showcase/preview';
+import { ShowcaseSection } from '@/components/showcase/section';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
@@ -40,755 +33,424 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { SIZE_KEYS } from '@/lib/variants';
+import { Link } from '@/i18n/navigation';
+import { type RadiusKey, RADIUS_KEYS, type SizeKey, SIZE_KEYS } from '@/lib/variants';
 
 export default function InputsPrimitivePage(): React.ReactElement {
   const t = useTranslations('common');
-  const [price, setPrice] = React.useState<number[]>([120]);
-  const [query, setQuery] = React.useState('sipariş');
-  const [passwordVisible, setPasswordVisible] = React.useState(false);
 
   return (
     <>
       <PageHeader
         title="Form alanları"
-        intent="Tüm giriş kontrolleri. Label her zaman placeholder'dan önce; aria-invalid hatalı alan için."
+        intent="Tüm giriş kontrolleri Button ile aynı size ailesini (sm/md/lg) ve radius eksenini paylaşır — formda tutarlı yükseklik ve köşe. Her bileşenin prop matrisini kontrol şeridinden canlı çevir; statik 'her durumu yan yana' bloklarının yerini Playground aldı. Label her zaman placeholder'dan önce; aria-invalid hatalı alan için."
       />
-      <PrimitiveNav />
+      <CategoryNav section="primitives" />
 
-      <Preview
-        title="Input + Label"
-        description="Placeholder label değildir. Tüm giriş alanları Button ile aynı size ailesini (sm/md/lg) paylaşır, formda tutarlı yükseklik."
+      <ShowcaseSection
+        title="Input"
+        description="Tek satır metin alanı. Adornment slot'ları (leading/trailing ikon, clear, sayaç), loading, invalid/valid ve radius tek yüzeyde toplanır. Kontrolleri çevirerek tüm prop matrisini gör; davranışsal demolar (clearable, reveal, async) altta ayrı kalır."
       >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="email">E-posta</Label>
-            <Input id="email" type="email" placeholder="ornek@domain.com" />
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="email-bad">Hatalı alan</Label>
-            <Input id="email-bad" type="email" defaultValue="bad" aria-invalid />
-            <span className="text-2xs text-destructive">Geçerli bir e-posta girin.</span>
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="price">Maliyet (₺)</Label>
-            <Input id="price" type="number" placeholder="0,00" className="tabular-nums" />
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="disabled-input">Devre dışı</Label>
-            <Input id="disabled-input" disabled defaultValue="Değiştirilemez" />
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Label — required · hata tonu · hint · peer-disabled"
-        description="required dekoratif * ekler (alan ayrıca required taşımalı — aria-required). Hata tonu FormLabel'in text-destructive'i, transition-colors ile yumuşar. hint = etiket yanına Tooltip'li bilgi ikonu. peer-disabled YALNIZ checkbox/radio satırında (kontrol önce gelir) söner; üstte-yığılı alanlarda form düzeyinde."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="store-name" required>
-              Mağaza adı
-            </Label>
-            <Input id="store-name" required placeholder="Zorunlu alan" />
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="store-name-err" required className="text-destructive">
-              Mağaza adı
-            </Label>
-            <Input id="store-name-err" required aria-invalid />
-            <span className="text-2xs text-destructive">Bu alan zorunlu.</span>
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label
-              htmlFor="desi"
-              hint={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0} role="img" aria-label="Desi nedir?" className="cursor-help">
-                      <InformationCircleIcon />
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>Desi = (en × boy × yükseklik) / 3000</TooltipContent>
-                </Tooltip>
-              }
-            >
-              Desi
-            </Label>
-            <Input id="desi" type="number" placeholder="0" className="tabular-nums" />
-          </div>
-          <div className="gap-xs flex items-center">
-            <Checkbox id="peer-cb" disabled className="peer" />
-            <Label htmlFor="peer-cb">Pasif seçenek (peer-disabled söner)</Label>
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Input — valid · readOnly · sayaç · radius"
-        description="valid = success border (invalid'in eşi; hatada shake, başarıda sakin). readOnly = gri yüzey + hover/glow YOK (düzenlenemez sinyali). showCount = sağda canlı length/maxLength. radius Button/Badge ile aynı eksen."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="iban-valid">IBAN</Label>
-            <Input id="iban-valid" valid defaultValue="TR12 0006 1005 ..." />
-            <span className="text-2xs text-success">Doğrulandı.</span>
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="store-id-ro">Mağaza kimliği (readOnly)</Label>
-            <Input id="store-id-ro" readOnly defaultValue="str_8f3a91c2" />
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="title-count">Başlık (showCount + maxLength)</Label>
-            <Input id="title-count" showCount maxLength={50} defaultValue="PazarSync demo" />
-          </div>
-          <div className="gap-xs flex flex-wrap items-center">
-            <Input radius="full" size="sm" placeholder="radius=full" />
-            <Input radius="lg" size="sm" placeholder="radius=lg" />
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Leading / trailing icon"
-        description="Ikon slot'ları otomatik size-icon-sm, muted renk, padding otomatik ayarlanır. Her viewport ve theme'de tutarlı."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="search-leading">Arama (leadingIcon)</Label>
+        <Playground
+          title="Input — size · radius · invalid · valid · loading · adornment'lar"
+          description="Tek etkileşimli yüzey; eski 11 statik Input Preview'unun config kısmını toplar. leadingIcon/trailingIcon/clearable/showCount boolean'ları slot'ları açar."
+          controls={{
+            size: control.segment(SIZE_KEYS, 'md'),
+            radius: control.select(RADIUS_KEYS, 'md'),
+            invalid: control.bool(false),
+            valid: control.bool(false),
+            disabled: control.bool(false),
+            loading: control.bool(false),
+            leadingIcon: control.bool(true, 'leadingIcon'),
+            trailingIcon: control.bool(false, 'trailingIcon'),
+            clearable: control.bool(false),
+            showCount: control.bool(false),
+          }}
+          render={(v) => (
             <Input
-              id="search-leading"
-              leadingIcon={<Search01Icon />}
-              placeholder="Sipariş, müşteri, SKU…"
-            />
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="email-leading">E-posta (leadingIcon + trailingIcon)</Label>
-            <Input
-              id="email-leading"
-              type="email"
-              leadingIcon={<Mail01Icon />}
-              trailingIcon={<Calendar01Icon />}
-              placeholder="ornek@domain.com"
-            />
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="user-leading">Kullanıcı (icon + invalid)</Label>
-            <Input id="user-leading" leadingIcon={<UserIcon />} invalid defaultValue="!!" />
-            <span className="text-2xs text-destructive">En az 2 harf içermeli.</span>
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Clearable (onClear)"
-        description="Value doluyken sağda X butonu çıkar. Klavye erişilebilir, aria-label i18n'den geliyor, pointer-coarse altında dokunma alanı genişler."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="q-clear">Sipariş ara (controlled)</Label>
-            <Input
-              id="q-clear"
-              leadingIcon={<Search01Icon />}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onClear={() => setQuery('')}
-              clearLabel={t('clear')}
-              placeholder="Sipariş numarası…"
-            />
-            <span className="text-2xs text-muted-foreground">Değer: &quot;{query}&quot;</span>
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="q-clear-uc">Uncontrolled</Label>
-            <Input
-              id="q-clear-uc"
-              leadingIcon={<Search01Icon />}
-              defaultValue="demo"
-              onClear={() => undefined}
-              clearLabel={t('clear')}
-            />
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Loading"
-        description="aria-busy=true + spinner. Input yine yazılabilir (async autocomplete için). prefers-reduced-motion altında dönmez."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="q-loading">Async sonuç</Label>
-            <Input
-              id="q-loading"
-              leadingIcon={<Search01Icon />}
-              loading
+              size={v.size}
+              radius={v.radius}
+              invalid={v.invalid}
+              valid={v.valid}
+              disabled={v.disabled}
+              loading={v.loading}
               loadingLabel={t('loading')}
-              defaultValue="Trendyol"
+              leadingIcon={v.leadingIcon ? <Search01Icon /> : undefined}
+              trailingIcon={v.trailingIcon ? <Calendar01Icon /> : undefined}
+              showCount={v.showCount}
+              maxLength={v.showCount ? 50 : undefined}
+              {...(v.clearable ? { onClear: () => undefined, clearLabel: t('clear') } : {})}
+              defaultValue="PazarSync demo"
+              placeholder="Sipariş, müşteri, SKU…"
+              aria-label="Input demo"
+              className="max-w-input"
             />
-          </div>
-        </div>
-      </Preview>
+          )}
+        />
 
-      <Preview
-        title="Free-form leading / trailing"
-        description="Icon yerine metin, kbd ipucu, birim — her şey geçer. leadingIcon/trailingIcon ile aynı slotlar, ama içerik olduğu gibi render edilir (auto-color yok)."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="price-unit">Ürün maliyeti</Label>
-            <Input
-              id="price-unit"
-              type="number"
-              leading={<span className="text-muted-foreground text-sm">₺</span>}
-              trailing={<span className="text-muted-foreground text-2xs">KDV hariç</span>}
-              placeholder="0,00"
-              className="tabular-nums"
-            />
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label htmlFor="cmd-search">Komut paleti ara</Label>
-            <Input
-              id="cmd-search"
-              leadingIcon={<Search01Icon />}
-              trailing={<Kbd>⌘K</Kbd>}
-              placeholder="Yaz, ara, hızla git…"
-            />
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Reveal toggle (password / API key / secret)"
-        description="type='password' + reveal prop → Input kendi görünürlük state'ini yönetir, trailing slot'u otomatik olarak Göster/Gizle butonuyla doldurur. Labels zorunlu (a11y disiplini) ve consumer'dan geçer."
-      >
-        <div className="max-w-form gap-3xs flex flex-col">
-          <Label htmlFor="pw">Parola</Label>
-          <Input
-            id="pw"
-            type="password"
-            placeholder="En az 8 karakter"
-            reveal={{ show: 'Göster', hide: 'Gizle' }}
-          />
-        </div>
-      </Preview>
-
-      <Preview
-        title="Manual trailing slot (for non-reveal cases)"
-        description="reveal prop password tipine özel. Başka senaryolarda (birim, kısa etiket, custom buton) trailing slot'u hâlâ serbest — content kendi aria-label'ını ve focus ring'ini yönetir."
-      >
-        <div className="max-w-form gap-3xs flex flex-col">
-          <Label htmlFor="pw-manual">Manuel kontrol örneği</Label>
-          <Input
-            id="pw-manual"
-            type={passwordVisible ? 'text' : 'password'}
-            placeholder="Tam kontrol gerekirse"
-            trailing={
-              <button
-                type="button"
-                aria-label={passwordVisible ? 'Gizle' : 'Göster'}
-                onClick={() => setPasswordVisible((v) => !v)}
-                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring p-3xs duration-fast [&_svg]:size-icon-sm cursor-pointer rounded-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
-              >
-                {passwordVisible ? <ViewOffIcon /> : <ViewIcon />}
-              </button>
-            }
-          />
-        </div>
-      </Preview>
-
-      <Preview
-        title="Sizes with adornments"
-        description="sm / md / lg — ikon boyutu sabit (size-icon-sm), padding boyuta göre; rhythm korunur."
-      >
-        <div className="max-w-form gap-md grid">
-          {SIZE_KEYS.map((size) => (
-            <div key={size} className="gap-3xs flex flex-col">
-              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
-              <Input size={size} leadingIcon={<Search01Icon />} placeholder="Ara…" />
+        <Preview
+          title="Input + Label (form satırı)"
+          description="Placeholder label değildir — Label her zaman üstte. aria-invalid hatalı alanı kırmızı kenarla işaretler, readOnly gri yüzey + hover/glow YOK (düzenlenemez sinyali)."
+        >
+          <div className="max-w-form gap-md grid">
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="email">E-posta</Label>
+              <Input id="email" type="email" placeholder="ornek@domain.com" />
             </div>
-          ))}
-        </div>
-      </Preview>
-
-      <Preview
-        title="Textarea"
-        description="min-h-20 default, user tarafından yükseklik ayarlanabilir."
-      >
-        <div className="max-w-form gap-3xs grid">
-          <Label htmlFor="notes">Sipariş notu</Label>
-          <Textarea id="notes" placeholder="Sipariş hakkında not…" rows={4} />
-        </div>
-      </Preview>
-
-      <Preview
-        title="Textarea — counter (maxLength)"
-        description="maxLength verildiğinde counter otomatik gösterilir. aria-live=polite ile ekran okuyucular sayımı anons eder."
-      >
-        <div className="max-w-form gap-3xs grid">
-          <Label htmlFor="tw-max">Açıklama (en fazla 120 karakter)</Label>
-          <Textarea
-            id="tw-max"
-            placeholder="Kısa bir özet…"
-            rows={3}
-            maxLength={120}
-            defaultValue="İstanbul - Kadıköy deposundan gönderildi."
-          />
-        </div>
-      </Preview>
-
-      <Preview
-        title="Textarea — auto-resize"
-        description="İçeriğe göre büyür (grid mirror pattern — height animate edilmez). maxRows ile tavan konur."
-      >
-        <div className="max-w-form gap-3xs grid">
-          <Label htmlFor="tw-auto">Uzun not</Label>
-          <Textarea
-            id="tw-auto"
-            autoResize
-            maxRows={8}
-            rows={2}
-            placeholder="Yazdıkça büyür, 8 satırdan sonra kendi içinde kaydırılır…"
-          />
-        </div>
-      </Preview>
-
-      <Preview
-        title="Textarea — invalid"
-        description="invalid prop aria-invalid=true + destructive border tokens."
-      >
-        <div className="max-w-form gap-3xs grid">
-          <Label htmlFor="tw-invalid">Kupon kodu</Label>
-          <Textarea id="tw-invalid" invalid defaultValue="geçersiz kod" rows={2} />
-          <span className="text-2xs text-destructive">Geçerli bir kupon kodu gir.</span>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Textarea — valid · readOnly · disabled · size · resize"
-        description="valid: success border. readOnly: gri yüzey, hover/glow yok. resize prop ('vertical' default / 'none' / 'both'). sm/lg paylaşılan size. Sayaç maxLength'e yaklaşınca warning rengine döner."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs grid">
-            <Label htmlFor="tw-valid">Açıklama</Label>
-            <Textarea id="tw-valid" valid defaultValue="Geçerli açıklama" rows={2} />
-            <span className="text-2xs text-success">Doğrulandı.</span>
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="email-bad">Hatalı alan</Label>
+              <Input id="email-bad" type="email" defaultValue="bad" aria-invalid />
+              <span className="text-2xs text-destructive">Geçerli bir e-posta girin.</span>
+            </div>
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="store-id-ro">Mağaza kimliği (readOnly)</Label>
+              <Input id="store-id-ro" readOnly defaultValue="str_8f3a91c2" />
+            </div>
           </div>
-          <div className="gap-3xs grid">
-            <Label htmlFor="tw-ro">Sistem notu (readOnly)</Label>
-            <Textarea
-              id="tw-ro"
-              readOnly
-              defaultValue="Otomatik üretildi — düzenlenemez."
-              rows={2}
+        </Preview>
+
+        <Preview
+          title="Clearable (onClear — etkileşimli)"
+          description="Value doluyken sağda X butonu çıkar. Klavye erişilebilir, aria-label i18n'den; pointer-coarse altında dokunma alanı genişler. Yazıp temizleyerek canlı gör."
+        >
+          <ClearableInputDemo clearLabel={t('clear')} />
+        </Preview>
+
+        <Preview
+          title="Reveal toggle (parola / API anahtarı)"
+          description="type='password' + reveal prop → Input kendi görünürlük state'ini yönetir, trailing slot'u otomatik Göster/Gizle butonuyla doldurur. Labels zorunlu (a11y) ve consumer'dan geçer."
+        >
+          <div className="max-w-form gap-3xs flex flex-col">
+            <Label htmlFor="pw">Parola</Label>
+            <Input
+              id="pw"
+              type="password"
+              placeholder="En az 8 karakter"
+              reveal={{ show: 'Göster', hide: 'Gizle' }}
             />
           </div>
-          <div className="gap-3xs grid">
-            <Label htmlFor="tw-disabled">Devre dışı</Label>
-            <Textarea id="tw-disabled" disabled defaultValue="Kapalı" rows={2} />
+        </Preview>
+
+        <Preview
+          title="Serbest leading / trailing slot (kompozisyon)"
+          description="Icon yerine metin, kbd ipucu, birim — her şey geçer. leadingIcon/trailingIcon ile aynı slotlar ama içerik olduğu gibi render edilir (auto-color yok). invalid + ikon birlikte de çalışır."
+        >
+          <div className="max-w-form gap-md grid">
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="price-unit">Ürün maliyeti</Label>
+              <Input
+                id="price-unit"
+                type="number"
+                leading={<span className="text-muted-foreground text-sm">₺</span>}
+                trailing={<span className="text-muted-foreground text-2xs">KDV hariç</span>}
+                placeholder="0,00"
+                className="tabular-nums"
+              />
+            </div>
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="cmd-search">Komut paleti ara</Label>
+              <Input
+                id="cmd-search"
+                leadingIcon={<Search01Icon />}
+                trailing={<Kbd>⌘K</Kbd>}
+                placeholder="Yaz, ara, hızla git…"
+              />
+            </div>
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="user-leading">Kullanıcı (icon + invalid)</Label>
+              <Input id="user-leading" leadingIcon={<UserIcon />} invalid defaultValue="!!" />
+              <span className="text-2xs text-destructive">En az 2 harf içermeli.</span>
+            </div>
           </div>
-          <div className="gap-3xs grid">
-            <Label htmlFor="tw-near">Başlık (sayaç warning)</Label>
+        </Preview>
+      </ShowcaseSection>
+
+      <ShowcaseSection
+        title="Textarea"
+        description="Çok satır metin alanı. size/invalid/valid/disabled/readOnly tek yüzeyde; sayaç (maxLength) ve içeriğe-göre büyüme (autoResize) davranışları ayrı demolarda."
+      >
+        <Playground
+          title="Textarea — size · invalid · valid · disabled · readOnly"
+          description="Config prop'ları tek şeritte. Sayaç/auto-resize davranışları aşağıda kalır (kontrol ifade edemediği için)."
+          controls={{
+            size: control.segment(SIZE_KEYS, 'md'),
+            invalid: control.bool(false),
+            valid: control.bool(false),
+            disabled: control.bool(false),
+            readOnly: control.bool(false),
+          }}
+          render={(v) => (
             <Textarea
-              id="tw-near"
+              size={v.size}
+              invalid={v.invalid}
+              valid={v.valid}
+              disabled={v.disabled}
+              readOnly={v.readOnly}
+              defaultValue="İstanbul - Kadıköy deposundan gönderildi."
+              placeholder="Sipariş hakkında not…"
+              rows={3}
+              aria-label="Textarea demo"
+              className="max-w-form"
+            />
+          )}
+        />
+
+        <Preview
+          title="Textarea — sayaç (maxLength)"
+          description="maxLength verildiğinde counter otomatik gösterilir; limite yaklaşınca warning, aşınca destructive rengine döner. aria-live=polite ile ekran okuyucu sayımı anons eder."
+        >
+          <div className="max-w-form gap-3xs grid">
+            <Label htmlFor="tw-max">Açıklama (en fazla 20 karakter — warning yakın)</Label>
+            <Textarea
+              id="tw-max"
               showCount
               maxLength={20}
+              placeholder="Kısa bir özet…"
+              rows={3}
               defaultValue="Limite yakın metin"
-              rows={2}
             />
           </div>
-          <div className="gap-xs grid">
-            <Textarea size="sm" resize="none" placeholder="size=sm · resize=none" />
-            <Textarea size="lg" resize="both" placeholder="size=lg · resize=both" rows={2} />
+        </Preview>
+
+        <Preview
+          title="Textarea — auto-resize (yapısal)"
+          description="İçeriğe göre büyür (grid mirror pattern — height animate edilmez, caret stabil kalır). maxRows ile tavan konur; üstünde kendi içinde kaydırır."
+        >
+          <div className="max-w-form gap-3xs grid">
+            <Label htmlFor="tw-auto">Uzun not</Label>
+            <Textarea
+              id="tw-auto"
+              autoResize
+              maxRows={8}
+              rows={2}
+              placeholder="Yazdıkça büyür, 8 satırdan sonra kendi içinde kaydırılır…"
+            />
           </div>
-        </div>
-      </Preview>
+        </Preview>
+      </ShowcaseSection>
 
-      <Preview
-        title="Input size (paylaşılan prop)"
-        description="sm / md (default) / lg. Button ve Select ile aynı anahtar — formda tutarlı yükseklik ailesi."
-      >
-        <div className="max-w-form gap-md grid">
-          {SIZE_KEYS.map((size) => (
-            <div key={size} className="gap-3xs flex flex-col">
-              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
-              <Input size={size} placeholder="ornek@domain.com" />
-            </div>
-          ))}
-        </div>
-      </Preview>
-
-      <Preview
+      <ShowcaseSection
         title="Select"
-        description="Radix Select. Klavye + ekran okuyucu dostu. Select item'ına basıldığında popup kapanır."
+        description="Radix tabanlı tek-seçim açılır liste. Trigger; size/radius/invalid/valid/loading/leadingIcon prop'larını taşır ve Input/Button ile aynı yükseklik ailesini paylaşır. Clearable, açıklamalı item ve gruplama davranışları ayrı demolarda."
       >
-        <div className="max-w-input-narrow gap-3xs grid">
-          <Label>Pazaryeri</Label>
-          <Select defaultValue="trendyol">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="trendyol">Trendyol</SelectItem>
-              <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
-              <SelectItem value="n11">n11</SelectItem>
-              <SelectItem value="amazon">Amazon</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Select — leading icon + clearable"
-        description="leadingIcon trigger'ın solunda; onClear verildiğinde chevron'un yanına X butonu gelir. Clear, Select'i açmaz — event propagation engellenir."
-      >
-        <ClearableSelectDemo />
-      </Preview>
-
-      <Preview
-        title="Select — loading + invalid"
-        description="loading async option fetch için (aria-busy + spinner, disable ETMEZ). invalid destructive border."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label>Mağaza (yükleniyor)</Label>
-            <Select>
-              <SelectTrigger leadingIcon={<Building03Icon />} loading loadingLabel={t('loading')}>
-                <SelectValue placeholder="Mağazalar yükleniyor…" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="x">Placeholder</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="gap-3xs flex flex-col">
-            <Label>Pazaryeri (invalid)</Label>
-            <Select>
-              <SelectTrigger invalid>
+        <Playground
+          title="Select trigger — size · radius · invalid · valid · loading · disabled"
+          description="Trigger'ın config prop'ları tek şeritte. leadingIcon boolean'ı trigger'ın solundaki ikonu açar; loading aria-busy + spinner verir ama trigger'ı disable ETMEZ."
+          controls={{
+            size: control.segment(SIZE_KEYS, 'md'),
+            radius: control.select(RADIUS_KEYS, 'md'),
+            invalid: control.bool(false),
+            valid: control.bool(false),
+            loading: control.bool(false),
+            disabled: control.bool(false),
+            leadingIcon: control.bool(false, 'leadingIcon'),
+          }}
+          render={(v) => (
+            <Select disabled={v.disabled} defaultValue="trendyol">
+              <SelectTrigger
+                size={v.size}
+                radius={v.radius}
+                invalid={v.invalid}
+                valid={v.valid}
+                loading={v.loading}
+                loadingLabel={t('loading')}
+                leadingIcon={v.leadingIcon ? <Building03Icon /> : undefined}
+                aria-label="Select demo"
+                className="max-w-input"
+              >
                 <SelectValue placeholder="Bir pazaryeri seç" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="trendyol">Trendyol</SelectItem>
+                <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
+                <SelectItem value="n11">n11</SelectItem>
+                <SelectItem value="amazon">Amazon</SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-2xs text-destructive">Bu alan zorunlu.</span>
-          </div>
-        </div>
-      </Preview>
+          )}
+        />
 
-      <Preview
-        title="Select — valid + disabled"
-        description="valid başarıyla doğrulanmış seçimi success border ile işaretler (invalid'in karşılığı). disabled trigger opacity-50 + cursor-not-allowed."
-      >
-        <div className="max-w-form gap-md grid">
-          <div className="gap-3xs flex flex-col">
-            <Label>Pazaryeri (valid)</Label>
-            <Select defaultValue="trendyol">
-              <SelectTrigger valid>
+        <Preview
+          title="Select — leading icon + clearable (etkileşimli)"
+          description="leadingIcon trigger'ın solunda; onClear verildiğinde chevron'un yanına X gelir. Clear Select'i açmaz — event propagation engellenir (trigger button içinde role=button span)."
+        >
+          <ClearableSelectDemo clearLabel={t('clear')} />
+        </Preview>
+
+        <Preview
+          title="Select — leadingIcon + description item (kompozisyon)"
+          description="SelectItem leadingIcon (logo/durum) ve description (ikincil satır) alır. İkisi de ItemText dışında render edilir — ekran okuyucu yalnız ana etiketi okur."
+        >
+          <div className="max-w-input gap-3xs grid">
+            <Label>Mağaza</Label>
+            <Select defaultValue="store-1">
+              <SelectTrigger leadingIcon={<Building03Icon />}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="trendyol">Trendyol</SelectItem>
-                <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
+                <SelectItem
+                  value="store-1"
+                  leadingIcon={<Building03Icon />}
+                  description="Trendyol — Mağaza #1234"
+                >
+                  Ana Mağaza
+                </SelectItem>
+                <SelectItem
+                  value="store-2"
+                  leadingIcon={<Building03Icon />}
+                  description="Hepsiburada — Mağaza #5678"
+                >
+                  İkincil Mağaza
+                </SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-2xs text-success">Bağlantı doğrulandı.</span>
           </div>
-          <div className="gap-3xs flex flex-col">
-            <Label>Pazaryeri (disabled)</Label>
-            <Select disabled defaultValue="trendyol">
+        </Preview>
+
+        <Preview
+          title="Select — gruplu + ayraç + disabled item (yapısal)"
+          description="SelectGroup + SelectLabel başlık, SelectSeparator gruplar arası çizgi, item bazında disabled. >6 seçeneği kategorize etmenin standart deseni."
+        >
+          <div className="max-w-input-narrow gap-3xs grid">
+            <Label>Mağaza durumu</Label>
+            <Select defaultValue="active-1">
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="trendyol">Trendyol</SelectItem>
+                <SelectGroup>
+                  <SelectLabel>Aktif Mağazalar</SelectLabel>
+                  <SelectItem value="active-1">Trendyol — Ana</SelectItem>
+                  <SelectItem value="active-2">Hepsiburada — Ana</SelectItem>
+                </SelectGroup>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel>Pasif Mağazalar</SelectLabel>
+                  <SelectItem value="passive-1" disabled>
+                    n11 — Askıda
+                  </SelectItem>
+                  <SelectItem value="passive-2">Amazon — Bağlantı kesik</SelectItem>
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
-        </div>
-      </Preview>
+        </Preview>
+      </ShowcaseSection>
 
-      <Preview
-        title="Select — size (paylaşılan prop)"
-        description="sm (h-8) / md (h-10, default) / lg (h-11). Input ve Button ile aynı yükseklik ailesi — formda hizalı satırlar."
+      <ShowcaseSection
+        title="Checkbox"
+        description="Formda commit eden binary (ya da tri-state) kontrol → checked full --primary (Toggle'ın primary-soft'undan ayrı). indeterminate tablo 'tümünü seç' başlığı için minus gösterir; tik fade-in ile gelir."
       >
-        <div className="max-w-form gap-md grid">
-          {SIZE_KEYS.map((size) => (
-            <div key={size} className="gap-3xs flex flex-col">
-              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
-              <Select>
-                <SelectTrigger size={size}>
-                  <SelectValue placeholder="Bir pazaryeri seç" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="trendyol">Trendyol</SelectItem>
-                  <SelectItem value="hepsiburada">Hepsiburada</SelectItem>
-                </SelectContent>
-              </Select>
+        <Playground
+          title="Checkbox — size · radius · invalid · valid · disabled · indeterminate"
+          description="checked/unchecked state'i bileşenin kendisi yönetir (tıkla); kontroller config prop'larını çevirir. indeterminate açıkken kutu kontrollü kısmi-duruma geçer (minus)."
+          controls={{
+            size: control.segment(SIZE_KEYS, 'md'),
+            radius: control.select(RADIUS_KEYS, 'xs'),
+            invalid: control.bool(false),
+            valid: control.bool(false),
+            disabled: control.bool(false),
+            indeterminate: control.bool(false),
+          }}
+          render={(v) => (
+            <div className="gap-xs flex items-center">
+              <CheckboxPlaygroundField
+                size={v.size}
+                radius={v.radius}
+                invalid={v.invalid}
+                valid={v.valid}
+                disabled={v.disabled}
+                indeterminate={v.indeterminate}
+              />
+              <Label htmlFor="cb-demo">Tümünü seç</Label>
             </div>
-          ))}
-        </div>
-      </Preview>
+          )}
+        />
+      </ShowcaseSection>
 
-      <Preview
-        title="Select — leadingIcon + description item"
-        description="SelectItem leadingIcon (logo/durum) ve description (ikincil satır) alır. İkisi de ItemText dışında render edilir — ekran okuyucu yalnız ana etiketi okur."
+      <ShowcaseSection
+        title="Switch"
+        description="Anlık açık/kapalı (Checkbox = formda commit). Binary → açık full --primary, 150ms ease-out-quart thumb kayması. Odakta dar offset ring (20px'te kutu-glow yerine)."
       >
-        <div className="max-w-input gap-3xs grid">
-          <Label>Mağaza</Label>
-          <Select defaultValue="store-1">
-            <SelectTrigger leadingIcon={<Building03Icon />}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                value="store-1"
-                leadingIcon={<Building03Icon />}
-                description="Trendyol — Mağaza #1234"
-              >
-                Ana Mağaza
-              </SelectItem>
-              <SelectItem
-                value="store-2"
-                leadingIcon={<Building03Icon />}
-                description="Hepsiburada — Mağaza #5678"
-              >
-                İkincil Mağaza
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </Preview>
+        <Playground
+          title="Switch — size · disabled · invalid · valid"
+          description="on/off state'i bileşenin kendisi yönetir (tıkla); kontroller görünüm prop'larını çevirir. invalid/valid track'e offset ring ekler (border değil — filled track'te border görünmez)."
+          controls={{
+            size: control.segment(SIZE_KEYS, 'md'),
+            disabled: control.bool(false),
+            invalid: control.bool(false),
+            valid: control.bool(false),
+          }}
+          render={(v) => (
+            <div className="gap-xs flex items-center">
+              <Switch
+                id="sw-demo"
+                size={v.size}
+                disabled={v.disabled}
+                invalid={v.invalid}
+                valid={v.valid}
+                defaultChecked
+              />
+              <Label htmlFor="sw-demo">Otomatik senkron</Label>
+            </div>
+          )}
+        />
+      </ShowcaseSection>
 
-      <Preview
-        title="Select — gruplu + ayraç + disabled item"
-        description="SelectGroup + SelectLabel başlık, SelectSeparator gruplar arası çizgi, item bazında disabled. >6 seçeneği duruma göre kategorize etmenin standart deseni."
+      <ShowcaseSection
+        title="RadioGroup, Slider, OTP & Kbd"
+        description="Grup/aralık/yapısal kontroller — bunlar bir tek prop'la özetlenmez (kümeler, range, slot dizileri), bu yüzden derli toplu Preview olarak kalır."
       >
-        <div className="max-w-input-narrow gap-3xs grid">
-          <Label>Mağaza durumu</Label>
-          <Select defaultValue="active-1">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectLabel>Aktif Mağazalar</SelectLabel>
-                <SelectItem value="active-1">Trendyol — Ana</SelectItem>
-                <SelectItem value="active-2">Hepsiburada — Ana</SelectItem>
-              </SelectGroup>
-              <SelectSeparator />
-              <SelectGroup>
-                <SelectLabel>Pasif Mağazalar</SelectLabel>
-                <SelectItem value="passive-1" disabled>
-                  n11 — Askıda
-                </SelectItem>
-                <SelectItem value="passive-2">Amazon — Bağlantı kesik</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Checkbox — durumlar · tri-state · size"
-        description={
-          'Binary kontrol → checked full --primary (Toggle’ın primary-soft’undan ayrı). checked="indeterminate" tablo "tümünü seç" başlığı için minus gösterir; tik fade-in ile gelir. invalid/valid form doğrulama, sm/md/lg size ekseni.'
-        }
-      >
-        <div className="gap-lg flex flex-col">
-          <div className="gap-md flex flex-wrap items-center">
-            <div className="gap-xs flex items-center">
-              <Checkbox id="c1" />
-              <Label htmlFor="c1">Varsayılan</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Checkbox id="c2" defaultChecked />
-              <Label htmlFor="c2">İşaretli</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Checkbox id="c3" checked="indeterminate" />
-              <Label htmlFor="c3">Kısmi (indeterminate)</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Checkbox id="c4" disabled />
-              <Label htmlFor="c4">Devre dışı</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Checkbox id="c5" invalid />
-              <Label htmlFor="c5">Hatalı (invalid)</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Checkbox id="c6" valid defaultChecked />
-              <Label htmlFor="c6">Doğrulandı (valid)</Label>
-            </div>
-          </div>
-          <div className="gap-md flex items-center">
-            {SIZE_KEYS.map((size) => (
-              <div key={size} className="gap-xs flex items-center">
-                <Checkbox id={`cb-${size}`} size={size} defaultChecked />
-                <Label htmlFor={`cb-${size}`} className="text-2xs text-muted-foreground font-mono">
-                  {size}
-                </Label>
+        <Preview
+          title="RadioGroup — size · disabled · orientation"
+          description="Binary kontrol → nokta full --primary (toggle'ın soft'undan ayrı). size ekseni (nokta orantılı, seçince zoom-in pop); item bazında disabled; orientation='horizontal' satır düzeni + ok-tuşu yönü."
+        >
+          <div className="gap-lg flex flex-col">
+            <RadioGroup defaultValue="monthly" className="gap-sm">
+              <div className="gap-xs flex items-center">
+                <RadioGroupItem value="weekly" id="r1" />
+                <Label htmlFor="r1">Haftalık rapor</Label>
               </div>
-            ))}
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Switch — durumlar · size"
-        description="Anlık açık/kapalı (Checkbox = formda commit). Binary → açık full --primary, 150ms ease-out-quart thumb kayması. Odakta dar offset ring (20px'te kutu-glow yerine). invalid/valid track border; sm/md/lg size (thumb + mesafe orantılı)."
-      >
-        <div className="gap-lg flex flex-col">
-          <div className="gap-md flex flex-wrap items-center">
-            <div className="gap-xs flex items-center">
-              <Switch id="s1" />
-              <Label htmlFor="s1">Kapalı</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Switch id="s2" defaultChecked />
-              <Label htmlFor="s2">Açık</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Switch id="s3" disabled />
-              <Label htmlFor="s3">Devre dışı</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Switch id="s4" invalid />
-              <Label htmlFor="s4">Hatalı (invalid)</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <Switch id="s5" valid defaultChecked />
-              <Label htmlFor="s5">Doğrulandı (valid)</Label>
-            </div>
-          </div>
-          <div className="gap-md flex items-center">
-            {SIZE_KEYS.map((size) => (
-              <div key={size} className="gap-xs flex items-center">
-                <Switch id={`sw-${size}`} size={size} defaultChecked />
-                <Label htmlFor={`sw-${size}`} className="text-2xs text-muted-foreground font-mono">
-                  {size}
-                </Label>
+              <div className="gap-xs flex items-center">
+                <RadioGroupItem value="monthly" id="r2" />
+                <Label htmlFor="r2">Aylık rapor</Label>
               </div>
-            ))}
-          </div>
-        </div>
-      </Preview>
-
-      <Preview
-        title="RadioGroup — size · disabled · orientation"
-        description="Binary kontrol → nokta full --primary (toggle’ın soft’undan ayrı). size ekseni (nokta orantılı ölçeklenir, seçince zoom-in pop); item bazında disabled; orientation='horizontal' satır düzeni + ok-tuşu yönü."
-      >
-        <div className="gap-lg flex flex-col">
-          <RadioGroup defaultValue="monthly" className="gap-sm">
-            <div className="gap-xs flex items-center">
-              <RadioGroupItem value="weekly" id="r1" />
-              <Label htmlFor="r1">Haftalık rapor</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <RadioGroupItem value="monthly" id="r2" />
-              <Label htmlFor="r2">Aylık rapor</Label>
-            </div>
-            <div className="gap-xs flex items-center">
-              <RadioGroupItem value="quarterly" id="r3" disabled />
-              <Label htmlFor="r3">Çeyrek dönem (disabled)</Label>
-            </div>
-          </RadioGroup>
-
-          <RadioGroup defaultValue="md-r" orientation="horizontal" className="gap-md grid-flow-col">
-            {SIZE_KEYS.map((size) => (
-              <div key={size} className="gap-xs flex items-center">
-                <RadioGroupItem value={`${size}-r`} id={`r-${size}`} size={size} />
-                <Label htmlFor={`r-${size}`} className="text-2xs text-muted-foreground font-mono">
-                  {size}
-                </Label>
+              <div className="gap-xs flex items-center">
+                <RadioGroupItem value="quarterly" id="r3" disabled />
+                <Label htmlFor="r3">Çeyrek dönem (disabled)</Label>
               </div>
-            ))}
-          </RadioGroup>
-        </div>
-      </Preview>
+            </RadioGroup>
 
-      <Preview
-        title="Slider — flat thumb · range · disabled · size"
-        description="Flat dolu --primary thumb (artık tek 'outlined' primitive değil). İki-elemanlı value = range picker. disabled tüm kontrolü soldurur; sm/md/lg track+thumb ölçekler; dokunmada thumb 44px'e açılır."
-      >
-        <div className="max-w-input gap-lg grid">
-          <div className="gap-sm grid">
-            <div className="flex items-center justify-between text-sm">
-              <Label>Net kar hedefi</Label>
-              <span className="text-foreground font-mono tabular-nums">
-                ₺{price[0]?.toFixed(0)}
-              </span>
-            </div>
-            <Slider value={price} onValueChange={setPrice} min={0} max={500} step={5} />
+            <RadioGroup
+              defaultValue="md-r"
+              orientation="horizontal"
+              className="gap-md grid-flow-col"
+            >
+              {SIZE_KEYS.map((size) => (
+                <div key={size} className="gap-xs flex items-center">
+                  <RadioGroupItem value={`${size}-r`} id={`r-${size}`} size={size} />
+                  <Label htmlFor={`r-${size}`} className="text-2xs text-muted-foreground font-mono">
+                    {size}
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
           </div>
-          <div className="gap-3xs grid">
-            <Label className="text-2xs text-muted-foreground">Range (iki thumb)</Label>
-            <Slider defaultValue={[120, 360]} min={0} max={500} step={5} />
-          </div>
-          <div className="gap-3xs grid">
-            <Label className="text-2xs text-muted-foreground">Devre dışı</Label>
-            <Slider defaultValue={[200]} min={0} max={500} disabled />
-          </div>
-          {SIZE_KEYS.map((size) => (
-            <div key={size} className="gap-3xs grid">
-              <Label className="text-2xs text-muted-foreground font-mono">size = {size}</Label>
-              <Slider size={size} defaultValue={[180]} min={0} max={500} />
-            </div>
-          ))}
-        </div>
-      </Preview>
+        </Preview>
 
-      <Preview
-        title="Slider — tooltip + formatValue"
-        description="tooltip = thumb üstünde değer balonu (hover / sürükleme / klavye odağı). formatValue hem balonu hem aria-valuetext'i biçimler (₺, %). Range'de her thumb kendi balonunu taşır."
-      >
-        <div className="max-w-input gap-xl pt-lg grid">
-          <div className="gap-3xs grid">
-            <Label>Komisyon eşiği (üzerine gel)</Label>
-            <Slider
-              tooltip
-              formatValue={(v) => `₺${v}`}
-              defaultValue={[180]}
-              min={0}
-              max={500}
-              step={5}
-            />
-          </div>
-          <div className="gap-3xs grid">
-            <Label className="text-2xs text-muted-foreground">Kâr marjı aralığı (%)</Label>
-            <Slider
-              tooltip
-              formatValue={(v) => `%${v}`}
-              defaultValue={[15, 40]}
-              min={0}
-              max={100}
-              step={1}
-            />
-          </div>
-        </div>
-      </Preview>
+        <Preview
+          title="Slider — range · disabled · tooltip · formatValue"
+          description="Flat dolu --primary thumb. İki-elemanlı value = range picker; disabled tüm kontrolü soldurur. tooltip = thumb üstünde değer balonu (hover/sürükleme/klavye); formatValue hem balonu hem aria-valuetext'i biçimler (₺, %)."
+        >
+          <SliderDemo />
+        </Preview>
 
-      <Preview
-        title="InputOTP"
-        description="2FA / SMS kodu doğrulama. Tabular-nums, auto-focus ilerleme, Paste desteği. Aktif slot field-focus (border-ring + glow), caret hard-blink. invalid → destructive border + shake."
-      >
-        <div className="gap-md flex flex-col">
-          <InputOTP maxLength={6}>
-            <InputOTPGroup>
-              <InputOTPSlot index={0} />
-              <InputOTPSlot index={1} />
-              <InputOTPSlot index={2} />
-            </InputOTPGroup>
-            <InputOTPSeparator />
-            <InputOTPGroup>
-              <InputOTPSlot index={3} />
-              <InputOTPSlot index={4} />
-              <InputOTPSlot index={5} />
-            </InputOTPGroup>
-          </InputOTP>
-          <div className="gap-2xs flex flex-col">
-            <InputOTP maxLength={6} invalid defaultValue="123">
+        <Preview
+          title="InputOTP"
+          description="2FA / SMS kodu doğrulama. Tabular-nums, auto-focus ilerleme, Paste desteği. Aktif slot field-focus (border-ring + glow), caret hard-blink. invalid → destructive border + shake."
+        >
+          <div className="gap-md flex flex-col">
+            <InputOTP maxLength={6}>
               <InputOTPGroup>
                 <InputOTPSlot index={0} />
                 <InputOTPSlot index={1} />
@@ -801,34 +463,144 @@ export default function InputsPrimitivePage(): React.ReactElement {
                 <InputOTPSlot index={5} />
               </InputOTPGroup>
             </InputOTP>
-            <span className="text-2xs text-destructive">invalid — geçersiz kod</span>
+            <div className="gap-2xs flex flex-col">
+              <InputOTP maxLength={6} invalid defaultValue="123">
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                </InputOTPGroup>
+                <InputOTPSeparator />
+                <InputOTPGroup>
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+              <span className="text-2xs text-destructive">invalid — geçersiz kod</span>
+            </div>
           </div>
-        </div>
-      </Preview>
+        </Preview>
 
-      <Preview
-        title="Kbd"
-        description="Klavye tuş kapağı — token-driven üniform kare. Tek tuşlar (⌘ K ? Esc) hizalanır; KbdGroup ile akor (⌘⇧P). Komut paleti ipuçları ve dokümantasyon için."
-      >
-        <div className="gap-md flex flex-wrap items-center">
-          <Kbd>⌘</Kbd>
-          <Kbd>K</Kbd>
-          <Kbd>?</Kbd>
-          <Kbd>Esc</Kbd>
-          <Kbd>⏎</Kbd>
-          <KbdGroup>
+        <Preview
+          title="Kbd"
+          description="Klavye tuş kapağı — token-driven üniform kare. Tek tuşlar (⌘ K ? Esc) hizalanır; KbdGroup ile akor (⌘⇧P). Komut paleti ipuçları ve dokümantasyon için."
+        >
+          <div className="gap-md flex flex-wrap items-center">
             <Kbd>⌘</Kbd>
-            <Kbd>⇧</Kbd>
-            <Kbd>P</Kbd>
-          </KbdGroup>
-        </div>
-      </Preview>
+            <Kbd>K</Kbd>
+            <Kbd>?</Kbd>
+            <Kbd>Esc</Kbd>
+            <Kbd>⏎</Kbd>
+            <KbdGroup>
+              <Kbd>⌘</Kbd>
+              <Kbd>⇧</Kbd>
+              <Kbd>P</Kbd>
+            </KbdGroup>
+          </div>
+        </Preview>
+      </ShowcaseSection>
+
+      <ShowcaseSection
+        title="Label"
+        description="Form etiketi — required dekoratif * ekler (alan ayrıca aria-required taşımalı), hata tonu text-destructive ile transition-colors, peer-disabled YALNIZ kontrol-önce satırlarda (checkbox/radio) söner."
+      >
+        <Preview
+          title="Label — required · hata tonu · peer-disabled"
+          description="required * ekler; hata tonu FormLabel'in text-destructive'i. peer-disabled checkbox/radio satırında (kontrol önce gelir) etiketi söndürür. Tooltip'li bilgi ikonu (hint) için Overlay sayfasındaki Tooltip demosuna bak."
+        >
+          <div className="max-w-form gap-md grid">
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="store-name" required>
+                Mağaza adı
+              </Label>
+              <Input id="store-name" required placeholder="Zorunlu alan" />
+            </div>
+            <div className="gap-3xs flex flex-col">
+              <Label htmlFor="store-name-err" required className="text-destructive">
+                Mağaza adı
+              </Label>
+              <Input id="store-name-err" required aria-invalid />
+              <span className="text-2xs text-destructive">Bu alan zorunlu.</span>
+            </div>
+            <div className="gap-xs flex items-center">
+              <Checkbox id="peer-cb" disabled className="peer" />
+              <Label htmlFor="peer-cb">Pasif seçenek (peer-disabled söner)</Label>
+            </div>
+          </div>
+        </Preview>
+        <p className="text-2xs text-muted-foreground">
+          Label hint slot&apos;undaki Tooltip için kanonik demo:{' '}
+          <Link href="/design/primitives/overlays" className="underline underline-offset-2">
+            /design/primitives/overlays
+          </Link>
+        </p>
+      </ShowcaseSection>
     </>
   );
 }
 
-function ClearableSelectDemo(): React.ReactElement {
-  const t = useTranslations('common');
+interface CheckboxPlaygroundFieldProps {
+  size: SizeKey;
+  radius: RadiusKey;
+  invalid: boolean;
+  valid: boolean;
+  disabled: boolean;
+  indeterminate: boolean;
+}
+
+/**
+ * Fully-controlled Checkbox for the Playground so toggling the `indeterminate`
+ * control never crosses the controlled↔uncontrolled boundary (which would log a
+ * React warning). `checked` is always a `CheckedState`; the `indeterminate`
+ * control forces the partial state, and clicking flips checked/unchecked.
+ */
+function CheckboxPlaygroundField({
+  size,
+  radius,
+  invalid,
+  valid,
+  disabled,
+  indeterminate,
+}: CheckboxPlaygroundFieldProps): React.ReactElement {
+  const [checked, setChecked] = React.useState<boolean | 'indeterminate'>(true);
+  const effectiveChecked = indeterminate ? 'indeterminate' : checked;
+
+  return (
+    <Checkbox
+      id="cb-demo"
+      size={size}
+      radius={radius}
+      invalid={invalid}
+      valid={valid}
+      disabled={disabled}
+      checked={effectiveChecked}
+      onCheckedChange={(next) => setChecked(next)}
+    />
+  );
+}
+
+function ClearableInputDemo({ clearLabel }: { clearLabel: string }): React.ReactElement {
+  const [query, setQuery] = React.useState('sipariş');
+
+  return (
+    <div className="max-w-form gap-3xs flex flex-col">
+      <Label htmlFor="q-clear">Sipariş ara (controlled)</Label>
+      <Input
+        id="q-clear"
+        leadingIcon={<Search01Icon />}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onClear={() => setQuery('')}
+        clearLabel={clearLabel}
+        placeholder="Sipariş numarası…"
+      />
+      <span className="text-2xs text-muted-foreground">Değer: &quot;{query}&quot;</span>
+    </div>
+  );
+}
+
+function ClearableSelectDemo({ clearLabel }: { clearLabel: string }): React.ReactElement {
   const [value, setValue] = React.useState<string | undefined>('trendyol');
 
   return (
@@ -837,9 +609,7 @@ function ClearableSelectDemo(): React.ReactElement {
       <Select value={value} onValueChange={setValue}>
         <SelectTrigger
           leadingIcon={<Building03Icon />}
-          {...(value !== undefined
-            ? { onClear: () => setValue(undefined), clearLabel: t('clear') }
-            : {})}
+          {...(value !== undefined ? { onClear: () => setValue(undefined), clearLabel } : {})}
         >
           <SelectValue placeholder="Bir pazaryeri seç" />
         </SelectTrigger>
@@ -851,6 +621,54 @@ function ClearableSelectDemo(): React.ReactElement {
         </SelectContent>
       </Select>
       <span className="text-2xs text-muted-foreground">Seçim: {value ?? '(boş)'}</span>
+    </div>
+  );
+}
+
+function SliderDemo(): React.ReactElement {
+  const [price, setPrice] = React.useState<number[]>([120]);
+
+  return (
+    <div className="max-w-input gap-lg grid">
+      <div className="gap-sm grid">
+        <div className="flex items-center justify-between text-sm">
+          <Label>Net kar hedefi</Label>
+          <span className="text-foreground font-mono tabular-nums">₺{price[0]?.toFixed(0)}</span>
+        </div>
+        <Slider value={price} onValueChange={setPrice} min={0} max={500} step={5} />
+      </div>
+      <div className="gap-3xs grid">
+        <Label className="text-2xs text-muted-foreground">Range (iki thumb)</Label>
+        <Slider defaultValue={[120, 360]} min={0} max={500} step={5} />
+      </div>
+      <div className="gap-3xs grid">
+        <Label className="text-2xs text-muted-foreground">Devre dışı</Label>
+        <Slider defaultValue={[200]} min={0} max={500} disabled />
+      </div>
+      <div className="gap-xl pt-lg grid">
+        <div className="gap-3xs grid">
+          <Label>Komisyon eşiği (₺ — üzerine gel)</Label>
+          <Slider
+            tooltip
+            formatValue={(v) => `₺${v}`}
+            defaultValue={[180]}
+            min={0}
+            max={500}
+            step={5}
+          />
+        </div>
+        <div className="gap-3xs grid">
+          <Label className="text-2xs text-muted-foreground">Kâr marjı aralığı (%)</Label>
+          <Slider
+            tooltip
+            formatValue={(v) => `%${v}`}
+            defaultValue={[15, 40]}
+            min={0}
+            max={100}
+            step={1}
+          />
+        </div>
+      </div>
     </div>
   );
 }

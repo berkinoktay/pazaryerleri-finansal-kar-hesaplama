@@ -4,6 +4,11 @@ import Decimal from 'decimal.js';
 import * as React from 'react';
 
 import { ProfitCell } from '@/components/patterns/profit-cell';
+import { Playground, control } from '@/components/showcase/playground';
+import { Preview } from '@/components/showcase/preview';
+
+const SAMPLE_VALUE = new Decimal('12320.50');
+const DELTA_PERCENT = 8.4;
 
 interface MockRow {
   id: string;
@@ -48,10 +53,32 @@ const ROWS: MockRow[] = [
 export function ProfitCellShowcase(): React.ReactElement {
   return (
     <div className="gap-lg flex flex-col">
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Stacked (default) — ürün karlılık tablosu
-        </span>
+      <Playground
+        title="ProfitCell — layout · delta · emphasis · dimWhenZero"
+        description="delta='none' → delta atlanır, ProfitCell düz Currency render eder. delta='up' ciro/kar (artış iyi), 'down' maliyet/iade (düşüş iyi). dimWhenZero değeri ₺0 ise siliklestirir; örnekte gerçek değer pozitif olduğundan etkisi sıfır değerlerde görünür."
+        controls={{
+          layout: control.segment(['stacked', 'inline'], 'stacked'),
+          delta: control.segment(['up', 'down', 'none'], 'up'),
+          emphasis: control.bool(true, 'emphasis'),
+          dimWhenZero: control.bool(false, 'dimWhenZero'),
+        }}
+        render={(v) => (
+          <ProfitCell
+            value={SAMPLE_VALUE}
+            layout={v.layout}
+            emphasis={v.emphasis}
+            dimWhenZero={v.dimWhenZero}
+            delta={
+              v.delta === 'none' ? undefined : { percent: DELTA_PERCENT, goodDirection: v.delta }
+            }
+          />
+        )}
+      />
+
+      <Preview
+        title="Stacked — ürün karlılık tablosu (in-context)"
+        description="Tablo kolonlarında stacked + align='right' (default) → tabular finansal hizalama. Net kar ve marj kolonları delta'lı; ciro deltasız düz Currency. Negatif değer + negatif delta kombinasyonu da burada görünür."
+      >
         <div className="border-border bg-card overflow-hidden rounded-md border">
           <table className="w-full">
             <thead className="bg-muted/40 border-border border-b">
@@ -95,61 +122,7 @@ export function ProfitCellShowcase(): React.ReactElement {
             </tbody>
           </table>
         </div>
-        <span className="text-2xs text-muted-foreground">
-          Stacked + alignRight (default) → tabular finansal kolonlar.
-        </span>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Inline — sıkışık özet satırı
-        </span>
-        <div className="border-border bg-card p-md gap-sm flex flex-col rounded-md border">
-          <div className="gap-md flex items-baseline justify-between">
-            <span className="text-2xs text-muted-foreground">Bugün net kar</span>
-            <ProfitCell
-              value={new Decimal('48120.80')}
-              delta={{ percent: 8.1, goodDirection: 'up' }}
-              layout="inline"
-              emphasis
-            />
-          </div>
-          <div className="gap-md flex items-baseline justify-between">
-            <span className="text-2xs text-muted-foreground">Reklam gideri</span>
-            <ProfitCell
-              value={new Decimal('3250.00')}
-              delta={{ percent: 14.2, goodDirection: 'down' }}
-              layout="inline"
-            />
-          </div>
-          <div className="gap-md flex items-baseline justify-between">
-            <span className="text-2xs text-muted-foreground">İade tutarı</span>
-            <ProfitCell
-              value={new Decimal('1240.50')}
-              delta={{ percent: -6.5, goodDirection: 'down' }}
-              layout="inline"
-            />
-          </div>
-        </div>
-        <span className="text-2xs text-muted-foreground">
-          goodDirection=&quot;down&quot; → reklam / iade gibi düşmesi iyi olan metrikler.
-        </span>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Delta yok — düz Currency davranışı
-        </span>
-        <div className="border-border bg-card p-md gap-sm flex flex-col items-end rounded-md border">
-          <ProfitCell value={new Decimal('249.90')} />
-          <ProfitCell value={new Decimal('1284.39')} emphasis />
-          <ProfitCell value={0} dimWhenZero />
-        </div>
-        <span className="text-2xs text-muted-foreground">
-          delta atlanırsa ProfitCell sadece Currency render eder; emphasis + dimWhenZero forward
-          edilir.
-        </span>
-      </div>
+      </Preview>
     </div>
   );
 }

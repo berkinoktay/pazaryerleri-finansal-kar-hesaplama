@@ -1,10 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import * as React from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
-import { PrimitiveNav } from '@/components/showcase/primitive-nav';
+import { CategoryNav } from '@/components/showcase/category-nav';
+import { Playground, control } from '@/components/showcase/playground';
 import { Preview } from '@/components/showcase/preview';
+import { ShowcaseSection } from '@/components/showcase/section';
 import {
   Breadcrumb,
   BreadcrumbEllipsis,
@@ -43,246 +46,216 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SIZE_KEYS } from '@/lib/variants';
 import { cn } from '@/lib/utils';
+
+// Sekme tanımları config-driven: sayaç açıkken count prop'u eklenir, kapalıyken
+// düz etiket. Aynı dizi her iki durumu da besler — kopyala-yapıştır yok.
+const TAB_ITEMS = [
+  { value: 'orders', label: 'Siparişler', count: 12, body: 'Aktif siparişler burada listelenir.' },
+  { value: 'returns', label: 'İadeler', count: 3, body: 'İade süreçleri burada izlenir.' },
+  {
+    value: 'settlements',
+    label: 'Hakediş',
+    count: 48,
+    body: 'Pazaryeri hakediş kalemleri burada eşleşir.',
+  },
+] as const;
 
 export default function NavigationPrimitivePage(): React.ReactElement {
   return (
     <>
       <PageHeader
         title="Gezinme"
-        intent="Tab, breadcrumb, pagination, navigation-menu, menubar. Üç sütunlu layout dışındaki her gezinme deseni buradan."
+        intent="Tab, breadcrumb, pagination, navigation-menu, menubar. Üç sütunlu dashboard shell'inin dışında kalan her gezinme deseni buradan — kontrol şeritlerinden Tabs prop'larını canlı çevir."
       />
-      <PrimitiveNav />
+      <CategoryNav section="primitives" />
 
-      <Preview
-        title="Tabs — pill (default)"
-        description="Açık gri pill track içinde segmented kontrol. Aktif sekme beyaz chip (shadow-sm ile hafif yüzer) + marka-renkli etiket (text-primary) — dolgu değil. Kart veya toolbar içinde kullanın."
+      <ShowcaseSection
+        title="Tabs"
+        description="Aynı hiyerarji seviyesindeki kardeş panel'ler arası geçiş. pill (default) = muted track içinde segmented kontrol; underline = tam sayfa bölümü tanıtan, konteynersiz alt çizgi. Aktiflik dolgu değil — beyaz chip + text-primary etiketle gelir. Aktif sekmeyi bileşen yönetir (tıkla); kontroller yalnız görünüm prop'larını çevirir."
       >
-        <Tabs defaultValue="orders">
-          <TabsList>
-            <TabsTrigger value="orders">Siparişler</TabsTrigger>
-            <TabsTrigger value="returns">İadeler</TabsTrigger>
-            <TabsTrigger value="settlements">Hakediş</TabsTrigger>
-          </TabsList>
-          <TabsContent value="orders" className="text-muted-foreground text-sm">
-            Aktif siparişler burada listelenir.
-          </TabsContent>
-          <TabsContent value="returns" className="text-muted-foreground text-sm">
-            İade süreçleri burada izlenir.
-          </TabsContent>
-          <TabsContent value="settlements" className="text-muted-foreground text-sm">
-            Pazaryeri hakediş kalemleri burada eşleşir.
-          </TabsContent>
-        </Tabs>
-      </Preview>
-
-      <Preview
-        title="Tabs — sayaç rozeti (count)"
-        description="TabsTrigger count prop'u: etiketin yanına dolu-primary sayaç rozeti. Sekme bir metrik taşıdığında (bekleyen / kargoda / teslim). Rozet aktif ve pasif sekmede aynı okunur; aktiflik beyaz chip + marka metniyle gelir."
-      >
-        <Tabs defaultValue="pending">
-          <TabsList>
-            <TabsTrigger value="pending" count={3}>
-              Bekleyen
-            </TabsTrigger>
-            <TabsTrigger value="shipped" count={12}>
-              Kargoda
-            </TabsTrigger>
-            <TabsTrigger value="delivered" count={48}>
-              Teslim
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="pending" className="text-muted-foreground text-sm">
-            Hazırlanmayı bekleyen 3 sipariş.
-          </TabsContent>
-          <TabsContent value="shipped" className="text-muted-foreground text-sm">
-            Kargoya verilmiş 12 sipariş.
-          </TabsContent>
-          <TabsContent value="delivered" className="text-muted-foreground text-sm">
-            Teslim edilmiş 48 sipariş.
-          </TabsContent>
-        </Tabs>
-      </Preview>
-
-      <Preview
-        title="Tabs — underline"
-        description="Tam sayfa bölümünü tanıtan tablar için. Konteyner yok, sadece alt çizgi ile aktif state."
-      >
-        <Tabs defaultValue="overview" variant="underline">
-          <TabsList>
-            <TabsTrigger value="overview">Genel bakış</TabsTrigger>
-            <TabsTrigger value="orders">Siparişler</TabsTrigger>
-            <TabsTrigger value="profitability">Karlılık</TabsTrigger>
-            <TabsTrigger value="settings">Ayarlar</TabsTrigger>
-          </TabsList>
-          <TabsContent value="overview" className="text-muted-foreground text-sm">
-            Bu mağazanın genel özeti.
-          </TabsContent>
-          <TabsContent value="orders" className="text-muted-foreground text-sm">
-            Tüm siparişlerin listesi ve durum filtresi.
-          </TabsContent>
-          <TabsContent value="profitability" className="text-muted-foreground text-sm">
-            Sipariş bazında net kar hesabı.
-          </TabsContent>
-          <TabsContent value="settings" className="text-muted-foreground text-sm">
-            Mağaza senkronizasyon ayarları.
-          </TabsContent>
-        </Tabs>
-      </Preview>
-
-      <Preview
-        title="Tabs — size (sm / md / lg)"
-        description="Paylaşılan size prop'u. Tabs, Button, Input, Select hepsi aynı anahtarı kullanır."
-      >
-        <div className="gap-lg flex flex-col">
-          {(['sm', 'md', 'lg'] as const).map((size) => (
-            <Tabs key={size} defaultValue="orders" size={size}>
+        <Playground
+          title="Tabs — variant · size · sayaç rozeti"
+          description="Tek etkileşimli yüzey; eski pill / count / underline / size statik Preview'larının yerini alır. count açıkken her sekmeye dolu-primary sayaç rozeti (bekleyen / kargoda / teslim metriği) eklenir — rozet aktif ve pasif sekmede aynı okunur."
+          controls={{
+            variant: control.segment(['pill', 'underline'], 'pill'),
+            size: control.segment(SIZE_KEYS, 'md'),
+            withCount: control.bool(false, 'withCount'),
+          }}
+          render={(v) => (
+            <Tabs defaultValue="orders" variant={v.variant} size={v.size} className="w-full">
               <TabsList>
-                <TabsTrigger value="orders">Siparişler</TabsTrigger>
-                <TabsTrigger value="returns">İadeler</TabsTrigger>
-                <TabsTrigger value="settlements">Hakediş</TabsTrigger>
+                {TAB_ITEMS.map((tab) => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    count={v.withCount ? tab.count : undefined}
+                  >
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
               </TabsList>
+              {TAB_ITEMS.map((tab) => (
+                <TabsContent
+                  key={tab.value}
+                  value={tab.value}
+                  className="text-muted-foreground text-sm"
+                >
+                  {tab.body}
+                </TabsContent>
+              ))}
             </Tabs>
-          ))}
-        </div>
-      </Preview>
+          )}
+        />
+      </ShowcaseSection>
 
-      <Preview
-        title="Breadcrumb"
-        description="Derin sayfa hiyerarşisi için. Dashboard'dan uzak sayfalarda (iade detayı, mutabakat alt-kırılımı) kullan."
+      <ShowcaseSection
+        title="Breadcrumb & Pagination"
+        description="Sayfa konumlandırma desenleri — derin hiyerarşi izi ve tablo sayfa gezinmesi. İkisi de yapısal kompozisyon; bir prop'la çevrilmez, kendi Preview'larında kalır."
       >
-        <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink href="/dashboard">Panel</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbLink href="/orders">Siparişler</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbEllipsis />
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>TY-2948-123</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
-      </Preview>
+        <Preview
+          title="Breadcrumb"
+          description="Derin sayfa hiyerarşisi için. Dashboard'dan uzak sayfalarda (iade detayı, mutabakat alt-kırılımı) kullan. Uzun yollar BreadcrumbEllipsis ile kısalır."
+        >
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink href="/dashboard">Panel</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbLink href="/orders">Siparişler</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbEllipsis />
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>TY-2948-123</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </Preview>
 
-      <Preview
-        title="Pagination"
-        description="Tablolarda sayfa gezinmesi. Tabular-nums ile hizalı."
-      >
-        <Pagination>
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious href="#" />
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationLink href="#">1</PaginationLink>
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationLink href="#" isActive>
-                2
-              </PaginationLink>
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationLink href="#">3</PaginationLink>
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationEllipsis />
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationLink href="#">24</PaginationLink>
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationNext href="#" />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-      </Preview>
+        <Preview
+          title="Pagination"
+          description="Tablolarda sayfa gezinmesi. Tabular-nums ile hizalı; isActive aktif sayfayı işaretler, PaginationEllipsis aradaki sayfaları gizler."
+        >
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious href="#" />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationLink href="#">1</PaginationLink>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationLink href="#" isActive>
+                  2
+                </PaginationLink>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationLink href="#">3</PaginationLink>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationEllipsis />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationLink href="#">24</PaginationLink>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext href="#" />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </Preview>
+      </ShowcaseSection>
 
-      <Preview
-        title="NavigationMenu"
-        description="Mega-menu / top-level navigation. Dashboard'un üç sütunlu shell'i ile değiştirdik ama landing sayfasının navbar'ı için uygun."
+      <ShowcaseSection
+        title="NavigationMenu & Menubar"
+        description="Overlay-tabanlı gezinme. Dashboard üç sütunlu shell ile değiştirildi — bu ikisi landing navbar'ı ve editör-tarzı içerik içindir. Açılır panel davranışı tek prop'la çevrilmez; kompozisyon Preview'larında kalır."
       >
-        <NavigationMenu>
-          <NavigationMenuList>
-            <NavigationMenuItem>
-              <NavigationMenuTrigger>Ürün</NavigationMenuTrigger>
-              <NavigationMenuContent>
-                <ul className="gap-3xs p-sm grid w-72">
-                  <li>
-                    <NavigationMenuLink asChild>
-                      <Link href="#" className="p-xs hover:bg-muted block rounded-md">
-                        <p className="text-sm font-medium">Karlılık</p>
-                        <p className="text-2xs text-muted-foreground">
-                          Sipariş bazında net kar hesabı
-                        </p>
-                      </Link>
-                    </NavigationMenuLink>
-                  </li>
-                  <li>
-                    <NavigationMenuLink asChild>
-                      <Link href="#" className="p-xs hover:bg-muted block rounded-md">
-                        <p className="text-sm font-medium">Mutabakat</p>
-                        <p className="text-2xs text-muted-foreground">
-                          Hakediş raporu - sipariş eşleştirme
-                        </p>
-                      </Link>
-                    </NavigationMenuLink>
-                  </li>
-                </ul>
-              </NavigationMenuContent>
-            </NavigationMenuItem>
-            <NavigationMenuItem>
-              <NavigationMenuLink asChild className={cn(navigationMenuTriggerStyle())}>
-                <Link href="#">Fiyatlandırma</Link>
-              </NavigationMenuLink>
-            </NavigationMenuItem>
-            <NavigationMenuItem>
-              <NavigationMenuLink asChild className={cn(navigationMenuTriggerStyle())}>
-                <Link href="#">Dokümantasyon</Link>
-              </NavigationMenuLink>
-            </NavigationMenuItem>
-          </NavigationMenuList>
-        </NavigationMenu>
-      </Preview>
+        <Preview
+          title="NavigationMenu"
+          description="Mega-menu / üst-seviye gezinme. Landing sayfasının navbar'ı için uygun; trigger üzerine gelince zengin içerikli panel açar."
+        >
+          <NavigationMenu>
+            <NavigationMenuList>
+              <NavigationMenuItem>
+                <NavigationMenuTrigger>Ürün</NavigationMenuTrigger>
+                <NavigationMenuContent>
+                  <ul className="gap-3xs p-sm grid w-72">
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link href="#" className="p-xs hover:bg-muted block rounded-md">
+                          <p className="text-sm font-medium">Karlılık</p>
+                          <p className="text-2xs text-muted-foreground">
+                            Sipariş bazında net kar hesabı
+                          </p>
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link href="#" className="p-xs hover:bg-muted block rounded-md">
+                          <p className="text-sm font-medium">Mutabakat</p>
+                          <p className="text-2xs text-muted-foreground">
+                            Hakediş raporu - sipariş eşleştirme
+                          </p>
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                  </ul>
+                </NavigationMenuContent>
+              </NavigationMenuItem>
+              <NavigationMenuItem>
+                <NavigationMenuLink asChild className={cn(navigationMenuTriggerStyle())}>
+                  <Link href="#">Fiyatlandırma</Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+              <NavigationMenuItem>
+                <NavigationMenuLink asChild className={cn(navigationMenuTriggerStyle())}>
+                  <Link href="#">Dokümantasyon</Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+            </NavigationMenuList>
+          </NavigationMenu>
+        </Preview>
 
-      <Preview
-        title="Menubar"
-        description="Desktop app metaforu. E-ticaret SaaS'ında nadir; editor tarzı içerik için uygun (ör. kampanya simülatörü)."
-      >
-        <Menubar>
-          <MenubarMenu>
-            <MenubarTrigger>Dosya</MenubarTrigger>
-            <MenubarContent>
-              <MenubarItem>
-                Yeni sipariş <MenubarShortcut>⌘N</MenubarShortcut>
-              </MenubarItem>
-              <MenubarItem>
-                İçe aktar <MenubarShortcut>⌘I</MenubarShortcut>
-              </MenubarItem>
-              <MenubarSeparator />
-              <MenubarItem>
-                Dışa aktar <MenubarShortcut>⌘E</MenubarShortcut>
-              </MenubarItem>
-            </MenubarContent>
-          </MenubarMenu>
-          <MenubarMenu>
-            <MenubarTrigger>Görünüm</MenubarTrigger>
-            <MenubarContent>
-              <MenubarCheckboxItem checked>Yan paneli göster</MenubarCheckboxItem>
-              <MenubarCheckboxItem>Etkinlik akışı</MenubarCheckboxItem>
-              <MenubarSeparator />
-              <MenubarItem>Tam ekran</MenubarItem>
-            </MenubarContent>
-          </MenubarMenu>
-        </Menubar>
-      </Preview>
+        <Preview
+          title="Menubar"
+          description="Desktop app metaforu — bu desenin kanonik evi burası (diğer sayfalardaki overlay'ler buraya yönlendirir). E-ticaret SaaS'ında nadir; editör-tarzı içerik için uygun (ör. kampanya simülatörü)."
+        >
+          <Menubar>
+            <MenubarMenu>
+              <MenubarTrigger>Dosya</MenubarTrigger>
+              <MenubarContent>
+                <MenubarItem>
+                  Yeni sipariş <MenubarShortcut>⌘N</MenubarShortcut>
+                </MenubarItem>
+                <MenubarItem>
+                  İçe aktar <MenubarShortcut>⌘I</MenubarShortcut>
+                </MenubarItem>
+                <MenubarSeparator />
+                <MenubarItem>
+                  Dışa aktar <MenubarShortcut>⌘E</MenubarShortcut>
+                </MenubarItem>
+              </MenubarContent>
+            </MenubarMenu>
+            <MenubarMenu>
+              <MenubarTrigger>Görünüm</MenubarTrigger>
+              <MenubarContent>
+                <MenubarCheckboxItem checked>Yan paneli göster</MenubarCheckboxItem>
+                <MenubarCheckboxItem>Etkinlik akışı</MenubarCheckboxItem>
+                <MenubarSeparator />
+                <MenubarItem>Tam ekran</MenubarItem>
+              </MenubarContent>
+            </MenubarMenu>
+          </Menubar>
+        </Preview>
+      </ShowcaseSection>
     </>
   );
 }

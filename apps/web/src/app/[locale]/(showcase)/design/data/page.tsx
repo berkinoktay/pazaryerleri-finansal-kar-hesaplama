@@ -1,14 +1,13 @@
 'use client';
 
-import { type ColumnDef } from '@tanstack/react-table';
 import * as React from 'react';
 import { toast } from 'sonner';
 
-import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { PageHeader } from '@/components/patterns/page-header';
+import { CategoryNav } from '@/components/showcase/category-nav';
 import { Preview } from '@/components/showcase/preview';
 import { ShowcaseSection } from '@/components/showcase/section';
 
@@ -18,102 +17,26 @@ import { DataTableExpandableRowsShowcase } from '../patterns/data-table-expandab
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
 import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
 import { DataTableRowClickShowcase } from '../patterns/data-table-row-click-showcase';
-import {
-  DataTableServerModeControlledSearchShowcase,
-  DataTableServerModeShowcase,
-} from '../patterns/data-table-server-mode-showcase';
+import { DataTableServerModeShowcase } from '../patterns/data-table-server-mode-showcase';
 import { DataTableStatesShowcase } from '../patterns/data-table-states-showcase';
 import { DataTableSubrowsShowcase } from '../patterns/data-table-subrows-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
-import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
+import { buildOrderColumns, buildShowcaseRows } from '../patterns/showcase-table';
 
-const STATUS_TONE: Record<MockOrder['status'], 'success' | 'info' | 'warning' | 'destructive'> = {
-  delivered: 'success',
-  shipped: 'info',
-  pending: 'warning',
-  returned: 'destructive',
-};
-
-const STATUS_LABEL: Record<MockOrder['status'], string> = {
-  delivered: 'Teslim',
-  shipped: 'Kargoda',
-  pending: 'Bekleyen',
-  returned: 'İade',
-};
-
-const columns: ColumnDef<MockOrder>[] = [
-  {
-    id: 'select',
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate')
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Tümünü seç"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Satırı seç"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
-  {
-    accessorKey: 'orderNumber',
-    header: 'Sipariş No',
-    cell: ({ row }) => (
-      <span className="text-foreground font-mono text-xs">{row.original.orderNumber}</span>
-    ),
-  },
-  {
-    accessorKey: 'customer',
-    header: 'Müşteri',
-  },
-  {
-    accessorKey: 'platform',
-    header: 'Pazaryeri',
-    cell: ({ row }) => (
-      <Badge variant="outline">
-        {row.original.platform === 'TRENDYOL' ? 'Trendyol' : 'Hepsiburada'}
-      </Badge>
-    ),
-  },
-  {
-    accessorKey: 'status',
-    header: 'Durum',
-    cell: ({ row }) => (
-      <Badge tone={STATUS_TONE[row.original.status]}>{STATUS_LABEL[row.original.status]}</Badge>
-    ),
-  },
-  {
-    accessorKey: 'grossAmount',
-    header: 'Ciro',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.grossAmount} />,
-  },
-  {
-    accessorKey: 'commissionAmount',
-    header: 'Komisyon',
-    meta: { numeric: true },
-    cell: ({ row }) => (
-      <Currency value={row.original.commissionAmount} className="text-muted-foreground" />
-    ),
-  },
-  {
-    accessorKey: 'netProfit',
-    header: 'Net kar',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.netProfit} emphasis />,
-  },
-];
+// The canonical 8-column MockOrder set, composed from the shared fixture every
+// data-table-* demo also draws from (select left, then identity / status /
+// money columns).
+const columns = buildOrderColumns([
+  'select',
+  'orderNumber',
+  'customer',
+  'platform',
+  'status',
+  'grossAmount',
+  'commissionAmount',
+  'netProfit',
+]);
 
 export default function DataShowcasePage(): React.ReactElement {
   // Mock data is stable for the page's lifetime — useMemo (not useState) so the
@@ -122,7 +45,7 @@ export default function DataShowcasePage(): React.ReactElement {
   // clicking an action re-renders only that demo, not the whole table-heavy
   // page (the previous page-level `loading` state re-rendered every table at
   // once and hung the tab).
-  const rows = React.useMemo(() => buildMockOrders(50), []);
+  const rows = React.useMemo(() => buildShowcaseRows(50), []);
 
   return (
     <>
@@ -130,6 +53,7 @@ export default function DataShowcasePage(): React.ReactElement {
         title="Veri tablosu"
         intent="TanStack Table v8 üstüne oturtulmuş DataTable wrapper'ı ve çevresindeki toolbar / filtre pattern'leri. En sık kullanılandan ileri senaryolara doğru sıralı."
       />
+      <CategoryNav section="patterns" />
 
       <ShowcaseSection
         title="Temel tablo"
@@ -214,17 +138,10 @@ export default function DataShowcasePage(): React.ReactElement {
         </Preview>
 
         <Preview
-          title="Controlled sorting + filtering + pagination"
-          description="Caller state'i lift eder, API'ye forward eder, gelen slice'ı `data` olarak besler. UI birebir aynı; sadece kim hesaplıyor değişir."
+          title="Sunucu modu — controlled sorting + filtering + pagination"
+          description="Caller state'i lift eder, API'ye forward eder, gelen slice'ı `data` olarak besler. UI birebir aynı; sadece kim hesaplıyor değişir. Üstteki segment arama bağlamasını çevirir: column-filter (TanStack) vs page-level (nuqs URL query) — `searchValue` + `onSearchChange`."
         >
           <DataTableServerModeShowcase />
-        </Preview>
-
-        <Preview
-          title="Controlled search (page-level query)"
-          description="Toolbar'ın `searchValue` + `onSearchChange` pair'i — search bir column filter değil, page-level URL query (nuqs) olduğunda."
-        >
-          <DataTableServerModeControlledSearchShowcase />
         </Preview>
       </ShowcaseSection>
 
@@ -232,12 +149,7 @@ export default function DataShowcasePage(): React.ReactElement {
         title="Toolbar, filtre & toplu işlem"
         description="Tablonun etrafındaki yardımcı pattern'ler — DataTable'ın parçası değil ama onunla birlikte kullanılır."
       >
-        <Preview
-          title="FilterTabs"
-          description="Liste üstüne oturan mutually-exclusive durum segmenti. Count slot, locale-aware sayı, loading=true → Skeleton. Controlled-only (URL state)."
-        >
-          <FilterTabsShowcase />
-        </Preview>
+        <FilterTabsShowcase />
 
         <Preview
           title="FilterChipGroup"
