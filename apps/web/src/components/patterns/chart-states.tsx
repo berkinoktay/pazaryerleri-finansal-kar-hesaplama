@@ -14,15 +14,18 @@ import { EmptyState } from './empty-state';
 /**
  * The non-data states a ChartFrame swaps the plot for. Both the loading skeleton
  * and the empty frame match the chart's `shape` (`line` | `bar` | `ranking` |
- * `donut`) so each chart's non-data states keep its own orientation (a column
- * chart never shows a line silhouette; a donut shows a ring, not bars):
- * - `ChartSkeleton shape` — the LOADING placeholder: for `line` / `bar`, a value
- *   y-gutter + hairline gridlines + a pulsing area silhouette / pulsing columns;
- *   for `ranking`, sorted pulsing pill rows; for `donut`, a pulsing ring + legend
- *   stubs. Reads as "the chart, data coming", never a generic grey box.
- * - `ChartEmptyFrame shape` — for `line` / `bar`, the chart's real empty axes
- *   (labels + gridlines, plus faint columns for `bar`); for `ranking`, faint
- *   sorted pill rows; for `donut`, a faint ring + legend stubs (no value axis).
+ * `donut` | `combo`) so each chart's non-data states keep its own orientation (a
+ * column chart never shows a bare line silhouette; a donut shows a ring, not
+ * bars; a combo shows columns AND a line overlay):
+ * - `ChartSkeleton shape` — the LOADING placeholder: for `line` / `bar` / `combo`,
+ *   a value y-gutter + hairline gridlines + a pulsing area silhouette / pulsing
+ *   columns / both; for `ranking`, sorted pulsing pill rows; for `donut`, a
+ *   pulsing ring + legend stubs. Reads as "the chart, data coming", never a
+ *   generic grey box.
+ * - `ChartEmptyFrame shape` — for `line` / `bar` / `combo`, the chart's real empty
+ *   axes (labels + gridlines, plus faint columns for `bar` / `combo` and a faint
+ *   line for `combo`); for `ranking`, faint sorted pill rows; for `donut`, a
+ *   faint ring + legend stubs (no value axis).
  * - `ChartEmptyHint` — the quiet "no data" pill overlaid on the empty frame.
  * - `ChartError` — a destructive-tone block with a retry action.
  */
@@ -30,6 +33,11 @@ import { EmptyState } from './empty-state';
 // Rising area silhouette for the line loading placeholder (stretched to fill).
 const SILHOUETTE =
   'M0 80 C40 76 62 64 100 60 C150 54 172 40 212 36 C252 32 280 26 300 22 L300 100 L0 100 Z';
+
+// Open rising curve for the combo line overlay (a marj %-style line near the top,
+// stroked not filled, so it reads as a line riding over the columns).
+const LINE_STROKE_SILHOUETTE =
+  'M0 64 C40 60 62 48 100 44 C150 38 172 26 212 22 C252 18 280 12 300 10';
 
 // Fractional bar heights for the bar shape's column placeholders — Tailwind
 // height utilities (no arbitrary values), varied so the row reads as bars.
@@ -44,6 +52,47 @@ const RANKING_AXIS_DOTS = [0, 1, 2, 3, 4];
 // the same count so they line up.
 const GRID_TICKS = [0, 1, 2, 3, 4];
 const X_TICKS = [0, 1, 2, 3, 4, 5];
+
+/**
+ * The line silhouette overlaid on the plot — a filled rising area (for the line
+ * shape, whose default is an area) or an open stroked curve (for the combo
+ * shape's line riding over the columns). Pulsing for loading, faint+static for
+ * empty. `non-scaling-stroke` keeps the combo line an even width despite the
+ * `preserveAspectRatio="none"` fill-stretch.
+ */
+function PlotLineSilhouette({
+  animated,
+  faint,
+  variant = 'area',
+}: {
+  animated: boolean;
+  faint?: boolean;
+  variant?: 'area' | 'line';
+}): React.ReactElement {
+  return (
+    <svg
+      className={cn(
+        'absolute inset-0 h-full w-full',
+        animated && 'animate-pulse',
+        faint && 'opacity-50',
+      )}
+      viewBox="0 0 300 100"
+      preserveAspectRatio="none"
+    >
+      {variant === 'area' ? (
+        <path d={SILHOUETTE} fill="var(--color-muted)" />
+      ) : (
+        <path
+          d={LINE_STROKE_SILHOUETTE}
+          fill="none"
+          stroke="var(--color-muted-foreground)"
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+    </svg>
+  );
+}
 
 /** Column placeholders for the bar shape — pulsing for loading, faint+static for empty. */
 function PlotBars({ animated, faint }: { animated: boolean; faint?: boolean }): React.ReactElement {
@@ -190,17 +239,11 @@ export function ChartSkeleton({ shape = 'line' }: { shape?: ChartShape }): React
               )}
             />
           ))}
-          {shape === 'bar' ? (
-            <PlotBars animated />
-          ) : (
-            <svg
-              className="absolute inset-0 h-full w-full animate-pulse"
-              viewBox="0 0 300 100"
-              preserveAspectRatio="none"
-            >
-              <path d={SILHOUETTE} fill="var(--color-muted)" />
-            </svg>
-          )}
+          {/* bar / combo show columns; line / combo show the line overlay */}
+          {shape === 'bar' || shape === 'combo' ? <PlotBars animated /> : null}
+          {shape === 'line' || shape === 'combo' ? (
+            <PlotLineSilhouette animated variant={shape === 'combo' ? 'line' : 'area'} />
+          ) : null}
         </div>
 
         {/* x-axis label placeholders */}
@@ -269,7 +312,9 @@ export function ChartEmptyFrame({
             )}
           />
         ))}
-        {shape === 'bar' ? <PlotBars animated={false} faint /> : null}
+        {/* bar / combo get faint columns; combo also a faint line overlay */}
+        {shape === 'bar' || shape === 'combo' ? <PlotBars animated={false} faint /> : null}
+        {shape === 'combo' ? <PlotLineSilhouette animated={false} faint variant="line" /> : null}
       </div>
     </div>
   );

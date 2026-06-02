@@ -37,6 +37,7 @@ import {
   resolveSeriesColor,
 } from './chart-colors';
 import { useChartAxisFormatter, useChartValueFormatter } from './chart-format';
+import { LINE_ACTIVE_DOT, LINE_STROKE_WIDTH } from './chart-shapes';
 import { ChartEmptyFrame } from './chart-states';
 import type { ChartColorMode, ChartDatum, ChartSeries } from './chart.types';
 
@@ -270,10 +271,10 @@ export function LineChart({
             dataKey={series.key}
             baseValue={0}
             stroke={`url(#${strokeId})`}
-            strokeWidth={2.2}
+            strokeWidth={LINE_STROKE_WIDTH}
             fill={`url(#${fillId})`}
             dot={false}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--color-card)' }}
+            activeDot={LINE_ACTIVE_DOT}
             isAnimationActive={false}
           />
         ) : (
@@ -281,9 +282,9 @@ export function LineChart({
             type="monotone"
             dataKey={series.key}
             stroke={`url(#${strokeId})`}
-            strokeWidth={2.2}
+            strokeWidth={LINE_STROKE_WIDTH}
             dot={false}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--color-card)' }}
+            activeDot={LINE_ACTIVE_DOT}
             isAnimationActive={false}
           />
         )}

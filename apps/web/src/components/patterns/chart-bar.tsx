@@ -36,6 +36,14 @@ import {
   resolveValueColor,
 } from './chart-colors';
 import { useChartAxisFormatter, useChartValueFormatter } from './chart-format';
+import {
+  BAR_CATEGORY_GAP,
+  BAR_CURSOR,
+  BAR_RADIUS,
+  ChartBar,
+  roundedRectTop,
+  type BarShape,
+} from './chart-shapes';
 import { ChartEmptyFrame } from './chart-states';
 import type { ChartColorMode, ChartDatum, ChartSeries } from './chart.types';
 
@@ -78,66 +86,8 @@ export interface BarChartProps {
   ariaLabel?: string;
 }
 
-// Corner radius (px) — mirrors --radius-md. Bars round only the FREE end; the
-// edge on the zero baseline stays square (a single bar caps the value end, a
-// stacked bar caps just the top of its top segment).
-const BAR_RADIUS = 10;
-// Hovered-column highlight — a faint full-height fill spanning the category band
-// behind the bars, the bar-family cursor (Line uses a dashed crosshair instead).
-const BAR_CURSOR = { fill: 'var(--color-muted-foreground)', fillOpacity: 0.12, radius: 6 } as const;
-// Tighter category gap than recharts' "10%" default — more compact columns.
-const BAR_CATEGORY_GAP = '8%';
 // The grouped comparison bar rides translucent so it reads as a quiet backdrop.
 const COMPARISON_FILL_OPACITY = 0.4;
-
-interface BarShape {
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  fill?: string;
-  index?: number;
-  payload?: ChartDatum;
-}
-
-/** Rounded-rect path with only the top two corners rounded (stacked top cap). */
-function roundedRectTop(x: number, y: number, w: number, h: number, r: number): string {
-  const rad = Math.max(0, Math.min(r, w / 2, h));
-  return `M${x},${y + h} L${x},${y + rad} Q${x},${y} ${x + rad},${y} L${x + w - rad},${y} Q${x + w},${y} ${x + w},${y + rad} L${x + w},${y + h} Z`;
-}
-
-/** Rounded-rect path with only the bottom two corners rounded (stacked base). */
-function roundedRectBottom(x: number, y: number, w: number, h: number, r: number): string {
-  const rad = Math.max(0, Math.min(r, w / 2, h));
-  return `M${x},${y} L${x + w},${y} L${x + w},${y + h - rad} Q${x + w},${y + h} ${x + w - rad},${y + h} L${x + rad},${y + h} Q${x},${y + h} ${x},${y + h - rad} L${x},${y} Z`;
-}
-
-/**
- * Single bar — rounds only the free end (the value tip), leaving the edge on the
- * zero baseline square. recharts hands a sub-zero bar a negative height, so we
- * normalize to (top, |h|) and pick the cap by the height's sign.
- */
-function ChartBar({
-  x,
-  y,
-  width,
-  height,
-  fill,
-  fillOpacity,
-}: BarShape & { fill: string; fillOpacity?: number }): React.ReactElement {
-  if (x === undefined || y === undefined || width === undefined || height === undefined)
-    return <g />;
-  const top = height >= 0 ? y : y + height;
-  const absHeight = Math.abs(height);
-  const path =
-    height >= 0
-      ? roundedRectTop(x, top, width, absHeight, BAR_RADIUS)
-      : roundedRectBottom(x, top, width, absHeight, BAR_RADIUS);
-  return (
-    // runtime-dynamic: bar fill is the value's resolved color
-    <path d={path} fill={fill} fillOpacity={fillOpacity} />
-  );
-}
 
 /**
  * One stacked segment — connected (no gap). Only the TOP cap rounds its top

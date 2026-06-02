@@ -8,6 +8,7 @@ import {
   ChartBarShowcase,
   ChartBarStackedShowcase,
 } from '../chart-bar-showcase';
+import { ComboChartMarketplaceShowcase, ComboChartShowcase } from '../chart-combo-showcase';
 import {
   ChartLineBrandShowcase,
   ChartLineMetricShowcase,
@@ -111,6 +112,20 @@ export default function ChartsPatternsPage(): React.ReactElement {
         description="Pazaryerlerine göre ciro payı. Footer kaynağı combined (Trendyol + Hepsiburada mağazaları → logo'lar + 'N mağaza')."
       >
         <ChartDonutShareShowcase />
+      </Preview>
+
+      <Preview
+        title="ComboChart — ciro (bar) + marj % (çizgi), çift eksen + durumlar"
+        description="Tutar vs. oran arketipi: barlar SOL ₺ ekseninde (ciro), çizgi SAĞ % ekseninde (marj). İki ölçek, ₺ binlerin %'lik çizgiyi ezmemesi için. Barlar paylaşılan ChartBar şeklini kullanır (serbest uç yuvarlak), çizgi üstte; altta legend renk→seri. Tooltip çok-satır kart (her satır kendi formatıyla: ₺ bar, % çizgi). Durum (Dolu/Yükleniyor/Boş/Hata) → combo skeleton (kolon + çizgi)."
+      >
+        <ComboChartShowcase />
+      </Preview>
+
+      <Preview
+        title="ComboChart — pazaryeri cirosu (gruplu bar) + marj (combined kaynak)"
+        description="İki bar serisi (Trendyol + Hepsiburada ciro, sol eksende gruplu) + sağ eksende marj çizgisi. Gruplu bar + çizgi + combined footer kaynağını birlikte gösterir."
+      >
+        <ComboChartMarketplaceShowcase />
       </Preview>
     </>
   );
