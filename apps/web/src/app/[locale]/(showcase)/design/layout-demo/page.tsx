@@ -6,9 +6,9 @@ import { toast } from 'sonner';
 
 import { AppShell } from '@/components/layout/app-shell';
 import { Currency } from '@/components/patterns/currency';
-import { KpiTile } from '@/components/patterns/kpi-tile';
 import { type Organization, type Store } from '@/components/patterns/org-store-switcher';
 import { PageHeader } from '@/components/patterns/page-header';
+import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { SyncBadge } from '@/components/patterns/sync-badge';
 import { buildMockOrders } from '@/components/showcase/showcase-mocks';
@@ -130,28 +130,28 @@ export default function LayoutDemoPage(): React.ReactElement {
         <QuickAccessPanel items={MOCK_QUICK_ACCESS} />
 
         <StatGroup>
-          <KpiTile
+          <StatCard
             label="Ciro"
-            value={{ kind: 'currency', amount: MOCK_REVENUE }}
+            value={<Currency value={MOCK_REVENUE} />}
             delta={{ percent: 12.4, goodDirection: 'up' }}
             context="Nisan 1-17 · Dün: ₺24.820"
-            wide
+            className="sm:col-span-2"
           />
-          <KpiTile
+          <StatCard
             label="Net kar"
-            value={{ kind: 'currency', amount: MOCK_PROFIT }}
+            value={<Currency value={MOCK_PROFIT} />}
             delta={{ percent: 8.1, goodDirection: 'up' }}
             context="Marj %16.9"
           />
-          <KpiTile
+          <StatCard
             label="Sipariş"
-            value={{ kind: 'count', amount: 1472 }}
+            value={(1472).toLocaleString('tr-TR')}
             delta={{ percent: -3.2, goodDirection: 'up' }}
             context="Nisan 1-17"
           />
-          <KpiTile
+          <StatCard
             label="İade"
-            value={{ kind: 'count', amount: 38 }}
+            value={38}
             delta={{ percent: -14.2, goodDirection: 'down' }}
             context="İade oranı %2.6"
           />

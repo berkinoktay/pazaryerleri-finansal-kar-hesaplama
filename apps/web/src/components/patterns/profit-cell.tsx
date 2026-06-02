@@ -20,15 +20,15 @@ import { cn } from '@/lib/utils';
  * - `stacked` (default for tables) — Currency on top, delta below.
  *   Right-aligned by default since financial table columns are.
  * - `inline` — Currency + delta on the same line. Use in row
- *   summaries / KpiTile-adjacent surfaces where vertical space is
+ *   summaries / StatCard-adjacent surfaces where vertical space is
  *   tight.
  *
- * For the standalone KPI surface use `KpiTile`; for plain monetary
+ * For the standalone KPI surface use `StatCard`; for plain monetary
  * display without a trend use `Currency` directly. Reach for
  * ProfitCell when both pieces of information ship together AND the
  * pairing is repeated across rows / cells.
  *
- * @useWhen rendering a Currency value paired with a TrendDelta chip in a table cell or row summary (use KpiTile for the standalone hero, Currency alone when there is no trend)
+ * @useWhen rendering a Currency value paired with a TrendDelta chip in a table cell or row summary (use StatCard for the standalone hero, Currency alone when there is no trend)
  */
 
 export interface ProfitCellProps {

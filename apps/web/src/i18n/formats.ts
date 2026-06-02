@@ -50,6 +50,9 @@ export const FORMATS = {
       maximumFractionDigits: 1,
     },
     percent: { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 },
+    /* Whole-number percent — distribution shares / breakdown legends where a
+       decimal ("%65,0") reads cluttered. Pass a 0..1 fraction. */
+    percentInt: { style: 'percent', maximumFractionDigits: 0 },
     percentDelta: {
       style: 'percent',
       minimumFractionDigits: 1,

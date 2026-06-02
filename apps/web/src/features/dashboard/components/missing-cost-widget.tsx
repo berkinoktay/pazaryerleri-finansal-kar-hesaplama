@@ -1,10 +1,9 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
-import Link from 'next/link';
+import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { KpiTile } from '@/components/patterns/kpi-tile';
+import { StatCard } from '@/components/patterns/stat-card';
 import { useMissingCostStats } from '@/features/costs/hooks/use-missing-cost-stats';
 
 export interface MissingCostWidgetProps {
@@ -21,16 +20,18 @@ export interface MissingCostWidgetProps {
 /**
  * Compact KPI tile shown alongside other dashboard widgets when one or more
  * product variants are missing cost profiles. Hidden entirely when
- * `count === 0` — never taunts the seller with an empty state. Clicks navigate
- * to the products page filtered to the missing variants.
+ * `count === 0` — never taunts the seller with an empty state. The whole card
+ * is the drill-down (StatCard `href` stretched-link) to the filtered products
+ * page.
  *
- * @useWhen dashboard root or analytics overview, alongside other KpiTiles
+ * @useWhen dashboard root or analytics overview, alongside other StatCards
  */
 export function MissingCostWidget({
   orgId,
   filteredProductsHref,
 }: MissingCostWidgetProps): React.ReactElement | null {
   const t = useTranslations('dashboard.missingCostWidget');
+  const formatter = useFormatter();
   const { data } = useMissingCostStats(orgId);
 
   if (data === undefined || data.count === 0) {
@@ -41,12 +42,11 @@ export function MissingCostWidget({
     data.totalVariants > 0 ? Math.round((data.count / data.totalVariants) * 100) : 0;
 
   return (
-    <Link href={filteredProductsHref} className="block">
-      <KpiTile
-        label={t('label', { count: data.count })}
-        value={{ kind: 'count', amount: data.count }}
-        context={t('percentOfTotal', { percent: percentMissing })}
-      />
-    </Link>
+    <StatCard
+      href={filteredProductsHref}
+      label={t('label', { count: data.count })}
+      value={formatter.number(data.count, 'integer')}
+      context={t('percentOfTotal', { percent: percentMissing })}
+    />
   );
 }

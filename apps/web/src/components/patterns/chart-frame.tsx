@@ -31,7 +31,7 @@ import { TrendDelta } from './trend-delta';
  * sub-line under the value, header metric tabs (one card, multiple metrics),
  * and an inline series legend (for a comparison chart). All are additive — omit
  * them for the bare card. Related/secondary KPIs do NOT live here; they compose
- * as sibling `KpiTile`s beside the chart at the page level.
+ * as sibling `StatCard`s beside the chart at the page level.
  *
  * @useWhen wrapping any chart archetype to give it consistent chrome + states
  */

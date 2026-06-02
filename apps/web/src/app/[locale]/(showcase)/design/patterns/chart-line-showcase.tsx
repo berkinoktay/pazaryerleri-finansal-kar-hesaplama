@@ -55,7 +55,7 @@ const PERIODS = [
  * Interactive P&L demo. The card stays lean by default (title · value · period);
  * toggling "Dün ile karşılaştır" reveals the chart-intrinsic comparison story —
  * a delta chip, a context sub-line, and an inline legend — without ever pulling
- * in secondary KPIs (those compose as sibling KpiTiles at the page level).
+ * in secondary KPIs (those compose as sibling StatCards at the page level).
  */
 export function ChartLineShowcase(): React.ReactElement {
   const [status, setStatus] = React.useState<ChartStatus>('ready');

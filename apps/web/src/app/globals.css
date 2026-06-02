@@ -292,7 +292,7 @@
   }
 
   /* Tabular numerics for any element with this class, any numeric column
-     in a table, and KPI values rendered via the Currency / KpiTile patterns. */
+     in a table, and KPI values rendered via the Currency / StatCard patterns. */
   .tabular-nums,
   [data-tabular='true'],
   table td[data-numeric='true'],

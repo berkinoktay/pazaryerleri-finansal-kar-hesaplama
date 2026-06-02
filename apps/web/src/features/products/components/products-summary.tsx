@@ -1,9 +1,9 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { KpiTile } from '@/components/patterns/kpi-tile';
+import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -32,6 +32,7 @@ export interface ProductsSummaryProps {
  */
 export function ProductsSummary({ counts }: ProductsSummaryProps): React.ReactElement {
   const t = useTranslations('products.summary');
+  const formatter = useFormatter();
 
   if (counts === undefined) {
     return (
@@ -48,19 +49,19 @@ export function ProductsSummary({ counts }: ProductsSummaryProps): React.ReactEl
 
   return (
     <StatGroup>
-      <KpiTile
+      <StatCard
         label={t('totalProducts')}
-        value={{ kind: 'count', amount: counts.total }}
+        value={formatter.number(counts.total, 'integer')}
         context={t('totalContext')}
       />
-      <KpiTile
+      <StatCard
         label={t('missingCost')}
-        value={{ kind: 'count', amount: counts.missingCost }}
+        value={formatter.number(counts.missingCost, 'integer')}
         context={t('ofCatalog', { pct: shareOfCatalog(counts.missingCost) })}
       />
-      <KpiTile
+      <StatCard
         label={t('missingVat')}
-        value={{ kind: 'count', amount: counts.missingVat }}
+        value={formatter.number(counts.missingVat, 'integer')}
         context={t('ofCatalog', { pct: shareOfCatalog(counts.missingVat) })}
       />
     </StatGroup>

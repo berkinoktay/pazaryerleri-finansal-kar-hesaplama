@@ -28,7 +28,7 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
    */
   meta?: React.ReactNode;
   /**
-   * Optional summary strip — a StatGroup of compact KpiTiles, rendered
+   * Optional summary strip — a StatGroup of compact StatCards, rendered
    * full-width below the title/actions row. This is a SLOT, not a fixture:
    * omit it on pages without at-a-glance metrics and the header still reads
    * as complete (title + intent + actions form a finished unit). Never put a

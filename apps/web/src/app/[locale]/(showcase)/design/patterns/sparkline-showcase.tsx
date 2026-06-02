@@ -4,8 +4,8 @@ import Decimal from 'decimal.js';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
-import { KpiTile } from '@/components/patterns/kpi-tile';
 import { Sparkline } from '@/components/patterns/sparkline';
+import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { TrendDelta } from '@/components/patterns/trend-delta';
 
@@ -58,12 +58,12 @@ export function SparklineShowcase(): React.ReactElement {
     <div className="gap-lg flex flex-col">
       <div className="gap-3xs flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          KpiTile içinde — son 14 gün trendi
+          StatCard içinde — son 14 gün trendi
         </span>
         <StatGroup>
-          <KpiTile
+          <StatCard
             label="Ciro"
-            value={{ kind: 'currency', amount: new Decimal('37640') }}
+            value={<Currency value={new Decimal('37640')} />}
             delta={{ percent: 12.4, goodDirection: 'up' }}
             context={
               <span className="gap-xs flex items-center">
@@ -72,9 +72,9 @@ export function SparklineShowcase(): React.ReactElement {
               </span>
             }
           />
-          <KpiTile
+          <StatCard
             label="Sipariş"
-            value={{ kind: 'count', amount: 218 }}
+            value={218}
             delta={{ percent: 9.5, goodDirection: 'up' }}
             context={
               <span className="gap-xs flex items-center">
@@ -83,9 +83,9 @@ export function SparklineShowcase(): React.ReactElement {
               </span>
             }
           />
-          <KpiTile
+          <StatCard
             label="İade"
-            value={{ kind: 'count', amount: 28 }}
+            value={28}
             delta={{ percent: 22.5, goodDirection: 'down' }}
             context={
               <span className="gap-xs flex items-center">
@@ -94,9 +94,9 @@ export function SparklineShowcase(): React.ReactElement {
               </span>
             }
           />
-          <KpiTile
+          <StatCard
             label="Aktif sync"
-            value={{ kind: 'count', amount: 40 }}
+            value={40}
             context={
               <span className="gap-xs flex items-center">
                 <Sparkline data={STALL_SERIES} tone="neutral" />

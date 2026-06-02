@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { render as rtlRender, type RenderOptions } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { TooltipProvider } from '../../src/components/ui/tooltip';
 import { FORMATS } from '../../src/i18n/formats';
 import trMessages from '../../messages/tr.json';
 
@@ -36,7 +37,7 @@ function AllProviders({ children, queryClient }: ProvidersProps) {
         timeZone="Europe/Istanbul"
         formats={FORMATS}
       >
-        {children}
+        <TooltipProvider>{children}</TooltipProvider>
       </NextIntlClientProvider>
     </QueryClientProvider>
   );
