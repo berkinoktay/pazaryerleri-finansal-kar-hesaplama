@@ -17,7 +17,6 @@ import {
   TableNoResultsState,
 } from '@/components/patterns/data-table-states';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { KpiTile } from '@/components/patterns/kpi-tile';
 import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { StatRow } from '@/components/patterns/stat-row';
@@ -26,9 +25,16 @@ import { DefinitionListShowcase } from '../definition-list-showcase';
 import { ImageCellShowcase } from '../image-cell-showcase';
 import { ProfitCellShowcase } from '../profit-cell-showcase';
 import { SparklineShowcase } from '../sparkline-showcase';
+import {
+  InfoHintShowcase,
+  StatCardChartKitShowcase,
+  StatCardRichShowcase,
+  StatCardStatesShowcase,
+  StatCardTilesShowcase,
+  StatStripShowcase,
+} from '../stat-card-showcase';
 import { TimeAgoShowcase } from '../time-ago-showcase';
 import { PageHeader } from '@/components/patterns/page-header';
-import { StatGroup } from '@/components/patterns/stat-group';
 import { TrendDelta } from '@/components/patterns/trend-delta';
 import { PatternNav } from '@/components/showcase/pattern-nav';
 import { Preview } from '@/components/showcase/preview';
@@ -54,35 +60,45 @@ export default function DisplayPatternsPage(): React.ReactElement {
       <PatternNav />
 
       <Preview
-        title="KpiTile + StatGroup"
-        description="Değer-birinci hiyerarşi. Delta chip ikon + renk + işaret ile; renk asla tek sinyal değil. StatGroup auto-fit grid; tile'lar viewport'a göre yeniden hizalanır."
+        title="StatStrip — segmented KPI özeti"
+        description="Tek hairline konteyner, ince ayraçlar; her hücre başlık (+ opsiyonel ⓘ) + sağ-üst dairesel outline ikon + büyük değer + dönem + delta pill. Sayfa başı özet bandı — mobilde stacked (border-t), lg'de tek satır (border-l). Ciro ve Net Kâr'ın ⓘ'sine gel."
       >
-        <StatGroup>
-          <KpiTile
-            label="Ciro"
-            value={{ kind: 'currency', amount: MOCK.revenue }}
-            delta={{ percent: 12.4, goodDirection: 'up' }}
-            context="Dün: ₺252.980 · Trendyol Ana Mağaza"
-          />
-          <KpiTile
-            label="Net kar"
-            value={{ kind: 'currency', amount: MOCK.profit }}
-            delta={{ percent: 8.1, goodDirection: 'up' }}
-            context="Marj %16.9 · Nisan 2026"
-          />
-          <KpiTile
-            label="Sipariş"
-            value={{ kind: 'count', amount: 1472 }}
-            delta={{ percent: -3.2, goodDirection: 'up' }}
-            context="Nisan 1-17 · Bugün: 82"
-          />
-          <KpiTile
-            label="İade"
-            value={{ kind: 'count', amount: 38 }}
-            delta={{ percent: -14.2, goodDirection: 'down' }}
-            context="İade oranı %2.6"
-          />
-        </StatGroup>
+        <StatStripShowcase />
+      </Preview>
+
+      <Preview
+        title="StatCard — icon-hero · metrik+trend · aksiyon"
+        description="Aynı slot-tabanlı StatCard üç dizilişte: dairesel soft ikon + değer + delta/dönem; değer + (mutlak + pill) + sağda mini-bar trend (Sparkline variant='bars'); emphasis başlık + trailing ikon + 'Raporu gör →' CTA."
+      >
+        <StatCardTilesShowcase />
+      </Preview>
+
+      <Preview
+        title="StatCard — breakdown (DistributionBar) + çok-metrik hero"
+        description="Breakdown: hero değer + (pill + mutlak + dönem) + stacked dağılım barı + legend (ChartSwatch · etiket · değer · %), DistributionBar children olarak. Çok-metrik hero: kompozisyon (yeni bileşen değil) — iki metrik + area trend."
+      >
+        <StatCardRichShowcase />
+      </Preview>
+
+      <Preview
+        title="StatCard + GERÇEK chart kit (DonutChart / BarChart)"
+        description="Slot'lar (trend/children) düz ReactNode — hiçbir grafik kartın içine gömülü değil. Burada children'a kit'in GERÇEK recharts bileşenleri konuyor: solda DonutChart (dağılım — DistributionBar yerine), sağda BarChart (aylık ciro). Gerçek sayfada recharts'ın daha iyi yönettiği yerde kendi chart kit'ini bu kartlara koyabilirsin; taşma/bozulma kontrolü için sabit-yükseklik konteynerde."
+      >
+        <StatCardChartKitShowcase />
+      </Preview>
+
+      <Preview
+        title="StatCard — durumlar + drill-down"
+        description="status='loading' shape-duyarlı skeleton, 'empty' → —, 'error' → yeniden-dene; toggle'ı dene. İkinci kart href ile tüm-kart drill-down (stretched-link + hover lift); ⓘ butonu drill-down'u tetiklemez."
+      >
+        <StatCardStatesShowcase />
+      </Preview>
+
+      <Preview
+        title="InfoHint — açıklama tooltip'i (genel atom)"
+        description="Etiketin yanına opsiyonel ⓘ + hover/focus tooltip (PazarSync Tooltip: bg-card · hairline · shadow · portala taşınır). Sadece stat'lara değil, her etiket/başlık yanına. Üstüne gel ya da Tab'la odaklan."
+      >
+        <InfoHintShowcase />
       </Preview>
 
       <Preview
@@ -225,14 +241,14 @@ export default function DisplayPatternsPage(): React.ReactElement {
 
       <Preview
         title="Sparkline"
-        description="KpiTile / tablo hücresi / row özeti içine sığan kompakt trend microchart. Recharts üstüne sarılmış area (default, gradient dolgulu) veya line variant. Tone-driven renk (success / warning / destructive / info / neutral) — TrendDelta ile aynı semantic vocabulary. Boş seri muted placeholder kutu döner."
+        description="StatCard / tablo hücresi / row özeti içine sığan kompakt trend microchart. Recharts üstüne sarılmış area (default, gradient dolgulu) veya line variant. Tone-driven renk (success / warning / destructive / info / neutral) — TrendDelta ile aynı semantic vocabulary. Boş seri muted placeholder kutu döner."
       >
         <SparklineShowcase />
       </Preview>
 
       <Preview
         title="ProfitCell"
-        description="Currency + TrendDelta komposisyonu — tablo hücresi + sıkışık özet için. Stacked (default, sağ yaslı) finansal kolonlar; inline aynı satırda. delta atlanırsa düz Currency davranışı; emphasis + dimWhenZero forward edilir. KpiTile standalone hero için, Currency tek başına trend yokken; ProfitCell ikisi birlikte tekrar eden hücrelerde."
+        description="Currency + TrendDelta komposisyonu — tablo hücresi + sıkışık özet için. Stacked (default, sağ yaslı) finansal kolonlar; inline aynı satırda. delta atlanırsa düz Currency davranışı; emphasis + dimWhenZero forward edilir. StatCard standalone hero için, Currency tek başına trend yokken; ProfitCell ikisi birlikte tekrar eden hücrelerde."
       >
         <ProfitCellShowcase />
       </Preview>

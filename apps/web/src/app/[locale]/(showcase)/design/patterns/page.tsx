@@ -29,7 +29,7 @@ const CATEGORIES: CategoryCard[] = [
     description:
       'Veri-okuma yüzeyleri: KPI tile, sparkline, sayı/yüzde delta, currency, badge stack, enum-mapping badge, marketplace logosu, key→value listesi, relative time, currency+delta hücresi, image/avatar hücresi, boş durum.',
     components:
-      'KpiTile · StatGroup · TrendDelta · Currency · ProfitCell · Sparkline · BadgeWithOverflow · MappedBadge · MarketplaceLogo · DefinitionList · TimeAgo · ImageCell · EmptyState',
+      'StatCard · StatGroup · TrendDelta · Currency · ProfitCell · Sparkline · BadgeWithOverflow · MappedBadge · MarketplaceLogo · DefinitionList · TimeAgo · ImageCell · EmptyState',
   },
   {
     href: '/design/patterns/forms',

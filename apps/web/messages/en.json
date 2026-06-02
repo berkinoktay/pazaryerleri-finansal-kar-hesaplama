@@ -1,5 +1,11 @@
 {
   "common": {
+    "infoHint": "Info",
+    "stat": {
+      "loadError": "Couldn't load",
+      "retry": "Retry",
+      "empty": "No data"
+    },
     "advancedFilter": {
       "addFilter": "Add filter",
       "apply": "Apply",

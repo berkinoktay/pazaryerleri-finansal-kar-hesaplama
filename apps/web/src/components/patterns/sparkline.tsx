@@ -1,12 +1,12 @@
 'use client';
 
 import * as React from 'react';
-import { Area, AreaChart, Line, LineChart, ResponsiveContainer } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, Line, LineChart, ResponsiveContainer } from 'recharts';
 
 import { cn } from '@/lib/utils';
 
 /**
- * Inline trend microchart — designed to fit inside a KpiTile, table
+ * Inline trend microchart — designed to fit inside a StatCard, table
  * cell, or row summary. Renders a tight area (default) or line chart
  * over a small numeric series with no axes, gridlines, or tooltips.
  * The chart is the visual; the surrounding label / value carries the
@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils';
  */
 
 export type SparklineTone = 'neutral' | 'success' | 'warning' | 'destructive' | 'info';
-export type SparklineVariant = 'area' | 'line';
+export type SparklineVariant = 'area' | 'line' | 'bars';
 
 export interface SparklinePoint {
   /** Y-axis numeric value. */
@@ -44,7 +44,7 @@ export interface SparklineProps {
   data: number[] | SparklinePoint[];
   /** Color tone for the line/area. Defaults to `'neutral'`. */
   tone?: SparklineTone;
-  /** `area` (default) renders with a gradient fill; `line` is stroke-only. */
+  /** `area` (default) gradient fill; `line` stroke-only; `bars` tiny rounded columns. */
   variant?: SparklineVariant;
   /** Width in px. Defaults to `80`. */
   width?: number;
@@ -135,6 +135,14 @@ export function Sparkline({
               activeDot={false}
             />
           </AreaChart>
+        ) : variant === 'bars' ? (
+          <BarChart
+            data={series}
+            margin={{ top: 1, right: 0, bottom: 0, left: 0 }}
+            barCategoryGap={2}
+          >
+            <Bar dataKey="value" fill={color} radius={[1.5, 1.5, 0, 0]} isAnimationActive={false} />
+          </BarChart>
         ) : (
           <LineChart data={series} margin={{ top: 1, right: 0, bottom: 1, left: 0 }}>
             <Line

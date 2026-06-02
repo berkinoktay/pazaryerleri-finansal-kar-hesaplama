@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
  * Container-aware: the grid reacts to its parent, not the viewport, so
  * embedding in a narrow column Just Works.
  *
- * @useWhen wrapping a row of KpiTile siblings that should self-tile responsively without breakpoint ladders
+ * @useWhen wrapping a row of StatCard siblings that should self-tile responsively without breakpoint ladders
  */
 export function StatGroup({
   className,

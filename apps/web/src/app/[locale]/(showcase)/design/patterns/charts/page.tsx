@@ -26,7 +26,7 @@ export default function ChartsPatternsPage(): React.ReactElement {
     <>
       <PageHeader
         title="Grafikler"
-        intent="PazarSync grafik kiti — tek ChartFrame kabuğu, shape-isimli reusable grafikler (LineChart), dinamik kâr/zarar rengi, loading/empty/error durumları. Kart yalın kalır; ilişkili KPI'lar grafiğin yanında ayrı KpiTile'lar olarak dizilir (sayfa seviyesinde)."
+        intent="PazarSync grafik kiti — tek ChartFrame kabuğu, shape-isimli reusable grafikler (LineChart), dinamik kâr/zarar rengi, loading/empty/error durumları. Kart yalın kalır; ilişkili KPI'lar grafiğin yanında ayrı StatCard'lar olarak dizilir (sayfa seviyesinde)."
       />
       <PatternNav />
 

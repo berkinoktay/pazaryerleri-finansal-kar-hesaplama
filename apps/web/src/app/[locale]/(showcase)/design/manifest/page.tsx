@@ -4,8 +4,8 @@ import { CodeIcon, PackageIcon, Search01Icon } from 'hugeicons-react';
 import * as React from 'react';
 
 import manifest from '@/../components.manifest.json';
-import { KpiTile } from '@/components/patterns/kpi-tile';
 import { PageHeader } from '@/components/patterns/page-header';
+import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -99,21 +99,13 @@ export default function ManifestPage(): React.ReactElement {
       />
 
       <StatGroup>
-        <KpiTile
+        <StatCard
           label="Toplam"
-          value={{ kind: 'count', amount: TYPED_MANIFEST.count }}
+          value={TYPED_MANIFEST.count}
           context="patterns/ + ui/ altında stable"
         />
-        <KpiTile
-          label="Atomlar"
-          value={{ kind: 'count', amount: counts.atoms }}
-          context="shadcn primitive üstünde"
-        />
-        <KpiTile
-          label="Patternler"
-          value={{ kind: 'count', amount: counts.molecules }}
-          context="PazarSync özel composite"
-        />
+        <StatCard label="Atomlar" value={counts.atoms} context="shadcn primitive üstünde" />
+        <StatCard label="Patternler" value={counts.molecules} context="PazarSync özel composite" />
       </StatGroup>
 
       <div className="gap-md flex flex-col">

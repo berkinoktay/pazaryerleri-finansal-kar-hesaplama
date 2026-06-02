@@ -1,5 +1,11 @@
 {
   "common": {
+    "infoHint": "Bilgi",
+    "stat": {
+      "loadError": "Yüklenemedi",
+      "retry": "Yenile",
+      "empty": "Veri yok"
+    },
     "advancedFilter": {
       "addFilter": "Filtre ekle",
       "apply": "Uygula",
