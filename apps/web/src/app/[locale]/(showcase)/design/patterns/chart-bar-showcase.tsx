@@ -78,13 +78,7 @@ export function ChartBarShowcase(): React.ReactElement {
 
       <ChartFrame
         title="Bu Hafta Net Kâr"
-        value={
-          <Currency
-            value={WEEK_NET}
-            emphasis
-            className="text-foreground text-3xl font-semibold tracking-tight"
-          />
-        }
+        value={<Currency value={WEEK_NET} />}
         delta={comparing ? { percent: 6, goodDirection: 'up' } : undefined}
         context={comparing ? 'Geçen haftadan +₺130 · 2 zarar günü' : undefined}
         legend={
@@ -140,13 +134,7 @@ export function ChartBarCategoricalShowcase(): React.ReactElement {
   return (
     <ChartFrame
       title="Kategoriye Göre Net Kâr — bu ay"
-      value={
-        <Currency
-          value={5140}
-          emphasis
-          className="text-foreground text-3xl font-semibold tracking-tight"
-        />
-      }
+      value={<Currency value={5140} />}
       source="Trendyol, Hepsiburada"
     >
       <BarChart
@@ -173,15 +161,7 @@ const DAILY_ORDERS = [
 /** Reuse demo: a neutral count in brand mode. */
 export function ChartBarBrandShowcase(): React.ReactElement {
   return (
-    <ChartFrame
-      title="Günlük Sipariş Adedi — son 7 gün"
-      value={
-        <span className="text-foreground text-3xl font-semibold tracking-tight tabular-nums">
-          450
-        </span>
-      }
-      source="Trendyol, Hepsiburada"
-    >
+    <ChartFrame title="Günlük Sipariş Adedi — son 7 gün" value={450} source="Trendyol, Hepsiburada">
       <BarChart
         data={DAILY_ORDERS}
         xKey="day"
@@ -216,13 +196,7 @@ export function ChartBarStackedShowcase(): React.ReactElement {
   return (
     <ChartFrame
       title="Günlük Gelir Dağılımı — bu hafta"
-      value={
-        <Currency
-          value={6230}
-          emphasis
-          className="text-foreground text-3xl font-semibold tracking-tight"
-        />
-      }
+      value={<Currency value={6230} />}
       source="Trendyol, Hepsiburada"
     >
       <BarChart data={COMPOSITION} xKey="day" series={COMPOSITION_SERIES} />

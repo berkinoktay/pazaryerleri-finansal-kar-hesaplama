@@ -74,12 +74,15 @@ export interface ChartFrameProps {
 
 function LiveBadge(): React.ReactElement {
   const t = useTranslations('common.chart');
+  // Contained success-surface pill (mirrors the TrendDelta chip recipe) so
+  // liveness reads as one calm bounded object beside the period picker, not
+  // loose green text competing with the hero value.
   return (
     <StatusDot
       tone="success"
       animatePulse
       label={t('live')}
-      className="text-success gap-2xs text-2xs font-medium"
+      className="bg-success-surface text-success gap-2xs px-xs py-3xs text-2xs rounded-full font-medium"
     />
   );
 }
@@ -89,8 +92,11 @@ function ChartLegend({
 }: {
   items: ReadonlyArray<ChartFrameLegendItem>;
 }): React.ReactElement {
+  // Top spacing is owned by the parent value block's gap-2xs (single source) —
+  // this row carries no pt of its own. End-values are font-medium, not
+  // semibold, so the 30px hero stays the only heavy number on the card.
   return (
-    <div className="gap-md pt-3xs flex flex-wrap items-center">
+    <div className="gap-md flex flex-wrap items-center">
       {items.map((item) => (
         <span key={item.label} className="gap-2xs text-2xs text-muted-foreground flex items-center">
           <span
@@ -100,7 +106,7 @@ function ChartLegend({
             aria-hidden
           />
           {item.label}
-          <span className="text-foreground font-semibold tabular-nums">{item.value}</span>
+          <span className="text-foreground font-medium tabular-nums">{item.value}</span>
         </span>
       ))}
     </div>
@@ -134,35 +140,53 @@ export function ChartFrame({
 
   return (
     <Card className={cn('gap-0 overflow-hidden p-0', className)}>
-      <div className="px-lg pt-lg pb-sm gap-md flex items-start justify-between">
-        <div className="gap-2xs flex min-w-0 flex-col">
+      {/* HEADER — a meta row (label ↔ controls) stacked over the full-width hero
+          value block, 12px apart. Splitting the old single `items-start` row is
+          what stops the controls floating up by the tiny eyebrow while the hero
+          number sits alone with empty space to its right. */}
+      <div className="px-lg pt-lg pb-md gap-sm flex flex-col">
+        <div className="gap-md flex items-center justify-between">
           {metricTabs ? (
             <ChartPeriodSelector {...metricTabs} />
           ) : (
-            <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+            <span className="text-2xs text-muted-foreground min-w-0 truncate font-medium tracking-wider uppercase">
               {title}
             </span>
           )}
-          {value !== undefined ? (
-            <div className="gap-sm flex items-baseline">
-              {value}
-              {delta ? (
-                <TrendDelta value={delta.percent} goodDirection={delta.goodDirection} />
-              ) : null}
+          {liveBadge || period ? (
+            <div className="gap-sm flex shrink-0 items-center">
+              {liveBadge ? <LiveBadge /> : null}
+              {period ? <ChartPeriodSelector {...period} /> : null}
             </div>
           ) : null}
-          {context ? <span className="text-2xs text-muted-foreground">{context}</span> : null}
-          {legend?.length ? <ChartLegend items={legend} /> : null}
         </div>
-        {liveBadge || period ? (
-          <div className="gap-sm flex shrink-0 items-center">
-            {liveBadge ? <LiveBadge /> : null}
-            {period ? <ChartPeriodSelector {...period} /> : null}
+
+        {value !== undefined || context || legend?.length ? (
+          <div className="gap-2xs flex min-w-0 flex-col">
+            {value !== undefined ? (
+              <div className="gap-sm flex items-baseline">
+                {/* The frame OWNS the hero typography so every chart card reads
+                    identically — callers pass a bare value (a Currency / number),
+                    never restyle it. `leading-none` collapses the token
+                    line-height so the deliberate 12px label→hero gap is the only
+                    space above. */}
+                <span className="text-foreground text-3xl leading-none font-semibold tracking-tight tabular-nums">
+                  {value}
+                </span>
+                {delta ? (
+                  <TrendDelta value={delta.percent} goodDirection={delta.goodDirection} />
+                ) : null}
+              </div>
+            ) : null}
+            {context ? (
+              <span className="text-2xs text-muted-foreground-dim tabular-nums">{context}</span>
+            ) : null}
+            {legend?.length ? <ChartLegend items={legend} /> : null}
           </div>
         ) : null}
       </div>
 
-      <div className="px-lg pb-sm">
+      <div className="px-lg pt-2xs pb-md">
         <div
           className={cn('relative w-full', height === undefined && 'h-chart')}
           // runtime-dynamic: caller-overridden plot height (else the h-chart token)
@@ -183,12 +207,17 @@ export function ChartFrame({
         </div>
       </div>
 
+      {/* FOOTER — one calm meta line: last-sync · source. No status dot here —
+          the header Canlı pulse is the single live cue; a middot joins the two
+          fragments only when both are present. */}
       {hasFooter ? (
-        <div className="px-lg py-sm border-border-muted text-2xs text-muted-foreground-dim gap-md flex flex-wrap items-center border-t">
+        <div className="px-lg py-md border-border-muted text-2xs text-muted-foreground-dim gap-xs flex flex-wrap items-center border-t tabular-nums">
           {syncedAt ? (
-            <span className="gap-2xs flex items-center">
-              <StatusDot tone="success" />
-              {t('lastSynced', { time: formatter.dateTime(syncedAt, 'time') })}
+            <span>{t('lastSynced', { time: formatter.dateTime(syncedAt, 'time') })}</span>
+          ) : null}
+          {syncedAt && source ? (
+            <span aria-hidden className="text-border-strong">
+              ·
             </span>
           ) : null}
           {source ? <span>{t('source', { source })}</span> : null}

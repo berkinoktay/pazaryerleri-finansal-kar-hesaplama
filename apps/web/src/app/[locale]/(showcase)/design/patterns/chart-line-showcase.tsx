@@ -97,13 +97,7 @@ export function ChartLineShowcase(): React.ReactElement {
 
       <ChartFrame
         title="Bugünkü Net Kâr"
-        value={
-          <Currency
-            value={NET_TODAY}
-            emphasis
-            className="text-foreground text-3xl font-semibold tracking-tight"
-          />
-        }
+        value={<Currency value={NET_TODAY} />}
         delta={comparing ? { percent: -7, goodDirection: 'up' } : undefined}
         context={comparing ? 'Dün aynı saatte ₺690 · ₺46 geride' : undefined}
         legend={
@@ -161,11 +155,7 @@ export function ChartLineBrandShowcase(): React.ReactElement {
   return (
     <ChartFrame
       title="Sipariş Adedi — son 7 gün"
-      value={
-        <span className="text-foreground text-3xl font-semibold tracking-tight tabular-nums">
-          {ORDERS_TOTAL}
-        </span>
-      }
+      value={ORDERS_TOTAL}
       source="Trendyol, Hepsiburada"
     >
       <LineChart
@@ -236,19 +226,7 @@ export function ChartLineMetricShowcase(): React.ReactElement {
         options: METRICS.map((item) => ({ value: item.value, label: item.label })),
         onValueChange: setSelected,
       }}
-      value={
-        metric.format === 'currency' ? (
-          <Currency
-            value={metric.headline}
-            emphasis
-            className="text-foreground text-3xl font-semibold tracking-tight"
-          />
-        ) : (
-          <span className="text-foreground text-3xl font-semibold tracking-tight tabular-nums">
-            {metric.headline}
-          </span>
-        )
-      }
+      value={metric.format === 'currency' ? <Currency value={metric.headline} /> : metric.headline}
       delta={{ percent: metric.delta, goodDirection: 'up' }}
       liveBadge
       lastSyncedAt={LAST_SYNC}
