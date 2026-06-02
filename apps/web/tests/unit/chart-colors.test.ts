@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { getZeroGradientOffset, resolveSeriesColor } from '@/components/patterns/chart-colors';
+import {
+  getZeroGradientOffset,
+  resolveSeriesColor,
+  resolveValueColor,
+} from '@/components/patterns/chart-colors';
 
 describe('resolveSeriesColor', () => {
   it('returns the brand color for brand mode regardless of index', () => {
@@ -16,6 +20,18 @@ describe('resolveSeriesColor', () => {
 
   it('uses the positive color as the resting semantic color', () => {
     expect(resolveSeriesColor('semantic', 0)).toBe('var(--color-chart-positive)');
+  });
+});
+
+describe('resolveValueColor', () => {
+  it('returns the positive color for a gain (incl. zero)', () => {
+    expect(resolveValueColor(120)).toBe('var(--color-chart-positive)');
+    expect(resolveValueColor(0)).toBe('var(--color-chart-positive)');
+  });
+
+  it('returns the negative color for a loss', () => {
+    expect(resolveValueColor(-1)).toBe('var(--color-chart-negative)');
+    expect(resolveValueColor(-460)).toBe('var(--color-chart-negative)');
   });
 });
 

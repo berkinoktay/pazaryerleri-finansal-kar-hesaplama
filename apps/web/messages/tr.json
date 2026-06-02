@@ -84,6 +84,7 @@
       },
       "lastSynced": "Son güncelleme {time}",
       "source": "Kaynak: {source}",
+      "storeCount": "{count} mağaza",
       "a11y": {
         "chart": "Grafik",
         "crosshair": "İmleç"

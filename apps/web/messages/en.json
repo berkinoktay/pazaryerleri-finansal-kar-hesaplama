@@ -84,6 +84,7 @@
       },
       "lastSynced": "Updated {time}",
       "source": "Source: {source}",
+      "storeCount": "{count, plural, one {# store} other {# stores}}",
       "a11y": {
         "chart": "Chart",
         "crosshair": "Crosshair"

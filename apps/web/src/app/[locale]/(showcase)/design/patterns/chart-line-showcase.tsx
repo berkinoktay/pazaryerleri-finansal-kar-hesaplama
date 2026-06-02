@@ -119,7 +119,7 @@ export function ChartLineShowcase(): React.ReactElement {
         }
         liveBadge
         lastSyncedAt={LAST_SYNC}
-        source="Trendyol, Hepsiburada"
+        source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
         status={status}
         onRetry={() => setStatus('ready')}
         period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
@@ -156,7 +156,7 @@ export function ChartLineBrandShowcase(): React.ReactElement {
     <ChartFrame
       title="Sipariş Adedi — son 7 gün"
       value={ORDERS_TOTAL}
-      source="Trendyol, Hepsiburada"
+      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
     >
       <LineChart
         data={ORDERS_7D}
@@ -230,7 +230,7 @@ export function ChartLineMetricShowcase(): React.ReactElement {
       delta={{ percent: metric.delta, goodDirection: 'up' }}
       liveBadge
       lastSyncedAt={LAST_SYNC}
-      source="Trendyol, Hepsiburada"
+      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
       period={{ value: period, options: PERIODS, onValueChange: setPeriod }}
     >
       <LineChart

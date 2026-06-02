@@ -30,10 +30,10 @@ import {
 import {
   CHART_BRAND,
   CHART_COMPARISON,
-  CHART_NEGATIVE,
   CHART_POSITIVE,
   CHART_ZERO_LINE,
   resolveSeriesColor,
+  resolveValueColor,
 } from './chart-colors';
 import { useChartAxisFormatter, useChartValueFormatter } from './chart-format';
 import { ChartEmptyFrame } from './chart-states';
@@ -49,10 +49,12 @@ import type { ChartColorMode, ChartDatum, ChartSeries } from './chart.types';
  * - `brand` — every bar the brand color (neutral count).
  * - `categorical` — the palette per bar (a breakdown).
  * Pass `comparison` for a muted grouped "Dün" bar beside each subject bar. Every
- * single bar is a rounded rectangle (all four corners, `--radius-md`).
+ * bar rounds only its FREE end; the edge sitting on the zero baseline stays
+ * square (`--radius-md`).
  *
  * STACKED (`series` is an array of `ChartSeries`) — the segments stack into one
- * connected bar (no gap) whose OUTER corners are rounded (top cap + base),
+ * connected bar (no gap) whose TOP cap is rounded (the base sits square on the
+ * zero baseline),
  * coloured from the qualitative palette, with a bottom legend mapping colour →
  * series. For a composition (e.g. gelir = net kâr + komisyon + kargo).
  *
@@ -76,8 +78,9 @@ export interface BarChartProps {
   ariaLabel?: string;
 }
 
-// Corner radius (px) — mirrors --radius-md. Single bars round all four corners;
-// a stacked bar rounds its outer corners (top of the top cap, bottom of the base).
+// Corner radius (px) — mirrors --radius-md. Bars round only the FREE end; the
+// edge on the zero baseline stays square (a single bar caps the value end, a
+// stacked bar caps just the top of its top segment).
 const BAR_RADIUS = 10;
 // Hovered-column highlight — a faint full-height fill spanning the category band
 // behind the bars, the bar-family cursor (Line uses a dashed crosshair instead).
@@ -97,19 +100,6 @@ interface BarShape {
   payload?: ChartDatum;
 }
 
-/**
- * Rounded-rect path with all four corners rounded by `r` (clamped). Handles a
- * negative `h` (recharts hands negative bars a negative height) by normalizing
- * to the top edge first — otherwise the clamp collapses the radius to 0 and the
- * sub-zero bar renders square.
- */
-function roundedRectAll(x: number, y: number, w: number, h: number, r: number): string {
-  const top = h >= 0 ? y : y + h;
-  const ht = Math.abs(h);
-  const rad = Math.max(0, Math.min(r, w / 2, ht / 2));
-  return `M${x + rad},${top} L${x + w - rad},${top} Q${x + w},${top} ${x + w},${top + rad} L${x + w},${top + ht - rad} Q${x + w},${top + ht} ${x + w - rad},${top + ht} L${x + rad},${top + ht} Q${x},${top + ht} ${x},${top + ht - rad} L${x},${top + rad} Q${x},${top} ${x + rad},${top} Z`;
-}
-
 /** Rounded-rect path with only the top two corners rounded (stacked top cap). */
 function roundedRectTop(x: number, y: number, w: number, h: number, r: number): string {
   const rad = Math.max(0, Math.min(r, w / 2, h));
@@ -122,7 +112,11 @@ function roundedRectBottom(x: number, y: number, w: number, h: number, r: number
   return `M${x},${y} L${x + w},${y} L${x + w},${y + h - rad} Q${x + w},${y + h} ${x + w - rad},${y + h} L${x + rad},${y + h} Q${x},${y + h} ${x},${y + h - rad} L${x},${y} Z`;
 }
 
-/** Single rounded bar (all corners) — fill is data-driven. */
+/**
+ * Single bar — rounds only the free end (the value tip), leaving the edge on the
+ * zero baseline square. recharts hands a sub-zero bar a negative height, so we
+ * normalize to (top, |h|) and pick the cap by the height's sign.
+ */
 function ChartBar({
   x,
   y,
@@ -133,17 +127,23 @@ function ChartBar({
 }: BarShape & { fill: string; fillOpacity?: number }): React.ReactElement {
   if (x === undefined || y === undefined || width === undefined || height === undefined)
     return <g />;
+  const top = height >= 0 ? y : y + height;
+  const absHeight = Math.abs(height);
+  const path =
+    height >= 0
+      ? roundedRectTop(x, top, width, absHeight, BAR_RADIUS)
+      : roundedRectBottom(x, top, width, absHeight, BAR_RADIUS);
   return (
     // runtime-dynamic: bar fill is the value's resolved color
-    <path
-      d={roundedRectAll(x, y, width, height, BAR_RADIUS)}
-      fill={fill}
-      fillOpacity={fillOpacity}
-    />
+    <path d={path} fill={fill} fillOpacity={fillOpacity} />
   );
 }
 
-/** One stacked segment — connected (no gap); outer corners (top cap / base) rounded. */
+/**
+ * One stacked segment — connected (no gap). Only the TOP cap rounds its top
+ * corners; every other segment (incl. the base sitting on the zero baseline) is
+ * a flush square rect.
+ */
 function StackedSegment({
   x,
   y,
@@ -151,8 +151,7 @@ function StackedSegment({
   height,
   fill,
   isTop,
-  isBottom,
-}: BarShape & { isTop?: boolean; isBottom?: boolean }): React.ReactElement {
+}: BarShape & { isTop?: boolean }): React.ReactElement {
   if (
     x === undefined ||
     y === undefined ||
@@ -163,7 +162,6 @@ function StackedSegment({
     return <g />;
   // runtime-dynamic: segment fill is the series palette color (recharts-injected)
   if (isTop) return <path d={roundedRectTop(x, y, width, height, BAR_RADIUS)} fill={fill} />;
-  if (isBottom) return <path d={roundedRectBottom(x, y, width, height, BAR_RADIUS)} fill={fill} />;
   return <rect x={x} y={y} width={width} height={height} fill={fill} />;
 }
 
@@ -263,9 +261,7 @@ export function BarChart({
                 stackId="stack"
                 fill={resolveSeriesColor('categorical', index)}
                 isAnimationActive={false}
-                shape={
-                  <StackedSegment isTop={index === seriesList.length - 1} isBottom={index === 0} />
-                }
+                shape={<StackedSegment isTop={index === seriesList.length - 1} />}
               />
             ))}
             <ChartLegend content={<ChartLegendContent />} />
@@ -304,7 +300,7 @@ export function BarChart({
 
 /** Per-bar fill for a single series, by color mode + value sign + index. */
 function fillFor(colorMode: ChartColorMode, value: number, index: number): string {
-  if (colorMode === 'semantic') return value >= 0 ? CHART_POSITIVE : CHART_NEGATIVE;
+  if (colorMode === 'semantic') return resolveValueColor(value);
   if (colorMode === 'categorical') return resolveSeriesColor('categorical', index);
   return CHART_BRAND;
 }

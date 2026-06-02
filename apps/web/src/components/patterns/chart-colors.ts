@@ -28,6 +28,15 @@ export const CHART_ZERO_LINE = 'var(--color-border-strong)';
 export const CHART_COMPARISON = 'var(--color-muted-foreground)';
 
 /**
+ * Sign-driven color for a single value — its own kâr=yeşil / zarar=kırmızı
+ * semantic. Shared by BarChart's per-bar semantic fill and RankingChart's
+ * semantic mode (both color a value by whether it cleared zero).
+ */
+export function resolveValueColor(value: number): string {
+  return value >= 0 ? CHART_POSITIVE : CHART_NEGATIVE;
+}
+
+/**
  * Resolve a series' resting stroke/fill color from the color mode + index.
  * `semantic` returns the positive color as the resting value; the actual
  * green/red split is applied per-value at render time (see

@@ -13,6 +13,11 @@ import {
   ChartLineMetricShowcase,
   ChartLineShowcase,
 } from '../chart-line-showcase';
+import {
+  ChartRankingPnlShowcase,
+  ChartRankingShareShowcase,
+  ChartRankingShowcase,
+} from '../chart-ranking-showcase';
 
 export default function ChartsPatternsPage(): React.ReactElement {
   return (
@@ -70,6 +75,27 @@ export default function ChartsPatternsPage(): React.ReactElement {
         description="colorMode='brand': tek marka rengi barlar. Sipariş adedi gibi +/- anlamı olmayan metrikler için."
       >
         <ChartBarBrandShowcase />
+      </Preview>
+
+      <Preview
+        title="RankingChart — en kârlı kategoriler (brand) + etiket modu"
+        description="Kalın yatay barlar, içerik-yükseklikli (kart satır sayısına göre uzar — sabit sıkıştırma yok). 'Etiket dışarıda/içeride' toggle'ını dene: dışarıda = sol gutter + sabit değer kolonu + x-ekseni (headroom → kırpılma yok); içeride = etiket barın İÇİNDE (beyaz, bara truncate). colorMode='brand': tek renk, sıralamayı UZUNLUK taşır. Durum + içerik-yükseklikli satır skeleton'ı (eksen noktalarıyla)."
+      >
+        <ChartRankingShowcase />
+      </Preview>
+
+      <Preview
+        title="RankingChart — ürün kâr/zarar (semantic, sıfırı geçen)"
+        description="colorMode='semantic': her satır KENDİ işaretine göre — kârlı satırlar sağa (yeşil), zarar edenler SIFIR AYIRACININ soluna (kırmızı). Değerler sağ kolonda, işaretli. 'Hangi ürünüm para kaybettiriyor?'"
+      >
+        <ChartRankingPnlShowcase />
+      </Preview>
+
+      <Preview
+        title="RankingChart — pazaryeri cirosu (categorical)"
+        description="colorMode='categorical': her satır nitel paletten (--chart-1..6) bir renk. Pazaryeri / kanal / kategori kırılımı sıralaması için."
+      >
+        <ChartRankingShareShowcase />
       </Preview>
     </>
   );

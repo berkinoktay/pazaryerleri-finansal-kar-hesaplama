@@ -1,5 +1,6 @@
 'use client';
 
+import type { Platform } from '@pazarsync/db/enums';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -10,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { ChartPeriodSelector } from './chart-period-selector';
 import { ChartEmptyHint, ChartError, ChartSkeleton } from './chart-states';
 import type { ChartPeriodControl, ChartShape, ChartStatus } from './chart.types';
+import { MarketplaceLogo, PLATFORM_NAME } from './marketplace-logo';
 import { TrendDelta } from './trend-delta';
 
 /**
@@ -42,6 +44,19 @@ export interface ChartFrameLegendItem {
   reference?: boolean;
 }
 
+/** One store's data lineage — its marketplace + display name. */
+export interface ChartStoreSource {
+  platform: Platform;
+  /** Store display name (a marketplace can have several connected stores). */
+  store: string;
+}
+
+/**
+ * A chart's footer data source: one store, or several aggregated (a cross-store
+ * / cross-marketplace chart, e.g. a total-profit roll-up across marketplaces).
+ */
+export type ChartSource = ChartStoreSource | ReadonlyArray<ChartStoreSource>;
+
 export interface ChartFrameProps {
   title: string;
   /** Headline value node (e.g. `<Currency emphasis />`). */
@@ -50,8 +65,12 @@ export interface ChartFrameProps {
   delta?: { percent: number; goodDirection?: 'up' | 'down' };
   /** Optional segmented period picker in the header. */
   period?: ChartPeriodControl;
-  /** Footer trust line — marketplace source. */
-  source?: string;
+  /**
+   * Footer data-lineage line — the store(s) the chart's data came from, rendered
+   * as a marketplace logo + name + store. Pass one `ChartStoreSource`, or an
+   * array for a combined cross-marketplace chart (logos + store count).
+   */
+  source?: ChartSource;
   /** Footer trust line — last sync time (rendered as GMT+3 time). */
   lastSyncedAt?: string | Date;
   /** Muted context sub-line under the headline value. */
@@ -66,8 +85,12 @@ export interface ChartFrameProps {
   emptyHint?: string;
   onRetry?: () => void;
   liveBadge?: boolean;
-  /** Plot height in px. Defaults to the `--size-chart` token (320px). */
-  height?: number;
+  /**
+   * Plot height in px, or `'auto'` to fit its content (used by the ranking
+   * list, whose height is row-count-driven). Defaults to the `--size-chart`
+   * token (320px).
+   */
+  height?: number | 'auto';
   className?: string;
   children: React.ReactNode;
 }
@@ -84,6 +107,46 @@ function LiveBadge(): React.ReactElement {
       label={t('live')}
       className="bg-success-surface text-success gap-2xs px-xs py-3xs text-2xs rounded-full font-medium"
     />
+  );
+}
+
+/**
+ * Footer data-lineage. A single store shows its marketplace logo + name + store;
+ * several aggregate to the unique marketplace logos + a store count (a combined
+ * cross-marketplace roll-up — listing every store would be noise there).
+ */
+function ChartSourceFooter({ source }: { source: ChartSource }): React.ReactElement | null {
+  const t = useTranslations('common.chart');
+  // `'platform' in source` narrows the single-store object vs. the array cleanly
+  // (Array.isArray widens a ReadonlyArray union to any[], losing the element type).
+  const stores: ReadonlyArray<ChartStoreSource> = 'platform' in source ? [source] : source;
+  const [first] = stores;
+  if (!first) return null;
+
+  if (stores.length === 1) {
+    return (
+      <span className="gap-2xs flex items-center">
+        <MarketplaceLogo platform={first.platform} size="sm" alt="" />
+        <span>
+          {PLATFORM_NAME[first.platform]} · {first.store}
+        </span>
+      </span>
+    );
+  }
+
+  const platforms = [...new Set(stores.map((entry) => entry.platform))];
+  return (
+    <span className="gap-2xs flex items-center">
+      {platforms.map((platform) => (
+        <MarketplaceLogo
+          key={platform}
+          platform={platform}
+          size="sm"
+          alt={PLATFORM_NAME[platform]}
+        />
+      ))}
+      <span>{t('storeCount', { count: stores.length })}</span>
+    </span>
   );
 }
 
@@ -220,7 +283,7 @@ export function ChartFrame({
               ·
             </span>
           ) : null}
-          {source ? <span>{t('source', { source })}</span> : null}
+          {source ? <ChartSourceFooter source={source} /> : null}
         </div>
       ) : null}
     </Card>

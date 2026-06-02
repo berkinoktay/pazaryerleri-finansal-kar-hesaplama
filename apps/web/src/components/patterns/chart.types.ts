@@ -24,9 +24,10 @@ export type ChartStatus = 'ready' | 'loading' | 'empty' | 'error';
 
 /**
  * The visual family of a chart. Drives the matching loading skeleton + empty
- * frame so a bar chart's non-data states show bars (not a line silhouette).
+ * frame so each chart's non-data states match its own shape (a bar chart shows
+ * columns, a ranking shows horizontal rows — never a line silhouette).
  */
-export type ChartShape = 'line' | 'bar';
+export type ChartShape = 'line' | 'bar' | 'ranking';
 
 export interface ChartSeries {
   /** Key into each datum object. */

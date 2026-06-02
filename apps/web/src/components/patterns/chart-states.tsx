@@ -13,14 +13,16 @@ import { EmptyState } from './empty-state';
 
 /**
  * The non-data states a ChartFrame swaps the plot for. Both the loading skeleton
- * and the empty frame match the chart's `shape` (`line` | `bar`) so a bar chart
- * never shows a line silhouette and vice-versa:
- * - `ChartSkeleton shape` — the LOADING placeholder: y-axis gutter + hairline
- *   gridlines matching the real chart + x-axis placeholders, with a pulsing
- *   area silhouette (`line`) or pulsing columns (`bar`). Reads as "the chart,
- *   data coming", never a generic grey box.
- * - `ChartEmptyFrame shape` — the chart's real empty axes (labels + gridlines)
- *   plus, for `bar`, faint static column placeholders.
+ * and the empty frame match the chart's `shape` (`line` | `bar` | `ranking`) so
+ * each chart's non-data states keep its own orientation (a column chart never
+ * shows a line silhouette; a horizontal ranking never shows columns):
+ * - `ChartSkeleton shape` — the LOADING placeholder: for `line` / `bar`, a value
+ *   y-gutter + hairline gridlines + a pulsing area silhouette / pulsing columns;
+ *   for `ranking`, sorted pulsing pill rows. Reads as "the chart, data coming",
+ *   never a generic grey box.
+ * - `ChartEmptyFrame shape` — for `line` / `bar`, the chart's real empty axes
+ *   (labels + gridlines, plus faint columns for `bar`); for `ranking`, faint
+ *   sorted pill rows (no value axis).
  * - `ChartEmptyHint` — the quiet "no data" pill overlaid on the empty frame.
  * - `ChartError` — a destructive-tone block with a retry action.
  */
@@ -32,6 +34,11 @@ const SILHOUETTE =
 // Fractional bar heights for the bar shape's column placeholders — Tailwind
 // height utilities (no arbitrary values), varied so the row reads as bars.
 const BAR_HEIGHTS = ['h-1/2', 'h-4/5', 'h-3/5', 'h-full', 'h-2/3', 'h-2/5', 'h-5/6'] as const;
+
+// Uniform rows for the ranking skeleton — a label stub + a thick full-width bar
+// — plus an axis-tick dot row, mirroring the live ranking's content-height layout.
+const RANKING_SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
+const RANKING_AXIS_DOTS = [0, 1, 2, 3, 4];
 
 // Five evenly-spaced rows — the y-axis gutter labels and the gridlines share
 // the same count so they line up.
@@ -54,8 +61,62 @@ function PlotBars({ animated, faint }: { animated: boolean; faint?: boolean }): 
   );
 }
 
+/**
+ * Row placeholders for the horizontal RANKING shape: a left label stub + a
+ * descending-width pill per row, so loading / empty read as a sorted top-list
+ * (not a column chart). Pulsing for loading, faint+static for empty.
+ */
+function RankingRows({
+  animated,
+  faint,
+}: {
+  animated: boolean;
+  faint?: boolean;
+}): React.ReactElement {
+  return (
+    <div className="gap-sm flex flex-col">
+      {RANKING_SKELETON_ROWS.map((row) => (
+        <div key={row} className="gap-sm flex items-center">
+          <Skeleton
+            animated={animated}
+            radius="xs"
+            className={cn('h-2xs w-2xl shrink-0', faint && 'opacity-50')}
+          />
+          <Skeleton
+            animated={animated}
+            className={cn('h-xl flex-1 rounded-md', faint && 'opacity-50')}
+          />
+        </div>
+      ))}
+      {/* axis tick dots, aligned under the track (past the label stub) */}
+      <div className="gap-sm flex items-center">
+        <span className="w-2xl shrink-0" aria-hidden />
+        <div className="flex flex-1 justify-between">
+          {RANKING_AXIS_DOTS.map((dot) => (
+            <Skeleton
+              key={dot}
+              animated={animated}
+              radius="full"
+              className={cn('size-2xs', faint && 'opacity-50')}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ChartSkeleton({ shape = 'line' }: { shape?: ChartShape }): React.ReactElement {
   const t = useTranslations('common.chart');
+  // Ranking is horizontal: skip the value y-gutter + gridlines and show sorted
+  // pill rows instead.
+  if (shape === 'ranking') {
+    return (
+      <div className="w-full" role="status" aria-busy aria-label={t('loading')}>
+        <RankingRows animated />
+      </div>
+    );
+  }
   return (
     <div className="gap-xs flex h-full w-full" role="status" aria-busy aria-label={t('loading')}>
       {/* y-axis label gutter — placeholders aligned to the gridlines */}
@@ -121,6 +182,15 @@ export function ChartEmptyFrame({
   className?: string;
   shape?: ChartShape;
 }): React.ReactElement {
+  // Ranking is horizontal + content-height — no value axis to label; show faint
+  // sorted rows (label stub + bar) instead.
+  if (shape === 'ranking') {
+    return (
+      <div className={cn('w-full', className)} role="img" aria-label={ariaLabel}>
+        <RankingRows animated={false} faint />
+      </div>
+    );
+  }
   return (
     <div className={cn('gap-xs flex h-full w-full', className)} role="img" aria-label={ariaLabel}>
       {/* y-axis labels — right-aligned, distributed to match the gridlines */}

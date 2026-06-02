@@ -100,7 +100,7 @@ export function ChartBarShowcase(): React.ReactElement {
         }
         liveBadge
         lastSyncedAt={LAST_SYNC}
-        source="Trendyol, Hepsiburada"
+        source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
         status={status}
         chartKind="bar"
         onRetry={() => setStatus('ready')}
@@ -135,7 +135,7 @@ export function ChartBarCategoricalShowcase(): React.ReactElement {
     <ChartFrame
       title="Kategoriye Göre Net Kâr — bu ay"
       value={<Currency value={5140} />}
-      source="Trendyol, Hepsiburada"
+      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
     >
       <BarChart
         data={CATEGORY_PROFIT}
@@ -161,7 +161,11 @@ const DAILY_ORDERS = [
 /** Reuse demo: a neutral count in brand mode. */
 export function ChartBarBrandShowcase(): React.ReactElement {
   return (
-    <ChartFrame title="Günlük Sipariş Adedi — son 7 gün" value={450} source="Trendyol, Hepsiburada">
+    <ChartFrame
+      title="Günlük Sipariş Adedi — son 7 gün"
+      value={450}
+      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
+    >
       <BarChart
         data={DAILY_ORDERS}
         xKey="day"
@@ -197,7 +201,7 @@ export function ChartBarStackedShowcase(): React.ReactElement {
     <ChartFrame
       title="Günlük Gelir Dağılımı — bu hafta"
       value={<Currency value={6230} />}
-      source="Trendyol, Hepsiburada"
+      source={{ platform: 'TRENDYOL', store: 'Ana Mağaza' }}
     >
       <BarChart data={COMPOSITION} xKey="day" series={COMPOSITION_SERIES} />
     </ChartFrame>
