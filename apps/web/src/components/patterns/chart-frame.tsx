@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 
 import { ChartPeriodSelector } from './chart-period-selector';
 import { ChartEmptyHint, ChartError, ChartSkeleton } from './chart-states';
-import type { ChartPeriodControl, ChartStatus } from './chart.types';
+import type { ChartPeriodControl, ChartShape, ChartStatus } from './chart.types';
 import { TrendDelta } from './trend-delta';
 
 /**
@@ -61,6 +61,8 @@ export interface ChartFrameProps {
   /** Header metric switcher; when set it replaces the eyebrow title. */
   metricTabs?: ChartPeriodControl;
   status?: ChartStatus;
+  /** The wrapped chart's visual family — picks the matching loading skeleton. */
+  chartKind?: ChartShape;
   emptyHint?: string;
   onRetry?: () => void;
   liveBadge?: boolean;
@@ -116,6 +118,7 @@ export function ChartFrame({
   legend,
   metricTabs,
   status = 'ready',
+  chartKind = 'line',
   emptyHint,
   onRetry,
   liveBadge = false,
@@ -166,7 +169,7 @@ export function ChartFrame({
           style={height === undefined ? undefined : { height }}
         >
           {status === 'loading' ? (
-            <ChartSkeleton />
+            <ChartSkeleton shape={chartKind} />
           ) : status === 'error' ? (
             <ChartError onRetry={onRetry} />
           ) : status === 'empty' ? (

@@ -21,6 +21,14 @@ import {
 import { cn } from '@/lib/utils';
 
 import {
+  CHART_X_AXIS_PROPS,
+  CHART_Y_AXIS_PROPS,
+  CURSOR_DASH,
+  GRID_DASH,
+  PLOT_MARGIN,
+  chartEmptyYLabels,
+} from './chart-cartesian';
+import {
   CHART_COMPARISON,
   CHART_NEGATIVE,
   CHART_POSITIVE,
@@ -88,21 +96,12 @@ export interface LineChartProps {
   ariaLabel?: string;
 }
 
-const PLOT_MARGIN = { top: 8, right: 8, bottom: 0, left: 0 } as const;
-const X_AXIS_PADDING = { left: 8, right: 8 } as const;
-// Dash rhythms (SVG stroke-dasharray) — named so the three dashed strokes stay
-// distinguishable: the grid is the faintest (short dash, wide gap), the hover
-// crosshair sits in between, and the comparison line gets the longest dash so a
-// reference series never reads as a gridline.
-const GRID_DASH = '2 4';
-const CURSOR_DASH = '4 4';
-const COMPARISON_DASH = '5 4';
-// The reference series rides a touch translucent so it recedes further behind
+// Line-family stroke constants (grid / cursor / axis defaults live in the shared
+// chart-cartesian module). The comparison reference line gets the longest dash
+// so it never reads as a gridline, and rides translucent so it recedes behind
 // the subject — a quiet backdrop, not a co-equal line.
+const COMPARISON_DASH = '5 4';
 const COMPARISON_OPACITY = 0.55;
-// Neutral 0-anchored tick scale for the empty frame's y-axis labels (formatted
-// through the series format). Representative only — there's no data to scale to.
-const EMPTY_Y_TICKS = [0, 25, 50, 75, 100];
 
 /**
  * Leading-edge "now" marker drawn via `<ReferenceDot shape>`: a solid core dot
@@ -167,7 +166,7 @@ export function LineChart({
   if (values.length === 0) {
     return (
       <ChartEmptyFrame
-        yLabels={[...EMPTY_Y_TICKS].reverse().map(formatAxis)}
+        yLabels={chartEmptyYLabels(formatAxis)}
         ariaLabel={ariaLabel ?? series.label}
         className={className}
       />
@@ -249,27 +248,15 @@ export function LineChart({
         </defs>
 
         <CartesianGrid vertical={false} strokeDasharray={GRID_DASH} />
-        <XAxis
-          dataKey={xKey}
-          tickLine={false}
-          axisLine={false}
-          tickMargin={12}
-          minTickGap={28}
-          interval="preserveStartEnd"
-          padding={X_AXIS_PADDING}
-          tickFormatter={xTickFormatter}
-        />
-        <YAxis
-          tickLine={false}
-          axisLine={false}
-          width={56}
-          tickMargin={10}
-          tickCount={5}
-          tickFormatter={formatAxis}
-        />
+        <XAxis dataKey={xKey} {...CHART_X_AXIS_PROPS} tickFormatter={xTickFormatter} />
+        <YAxis {...CHART_Y_AXIS_PROPS} tickFormatter={formatAxis} />
         <ReferenceLine y={0} stroke={CHART_ZERO_LINE} />
         <ChartTooltip
-          cursor={showCrosshair ? { strokeDasharray: CURSOR_DASH } : false}
+          cursor={
+            showCrosshair
+              ? { stroke: 'var(--color-border-strong)', strokeDasharray: CURSOR_DASH }
+              : false
+          }
           content={
             <ChartTooltipContent
               variant={comparison ? 'card' : 'inverted'}

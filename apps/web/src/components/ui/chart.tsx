@@ -73,9 +73,9 @@ export const ChartContainer = React.forwardRef<
           // Grid reads from the chart-system token so it stays a hairline in
           // light but lifts to a visible value in dark (see --chart-grid).
           '[&_.recharts-cartesian-grid_line]:stroke-chart-grid',
-          // Crosshair cursor: a touch stronger than the grid so the hovered
-          // column reads. Dash pattern is set per-chart via the cursor prop.
-          '[&_.recharts-tooltip-cursor]:stroke-border-strong',
+          // Cursor stroke/fill is set per-chart on the `cursor` prop (a dashed
+          // line for Line, a filled column for Bar) — not forced here, so the
+          // bar column isn't outlined.
           '[&_.recharts-layer]:outline-none',
           '[&_.recharts-sector]:outline-none',
           '[&_.recharts-surface]:outline-none',

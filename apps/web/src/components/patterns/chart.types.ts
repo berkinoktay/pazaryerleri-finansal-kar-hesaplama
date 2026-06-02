@@ -22,6 +22,12 @@ export type ChartValueFormat = 'currency' | 'percent' | 'number';
 /** Derived render state of a chart, driven by the consumer's query. */
 export type ChartStatus = 'ready' | 'loading' | 'empty' | 'error';
 
+/**
+ * The visual family of a chart. Drives the matching loading skeleton + empty
+ * frame so a bar chart's non-data states show bars (not a line silhouette).
+ */
+export type ChartShape = 'line' | 'bar';
+
 export interface ChartSeries {
   /** Key into each datum object. */
   key: string;

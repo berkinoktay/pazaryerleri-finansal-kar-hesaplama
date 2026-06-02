@@ -8,58 +8,86 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
+import type { ChartShape } from './chart.types';
 import { EmptyState } from './empty-state';
 
 /**
- * The non-data states a ChartFrame swaps the plot for. Empty is the exception —
- * ChartFrame keeps the chart's OWN real empty axes for empty and only overlays
- * `ChartEmptyHint`, so the only swapped-in placeholders are loading and error:
- * - `ChartSkeleton` — the LOADING placeholder: a chart-SHAPED shimmer (y-axis
- *   gutter, hairline gridlines matching the real chart, x-axis placeholders) +
- *   a soft area silhouette, all pulsing. Reads as "the chart, data coming",
- *   never a generic grey box or two stray lines.
- * - `ChartEmptyHint` — the quiet "no data" pill overlaid on the real empty plot.
+ * The non-data states a ChartFrame swaps the plot for. Both the loading skeleton
+ * and the empty frame match the chart's `shape` (`line` | `bar`) so a bar chart
+ * never shows a line silhouette and vice-versa:
+ * - `ChartSkeleton shape` — the LOADING placeholder: y-axis gutter + hairline
+ *   gridlines matching the real chart + x-axis placeholders, with a pulsing
+ *   area silhouette (`line`) or pulsing columns (`bar`). Reads as "the chart,
+ *   data coming", never a generic grey box.
+ * - `ChartEmptyFrame shape` — the chart's real empty axes (labels + gridlines)
+ *   plus, for `bar`, faint static column placeholders.
+ * - `ChartEmptyHint` — the quiet "no data" pill overlaid on the empty frame.
  * - `ChartError` — a destructive-tone block with a retry action.
  */
 
-// Rising area silhouette for the loading placeholder (stretched to fill).
+// Rising area silhouette for the line loading placeholder (stretched to fill).
 const SILHOUETTE =
   'M0 80 C40 76 62 64 100 60 C150 54 172 40 212 36 C252 32 280 26 300 22 L300 100 L0 100 Z';
 
-const GRIDLINES = [0, 1, 2, 3, 4];
-const Y_TICKS = [0, 1, 2, 3, 4];
+// Fractional bar heights for the bar shape's column placeholders — Tailwind
+// height utilities (no arbitrary values), varied so the row reads as bars.
+const BAR_HEIGHTS = ['h-1/2', 'h-4/5', 'h-3/5', 'h-full', 'h-2/3', 'h-2/5', 'h-5/6'] as const;
+
+// Five evenly-spaced rows — the y-axis gutter labels and the gridlines share
+// the same count so they line up.
+const GRID_TICKS = [0, 1, 2, 3, 4];
 const X_TICKS = [0, 1, 2, 3, 4, 5];
 
-export function ChartSkeleton(): React.ReactElement {
+/** Column placeholders for the bar shape — pulsing for loading, faint+static for empty. */
+function PlotBars({ animated, faint }: { animated: boolean; faint?: boolean }): React.ReactElement {
+  return (
+    <div className="gap-xs absolute inset-0 flex items-end">
+      {BAR_HEIGHTS.map((height) => (
+        <Skeleton
+          key={height}
+          animated={animated}
+          radius="none"
+          className={cn('flex-1 rounded-t-sm', height, faint && 'opacity-50')}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function ChartSkeleton({ shape = 'line' }: { shape?: ChartShape }): React.ReactElement {
   const t = useTranslations('common.chart');
   return (
     <div className="gap-xs flex h-full w-full" role="status" aria-busy aria-label={t('loading')}>
       {/* y-axis label gutter — placeholders aligned to the gridlines */}
       <div className="py-2xs flex w-2xl flex-col items-end justify-between">
-        {Y_TICKS.map((i) => (
+        {GRID_TICKS.map((i) => (
           <Skeleton key={i} radius="xs" className="h-2xs w-lg" />
         ))}
       </div>
 
       <div className="flex flex-1 flex-col">
-        {/* plot — hairline gridlines (last = stronger zero baseline) + silhouette */}
+        {/* plot — hairline gridlines (last = stronger zero baseline) + shape */}
         <div className="relative flex flex-1 flex-col justify-between">
-          {GRIDLINES.map((i) => (
+          {GRID_TICKS.map((i) => (
             <div
               key={i}
               className={cn(
                 'border-t',
-                i === GRIDLINES.length - 1 ? 'border-border-strong' : 'border-chart-grid',
+                i === GRID_TICKS.length - 1 ? 'border-border-strong' : 'border-chart-grid',
               )}
             />
           ))}
-          <svg
-            className="absolute inset-0 h-full w-full animate-pulse"
-            viewBox="0 0 300 100"
-            preserveAspectRatio="none"
-          >
-            <path d={SILHOUETTE} fill="var(--color-muted)" />
-          </svg>
+          {shape === 'bar' ? (
+            <PlotBars animated />
+          ) : (
+            <svg
+              className="absolute inset-0 h-full w-full animate-pulse"
+              viewBox="0 0 300 100"
+              preserveAspectRatio="none"
+            >
+              <path d={SILHOUETTE} fill="var(--color-muted)" />
+            </svg>
+          )}
         </div>
 
         {/* x-axis label placeholders */}
@@ -78,17 +106,20 @@ export function ChartSkeleton(): React.ReactElement {
  * hairline gridlines (last = the stronger zero baseline), matching the live
  * chart's grid. recharts can't render axes from an empty data array, so each
  * archetype formats its y-tick labels and hands them here; ChartFrame overlays
- * the "no data" hint. No pulse, no placeholder bars — the genuine frame, just
- * dataless. Decorative for a11y (the hint carries the message), so `aria-hidden`.
+ * the "no data" hint. For `shape="bar"` it adds faint static column placeholders
+ * so the empty bar chart reads as bars, not a bare line grid. Decorative for
+ * a11y (the hint carries the message), so `aria-hidden` on the plot.
  */
 export function ChartEmptyFrame({
   yLabels,
   ariaLabel,
   className,
+  shape = 'line',
 }: {
   yLabels: ReadonlyArray<string>;
   ariaLabel?: string;
   className?: string;
+  shape?: ChartShape;
 }): React.ReactElement {
   return (
     <div className={cn('gap-xs flex h-full w-full', className)} role="img" aria-label={ariaLabel}>
@@ -98,7 +129,7 @@ export function ChartEmptyFrame({
           <span key={label}>{label}</span>
         ))}
       </div>
-      {/* dashed hairline gridlines (last = stronger zero baseline) */}
+      {/* dashed hairline gridlines (last = stronger zero baseline) + bar placeholders */}
       <div className="py-2xs relative flex flex-1 flex-col justify-between" aria-hidden>
         {yLabels.map((label, index) => (
           <div
@@ -109,6 +140,7 @@ export function ChartEmptyFrame({
             )}
           />
         ))}
+        {shape === 'bar' ? <PlotBars animated={false} faint /> : null}
       </div>
     </div>
   );
