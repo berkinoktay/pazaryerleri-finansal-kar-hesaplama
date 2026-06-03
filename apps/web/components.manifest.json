@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 109,
+  "count": 110,
   "components": [
     {
       "name": "Accordion",
@@ -337,6 +337,13 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "showing a hover-triggered preview card with rich content (use Tooltip for short hint text, Popover for click-triggered panels)"
+    },
+    {
+      "name": "IdentityCell",
+      "path": "apps/web/src/components/patterns/identity-cell.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering an avatar + name + secondary-line + trailing row in the app chrome (switcher chip/rows, account trigger) — keeps one truncation/spacing contract across all of them"
     },
     {
       "name": "ImageCell",

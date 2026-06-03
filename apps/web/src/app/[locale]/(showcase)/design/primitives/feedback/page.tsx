@@ -243,7 +243,7 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
 
       <ShowcaseSection
         title="StatusDot"
-        description="Renkli nokta + opsiyonel inline label (label slot'u → text erişilebilir ad, nokta dekoratif). animatePulse aktif-senkron 'alive' göstergesi (org-switcher bunu kullanır). Renk asla tek sinyal değil — yanında daima etiket/ikon. Kanonik ev burası."
+        description="Renkli nokta + opsiyonel inline label (label slot'u → text erişilebilir ad, nokta dekoratif). animatePulse aktif-senkron 'alive' göstergesi (org-store-switcher bunu kullanır). Renk asla tek sinyal değil — yanında daima etiket/ikon. Kanonik ev burası."
       >
         <Playground
           title="StatusDot — tone · size · animatePulse · label"

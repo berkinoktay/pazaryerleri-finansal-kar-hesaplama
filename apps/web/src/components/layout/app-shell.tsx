@@ -153,6 +153,7 @@ export function AppShell({
   activeStoreId,
   onSelectOrg,
   onSelectStore,
+  onAddStore,
   children,
 }: AppShellProps): React.ReactElement {
   const t = useTranslations();
@@ -165,6 +166,7 @@ export function AppShell({
         activeStoreId={activeStoreId}
         onSelectOrg={onSelectOrg}
         onSelectStore={onSelectStore}
+        onAddStore={onAddStore}
       />
       {/*
         SidebarInset renders the <main role="main"> landmark. Inside it: a
@@ -179,7 +181,7 @@ export function AppShell({
           </div>
           <div className="gap-xs flex items-center">
             <NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />
-            <UserMenu />
+            <UserMenu placement="header" />
           </div>
         </header>
         {/*
@@ -202,6 +204,7 @@ interface AppSidebarProps {
   activeStoreId: string | undefined;
   onSelectOrg: (orgId: string) => void;
   onSelectStore: (storeId: string) => void;
+  onAddStore?: () => void;
 }
 
 function AppSidebar({
@@ -211,6 +214,7 @@ function AppSidebar({
   activeStoreId,
   onSelectOrg,
   onSelectStore,
+  onAddStore,
 }: AppSidebarProps): React.ReactElement {
   const t = useTranslations();
   const pathname = usePathname();
@@ -238,6 +242,7 @@ function AppSidebar({
             activeStoreId={activeStoreId ?? null}
             onSelectOrg={onSelectOrg}
             onSelectStore={onSelectStore}
+            onAddStore={onAddStore}
             collapsed={collapsed}
           />
         </div>

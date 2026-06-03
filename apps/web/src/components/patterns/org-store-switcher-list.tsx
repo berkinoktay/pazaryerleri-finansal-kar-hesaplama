@@ -1,16 +1,16 @@
 'use client';
 
 import { useCommandState } from 'cmdk';
-import { Settings02Icon, ShoppingBag01Icon } from 'hugeicons-react';
+import { ArrowRight01Icon, Settings02Icon, ShoppingBag01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { IdentityCell } from '@/components/patterns/identity-cell';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Command,
   CommandEmpty,
@@ -52,6 +52,9 @@ interface OrgStoreSwitcherListProps {
   activeStoreId: string | null;
   onSelectOrg: (orgId: string) => void;
   onSelectStore: (storeId: string) => void;
+  /** When provided, the Stores header's "+ Yeni Mağaza" runs this (opens the
+   * connect-store modal) instead of linking to the settings page. */
+  onAddStore?: () => void;
 }
 
 const PALETTE_BG: Record<OrgAvatarPalette, string> = {
@@ -76,10 +79,12 @@ const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember' | 'role
   VIEWER: 'roleViewer',
 };
 
-// OWNER stands out (solid primary); MEMBER/VIEWER stay low-emphasis (outline).
+// Restrained role vocabulary for a dense list: OWNER gets a quiet brand-tinted
+// SURFACE chip (not a loud solid fill that shouts in every row); ADMIN a neutral
+// surface; MEMBER/VIEWER the lightest outline. The role is context, not an alarm.
 const ROLE_BADGE: Record<OrgRole, { tone: BadgeProps['tone']; variant?: BadgeProps['variant'] }> = {
-  OWNER: { tone: 'primary', variant: 'solid' },
-  ADMIN: { tone: 'neutral' },
+  OWNER: { tone: 'primary', variant: 'surface' },
+  ADMIN: { tone: 'neutral', variant: 'surface' },
   MEMBER: { tone: 'neutral', variant: 'outline' },
   VIEWER: { tone: 'neutral', variant: 'outline' },
 };
@@ -143,6 +148,7 @@ export function OrgStoreSwitcherList({
   activeStoreId,
   onSelectOrg,
   onSelectStore,
+  onAddStore,
 }: OrgStoreSwitcherListProps): React.ReactElement {
   const t = useTranslations('orgStoreSwitcher');
   const formatter = useFormatter();
@@ -186,11 +192,6 @@ export function OrgStoreSwitcherList({
                   href: '/onboarding/create-organization',
                   label: t('newOrgInline'),
                 }}
-                manageAction={{
-                  href: '/settings/organization',
-                  label: t('footerOrgSettings'),
-                  icon: Settings02Icon,
-                }}
               />
               <CommandGroup heading="" className="px-2xs pb-2xs pt-0">
                 {split.recent.map((org) => (
@@ -214,23 +215,13 @@ export function OrgStoreSwitcherList({
               <SectionHeading
                 label={split.recent.length > 0 ? t('allOrgsSection') : t('sectionOrgs')}
                 count={split.rest.length}
-                // When the recent section is rendered above, it already
-                // surfaces both create + manage actions — repeating them
-                // on the "all orgs" header would be visual noise.
+                // When the recent section is rendered above, it already carries
+                // the create CTA — repeating it on the "all orgs" header is noise.
                 createAction={
                   split.recent.length === 0
                     ? {
                         href: '/onboarding/create-organization',
                         label: t('newOrgInline'),
-                      }
-                    : null
-                }
-                manageAction={
-                  split.recent.length === 0
-                    ? {
-                        href: '/settings/organization',
-                        label: t('footerOrgSettings'),
-                        icon: Settings02Icon,
                       }
                     : null
                 }
@@ -258,15 +249,10 @@ export function OrgStoreSwitcherList({
                 label={activeOrg ? `${t('sectionStores')} — ${activeOrg.name}` : t('sectionStores')}
                 count={stores.length}
                 createAction={
-                  activeOrg ? { href: '/settings/stores', label: t('connectStore') } : null
-                }
-                manageAction={
                   activeOrg
-                    ? {
-                        href: '/settings/stores',
-                        label: t('footerStoreManagement'),
-                        icon: ShoppingBag01Icon,
-                      }
+                    ? onAddStore
+                      ? { label: t('connectStore'), onClick: onAddStore }
+                      : { href: '/settings/stores', label: t('connectStore') }
                     : null
                 }
               />
@@ -287,72 +273,107 @@ export function OrgStoreSwitcherList({
           ) : null}
         </CommandList>
       </Command>
+
+      {/* Management footer — a clear, always-visible home for org + store
+          settings. Replaces the cramped per-section ⚙ icons (which also linked
+          a non-existent /settings/organization route): one obvious row each,
+          full label + trailing chevron, so "where do I manage this?" is answered
+          at a glance rather than hidden behind a tiny icon. */}
+      <div className="border-border gap-3xs p-2xs flex flex-col border-t">
+        <ManageRow href="/settings" icon={Settings02Icon} label={t('footerOrgSettings')} />
+        <ManageRow
+          href="/settings/stores"
+          icon={ShoppingBag01Icon}
+          label={t('footerStoreManagement')}
+        />
+      </div>
     </div>
   );
 }
 
-interface SectionAction {
+interface ManageRowProps {
   href: string;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
 }
 
-interface SectionManageAction extends SectionAction {
-  icon: React.ComponentType<{ className?: string }>;
+/** A clear management destination row in the switcher footer (icon + label +
+ * trailing chevron). Navigating closes the popover via the route change. */
+function ManageRow({ href, icon: Icon, label }: ManageRowProps): React.ReactElement {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'gap-xs px-2xs py-2xs duration-fast flex cursor-pointer items-center rounded-sm text-xs transition-colors',
+        'text-muted-foreground hover:bg-muted hover:text-foreground',
+        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+      )}
+    >
+      <Icon className="size-icon-sm" />
+      <span className="flex-1">{label}</span>
+      <ArrowRight01Icon className="size-icon-xs text-muted-foreground-dim" aria-hidden />
+    </Link>
+  );
+}
+
+interface SectionCreateAction {
+  label: string;
+  /** Navigate to a page (e.g. /onboarding/create-organization)… */
+  href?: string;
+  /** …or run an action in place (e.g. open the connect-store modal). */
+  onClick?: () => void;
 }
 
 interface SectionHeadingProps {
   label: string;
   count: number;
-  /** Quiet text-link CTA on the right (e.g. "+ Yeni Organizasyon"). */
-  createAction: SectionAction | null;
-  /** Icon-only secondary action (e.g. ⚙ org settings) with tooltip. */
-  manageAction: SectionManageAction | null;
+  /** Quiet text CTA on the right (e.g. "+ Yeni Organizasyon"). Renders a Link when `href` is set, a button when `onClick` is. */
+  createAction: SectionCreateAction | null;
 }
+
+// Quiet brand text CTA — shared by the Link and button forms so the create
+// affordance looks identical whether it navigates or opens a modal. `whitespace-nowrap`
+// keeps it on one line so a long section label truncates instead of pushing it to wrap.
+const CREATE_ACTION_CLASS = cn(
+  'text-primary hover:text-primary-hover px-2xs py-3xs text-2xs rounded-xs font-medium tracking-normal normal-case whitespace-nowrap cursor-pointer',
+  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:outline-none',
+);
 
 /**
  * Section heading mirroring cmdk's auto-rendered group heading typography
- * with up to two inline actions on the right: a primary text link for
- * creation ("+ Yeni X") and a secondary icon link for management (⚙).
- * Both live inside the section so each group carries its own affordances —
- * the dropdown no longer needs a separate footer (Image #8 follow-up).
+ * with a single inline create CTA ("+ Yeni X") on the right. Management
+ * destinations live in the dropdown's footer (one clear row each) rather than
+ * as a cramped per-section ⚙ icon.
  */
-function SectionHeading({
-  label,
-  count,
-  createAction,
-  manageAction,
-}: SectionHeadingProps): React.ReactElement {
+function SectionHeading({ label, count, createAction }: SectionHeadingProps): React.ReactElement {
   return (
     <div className="text-muted-foreground gap-xs px-sm pt-sm pb-2xs text-2xs flex items-center justify-between font-medium tracking-wide uppercase">
-      <span className="truncate">
-        {label} <span className="text-muted-foreground/70 normal-case">({count})</span>
+      <span className="min-w-0 truncate">
+        {label} <span className="text-muted-foreground-dim normal-case">({count})</span>
       </span>
-      <div className="gap-2xs flex items-center">
-        {createAction ? (
-          <Link
-            href={createAction.href}
-            className="text-primary hover:text-primary-hover px-2xs py-3xs text-2xs rounded-xs font-medium tracking-normal normal-case"
-          >
-            {createAction.label}
-          </Link>
-        ) : null}
-        {manageAction ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Link
-                href={manageAction.href}
-                aria-label={manageAction.label}
-                className="text-muted-foreground hover:text-foreground hover:bg-muted p-2xs duration-fast flex items-center justify-center rounded-sm transition-colors"
-              >
-                <manageAction.icon className="size-icon-xs" />
-              </Link>
-            </TooltipTrigger>
-            <TooltipContent side="top">{manageAction.label}</TooltipContent>
-          </Tooltip>
-        ) : null}
+      <div className="gap-2xs flex shrink-0 items-center">
+        {createAction !== null ? <CreateAction action={createAction} /> : null}
       </div>
     </div>
   );
+}
+
+function CreateAction({ action }: { action: SectionCreateAction }): React.ReactElement | null {
+  if (action.onClick !== undefined) {
+    return (
+      <button type="button" onClick={action.onClick} className={CREATE_ACTION_CLASS}>
+        {action.label}
+      </button>
+    );
+  }
+  if (action.href !== undefined) {
+    return (
+      <Link href={action.href} className={CREATE_ACTION_CLASS}>
+        {action.label}
+      </Link>
+    );
+  }
+  return null;
 }
 
 /**
@@ -425,41 +446,41 @@ function OrgRow({
     <CommandItem
       value={`${org.name} ${org.id}`}
       onSelect={() => onSelect(org.id)}
-      className={cn(
-        'group/row gap-xs px-2xs py-2xs items-center rounded-sm',
-        isActive && 'bg-muted',
-      )}
+      // Persisted active selection — announced to screen readers (the radio
+      // ActiveDot is visual-only; cmdk's aria-selected only tracks keyboard
+      // highlight, not which org is actually active).
+      aria-current={isActive ? 'true' : undefined}
+      className={cn('group/row px-2xs py-2xs rounded-sm', isActive && 'bg-muted')}
     >
-      <Avatar size="sm" className={cn('size-7 rounded-md', PALETTE_BG[palette])}>
-        <AvatarFallback className={cn('rounded-md', PALETTE_BG[palette])}>{initial}</AvatarFallback>
-      </Avatar>
-      <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="text-foreground truncate text-xs font-medium">
-          <HighlightedText text={org.name} />
-        </span>
-        {meta ? <span className="text-muted-foreground text-2xs truncate">{meta}</span> : null}
-      </span>
-      <Badge
-        tone={ROLE_BADGE[org.role].tone}
-        variant={ROLE_BADGE[org.role].variant}
-        size="sm"
-        radius="sm"
-        className="shrink-0"
-      >
-        {t(ROLE_KEY[org.role])}
-      </Badge>
-      {isActive ? (
-        <ActiveDot />
-      ) : (
-        <Link
-          href={{ pathname: '/settings/organization' }}
-          aria-label={t('orgSettingsLabel', { name: org.name })}
-          className="duration-fast hover:bg-card hover:text-foreground text-muted-foreground p-3xs flex shrink-0 items-center justify-center rounded-xs opacity-0 transition-opacity group-hover/row:opacity-100"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Settings02Icon className="size-icon-xs" />
-        </Link>
-      )}
+      <IdentityCell
+        className="w-full"
+        leading={
+          <Avatar size="sm" className={cn('size-7 rounded-md', PALETTE_BG[palette])}>
+            <AvatarFallback className={cn('rounded-md', PALETTE_BG[palette])}>
+              {initial}
+            </AvatarFallback>
+          </Avatar>
+        }
+        title={<HighlightedText text={org.name} />}
+        meta={meta ? <span className="truncate">{meta}</span> : undefined}
+        trailing={
+          <span className="gap-xs flex shrink-0 items-center">
+            <Badge
+              tone={ROLE_BADGE[org.role].tone}
+              variant={ROLE_BADGE[org.role].variant}
+              size="sm"
+              radius="sm"
+            >
+              {t(ROLE_KEY[org.role])}
+            </Badge>
+            {isActive ? <ActiveDot /> : null}
+          </span>
+        }
+      />
+      {/* Announce the persistently-active org to screen readers independent of
+          how a given SR treats aria-current on a role=option (cmdk owns
+          aria-selected for keyboard highlight, so it can't carry this). */}
+      {isActive ? <span className="sr-only">{t('activeLabel')}</span> : null}
     </CommandItem>
   );
 }
@@ -487,27 +508,29 @@ function StoreRow({
     <CommandItem
       value={`${store.name} ${store.id} ${t(PLATFORM_KEY[store.platform])}`}
       onSelect={() => onSelect(store.id)}
-      className={cn(
-        'group/row gap-xs px-2xs py-2xs items-center rounded-sm',
-        isActive && 'bg-muted',
-      )}
+      aria-current={isActive ? 'true' : undefined}
+      className={cn('group/row px-2xs py-2xs rounded-sm', isActive && 'bg-muted')}
     >
-      <span
-        aria-hidden
-        className="bg-card border-border inline-flex size-7 shrink-0 items-center justify-center rounded-md border"
-      >
-        <MarketplaceLogo platform={store.platform} size="xs" alt="" />
-      </span>
-      <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="text-foreground truncate text-xs font-medium">
-          <HighlightedText text={store.name} />
-        </span>
-        <span className="text-muted-foreground gap-3xs text-2xs flex items-center truncate">
-          <StatusDot tone={SYNC_TONE[store.syncState]} animatePulse />
-          <span className="truncate">{meta}</span>
-        </span>
-      </span>
-      {isActive ? <ActiveDot /> : null}
+      <IdentityCell
+        className="w-full"
+        leading={
+          <span
+            aria-hidden
+            className="bg-card border-border inline-flex size-7 shrink-0 items-center justify-center rounded-md border"
+          >
+            <MarketplaceLogo platform={store.platform} size="xs" alt="" />
+          </span>
+        }
+        title={<HighlightedText text={store.name} />}
+        meta={
+          <>
+            <StatusDot tone={SYNC_TONE[store.syncState]} animatePulse />
+            <span className="truncate">{meta}</span>
+          </>
+        }
+        trailing={isActive ? <ActiveDot /> : undefined}
+      />
+      {isActive ? <span className="sr-only">{t('activeLabel')}</span> : null}
     </CommandItem>
   );
 }

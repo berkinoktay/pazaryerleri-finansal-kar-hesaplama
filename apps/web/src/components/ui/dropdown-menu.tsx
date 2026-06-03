@@ -31,7 +31,7 @@ export const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      'gap-xs px-xs py-2xs flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'gap-xs px-xs py-2xs flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
       'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
       // Clean highlight fill (pointer + keyboard) and the open-submenu fill;
       // suppress the global :focus-visible brand glow so no box rings the row.
@@ -105,7 +105,7 @@ export const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      'gap-xs px-xs py-2xs relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'gap-xs px-xs py-2xs relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
       'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
       'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
       'focus:shadow-none focus-visible:shadow-none',
@@ -125,7 +125,7 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      'py-2xs pl-lg pr-xs relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'py-2xs pl-lg pr-xs relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
       'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
       'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
       'focus:shadow-none focus-visible:shadow-none data-[state=checked]:font-medium',
@@ -152,7 +152,7 @@ export const DropdownMenuRadioItem = React.forwardRef<
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      'py-2xs pl-lg pr-xs relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'py-2xs pl-lg pr-xs relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
       'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
       'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
       'focus:shadow-none focus-visible:shadow-none data-[state=checked]:font-medium',

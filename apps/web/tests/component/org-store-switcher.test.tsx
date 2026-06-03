@@ -57,6 +57,8 @@ const messages = {
     storeMetaWithPlatform: '{platform} · {sync}',
     orgSettingsLabel: '{name} ayarları',
     multiOrgIndicator: '+{count}',
+    multiOrgMore: '{count} organizasyon daha',
+    activeLabel: 'aktif',
   },
 };
 
@@ -104,6 +106,7 @@ interface RenderProps {
   collapsed?: boolean;
   onSelectOrg?: (id: string) => void;
   onSelectStore?: (id: string) => void;
+  onAddStore?: () => void;
 }
 
 function renderSwitcher(props: RenderProps = {}) {
@@ -123,6 +126,7 @@ function renderSwitcher(props: RenderProps = {}) {
           activeStoreId={props.activeStoreId === undefined ? 'store-1' : props.activeStoreId}
           onSelectOrg={onSelectOrg}
           onSelectStore={onSelectStore}
+          onAddStore={props.onAddStore}
           collapsed={props.collapsed}
         />
       </TooltipProvider>
@@ -165,6 +169,17 @@ describe('OrgStoreSwitcher', () => {
     await screen.findByPlaceholderText(/ara/i);
     await user.click(screen.getByText('Beta Ltd'));
     expect(onSelectOrg).toHaveBeenCalledWith('org-b');
+  });
+
+  it('runs onAddStore from the Stores section header when provided', async () => {
+    const onAddStore = vi.fn();
+    const { user } = renderSwitcher({ onAddStore });
+    await user.click(screen.getByRole('button', { name: /Acme A\.Ş\./ }));
+    await screen.findByPlaceholderText(/ara/i);
+    // With onAddStore wired, the "+ Yeni Mağaza" create action becomes a button
+    // (opens the connect-store modal) instead of a settings-page link.
+    await user.click(screen.getByRole('button', { name: '+ Yeni Mağaza' }));
+    expect(onAddStore).toHaveBeenCalledTimes(1);
   });
 
   it('shows a role badge for each organization in the dropdown', async () => {
