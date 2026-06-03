@@ -659,6 +659,17 @@ async function seedMemberStoreAccess(
 }
 
 async function main(): Promise<void> {
+  // Clean-by-default: `db:seed` is a no-op unless `--with-sample` is passed.
+  // Tests never depend on seed data — every integration test wipes the tenant
+  // tables (truncateAll) and builds its own fixtures via factories, and
+  // reference data (shipping/fees/commission) comes from the integration
+  // globalSetup / per-test helpers, not this seed. So the seed exists purely to
+  // hydrate the dev UI; opt in only when you actually want demo data.
+  if (!process.argv.includes('--with-sample')) {
+    console.log('✓ Seed skipped — clean baseline. Pass --with-sample to seed demo data.');
+    return;
+  }
+
   await seedUsers();
   const orgs = await seedOrgsAndMemberships();
   const storeIds = await seedStoresProductsOrders(orgs);

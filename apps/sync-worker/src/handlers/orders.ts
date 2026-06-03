@@ -32,23 +32,14 @@
  */
 
 import { prisma } from '@pazarsync/db';
-import type { SyncLog, Store } from '@pazarsync/db';
-import {
-  fetchShipmentPackagesStream,
-  isTrendyolCredentials,
-  STREAM_WINDOW_MAX_DAYS,
-  type TrendyolCredentials,
-} from '@pazarsync/marketplace';
+import type { SyncLog } from '@pazarsync/db';
+import { fetchShipmentPackagesStream, STREAM_WINDOW_MAX_DAYS } from '@pazarsync/marketplace';
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
-import {
-  decryptCredentials,
-  parseOrdersCursor,
-  syncLog,
-  type OrdersStreamWindowCursor,
-} from '@pazarsync/sync-core';
+import { parseOrdersCursor, syncLog, type OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 
 import { readSyncEnv } from '../lib/env';
+import { decryptStoreCredentials } from '../lib/store-credentials';
 
 import type { ChunkResult, ModuleHandler } from './types';
 
@@ -112,18 +103,6 @@ export function computeStreamChunkCount(args: {
   const spanDays = Math.ceil((args.endDate - cutoffMs) / MS_PER_DAY);
   if (spanDays <= 0) return 0;
   return Math.ceil(spanDays / STREAM_CHUNK_DAYS);
-}
-
-// ─── Credentials decryption (products.ts mirror) ─────────────────────────────
-
-function decryptStoreCredentials(store: Store): TrendyolCredentials {
-  // Prisma's Json column type is `JsonValue`, not `string`; the actual
-  // runtime value here is the AES-256-GCM ciphertext base64 blob.
-  const decrypted = decryptCredentials(store.credentials as string);
-  if (!isTrendyolCredentials(decrypted)) {
-    throw new Error('Invalid Trendyol credentials shape on store');
-  }
-  return decrypted;
 }
 
 // ─── Chunk window helpers ────────────────────────────────────────────────────

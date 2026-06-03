@@ -35,6 +35,7 @@ import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync
 
 import { errorCodeOf } from './error-code';
 import { processBufferPromote } from './handlers/buffer-promote';
+import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
 import { advanceCursorPastBadPage } from './skip-bad-page';
@@ -52,6 +53,13 @@ const WATCHDOG_INTERVAL_MS = 30_000;
 // correct if more than one worker instance is deployed (and across overlapping
 // ticks if a sweep ever runs longer than the interval).
 const BUFFER_PROMOTE_INTERVAL_MS = 5_000;
+// Self-healing webhook reconcile tick — keeps every ACTIVE TRENDYOL store's
+// Trendyol webhook subscription healthy at the current PUBLIC_API_BASE_URL and
+// prunes orphans. 5-min cadence (plus once on boot): webhooks are the primary
+// ingest path and the hourly cron delta sync is the safety net, so the
+// reconciler only heals drift (db reset, ngrok/base-URL change, failed connect)
+// and need not run hot. Idempotent — steady state is one GET per seller, no writes.
+const WEBHOOK_RECONCILE_INTERVAL_MS = 5 * 60_000;
 const IDLE_LOG_THROTTLE_MS = 30_000;
 const MAX_ATTEMPTS = 5;
 
@@ -106,6 +114,25 @@ async function main(): Promise<void> {
       });
     });
   }, BUFFER_PROMOTE_INTERVAL_MS);
+
+  // Run once on boot so a freshly (re)started worker heals webhooks immediately
+  // — e.g. right after a db reset that orphaned the old subscriptions — then on
+  // the interval. Wrapped like buffer-promote so a Trendyol/DB hiccup never
+  // crashes the worker.
+  void processWebhookReconcile().catch((err: unknown) => {
+    syncLog.error('webhook.reconcile-boot-error', {
+      workerId: WORKER_ID,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+  });
+  const webhookReconcileTimer = setInterval(() => {
+    void processWebhookReconcile().catch((err: unknown) => {
+      syncLog.error('webhook.reconcile-tick-error', {
+        workerId: WORKER_ID,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }, WEBHOOK_RECONCILE_INTERVAL_MS);
 
   let backoff = POLL_BACKOFF_INITIAL_MS;
   let lastIdleLogAt = 0;
@@ -163,6 +190,7 @@ async function main(): Promise<void> {
 
   clearInterval(watchdogTimer);
   clearInterval(bufferPromoteTimer);
+  clearInterval(webhookReconcileTimer);
   syncLog.info('worker.stopped', { workerId: WORKER_ID });
 }
 

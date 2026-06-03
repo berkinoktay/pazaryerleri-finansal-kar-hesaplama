@@ -1,0 +1,48 @@
+// `db:reset:clean` — wipe the dev DB to a true blank baseline.
+//
+// TRUNCATEs every application table (tenant + catalog + account + reference) and
+// purges leaked `@test.local` auth users, leaving the schema intact but empty.
+// After this, run `pnpm db:seed` for a minimal login and re-sync products (real
+// Trendyol product sync) before testing orders — an order line with no resolvable
+// variant is a hard skip, so a blank catalog cannot ingest orders.
+//
+// The table set is DISCOVERED dynamically from the catalog (every public table
+// except Prisma's migration bookkeeping), so the wipe never drifts as the schema
+// grows — no hand-maintained list to keep in sync with `truncateAll`.
+//
+// Uses `pg` directly (psql is an optional system dep; pg is a workspace dep).
+import { Client } from 'pg';
+
+const connectionString = process.env['DATABASE_URL'];
+if (connectionString === undefined || connectionString.length === 0) {
+  console.error('DATABASE_URL is required. Run with `pnpm db:reset:clean` (loads .env).');
+  process.exit(1);
+}
+
+const client = new Client({ connectionString });
+await client.connect();
+try {
+  const { rows } = await client.query<{ tablename: string }>(
+    `SELECT tablename FROM pg_tables
+     WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'
+     ORDER BY tablename`,
+  );
+  const tables = rows.map((row) => row.tablename);
+
+  if (tables.length > 0) {
+    // Identifiers come from the catalog (not user input); quote them and let
+    // CASCADE handle FK order in one statement.
+    const quoted = tables.map((name) => `"${name}"`).join(', ');
+    await client.query(`TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE`);
+  }
+  console.log(`✓ Truncated ${tables.length} public table(s) (tenant + catalog + reference)`);
+
+  const purged = await client.query(`DELETE FROM auth.users WHERE email LIKE '%@test.local'`);
+  console.log(`✓ Purged ${purged.rowCount ?? 0} test auth user(s)`);
+
+  console.log(
+    '✓ Blank baseline ready. Next: `pnpm db:seed` (minimal login), then re-sync products before testing orders.',
+  );
+} finally {
+  await client.end();
+}

@@ -21,13 +21,15 @@ const execFilePromise = promisify(execFile);
  *   length 10 but got 0" in CI. The helper is idempotent — local devs
  *   who already ran `prisma migrate dev` see a fast no-op.
  *
- * TEARDOWN half:
- *   Restore seed data so the developer's browser session (logged in
- *   as berkin / demo) sees the usual orgs and stores instead of the
- *   post-truncate empty state. Seed is idempotent (upsert + delete-
- *   then-create). Skipped in CI (no dev UI to hydrate) and when only
- *   unit tests ran (`pnpm test:unit` sets PAZARSYNC_SKIP_RESEED=1 —
- *   no DB was touched).
+ * TEARDOWN half (clean-by-default):
+ *   Always TRUNCATE leftover tenant rows AND purge leaked `@test.local`
+ *   auth users — integration tests mint real `auth.users` rows that
+ *   `truncateAll` never touches (feedback_tests_dont_wipe_seed), so without
+ *   this they accumulate unboundedly (hit ~35k once). The post-test re-seed
+ *   that re-hydrates the dev UI (berkin / demo orgs + stores) is now OPT-IN
+ *   via PAZARSYNC_RESEED_AFTER_TESTS=1; by default the DB is left clean.
+ *   Skipped entirely in CI (no dev UI) and on unit-only runs (`pnpm test:unit`
+ *   sets PAZARSYNC_SKIP_RESEED=1 — no DB was touched).
  */
 export default async function globalSetup(): Promise<() => Promise<void>> {
   // Setup: shipping reference data. Skipped for unit-only runs (DB may
@@ -55,11 +57,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       // aftermath (e.g. tenant-isolation tests leave "iso-a" / "iso-b"
       // orgs behind). Otherwise they accumulate run after run.
       //
-      // Mirrors `helpers/db.ts::truncateAll` — does NOT touch
-      // `auth.users` or `user_profiles`. Wiping `user_profiles` here
-      // would orphan any browser-signed-up developer's auth.users row
-      // (P2003 on the next org-create attempt).  The seed step below
-      // upserts the canonical profiles so dev UI still hydrates.
+      // Does NOT touch `user_profiles` — wiping it would orphan a
+      // browser-signed-up developer's auth.users row (P2003 on the next
+      // org-create attempt).
       await prisma.$executeRawUnsafe(
         `TRUNCATE TABLE
            sync_logs,
@@ -75,9 +75,29 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
          RESTART IDENTITY CASCADE`,
       );
 
-      const { stdout, stderr } = await execFilePromise('pnpm', ['-w', 'run', 'db:seed'], {
-        cwd: process.cwd().replace(/\/apps\/api$/, ''),
-      });
+      // Purge leaked test auth users. `createAuthenticatedTestUser` mints real
+      // Supabase `auth.users` rows (`test-<uuid>@test.local`) and the
+      // `createUserProfile` factory uses `<uuid>@test.local`. `truncateAll`
+      // never touches `auth.users` (feedback_tests_dont_wipe_seed), so they
+      // accumulate run after run (hit ~35k once). Pattern-scoped to
+      // `@test.local` → real logins (gmail, `demo@pazarsync.local`) never match.
+      const purged = await prisma.$executeRawUnsafe(
+        `DELETE FROM auth.users WHERE email LIKE '%@test.local'`,
+      );
+      if (purged > 0) console.log(`Purged ${purged} test auth user(s)`);
+
+      // Clean-by-default: the post-test re-seed (demo orgs / stores / products)
+      // is residue most runs do not want. Opt in with
+      // PAZARSYNC_RESEED_AFTER_TESTS=1 when the dev UI should be hydrated.
+      if (process.env['PAZARSYNC_RESEED_AFTER_TESTS'] !== '1') return;
+
+      // `--with-sample` because `db:seed` is clean-by-default (a no-op without
+      // it); the opt-in reseed wants the full dev-UI hydration.
+      const { stdout, stderr } = await execFilePromise(
+        'pnpm',
+        ['--filter', '@pazarsync/db', 'seed', '--with-sample'],
+        { cwd: process.cwd().replace(/\/apps\/api$/, '') },
+      );
       const lastLines = stdout.trim().split('\n').slice(-5).join('\n');
       console.log(`\n\u2713 Post-test re-seed:\n${lastLines}`);
       if (stderr.trim() !== '') console.warn('[teardown] stderr:', stderr);
