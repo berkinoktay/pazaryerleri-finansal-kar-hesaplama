@@ -176,6 +176,77 @@ export async function unregisterTrendyolWebhook(
   if (!res.ok) mapTrendyolResponseToDomainError(res, opts.env);
 }
 
+export interface ListTrendyolWebhooksOpts {
+  credentials: TrendyolCredentials;
+  env: StoreEnvironment;
+  signal?: AbortSignal;
+}
+
+/**
+ * One subscription as Trendyol reports it. The reconciler consumes id + url +
+ * status: `status` ('ACTIVE' | 'PASSIVE') is load-bearing — Trendyol
+ * auto-deactivates a hook to PASSIVE after sustained delivery failures, and a
+ * PASSIVE hook silently stops delivering, so the reconciler must heal it rather
+ * than treat it as live. Absent on malformed entries.
+ */
+export interface TrendyolWebhookEntry {
+  id: string;
+  url: string;
+  status?: string;
+}
+
+/**
+ * GET /integration/webhook/sellers/{sellerId}/webhooks
+ *
+ * Lists the seller's current webhook subscriptions. The reconciler uses this to
+ * detect orphaned subscriptions (point at dead storeIds) and to avoid duplicate
+ * registration.
+ *
+ * Response is a BARE JSON ARRAY (NOT `{ content: [...] }` like the orders/products
+ * endpoints) where each entry carries id/url/username/status/subscribedStatuses;
+ * `lastModifiedDate` and `subscribedStatuses` may be null (webhook-listeleme.md).
+ * We project to `{ id, url }` and defensively skip any entry missing either —
+ * the reconciler matches on `url` and prunes by `id`, nothing else is needed.
+ */
+export async function getTrendyolWebhooks(
+  opts: ListTrendyolWebhooksOpts,
+): Promise<TrendyolWebhookEntry[]> {
+  const base = baseUrlFor(opts.env);
+  const url = `${base}/integration/webhook/sellers/${opts.credentials.supplierId}/webhooks`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: buildAuthHeader(opts.credentials),
+        'User-Agent': buildUserAgent(opts.credentials),
+        Accept: 'application/json',
+      },
+      signal: opts.signal ?? AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0 });
+  }
+
+  if (!res.ok) mapTrendyolResponseToDomainError(res, opts.env);
+
+  const parsed = (await res.json()) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((entry): TrendyolWebhookEntry[] => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const record = entry as Record<string, unknown>;
+    const id = record['id'];
+    const entryUrl = record['url'];
+    if (typeof id !== 'string' || typeof entryUrl !== 'string') return [];
+    const projected: TrendyolWebhookEntry = { id, url: entryUrl };
+    const status = record['status'];
+    if (typeof status === 'string') projected.status = status;
+    return [projected];
+  });
+}
+
 /**
  * PUT /integration/webhook/sellers/{sellerId}/webhooks/{id}
  *

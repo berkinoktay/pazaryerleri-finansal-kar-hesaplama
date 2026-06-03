@@ -41,19 +41,18 @@
 // tests; production calls use the @pazarsync/marketplace defaults.
 
 import { prisma } from '@pazarsync/db';
-import type { Store, SyncLog } from '@pazarsync/db';
+import type { SyncLog } from '@pazarsync/db';
 import {
   fetchOtherFinancials,
   fetchSettlements,
   FINANCIAL_WINDOW_MAX_DAYS,
-  isTrendyolCredentials,
   type FetchOtherFinancialsOpts,
   type FetchSettlementsOpts,
-  type TrendyolCredentials,
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
-import { decryptCredentials, syncLog } from '@pazarsync/sync-core';
+import { syncLog } from '@pazarsync/sync-core';
 
+import { decryptStoreCredentials } from '../../lib/store-credentials';
 import { bumpReconciliationStatusForStore } from './status-bump';
 import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
 import type { ChunkResult, ModuleHandler } from '../types';
@@ -68,14 +67,6 @@ const SCAN_WINDOW_DAYS = 60;
 // produces concrete rows (PR-N follow-up).
 const SETTLEMENT_TYPES = ['Sale', 'Discount', 'Return'] as const;
 const OTHER_FINANCIAL_TYPES = ['PaymentOrder', 'Stoppage', 'DeductionInvoices'] as const;
-
-function decryptStoreCredentials(store: Store): TrendyolCredentials {
-  const decrypted = decryptCredentials(store.credentials as string);
-  if (!isTrendyolCredentials(decrypted)) {
-    throw new Error('Invalid Trendyol credentials shape on store');
-  }
-  return decrypted;
-}
 
 // ─── DI shape for fetchers (test-mockable) ──────────────────────────────
 

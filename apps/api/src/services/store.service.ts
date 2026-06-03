@@ -142,16 +142,19 @@ export async function connect(organizationId: string, input: ConnectStoreInput):
     mapPrismaError(err);
   }
 
-  // ─── Trendyol webhook register — PRODUCTION only, non-blocking ─────────
+  // ─── Trendyol webhook register — all environments, non-blocking ────────
   // Design: docs/plans/2026-05-20-trendyol-webhook-receiver-design.md §7.2
   //
   // Register failure is intentionally non-blocking: the store IS created and
-  // the user can manually retry via the rotate-secret endpoint. The 6-hour
-  // delta sync (PR-D) covers the polling fallback so missed webhooks recover
-  // automatically. We only attempt for TRENDYOL + PRODUCTION; SANDBOX skips
-  // because Trendyol stage URL rejects the production tunnel/host string and
-  // most stage testing predates the webhook subscription.
-  if (platform === 'TRENDYOL' && row.environment === 'PRODUCTION') {
+  // the user can manually retry via the rotate-secret endpoint. The real safety
+  // net is the sync-worker webhook-reconcile tick — it heals any connect-time
+  // failure (and base-URL/ngrok drift) on its next pass, and the hourly delta
+  // sync covers webhooks missed in the meantime.
+  //
+  // SANDBOX registers too: dev/ngrok HTTPS callback URLs pass
+  // assertValidCallbackUrl, so there is no reason to skip stage stores (the old
+  // PRODUCTION-only gate left sandbox test orders unable to ever arrive).
+  if (platform === 'TRENDYOL') {
     try {
       const { webhookId, encryptedSecret } = await registerStoreWebhook({
         storeId: row.id,

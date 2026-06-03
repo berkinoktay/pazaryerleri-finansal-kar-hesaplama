@@ -83,11 +83,32 @@ export { trendyolFactory } from './trendyol/adapter';
 export {
   TRENDYOL_SUBSCRIBED_STATUSES,
   WebhookCallbackUrlError,
+  getTrendyolWebhooks,
   registerTrendyolWebhook,
   unregisterTrendyolWebhook,
   updateTrendyolWebhook,
+  type ListTrendyolWebhooksOpts,
   type RegisterTrendyolWebhookOpts,
   type TrendyolSubscribedStatus,
+  type TrendyolWebhookEntry,
   type UnregisterTrendyolWebhookOpts,
   type UpdateTrendyolWebhookOpts,
 } from './trendyol/webhooks';
+export {
+  buildWebhookCallbackUrl,
+  generateWebhookCredentials,
+  registerStoreWebhook,
+  rotateStoreWebhookSecret,
+  unregisterStoreWebhook,
+  type RegisterStoreWebhookArgs,
+  type RegisterStoreWebhookResult,
+  type RotateStoreWebhookArgs,
+  type UnregisterStoreWebhookArgs,
+  type WebhookReceiverCredentials,
+} from './trendyol/webhook-orchestration';
+export {
+  planWebhookReconcile,
+  type ReconcilePlan,
+  type ReconcileStore,
+  type RemoteWebhook,
+} from './trendyol/webhook-reconcile';

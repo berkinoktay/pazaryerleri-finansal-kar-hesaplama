@@ -18,17 +18,12 @@ import type { Store, SyncLog } from '@pazarsync/db';
 import {
   APPROVED_PAGE_CAP_ITEMS,
   fetchApprovedProducts,
-  isTrendyolCredentials,
   PRODUCTS_PAGE_SIZE,
   type MappedProduct,
-  type TrendyolCredentials,
 } from '@pazarsync/marketplace';
-import {
-  decryptCredentials,
-  parseProductsCursor,
-  syncLog,
-  type ProductsCursor,
-} from '@pazarsync/sync-core';
+import { parseProductsCursor, syncLog, type ProductsCursor } from '@pazarsync/sync-core';
+
+import { decryptStoreCredentials } from '../lib/store-credentials';
 
 import type { ChunkResult, ModuleHandler } from './types';
 
@@ -180,18 +175,6 @@ export async function processProductsChunk(input: {
 }
 
 export const productsHandler: ModuleHandler = { processChunk: processProductsChunk };
-
-function decryptStoreCredentials(store: Store): TrendyolCredentials {
-  // Prisma's Json column type is `JsonValue`, not `string`; the actual
-  // runtime value here is the AES-256-GCM ciphertext base64 blob. The
-  // `as string` matches the existing pattern in the legacy service —
-  // the documented Prisma JSON exception to the no-`as` rule.
-  const decrypted = decryptCredentials(store.credentials as string);
-  if (!isTrendyolCredentials(decrypted)) {
-    throw new Error('Invalid Trendyol credentials shape on store');
-  }
-  return decrypted;
-}
 
 // The denormalized aggregates Product carries for the products-list workflows:
 // totalStock (sort + restock review) and min/maxSalePrice (sort=salePrice + the
