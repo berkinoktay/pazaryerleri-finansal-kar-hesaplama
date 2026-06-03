@@ -7,7 +7,10 @@ import * as React from 'react';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { CountBadge } from '@/components/ui/count-badge';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getOrgAvatarPalette, type OrgAvatarPalette } from '@/lib/org-avatar-color';
 import { cn } from '@/lib/utils';
@@ -45,6 +48,13 @@ export interface OrgStoreSwitcherProps {
   activeStoreId: string | null;
   onSelectOrg: (orgId: string) => void;
   onSelectStore: (storeId: string) => void;
+  /**
+   * In-popover "connect a new store" action. When provided (the caller's role
+   * grants it), the Stores section header surfaces a "+ Yeni Mağaza" button
+   * that closes the popover and runs this — typically opening the connect-store
+   * modal. When omitted, the header falls back to a settings-page link.
+   */
+  onAddStore?: () => void;
   /** Collapsed sidebar mode — render icon-only avatar trigger. */
   collapsed?: boolean;
 }
@@ -58,10 +68,10 @@ const PALETTE_BG: Record<OrgAvatarPalette, string> = {
   accent: 'bg-accent text-accent-foreground',
 };
 
-const SYNC_BG: Record<SyncState, string> = {
-  fresh: 'bg-success',
-  stale: 'bg-warning',
-  failed: 'bg-destructive',
+const SYNC_TONE: Record<SyncState, StatusDotProps['tone']> = {
+  fresh: 'success',
+  stale: 'warning',
+  failed: 'destructive',
 };
 
 /** Border tint applied to the chip itself when the active store has a
@@ -126,6 +136,7 @@ export function OrgStoreSwitcher({
   activeStoreId,
   onSelectOrg,
   onSelectStore,
+  onAddStore,
   collapsed = false,
 }: OrgStoreSwitcherProps): React.ReactElement {
   const t = useTranslations('orgStoreSwitcher');
@@ -185,8 +196,8 @@ export function OrgStoreSwitcher({
         org={activeOrg}
         activeStore={activeStore}
         showMultiOrgIndicator={showMultiOrgIndicator}
-        otherOrgCount={otherOrgCount}
         multiOrgLabel={t('multiOrgIndicator', { count: otherOrgCount })}
+        multiOrgMoreLabel={t('multiOrgMore', { count: otherOrgCount })}
       />
       {!collapsed ? (
         <>
@@ -196,13 +207,7 @@ export function OrgStoreSwitcher({
             </span>
             {activeStore ? (
               <span className="text-muted-foreground gap-3xs text-2xs flex w-full items-center truncate text-left leading-tight">
-                <span
-                  aria-hidden
-                  className={cn(
-                    'animate-sync-pulse size-2 shrink-0 rounded-full',
-                    SYNC_BG[activeStore.syncState],
-                  )}
-                />
+                <StatusDot tone={SYNC_TONE[activeStore.syncState]} animatePulse />
                 <span className="truncate">{activeStore.name}</span>
               </span>
             ) : null}
@@ -224,7 +229,7 @@ export function OrgStoreSwitcher({
               // Open state surfaces primary tint as a clear "dropdown is open" cue.
               'bg-muted text-muted-foreground duration-fast transition-colors',
               'group-hover:text-foreground',
-              'group-data-[state=open]:bg-primary/10 group-data-[state=open]:text-primary',
+              'group-data-[state=open]:bg-primary-soft group-data-[state=open]:text-primary-soft-foreground',
             )}
           >
             <ArrowDown01Icon className="size-icon-sm duration-fast transition-transform group-data-[state=open]:rotate-180" />
@@ -241,9 +246,12 @@ export function OrgStoreSwitcher({
           <TooltipTrigger asChild>
             <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
           </TooltipTrigger>
-          <TooltipContent side="right" sideOffset={8} className="gap-3xs flex flex-col">
+          <TooltipContent side="right" sideOffset={8} className="gap-2xs flex flex-col">
             <span className="text-2xs font-medium">{triggerLabel}</span>
-            <span className="text-2xs opacity-70">{t('openShortcut')}</span>
+            <KbdGroup aria-label={t('openShortcut')}>
+              <Kbd>⌘</Kbd>
+              <Kbd>O</Kbd>
+            </KbdGroup>
           </TooltipContent>
         </Tooltip>
       ) : (
@@ -256,7 +264,11 @@ export function OrgStoreSwitcher({
         // buttons can't push the width beyond the sidebar — flex children
         // with min-width:auto would otherwise expand the popover to fit
         // their content. Pairs with icon-only secondary footer buttons.
-        className="w-dropdown-popover overflow-hidden p-0"
+        // max-w opt-in: this is the one sidebar popover wider (384px) than a
+        // narrow phone, and it can open inside the mobile drawer — cap it to the
+        // viewport gap so it never overflows horizontally. (Width only, so the
+        // management footer below the scroll list is never clipped.)
+        className="w-dropdown-popover max-w-[var(--radix-popover-content-available-width)] overflow-hidden p-0"
       >
         {isEmpty ? (
           <OrgStoreSwitcherEmpty />
@@ -274,6 +286,14 @@ export function OrgStoreSwitcher({
               onSelectStore(id);
               setOpen(false);
             }}
+            onAddStore={
+              onAddStore
+                ? () => {
+                    setOpen(false);
+                    onAddStore();
+                  }
+                : undefined
+            }
           />
         )}
       </PopoverContent>
@@ -285,8 +305,10 @@ interface SwitcherAvatarProps {
   org: Organization | null;
   activeStore: Store | null;
   showMultiOrgIndicator: boolean;
-  otherOrgCount: number;
+  /** Visible "+N" text on the corner indicator. */
   multiOrgLabel: string;
+  /** Localized accessible name for the corner indicator ("N more organizations"). */
+  multiOrgMoreLabel: string;
 }
 
 /**
@@ -313,8 +335,8 @@ function SwitcherAvatar({
   org,
   activeStore,
   showMultiOrgIndicator,
-  otherOrgCount,
   multiOrgLabel,
+  multiOrgMoreLabel,
 }: SwitcherAvatarProps): React.ReactElement {
   if (org === null) {
     return (
@@ -337,7 +359,7 @@ function SwitcherAvatar({
           <MarketplaceLogo platform={activeStore.platform} size="md" alt="" />
         </span>
         {showMultiOrgIndicator ? (
-          <MultiOrgPlus label={multiOrgLabel} count={otherOrgCount} />
+          <MultiOrgPlus label={multiOrgLabel} ariaLabel={multiOrgMoreLabel} />
         ) : null}
       </span>
     );
@@ -349,26 +371,36 @@ function SwitcherAvatar({
   return (
     <span className="relative shrink-0">
       <Avatar size="md" className={cn('rounded-md', PALETTE_BG[palette])}>
-        <AvatarFallback className={cn('rounded-md text-sm font-semibold', PALETTE_BG[palette])}>
+        <AvatarFallback className={cn('rounded-md text-sm', PALETTE_BG[palette])}>
           {initial}
         </AvatarFallback>
       </Avatar>
-      {showMultiOrgIndicator ? <MultiOrgPlus label={multiOrgLabel} count={otherOrgCount} /> : null}
+      {showMultiOrgIndicator ? (
+        <MultiOrgPlus label={multiOrgLabel} ariaLabel={multiOrgMoreLabel} />
+      ) : null}
     </span>
   );
 }
 
-function MultiOrgPlus({ label, count }: { label: string; count: number }): React.ReactElement {
+/**
+ * Corner "+N other orgs" indicator on the collapsed-rail avatar — the canonical
+ * CountBadge primitive, ringed against the avatar so it reads as attached, with
+ * a localized accessible name (the visible "+N" alone is not a good SR label).
+ */
+function MultiOrgPlus({
+  label,
+  ariaLabel,
+}: {
+  label: string;
+  ariaLabel: string;
+}): React.ReactElement {
   return (
-    <span
-      aria-label={`${count} more organization${count === 1 ? '' : 's'}`}
-      className={cn(
-        '-bottom-3xs -left-3xs ring-card bg-card text-foreground absolute',
-        'text-2xs flex items-center justify-center rounded-sm leading-none font-semibold ring-2',
-        'px-3xs py-3xs',
-      )}
+    <CountBadge
+      tone="primary"
+      aria-label={ariaLabel}
+      className="ring-card -bottom-3xs -left-3xs px-3xs absolute h-4 min-w-4 rounded-sm ring-2"
     >
       {label}
-    </span>
+    </CountBadge>
   );
 }

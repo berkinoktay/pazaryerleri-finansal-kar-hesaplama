@@ -1,5 +1,39 @@
 {
   "common": {
+    "infoHint": "Bilgi",
+    "stat": {
+      "loadError": "Yüklenemedi",
+      "retry": "Yenile",
+      "empty": "Veri yok"
+    },
+    "advancedFilter": {
+      "addFilter": "Filtre ekle",
+      "apply": "Uygula",
+      "cancel": "İptal",
+      "rangeHint": "İki uçtan birini ya da ikisini de ayarla; biri boş = tek yönlü.",
+      "searchFields": "Filtre ara…",
+      "noFields": "Filtre yok",
+      "minLabel": "En az",
+      "maxLabel": "En çok",
+      "valuePlaceholder": "Değer",
+      "selectValues": "Ara…",
+      "noValues": "Sonuç yok",
+      "removeFilter": "Filtreyi kaldır",
+      "any": "Hepsi",
+      "chooseValue": "değer seç",
+      "valuesSelected": "{count} seçili",
+      "operators": {
+        "eq": "Eşit",
+        "gte": "En az",
+        "lte": "En çok",
+        "between": "Arasında",
+        "contains": "İçerir",
+        "equals": "Eşittir",
+        "startsWith": "Başlar",
+        "in": "İçinde",
+        "isTrue": "Evet"
+      }
+    },
     "appName": "PazarSync",
     "loading": "Yükleniyor",
     "empty": "Veri yok",
@@ -11,13 +45,23 @@
     "remove": "Kaldır",
     "dismiss": "Kapat",
     "close": "Kapat",
+    "commandPalette": "Komut paleti",
     "more": "Daha fazla",
+    "breadcrumb": {
+      "label": "Gezinme yolu"
+    },
+    "sidebar": {
+      "label": "Kenar çubuğu",
+      "description": "Mobil kenar çubuğunu gösterir.",
+      "toggle": "Kenar çubuğunu aç/kapat"
+    },
     "pagination": {
       "label": "Sayfalama",
       "previous": "Önceki",
       "previousPage": "Önceki sayfa",
       "next": "Sonraki",
-      "nextPage": "Sonraki sayfa"
+      "nextPage": "Sonraki sayfa",
+      "page": "Sayfa {page}"
     },
     "calendar": {
       "previousMonth": "Önceki ay",
@@ -34,10 +78,64 @@
       "searchPlaceholder": "Ara…",
       "empty": "Sonuç bulunamadı"
     },
+    "chart": {
+      "empty": "Bu dönemde veri yok",
+      "loading": "Yükleniyor…",
+      "live": "Canlı",
+      "legend": "Açıklama",
+      "error": {
+        "title": "Veriler yüklenemedi",
+        "description": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+        "retry": "Tekrar dene"
+      },
+      "lastSynced": "Son güncelleme {time}",
+      "source": "Kaynak: {source}",
+      "storeCount": "{count} mağaza",
+      "a11y": {
+        "chart": "Grafik",
+        "crosshair": "İmleç"
+      },
+      "periods": {
+        "today": "Bugün",
+        "7d": "7G",
+        "30d": "30G",
+        "90d": "90G",
+        "6m": "6A",
+        "12m": "12A",
+        "ytd": "Yıl",
+        "all": "Tümü"
+      }
+    },
     "dataTable": {
       "empty": {
         "title": "Gösterilecek kayıt yok",
-        "description": "Filtreleri temizleyin veya senkronizasyonu yenileyin."
+        "description": "Veri senkronize edildiğinde burada görünecek."
+      },
+      "noResults": {
+        "title": "Eşleşen kayıt yok",
+        "description": "Aramanı veya filtrelerini değiştirmeyi dene.",
+        "clearFilters": "Filtreleri temizle"
+      },
+      "error": {
+        "title": "Veriler yüklenemedi",
+        "description": "Bir şeyler ters gitti. Lütfen tekrar dene.",
+        "retry": "Tekrar dene"
+      },
+      "loading": "Yükleniyor…",
+      "sort": {
+        "ascending": "Artan sıralı",
+        "descending": "Azalan sıralı",
+        "sortable": "Sıralanabilir"
+      },
+      "selection": {
+        "selectedCount": "{count} satır seçili",
+        "clear": "Seçimi temizle",
+        "processing": "İşleniyor…",
+        "more": "Daha fazla"
+      },
+      "rowActions": {
+        "trigger": "Satır işlemleri",
+        "columnHeader": "İşlemler"
       },
       "toolbar": {
         "searchPlaceholder": "Ara…",
@@ -52,11 +150,7 @@
       "pagination": {
         "rowsPerPage": "Sayfa başına",
         "rowsOf": "{shown} / {total} satır",
-        "pageOf": "Sayfa {page} / {total}",
-        "first": "İlk sayfa",
-        "previous": "Önceki sayfa",
-        "next": "Sonraki sayfa",
-        "last": "Son sayfa"
+        "pageOf": "Sayfa {page} / {total}"
       }
     },
     "lastSynced": "Son senkronizasyon",
@@ -175,7 +269,16 @@
     "support": "Destek",
     "tools": "Maliyet & Araçlar",
     "whatsNew": "Yenilikler",
-    "livePerformance": "Canlı Performans"
+    "livePerformance": "Canlı Performans",
+    "toggleSidebar": "Kenar çubuğunu aç/kapat",
+    "groups": {
+      "overview": "Özet",
+      "operations": "Operasyon",
+      "financeTools": "Finans"
+    },
+    "help": {
+      "label": "Yardım & Destek"
+    }
   },
   "navSections": {
     "orders": {
@@ -346,16 +449,17 @@
     "orgMetaStores": "{count} mağaza",
     "orgMetaNoStores": "henüz mağaza yok",
     "orgMetaWithSync": "{stores} · son senkron {time}",
-    "storeSyncRelative": "Senkron {time}",
+    "storeSyncRelative": "son senkron {time}",
     "storeNoSync": "Henüz senkron yapılmadı",
     "storeMetaWithPlatform": "{platform} · {sync}",
-    "orgSettingsLabel": "{name} ayarları",
-    "multiOrgIndicator": "+{count}"
+    "multiOrgIndicator": "+{count}",
+    "multiOrgMore": "{count} organizasyon daha",
+    "activeLabel": "aktif"
   },
   "userMenu": {
     "open": "Kullanıcı menüsünü aç",
     "profile": "Profil",
-    "settings": "Ayarlar",
+    "settings": "Hesap ayarları",
     "theme": {
       "heading": "Tema",
       "light": "Açık",
@@ -844,6 +948,20 @@
       "description": "Mağazanın onaylı ürünleri ve varyantları",
       "intent": "Trendyol mağazandan senkronize edilen onaylı ürünler"
     },
+    "advancedFilters": {
+      "groups": {
+        "range": "Aralık",
+        "attribute": "Özellik"
+      },
+      "fields": {
+        "salePrice": "Satış fiyatı",
+        "stock": "Stok",
+        "vatRate": "KDV oranı",
+        "brand": "Marka",
+        "category": "Kategori"
+      },
+      "vatRateOption": "%{rate}"
+    },
     "filters": {
       "searchPlaceholder": "Ürün adı, model kodu, stok kodu, barkod ile ara…",
       "status": "Durum",
@@ -950,6 +1068,13 @@
     "syncButton": {
       "label": "Eşitle",
       "syncing": "Eşitleniyor…"
+    },
+    "summary": {
+      "totalProducts": "Toplam ürün",
+      "totalContext": "Onaylı · senkron edilmiş",
+      "missingCost": "Maliyeti eksik",
+      "missingVat": "KDV oranı eksik",
+      "ofCatalog": "Katalogun %{pct} kadarı"
     },
     "missingCostBanner": {
       "title": "Maliyetsiz {count} ürün — kâr hesabı yapılamıyor.",

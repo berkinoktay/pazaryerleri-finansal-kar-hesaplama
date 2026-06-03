@@ -169,7 +169,11 @@ export function SyncCenter({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="gap-lg max-w-sheet-wide flex flex-col">
+      <SheetContent
+        side="right"
+        variant="floating"
+        className="gap-lg max-w-sheet-wide flex flex-col"
+      >
         <SheetHeader>
           <SheetTitle>{t('title')}</SheetTitle>
           <SheetDescription>{t('description')}</SheetDescription>

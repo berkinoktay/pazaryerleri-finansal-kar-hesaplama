@@ -77,9 +77,11 @@ describe('DataTable column pinning', () => {
       const edgeCells = container.querySelectorAll('[data-pinned-edge="last-left"]');
       // 1 header + 2 body rows for column "b" = 3
       expect(edgeCells.length).toBe(3);
-      // None of column "a"'s cells should carry the edge marker.
+      // None of column "a"'s cells should carry the edge marker. Match on the
+      // unique column-"a" body values (a1/a2) — the sortable header now carries
+      // an sr-only "Sıralanabilir" phrase that also contains a bare "a".
       for (const el of edgeCells) {
-        expect(el.textContent).not.toContain('a');
+        expect(el.textContent).not.toMatch(/a[12]/);
       }
     });
 
@@ -143,9 +145,11 @@ describe('DataTable column pinning', () => {
       const { user, container } = renderWithIntl(<Harness />);
       // Open the column-management dropdown.
       await user.click(screen.getByRole('button', { name: 'Kolonları düzenle' }));
-      // Click "Sağa sabitle" for column "b".
-      const bRowLabel = await screen.findByText('b');
-      const bRow = bRowLabel.closest('[role="menuitem"]') as HTMLElement;
+      // Click "Sağa sabitle" for column "b". The menu now shows the human label
+      // ("B", the header) — scope to the menu so it doesn't collide with the
+      // "B" header cell rendered in the table itself.
+      const menu = await screen.findByRole('menu');
+      const bRow = within(menu).getByText('B').closest('[role="menuitem"]') as HTMLElement;
       const pinRightBtn = within(bRow).getByRole('button', { name: 'Sağa sabitle' });
       await user.click(pinRightBtn);
       // The pinning callback should have fired with column b on the right.
@@ -156,14 +160,88 @@ describe('DataTable column pinning', () => {
       const rightPinnedHeads = container.querySelectorAll('th[data-pinned-side="right"]');
       expect(rightPinnedHeads.length).toBeGreaterThan(0);
     });
+
+    it('keeps the actions column anchored far-right when another column is pinned right', async () => {
+      const onChange = vi.fn();
+      const columnsWithActions: ColumnDef<Row>[] = [
+        ...COLUMNS,
+        { id: 'actions', header: 'Eylemler', cell: () => null, enableHiding: false },
+      ];
+      function Harness() {
+        const [pinning, setPinning] = React.useState<ColumnPinningState>({
+          left: [],
+          right: ['actions'],
+        });
+        return (
+          <DataTable
+            columns={columnsWithActions}
+            data={ROWS}
+            getRowId={(r) => r.id}
+            columnPinning={pinning}
+            onColumnPinningChange={(updater) => {
+              const next = typeof updater === 'function' ? updater(pinning) : updater;
+              onChange(next);
+              setPinning(next);
+            }}
+            toolbar={(table) => <DataTableToolbar table={table} />}
+          />
+        );
+      }
+      const { user } = renderWithIntl(<Harness />);
+      await user.click(screen.getByRole('button', { name: 'Kolonları düzenle' }));
+      const menu = await screen.findByRole('menu');
+      const bRow = within(menu).getByText('B').closest('[role="menuitem"]') as HTMLElement;
+      await user.click(within(bRow).getByRole('button', { name: 'Sağa sabitle' }));
+      // TanStack appends → ['actions', 'b']; normalizePinning re-anchors the
+      // kebab to the outermost slot → 'b' lands LEFT of the far-right actions.
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ right: ['b', 'actions'] }));
+    });
   });
 
   describe('uncontrolled (default) mode', () => {
-    it('starts with no pinned columns when no initial state is supplied', () => {
+    it('starts with no pinned columns when only data columns are supplied', () => {
       const { container } = renderWithIntl(
         <DataTable columns={COLUMNS} data={ROWS} getRowId={(r) => r.id} />,
       );
+      // None of a/b/c/d match the auto-pin id convention, so nothing pins.
       expect(container.querySelectorAll('[data-pinned-side]').length).toBe(0);
+    });
+
+    it('auto-pins the select column left and the actions column right by id convention', () => {
+      const withUtilityColumns: ColumnDef<Row>[] = [
+        { id: 'select', header: 'Seç', cell: () => null },
+        ...COLUMNS,
+        { id: 'actions', header: 'Eylemler', cell: () => null },
+      ];
+      const { container } = renderWithIntl(
+        <DataTable columns={withUtilityColumns} data={ROWS} getRowId={(r) => r.id} />,
+      );
+      // 'select' auto-pinned left: 1 header th + 2 body td = 3.
+      expect(container.querySelectorAll('[data-pinned-side="left"]').length).toBe(3);
+      // 'actions' auto-pinned right: 1 header th + 2 body td = 3.
+      expect(container.querySelectorAll('[data-pinned-side="right"]').length).toBe(3);
+    });
+
+    it('lets an explicit initialColumnPinning override the auto-pin default', () => {
+      const withUtilityColumns: ColumnDef<Row>[] = [
+        { id: 'select', header: 'Seç', cell: () => null },
+        ...COLUMNS,
+        { id: 'actions', header: 'Eylemler', cell: () => null },
+      ];
+      const { container } = renderWithIntl(
+        <DataTable
+          columns={withUtilityColumns}
+          data={ROWS}
+          getRowId={(r) => r.id}
+          // Explicit pinning replaces the auto default entirely — the select
+          // and actions columns are NOT auto-pinned once the caller opts in.
+          initialColumnPinning={{ left: ['a'], right: [] }}
+        />,
+      );
+      // Only column 'a' is left-pinned (1 header + 2 body = 3); select is NOT.
+      expect(container.querySelectorAll('[data-pinned-side="left"]').length).toBe(3);
+      // Nothing right-pinned — actions is NOT auto-pinned under explicit control.
+      expect(container.querySelectorAll('[data-pinned-side="right"]').length).toBe(0);
     });
   });
 });

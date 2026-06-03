@@ -1,26 +1,26 @@
 'use client';
 
 import {
-  AlertCircleIcon,
   ArrowRight01Icon,
   Cancel01Icon,
-  Download01Icon,
   PlusSignIcon,
   Search01Icon,
   Tick02Icon,
-  Time04Icon,
 } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
-import { PrimitiveNav } from '@/components/showcase/primitive-nav';
+import { CategoryNav } from '@/components/showcase/category-nav';
+import { Playground, control } from '@/components/showcase/playground';
 import { Preview } from '@/components/showcase/preview';
-import { Badge } from '@/components/ui/badge';
+import { ShowcaseSection } from '@/components/showcase/section';
+import { Badge, BADGE_VARIANTS } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { RADIUS_KEYS, SIZE_KEYS } from '@/lib/variants';
+import { Link } from '@/i18n/navigation';
+import { RADIUS_KEYS, SIZE_KEYS, TONE_KEYS } from '@/lib/variants';
 
 export default function ButtonsPrimitivePage(): React.ReactElement {
   const t = useTranslations('common');
@@ -28,208 +28,202 @@ export default function ButtonsPrimitivePage(): React.ReactElement {
     <>
       <PageHeader
         title="Buton & Rozet"
-        intent="Button ve Badge paylaşılan size/radius prop setini kullanır — aynı anahtar (`md`, `lg`) tüm component'lerde aynı token'a çözülür."
+        intent="Button ve Badge paylaşılan size/radius prop setini kullanır — aynı anahtar (`md`, `lg`) tüm bileşenlerde aynı token'a çözülür. Aşağıdaki kontrol şeritlerinden prop'ları canlı çevir."
       />
-      <PrimitiveNav />
+      <CategoryNav section="primitives" />
 
-      <Preview
-        title="Button varyantları"
-        description="Default, Secondary, Outline, Ghost, Link, Destructive. Varyant hiyerarşiyi taşır — sayfada sadece bir primary olmalı."
+      <ShowcaseSection
+        title="Button"
+        description="Workhorse tetikleyici — variant hiyerarşiyi taşır (sayfada tek primary). Dolu varyantlar düz (gölgesiz), basışta hafif scale-down. Kontrolleri çevirerek tüm prop matrisini gör."
       >
-        <div className="gap-xs flex flex-wrap">
-          <Button>Default</Button>
-          <Button variant="secondary">Secondary</Button>
-          <Button variant="outline">Outline</Button>
-          <Button variant="ghost">Ghost</Button>
-          <Button variant="link">Link</Button>
-          <Button variant="destructive">Destructive</Button>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Button size (paylaşılan prop)"
-        description="sm / md (default) / lg. Aynı 'size' prop'u her input-sınıfı bileşende aynı yüksekliği verir."
-      >
-        <div className="gap-md flex flex-col">
-          {SIZE_KEYS.map((size) => (
-            <div key={size} className="gap-xs flex flex-wrap items-center">
-              <span className="text-2xs text-muted-foreground w-12 font-mono">{size}</span>
-              <Button size={size}>{size.toUpperCase()}</Button>
-              <Button size={size} variant="outline">
-                Outline
-              </Button>
-              <Button size={size} variant="ghost">
-                Ghost
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Preview>
-
-      <Preview
-        title="Button radius (paylaşılan prop)"
-        description="none, xs, sm, md (default), lg, xl, 2xl, full. Aynı anahtar Badge, Input, Card'da da çalışır."
-      >
-        <div className="gap-xs flex flex-wrap items-center">
-          {RADIUS_KEYS.map((r) => (
-            <Button key={r} variant="outline" radius={r}>
-              {r}
+        <Playground
+          title="Button — variant · size · radius · ikon · loading · disabled"
+          description="Tek etkileşimli yüzey; eski 'her varyantı statik grid'de tekrar et' bloklarının yerini alır."
+          controls={{
+            variant: control.select(
+              [
+                'default',
+                'secondary',
+                'outline',
+                'ghost',
+                'link',
+                'destructive',
+                'success',
+                'warning',
+              ],
+              'default',
+            ),
+            size: control.segment(SIZE_KEYS, 'md'),
+            radius: control.select(RADIUS_KEYS, 'md'),
+            leadingIcon: control.bool(true, 'leadingIcon'),
+            trailingIcon: control.bool(false, 'trailingIcon'),
+            loading: control.bool(false),
+            disabled: control.bool(false),
+          }}
+          render={(v) => (
+            <Button
+              variant={v.variant}
+              size={v.size}
+              radius={v.radius}
+              loading={v.loading}
+              loadingLabel={t('loading')}
+              disabled={v.disabled}
+              leadingIcon={v.leadingIcon ? <PlusSignIcon /> : undefined}
+              trailingIcon={v.trailingIcon ? <ArrowRight01Icon /> : undefined}
+            >
+              Mağaza ekle
             </Button>
-          ))}
-        </div>
-      </Preview>
+          )}
+        />
 
-      <Preview
-        title="Icon button'lar"
-        description="icon (40px) ve icon-sm (32px) tek-aksiyon dairesel butonlar için."
-      >
-        <div className="gap-xs flex flex-wrap items-center">
-          <Button size="icon" aria-label="Ekle">
-            <PlusSignIcon className="size-icon-sm" />
-          </Button>
-          <Button size="icon-sm" variant="outline" aria-label="Ara">
-            <Search01Icon className="size-icon-sm" />
-          </Button>
-          <Button size="icon" radius="full" variant="outline" aria-label="Ara (dairesel)">
-            <Search01Icon className="size-icon-sm" />
-          </Button>
-        </div>
-      </Preview>
-
-      <Preview title="Button durumları" description="Disabled, loading (custom), active focus.">
-        <div className="gap-xs flex flex-wrap">
-          <Button disabled>Disabled</Button>
-          <Button variant="outline" disabled>
-            Disabled
-          </Button>
-          <Button variant="destructive" disabled>
-            Disabled
-          </Button>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Button — leading & trailing icon slot"
-        description="leadingIcon / trailingIcon prop'ları — auto-sized (size-icon-sm), gap otomatik, ikon rengi buton variant'ından mirasla."
-      >
-        <div className="gap-xs flex flex-wrap">
-          <Button leadingIcon={<PlusSignIcon />}>Yeni Mağaza</Button>
-          <Button variant="outline" leadingIcon={<Download01Icon />}>
-            Dışa aktar
-          </Button>
-          <Button variant="ghost" trailingIcon={<ArrowRight01Icon />}>
-            Devam et
-          </Button>
-          <Button
-            variant="secondary"
-            leadingIcon={<Search01Icon />}
-            trailingIcon={<ArrowRight01Icon />}
-          >
-            Arama sonuçları
-          </Button>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Button — loading"
-        description="loading=true spinner + aria-busy + auto disabled. loadingText isteğe bağlı — geçici metin. prefers-reduced-motion altında spinner donar."
-      >
-        <ButtonLoadingDemo loadingLabel={t('loading')} />
-      </Preview>
-
-      <Preview
-        title="Badge tonları"
-        description="Neutral, Primary, Outline, Success, Destructive, Warning, Info. Ton rengi yüzeyle taşınır; yan-şerit border yasak."
-      >
-        <div className="gap-xs flex flex-wrap">
-          <Badge>Neutral</Badge>
-          <Badge tone="primary">Primary</Badge>
-          <Badge tone="outline">Outline</Badge>
-          <Badge tone="success">Teslim edildi</Badge>
-          <Badge tone="destructive">İade</Badge>
-          <Badge tone="warning">Bekleyen</Badge>
-          <Badge tone="info">Kargoda</Badge>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Badge — leading / trailing icon"
-        description="leadingIcon tone'a göre renklenir (success → yeşil check, destructive → kırmızı x). size-icon-xs auto-sized."
-      >
-        <div className="gap-xs flex flex-wrap items-center">
-          <Badge tone="success" leadingIcon={<Tick02Icon />}>
-            Senkron
-          </Badge>
-          <Badge tone="destructive" leadingIcon={<Cancel01Icon />}>
-            Hata
-          </Badge>
-          <Badge tone="warning" leadingIcon={<AlertCircleIcon />}>
-            Bekleyen
-          </Badge>
-          <Badge tone="info" leadingIcon={<Time04Icon />}>
-            Kargoda
-          </Badge>
-        </div>
-      </Preview>
-
-      <Preview
-        title="Badge — removable (onRemove)"
-        description="Filter chip / tag kullanımı. Buton 44px touch target, aria-label i18n'den."
-      >
-        <BadgeRemovableDemo removeLabel={t('remove')} />
-      </Preview>
-
-      <Preview
-        title="Badge size & radius"
-        description="sm / md (default) / lg × full pill veya md köşe. Paylaşılan prop mekanizması."
-      >
-        <div className="gap-md flex flex-col">
+        <Preview
+          title="Icon button'lar"
+          description="size='icon' (40px) ve 'icon-sm' (32px) tek-aksiyon butonlar — radius='full' dairesel yapar. Icon-only buton aria-label ister."
+        >
           <div className="gap-xs flex flex-wrap items-center">
-            {SIZE_KEYS.map((size) => (
-              <Badge key={size} size={size} tone="success">
-                {size}
-              </Badge>
-            ))}
+            <Button size="icon" aria-label="Ekle">
+              <PlusSignIcon className="size-icon-sm" />
+            </Button>
+            <Button size="icon-sm" variant="outline" aria-label="Ara">
+              <Search01Icon className="size-icon-sm" />
+            </Button>
+            <Button size="icon-sm" variant="ghost" aria-label="Kapat">
+              <Cancel01Icon className="size-icon-sm" />
+            </Button>
+            <Button size="icon" radius="full" variant="outline" aria-label="Ara (dairesel)">
+              <Search01Icon className="size-icon-sm" />
+            </Button>
           </div>
+        </Preview>
+
+        <Preview
+          title="asChild — buton stili bir Link'e"
+          description="asChild ile Button stilleri gerçek bir <Link>/<a>'ya uygulanır. variant='link' GÖRÜNÜM içindir; asChild DAVRANIŞ (gerçek bağlantı) içindir — en çok kullanılan kompozisyon."
+        >
           <div className="gap-xs flex flex-wrap items-center">
-            {(['full', 'md', 'sm'] as const).map((r) => (
-              <Badge key={r} radius={r} tone="info">
-                radius = {r}
-              </Badge>
-            ))}
+            <Button asChild>
+              <Link href="/design">Panoya git</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/design/primitives">{"Primitive'ler"}</Link>
+            </Button>
+            <Button variant="ghost" asChild>
+              <Link href="/design/tokens">{"Token'lar"}</Link>
+            </Button>
           </div>
-        </div>
-      </Preview>
+        </Preview>
 
-      <Preview
-        title="Toggle"
-        description="Tek açık/kapalı kontrol. Button varyantı gibi davranır ama on/off state ayırt eder."
-      >
-        <div className="gap-xs flex flex-wrap">
-          <Toggle defaultPressed>Kalın</Toggle>
-          <Toggle>İtalik</Toggle>
-          <Toggle variant="outline">Altı çizili</Toggle>
-        </div>
-      </Preview>
+        <Preview
+          title="Button — loading (etkileşimli)"
+          description="loading=true spinner + aria-busy + auto disabled. Gerçek bir async mutasyonu tetikleyip canlı gör. prefers-reduced-motion altında spinner donar."
+        >
+          <ButtonLoadingDemo loadingLabel={t('loading')} />
+        </Preview>
+      </ShowcaseSection>
 
-      <Preview
-        title="ToggleGroup"
-        description="Segmented control (single/multiple). Döneme göre filtre, hizalama seçici, platform filtresi gibi yerlerde."
+      <ShowcaseSection
+        title="Badge"
+        description="Durum/etiket/filtre çipi — tone (renk) × variant (yüzey/dolu/kenarlık) ortogonal. surface (soluk tint) = 60-30-10'un sakin '30'u; solid = nadir '10' aksan. Yan-şerit border yasak."
       >
-        <div className="gap-md flex flex-col">
-          <ToggleGroup type="single" defaultValue="month" variant="outline">
-            <ToggleGroupItem value="day">Gün</ToggleGroupItem>
-            <ToggleGroupItem value="week">Hafta</ToggleGroupItem>
-            <ToggleGroupItem value="month">Ay</ToggleGroupItem>
-            <ToggleGroupItem value="quarter">Çeyrek</ToggleGroupItem>
-          </ToggleGroup>
-          <ToggleGroup type="multiple" defaultValue={['trendyol']}>
-            <ToggleGroupItem value="trendyol">Trendyol</ToggleGroupItem>
-            <ToggleGroupItem value="hepsiburada">Hepsiburada</ToggleGroupItem>
-            <ToggleGroupItem value="n11">n11</ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-      </Preview>
+        <Playground
+          title="Badge — variant · tone · size · radius · leadingIcon"
+          description="leadingIcon açıkken ikon tone'a göre renklenir (success → yeşil, destructive → kırmızı). Etiket seçili tone'u gösterir."
+          controls={{
+            variant: control.segment(BADGE_VARIANTS, 'surface'),
+            tone: control.select(TONE_KEYS, 'success'),
+            size: control.segment(SIZE_KEYS, 'md'),
+            radius: control.select(RADIUS_KEYS, 'md'),
+            leadingIcon: control.bool(true, 'leadingIcon'),
+          }}
+          render={(v) => (
+            <Badge
+              variant={v.variant}
+              tone={v.tone}
+              size={v.size}
+              radius={v.radius}
+              leadingIcon={v.leadingIcon ? <Tick02Icon /> : undefined}
+            >
+              {v.tone}
+            </Badge>
+          )}
+        />
+
+        <Preview
+          title="Badge — removable (onRemove)"
+          description="Filter chip / tag kullanımı. Kaldır butonu 44px touch target, aria-label i18n'den. Çipleri kaldırıp boş-durumu gör."
+        >
+          <BadgeRemovableDemo removeLabel={t('remove')} />
+        </Preview>
+      </ShowcaseSection>
+
+      <ShowcaseSection
+        title="Toggle & ToggleGroup"
+        description="Toggle tek aç/kapa kontrol (on-state accent dolgu); ToggleGroup ilişkili toggle kümesi (connected segment-bar veya plain). Playground'daki Toggle tıklanabilir kalır — kontroller yalnız variant/size/disabled'ı çevirir."
+      >
+        <Playground
+          title="Toggle — variant · size · disabled"
+          description="on/off state'i bileşenin kendisi yönetir (tıkla); kontroller görünüm prop'larını çevirir. md=40px Button ile hizalı."
+          controls={{
+            variant: control.segment(['default', 'outline'], 'default'),
+            size: control.segment(SIZE_KEYS, 'md'),
+            disabled: control.bool(false),
+          }}
+          render={(v) => (
+            <Toggle variant={v.variant} size={v.size} disabled={v.disabled} defaultPressed>
+              Kalın
+            </Toggle>
+          )}
+        />
+
+        <Preview
+          title="ToggleGroup — connected (segment-bar) · plain · dikey"
+          description="Bitişik segment-bar (default 'connected'): tek çerçeve, seçili = primary-soft (Tabs'taki segmented'dan ayrı). 'plain' ayrık toggle'lar. type=single/multiple, per-item disabled, dikey; gruba aria-label ver."
+        >
+          <div className="gap-md flex flex-col">
+            <ToggleGroup type="single" defaultValue="month" aria-label="Dönem">
+              <ToggleGroupItem value="day">Gün</ToggleGroupItem>
+              <ToggleGroupItem value="week">Hafta</ToggleGroupItem>
+              <ToggleGroupItem value="month">Ay</ToggleGroupItem>
+              <ToggleGroupItem value="quarter" disabled>
+                Çeyrek
+              </ToggleGroupItem>
+            </ToggleGroup>
+
+            <ToggleGroup
+              type="multiple"
+              defaultValue={['trendyol']}
+              size="sm"
+              aria-label="Platform"
+            >
+              <ToggleGroupItem value="trendyol">Trendyol</ToggleGroupItem>
+              <ToggleGroupItem value="hepsiburada">Hepsiburada</ToggleGroupItem>
+              <ToggleGroupItem value="n11">n11</ToggleGroupItem>
+            </ToggleGroup>
+
+            <ToggleGroup
+              type="single"
+              defaultValue="table"
+              appearance="plain"
+              aria-label="Görünüm modu (plain)"
+            >
+              <ToggleGroupItem value="table">Tablo</ToggleGroupItem>
+              <ToggleGroupItem value="grid">Kart</ToggleGroupItem>
+              <ToggleGroupItem value="list">Liste</ToggleGroupItem>
+            </ToggleGroup>
+
+            <ToggleGroup
+              type="single"
+              defaultValue="orta"
+              orientation="vertical"
+              aria-label="Hizalama (dikey)"
+            >
+              <ToggleGroupItem value="sol">Sol</ToggleGroupItem>
+              <ToggleGroupItem value="orta">Orta</ToggleGroupItem>
+              <ToggleGroupItem value="sag">Sağ</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        </Preview>
+      </ShowcaseSection>
     </>
   );
 }
@@ -275,35 +269,19 @@ function ButtonLoadingDemo({ loadingLabel }: { loadingLabel: string }): React.Re
   };
 
   return (
-    <div className="gap-md flex flex-col">
-      <div className="gap-xs flex flex-wrap">
-        <Button loading loadingLabel={loadingLabel}>
-          Kaydet
-        </Button>
-        <Button loading loadingLabel={loadingLabel} loadingText="Kaydediliyor…">
-          Kaydet
-        </Button>
-        <Button variant="outline" loading loadingLabel={loadingLabel}>
-          Yenile
-        </Button>
-        <Button variant="destructive" loading loadingLabel={loadingLabel} loadingText="Siliniyor…">
-          Sil
-        </Button>
-      </div>
-      <div className="gap-xs flex flex-wrap items-center">
-        <Button
-          onClick={kickLoading}
-          loading={busy}
-          loadingLabel={loadingLabel}
-          loadingText="Gönderiliyor…"
-          leadingIcon={<PlusSignIcon />}
-        >
-          Denemek için tıkla
-        </Button>
-        <span className="text-2xs text-muted-foreground">
-          1.8 sn süren senkron mutasyonu taklit eder.
-        </span>
-      </div>
+    <div className="gap-xs flex flex-wrap items-center">
+      <Button
+        onClick={kickLoading}
+        loading={busy}
+        loadingLabel={loadingLabel}
+        loadingText="Gönderiliyor…"
+        leadingIcon={<PlusSignIcon />}
+      >
+        Denemek için tıkla
+      </Button>
+      <span className="text-2xs text-muted-foreground">
+        1.8 sn süren senkron mutasyonu taklit eder.
+      </span>
     </div>
   );
 }

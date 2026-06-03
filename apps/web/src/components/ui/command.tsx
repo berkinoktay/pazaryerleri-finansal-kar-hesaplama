@@ -2,9 +2,10 @@
 
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search01Icon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 /**
@@ -38,12 +39,17 @@ interface CommandDialogProps extends React.ComponentProps<typeof Dialog> {
 }
 
 export function CommandDialog({ children, ...props }: CommandDialogProps): React.ReactElement {
+  const t = useTranslations('common');
   return (
     <Dialog {...props}>
-      <DialogContent className="overflow-hidden p-0">
-        <Command className="[&_[cmdk-group-heading]]:px-xs [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-xs [&_[cmdk-group-heading]]:font-medium">
-          {children}
-        </Command>
+      {/* Radix Dialog requires a Title for the a11y tree (it warns/throws
+          without one) — the palette's input is the visible label, so the title
+          is visually hidden. aria-describedby is explicitly cleared: the palette
+          has no separate description. The cmdk-group-heading typography is owned
+          by CommandGroup, so no override is needed here. */}
+      <DialogContent className="overflow-hidden p-0" aria-describedby={undefined}>
+        <DialogTitle className="sr-only">{t('commandPalette')}</DialogTitle>
+        <Command>{children}</Command>
       </DialogContent>
     </Dialog>
   );
@@ -66,9 +72,9 @@ export const CommandInput = React.forwardRef<
   // and what consumers expect here too.
   <div
     className={cn(
-      'gap-xs px-sm m-3xs h-10',
+      'gap-xs px-sm m-3xs h-10 pointer-coarse:min-h-11',
       'border-border bg-background text-foreground flex items-center rounded-md border shadow-xs',
-      'duration-fast transition-colors',
+      'duration-fast ease-out-quart transition-colors',
       'hover:border-border-strong focus-within:border-ring',
       wrapperClassName,
     )}
@@ -148,7 +154,13 @@ export const CommandItem = React.forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={cn(
-      "gap-xs px-xs py-3xs aria-selected:bg-muted aria-selected:text-foreground relative flex cursor-default items-center rounded-sm text-sm outline-none select-none data-[disabled='true']:pointer-events-none data-[disabled='true']:opacity-50",
+      // cmdk emits aria-selected (not data-highlighted) for the active row — keep
+      // it, but join the house menu recipe: tokenized transition, touch floor,
+      // and global :focus-visible glow suppression so no box rings the row.
+      'gap-xs px-xs py-2xs aria-selected:bg-muted aria-selected:text-foreground relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'focus:shadow-none focus-visible:shadow-none',
+      "data-[disabled='true']:pointer-events-none data-[disabled='true']:opacity-50",
       className,
     )}
     {...props}

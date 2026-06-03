@@ -16,7 +16,7 @@ export function SizeChipList({ sizes, extraCount }: SizeChipListProps): React.Re
   return (
     <div className="gap-3xs flex flex-wrap items-center">
       {sizes.map((size) => (
-        <Badge key={size} tone="outline" size="sm" radius="md">
+        <Badge key={size} variant="outline" size="sm" radius="md">
           {size}
         </Badge>
       ))}

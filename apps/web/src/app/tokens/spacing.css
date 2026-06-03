@@ -50,6 +50,16 @@
   --size-tile-min: 280px;
   --size-tile-min-sm: 220px;
   --size-table-row-h: 44px;
+  /* Min-height for the DataTable body when it shows a single full-width state
+   * (loading skeleton block, error, first-run empty, filtered no-results) so
+   * the region never looks cramped and never jumps height as it transitions
+   * between those four states (320px). */
+  --size-table-empty: 20rem;
+
+  /* Default plot height for a ChartFrame. Charts get a FIXED height (width is
+   * responsive) — an aspect-ratio would balloon to 700px+ on a wide card. A
+   * caller can override per-chart via the ChartFrame `height` prop. */
+  --size-chart: 20rem;
 
   --size-content-max: 1440px;
   --size-prose-max: 68ch;
@@ -74,6 +84,7 @@
   --size-sheet-wide: 28rem; /* sheet on ≥sm viewports (448px) */
   --size-modal: 32rem; /* dialog content (512px) */
   --size-dropdown-popover: 24rem; /* org+store switcher dropdown panel (384px) */
+  --size-tooltip: 16rem; /* InfoHint / explanation tooltip readable width (256px) — wraps a sentence without sprawling */
   --size-pagesize-select: 5rem; /* DataTablePagination per-page Select trigger (80px — fits 1–3 digit page sizes + chevron) */
   --size-headline: 56rem; /* landing hero H1 column (896px) */
 

@@ -20,12 +20,16 @@ import { ROLE_LABEL_KEY, type Member, type MemberRole, type Store } from '../api
 import { MemberRoleDialog } from './member-role-dialog';
 import { MemberStoreAccessDialog } from './member-store-access-dialog';
 
-// Same role→tone mapping as the org switcher, kept consistent across surfaces.
-const ROLE_TONE: Record<MemberRole, NonNullable<BadgeProps['tone']>> = {
-  OWNER: 'primary',
-  ADMIN: 'neutral',
-  MEMBER: 'outline',
-  VIEWER: 'outline',
+// Same role→badge mapping as the org switcher, kept consistent across surfaces.
+// OWNER stands out (solid primary); MEMBER/VIEWER stay low-emphasis (outline).
+const ROLE_BADGE: Record<
+  MemberRole,
+  { tone: BadgeProps['tone']; variant?: BadgeProps['variant'] }
+> = {
+  OWNER: { tone: 'primary', variant: 'solid' },
+  ADMIN: { tone: 'neutral' },
+  MEMBER: { tone: 'neutral', variant: 'outline' },
+  VIEWER: { tone: 'neutral', variant: 'outline' },
 };
 
 interface MembersTableProps {
@@ -70,7 +74,11 @@ export function MembersTable({ orgId, members, stores }: MembersTableProps): Rea
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge tone={ROLE_TONE[member.role]} size="sm">
+                  <Badge
+                    tone={ROLE_BADGE[member.role].tone}
+                    variant={ROLE_BADGE[member.role].variant}
+                    size="sm"
+                  >
                     {tRoles(ROLE_LABEL_KEY[member.role])}
                   </Badge>
                 </TableCell>

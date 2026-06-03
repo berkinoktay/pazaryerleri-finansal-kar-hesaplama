@@ -1,5 +1,39 @@
 {
   "common": {
+    "infoHint": "Info",
+    "stat": {
+      "loadError": "Couldn't load",
+      "retry": "Retry",
+      "empty": "No data"
+    },
+    "advancedFilter": {
+      "addFilter": "Add filter",
+      "apply": "Apply",
+      "cancel": "Cancel",
+      "rangeHint": "Set either or both bounds; leaving one empty is one-sided.",
+      "searchFields": "Search filters…",
+      "noFields": "No filters",
+      "minLabel": "Min",
+      "maxLabel": "Max",
+      "valuePlaceholder": "Value",
+      "selectValues": "Search…",
+      "noValues": "No results",
+      "removeFilter": "Remove filter",
+      "any": "Any",
+      "chooseValue": "set value",
+      "valuesSelected": "{count} selected",
+      "operators": {
+        "eq": "Equals",
+        "gte": "Min",
+        "lte": "Max",
+        "between": "Between",
+        "contains": "Contains",
+        "equals": "Equals",
+        "startsWith": "Starts with",
+        "in": "In",
+        "isTrue": "Yes"
+      }
+    },
     "appName": "PazarSync",
     "loading": "Loading",
     "empty": "No data",
@@ -11,13 +45,23 @@
     "remove": "Remove",
     "dismiss": "Dismiss",
     "close": "Close",
+    "commandPalette": "Command palette",
     "more": "More",
+    "breadcrumb": {
+      "label": "Breadcrumb"
+    },
+    "sidebar": {
+      "label": "Sidebar",
+      "description": "Displays the mobile sidebar.",
+      "toggle": "Toggle sidebar"
+    },
     "pagination": {
       "label": "Pagination",
       "previous": "Previous",
       "previousPage": "Previous page",
       "next": "Next",
-      "nextPage": "Next page"
+      "nextPage": "Next page",
+      "page": "Page {page}"
     },
     "calendar": {
       "previousMonth": "Previous month",
@@ -34,10 +78,64 @@
       "searchPlaceholder": "Search…",
       "empty": "No results"
     },
+    "chart": {
+      "empty": "No data for this period",
+      "loading": "Loading…",
+      "live": "Live",
+      "legend": "Legend",
+      "error": {
+        "title": "Couldn't load data",
+        "description": "Something went wrong. Please try again.",
+        "retry": "Try again"
+      },
+      "lastSynced": "Updated {time}",
+      "source": "Source: {source}",
+      "storeCount": "{count, plural, one {# store} other {# stores}}",
+      "a11y": {
+        "chart": "Chart",
+        "crosshair": "Crosshair"
+      },
+      "periods": {
+        "today": "Today",
+        "7d": "7D",
+        "30d": "30D",
+        "90d": "90D",
+        "6m": "6M",
+        "12m": "12M",
+        "ytd": "YTD",
+        "all": "All"
+      }
+    },
     "dataTable": {
       "empty": {
         "title": "No records to display",
-        "description": "Clear the filters or refresh the sync."
+        "description": "Records will appear here once your data is synced."
+      },
+      "noResults": {
+        "title": "No matching records",
+        "description": "Try adjusting your search or filters.",
+        "clearFilters": "Clear filters"
+      },
+      "error": {
+        "title": "Couldn't load data",
+        "description": "Something went wrong. Please try again.",
+        "retry": "Try again"
+      },
+      "loading": "Loading…",
+      "sort": {
+        "ascending": "Sorted ascending",
+        "descending": "Sorted descending",
+        "sortable": "Sortable"
+      },
+      "selection": {
+        "selectedCount": "{count, plural, one {# row selected} other {# rows selected}}",
+        "clear": "Clear selection",
+        "processing": "Working…",
+        "more": "More"
+      },
+      "rowActions": {
+        "trigger": "Row actions",
+        "columnHeader": "Actions"
       },
       "toolbar": {
         "searchPlaceholder": "Search…",
@@ -52,11 +150,7 @@
       "pagination": {
         "rowsPerPage": "Per page",
         "rowsOf": "{shown} of {total} rows",
-        "pageOf": "Page {page} of {total}",
-        "first": "First page",
-        "previous": "Previous page",
-        "next": "Next page",
-        "last": "Last page"
+        "pageOf": "Page {page} of {total}"
       }
     },
     "lastSynced": "Last synced",
@@ -175,7 +269,16 @@
     "support": "Support",
     "tools": "Tools & Pricing",
     "whatsNew": "What's New",
-    "livePerformance": "Live Performance"
+    "livePerformance": "Live Performance",
+    "toggleSidebar": "Toggle sidebar",
+    "groups": {
+      "overview": "Overview",
+      "operations": "Operations",
+      "financeTools": "Finance"
+    },
+    "help": {
+      "label": "Help & Support"
+    }
   },
   "navSections": {
     "orders": {
@@ -345,17 +448,18 @@
     "newOrgInline": "+ New Organization",
     "orgMetaStores": "{count} stores",
     "orgMetaNoStores": "no stores yet",
-    "orgMetaWithSync": "{stores} · last sync {time}",
-    "storeSyncRelative": "Synced {time}",
+    "orgMetaWithSync": "{stores} · last synced {time}",
+    "storeSyncRelative": "last synced {time}",
     "storeNoSync": "Not synced yet",
     "storeMetaWithPlatform": "{platform} · {sync}",
-    "orgSettingsLabel": "{name} settings",
-    "multiOrgIndicator": "+{count}"
+    "multiOrgIndicator": "+{count}",
+    "multiOrgMore": "{count} more organizations",
+    "activeLabel": "active"
   },
   "userMenu": {
     "open": "Open user menu",
     "profile": "Profile",
-    "settings": "Settings",
+    "settings": "Account settings",
     "theme": {
       "heading": "Theme",
       "light": "Light",
@@ -844,6 +948,20 @@
       "description": "Approved products and variants from your store",
       "intent": "Approved products synced from your Trendyol store"
     },
+    "advancedFilters": {
+      "groups": {
+        "range": "Range",
+        "attribute": "Attribute"
+      },
+      "fields": {
+        "salePrice": "Sale price",
+        "stock": "Stock",
+        "vatRate": "VAT rate",
+        "brand": "Brand",
+        "category": "Category"
+      },
+      "vatRateOption": "{rate}%"
+    },
     "filters": {
       "searchPlaceholder": "Search by product name, model code, stock code, barcode…",
       "status": "Status",
@@ -950,6 +1068,13 @@
     "syncButton": {
       "label": "Sync",
       "syncing": "Syncing…"
+    },
+    "summary": {
+      "totalProducts": "Total products",
+      "totalContext": "Approved · synced",
+      "missingCost": "Missing cost",
+      "missingVat": "Missing VAT rate",
+      "ofCatalog": "{pct}% of catalog"
     },
     "missingCostBanner": {
       "title": "{count} products missing cost — profit cannot be calculated.",

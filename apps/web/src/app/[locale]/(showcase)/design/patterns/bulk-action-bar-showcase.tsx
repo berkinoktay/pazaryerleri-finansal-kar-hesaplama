@@ -1,10 +1,17 @@
 'use client';
 
-import { Delete02Icon, DownloadCircle02Icon, Tag01Icon } from 'hugeicons-react';
+import {
+  Delete02Icon,
+  DownloadCircle02Icon,
+  Mail01Icon,
+  PrinterIcon,
+  Tag01Icon,
+} from 'hugeicons-react';
 import * as React from 'react';
 
 import { BulkActionBar, type BulkAction } from '@/components/patterns/bulk-action-bar';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 
 interface MockOrder {
   id: string;
@@ -21,10 +28,56 @@ const MOCK_ORDERS: MockOrder[] = [
   { id: '5', number: 'TY-2948017', customer: 'Emine Şahin', total: '₺78,40' },
 ];
 
+// Single action catalog for every demo on this page — pick the ids a demo
+// needs. The floating + inline bars use a compact 3-action set (with a
+// destructive delete); the overflow demo uses all five. One source kills the
+// near-identical buildActions / buildManyActions pair.
+type ActionId = 'tag' | 'export' | 'mail' | 'print' | 'delete';
+
+const ACTION_CATALOG: Record<
+  ActionId,
+  { label: string; icon: React.ReactNode; tone?: 'destructive' }
+> = {
+  tag: { label: 'Etiketle', icon: <Tag01Icon className="size-icon-sm" aria-hidden /> },
+  export: {
+    label: 'CSV indir',
+    icon: <DownloadCircle02Icon className="size-icon-sm" aria-hidden />,
+  },
+  mail: { label: 'E-posta gönder', icon: <Mail01Icon className="size-icon-sm" aria-hidden /> },
+  print: { label: 'Yazdır', icon: <PrinterIcon className="size-icon-sm" aria-hidden /> },
+  delete: {
+    label: 'Sil',
+    icon: <Delete02Icon className="size-icon-sm" aria-hidden />,
+    tone: 'destructive',
+  },
+};
+
+const COMPACT_ACTIONS: ActionId[] = ['tag', 'export', 'delete'];
+const FULL_ACTIONS: ActionId[] = ['tag', 'export', 'mail', 'print', 'delete'];
+
+function buildActions(
+  ids: ActionId[],
+  count: number,
+  onAction: (label: string) => void,
+): BulkAction[] {
+  return ids.map((id) => {
+    const def = ACTION_CATALOG[id];
+    return {
+      id,
+      label: def.label,
+      icon: def.icon,
+      tone: def.tone,
+      onClick: () => onAction(`${def.label} (${count})`),
+    };
+  });
+}
+
 export function BulkActionBarShowcase(): React.ReactElement {
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [lastAction, setLastAction] = React.useState<string | null>(null);
   const [inlineSelected, setInlineSelected] = React.useState<Set<string>>(new Set(['1', '2']));
+  const [busy, setBusy] = React.useState(false);
+  const [overflowSelected, setOverflowSelected] = React.useState<Set<string>>(new Set(['1', '2']));
 
   const toggle = (id: string): void => {
     setSelected((prev) => {
@@ -40,28 +93,6 @@ export function BulkActionBarShowcase(): React.ReactElement {
       prev.size === MOCK_ORDERS.length ? new Set() : new Set(MOCK_ORDERS.map((o) => o.id)),
     );
   };
-
-  const buildActions = (count: number): BulkAction[] => [
-    {
-      id: 'tag',
-      label: 'Etiketle',
-      icon: <Tag01Icon className="size-icon-sm" aria-hidden />,
-      onClick: () => setLastAction(`Etiketle (${count})`),
-    },
-    {
-      id: 'export',
-      label: 'CSV indir',
-      icon: <DownloadCircle02Icon className="size-icon-sm" aria-hidden />,
-      onClick: () => setLastAction(`CSV indir (${count})`),
-    },
-    {
-      id: 'delete',
-      label: 'Sil',
-      icon: <Delete02Icon className="size-icon-sm" aria-hidden />,
-      tone: 'destructive',
-      onClick: () => setLastAction(`Sil (${count})`),
-    },
-  ];
 
   return (
     <div className="gap-lg flex flex-col">
@@ -133,24 +164,30 @@ export function BulkActionBarShowcase(): React.ReactElement {
         <BulkActionBar
           selectedCount={selected.size}
           onClear={() => setSelected(new Set())}
-          actions={buildActions(selected.size)}
+          actions={buildActions(COMPACT_ACTIONS, selected.size, setLastAction)}
           countLabel={(count) => `${count} sipariş seçili`}
         />
       </div>
 
       <div className="gap-sm flex flex-col">
         <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Inline — kart / split pane içinde
+          Inline — kart / split pane içinde · busy (in-flight) durumu
         </span>
         <div className="border-border bg-card p-md gap-sm flex flex-col rounded-md border">
           <div className="text-foreground text-sm">
-            Burada inline BulkActionBar hep render edilir; toolbar yerine kullanılan varyant.
+            Inline BulkActionBar hep render edilir. <strong>busy</strong> açıkken bir toplu işlem
+            sürüyormuş gibi spinner görünür ve tüm aksiyonlar + temizle düğmesi devre dışı kalır.
           </div>
+          <label className="gap-xs text-foreground flex items-center text-sm">
+            <Switch checked={busy} onCheckedChange={setBusy} />
+            İşlem sürüyor (busy)
+          </label>
           <BulkActionBar
             position="inline"
             selectedCount={inlineSelected.size}
             onClear={() => setInlineSelected(new Set())}
-            actions={buildActions(inlineSelected.size)}
+            actions={buildActions(COMPACT_ACTIONS, inlineSelected.size, setLastAction)}
+            busy={busy}
             countLabel={(count) => `${count} ürün seçili`}
           />
           <Button
@@ -160,6 +197,34 @@ export function BulkActionBarShowcase(): React.ReactElement {
             onClick={() => setInlineSelected(new Set(['1', '2', '3']))}
           >
             3 satır seç (demo)
+          </Button>
+        </div>
+      </div>
+
+      <div className="gap-sm flex flex-col">
+        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
+          overflowAfter — fazla aksiyon &quot;Daha fazla&quot; menüsüne taşınır
+        </span>
+        <div className="border-border bg-card p-md gap-sm flex flex-col rounded-md border">
+          <div className="text-foreground text-sm">
+            5 aksiyon, <code className="text-xs">overflowAfter=2</code> → ilk 2 satır içinde,
+            kalanlar bir dropdown&apos;a toplanır. Dar ekranlarda aksiyon etiketleri ikon-only olur.
+          </div>
+          <BulkActionBar
+            position="inline"
+            selectedCount={overflowSelected.size}
+            onClear={() => setOverflowSelected(new Set())}
+            actions={buildActions(FULL_ACTIONS, overflowSelected.size, setLastAction)}
+            overflowAfter={2}
+            countLabel={(count) => `${count} kayıt seçili`}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setOverflowSelected(new Set(['1', '2']))}
+          >
+            Seç (demo)
           </Button>
         </div>
       </div>

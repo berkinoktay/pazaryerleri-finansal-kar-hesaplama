@@ -45,8 +45,12 @@ export const MenubarTrigger = React.forwardRef<
   <MenubarPrimitive.Trigger
     ref={ref}
     className={cn(
-      'px-sm py-3xs flex cursor-default items-center rounded-sm text-sm font-medium transition-colors outline-none select-none',
-      'focus:bg-muted data-[state=open]:bg-muted',
+      'px-sm py-3xs flex cursor-default items-center rounded-sm text-sm font-medium outline-none select-none',
+      'duration-fast ease-out-quart transition-colors',
+      // Radix sets data-highlighted on arrow-nav across the bar; data-state=open
+      // is the active-menu fill. Suppress the global focus glow on the row.
+      'data-[highlighted]:bg-muted data-[state=open]:bg-muted',
+      'focus:shadow-none focus-visible:shadow-none',
       className,
     )}
     {...props}
@@ -61,14 +65,16 @@ export const MenubarSubTrigger = React.forwardRef<
   <MenubarPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      'gap-xs px-xs py-3xs flex cursor-default items-center rounded-sm text-sm outline-none select-none',
-      'focus:bg-muted data-[state=open]:bg-muted',
+      'gap-xs px-xs py-2xs flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'data-[highlighted]:bg-muted data-[state=open]:bg-muted',
+      'focus:shadow-none focus-visible:shadow-none',
       className,
     )}
     {...props}
   >
     {children}
-    <ArrowRight01Icon className="size-icon-sm ml-auto" />
+    <ArrowRight01Icon className="size-icon-sm text-muted-foreground ml-auto" />
   </MenubarPrimitive.SubTrigger>
 ));
 MenubarSubTrigger.displayName = MenubarPrimitive.SubTrigger.displayName;
@@ -81,6 +87,14 @@ export const MenubarSubContent = React.forwardRef<
     ref={ref}
     className={cn(
       'border-border bg-popover p-3xs text-popover-foreground z-50 min-w-32 overflow-hidden rounded-md border shadow-md',
+      // Sub-content shipped with NO animation at all — give it the full recipe.
+      'origin-[var(--radix-menubar-content-transform-origin)]',
+      'duration-base ease-out-quart',
+      'data-[state=open]:animate-in data-[state=closed]:animate-out',
+      'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+      'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
+      'data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2',
       className,
     )}
     {...props}
@@ -100,7 +114,14 @@ export const MenubarContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         'border-border bg-popover p-3xs text-popover-foreground z-50 min-w-48 overflow-hidden rounded-md border shadow-md',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
+        // Was fade-only — complete to the full house entrance recipe.
+        'origin-[var(--radix-menubar-content-transform-origin)]',
+        'duration-base ease-out-quart',
+        'data-[state=open]:animate-in data-[state=closed]:animate-out',
+        'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+        'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
+        'data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2',
         className,
       )}
       {...props}
@@ -116,8 +137,10 @@ export const MenubarItem = React.forwardRef<
   <MenubarPrimitive.Item
     ref={ref}
     className={cn(
-      'gap-xs px-xs py-3xs relative flex cursor-default items-center rounded-sm text-sm transition-colors outline-none select-none',
-      'focus:bg-muted focus:text-foreground',
+      'gap-xs px-xs py-2xs relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+      'focus:shadow-none focus-visible:shadow-none',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       inset && 'pl-lg',
       className,
@@ -134,23 +157,51 @@ export const MenubarCheckboxItem = React.forwardRef<
   <MenubarPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      'py-3xs pl-lg pr-xs relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
-      'focus:bg-muted focus:text-foreground',
+      'py-2xs pl-lg pr-xs relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+      'focus:shadow-none focus-visible:shadow-none data-[state=checked]:font-medium',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     checked={checked}
     {...props}
   >
-    <span className="left-xs absolute flex size-3 items-center justify-center">
+    <span className="left-xs size-icon-sm absolute flex items-center justify-center">
       <MenubarPrimitive.ItemIndicator>
-        <Tick02Icon className="size-3" strokeWidth={3} />
+        <Tick02Icon className="text-primary size-3.5" strokeWidth={2.5} />
       </MenubarPrimitive.ItemIndicator>
     </span>
     {children}
   </MenubarPrimitive.CheckboxItem>
 ));
 MenubarCheckboxItem.displayName = MenubarPrimitive.CheckboxItem.displayName;
+
+export const MenubarRadioItem = React.forwardRef<
+  React.ElementRef<typeof MenubarPrimitive.RadioItem>,
+  React.ComponentPropsWithoutRef<typeof MenubarPrimitive.RadioItem>
+>(({ className, children, ...props }, ref) => (
+  <MenubarPrimitive.RadioItem
+    ref={ref}
+    className={cn(
+      'py-2xs pl-lg pr-xs relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+      'focus:shadow-none focus-visible:shadow-none data-[state=checked]:font-medium',
+      'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+      className,
+    )}
+    {...props}
+  >
+    <span className="left-xs size-icon-sm absolute flex items-center justify-center">
+      <MenubarPrimitive.ItemIndicator>
+        <span className="bg-primary size-2 rounded-full" />
+      </MenubarPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </MenubarPrimitive.RadioItem>
+));
+MenubarRadioItem.displayName = MenubarPrimitive.RadioItem.displayName;
 
 export const MenubarSeparator = React.forwardRef<
   React.ElementRef<typeof MenubarPrimitive.Separator>,

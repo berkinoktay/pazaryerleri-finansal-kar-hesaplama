@@ -65,15 +65,21 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 ```
 ├── apps/
 │   ├── web/              # Next.js 16 frontend (see apps/web/CLAUDE.md)
-│   └── api/              # Hono backend server (see apps/api/CLAUDE.md)
+│   ├── api/              # Hono backend server (see apps/api/CLAUDE.md)
+│   └── sync-worker/      # Long-running worker: polls the SyncLog queue, claims jobs,
+│                         #   runs marketplace sync handlers (orders/products/settlements/fx)
 ├── packages/
-│   ├── db/               # Prisma schema, client, migrations
-│   ├── types/            # Shared TypeScript types (API contracts, domain models)
-│   └── utils/            # Shared utilities (currency, date, validation)
+│   ├── db/               # Prisma 7 schema, client (→ generated/prisma), migrations, domain enums
+│   ├── utils/            # Shared utilities (currency, date, business-timezone, cursor, permissions, validation)
+│   ├── api-client/       # Generated typed API contracts (OpenAPI → openapi-fetch); cross-app types live here
+│   ├── marketplace/      # Marketplace adapters (Trendyol, Hepsiburada) + MarketplaceAdapter interface + registry
+│   ├── sync-core/        # Sync primitives: job claim, checkpoint, crypto, logger, sync-log service
+│   ├── order-sync/       # Idempotent order upsert (marketplace payload → domain Order)
+│   └── profit/           # Profit engine: formula, on-create estimates, settlement reconcile, fee resolution
 ├── supabase/
-│   ├── functions/        # Edge Functions (marketplace sync workers)
+│   ├── functions/        # Edge Functions (marketplace sync: sync-trendyol, sync-hepsiburada, fx-rates-sync)
 │   └── sql/              # RLS policies, pg_cron setup, DB functions
-├── docs/
+├── docs/                 # Local-only knowledge base (gitignored)
 │   ├── SECURITY.md       # CRITICAL: Tenant isolation, encryption, auth rules
 │   ├── ARCHITECTURE.md   # System architecture, DB schema, API design
 │   ├── PRODUCT_VISION.md # Product vision and requirements
@@ -83,6 +89,8 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 ├── pnpm-workspace.yaml
 └── tsconfig.base.json
 ```
+
+> There is no `packages/types` package. Cross-app **request/response contracts** come from `@pazarsync/api-client` (generated from the backend OpenAPI spec); cross-app **domain enums** (Platform, OrderStatus, …) come from `@pazarsync/db`.
 
 ## Documentation References
 
@@ -134,9 +142,16 @@ pnpm typecheck              # Type check all packages
 pnpm lint                   # Lint all packages
 pnpm format                 # Format all files
 
-# Supabase
-pnpm supabase:start         # Start local Supabase
-pnpm supabase:functions     # Serve Edge Functions locally
+# API contract codegen (run after backend route/schema changes)
+pnpm api:sync               # Regenerate OpenAPI spec + typed @pazarsync/api-client
+
+# Pre-commit / pre-PR gates
+pnpm check:all              # Pre-commit gate — static checks + fast tests + audits, no DB needed
+pnpm check:full             # Pre-PR gate — check:all plus the integration suite (needs `supabase start`)
+
+# Supabase (CLI, not a pnpm script)
+supabase start              # Start local Supabase (Postgres on port 54322)
+supabase functions serve    # Serve Edge Functions locally
 ```
 
 ## Architecture Principles
@@ -164,9 +179,11 @@ Store-scoped endpoints follow: `/api/v1/organizations/:orgId/stores/:storeId/...
 ### Data Flow
 
 ```
-Marketplace API → Supabase Edge Function (pg_cron) → PostgreSQL
+Marketplace API → sync-worker / Edge Functions (pg_cron-scheduled) → PostgreSQL
 PostgreSQL → Hono API (Prisma) → Next.js Frontend (React Query)
 ```
+
+Sync is queue-driven: a `SyncLog` row is enqueued (PENDING), and `apps/sync-worker` (a long-running process) polls, claims, and drives each job through chunks with a watchdog reclaiming stale claims. Edge Functions under `supabase/functions/` cover scheduled/lightweight sync paths (Trendyol, Hepsiburada, fx-rates).
 
 ## Coding Standards (Shared)
 
@@ -460,8 +477,8 @@ Commands:
 - `pnpm test:integration` — slow (needs `supabase start` + `pnpm db:push`), run before commits
 - `pnpm test` — both
 - `pnpm test:watch` — watch mode
-- `pnpm check:all` — pre-commit gate: typecheck + lint + unit tests + format check (no DB)
-- `pnpm check:full` — pre-PR gate: typecheck + lint + ALL tests + format check (needs Supabase local)
+- `pnpm check:all` — pre-commit gate: static checks + fast tests + audits, no DB
+- `pnpm check:full` — pre-PR gate: everything in `check:all` plus the integration suite (needs Supabase local)
 
 ## No Utility Duplication
 
@@ -496,13 +513,13 @@ export function formatCurrency(value: Decimal | string | number): string { ... }
 
 ### The location decision
 
-| Symbol used by                              | Lives in                                                                             |
-| ------------------------------------------- | ------------------------------------------------------------------------------------ |
-| One feature only                            | `apps/web/src/features/<X>/<lib\|components\|hooks>/`                                |
-| 2+ features (web only)                      | `apps/web/src/lib/` (utils/hooks) · `apps/web/src/components/patterns/` (composites) |
-| 2+ features (web AND api)                   | `packages/utils/` (utils) · `packages/types/` (cross-app types)                      |
-| Domain enums (Platform, OrderStatus, …)     | `@pazarsync/db` (Prisma 7 emits them during `pnpm db:generate`) — never duplicate    |
-| Marketplace/business config (rates, limits) | `apps/api/src/config/` or DB tables — never inline in feature code                   |
+| Symbol used by                              | Lives in                                                                                   |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| One feature only                            | `apps/web/src/features/<X>/<lib\|components\|hooks>/`                                      |
+| 2+ features (web only)                      | `apps/web/src/lib/` (utils/hooks) · `apps/web/src/components/patterns/` (composites)       |
+| 2+ features (web AND api)                   | `packages/utils/` (utils) · `@pazarsync/api-client` (cross-app request/response contracts) |
+| Domain enums (Platform, OrderStatus, …)     | `@pazarsync/db` (Prisma 7 emits them during `pnpm db:generate`) — never duplicate          |
+| Marketplace/business config (rates, limits) | `apps/api/src/config/` or DB tables — never inline in feature code                         |
 
 ### When to promote
 
@@ -515,7 +532,7 @@ Promote the moment a second feature needs the symbol — not earlier, not later.
 
 Type-only imports across features are softer than runtime imports — no bundle dependency, only a compile-time shape — but still a smell. If feature A and feature B both depend on the same `Organization` shape, that shape is a **shared contract**, not feature-A's private detail. Move it to:
 
-- `packages/types/` if both web and api consume it
+- `@pazarsync/api-client` if it's a request/response contract both web and api consume (it's generated from the backend OpenAPI spec — change the Zod schema, then `pnpm api:sync`)
 - `apps/web/src/lib/` (or a dedicated `apps/web/src/types/` later) if only web consumes it
 
 The audit downgrades type-only edges to `warn` by default; treat the warn list as a backlog, not as "no problem".
@@ -535,8 +552,13 @@ If you genuinely need a cross-feature edge (e.g. a `dashboard` feature that aggr
 
 ## Shared Packages
 
-- `@pazarsync/db` — Prisma 7 client (generated to `../generated/prisma`), driver adapter (`@prisma/adapter-pg`), migration scripts
-- `@pazarsync/utils` — Currency formatting (TRY), date helpers, Zod schemas shared between frontend and backend
+- `@pazarsync/db` — Prisma 7 client (generated to `../generated/prisma`), driver adapter (`@prisma/adapter-pg`), migration scripts, domain enums (`@pazarsync/db/enums`)
+- `@pazarsync/utils` — Currency formatting (TRY), date + business-timezone helpers, cursor, permissions, Zod schemas shared between frontend and backend
+- `@pazarsync/api-client` — Generated typed API contracts (backend OpenAPI → `openapi-fetch`); the home for cross-app request/response types
+- `@pazarsync/marketplace` — Marketplace adapters (Trendyol, Hepsiburada), the `MarketplaceAdapter` interface, and the platform registry. Consumed by both `apps/api` and `apps/sync-worker`
+- `@pazarsync/sync-core` — Sync engine primitives: job claim, checkpoint, crypto, logger, `sync-log` service, `mapPrismaError`
+- `@pazarsync/order-sync` — Idempotent order upsert (marketplace payload → domain `Order`)
+- `@pazarsync/profit` — Profit calculation engine: formula, on-order-create estimates, settlement reconciliation, fee resolution, calculability inference
 
 **API request/response contracts** are generated into `@pazarsync/api-client` from backend Zod schemas (see `docs/plans/archive/2026-04-16-api-docs-design.md`). **Domain enums** (Platform, OrderStatus, MemberRole, …) come from `@pazarsync/db` — Prisma 7 emits them as TypeScript types during `pnpm db:generate`.
 
@@ -600,8 +622,8 @@ SUPABASE_SECRET_KEY=
   - `pnpm --filter <package> test:integration` — for any route, service, or DB query change (needs `supabase start`)
 - After adding a new endpoint, write the integration test in the same PR. Do NOT merge route code without its test.
 - After adding a new org-scoped endpoint, write the multi-tenancy isolation test in the same PR (see `docs/TESTING.md` § "Multi-Tenancy Test Pattern").
-- **Before committing**: run `pnpm check:all` — typecheck + lint + unit tests + format check. Fast, no DB required.
-- **Before opening a PR**: run `supabase start && pnpm check:full` — same as `check:all` plus the full integration suite. Mirrors what CI runs.
+- **Before committing**: run `pnpm check:all` — the static checks, fast tests, and audits. Fast, no DB required.
+- **Before opening a PR**: run `supabase start && pnpm check:full` — same as `check:all` plus the integration suite. Mirrors what CI runs.
 - Never commit with failing tests. If a test reveals a bug in your work, fix the bug — don't disable the test.
 - Never commit with skipped tests (`it.skip`, `describe.skip`) without:
   - A code comment explaining why it's skipped, AND
@@ -612,8 +634,8 @@ SUPABASE_SECRET_KEY=
 
 Before running `pnpm check:all`, apply skills in this order on all changed code:
 
-1. Run `/simplify` on all changed code.
-2. After `/simplify` finishes, run `/vercel-react-best-practices` on changed React/Next.js code, and `/postgres` on changed database code (if applicable).
+1. Run `/code-review` on all changed code. It covers correctness bugs AND the reuse / simplification / efficiency cleanups, so it supersedes the old `/simplify` step (which was quality-only and never hunted bugs). Apply findings with `--fix` (or by hand); raise the effort (`high` / `ultra`) for a deeper, broader pass on larger or higher-risk diffs. `/simplify` stays available for a cleanup-only pass when you explicitly do NOT want bug-hunting, but `/code-review` is the default pre-commit gate.
+2. After `/code-review` finishes, run `/vercel-react-best-practices` on changed React/Next.js code, and `supabase-postgres-best-practices` on changed database code (if applicable).
 3. After all skill fixes are done, run `pnpm check:all` and fix every error.
 
 ## Bug Fix Workflow

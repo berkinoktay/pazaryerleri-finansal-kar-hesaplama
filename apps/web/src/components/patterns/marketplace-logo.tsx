@@ -31,6 +31,16 @@ const PLATFORM_SRC: Record<MarketplacePlatform, string> = {
 };
 
 /**
+ * Display name per marketplace — brand proper nouns, identical in tr / en, so
+ * they live here (next to the logo) rather than in i18n. Use for the logo's
+ * `alt` and any "logo + name" pairing.
+ */
+export const PLATFORM_NAME: Record<MarketplacePlatform, string> = {
+  TRENDYOL: 'Trendyol',
+  HEPSIBURADA: 'Hepsiburada',
+};
+
+/**
  * Rendered height per size; width is driven by CSS `w-auto` so each
  * wordmark's natural aspect ratio is preserved. The Next.js `width`
  * attribute is a hint for intrinsic size only — the class below wins.

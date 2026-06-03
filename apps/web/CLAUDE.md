@@ -628,11 +628,12 @@ The live reference for every token, primitive, and pattern lives under `/design/
 
 - `/design/tokens` — colors, typography, spacing, radius, shadow, motion (live swatches)
 - `/design/primitives/*` — every shadcn primitive with variants and states
-- `/design/patterns` — PazarSync-specific composites (KpiTile, TrendDelta, Currency, SyncBadge, PageHeader, EmptyState)
+- `/design/patterns` — PazarSync-specific composites (StatCard family, chart kit, TrendDelta, Currency, SyncBadge, PageHeader, EmptyState)
 - `/design/data` — DataTable with filters, sorting, selection, import/export
 - `/design/layout-demo` — three-column AppShell with mock store data
+- `/design/manifest` + `/design/checklist` — generated component manifest and design-system coverage checklist
 
-Before building a new screen, check the showcase to see what's already available. Before tweaking styles on a primitive, check whether the change belongs at the token layer (affects the whole system) or whether a pattern wrapper is the right home.
+The `/design/*` showcase is behind the auth gate (it's in `proxy.ts`'s `PROTECTED` list). Before building a new screen, check the showcase to see what's already available. Before tweaking styles on a primitive, check whether the change belongs at the token layer (affects the whole system) or whether a pattern wrapper is the right home.
 
 ## Next.js 16 Specifics
 
@@ -675,8 +676,8 @@ All UI work in `apps/web` follows a strict selection cascade. Bypassing it fragm
 
 ### The cascade (mandatory order)
 
-1. **Scan `apps/web/src/components/patterns/`** — PazarSync composites (KpiTile, StatGroup, Currency, TrendDelta, SyncBadge, PageHeader, EmptyState, DateRangePicker, DataTable, DataTableToolbar). Always reuse first.
-2. **Scan `apps/web/src/components/ui/`** — 41 shadcn/ui primitives already installed (Button, Card, Dialog, Form, Input, Select, Table, Tabs, Popover, Sheet, …).
+1. **Scan `apps/web/src/components/patterns/`** — PazarSync composites (stat cards, the chart kit, currency cells, sync badges, page headers, empty states, the DataTable shell, …). The folder and the live `/design/patterns` showcase are the source of truth — browse them; don't rely on any fixed list here. Always reuse before building.
+2. **Scan `apps/web/src/components/ui/`** — the installed shadcn/ui primitives (Button, Card, Dialog, Form, Input, Select, Table, …) plus a few PazarSync-grown ones. Browse the folder rather than trusting a snapshot list.
 3. **Fallback to the shadcn registry** — if `ui/` is genuinely missing a primitive, add it with `pnpm dlx shadcn@latest add <name>`. Don't hand-roll a primitive shadcn already ships.
 4. **Custom component** — only if 1–3 all miss. Custom components MUST compose from `ui/` and `patterns/` — never raw HTML, never by forking a primitive.
    - Feature-scoped → `apps/web/src/features/<feature>/components/`
@@ -717,14 +718,14 @@ Anything you need may already be there. The "Component Architecture" section bel
 
 Top-level `src/components/` folders — each has a single, narrow purpose. Don't create new top-level folders without updating this table:
 
-| Folder      | Purpose                                                                            |
-| ----------- | ---------------------------------------------------------------------------------- |
-| `ui/`       | Raw shadcn/ui primitives. Never fork; extend tokens or add a `patterns/` wrapper.  |
-| `patterns/` | PazarSync composites built on `ui/` (currency cells, kpi tiles, data-table shell). |
-| `layout/`   | App shell, rails, navigation config — structural chrome only.                      |
-| `brand/`    | Logo, wordmark, brand-specific marks.                                              |
-| `common/`   | Cross-feature UI utilities not tied to a single feature (e.g. language-switcher).  |
-| `showcase/` | Design system demo components, only rendered under `(showcase)` routes.            |
+| Folder      | Purpose                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| `ui/`       | Raw shadcn/ui primitives. Never fork; extend tokens or add a `patterns/` wrapper.           |
+| `patterns/` | PazarSync composites built on `ui/` (currency cells, stat cards, charts, data-table shell). |
+| `layout/`   | App shell, rails, navigation config — structural chrome only.                               |
+| `brand/`    | Logo, wordmark, brand-specific marks.                                                       |
+| `common/`   | Cross-feature UI utilities not tied to a single feature (e.g. language-switcher).           |
+| `showcase/` | Design system demo components, only rendered under `(showcase)` routes.                     |
 
 Feature-specific components live under `src/features/<feature>/components/`, not here. Each feature follows this structure:
 

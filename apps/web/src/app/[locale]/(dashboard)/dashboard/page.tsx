@@ -87,8 +87,12 @@ export default async function DashboardPage({
       <PageHeader
         title={t('title')}
         intent={activeOrg?.name}
-        meta={<SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />}
-        actions={<NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />}
+        actions={
+          <>
+            <SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />
+            <NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />
+          </>
+        }
       />
       <QuickAccessPanel items={QUICK_ACCESS_ITEMS} />
       <EmptyState title={t('empty.title')} description={t('empty.description')} />

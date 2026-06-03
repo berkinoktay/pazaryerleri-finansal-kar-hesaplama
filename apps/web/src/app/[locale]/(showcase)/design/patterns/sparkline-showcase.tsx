@@ -4,10 +4,12 @@ import Decimal from 'decimal.js';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
-import { KpiTile } from '@/components/patterns/kpi-tile';
 import { Sparkline } from '@/components/patterns/sparkline';
+import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
 import { TrendDelta } from '@/components/patterns/trend-delta';
+import { Playground, control } from '@/components/showcase/playground';
+import { Preview } from '@/components/showcase/preview';
 
 // Synthetic 14-day series with realistic dashboard shapes — caller code
 // would derive these from React Query results or pre-aggregated rollups.
@@ -20,6 +22,9 @@ const ORDER_SERIES = [142, 148, 132, 158, 152, 167, 161, 174, 169, 188, 195, 184
 const REFUND_SERIES = [12, 8, 15, 9, 7, 11, 13, 18, 22, 19, 14, 21, 25, 28];
 
 const STALL_SERIES = [40, 41, 39, 40, 38, 40, 41, 40, 39, 40, 41, 40, 39, 40];
+
+const SPARKLINE_VARIANTS = ['area', 'line', 'bars'] as const;
+const SPARKLINE_TONES = ['neutral', 'success', 'warning', 'destructive', 'info'] as const;
 
 interface RowDatum {
   product: string;
@@ -56,14 +61,32 @@ const ROW_DATA: RowDatum[] = [
 export function SparklineShowcase(): React.ReactElement {
   return (
     <div className="gap-lg flex flex-col">
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          KpiTile içinde — son 14 gün trendi
-        </span>
+      <Playground
+        title="Sparkline — variant · tone"
+        description="variant: area (gradient dolgulu), line (stroke-only), bars (ince yuvarlatılmış kolonlar). tone TrendDelta + Badge ile aynı semantic vocabulary — yükselen metrik success, düşen maliyet destructive."
+        controls={{
+          variant: control.segment(SPARKLINE_VARIANTS, 'area'),
+          tone: control.segment(SPARKLINE_TONES, 'success'),
+        }}
+        render={(v) => (
+          <Sparkline
+            data={REVENUE_SERIES}
+            variant={v.variant}
+            tone={v.tone}
+            width={120}
+            height={32}
+          />
+        )}
+      />
+
+      <Preview
+        title="StatCard içinde — son 14 gün trendi"
+        description="StatCard context slot'unda Sparkline + 'son 14 gün' etiketi. Trend yönü tone'u sürer: ciro/sipariş success, iade destructive (goodDirection='down'), düz sync neutral."
+      >
         <StatGroup>
-          <KpiTile
+          <StatCard
             label="Ciro"
-            value={{ kind: 'currency', amount: new Decimal('37640') }}
+            value={<Currency value={new Decimal('37640')} />}
             delta={{ percent: 12.4, goodDirection: 'up' }}
             context={
               <span className="gap-xs flex items-center">
@@ -72,9 +95,9 @@ export function SparklineShowcase(): React.ReactElement {
               </span>
             }
           />
-          <KpiTile
+          <StatCard
             label="Sipariş"
-            value={{ kind: 'count', amount: 218 }}
+            value={218}
             delta={{ percent: 9.5, goodDirection: 'up' }}
             context={
               <span className="gap-xs flex items-center">
@@ -83,9 +106,9 @@ export function SparklineShowcase(): React.ReactElement {
               </span>
             }
           />
-          <KpiTile
+          <StatCard
             label="İade"
-            value={{ kind: 'count', amount: 28 }}
+            value={28}
             delta={{ percent: 22.5, goodDirection: 'down' }}
             context={
               <span className="gap-xs flex items-center">
@@ -94,9 +117,9 @@ export function SparklineShowcase(): React.ReactElement {
               </span>
             }
           />
-          <KpiTile
+          <StatCard
             label="Aktif sync"
-            value={{ kind: 'count', amount: 40 }}
+            value={40}
             context={
               <span className="gap-xs flex items-center">
                 <Sparkline data={STALL_SERIES} tone="neutral" />
@@ -105,12 +128,12 @@ export function SparklineShowcase(): React.ReactElement {
             }
           />
         </StatGroup>
-      </div>
+      </Preview>
 
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Tablo hücresinde — ürün başına 7-gün trendi
-        </span>
+      <Preview
+        title="Tablo hücresinde — ürün başına 7-gün trendi"
+        description="width / height ile hücre footprint'ine sığar. Her satırın trend yönü tone seçimini yönlendirir — düşüşte destructive, çıkışta success."
+      >
         <div className="border-border bg-card overflow-hidden rounded-md border">
           <table className="w-full">
             <thead className="bg-muted/40 border-border border-b">
@@ -147,46 +170,17 @@ export function SparklineShowcase(): React.ReactElement {
             </tbody>
           </table>
         </div>
-        <span className="text-2xs text-muted-foreground">
-          Her satırın trend yönü tone seçimini yönlendirir — düşüşte destructive, çıkışta success.
-        </span>
-      </div>
+      </Preview>
 
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Variant: line — area dolgusu olmadan
-        </span>
-        <div className="border-border bg-card p-md gap-md flex flex-wrap items-center rounded-md border">
-          <div className="gap-xs flex items-center">
-            <Sparkline data={REVENUE_SERIES} tone="success" variant="line" />
-            <span className="text-2xs text-muted-foreground">Ciro · success</span>
-          </div>
-          <div className="gap-xs flex items-center">
-            <Sparkline data={ORDER_SERIES} tone="info" variant="line" />
-            <span className="text-2xs text-muted-foreground">Sipariş · info</span>
-          </div>
-          <div className="gap-xs flex items-center">
-            <Sparkline data={REFUND_SERIES} tone="warning" variant="line" />
-            <span className="text-2xs text-muted-foreground">İade · warning</span>
-          </div>
-          <div className="gap-xs flex items-center">
-            <Sparkline data={STALL_SERIES} tone="neutral" variant="line" />
-            <span className="text-2xs text-muted-foreground">Aktif sync · neutral</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Boş seri — placeholder kutu
-        </span>
-        <div className="border-border bg-card p-md gap-md flex items-center rounded-md border">
+      <Preview
+        title="Boş seri — placeholder kutu"
+        description="data=[] → tone-neutral muted dolgu, istenen footprint'i yer tutar (chart hiç çizilmez)."
+      >
+        <div className="gap-md flex items-center">
           <Sparkline data={[]} ariaLabel="Veri yok" />
-          <span className="text-2xs text-muted-foreground">
-            data=[] → tone-neutral muted dolgu, yer tutar.
-          </span>
+          <span className="text-2xs text-muted-foreground">data=[] → muted placeholder.</span>
         </div>
-      </div>
+      </Preview>
     </div>
   );
 }

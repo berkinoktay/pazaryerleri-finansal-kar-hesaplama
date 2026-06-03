@@ -1,4 +1,6 @@
-import { parseAsInteger, parseAsString, parseAsStringEnum } from 'nuqs';
+import { parseAsInteger, parseAsJson, parseAsString, parseAsStringEnum } from 'nuqs';
+
+import { parseFilterRows, type FilterRow } from '@/lib/advanced-filter';
 
 // Single source of truth for the URL ↔ React Query state binding on
 // the products page. Mirrors the backend's ListProductsQuerySchema —
@@ -46,6 +48,10 @@ export const productsFiltersParsers = {
   // — we want null as the "no override-tab active" signal, distinct from
   // the implicit default for required fields.
   overrideMissing: parseAsStringEnum<ProductOverrideMissing>([...PRODUCT_OVERRIDE_MISSING]),
+  // Advanced Filtering (PR-F1): the whole FilterRow[] rides one URL param as
+  // JSON, separate from the single-value facet params above. parseFilterRows
+  // drops malformed entries so a stale/hostile URL degrades to "no filters".
+  filters: parseAsJson<FilterRow[]>(parseFilterRows).withDefault([]),
   page: parseAsInteger.withDefault(1),
   perPage: parseAsInteger.withDefault(25),
   sort: parseAsStringEnum<ProductListSortExtended>([...PRODUCT_LIST_SORTS_EXTENDED]).withDefault(
@@ -60,6 +66,7 @@ export interface ProductsFilters {
   categoryId: string;
   productId: string;
   overrideMissing: ProductOverrideMissing | null;
+  filters: FilterRow[];
   page: number;
   perPage: number;
   sort: ProductListSortExtended;

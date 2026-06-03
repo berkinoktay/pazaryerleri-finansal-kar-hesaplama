@@ -13,14 +13,17 @@ import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 import { cn } from '@/lib/utils';
 
 import { useProductFacets } from '../hooks/use-product-facets';
+import { useProductFilterFields } from '../hooks/use-product-filter-fields';
 import { useProducts } from '../hooks/use-products';
 import { useProductsFilters } from '../hooks/use-products-filters';
 import { useStartProductSync } from '../hooks/use-start-product-sync';
 import { aggregateMissingShipping } from '../lib/aggregate-missing-shipping';
+import { filterRowsToProductParams } from '../lib/products-filter-fields';
 
 import { MissingCostWarningBanner } from './missing-cost-warning-banner';
 import { MissingShippingBanner } from './missing-shipping-banner';
 import { ProductsEmptyState } from './products-empty-state';
+import { ProductsSummary } from './products-summary';
 import { ProductsTable } from './products-table';
 import { type ProductsOverrideTab } from './products-tab-strip';
 
@@ -69,6 +72,8 @@ export function ProductsPageClient({
           categoryId: filters.categoryId.length > 0 ? filters.categoryId : undefined,
           productId: filters.productId.length > 0 ? filters.productId : undefined,
           overrideMissing: filters.overrideMissing ?? undefined,
+          // Advanced Filtering chips (FilterRow[]) → the PR-B2 query params.
+          ...filterRowsToProductParams(filters.filters),
           page: filters.page,
           perPage: filters.perPage,
           sort: filters.sort,
@@ -77,6 +82,7 @@ export function ProductsPageClient({
   const facetsQuery = useProductFacets(orgId, storeId);
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
   const startSync = useStartProductSync(orgId, storeId);
+  const filterFields = useProductFilterFields(facetsQuery.data);
 
   if (noStoreSelected) {
     return (
@@ -109,7 +115,11 @@ export function ProductsPageClient({
     filters.q.length > 0 ||
     filters.status !== 'onSale' ||
     filters.brandId.length > 0 ||
-    filters.categoryId.length > 0;
+    filters.categoryId.length > 0 ||
+    // Advanced-filter chips (PR-F1) are a filter dimension too — without this a
+    // table filtered to zero by ONLY advanced chips was misclassified as
+    // genuinely-empty ("no products") instead of filtered ("no matches").
+    filters.filters.length > 0;
 
   const productSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
@@ -138,32 +148,34 @@ export function ProductsPageClient({
         <PageHeader
           title={pageTitle}
           intent={pageIntent}
-          meta={
-            <SyncBadge
-              state={productSyncSnapshot.state}
-              lastSyncedAt={productSyncSnapshot.lastSyncedAt}
-              progress={productSyncSnapshot.progress}
-              activeCount={activeSyncs.length}
-              source="Trendyol"
-              onClick={() => setSyncCenterOpen(true)}
-              ariaLabel={tSync('openLabel')}
-            />
-          }
+          summary={<ProductsSummary counts={facetsQuery.data?.overrideCounts} />}
           actions={
-            // Promoted from a hidden text-link inside the SyncBadge to a
-            // first-class action — sellers expect a top-right "Eşitle"
-            // button (Tiyasis ships the same affordance) and the prior
-            // long meta string was illegible as a clickable target.
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => startSync.mutate()}
-              disabled={syncButtonDisabled}
-              className="gap-xs"
-            >
-              <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
-              {syncButtonDisabled ? tProducts('syncButton.syncing') : tProducts('syncButton.label')}
-            </Button>
+            // SyncBadge (freshness) grouped with the Eşitle action in the
+            // right cluster — freshness + its action read as one unit
+            // (design spec D10) instead of split across meta + actions.
+            <>
+              <SyncBadge
+                state={productSyncSnapshot.state}
+                lastSyncedAt={productSyncSnapshot.lastSyncedAt}
+                progress={productSyncSnapshot.progress}
+                activeCount={activeSyncs.length}
+                source="Trendyol"
+                onClick={() => setSyncCenterOpen(true)}
+                ariaLabel={tSync('openLabel')}
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => startSync.mutate()}
+                disabled={syncButtonDisabled}
+                className="gap-xs"
+              >
+                <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
+                {syncButtonDisabled
+                  ? tProducts('syncButton.syncing')
+                  : tProducts('syncButton.label')}
+              </Button>
+            </>
           }
         />
 
@@ -192,7 +204,21 @@ export function ProductsPageClient({
           data={data}
           loading={isInitialLoad}
           empty={
-            emptyVariant !== undefined ? <ProductsEmptyState variant={emptyVariant} /> : undefined
+            emptyVariant !== undefined ? (
+              <ProductsEmptyState
+                variant={emptyVariant}
+                onClearFilters={() =>
+                  void setFilters({
+                    q: '',
+                    status: 'onSale',
+                    brandId: '',
+                    categoryId: '',
+                    filters: [],
+                    page: 1,
+                  })
+                }
+              />
+            ) : undefined
           }
           pagination={pagination}
           q={filters.q}
@@ -202,6 +228,9 @@ export function ProductsPageClient({
           overrideMissing={filters.overrideMissing}
           sort={filters.sort}
           facets={facetsQuery.data}
+          filterFields={filterFields}
+          filterRows={filters.filters}
+          onFiltersApply={(rows) => void setFilters({ filters: rows })}
           overrideTab={tabValue}
           overrideCounts={facetsQuery.data?.overrideCounts}
           facetsLoading={facetsQuery.isLoading}

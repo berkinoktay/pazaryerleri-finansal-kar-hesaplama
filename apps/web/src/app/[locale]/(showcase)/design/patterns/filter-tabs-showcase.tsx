@@ -2,10 +2,18 @@
 
 import * as React from 'react';
 
+import { Playground, control } from '@/components/showcase/playground';
+import { Preview } from '@/components/showcase/preview';
 import { FilterTabs, type FilterTabOption } from '@/components/patterns/filter-tabs';
+import { SIZE_KEYS } from '@/lib/variants';
 
 type OrderStatus = 'all' | 'open' | 'shipped' | 'completed' | 'returned';
 type ProductStatus = 'all' | 'onSale' | 'archived' | 'blocked' | 'inactive';
+
+// FilterTabs.variant comes from the Tabs primitive: pill (segmented control
+// inside a card / toolbar) or underline (page-section strip). `size` is the
+// shared SIZE_KEYS scale.
+const FILTER_TABS_VARIANTS = ['pill', 'underline'] as const;
 
 const ORDER_OPTIONS: FilterTabOption<OrderStatus>[] = [
   { value: 'all', label: 'Tümü', count: 1472 },
@@ -31,84 +39,82 @@ const PILL_OPTIONS: FilterTabOption<'pending' | 'approved' | 'rejected'>[] = [
 ];
 
 export function FilterTabsShowcase(): React.ReactElement {
-  const [orderStatus, setOrderStatus] = React.useState<OrderStatus>('open');
-  const [productStatus, setProductStatus] = React.useState<ProductStatus>('all');
-  const [pillStatus, setPillStatus] = React.useState<'pending' | 'approved' | 'rejected'>(
-    'pending',
-  );
-  const [loading, setLoading] = React.useState(false);
-
   return (
     <div className="gap-lg flex flex-col">
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Sipariş listesi — kanonik underline + count
-        </span>
-        <FilterTabs<OrderStatus>
-          value={orderStatus}
-          onValueChange={setOrderStatus}
-          options={ORDER_OPTIONS}
-        />
-        <span className="text-2xs text-muted-foreground">
-          Aktif: <span className="text-foreground font-medium">{orderStatus}</span> — gerçekte
-          DataTable bu state&apos;i okuyup satırları filtreler.
-        </span>
-      </div>
+      <Playground
+        title="FilterTabs — variant · size · loading"
+        description="Tek state'li canlı şerit. Seçili sekme bileşenin kendi state'i (tıkla); kontroller sadece variant / size / loading config prop'larını çevirir. loading=true → her sayım slot'u eşit-footprint Skeleton."
+        controls={{
+          variant: control.segment(FILTER_TABS_VARIANTS, 'underline'),
+          size: control.segment(SIZE_KEYS, 'md'),
+          loading: control.bool(false),
+        }}
+        render={(v) => <FilterTabsDemo variant={v.variant} size={v.size} loading={v.loading} />}
+      />
 
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Ürün listesi — count eksik bir tab ile (`Pasif` sayım dışı)
-        </span>
-        <FilterTabs<ProductStatus>
-          value={productStatus}
-          onValueChange={setProductStatus}
-          options={PRODUCT_OPTIONS}
-        />
-        <span className="text-2xs text-muted-foreground">
-          `count` undefined ise rozet hiç render edilmez — sadece label gösterilir.
-        </span>
-      </div>
+      <Preview
+        title="Count eksik bir tab (`Pasif` sayım dışı)"
+        description="`count` undefined ise rozet hiç render edilmez — sadece label gösterilir. Bir şeritte sayımlı ve sayımsız sekmeler karışabilir."
+      >
+        <ProductTabsDemo />
+      </Preview>
 
-      <div className="gap-xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          loading=true — skeleton sayım
-        </span>
-        <button
-          type="button"
-          className="border-border bg-background px-sm py-3xs text-2xs hover:bg-muted self-start rounded-md border font-medium transition-colors"
-          onClick={() => {
-            setLoading(true);
-            setTimeout(() => setLoading(false), 1600);
-          }}
-        >
-          {loading ? 'Yükleniyor…' : '1.6 saniyelik yüklemeyi tetikle'}
-        </button>
-        <FilterTabs<OrderStatus>
-          value={orderStatus}
-          onValueChange={setOrderStatus}
-          options={ORDER_OPTIONS}
-          loading={loading}
-        />
-      </div>
-
-      <div className="gap-3xs flex flex-col">
-        <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-          Variant: pill — constrained kart içinde
-        </span>
+      <Preview
+        title="Variant: pill — constrained kart içinde, explicit 0"
+        description='pill variant kart / toolbar yüzeyi için. Reddedilmiş 0 — açıkça sıfır gösterilir, atlanmaz. "Veri yok" yerine "veri var, gerçekten sıfır" sinyali.'
+      >
         <div className="border-border bg-card p-md gap-sm flex flex-col rounded-md border">
           <span className="text-foreground text-sm font-medium">Hakediş onay durumu</span>
-          <FilterTabs<'pending' | 'approved' | 'rejected'>
-            value={pillStatus}
-            onValueChange={setPillStatus}
-            options={PILL_OPTIONS}
-            variant="pill"
-          />
-          <span className="text-2xs text-muted-foreground">
-            Reddedilmiş 0 — açıkça sıfır gösterilir, atlanmaz. &quot;Veri yok&quot; yerine
-            &quot;veri var, gerçekten sıfır&quot; sinyali.
-          </span>
+          <PillTabsDemo />
         </div>
-      </div>
+      </Preview>
     </div>
+  );
+}
+
+function FilterTabsDemo({
+  variant,
+  size,
+  loading,
+}: {
+  variant: (typeof FILTER_TABS_VARIANTS)[number];
+  size: (typeof SIZE_KEYS)[number];
+  loading: boolean;
+}): React.ReactElement {
+  const [status, setStatus] = React.useState<OrderStatus>('open');
+  return (
+    <div className="gap-3xs flex flex-1 flex-col">
+      <FilterTabs<OrderStatus>
+        value={status}
+        onValueChange={setStatus}
+        options={ORDER_OPTIONS}
+        variant={variant}
+        size={size}
+        loading={loading}
+      />
+      <span className="text-2xs text-muted-foreground">
+        Aktif: <span className="text-foreground font-medium">{status}</span> — gerçekte DataTable bu
+        state&apos;i okuyup satırları filtreler.
+      </span>
+    </div>
+  );
+}
+
+function ProductTabsDemo(): React.ReactElement {
+  const [status, setStatus] = React.useState<ProductStatus>('all');
+  return (
+    <FilterTabs<ProductStatus> value={status} onValueChange={setStatus} options={PRODUCT_OPTIONS} />
+  );
+}
+
+function PillTabsDemo(): React.ReactElement {
+  const [status, setStatus] = React.useState<'pending' | 'approved' | 'rejected'>('pending');
+  return (
+    <FilterTabs<'pending' | 'approved' | 'rejected'>
+      value={status}
+      onValueChange={setStatus}
+      options={PILL_OPTIONS}
+      variant="pill"
+    />
   );
 }

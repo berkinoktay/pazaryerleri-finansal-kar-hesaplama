@@ -6624,12 +6624,99 @@
                 "-totalStock"
               ],
               "default": "-platformCreatedAt",
-              "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformCreatedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
+              "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. `salePrice` orders by the product’s lowest variant price (cheapest products first) and `-salePrice` by the highest (priciest first), read from the denormalized Product.minSalePrice / maxSalePrice columns the sync worker maintains.",
               "example": "-platformCreatedAt"
             },
             "required": false,
-            "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformCreatedAt because Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.",
+            "description": "Sort key. Prefix with `-` for descending. Default: `-platformCreatedAt` (newest listings first) — matches the Trendyol seller-panel default ordering, analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on Trendyol's /products/approved endpoint. `salePrice` orders by the product’s lowest variant price (cheapest products first) and `-salePrice` by the highest (priciest first), read from the denormalized Product.minSalePrice / maxSalePrice columns the sync worker maintains.",
             "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+(\\.\\d{1,2})?$",
+              "description": "Lower bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or above this — read from the denormalized Product.maxSalePrice.",
+              "example": "50.00"
+            },
+            "required": false,
+            "description": "Lower bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or above this — read from the denormalized Product.maxSalePrice.",
+            "name": "salePriceMin",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+(\\.\\d{1,2})?$",
+              "description": "Upper bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or below this — read from the denormalized Product.minSalePrice.",
+              "example": "500.00"
+            },
+            "required": false,
+            "description": "Upper bound of a salePrice overlap filter (decimal string). A product matches when it has a variant priced at or below this — read from the denormalized Product.minSalePrice.",
+            "name": "salePriceMax",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive lower bound on Product.totalStock (denormalized SUM of variant quantities).",
+              "example": 1
+            },
+            "required": false,
+            "description": "Inclusive lower bound on Product.totalStock (denormalized SUM of variant quantities).",
+            "name": "stockMin",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Inclusive upper bound on Product.totalStock.",
+              "example": 100
+            },
+            "required": false,
+            "description": "Inclusive upper bound on Product.totalStock.",
+            "name": "stockMax",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a product matches if ≥1 of its variants carries one of the listed rates.",
+              "example": "10,20"
+            },
+            "required": false,
+            "description": "Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a product matches if ≥1 of its variants carries one of the listed rates.",
+            "name": "vatRateIn",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter by one or more Trendyol brand ids (comma-separated BigInts).",
+              "example": "2032,1001"
+            },
+            "required": false,
+            "description": "Filter by one or more Trendyol brand ids (comma-separated BigInts).",
+            "name": "brandIdIn",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter by one or more Trendyol category ids (comma-separated BigInts).",
+              "example": "2122,411"
+            },
+            "required": false,
+            "description": "Filter by one or more Trendyol category ids (comma-separated BigInts).",
+            "name": "categoryIdIn",
             "in": "query"
           }
         ],

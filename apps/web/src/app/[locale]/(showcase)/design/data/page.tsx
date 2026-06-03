@@ -1,244 +1,177 @@
 'use client';
 
-import { type ColumnDef } from '@tanstack/react-table';
 import * as React from 'react';
 import { toast } from 'sonner';
 
-import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { PageHeader } from '@/components/patterns/page-header';
+import { CategoryNav } from '@/components/showcase/category-nav';
 import { Preview } from '@/components/showcase/preview';
+import { ShowcaseSection } from '@/components/showcase/section';
 
+import { AdvancedFilterShowcase } from '../patterns/advanced-filter-showcase';
 import { BulkActionBarShowcase } from '../patterns/bulk-action-bar-showcase';
 import { DataTableExpandableRowsShowcase } from '../patterns/data-table-expandable-rows-showcase';
 import { DataTablePaginationShowcase } from '../patterns/data-table-pagination-showcase';
 import { DataTablePinningShowcase } from '../patterns/data-table-pinning-showcase';
 import { DataTableRowClickShowcase } from '../patterns/data-table-row-click-showcase';
-import {
-  DataTableServerModeControlledSearchShowcase,
-  DataTableServerModeShowcase,
-} from '../patterns/data-table-server-mode-showcase';
+import { DataTableServerModeShowcase } from '../patterns/data-table-server-mode-showcase';
+import { DataTableStatesShowcase } from '../patterns/data-table-states-showcase';
 import { DataTableSubrowsShowcase } from '../patterns/data-table-subrows-showcase';
 import { FilterChipGroupShowcase } from '../patterns/filter-chip-group-showcase';
 import { FilterTabsShowcase } from '../patterns/filter-tabs-showcase';
-import { buildMockOrders, type MockOrder } from '@/components/showcase/showcase-mocks';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
+import { buildOrderColumns, buildShowcaseRows } from '../patterns/showcase-table';
 
-const STATUS_TONE: Record<MockOrder['status'], 'success' | 'info' | 'warning' | 'destructive'> = {
-  delivered: 'success',
-  shipped: 'info',
-  pending: 'warning',
-  returned: 'destructive',
-};
-
-const STATUS_LABEL: Record<MockOrder['status'], string> = {
-  delivered: 'Teslim',
-  shipped: 'Kargoda',
-  pending: 'Bekleyen',
-  returned: 'İade',
-};
-
-const columns: ColumnDef<MockOrder>[] = [
-  {
-    id: 'select',
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate')
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Tümünü seç"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Satırı seç"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
-  {
-    accessorKey: 'orderNumber',
-    header: 'Sipariş No',
-    cell: ({ row }) => (
-      <span className="text-foreground font-mono text-xs">{row.original.orderNumber}</span>
-    ),
-  },
-  {
-    accessorKey: 'customer',
-    header: 'Müşteri',
-  },
-  {
-    accessorKey: 'platform',
-    header: 'Pazaryeri',
-    cell: ({ row }) => (
-      <Badge tone="outline">
-        {row.original.platform === 'TRENDYOL' ? 'Trendyol' : 'Hepsiburada'}
-      </Badge>
-    ),
-  },
-  {
-    accessorKey: 'status',
-    header: 'Durum',
-    cell: ({ row }) => (
-      <Badge tone={STATUS_TONE[row.original.status]}>{STATUS_LABEL[row.original.status]}</Badge>
-    ),
-  },
-  {
-    accessorKey: 'grossAmount',
-    header: 'Ciro',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.grossAmount} />,
-  },
-  {
-    accessorKey: 'commissionAmount',
-    header: 'Komisyon',
-    meta: { numeric: true },
-    cell: ({ row }) => (
-      <Currency value={row.original.commissionAmount} className="text-muted-foreground" />
-    ),
-  },
-  {
-    accessorKey: 'netProfit',
-    header: 'Net kar',
-    meta: { numeric: true },
-    cell: ({ row }) => <Currency value={row.original.netProfit} emphasis />,
-  },
-];
+// The canonical 8-column MockOrder set, composed from the shared fixture every
+// data-table-* demo also draws from (select left, then identity / status /
+// money columns).
+const columns = buildOrderColumns([
+  'select',
+  'orderNumber',
+  'customer',
+  'platform',
+  'status',
+  'grossAmount',
+  'commissionAmount',
+  'netProfit',
+]);
 
 export default function DataShowcasePage(): React.ReactElement {
-  const [rows] = React.useState(() => buildMockOrders(50));
-  const [loading, setLoading] = React.useState(false);
+  // Mock data is stable for the page's lifetime — useMemo (not useState) so the
+  // page component holds NO mutable state and never re-renders. Every
+  // interactive demo owns its OWN state inside its showcase component, so
+  // clicking an action re-renders only that demo, not the whole table-heavy
+  // page (the previous page-level `loading` state re-rendered every table at
+  // once and hung the tab).
+  const rows = React.useMemo(() => buildShowcaseRows(50), []);
 
   return (
     <>
       <PageHeader
         title="Veri tablosu"
-        intent="TanStack Table v8 üstüne oturtulmuş DataTable wrapper'ı. Toolbar search + filter + column visibility + import/export emit eder."
+        intent="TanStack Table v8 üstüne oturtulmuş DataTable wrapper'ı ve çevresindeki toolbar / filtre pattern'leri. En sık kullanılandan ileri senaryolara doğru sıralı."
       />
+      <CategoryNav section="patterns" />
 
-      <Preview
-        title="Canlı çalışan tablo"
-        description="50 satır mock sipariş. Başlıklara tıklayıp sırala, satırları seç, tümünü seç, kolonları gizle/göster, sayfalar arasında gez ve sayfa başına satır sayısını değiştir."
+      <ShowcaseSection
+        title="Temel tablo"
+        description="Sıralama, seçim, toolbar ve sayfalamanın bir arada çalıştığı tam örnek — çoğu özelliği tek tabloda gör."
       >
-        <DataTable
-          columns={columns}
-          data={rows}
-          getRowId={(row) => row.id}
-          enableRowSelection
-          toolbar={(table) => (
-            <DataTableToolbar
-              table={table}
-              searchColumn="customer"
-              searchPlaceholder="Müşteri ara..."
-              onImport={() => toast.info('Import diyaloğu burada açılır')}
-              onExport={(selected) =>
-                toast.success(`${selected.length} kayıt dışa aktarıldı (mock)`)
-              }
-            />
-          )}
-          pagination={(table) => <DataTablePagination table={table} />}
-        />
-      </Preview>
+        <Preview
+          title="Canlı tablo"
+          description="Başlık tıkla & sırala · satır seç · kolon gizle/göster · sayfalar arası gez. Toolbar arama + filtre + içe/dışa aktarım emit eder."
+        >
+          <DataTable
+            columns={columns}
+            data={rows}
+            getRowId={(row) => row.id}
+            enableRowSelection
+            toolbar={(table) => (
+              <DataTableToolbar
+                table={table}
+                searchColumn="customer"
+                searchPlaceholder="Müşteri ara..."
+                onImport={() => toast.info('Import diyaloğu burada açılır')}
+                onExport={(selected) =>
+                  toast.success(`${selected.length} kayıt dışa aktarıldı (mock)`)
+                }
+              />
+            )}
+            pagination={(table) => <DataTablePagination table={table} />}
+          />
+        </Preview>
+      </ShowcaseSection>
 
-      <Preview title="Yükleme iskeleti" description="loading=true → satırlar Skeleton'a dönüşür.">
-        <div className="gap-xs flex flex-col">
-          <button
-            type="button"
-            className="border-border bg-background px-sm py-3xs text-2xs hover:bg-muted self-start rounded-md border font-medium transition-colors"
-            onClick={() => {
-              setLoading(true);
-              setTimeout(() => setLoading(false), 1600);
-            }}
-          >
-            {loading ? 'Yükleniyor…' : '1.6 saniyelik yüklemeyi tetikle'}
-          </button>
-          <DataTable columns={columns.slice(1, 6)} data={rows.slice(0, 5)} loading={loading} />
-        </div>
-      </Preview>
-
-      <Preview
-        title="Boş durum"
-        description="Filtre hiç satır eşleştirmezse DataTable otomatik empty state gösterir."
+      <ShowcaseSection
+        title="Durumlar"
+        description="Gövde tek bir öncelik merdivenine indirgenir: loading → error → (filtreliyse no-results : first-run) → satırlar. Her durumun ayrı ikonu, copy'si ve eylemi var; hepsi aynı yükseklikte (min-h-table-empty) olduğu için geçişlerde zıplama olmaz."
       >
-        <DataTable columns={columns.slice(1, 6)} data={[]} />
-      </Preview>
+        <Preview
+          title="Dört durum — tek tabloda geçiş yap"
+          description="Segmenti değiştir: Yükleniyor (skeleton) · İlk kurulum (inbox + senkron) · Sonuç yok (filtre-kapalı + Filtreleri temizle) · Hata (uyarı + Tekrar dene) · Dolu. State izole — sayfayı çökertmez."
+        >
+          <DataTableStatesShowcase />
+        </Preview>
+      </ShowcaseSection>
 
-      <Preview
-        title="BulkActionBar"
-        description="Seçili satırlar üstünde çoklu aksiyon. Floating mod = viewport tabanına yapışır, seçim 0'dan büyükken görünür ve fade+slide ile girer (motion-reduce honored). Inline mod = kart içinde toolbar yerine durur. Per-action tone (default / destructive) ve disabled. Bar selection state'i sahiplenmez — caller selectedCount + onClear verir."
+      <ShowcaseSection
+        title="Sütun & satır davranışları"
+        description="Pinli kolonlar, satıra tıklama, inline genişleyen detay paneli ve hiyerarşik alt satırlar."
       >
-        <BulkActionBarShowcase />
-      </Preview>
+        <Preview
+          title="Sütun sabitleme & yatay scroll"
+          description="Pinli kolonlar yatay kaydırmada yerinde kalır; pin-edge gölgesi yalnızca kayan içerik pinin altına girince, scroll konumuna duyarlı belirir. `select` sola, `actions` sağa otomatik sabitlenir."
+        >
+          <DataTablePinningShowcase />
+        </Preview>
 
-      <Preview
-        title="FilterChipGroup"
-        description="Uygulanan filtreleri pill chip'leri olarak gösterir; her chip'in kendi X'i ve opsiyonel global &quot;Tümünü temizle&quot; linki var. group + label (Durum: Aktif) ya da sadece label varyantları. Per-chip leading icon (StatusDot, MarketplaceLogo). chips=[] ise null döner — caller visibility gating yapmaz."
+        <Preview
+          title="Satır tıklama (onRowClick)"
+          description="Satıra tıkla → handler; ama checkbox / button / link gibi interaktif alt öğeler tıklamayı yutmaz. `data-row-action` ile custom opt-out."
+        >
+          <DataTableRowClickShowcase />
+        </Preview>
+
+        <Preview
+          title="Genişleyebilen satırlar (renderSubComponent)"
+          description="`getRowCanExpand` koşulunu sağlayan satırlar chevron alır; tıklayınca `renderSubComponent` altında inline genişler."
+        >
+          <DataTableExpandableRowsShowcase />
+        </Preview>
+
+        <Preview
+          title="Alt satırlar (getSubRows)"
+          description="Parent satırın child koleksiyonu aynı grid'de sibling olarak render olur; column genişlikleri hizalı, `data-depth` ile stillenir."
+        >
+          <DataTableSubrowsShowcase />
+        </Preview>
+      </ShowcaseSection>
+
+      <ShowcaseSection
+        title="Sayfalama & sunucu modu"
+        description="DataTablePagination client ve server modunda aynı UI'ı verir. Sorting / filtering / pagination state'i parent'a verilince DataTable hesaplamayı bırakır — manualSorting / manualFiltering / manualPagination otomatik açılır."
       >
-        <FilterChipGroupShowcase />
-      </Preview>
+        <Preview title="Sayfalama varyantları">
+          <DataTablePaginationShowcase />
+        </Preview>
 
-      <Preview
-        title="FilterTabs"
-        description="Liste / tablo üstüne oturan durum-segmenter strip. Tabs primitive üstüne sarılmış; her seçenek için count slot, locale-aware sayı formatı, undefined-count fallback (label-only), explicit zero (trust signal), loading=true → her count Skeleton. Controlled-only (URL state + nuqs ile). Default underline; pill variant constrained kart için. FilterChipGroup additive filtreler için, FilterTabs mutually-exclusive durum segmenti için."
+        <Preview
+          title="Sunucu modu — controlled sorting + filtering + pagination"
+          description="Caller state'i lift eder, API'ye forward eder, gelen slice'ı `data` olarak besler. UI birebir aynı; sadece kim hesaplıyor değişir. Üstteki segment arama bağlamasını çevirir: column-filter (TanStack) vs page-level (nuqs URL query) — `searchValue` + `onSearchChange`."
+        >
+          <DataTableServerModeShowcase />
+        </Preview>
+      </ShowcaseSection>
+
+      <ShowcaseSection
+        title="Toolbar, filtre & toplu işlem"
+        description="Tablonun etrafındaki yardımcı pattern'ler — DataTable'ın parçası değil ama onunla birlikte kullanılır."
       >
         <FilterTabsShowcase />
-      </Preview>
 
-      <Preview
-        title="DataTablePagination"
-        description="DataTable'ın altına oturan kanonik sayfalama altbiti. Solda &quot;1–10 / 50 satır&quot; özet, sağda perPage Select [10/25/50/100] + &quot;Sayfa X / Y&quot; caption + ilk/önceki/sonraki/son. Tüm sayılar useFormatter().number üstünden — tr-TR'de 1.472 olarak gruplanır. Server-side aware: manualPagination + pageCount/rowCount geçildiğinde aynı UI çalışır. Boş seride graceful fallback (Sayfa 1 / 1, tüm nav disabled). DataTable'ın `pagination` slot'una geçilir."
-      >
-        <DataTablePaginationShowcase />
-      </Preview>
+        <Preview
+          title="FilterChipGroup"
+          description="Uygulanan additive filtreleri pill chip'leri olarak gösterir; her chip kendi X'i + opsiyonel &quot;Tümünü temizle&quot;. Per-chip leading icon."
+        >
+          <FilterChipGroupShowcase />
+        </Preview>
 
-      <Preview
-        title="Kolon sabitleme (pinning)"
-        description="`initialColumnPinning` ile başlangıç durumu, ya da kontrollü `columnPinning` + `onColumnPinningChange` ile URL state. Toolbar'ın kolon yönetimi menüsünden her kolon sola / sağa pin'lenebilir. Sticky CSS + opaque arka plan + pin-edge gölgesi (--shadow-pin-left-edge / --shadow-pin-right-edge token'ları). Hover ve seçim durumu pinli hücrelere group/row CSS kontratı üstünden yansır."
-      >
-        <DataTablePinningShowcase />
-      </Preview>
+        <Preview
+          title="BulkActionBar"
+          description='Seçili satırlar üstünde çoklu aksiyon. Simetrik giriş/çıkış animasyonu (pop yok, kayarak iner), busy (spinner + tümü disable), Escape ile temizle, dar ekranda icon-only + overflowAfter ile "Daha fazla" menüsü. Floating mod shadow-lg ile en üst katman; inline mod toolbar yerine durur.'
+        >
+          <BulkActionBarShowcase />
+        </Preview>
 
-      <Preview
-        title="Satır tıklama (onRowClick)"
-        description="Satıra tıkla → handler tetiklenir; ama checkbox / button / link / role-bearing alt öğelere tıklamak handler'ı yutmaz. button / a / input / label / select / textarea ve role=button|checkbox|menuitem|link|switch|tab|option otomatik atlanıyor. Custom interaktif span'lar için `data-row-action` opt-out attribute'ü. onRowClick atlanırsa satırlar pasif kalır — eski tüketicilerle backwards-compatible."
-      >
-        <DataTableRowClickShowcase />
-      </Preview>
-
-      <Preview
-        title="Server-side mode (controlled)"
-        description="`sorting` + `onSortingChange`, `columnFilters` + `onColumnFiltersChange`, `paginationState` + `onPaginationChange` + `pageCount` + `rowCount` props verildiğinde DataTable kendi tarafında compute etmeyi bırakır — manualSorting / manualFiltering / manualPagination otomatik aktif olur. Caller state'i lift eder, API'ye forward eder, gelen slice'ı `data` olarak besler. UI birebir aynı; sadece kim hesaplıyor değişiyor. PR 4'ün columnPinning idiomu üç axis'e daha yayıldı."
-      >
-        <DataTableServerModeShowcase />
-      </Preview>
-
-      <Preview
-        title="Server-side mode + controlled search"
-        description="DataTableToolbar'ın `searchValue` + `onSearchChange` prop pair'i — `searchColumn`'a alternatif. Server-paginated sayfalarda search input bir TanStack column filter değil, page-level URL query param (nuqs) olduğunda tercih edilir. Caller value'yu owner; toolbar saf controlled input. Iki mod mutually exclusive: hem `searchColumn` hem `searchValue` verilirse `searchColumn` kazanır (dev-mode warning). Debouncing caller'ın sorumluluğunda — gerçek sayfa hook seviyesinde useDebounce ile sarar."
-      >
-        <DataTableServerModeControlledSearchShowcase />
-      </Preview>
-
-      <Preview
-        title="Genişleyebilen satırlar (expandable rows)"
-        description="`getRowCanExpand` koşulu sağlayan satırlar chevron buttonu render eder — tıklandığında `renderSubComponent` döner ve altında inline genişler. Tek kalemli siparişler chevron almaz; doldurucu boş slot ile dikey hizalama korunur. TanStack `getExpandedRowModel` zaten DataTable'da wired — yeni API yok, sadece propslar. Sipariş kalemleri, varyant satırları, log entry detayları için kanonik."
-      >
-        <DataTableExpandableRowsShowcase />
-      </Preview>
-
-      <Preview
-        title="Sub-row mode (getSubRows)"
-        description="`getSubRows` parent satırların child koleksiyonunu döner — TanStack v8 native subRows machinery alt satırları aynı `<tbody>`'de sibling olarak render eder, parent'ın column tanımlarını birebir uygular. Column genişlikleri hizalanır; her cell aynı `columns[]` üzerinden render edilir. Sub-row'lar `data-depth=&quot;1&quot;` taşır, feature CSS'i `tokens/components.css` üstünden tek kaynaktan stilliyor (muted bg + leading cell indent). `renderSubComponent` ile karıştırma — biri sibling row, diğeri colspan paneli. Varyantlı ürünler, hierarchical SKU listeleri için kanonik."
-      >
-        <DataTableSubrowsShowcase />
-      </Preview>
+        <Preview
+          title="Gelişmiş filtreleme (AdvancedFilter)"
+          description="Tek `+ Filtre ekle` cmdk menüsü → tip-duyarlı interaktif chip'ler (operatör seçici + değer editörü) → tümü AND ile birleşir, `Uygula` ile commit. Aralık alanları RangeInput, çoklu-seçim Command, sabit-set Select. Generic motor (`FilterFieldDef[]` ile her tabloya). Filtre 0 sonuç verince DataTable'ın no-results durumu çıkar."
+        >
+          <AdvancedFilterShowcase />
+        </Preview>
+      </ShowcaseSection>
     </>
   );
 }

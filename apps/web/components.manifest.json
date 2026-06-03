@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "count": 91,
+  "count": 110,
   "components": [
     {
       "name": "Accordion",
@@ -15,6 +15,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering a chronological list of events with per-entry tone, title, description, optional detail, and optional timestamp/source meta (use NotificationBell for the popover surface, SyncBadge for single-state freshness)"
+    },
+    {
+      "name": "AdvancedFilterMenu",
+      "path": "apps/web/src/components/patterns/advanced-filter-menu.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "building a multi-dimension, operator-aware filter bar above a table"
     },
     {
       "name": "Alert",
@@ -66,6 +73,13 @@
       "useWhen": "surfacing a system-wide event that affects every screen until resolved (use Alert for page-level inline messages, Toast for transient confirmations)"
     },
     {
+      "name": "BarChart",
+      "path": "apps/web/src/components/patterns/chart-bar.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "plotting a value across discrete categories — daily P&L (semantic),"
+    },
+    {
       "name": "BottomDock",
       "path": "apps/web/src/components/patterns/bottom-dock.tsx",
       "category": "molecule",
@@ -115,11 +129,25 @@
       "useWhen": "rendering a recharts chart whose series colors must swap correctly in dark mode (always pair with ChartConfig keyed by series name)"
     },
     {
+      "name": "ChartFrame",
+      "path": "apps/web/src/components/patterns/chart-frame.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "wrapping any chart archetype to give it consistent chrome + states"
+    },
+    {
+      "name": "ChartPeriodSelector",
+      "path": "apps/web/src/components/patterns/chart-period-selector.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "letting the user switch a chart's time window from its header"
+    },
+    {
       "name": "Checkbox",
       "path": "apps/web/src/components/ui/checkbox.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "rendering a single boolean choice that commits on form submit (use Switch for immediate-effect toggles)"
+      "useWhen": "rendering a single boolean or tri-state choice that commits on form submit (use Switch for immediate-effect toggles)"
     },
     {
       "name": "Collapsible",
@@ -134,6 +162,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering a searchable single-select picker over a finite list of options (use Select for short fixed lists, RadioGroup for 2-7 visible options, future MultiCombobox for multi-select)"
+    },
+    {
+      "name": "ComboChart",
+      "path": "apps/web/src/components/patterns/chart-combo.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing an absolute value and the rate it drives together — ciro +"
     },
     {
       "name": "Command",
@@ -157,6 +192,20 @@
       "useWhen": "attaching a right-click contextual menu to a region (always pair with a DropdownMenu equivalent for touch users)"
     },
     {
+      "name": "CopyableValue",
+      "path": "apps/web/src/components/patterns/copyable-value.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "surfacing a short identifier the user is likely to paste"
+    },
+    {
+      "name": "CountBadge",
+      "path": "apps/web/src/components/ui/count-badge.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "showing a small solid numeric count pill (unread / pending / tab counts) — use Badge for labelled status chips"
+    },
+    {
       "name": "Currency",
       "path": "apps/web/src/components/patterns/currency.tsx",
       "category": "molecule",
@@ -176,6 +225,13 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "mounting the standard pagination footer beneath a DataTable (works for both client-side TanStack pagination and server-side controlled pagination — the wrapping DataTable decides the mode)"
+    },
+    {
+      "name": "DataTableRowActions",
+      "path": "apps/web/src/components/patterns/data-table-row-actions.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "giving each DataTable row an overflow (kebab) action menu"
     },
     {
       "name": "DataTableToolbar",
@@ -211,6 +267,20 @@
       "category": "atom",
       "status": "stable",
       "useWhen": "interrupting flow with a focused task or confirmation that requires the page to stop (use AlertDialog for destructive confirmations, Sheet to preserve context)"
+    },
+    {
+      "name": "DistributionBar",
+      "path": "apps/web/src/components/patterns/distribution-bar.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing a total's composition inline under a metric (use DonutChart for a standalone share chart)"
+    },
+    {
+      "name": "DonutChart",
+      "path": "apps/web/src/components/patterns/chart-donut.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing how a total splits into parts — a cost/expense breakdown, a"
     },
     {
       "name": "Drawer",
@@ -269,11 +339,32 @@
       "useWhen": "showing a hover-triggered preview card with rich content (use Tooltip for short hint text, Popover for click-triggered panels)"
     },
     {
+      "name": "IdentityCell",
+      "path": "apps/web/src/components/patterns/identity-cell.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering an avatar + name + secondary-line + trailing row in the app chrome (switcher chip/rows, account trigger) — keeps one truncation/spacing contract across all of them"
+    },
+    {
       "name": "ImageCell",
       "path": "apps/web/src/components/patterns/image-cell.tsx",
       "category": "molecule",
       "status": "stable",
       "useWhen": "rendering a fixed-footprint image inside a table cell or list row with a built-in fallback for missing / failed loads (use ImageCell with shape=circle + fallback=initials for avatar-style cells)"
+    },
+    {
+      "name": "ImageModal",
+      "path": "apps/web/src/components/ui/image-modal.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "wrapping a thumbnail cell so users can inspect a product / asset image at original resolution (pair with a clickable button around the thumbnail and a useState for open / onOpenChange)"
+    },
+    {
+      "name": "InfoHint",
+      "path": "apps/web/src/components/patterns/info-hint.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "annotating a label with an optional explanation tooltip (use Popover for touch-critical or interactive content)"
     },
     {
       "name": "InlineEdit",
@@ -304,18 +395,18 @@
       "useWhen": "displaying a keyboard key or chord hint inline (use KbdGroup to compose multi-key shortcuts with consistent spacing)"
     },
     {
-      "name": "KpiTile",
-      "path": "apps/web/src/components/patterns/kpi-tile.tsx",
-      "category": "molecule",
-      "status": "stable",
-      "useWhen": "rendering a single headline metric with optional period-delta and context line (compose into a StatGroup row for primary KPI strip)"
-    },
-    {
       "name": "Label",
       "path": "apps/web/src/components/ui/label.tsx",
       "category": "atom",
       "status": "stable",
       "useWhen": "attaching an accessible text caption to a form control via htmlFor (placeholders are not labels)"
+    },
+    {
+      "name": "LineChart",
+      "path": "apps/web/src/components/patterns/chart-line.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "plotting a metric over time — P&L (default), a neutral trend"
     },
     {
       "name": "MappedBadge",
@@ -357,7 +448,7 @@
       "path": "apps/web/src/components/patterns/nav-group.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "rendering a primary sidebar nav row that has children (sub-routes) and should both navigate and reveal the sub-list on click"
+      "useWhen": "rendering a primary sidebar nav row that has children (sub-routes) — inline accordion when expanded, right-side flyout when the rail is collapsed"
     },
     {
       "name": "NavigationMenu",
@@ -371,7 +462,7 @@
       "path": "apps/web/src/components/patterns/notification-bell.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "mounting a global notification surface in PageHeader.actions for high-frequency events (sync results, alerts) — full history lives at /notifications"
+      "useWhen": "mounting a notification surface — high-frequency events (sync results, alerts) — in PageHeader.actions (icon) or the sidebar footer (sidebar); full history lives at /notifications"
     },
     {
       "name": "OrgStoreSwitcher",
@@ -392,7 +483,7 @@
       "path": "apps/web/src/components/patterns/page-header.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb / store chip), trailing actions, and meta row (typically SyncBadge)"
+      "useWhen": "anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb), trailing actions, and a meta row (typically SyncBadge)"
     },
     {
       "name": "Pagination",
@@ -420,14 +511,14 @@
       "path": "apps/web/src/components/patterns/profit-cell.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "rendering a Currency value paired with a TrendDelta chip in a table cell or row summary (use KpiTile for the standalone hero, Currency alone when there is no trend)"
+      "useWhen": "rendering a Currency value paired with a TrendDelta chip in a table cell or row summary (use StatCard for the standalone hero, Currency alone when there is no trend)"
     },
     {
       "name": "Progress",
       "path": "apps/web/src/components/ui/progress.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "showing determinate 0-100 progress (use Spinner when the percentage is unknown)"
+      "useWhen": "showing determinate 0-100 progress or an indeterminate unknown-duration sweep (use Spinner for a small inline busy region)"
     },
     {
       "name": "RadioGroup",
@@ -442,6 +533,20 @@
       "category": "molecule",
       "status": "stable",
       "useWhen": "surfacing an actionable issue inline in the ContextRail (use Alert for page-width inline messages, future Banner for app-spanning system messages)"
+    },
+    {
+      "name": "RangeInput",
+      "path": "apps/web/src/components/ui/range-input.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "editing an inclusive numeric range (min–max) in a filter or form"
+    },
+    {
+      "name": "RankingChart",
+      "path": "apps/web/src/components/patterns/chart-ranking.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "ranking discrete items by a value — top products by profit, best"
     },
     {
       "name": "ScrollArea",
@@ -469,7 +574,7 @@
       "path": "apps/web/src/components/ui/separator.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "drawing a thin horizontal or vertical line between sibling content groups that need a visible boundary beyond plain spacing"
+      "useWhen": "drawing a thin horizontal or vertical line between sibling content groups that need a visible boundary beyond plain spacing (pick `variant` to match how hard the separation should read)"
     },
     {
       "name": "Sheet",
@@ -500,6 +605,13 @@
       "useWhen": "rendering a single or range numeric input over a continuous scale where relative position matters more than exact value"
     },
     {
+      "name": "SoftSquareIcon",
+      "path": "apps/web/src/components/ui/soft-square-icon.tsx",
+      "category": "atom",
+      "status": "stable",
+      "useWhen": "fronting a KPI status row / quota tile / panel item with a small semantic icon chip (use Badge for a text chip, StatusDot for a bare dot)"
+    },
+    {
       "name": "Sparkline",
       "path": "apps/web/src/components/patterns/sparkline.tsx",
       "category": "molecule",
@@ -514,18 +626,39 @@
       "useWhen": "indicating in-flight async work inline within a small UI region (use Skeleton for page or region-level loading where the eventual layout matters)"
     },
     {
+      "name": "StatCard",
+      "path": "apps/web/src/components/patterns/stat-card.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "rendering a single headline metric with optional icon, delta, inline trend, breakdown, or drill-down (compose into a StatGroup grid or a StatStrip row)"
+    },
+    {
       "name": "StatGroup",
       "path": "apps/web/src/components/patterns/stat-group.tsx",
       "category": "molecule",
       "status": "stable",
-      "useWhen": "wrapping a row of KpiTile siblings that should self-tile responsively without breakpoint ladders"
+      "useWhen": "wrapping a row of StatCard siblings that should self-tile responsively without breakpoint ladders"
+    },
+    {
+      "name": "StatRow",
+      "path": "apps/web/src/components/patterns/stat-row.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "adding a nested icon + label + status row inside a KPI / summary Card (wrap in a Link for navigation; use DefinitionList for plain key/value pairs)"
+    },
+    {
+      "name": "StatStrip",
+      "path": "apps/web/src/components/patterns/stat-strip.tsx",
+      "category": "molecule",
+      "status": "stable",
+      "useWhen": "showing a dense at-a-glance KPI summary band across the top of a page (use StatGroup + StatCard for richer, individually-surfaced metrics)"
     },
     {
       "name": "StatusDot",
       "path": "apps/web/src/components/ui/status-dot.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "marking inline status with just a colored dot (use Badge when the dot needs an inline label, SyncBadge for the canonical sync-state surface)"
+      "useWhen": "marking inline status with a colored dot (+ optional label); use Badge when the status needs a full chip surface"
     },
     {
       "name": "Stepper",
@@ -616,7 +749,7 @@
       "path": "apps/web/src/components/ui/toggle-group.tsx",
       "category": "atom",
       "status": "stable",
-      "useWhen": "rendering a small set of related Toggles that should look unified and share a single-or-multiple selection rule"
+      "useWhen": "rendering a small set of related toggles that should look unified and share a single-or-multiple selection rule"
     },
     {
       "name": "Tooltip",

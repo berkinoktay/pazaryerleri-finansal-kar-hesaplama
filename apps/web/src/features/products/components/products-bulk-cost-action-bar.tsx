@@ -91,6 +91,10 @@ export function ProductsBulkCostActionBar({
 
   const selectedCount = selectedRows.length;
 
+  // Any cost mutation in flight drives the bar's busy state — disables every
+  // action + the clear button so a seller can't double-fire or deselect mid-op.
+  const busy = attachMutation.isPending || detachMutation.isPending || replaceMutation.isPending;
+
   // Build combobox options from the non-archived profiles list.
   const profileOptions: ComboboxOption[] = React.useMemo(() => {
     const all = profilesQuery.data?.data ?? [];
@@ -183,14 +187,12 @@ export function ProductsBulkCostActionBar({
       label: t('attach'),
       icon: <AddCircleIcon className="size-icon-sm" />,
       onClick: () => setActiveDialog('attach'),
-      disabled: attachMutation.isPending,
     },
     {
       id: 'detach',
       label: t('detach'),
       icon: <Delete01Icon className="size-icon-sm" />,
       onClick: () => setActiveDialog('detach'),
-      disabled: detachMutation.isPending,
     },
     {
       id: 'replace',
@@ -198,7 +200,6 @@ export function ProductsBulkCostActionBar({
       icon: <RepeatIcon className="size-icon-sm" />,
       onClick: () => setActiveDialog('replace'),
       tone: 'destructive' as const,
-      disabled: replaceMutation.isPending,
     },
     {
       id: 'desi',
@@ -260,6 +261,12 @@ export function ProductsBulkCostActionBar({
         selectedCount={selectedCount}
         onClear={onClearSelection}
         actions={actions}
+        busy={busy}
+        // Bulk cost ops stay a ≥2 affordance (single-product cost edits live in
+        // the row's own kebab). This preserves the previous caller-gate
+        // threshold now that the gate moved into the always-mounted bar so the
+        // exit animation can play.
+        minSelected={2}
         countLabel={(count) => t('selectedCount', { count })}
         clearLabel={t('clearSelection')}
       />

@@ -25,6 +25,7 @@ export function CommissionRatesEmptyState({
   if (variant === 'no-store') {
     return (
       <EmptyState
+        embedded
         icon={StoreLocation01Icon}
         title={t('noStore.title')}
         description={t('noStore.description')}
@@ -40,16 +41,17 @@ export function CommissionRatesEmptyState({
   if (variant === 'no-rates') {
     return (
       <EmptyState
+        embedded
         icon={PercentCircleIcon}
         title={t('noRates.title')}
         description={t('noRates.description')}
-        className="border-0"
       />
     );
   }
 
   return (
     <EmptyState
+      embedded
       icon={Layers01Icon}
       title={t('noMatches.title')}
       description={t('noMatches.description')}
@@ -60,7 +62,6 @@ export function CommissionRatesEmptyState({
           </Button>
         ) : undefined
       }
-      className="border-0"
     />
   );
 }

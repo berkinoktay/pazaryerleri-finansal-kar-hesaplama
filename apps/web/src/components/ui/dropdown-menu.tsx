@@ -31,14 +31,18 @@ export const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      'gap-xs px-xs py-3xs flex cursor-default items-center rounded-sm text-sm outline-none select-none',
-      'focus:bg-muted data-[state=open]:bg-muted',
+      'gap-xs px-xs py-2xs flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      // Clean highlight fill (pointer + keyboard) and the open-submenu fill;
+      // suppress the global :focus-visible brand glow so no box rings the row.
+      'data-[highlighted]:bg-muted data-[state=open]:bg-muted',
+      'focus:shadow-none focus-visible:shadow-none',
       className,
     )}
     {...props}
   >
     {children}
-    <ArrowRight01Icon className="size-icon-sm ml-auto" />
+    <ArrowRight01Icon className="size-icon-sm text-muted-foreground ml-auto" />
   </DropdownMenuPrimitive.SubTrigger>
 ));
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
@@ -51,7 +55,13 @@ export const DropdownMenuSubContent = React.forwardRef<
     ref={ref}
     className={cn(
       'border-border bg-popover p-3xs text-popover-foreground z-50 min-w-32 overflow-hidden rounded-md border shadow-md',
+      'origin-[var(--radix-dropdown-menu-content-transform-origin)]',
+      'duration-base ease-out-quart',
       'data-[state=open]:animate-in data-[state=closed]:animate-out',
+      'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+      'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
+      'data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2',
       className,
     )}
     {...props}
@@ -69,7 +79,15 @@ export const DropdownMenuContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         'border-border bg-popover p-3xs text-popover-foreground z-50 min-w-48 overflow-hidden rounded-md border shadow-md',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95',
+        // Full tooltip/Select entrance recipe: trigger-anchored origin + zoom +
+        // fade + four side-aware slides, on the house panel clock.
+        'origin-[var(--radix-dropdown-menu-content-transform-origin)]',
+        'duration-base ease-out-quart',
+        'data-[state=open]:animate-in data-[state=closed]:animate-out',
+        'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+        'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
+        'data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2',
         className,
       )}
       {...props}
@@ -87,8 +105,10 @@ export const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      'gap-xs px-xs py-3xs relative flex cursor-default items-center rounded-sm text-sm transition-colors outline-none select-none',
-      'focus:bg-muted focus:text-foreground',
+      'gap-xs px-xs py-2xs relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+      'focus:shadow-none focus-visible:shadow-none',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       inset && 'pl-lg',
       className,
@@ -105,16 +125,19 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      'py-3xs pl-lg pr-xs relative flex cursor-default items-center rounded-sm text-sm transition-colors outline-none select-none',
-      'focus:bg-muted focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+      'py-2xs pl-lg pr-xs relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+      'focus:shadow-none focus-visible:shadow-none data-[state=checked]:font-medium',
+      'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     checked={checked}
     {...props}
   >
-    <span className="left-xs absolute flex size-3 items-center justify-center">
+    <span className="left-xs size-icon-sm absolute flex items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>
-        <Tick02Icon className="size-3" strokeWidth={3} />
+        <Tick02Icon className="text-primary size-3.5" strokeWidth={2.5} />
       </DropdownMenuPrimitive.ItemIndicator>
     </span>
     {children}
@@ -129,15 +152,18 @@ export const DropdownMenuRadioItem = React.forwardRef<
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      'py-3xs pl-lg pr-xs relative flex cursor-default items-center rounded-sm text-sm transition-colors outline-none select-none',
-      'focus:bg-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+      'py-2xs pl-lg pr-xs relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
+      'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
+      'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+      'focus:shadow-none focus-visible:shadow-none data-[state=checked]:font-medium',
+      'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     {...props}
   >
-    <span className="left-xs absolute flex size-3 items-center justify-center">
+    <span className="left-xs size-icon-sm absolute flex items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>
-        <span className="size-2 rounded-full bg-current" />
+        <span className="bg-primary size-2 rounded-full" />
       </DropdownMenuPrimitive.ItemIndicator>
     </span>
     {children}

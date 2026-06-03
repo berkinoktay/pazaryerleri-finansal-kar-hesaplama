@@ -10,6 +10,8 @@ import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { AdvancedFilterMenu } from '@/components/patterns/advanced-filter-menu';
+import type { FilterFieldDef, FilterRow } from '@/lib/advanced-filter';
 import { CopyableValue } from '@/components/patterns/copyable-value';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
@@ -140,6 +142,13 @@ interface ProductsTableProps {
   facetsLoading?: boolean;
   onOverrideTabChange: (next: ProductsOverrideTab) => void;
 
+  // Advanced Filtering (PR-F1) — the per-table catalog, the committed
+  // FilterRow[], and the Apply commit handler. Rendered as the `+ Filtre ekle`
+  // menu in the toolbar alongside the quick facet chips.
+  filterFields: FilterFieldDef[];
+  filterRows: FilterRow[];
+  onFiltersApply: (rows: FilterRow[]) => void;
+
   onSearchChange: (next: string) => void;
   onStatusChange: (next: ProductVariantStatus) => void;
   onBrandChange: (next: string) => void;
@@ -268,7 +277,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           // Count chip + caret. Wider click target than a bare arrow,
           // and the count surfaces "this row has N variants" without
           // forcing the user to expand to find out. Styling mirrors
-          // Badge tone="outline" size="sm" radius="md" — kept inline
+          // Badge variant="outline" size="sm" radius="md" — kept inline
           // because Badge is a <span>, not interactive.
           return (
             <button
@@ -660,40 +669,47 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           onSearchChange={props.onSearchChange}
           searchPlaceholder={t('filters.searchPlaceholder')}
           facets={
-            <ProductsFacetChips
-              brand={props.brandId}
-              category={props.categoryId}
-              status={props.status}
-              brandOptions={(props.facets?.brands ?? []).map((b) => ({
-                value: b.id,
-                label: b.name,
-                count: b.count,
-              }))}
-              categoryOptions={(props.facets?.categories ?? []).map((c) => ({
-                value: c.id,
-                label: c.name,
-                count: c.count,
-              }))}
-              onBrandChange={props.onBrandChange}
-              onCategoryChange={props.onCategoryChange}
-              onStatusChange={props.onStatusChange}
-            />
+            <>
+              <ProductsFacetChips
+                brand={props.brandId}
+                category={props.categoryId}
+                status={props.status}
+                brandOptions={(props.facets?.brands ?? []).map((b) => ({
+                  value: b.id,
+                  label: b.name,
+                  count: b.count,
+                }))}
+                categoryOptions={(props.facets?.categories ?? []).map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  count: c.count,
+                }))}
+                onBrandChange={props.onBrandChange}
+                onCategoryChange={props.onCategoryChange}
+                onStatusChange={props.onStatusChange}
+              />
+              <AdvancedFilterMenu
+                fields={props.filterFields}
+                value={props.filterRows}
+                onApply={props.onFiltersApply}
+              />
+            </>
           }
         />
       )}
       pagination={(table) => <DataTablePagination table={table} />}
-      fab={(table) => {
-        const selected = getSelectedRowOriginals(table);
-        if (selected.length < 2) return null;
-        return (
-          <ProductsBulkCostActionBar
-            orgId={props.orgId}
-            storeId={props.storeId}
-            selectedRows={selected}
-            onClearSelection={() => table.resetRowSelection()}
-          />
-        );
-      }}
+      // Always mounted (not gated on selection) so BulkActionBar's own presence
+      // machine can play the exit animation when the selection clears — gating
+      // here would unmount it mid-transition. The bar self-hides below its
+      // minSelected (2 for bulk cost ops, set inside ProductsBulkCostActionBar).
+      fab={(table) => (
+        <ProductsBulkCostActionBar
+          orgId={props.orgId}
+          storeId={props.storeId}
+          selectedRows={getSelectedRowOriginals(table)}
+          onClearSelection={() => table.resetRowSelection()}
+        />
+      )}
     />
   );
 }

@@ -4,8 +4,8 @@ import Decimal from 'decimal.js';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { KpiTile } from '@/components/patterns/kpi-tile';
-import { Card } from '@/components/ui/card';
+import { Currency } from '@/components/patterns/currency';
+import { StatCard } from '@/components/patterns/stat-card';
 
 import { type OrderDetail } from '../api/get-order.api';
 
@@ -14,15 +14,15 @@ export interface OrderKpiGridProps {
 }
 
 /**
- * 4-tile KPI strip at the top of the order detail. The first three reuse
- * the canonical KpiTile (currency). The margin tile uses the same Card
- * shell + heading hierarchy so the strip reads as a single unit, but
- * renders a percentage — the design system's KpiTile is value-kind locked
- * to currency / count, so percent is feature-local rather than forking
- * the primitive.
+ * 4-tile KPI strip at the top of the order detail: net sale subtotal, estimated
+ * and settled net profit, and the derived margin. All four are plain `StatCard`s
+ * — the margin renders a percentage directly now that StatCard's `value` is a
+ * node (no feature-local primitive fork as the old KpiTile's currency/count
+ * value-kind needed).
  */
 export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
   const t = useTranslations('orderDetail.kpis');
+  const formatter = useFormatter();
 
   const saleNet = order.saleSubtotalNet;
   const estimatedProfit = order.estimatedNetProfit;
@@ -33,27 +33,29 @@ export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
 
   return (
     <div className="gap-md grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-      <KpiTile
+      <StatCard
         label={t('saleSubtotalNet.label')}
-        value={{ kind: 'currency', amount: saleNet ?? '0' }}
+        value={<Currency value={saleNet ?? '0'} />}
         context={saleNet === null ? t('common.notAvailable') : undefined}
       />
-      <KpiTile
+      <StatCard
         label={t('estimatedNetProfit.label')}
-        value={{ kind: 'currency', amount: estimatedProfit ?? '0' }}
+        value={<Currency value={estimatedProfit ?? '0'} />}
         context={estimatedProfit === null ? t('common.notAvailable') : t('estimatedNetProfit.hint')}
       />
-      <KpiTile
+      <StatCard
         label={t('settledNetProfit.label')}
-        value={{ kind: 'currency', amount: settledProfit ?? '0' }}
+        value={<Currency value={settledProfit ?? '0'} />}
         context={
           settledProfit === null ? t('settledNetProfit.pending') : t('settledNetProfit.hint')
         }
       />
-      <MarginTile
+      <StatCard
         label={t('margin.label')}
-        percent={marginPercent}
-        hint={
+        value={
+          marginPercent === null ? '—' : `${formatter.number(marginPercent.toNumber(), 'decimal')}%`
+        }
+        context={
           marginPercent === null
             ? t('common.notAvailable')
             : settledProfit !== null
@@ -62,32 +64,6 @@ export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
         }
       />
     </div>
-  );
-}
-
-interface MarginTileProps {
-  label: string;
-  percent: Decimal | null;
-  hint: string;
-}
-
-function MarginTile({ label, percent, hint }: MarginTileProps): React.ReactElement {
-  const formatter = useFormatter();
-  return (
-    <Card className="gap-md p-lg flex flex-col justify-between">
-      <span className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
-        {label}
-      </span>
-      <div className="gap-sm flex items-baseline">
-        <span
-          data-tabular="true"
-          className="text-foreground text-4xl font-semibold tracking-tight tabular-nums"
-        >
-          {percent === null ? '—' : `${formatter.number(percent.toNumber(), 'decimal')}%`}
-        </span>
-      </div>
-      <p className="text-2xs text-muted-foreground">{hint}</p>
-    </Card>
   );
 }
 

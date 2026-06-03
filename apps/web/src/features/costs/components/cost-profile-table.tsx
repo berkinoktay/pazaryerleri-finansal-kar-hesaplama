@@ -1,39 +1,20 @@
 'use client';
 
 import { type ColumnDef } from '@tanstack/react-table';
-import {
-  Archive01Icon,
-  Edit01Icon,
-  ArrowReloadVerticalIcon,
-  MoreVerticalIcon,
-} from 'hugeicons-react';
+import { Archive01Icon, ArrowReloadVerticalIcon, Edit01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
+import { createRowActionsColumn } from '@/components/patterns/data-table-row-actions';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
-import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 import { useIsMounted } from '@/lib/use-is-mounted';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
 import type { CostProfile } from '../types/cost-profile.types';
 
 import { CostProfileTypeBadge } from './cost-profile-type-badge';
-
-// ─── Pagination state ────────────────────────────────────────────────────────
-
-interface PaginationState {
-  cursor?: string;
-  limit: number;
-}
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -70,6 +51,7 @@ export interface CostProfileTableProps {
 export function CostProfileTable(props: CostProfileTableProps): React.ReactElement {
   const t = useTranslations('costs');
   const tCols = useTranslations('costs.table.columns');
+  const tActions = useTranslations('costs.table.actions');
   const formatter = useFormatter();
   // Gate relativeTime() on mount: SSR has no stable "now", so server/client
   // would render different relative labels and trip a hydration mismatch.
@@ -158,20 +140,39 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
           );
         },
       },
-      {
-        id: 'actions',
-        header: () => tCols('actions'),
-        cell: ({ row }) => (
-          <CostProfileRowActions
-            profile={row.original}
-            onEditClick={props.onEditClick}
-            onArchiveClick={props.onArchiveClick}
-            onRestoreClick={props.onRestoreClick}
-          />
-        ),
-      },
+      createRowActionsColumn<CostProfile>((profile) =>
+        profile.archivedAt !== null
+          ? [
+              { label: tActions('edit'), icon: <Edit01Icon />, onSelect: props.onEditClick },
+              {
+                label: tActions('restore'),
+                icon: <ArrowReloadVerticalIcon />,
+                onSelect: props.onRestoreClick,
+                separatorBefore: true,
+              },
+            ]
+          : [
+              { label: tActions('edit'), icon: <Edit01Icon />, onSelect: props.onEditClick },
+              {
+                label: tActions('archive'),
+                icon: <Archive01Icon />,
+                onSelect: props.onArchiveClick,
+                tone: 'warning',
+                separatorBefore: true,
+              },
+            ],
+      ),
     ],
-    [formatter, t, tCols, mounted, props.onEditClick, props.onArchiveClick, props.onRestoreClick],
+    [
+      formatter,
+      t,
+      tCols,
+      tActions,
+      mounted,
+      props.onEditClick,
+      props.onArchiveClick,
+      props.onRestoreClick,
+    ],
   );
 
   return (
@@ -191,55 +192,5 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
         />
       )}
     />
-  );
-}
-
-// ─── Row actions dropdown ────────────────────────────────────────────────────
-
-interface CostProfileRowActionsProps {
-  profile: CostProfile;
-  onEditClick: (profile: CostProfile) => void;
-  onArchiveClick: (profile: CostProfile) => void;
-  onRestoreClick: (profile: CostProfile) => void;
-}
-
-function CostProfileRowActions({
-  profile,
-  onEditClick,
-  onArchiveClick,
-  onRestoreClick,
-}: CostProfileRowActionsProps): React.ReactElement {
-  const t = useTranslations('costs.table.actions');
-  const isArchived = profile.archivedAt !== null;
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={t('edit')}>
-          <MoreVerticalIcon />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => onEditClick(profile)}>
-          <Edit01Icon className="size-icon-xs" />
-          {t('edit')}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {isArchived ? (
-          <DropdownMenuItem onClick={() => onRestoreClick(profile)}>
-            <ArrowReloadVerticalIcon className="size-icon-xs" />
-            {t('restore')}
-          </DropdownMenuItem>
-        ) : (
-          <DropdownMenuItem
-            onClick={() => onArchiveClick(profile)}
-            className="text-warning focus:text-warning"
-          >
-            <Archive01Icon className="size-icon-xs" />
-            {t('archive')}
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }

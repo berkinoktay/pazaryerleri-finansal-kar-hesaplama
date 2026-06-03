@@ -4,7 +4,6 @@ import { ArrowDown01Icon, Tick02Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Button } from '@/components/ui/button';
 import {
   Command,
   CommandEmpty,
@@ -14,6 +13,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { selectTriggerVariants } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
@@ -104,44 +104,46 @@ export function Combobox({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
+        {/* aria-invalid drives the destructive border + shake via the variant's
+            aria-invalid:* rules — identical to Select / Input (one mental model
+            for every field trigger). role-supports-aria-props fires only because
+            this is a literal <button>; the attribute is benign and read by AT that
+            supports it, and the user-facing error copy comes from FormMessage. */}
+        {/* eslint-disable-next-line jsx-a11y/role-supports-aria-props */}
+        <button
           type="button"
-          variant="outline"
-          size={triggerSize}
           disabled={disabled}
           aria-expanded={open}
           aria-invalid={invalid || undefined}
-          className={cn(
-            'gap-xs w-full justify-between font-normal',
-            invalid && 'border-destructive focus-visible:border-destructive',
-            className,
-          )}
+          // Same field-trigger recipe as SelectTrigger (bg-input, border-input,
+          // hover border-strong, focus glow, size ladder) so the Combobox reads
+          // identically to Select / Input rather than as an outline action button.
+          className={cn(selectTriggerVariants({ size: triggerSize }), className)}
         >
-          <span className="gap-xs flex min-w-0 flex-1 items-center truncate text-left">
-            {selected !== null ? (
-              <>
-                {selected.icon !== undefined ? (
-                  <span className="text-muted-foreground [&_svg]:size-icon-sm flex shrink-0 items-center">
-                    {selected.icon}
-                  </span>
-                ) : null}
-                <span className="text-foreground truncate">{selected.label}</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground truncate">
-                {placeholder ?? t('placeholder')}
-              </span>
+          {selected?.icon !== undefined ? (
+            <span className="text-muted-foreground [&_svg]:size-icon-sm flex shrink-0 items-center">
+              {selected.icon}
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              'flex min-w-0 flex-1 items-center truncate text-start',
+              selected === null && 'text-muted-foreground',
             )}
+          >
+            {selected === null ? (placeholder ?? t('placeholder')) : selected.label}
           </span>
-          {loading ? (
-            <Spinner className="text-muted-foreground" />
-          ) : (
-            <ArrowDown01Icon
-              aria-hidden
-              className="size-icon-sm text-muted-foreground shrink-0 opacity-70"
-            />
-          )}
-        </Button>
+          <div className="gap-xs flex shrink-0 items-center">
+            {loading ? (
+              <Spinner className="text-muted-foreground" />
+            ) : (
+              <ArrowDown01Icon
+                aria-hidden
+                className="size-icon-sm duration-fast ease-out-quart opacity-50 transition-transform group-data-[state=open]:rotate-180"
+              />
+            )}
+          </div>
+        </button>
       </PopoverTrigger>
       <PopoverContent
         align={align}

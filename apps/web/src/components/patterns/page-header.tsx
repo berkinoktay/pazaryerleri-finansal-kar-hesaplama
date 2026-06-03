@@ -27,6 +27,14 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
    * stacks: title → intent → meta.
    */
   meta?: React.ReactNode;
+  /**
+   * Optional summary strip — a StatGroup of compact StatCards, rendered
+   * full-width below the title/actions row. This is a SLOT, not a fixture:
+   * omit it on pages without at-a-glance metrics and the header still reads
+   * as complete (title + intent + actions form a finished unit). Never put a
+   * single number here — it's for a row of related KPIs.
+   */
+  summary?: React.ReactNode;
 }
 
 /**
@@ -55,6 +63,7 @@ export function PageHeader({
   leading,
   actions,
   meta,
+  summary,
   className,
   ...props
 }: PageHeaderProps): React.ReactElement {
@@ -78,6 +87,7 @@ export function PageHeader({
           <div className="gap-xs flex shrink-0 flex-wrap items-center">{actions}</div>
         ) : null}
       </div>
+      {summary ? <div className="min-w-0">{summary}</div> : null}
     </header>
   );
 }

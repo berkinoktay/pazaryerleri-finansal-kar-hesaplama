@@ -38,7 +38,21 @@ export const FORMATS = {
     decimal: { minimumFractionDigits: 2, maximumFractionDigits: 2 },
     amount: { minimumFractionDigits: 0, maximumFractionDigits: 2 },
     currency: { style: 'currency', currency: 'TRY' },
+    /* Compact magnitude for chart axis ticks — "48 B", "1,2 Mn" (tr) — so a
+       y-axis stays uncluttered while the tooltip/value carries full ₺. */
+    compact: { notation: 'compact', maximumFractionDigits: 1 },
+    /* Compact WITH the ₺ symbol — for a currency chart's y-axis so the axis
+       reads "₺644" / "₺48 B" instead of a bare number. */
+    compactCurrency: {
+      style: 'currency',
+      currency: 'TRY',
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    },
     percent: { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 },
+    /* Whole-number percent — distribution shares / breakdown legends where a
+       decimal ("%65,0") reads cluttered. Pass a 0..1 fraction. */
+    percentInt: { style: 'percent', maximumFractionDigits: 0 },
     percentDelta: {
       style: 'percent',
       minimumFractionDigits: 1,

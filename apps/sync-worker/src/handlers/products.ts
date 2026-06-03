@@ -11,6 +11,8 @@
 // transaction + try/catch + image replace semantics) — PR 4h will delete the
 // original; this port preserves behavior bit-for-bit.
 
+import { Decimal } from 'decimal.js';
+
 import { prisma } from '@pazarsync/db';
 import type { Store, SyncLog } from '@pazarsync/db';
 import {
@@ -191,6 +193,34 @@ function decryptStoreCredentials(store: Store): TrendyolCredentials {
   return decrypted;
 }
 
+// The denormalized aggregates Product carries for the products-list workflows:
+// totalStock (sort + restock review) and min/maxSalePrice (sort=salePrice + the
+// salePrice range filter, which read a column instead of aggregating the child
+// relation). Computed in a single pass so the sync hot path touches each
+// variant once. Sale-price bounds are null for a content with no variants
+// (avoids a misleading 0.00); mapped salePrice is always a 2-dp decimal string
+// (marketplace mapper `priceToDecimalString`). Pure + exported for unit testing.
+export function computeProductAggregates(variants: { quantity: number; salePrice: string }[]): {
+  totalStock: number;
+  minSalePrice: string | null;
+  maxSalePrice: string | null;
+} {
+  let totalStock = 0;
+  let min: Decimal | null = null;
+  let max: Decimal | null = null;
+  for (const variant of variants) {
+    totalStock += variant.quantity;
+    const price = new Decimal(variant.salePrice);
+    if (min === null || price.lt(min)) min = price;
+    if (max === null || price.gt(max)) max = price;
+  }
+  return {
+    totalStock,
+    minSalePrice: min === null ? null : min.toFixed(2),
+    maxSalePrice: max === null ? null : max.toFixed(2),
+  };
+}
+
 async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: string): Promise<void> {
   // ─── PORTED VERBATIM from apps/api/src/services/product-sync.service.ts ──
   // One transaction per content (parent + its variants + image replace).
@@ -305,14 +335,17 @@ async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: stri
           });
         }
 
-        // Recompute totalStock from the variants we just upserted. We do this
-        // inside the same transaction (rather than using a SQL trigger) so the
-        // sync worker remains the single source of truth for product mutations
-        // and the value is immediately consistent for the products-list sort.
-        const totalStock = mapped.variants.reduce((sum, v) => sum + v.quantity, 0);
+        // Recompute the denormalized aggregates (totalStock + min/max sale
+        // price) from the variants we just upserted. We do this inside the same
+        // transaction (rather than a SQL trigger) so the sync worker remains the
+        // single source of truth for product mutations and the values are
+        // immediately consistent for the products-list sort + salePrice filter.
+        const { totalStock, minSalePrice, maxSalePrice } = computeProductAggregates(
+          mapped.variants,
+        );
         await tx.product.update({
           where: { id: product.id },
-          data: { totalStock },
+          data: { totalStock, minSalePrice, maxSalePrice },
         });
 
         // Replace images for this product. ProductImage rows have no

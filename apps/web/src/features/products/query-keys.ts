@@ -9,6 +9,13 @@ export interface ProductListFilters {
   categoryId?: string;
   productId?: string;
   overrideMissing?: string;
+  salePriceMin?: string;
+  salePriceMax?: string;
+  stockMin?: number;
+  stockMax?: number;
+  vatRateIn?: string;
+  brandIdIn?: string;
+  categoryIdIn?: string;
   page: number;
   perPage: number;
   sort: string;

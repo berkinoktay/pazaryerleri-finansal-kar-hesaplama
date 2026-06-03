@@ -1,10 +1,9 @@
 'use client';
 
-import { type Table } from '@tanstack/react-table';
+import { type Column, type Table } from '@tanstack/react-table';
 import {
   Cancel01Icon,
   DownloadSquare02Icon,
-  FilterIcon,
   Search01Icon,
   SidebarLeftIcon,
   SidebarRightIcon,
@@ -107,6 +106,7 @@ export function DataTableToolbar<TData>({
           <div className="max-w-input relative flex-1">
             <Search01Icon className="left-sm size-icon-sm text-muted-foreground pointer-events-none absolute top-1/2 -translate-y-1/2" />
             <Input
+              size="sm"
               value={inputValue}
               onChange={(event) => handleSearchInput(event.target.value)}
               placeholder={searchPlaceholder ?? t('searchPlaceholder')}
@@ -149,12 +149,16 @@ export function DataTableToolbar<TData>({
             <DropdownMenuLabel>{t('visibleColumns')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             {table
+              // Only user-facing, hideable columns belong in the visibility
+              // menu — utility columns (select / expand / actions) set
+              // enableHiding:false and are excluded so their machine ids never
+              // surface to the user.
               .getAllColumns()
-              .filter((column) => column.getCanHide() || column.getCanPin())
+              .filter((column) => column.getCanHide())
               .map((column) => {
                 const pinned = column.getIsPinned();
-                const canHide = column.getCanHide();
                 const canPin = column.getCanPin();
+                const label = resolveColumnLabel(column);
                 return (
                   <DropdownMenuItem
                     key={column.id}
@@ -167,10 +171,9 @@ export function DataTableToolbar<TData>({
                       <Checkbox
                         checked={column.getIsVisible()}
                         onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                        disabled={!canHide}
-                        aria-label={column.id}
+                        aria-label={label}
                       />
-                      <span className="truncate text-sm">{column.id}</span>
+                      <span className="truncate text-sm">{label}</span>
                     </label>
                     {canPin ? (
                       <div className="gap-3xs flex items-center">
@@ -180,7 +183,7 @@ export function DataTableToolbar<TData>({
                           aria-pressed={pinned === 'left'}
                           onClick={() => column.pin(pinned === 'left' ? false : 'left')}
                           className={cn(
-                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors',
+                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors pointer-coarse:size-11',
                             'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
                             pinned === 'left'
                               ? 'bg-muted text-foreground'
@@ -195,7 +198,7 @@ export function DataTableToolbar<TData>({
                           aria-pressed={pinned === 'right'}
                           onClick={() => column.pin(pinned === 'right' ? false : 'right')}
                           className={cn(
-                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors',
+                            'p-3xs duration-fast inline-flex items-center justify-center rounded-sm transition-colors pointer-coarse:size-11',
                             'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
                             pinned === 'right'
                               ? 'bg-muted text-foreground'
@@ -216,4 +219,14 @@ export function DataTableToolbar<TData>({
   );
 }
 
-export { FilterIcon };
+/**
+ * Resolves a column's human-readable label for the visibility menu (and its
+ * a11y name): the explicit `meta.label`, else a plain-string `header`, else the
+ * machine `id` as a last resort. Prevents the raw id (`grossAmount`) leaking to
+ * a Turkish-only UI when the header is a function / element.
+ */
+function resolveColumnLabel<TData>(column: Column<TData, unknown>): string {
+  const { meta, header } = column.columnDef;
+  if (meta?.label !== undefined) return meta.label;
+  return typeof header === 'string' ? header : column.id;
+}

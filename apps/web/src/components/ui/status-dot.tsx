@@ -4,68 +4,88 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * Small semantic colored dot for inline status indicators — sync
- * state, online/offline, store fresh/stale/failed, "unread" markers.
- * Cheaper than reaching for a Badge when only the dot is needed:
- * Badge is a labeled chip with its own padding and tone surface;
- * StatusDot is the dot alone, paired separately with whatever
- * label (or no label) the caller chooses.
+ * Small semantic colored dot for inline status indicators — sync state,
+ * online/offline, store fresh/stale/failed, "unread" markers. Cheaper than a
+ * Badge when only the dot (optionally + a label) is needed.
  *
- * Decorative by default (aria-hidden) — pass `label` to announce the
- * status to screen readers when the visible context doesn't already
- * convey it. Color alone is never the only signal in PazarSync, so the
- * caller is responsible for ensuring an accompanying icon, sign, or
- * label exists in the surrounding markup.
+ * Pass `label` to render the text inline beside the dot (`inline-flex` with a
+ * baked-in gap) — the text IS the accessible name, so the dot itself is
+ * decorative. Omit `label` for a bare dot (decorative; the caller must provide
+ * an adjacent label/icon — color is never the only signal in PazarSync).
  *
- * Sizes: `sm` (6px) for very tight rows, `md` (8px, default) for
- * standard inline use. Tones use the same semantic vocabulary as
- * Badge / Alert / TrendDelta so cross-component consistency holds.
+ * `animatePulse` layers an expanding "live" ring behind a solid dot — the
+ * recognisable active-indicator for an actively-syncing store (collapses under
+ * prefers-reduced-motion to just the solid dot). Sizes: `sm` (6px) for tight
+ * rows, `md` (8px, default), `lg` (12px) for standalone prominence. Tones use
+ * the same semantic vocabulary as Badge / Alert / TrendDelta.
  *
- * @useWhen marking inline status with just a colored dot (use Badge when the dot needs an inline label, SyncBadge for the canonical sync-state surface)
+ * @useWhen marking inline status with a colored dot (+ optional label); use Badge when the status needs a full chip surface
  */
 
 const statusDotVariants = cva('inline-block shrink-0 rounded-full', {
   variants: {
     tone: {
       neutral: 'bg-muted-foreground',
+      primary: 'bg-primary',
       success: 'bg-success',
       warning: 'bg-warning',
       destructive: 'bg-destructive',
       info: 'bg-info',
-      primary: 'bg-primary',
     },
     size: {
       sm: 'size-1.5',
       md: 'size-2',
+      lg: 'size-3',
     },
   },
   defaultVariants: { tone: 'neutral', size: 'md' },
 });
 
 export interface StatusDotProps
-  extends
-    Omit<React.HTMLAttributes<HTMLSpanElement>, 'aria-label'>,
-    VariantProps<typeof statusDotVariants> {
-  /**
-   * Translated status label. When provided the dot becomes a
-   * `role="status"` element and screen readers announce the label;
-   * when omitted the dot is purely decorative and ignored by AT.
-   */
-  label?: string;
+  extends React.HTMLAttributes<HTMLSpanElement>, VariantProps<typeof statusDotVariants> {
+  /** Inline label rendered beside the dot. The text is the accessible name (the dot becomes decorative). */
+  label?: React.ReactNode;
+  /** Opt into the gentle sync-pulse — use for an actively-syncing "alive" indicator. */
+  animatePulse?: boolean;
 }
 
 export function StatusDot({
   tone,
   size,
   label,
+  animatePulse = false,
   className,
   ...props
 }: StatusDotProps): React.ReactElement {
-  const classes = cn(statusDotVariants({ tone, size }), className);
+  const dotClass = statusDotVariants({ tone, size });
+
+  // When pulsing, stack an expanding ping ring (same tone) behind the solid dot.
+  const indicator = animatePulse ? (
+    <span className="relative inline-flex shrink-0">
+      <span aria-hidden className={cn(dotClass, 'absolute inset-0 animate-ping')} />
+      <span aria-hidden className={cn(dotClass, 'relative')} />
+    </span>
+  ) : (
+    <span aria-hidden className={dotClass} />
+  );
+
   if (label !== undefined) {
-    return <span role="status" aria-label={label} className={classes} {...props} />;
+    return (
+      <span className={cn('gap-xs inline-flex items-center', className)} {...props}>
+        {indicator}
+        {label}
+      </span>
+    );
   }
-  return <span aria-hidden className={classes} {...props} />;
+  if (animatePulse) {
+    return (
+      <span className={cn('relative inline-flex shrink-0', className)} {...props}>
+        <span aria-hidden className={cn(dotClass, 'absolute inset-0 animate-ping')} />
+        <span aria-hidden className={cn(dotClass, 'relative')} />
+      </span>
+    );
+  }
+  return <span aria-hidden className={cn(dotClass, className)} {...props} />;
 }
 
 export { statusDotVariants };

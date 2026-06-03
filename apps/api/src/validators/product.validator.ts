@@ -4,6 +4,7 @@ import { SyncStatus, SyncType } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
 import { SyncErrorCode, isSyncErrorCode } from '@pazarsync/db/enums';
 
+import { csvParam, decimalBoundParam, intBoundParam } from '../lib/query-params';
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
 
 // ─── Sync trigger response ─────────────────────────────────────────────
@@ -226,11 +227,51 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
         '(newest listings first) — matches the Trendyol seller-panel default ordering, ' +
         'analogous to the `orderByDirection: SellerCreatedDate, DESC` parameter on ' +
         "Trendyol's /products/approved endpoint. " +
-        'KNOWN LIMITATION: salePrice / -salePrice currently fall back to platformCreatedAt because ' +
-        'Prisma cannot natively MAX over a decimal child relation without raw SQL or a denormalized ' +
-        'column. A future PR will denormalize Product.minSalePrice / maxSalePrice and replace this fallback.',
+        '`salePrice` orders by the product’s lowest variant price (cheapest products ' +
+        'first) and `-salePrice` by the highest (priciest first), read from the denormalized ' +
+        'Product.minSalePrice / maxSalePrice columns the sync worker maintains.',
       example: '-platformCreatedAt',
     }),
+
+  // ─── Advanced Filtering (PR-B2) — column-backed, all AND-combined ──────────
+  // To add a products filter: add one param here (using a query-params factory)
+  // + one where-line in products-list.service.ts + one isolation test. The
+  // existing single brandId/categoryId stay; the *In params add multi-select.
+  salePriceMin: decimalBoundParam({
+    description:
+      'Lower bound of a salePrice overlap filter (decimal string). A product matches when it ' +
+      'has a variant priced at or above this — read from the denormalized Product.maxSalePrice.',
+    example: '50.00',
+  }),
+  salePriceMax: decimalBoundParam({
+    description:
+      'Upper bound of a salePrice overlap filter (decimal string). A product matches when it ' +
+      'has a variant priced at or below this — read from the denormalized Product.minSalePrice.',
+    example: '500.00',
+  }),
+  stockMin: intBoundParam({
+    description:
+      'Inclusive lower bound on Product.totalStock (denormalized SUM of variant quantities).',
+    example: 1,
+  }),
+  stockMax: intBoundParam({
+    description: 'Inclusive upper bound on Product.totalStock.',
+    example: 100,
+  }),
+  vatRateIn: csvParam(z.coerce.number().int(), {
+    description:
+      'Filter by one or more variant VAT rates (comma-separated, e.g. 10,20). Variant-level: a ' +
+      'product matches if ≥1 of its variants carries one of the listed rates.',
+    example: '10,20',
+  }),
+  brandIdIn: csvParam(z.coerce.bigint(), {
+    description: 'Filter by one or more Trendyol brand ids (comma-separated BigInts).',
+    example: '2032,1001',
+  }),
+  categoryIdIn: csvParam(z.coerce.bigint(), {
+    description: 'Filter by one or more Trendyol category ids (comma-separated BigInts).',
+    example: '2122,411',
+  }),
 }).openapi('ListProductsQuery');
 
 export type ListProductsQuery = z.infer<typeof ListProductsQuerySchema>;

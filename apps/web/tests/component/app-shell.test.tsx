@@ -45,14 +45,21 @@ import { render, screen } from '@/../tests/helpers/render';
 const messages = {
   nav: {
     dashboard: 'Pano',
+    livePerformance: 'Canlı Performans',
     orders: 'Siparişler',
     products: 'Ürünler',
+    costs: 'Maliyetler',
     profitability: 'Karlılık',
     reconciliation: 'Mutabakat',
+    tools: 'Maliyet & Araçlar',
     expenses: 'Giderler',
     settings: 'Ayarlar',
     notifications: 'Bildirimler',
     support: 'Destek',
+    whatsNew: 'Yenilikler',
+    toggleSidebar: 'Kenar çubuğunu aç/kapat',
+    groups: { overview: 'Özet', operations: 'Operasyon', financeTools: 'Finans' },
+    help: { label: 'Yardım & Destek' },
   },
   navSections: {
     orders: {
@@ -122,6 +129,15 @@ const messages = {
         sync: 'Senkron',
         orders: 'Sipariş',
         warning: 'Uyarı',
+      },
+    },
+    tools: {
+      tools: {
+        title: 'Araçlar',
+        commissionRates: 'Komisyon Oranları',
+        commissionCalculator: 'Komisyon Hesaplama',
+        plusCommissionRates: 'Plus Komisyon Tarifesi',
+        productPricing: 'Ürün Fiyatlandırma',
       },
     },
   },
@@ -218,11 +234,11 @@ describe('AppShell', () => {
     expect(main).toContainElement(screen.getByTestId('page-content'));
   });
 
-  it('renders at least one SidebarTrigger (accessible name "Toggle Sidebar")', () => {
+  it('renders at least one SidebarTrigger (localized accessible name)', () => {
     renderShell();
     // Both desktop (sidebar header) + mobile (inline header) triggers render to the DOM.
     // CSS controls which is visible by viewport.
-    const triggers = screen.getAllByRole('button', { name: /toggle sidebar/i });
+    const triggers = screen.getAllByRole('button', { name: /kenar çubuğunu/i });
     expect(triggers.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -236,7 +252,7 @@ describe('AppShell', () => {
     // Desktop trigger lives inside the SidebarHeader; mobile trigger is in the
     // mobile-only inline header at the top of <SidebarInset>.  Both should
     // render to the DOM regardless of viewport — CSS handles visibility.
-    const triggers = screen.getAllByRole('button', { name: /toggle sidebar/i });
+    const triggers = screen.getAllByRole('button', { name: /kenar çubuğunu/i });
     expect(triggers.length).toBeGreaterThanOrEqual(2);
   });
 
