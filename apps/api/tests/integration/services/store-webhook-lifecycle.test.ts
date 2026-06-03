@@ -108,17 +108,16 @@ describe('storeService — webhook lifecycle', () => {
       });
     });
 
-    it('TRENDYOL + SANDBOX → skips webhook register; fields stay null', async () => {
+    it('TRENDYOL + SANDBOX → registers webhook too (dev/ngrok HTTPS passes the callback check)', async () => {
       const org = await createOrganization();
-      // Mock only the probe — register MUST NOT be called
-      installTrendyolFetchMock([]);
+      installTrendyolFetchMock([webhookCreateOk('trendyol-wh-sandbox-1')]);
 
       const result = await storeService.connect(org.id, SANDBOX_INPUT);
 
       const row = await prisma.store.findFirstOrThrow({ where: { id: result.id } });
-      expect(row.webhookId).toBeNull();
-      expect(row.webhookSecret).toBeNull();
-      expect(row.webhookActiveAt).toBeNull();
+      expect(row.webhookId).toBe('trendyol-wh-sandbox-1');
+      expect(row.webhookSecret).not.toBeNull();
+      expect(row.webhookActiveAt).not.toBeNull();
     });
 
     it('register failure is non-blocking; store IS created with webhook fields null', async () => {

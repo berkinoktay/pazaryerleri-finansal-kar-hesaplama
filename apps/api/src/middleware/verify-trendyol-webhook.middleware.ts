@@ -24,7 +24,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { prisma } from '@pazarsync/db';
 import type { Store } from '@pazarsync/db';
-import { decryptCredentials } from '@pazarsync/sync-core';
+import { decryptCredentials, syncLog } from '@pazarsync/sync-core';
 import { createMiddleware } from 'hono/factory';
 
 import { NotFoundError, UnauthorizedError } from '../lib/errors';
@@ -66,6 +66,15 @@ export const verifyTrendyolWebhookMiddleware = createMiddleware<{
   // 404 non-disclosure pattern.
   const store = await prisma.store.findFirst({ where: { id: storeId } });
   if (store === null || store.webhookSecret === null) {
+    // Surface stale/unregistered webhook hits in api logs. These 404s were
+    // server-side-silent (only the tunnel/ngrok showed them), which made the
+    // "test orders never arrive" incident hard to diagnose. The sync-worker
+    // reconciler heals the underlying cause (missing reg / dead storeId); this
+    // logs the symptom. storeId is not PII — safe to log for triage.
+    syncLog.warn('webhook.store-not-found-or-disabled', {
+      storeId,
+      reason: store === null ? 'store_not_found' : 'webhook_secret_null',
+    });
     // Same 404 for "store missing" AND "webhook disabled" — caller cannot
     // distinguish, preserving non-disclosure (SECURITY.md §3).
     throw new NotFoundError('Store', storeId);

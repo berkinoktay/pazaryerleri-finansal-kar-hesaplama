@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
-import { encryptCredentials } from '@pazarsync/sync-core';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../../../../src/app';
 import { _resetRateLimitStoreForTests } from '../../../../src/middleware/rate-limit.middleware';
@@ -187,16 +187,22 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       expect(res.status).toBe(401);
     });
 
-    it('404 (non-disclosure) when storeId is unknown', async () => {
+    it('404 (non-disclosure) when storeId is unknown + logs store_not_found', async () => {
+      const warnSpy = vi.spyOn(syncLog, 'warn');
       const res = await postWebhook(
         '00000000-0000-0000-0000-000000000000',
         makeWebhookPayload(),
         basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
       );
       expect(res.status).toBe(404);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'webhook.store-not-found-or-disabled',
+        expect.objectContaining({ reason: 'store_not_found' }),
+      );
+      warnSpy.mockRestore();
     });
 
-    it('404 when store exists but webhookSecret is null (disabled)', async () => {
+    it('404 when store exists but webhookSecret is null (disabled) + logs webhook_secret_null', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -212,12 +218,18 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
         },
       });
 
+      const warnSpy = vi.spyOn(syncLog, 'warn');
       const res = await postWebhook(
         store.id,
         makeWebhookPayload(),
         basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
       );
       expect(res.status).toBe(404);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'webhook.store-not-found-or-disabled',
+        expect.objectContaining({ storeId: store.id, reason: 'webhook_secret_null' }),
+      );
+      warnSpy.mockRestore();
     });
   });
 
