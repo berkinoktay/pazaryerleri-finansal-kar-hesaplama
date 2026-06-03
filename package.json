@@ -17,6 +17,7 @@
     "db:seed": "pnpm --filter @pazarsync/db seed",
     "db:studio": "pnpm --filter @pazarsync/db studio",
     "db:purge-test-users": "pnpm --filter @pazarsync/db purge-test-users",
+    "db:reset:clean": "pnpm --filter @pazarsync/db reset-clean",
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:component": "turbo run test:component",

@@ -91,9 +91,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       // PAZARSYNC_RESEED_AFTER_TESTS=1 when the dev UI should be hydrated.
       if (process.env['PAZARSYNC_RESEED_AFTER_TESTS'] !== '1') return;
 
-      const { stdout, stderr } = await execFilePromise('pnpm', ['-w', 'run', 'db:seed'], {
-        cwd: process.cwd().replace(/\/apps\/api$/, ''),
-      });
+      // `--with-sample` because `db:seed` is clean-by-default (a no-op without
+      // it); the opt-in reseed wants the full dev-UI hydration.
+      const { stdout, stderr } = await execFilePromise(
+        'pnpm',
+        ['--filter', '@pazarsync/db', 'seed', '--with-sample'],
+        { cwd: process.cwd().replace(/\/apps\/api$/, '') },
+      );
       const lastLines = stdout.trim().split('\n').slice(-5).join('\n');
       console.log(`\n\u2713 Post-test re-seed:\n${lastLines}`);
       if (stderr.trim() !== '') console.warn('[teardown] stderr:', stderr);
