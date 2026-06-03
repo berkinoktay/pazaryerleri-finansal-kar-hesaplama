@@ -106,6 +106,23 @@ async function reconcileSeller(sellerStores: Store[], baseUrl: string): Promise<
 
   const storeById = new Map(sellerStores.map((store) => [store.id, store]));
 
+  // PRUNE FIRST — before register/update. Trendyol caps a seller at 15 webhook
+  // subscriptions (PASSIVE ones included). The reconciler's primary job is to
+  // heal a seller that accumulated orphans across db resets — exactly the case
+  // where the seller can sit at/near the cap. Registering first would let
+  // Trendyol reject the POST (cap exceeded), throw, and skip the prune entirely,
+  // a permanent deadlock. Pruning first frees the slots. planWebhookReconcile
+  // only ever puts unclaimed orphan / duplicate / PASSIVE hooks in toPrune
+  // (never an active store's live hook), so pruning before registering is safe.
+  for (const hook of plan.toPrune) {
+    await unregisterStoreWebhook({
+      credentials: sellerCredentials,
+      env: first.environment,
+      webhookId: hook.id,
+    });
+    syncLog.info('webhook.reconcile-pruned', { webhookId: hook.id, url: hook.url });
+  }
+
   for (const target of plan.toRegister) {
     const store = storeById.get(target.id);
     if (store === undefined) continue;
@@ -137,14 +154,5 @@ async function reconcileSeller(sellerStores: Store[], baseUrl: string): Promise<
       data: { webhookId, webhookSecret: encryptedSecret, webhookActiveAt: new Date() },
     });
     syncLog.info('webhook.reconcile-updated', { storeId: store.id });
-  }
-
-  for (const hook of plan.toPrune) {
-    await unregisterStoreWebhook({
-      credentials: sellerCredentials,
-      env: first.environment,
-      webhookId: hook.id,
-    });
-    syncLog.info('webhook.reconcile-pruned', { webhookId: hook.id, url: hook.url });
   }
 }
