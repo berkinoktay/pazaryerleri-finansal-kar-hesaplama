@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { LiveOrdersTable } from '@/features/live-performance/components/live-orders-table';
 
-import { render, screen, waitFor } from '../../../helpers/render';
+import { render, screen, waitFor, within } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
@@ -43,12 +43,16 @@ describe('LiveOrdersTable', () => {
     render(<LiveOrdersTable orgId={ORG_ID} storeId={STORE_ID} />);
 
     await waitFor(() => expect(screen.getByText('TY-1001')).toBeInTheDocument());
-    // Status badges from `source`: orders → Hesaplandı, buffer → Bekliyor
-    expect(screen.getByText('Hesaplandı')).toBeInTheDocument();
-    expect(screen.getByText('Bekliyor')).toBeInTheDocument();
-    // Tab labels carry the per-tab counts from `counts`.
-    expect(screen.getByRole('tab', { name: 'Tümü (2)' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Hesaplanmış (1)' })).toBeInTheDocument();
+    // Status badges from `source` (scoped to the table, since "Bekliyor" is also
+    // a tab label): orders → Hesaplandı, buffer → Bekliyor.
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('Hesaplandı')).toBeInTheDocument();
+    expect(within(table).getByText('Bekliyor')).toBeInTheDocument();
+    // FilterTabs render the per-tab count from `counts` as a separate chip.
+    expect(within(screen.getByRole('tab', { name: /Tümü/ })).getByText('2')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('tab', { name: /Hesaplanmış/ })).getByText('1'),
+    ).toBeInTheDocument();
   });
 
   it('refetches with filter=pending when the Bekliyor tab is selected', async () => {
@@ -64,7 +68,7 @@ describe('LiveOrdersTable', () => {
 
     await waitFor(() => expect(screen.getByText('TY-1001')).toBeInTheDocument());
 
-    await user.click(screen.getByRole('tab', { name: 'Bekliyor (1)' }));
+    await user.click(screen.getByRole('tab', { name: /Bekliyor/ }));
 
     await waitFor(() => expect(lastFilter).toBe('pending'));
   });

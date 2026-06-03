@@ -86,7 +86,7 @@ export function LivePerformancePageClient({
         }
       />
       <LiveKpiRow orgId={orgId} storeId={storeId} />
-      <LiveProfitChart orgId={orgId} storeId={storeId} />
+      <LiveProfitChart orgId={orgId} storeId={storeId} live={health === 'healthy'} />
       <LiveMissingCostCard orgId={orgId} storeId={storeId} />
       <LiveTopProducts orgId={orgId} storeId={storeId} />
       <LiveOrdersTable orgId={orgId} storeId={storeId} />
@@ -126,6 +126,11 @@ function LiveStatusPill({ health }: { health: RealtimeHealth }): React.ReactElem
   );
 }
 
+/**
+ * Chunk-load fallback for the dynamically-imported chart (shown only while the
+ * recharts bundle downloads — once mounted, ChartFrame owns its own loading
+ * state). Sized to `h-chart` so swapping in the real frame causes no layout jump.
+ */
 function ChartSkeleton(): React.ReactElement {
   return (
     <Card aria-hidden>
@@ -133,7 +138,7 @@ function ChartSkeleton(): React.ReactElement {
         <Skeleton className="h-5 w-40" />
       </CardHeader>
       <CardContent>
-        <Skeleton className="aspect-[16/6] w-full" />
+        <Skeleton className="h-chart w-full" />
       </CardContent>
     </Card>
   );

@@ -7,8 +7,8 @@ import * as React from 'react';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import type { LiveOrderRow } from '../api/get-live-orders.api';
 import { useLiveOrders } from '../hooks/use-live-orders';
@@ -21,17 +21,12 @@ interface LiveOrdersTableProps {
 
 const EMPTY_COUNTS = { all: 0, calculated: 0, pending: 0 } as const;
 
-/** Narrow an arbitrary tab value back to the filter union without a type assertion. */
-function toFilter(value: string): LiveOrdersFilter {
-  return value === 'calculated' || value === 'pending' ? value : 'all';
-}
-
 /**
  * Today's orders feed: a UNION of fully-calculated orders and cost-missing
- * buffer entries. The Tümü / Hesaplanmış / Bekliyor tabs drive a server-side
- * filter; `counts` always reports every tab's total so the labels stay honest.
- * Rows persist all day — a cost being attached moves a row from Bekliyor into
- * Hesaplanmış, never off the feed (until the 00:00 reset).
+ * buffer entries. The Tümü / Hesaplanmış / Bekliyor FilterTabs drive a
+ * server-side filter; `counts` always reports every tab's total so the chips
+ * stay honest. Rows persist all day — attaching a cost moves a row from Bekliyor
+ * into Hesaplanmış, never off the feed (until the 00:00 reset).
  */
 export function LiveOrdersTable({ orgId, storeId }: LiveOrdersTableProps): React.ReactElement {
   const t = useTranslations('livePerformance.orders');
@@ -105,15 +100,16 @@ export function LiveOrdersTable({ orgId, storeId }: LiveOrdersTableProps): React
   );
 
   const tabs = (
-    <Tabs variant="underline" value={filter} onValueChange={(value) => setFilter(toFilter(value))}>
-      <TabsList>
-        <TabsTrigger value="all">{t('tabs.all', { count: counts.all })}</TabsTrigger>
-        <TabsTrigger value="calculated">
-          {t('tabs.calculated', { count: counts.calculated })}
-        </TabsTrigger>
-        <TabsTrigger value="pending">{t('tabs.pending', { count: counts.pending })}</TabsTrigger>
-      </TabsList>
-    </Tabs>
+    <FilterTabs<LiveOrdersFilter>
+      value={filter}
+      onValueChange={setFilter}
+      loading={query.isPending}
+      options={[
+        { value: 'all', label: t('tabs.all'), count: counts.all },
+        { value: 'calculated', label: t('tabs.calculated'), count: counts.calculated },
+        { value: 'pending', label: t('tabs.pending'), count: counts.pending },
+      ]}
+    />
   );
 
   return (
@@ -123,8 +119,10 @@ export function LiveOrdersTable({ orgId, storeId }: LiveOrdersTableProps): React
         columns={columns}
         data={rows}
         loading={query.isLoading}
+        error={query.isError}
+        onRetry={() => void query.refetch()}
         tabs={tabs}
-        empty={<EmptyState title={t('emptyTitle')} />}
+        empty={<EmptyState title={t('emptyTitle')} embedded />}
       />
     </section>
   );

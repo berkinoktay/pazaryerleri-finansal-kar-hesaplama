@@ -1552,7 +1552,8 @@
     "chart": {
       "title": "Hourly Cumulative Profit",
       "todayLabel": "Today",
-      "yesterdayLabel": "Yesterday"
+      "yesterdayLabel": "Yesterday",
+      "emptyHint": "No data yet for today"
     },
     "missingCost": {
       "title": "Products Missing Cost",
@@ -1564,16 +1565,14 @@
     },
     "topProducts": {
       "title": "Today's Best Sellers",
-      "orderCountLabel": "{count} orders",
-      "profitEmpty": "Profit —",
       "emptyTitle": "No sales yet today"
     },
     "orders": {
       "title": "Today's Orders",
       "tabs": {
-        "all": "All ({count})",
-        "calculated": "Calculated ({count})",
-        "pending": "Pending ({count})"
+        "all": "All",
+        "calculated": "Calculated",
+        "pending": "Pending"
       },
       "columns": {
         "orderNumber": "Order No",

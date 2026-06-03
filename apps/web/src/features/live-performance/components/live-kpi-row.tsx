@@ -1,12 +1,14 @@
 'use client';
 
+import Decimal from 'decimal.js';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { KpiTile } from '@/components/patterns/kpi-tile';
+import { formatNumber, formatPercent } from '@pazarsync/utils';
+
+import { Currency } from '@/components/patterns/currency';
+import { StatCard, type StatCardDelta } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
-import { Card } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 
 import { useLiveKpis } from '../hooks/use-live-kpis';
 import { computeDeltaPercent } from '../lib/compute-delta-percent';
@@ -17,66 +19,63 @@ interface LiveKpiRowProps {
 }
 
 /**
- * The four headline KPIs — Ciro / Net Kâr / Sipariş / Marj — each as a today
- * value with a today-vs-yesterday TrendDelta. Revenue/profit/order-count read
- * "up is good"; margin too. The delta chip is omitted when yesterday was zero
- * (relative change undefined) rather than rendering a misleading "+∞%".
+ * The four headline KPIs — Ciro / Net Kâr / Sipariş / Marj — each a today value
+ * with a today-vs-yesterday TrendDelta. All four read "up is good" (revenue,
+ * profit, orders, margin all improve when they rise). The delta chip is omitted
+ * when yesterday was zero (relative change undefined) rather than rendering a
+ * misleading "+∞%". The four cards share one query, so its loading / error state
+ * drives every card's `status` (StatCard owns the matching skeleton / error
+ * surface); retry is the page-header Refresh.
  */
 export function LiveKpiRow({ orgId, storeId }: LiveKpiRowProps): React.ReactElement {
   const t = useTranslations('livePerformance.kpis');
   const query = useLiveKpis(orgId, storeId);
-
-  if (query.data === undefined) {
-    return <LiveKpiRowSkeleton />;
-  }
-
   const kpis = query.data;
+  const status: 'ready' | 'loading' | 'error' = query.isPending
+    ? 'loading'
+    : query.isError
+      ? 'error'
+      : 'ready';
 
   return (
     <StatGroup>
-      <KpiTile
+      <StatCard
+        status={status}
         label={t('revenue')}
-        value={{ kind: 'currency', amount: kpis.revenueToday }}
-        delta={deltaProp(kpis.revenueToday, kpis.revenueYesterday)}
+        value={kpis ? <Currency value={kpis.revenueToday} /> : null}
+        delta={kpis ? deltaProp(kpis.revenueToday, kpis.revenueYesterday) : undefined}
       />
-      <KpiTile
+      <StatCard
+        status={status}
         label={t('netProfit')}
-        value={{ kind: 'currency', amount: kpis.netProfitToday }}
-        delta={deltaProp(kpis.netProfitToday, kpis.netProfitYesterday)}
+        value={kpis ? <Currency value={kpis.netProfitToday} /> : null}
+        delta={kpis ? deltaProp(kpis.netProfitToday, kpis.netProfitYesterday) : undefined}
       />
-      <KpiTile
+      <StatCard
+        status={status}
         label={t('orderCount')}
-        value={{ kind: 'count', amount: kpis.orderCountToday }}
-        delta={deltaProp(String(kpis.orderCountToday), String(kpis.orderCountYesterday))}
+        value={kpis ? formatNumber(kpis.orderCountToday) : null}
+        delta={
+          kpis
+            ? deltaProp(String(kpis.orderCountToday), String(kpis.orderCountYesterday))
+            : undefined
+        }
       />
-      <KpiTile
+      <StatCard
+        status={status}
         label={t('margin')}
-        value={{ kind: 'percent', amount: kpis.marginToday }}
-        delta={deltaProp(kpis.marginToday, kpis.marginYesterday)}
+        value={kpis ? formatPercent(new Decimal(kpis.marginToday)) : null}
+        delta={kpis ? deltaProp(kpis.marginToday, kpis.marginYesterday) : undefined}
       />
     </StatGroup>
   );
 }
 
 /**
- * Build the KpiTile delta prop, or `undefined` when no relative change exists.
- * `goodDirection` defaults to 'up' in TrendDelta — all four KPIs read "higher is
- * better" — so it's omitted here.
+ * Build the StatCard delta, or `undefined` when no relative change exists
+ * (yesterday was zero). All four KPIs read "higher is better" → goodDirection up.
  */
-function deltaProp(today: string, yesterday: string): { percent: number } | undefined {
+function deltaProp(today: string, yesterday: string): StatCardDelta | undefined {
   const percent = computeDeltaPercent(today, yesterday);
-  return percent === null ? undefined : { percent };
-}
-
-function LiveKpiRowSkeleton(): React.ReactElement {
-  return (
-    <StatGroup aria-hidden>
-      {Array.from({ length: 4 }, (_, index) => (
-        <Card key={index} className="gap-md p-lg flex flex-col justify-between">
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="h-9 w-28" />
-        </Card>
-      ))}
-    </StatGroup>
-  );
+  return percent === null ? undefined : { percent, goodDirection: 'up' };
 }

@@ -1617,7 +1617,8 @@
     "chart": {
       "title": "Saatlik Kümülatif Kâr",
       "todayLabel": "Bugün",
-      "yesterdayLabel": "Dün"
+      "yesterdayLabel": "Dün",
+      "emptyHint": "Bugün için henüz veri yok"
     },
     "missingCost": {
       "title": "Maliyeti Eksik Ürünler",
@@ -1629,16 +1630,14 @@
     },
     "topProducts": {
       "title": "Bugünün En Çok Satanları",
-      "orderCountLabel": "{count} sipariş",
-      "profitEmpty": "Kâr —",
       "emptyTitle": "Bugün henüz satış yok"
     },
     "orders": {
       "title": "Bugünün Siparişleri",
       "tabs": {
-        "all": "Tümü ({count})",
-        "calculated": "Hesaplanmış ({count})",
-        "pending": "Bekliyor ({count})"
+        "all": "Tümü",
+        "calculated": "Hesaplanmış",
+        "pending": "Bekliyor"
       },
       "columns": {
         "orderNumber": "Sipariş No",

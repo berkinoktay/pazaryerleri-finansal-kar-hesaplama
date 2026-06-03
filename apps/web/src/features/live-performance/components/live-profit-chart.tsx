@@ -1,19 +1,15 @@
 'use client';
 
-import { useFormatter, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from '@/components/ui/chart';
-import { Skeleton } from '@/components/ui/skeleton';
+import { getBusinessHour } from '@pazarsync/utils';
+
+import { CHART_COMPARISON, resolveValueColor } from '@/components/patterns/chart-colors';
+import { ChartFrame, type ChartFrameLegendItem } from '@/components/patterns/chart-frame';
+import { LineChart } from '@/components/patterns/chart-line';
+import type { ChartStatus } from '@/components/patterns/chart.types';
+import { Currency } from '@/components/patterns/currency';
 
 import { useLiveChart } from '../hooks/use-live-chart';
 import { buildChartSeries } from '../lib/build-chart-series';
@@ -21,79 +17,92 @@ import { buildChartSeries } from '../lib/build-chart-series';
 interface LiveProfitChartProps {
   orgId: string;
   storeId: string;
+  /** Realtime channel is healthy → show the live badge + the "now" edge dot. */
+  live: boolean;
 }
 
-/** Sparse, legible x-axis: a tick every six hours plus the end of the day. */
-const HOUR_TICKS = [0, 6, 12, 18, 23] as const;
+/** `14` → `14:00` — the x-axis hour tick. */
+function formatHour(value: string | number): string {
+  return `${String(value).padStart(2, '0')}:00`;
+}
 
 /**
- * Hourly cumulative-profit dual line: today (solid, primary) vs yesterday
- * (dashed, muted) — the "actual vs reference" financial idiom, distinguished by
- * both color and line style for color-blind safety. Recharts is untestable in
- * happy-dom, so the data-shaping (buildChartSeries) is unit-tested and this
- * component is dynamically imported (ssr:false) where it's mounted.
+ * Hourly cumulative-profit comparison: today (semantic kâr/zarar area) vs
+ * yesterday (muted dashed reference). The chart-kit `LineChart` owns the dual-
+ * series idiom — the dashed comparison line, the two-row tooltip, and the
+ * pulsing `liveDot` that marks today's leading edge where the subject line stops
+ * at "now". Recharts is untestable in happy-dom, so the data-shaping
+ * (`buildChartSeries`) is unit-tested and this component is dynamically imported
+ * (ssr:false) — reading the client's current business hour here is therefore
+ * safe (no server render to desync).
  */
-export function LiveProfitChart({ orgId, storeId }: LiveProfitChartProps): React.ReactElement {
+export function LiveProfitChart({
+  orgId,
+  storeId,
+  live,
+}: LiveProfitChartProps): React.ReactElement {
   const t = useTranslations('livePerformance.chart');
-  const formatter = useFormatter();
   const query = useLiveChart(orgId, storeId);
 
-  const config = {
-    today: { label: t('todayLabel'), color: 'var(--chart-1)' },
-    yesterday: { label: t('yesterdayLabel'), color: 'var(--chart-3)' },
-  } satisfies ChartConfig;
+  const shaped = React.useMemo(() => {
+    if (query.data === undefined) {
+      return { rows: [], todayTotal: 0, yesterdayTotal: 0, isEmptyData: true };
+    }
+    // Recomputed on every data refresh (Realtime / poll), so the "now" edge
+    // advances with the wall clock as new hours of orders arrive.
+    const currentHour = getBusinessHour(new Date());
+    const rows = buildChartSeries(query.data.today, query.data.yesterday, currentHour);
+    return {
+      rows,
+      todayTotal: Number(rows[currentHour]?.today ?? 0),
+      yesterdayTotal: Number(rows[rows.length - 1]?.yesterday ?? 0),
+      isEmptyData: query.data.today.length === 0 && query.data.yesterday.length === 0,
+    };
+  }, [query.data]);
 
-  const data = React.useMemo(
-    () => (query.data ? buildChartSeries(query.data.today, query.data.yesterday) : []),
-    [query.data],
-  );
+  const status: ChartStatus = query.isPending
+    ? 'loading'
+    : query.isError
+      ? 'error'
+      : shaped.isEmptyData
+        ? 'empty'
+        : 'ready';
+
+  const legend: ChartFrameLegendItem[] = [
+    {
+      label: t('todayLabel'),
+      value: <Currency value={shaped.todayTotal} />,
+      swatch: resolveValueColor(shaped.todayTotal),
+    },
+    {
+      label: t('yesterdayLabel'),
+      value: <Currency value={shaped.yesterdayTotal} />,
+      swatch: CHART_COMPARISON,
+      reference: true,
+    },
+  ];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('title')}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {query.data === undefined ? (
-          <Skeleton className="aspect-[16/6] w-full" />
-        ) : (
-          <ChartContainer config={config} className="aspect-[16/6] w-full">
-            <LineChart data={data} margin={{ top: 16, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="hour"
-                tickLine={false}
-                axisLine={false}
-                ticks={[...HOUR_TICKS]}
-                tickFormatter={(hour: number) => `${String(hour).padStart(2, '0')}:00`}
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={48}
-                tickFormatter={(value: number) => formatter.number(value, 'integer')}
-              />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <ChartLegend content={<ChartLegendContent />} />
-              <Line
-                type="monotone"
-                dataKey="today"
-                stroke="var(--color-today)"
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="yesterday"
-                stroke="var(--color-yesterday)"
-                strokeWidth={2}
-                strokeDasharray="4 4"
-                dot={false}
-              />
-            </LineChart>
-          </ChartContainer>
-        )}
-      </CardContent>
-    </Card>
+    <ChartFrame
+      title={t('title')}
+      status={status}
+      chartKind="line"
+      liveBadge={live}
+      legend={status === 'ready' ? legend : undefined}
+      emptyHint={t('emptyHint')}
+      onRetry={() => void query.refetch()}
+    >
+      <LineChart
+        data={status === 'empty' ? [] : shaped.rows}
+        xKey="hour"
+        series={{ key: 'today', label: t('todayLabel'), format: 'currency' }}
+        comparison={{ key: 'yesterday', label: t('yesterdayLabel'), format: 'currency' }}
+        colorMode="semantic"
+        variant="area"
+        liveDot={live}
+        xTickFormatter={formatHour}
+        ariaLabel={t('title')}
+      />
+    </ChartFrame>
   );
 }

@@ -1,14 +1,9 @@
+import type { ChartDatum } from '@/components/patterns/chart.types';
+
 /** One point of an API cumulative-profit series (`chart.today` / `chart.yesterday`). */
 export interface CumulativePoint {
   hour: number;
   cumulativeProfit: string;
-}
-
-/** One merged row consumed by the recharts dual-line chart. */
-export interface ChartSeriesPoint {
-  hour: number;
-  today: number;
-  yesterday: number;
 }
 
 const HOURS_IN_DAY = 24;
@@ -34,20 +29,29 @@ function densify(points: CumulativePoint[]): number[] {
 }
 
 /**
- * Merge the API's two independent cumulative-profit arrays into a single
- * 24-row recharts dataset keyed by hour. Always returns exactly 24 rows
- * (hours 0..23) so the x-axis is stable regardless of how far into the day
- * the live data has progressed.
+ * Merge the API's two independent cumulative-profit arrays into a single 24-row
+ * chart-kit dataset keyed by hour, for the comparison LineChart. Always returns
+ * exactly 24 rows (hours 0..23) so the x-axis is stable regardless of how far
+ * into the day the live data has progressed.
+ *
+ * `yesterday` is a COMPLETE past day, so its value is present on every row (the
+ * dashed reference line spans the full axis). `today` is IN PROGRESS, so its key
+ * is attached only for hours up to `currentHour` (the business-day hour, 0..23);
+ * later hours omit it entirely so the subject line stops at "now" — where the
+ * chart's `liveDot` marks the leading edge — instead of flat-lining forward.
  */
 export function buildChartSeries(
   today: CumulativePoint[],
   yesterday: CumulativePoint[],
-): ChartSeriesPoint[] {
+  currentHour: number,
+): ChartDatum[] {
   const todayFilled = densify(today);
   const yesterdayFilled = densify(yesterday);
-  return Array.from({ length: HOURS_IN_DAY }, (_, hour) => ({
-    hour,
-    today: todayFilled[hour] ?? 0,
-    yesterday: yesterdayFilled[hour] ?? 0,
-  }));
+  return Array.from({ length: HOURS_IN_DAY }, (_, hour): ChartDatum => {
+    const row: ChartDatum = { hour, yesterday: yesterdayFilled[hour] ?? 0 };
+    if (hour <= currentHour) {
+      row.today = todayFilled[hour] ?? 0;
+    }
+    return row;
+  });
 }
