@@ -32,7 +32,7 @@ const messages = {
   userMenu: {
     open: 'Kullanıcı menüsünü aç',
     profile: 'Profil',
-    settings: 'Ayarlar',
+    settings: 'Hesap ayarları',
     theme: { heading: 'Tema', light: 'Açık', dark: 'Koyu', system: 'Sistem' },
     language: { heading: 'Dil' },
     help: { docs: 'Yardım', shortcuts: 'Kısayollar', feedback: 'Geri bildirim' },
@@ -70,20 +70,24 @@ describe('UserMenu', () => {
   it('renders profile and settings items', async () => {
     await openMenu();
     expect(await screen.findByText('Profil')).toBeInTheDocument();
-    expect(screen.getByText('Ayarlar')).toBeInTheDocument();
+    expect(screen.getByText('Hesap ayarları')).toBeInTheDocument();
   });
 
-  it('renders the theme segmented control with three options', async () => {
-    await openMenu();
-    expect(await screen.findByRole('radio', { name: 'Açık' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Koyu' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Sistem' })).toBeInTheDocument();
+  it('opens a theme dropdown with three options', async () => {
+    const { user } = await openMenu();
+    // The theme trigger's accessible name carries the current value ("Tema: Sistem").
+    await user.click(await screen.findByRole('button', { name: /Tema/ }));
+    expect(await screen.findByRole('menuitemradio', { name: 'Açık' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: 'Koyu' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: 'Sistem' })).toBeInTheDocument();
   });
 
-  it('renders the language segmented control with TR + EN', async () => {
+  it('renders the language flags as Türkçe and English options', async () => {
     await openMenu();
-    expect(await screen.findByRole('radio', { name: 'TR' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'EN' })).toBeInTheDocument();
+    // Flag toggle items label themselves with the language name (LOCALE_LABELS),
+    // not the raw locale code, for screen readers.
+    expect(await screen.findByRole('radio', { name: 'Türkçe' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'English' })).toBeInTheDocument();
   });
 
   it('renders the sign-out item', async () => {

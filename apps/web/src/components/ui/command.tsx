@@ -157,7 +157,7 @@ export const CommandItem = React.forwardRef<
       // cmdk emits aria-selected (not data-highlighted) for the active row — keep
       // it, but join the house menu recipe: tokenized transition, touch floor,
       // and global :focus-visible glow suppression so no box rings the row.
-      'gap-xs px-xs py-2xs aria-selected:bg-muted aria-selected:text-foreground relative flex cursor-default items-center rounded-sm text-sm outline-none select-none',
+      'gap-xs px-xs py-2xs aria-selected:bg-muted aria-selected:text-foreground relative flex cursor-pointer items-center rounded-sm text-sm outline-none select-none',
       'duration-fast ease-out-quart transition-colors pointer-coarse:min-h-11',
       'focus:shadow-none focus-visible:shadow-none',
       "data-[disabled='true']:pointer-events-none data-[disabled='true']:opacity-50",

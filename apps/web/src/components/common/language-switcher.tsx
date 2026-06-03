@@ -1,8 +1,7 @@
 'use client';
 
 import { Globe02Icon, Tick02Icon } from 'hugeicons-react';
-import { useLocale, useTranslations } from 'next-intl';
-import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -14,8 +13,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { LOCALES, type Locale } from '@/i18n/config';
-import { usePathname, useRouter } from '@/i18n/navigation';
+import { LOCALES } from '@/i18n/config';
+import { useLocaleSwitch } from '@/lib/use-locale-switch';
 import { cn } from '@/lib/utils';
 
 export interface LanguageSwitcherProps {
@@ -34,21 +33,7 @@ export function LanguageSwitcher({
   className,
 }: LanguageSwitcherProps): React.ReactElement {
   const t = useTranslations('languageSwitcher');
-  const locale = useLocale() as Locale;
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const [isPending, startTransition] = React.useTransition();
-
-  const queryString = searchParams.toString();
-  const href = queryString ? `${pathname}?${queryString}` : pathname;
-
-  const handleSelect = (next: Locale): void => {
-    if (next === locale) return;
-    startTransition(() => {
-      router.replace(href, { locale: next });
-    });
-  };
+  const { locale, isPending, switchTo } = useLocaleSwitch();
 
   return (
     <DropdownMenu>
@@ -75,7 +60,7 @@ export function LanguageSwitcher({
           return (
             <DropdownMenuItem
               key={option}
-              onSelect={() => handleSelect(option)}
+              onSelect={() => switchTo(option)}
               className="justify-between"
             >
               <span>{t(option)}</span>

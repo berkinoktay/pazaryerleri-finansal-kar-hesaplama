@@ -448,17 +448,18 @@
     "newOrgInline": "+ New Organization",
     "orgMetaStores": "{count} stores",
     "orgMetaNoStores": "no stores yet",
-    "orgMetaWithSync": "{stores} · last sync {time}",
-    "storeSyncRelative": "Synced {time}",
+    "orgMetaWithSync": "{stores} · last synced {time}",
+    "storeSyncRelative": "last synced {time}",
     "storeNoSync": "Not synced yet",
     "storeMetaWithPlatform": "{platform} · {sync}",
-    "orgSettingsLabel": "{name} settings",
-    "multiOrgIndicator": "+{count}"
+    "multiOrgIndicator": "+{count}",
+    "multiOrgMore": "{count} more organizations",
+    "activeLabel": "active"
   },
   "userMenu": {
     "open": "Open user menu",
     "profile": "Profile",
-    "settings": "Settings",
+    "settings": "Account settings",
     "theme": {
       "heading": "Theme",
       "light": "Light",

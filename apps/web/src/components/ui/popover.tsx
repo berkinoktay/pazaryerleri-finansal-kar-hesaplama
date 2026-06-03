@@ -22,12 +22,20 @@ export const PopoverAnchor = PopoverPrimitive.Anchor;
 export const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
->(({ className, align = 'center', sideOffset = 4, ...props }, ref) => (
+>(({ className, align = 'center', sideOffset = 4, collisionPadding = 8, ...props }, ref) => (
   <PopoverPrimitive.Portal>
     <PopoverPrimitive.Content
       ref={ref}
       align={align}
       sideOffset={sideOffset}
+      // Keep the panel off the viewport edges and let Radix flip/shift to the
+      // side with room — the default that makes every popover open in a sane
+      // spot without each call site hand-tuning placement. (No blanket
+      // max-w/max-h cap here: it would clip popovers that intentionally
+      // overflow — wide two-card filter menus, 2-month calendars — or whose
+      // footer sits below a fixed-height scroll list. Consumers that need a
+      // viewport cap opt in per-panel via the Radix available-size CSS vars.)
+      collisionPadding={collisionPadding}
       className={cn(
         'border-border bg-popover p-md text-popover-foreground z-50 w-72 rounded-md border shadow-md',
         // Scale + slide grow FROM the trigger-anchored popper origin (Radix
