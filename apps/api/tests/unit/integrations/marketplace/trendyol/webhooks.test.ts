@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TRENDYOL_SUBSCRIBED_STATUSES,
   WebhookCallbackUrlError,
+  getTrendyolWebhooks,
   registerTrendyolWebhook,
   unregisterTrendyolWebhook,
   updateTrendyolWebhook,
@@ -262,5 +263,84 @@ describe('updateTrendyolWebhook', () => {
         password: 'p',
       }),
     ).rejects.toBeInstanceOf(WebhookCallbackUrlError);
+  });
+});
+
+describe('getTrendyolWebhooks', () => {
+  it('GETs the seller-scoped endpoint and maps the bare-array response to {id,url}[]', async () => {
+    // Trendyol GET returns a BARE ARRAY (not {content:[...]}); extra fields ignored,
+    // lastModifiedDate/subscribedStatuses may be null (webhook-listeleme.md sample).
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 'wh-1',
+          createdDate: 1733317686667,
+          lastModifiedDate: null,
+          url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-1',
+          username: 'pazarsync-aaa',
+          authenticationType: 'BASIC_AUTHENTICATION',
+          status: 'ACTIVE',
+          subscribedStatuses: null,
+        },
+        {
+          id: 'wh-2',
+          url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-2',
+          username: 'pazarsync-bbb',
+          status: 'PASSIVE',
+          subscribedStatuses: ['CREATED', 'DELIVERED'],
+        },
+      ]),
+    );
+
+    const hooks = await getTrendyolWebhooks({ credentials: CREDENTIALS, env: ENV });
+
+    expect(hooks).toEqual([
+      { id: 'wh-1', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-1' },
+      { id: 'wh-2', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-2' },
+    ]);
+
+    const [calledUrl, init] = fetchSpy.mock.calls[0]!;
+    expect(calledUrl).toBe(`${BASE_URL}/integration/webhook/sellers/2738/webhooks`);
+    expect((init as RequestInit).method).toBe('GET');
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers['Authorization']).toMatch(/^Basic /);
+  });
+
+  it('returns [] when Trendyol returns an empty list', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse([]));
+    expect(await getTrendyolWebhooks({ credentials: CREDENTIALS, env: ENV })).toEqual([]);
+  });
+
+  it('skips malformed entries missing id or url (defensive parse)', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse([
+        { id: 'ok', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/s1' },
+        { id: 'no-url-field' },
+        { url: 'https://x.ngrok-free.dev/v1/webhooks/orders/s2' },
+        null,
+        'garbage',
+      ]),
+    );
+    expect(await getTrendyolWebhooks({ credentials: CREDENTIALS, env: ENV })).toEqual([
+      { id: 'ok', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/s1' },
+    ]);
+  });
+
+  it('returns [] when the response body is not an array', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ content: [] }));
+    expect(await getTrendyolWebhooks({ credentials: CREDENTIALS, env: ENV })).toEqual([]);
+  });
+
+  it('wraps network errors in MarketplaceUnreachable', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    await expect(
+      getTrendyolWebhooks({ credentials: CREDENTIALS, env: ENV }),
+    ).rejects.toBeInstanceOf(MarketplaceUnreachable);
+  });
+
+  it('rethrows AbortError so callers can distinguish cancellation', async () => {
+    const abort = new DOMException('aborted', 'AbortError');
+    fetchSpy.mockRejectedValueOnce(abort);
+    await expect(getTrendyolWebhooks({ credentials: CREDENTIALS, env: ENV })).rejects.toBe(abort);
   });
 });

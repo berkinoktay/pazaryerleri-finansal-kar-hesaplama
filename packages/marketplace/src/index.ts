@@ -83,11 +83,14 @@ export { trendyolFactory } from './trendyol/adapter';
 export {
   TRENDYOL_SUBSCRIBED_STATUSES,
   WebhookCallbackUrlError,
+  getTrendyolWebhooks,
   registerTrendyolWebhook,
   unregisterTrendyolWebhook,
   updateTrendyolWebhook,
+  type ListTrendyolWebhooksOpts,
   type RegisterTrendyolWebhookOpts,
   type TrendyolSubscribedStatus,
+  type TrendyolWebhookEntry,
   type UnregisterTrendyolWebhookOpts,
   type UpdateTrendyolWebhookOpts,
 } from './trendyol/webhooks';
