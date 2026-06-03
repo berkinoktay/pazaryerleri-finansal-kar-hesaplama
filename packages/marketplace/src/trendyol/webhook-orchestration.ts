@@ -27,6 +27,7 @@ import type { StoreEnvironment } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
 
 import type { TrendyolCredentials } from './types';
+import { WEBHOOK_ORDERS_PATH } from './webhook-paths';
 import {
   registerTrendyolWebhook,
   unregisterTrendyolWebhook,
@@ -63,7 +64,7 @@ export function generateWebhookCredentials(): WebhookReceiverCredentials {
  * stripped. The base URL is injected by the caller — this builder reads no env.
  */
 export function buildWebhookCallbackUrl(baseUrl: string, storeId: string): string {
-  return `${baseUrl.replace(/\/$/, '')}/v1/webhooks/orders/${storeId}`;
+  return `${baseUrl.replace(/\/$/, '')}${WEBHOOK_ORDERS_PATH}${storeId}`;
 }
 
 /**

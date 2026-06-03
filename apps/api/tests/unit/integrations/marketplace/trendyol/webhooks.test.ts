@@ -295,8 +295,8 @@ describe('getTrendyolWebhooks', () => {
     const hooks = await getTrendyolWebhooks({ credentials: CREDENTIALS, env: ENV });
 
     expect(hooks).toEqual([
-      { id: 'wh-1', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-1' },
-      { id: 'wh-2', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-2' },
+      { id: 'wh-1', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-1', status: 'ACTIVE' },
+      { id: 'wh-2', url: 'https://x.ngrok-free.dev/v1/webhooks/orders/store-2', status: 'PASSIVE' },
     ]);
 
     const [calledUrl, init] = fetchSpy.mock.calls[0]!;

@@ -14,6 +14,8 @@
  * never delete a production deployment's webhooks.
  */
 
+import { WEBHOOK_ORDERS_PATH } from './webhook-paths';
+
 /** The fields of an active store the planner reasons about (scoped to one seller). */
 export interface ReconcileStore {
   id: string;
@@ -25,6 +27,8 @@ export interface ReconcileStore {
 export interface RemoteWebhook {
   id: string;
   url: string;
+  /** Trendyol subscription status ('ACTIVE' | 'PASSIVE'); absent → treated as live. */
+  status?: string;
 }
 
 export interface ReconcilePlan {
@@ -33,10 +37,18 @@ export interface ReconcilePlan {
   toPrune: RemoteWebhook[];
 }
 
-const WEBHOOK_PATH = '/v1/webhooks/orders/';
-
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/$/, '');
+}
+
+/**
+ * A subscription Trendyol has auto-deactivated (PASSIVE) silently stops
+ * delivering, and only the seller can revive it; we heal it by pruning +
+ * re-registering a fresh ACTIVE one. Any other / absent status is treated as
+ * live so an unexpected value never causes over-pruning.
+ */
+function isLive(hook: RemoteWebhook): boolean {
+  return hook.status !== 'PASSIVE';
 }
 
 export function planWebhookReconcile(args: {
@@ -45,7 +57,7 @@ export function planWebhookReconcile(args: {
   baseUrl: string;
 }): ReconcilePlan {
   const base = stripTrailingSlash(args.baseUrl);
-  const ourPrefix = `${base}${WEBHOOK_PATH}`;
+  const ourPrefix = `${base}${WEBHOOK_ORDERS_PATH}`;
   // SAFETY INVARIANT: only subscriptions under our own base are eligible for
   // update/prune. A hook under a different base (e.g. a prod deployment sharing
   // this Trendyol seller) is excluded here and therefore never touched.
@@ -56,25 +68,27 @@ export function planWebhookReconcile(args: {
   const claimed = new Set<string>();
 
   for (const store of args.stores) {
-    const want = `${base}${WEBHOOK_PATH}${store.id}`;
+    const want = `${base}${WEBHOOK_ORDERS_PATH}${store.id}`;
     const matches = ours.filter((hook) => hook.url === want);
-    const primary = matches[0];
+    // Only a LIVE (non-PASSIVE) hook counts as the store's healthy subscription;
+    // prefer the one the store already tracks to avoid needless churn. PASSIVE
+    // matches stay unclaimed → pruned, and the store (re)registers a fresh one.
+    const live = matches.filter(isLive);
+    const primary = live.find((hook) => hook.id === store.webhookId) ?? live[0];
     if (primary === undefined) {
       toRegister.push(store);
       continue;
     }
-    // Keep the first match as the store's live subscription; bind it so it is
-    // not pruned. Re-register/update when the local secret is missing or the
-    // locally-stored webhookId no longer agrees with the remote one.
     claimed.add(primary.id);
     if (store.webhookSecret === null || store.webhookId !== primary.id) {
       toUpdate.push({ store, webhookId: primary.id });
     }
   }
 
-  // Every "ours" hook not claimed by an active store is either an orphan (its
-  // storeId is no longer active) or a duplicate of an active store's hook —
-  // both are pruned to respect Trendyol's 15-webhook-per-seller cap.
+  // Every "ours" hook not claimed by an active store is an orphan (dead
+  // storeId), a duplicate, or a PASSIVE hook being replaced — all pruned to
+  // respect Trendyol's 15-webhook-per-seller cap. The worker prunes BEFORE
+  // registering so freeing these slots never collides with that cap.
   const toPrune = ours.filter((hook) => !claimed.has(hook.id));
 
   return { toRegister, toUpdate, toPrune };

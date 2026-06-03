@@ -182,10 +182,17 @@ export interface ListTrendyolWebhooksOpts {
   signal?: AbortSignal;
 }
 
-/** One subscription as Trendyol reports it. The reconciler consumes only id + url. */
+/**
+ * One subscription as Trendyol reports it. The reconciler consumes id + url +
+ * status: `status` ('ACTIVE' | 'PASSIVE') is load-bearing — Trendyol
+ * auto-deactivates a hook to PASSIVE after sustained delivery failures, and a
+ * PASSIVE hook silently stops delivering, so the reconciler must heal it rather
+ * than treat it as live. Absent on malformed entries.
+ */
 export interface TrendyolWebhookEntry {
   id: string;
   url: string;
+  status?: string;
 }
 
 /**
@@ -233,7 +240,10 @@ export async function getTrendyolWebhooks(
     const id = record['id'];
     const entryUrl = record['url'];
     if (typeof id !== 'string' || typeof entryUrl !== 'string') return [];
-    return [{ id, url: entryUrl }];
+    const projected: TrendyolWebhookEntry = { id, url: entryUrl };
+    const status = record['status'];
+    if (typeof status === 'string') projected.status = status;
+    return [projected];
   });
 }
 

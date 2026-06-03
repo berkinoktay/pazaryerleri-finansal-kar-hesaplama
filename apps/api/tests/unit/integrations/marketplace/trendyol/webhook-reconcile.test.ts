@@ -131,4 +131,32 @@ describe('planWebhookReconcile', () => {
     });
     expect(plan).toEqual({ toRegister: [], toUpdate: [], toPrune: [] });
   });
+
+  it('treats a PASSIVE matching hook as unhealthy → prunes it and re-registers the store', () => {
+    const plan = planWebhookReconcile({
+      stores: [store('s1', { webhookId: 'whP', webhookSecret: 'enc' })],
+      remoteHooks: [{ id: 'whP', url: urlFor('s1'), status: 'PASSIVE' }],
+      baseUrl: BASE,
+    });
+    expect(plan.toRegister.map((s) => s.id)).toEqual(['s1']);
+    expect(plan.toPrune).toEqual([{ id: 'whP', url: urlFor('s1'), status: 'PASSIVE' }]);
+    expect(plan.toUpdate).toEqual([]);
+  });
+
+  it('prefers an ACTIVE hook over a PASSIVE duplicate for the same store', () => {
+    const plan = planWebhookReconcile({
+      stores: [store('s1', { webhookId: 'whP', webhookSecret: 'enc' })],
+      remoteHooks: [
+        { id: 'whP', url: urlFor('s1'), status: 'PASSIVE' },
+        { id: 'whA', url: urlFor('s1'), status: 'ACTIVE' },
+      ],
+      baseUrl: BASE,
+    });
+    // ACTIVE hook kept (store re-pointed to it); PASSIVE one pruned, never kept.
+    expect(plan.toUpdate).toEqual([
+      { store: expect.objectContaining({ id: 's1' }), webhookId: 'whA' },
+    ]);
+    expect(plan.toPrune).toEqual([{ id: 'whP', url: urlFor('s1'), status: 'PASSIVE' }]);
+    expect(plan.toRegister).toEqual([]);
+  });
 });
