@@ -1442,6 +1442,11 @@
                   "maximum": 23,
                   "example": 14
                 },
+                "cumulativeRevenue": {
+                  "type": "string",
+                  "description": "Decimal string",
+                  "example": "8400.00"
+                },
                 "cumulativeProfit": {
                   "type": "string",
                   "description": "Decimal string",
@@ -1450,6 +1455,7 @@
               },
               "required": [
                 "hour",
+                "cumulativeRevenue",
                 "cumulativeProfit"
               ]
             }
@@ -1465,6 +1471,11 @@
                   "maximum": 23,
                   "example": 14
                 },
+                "cumulativeRevenue": {
+                  "type": "string",
+                  "description": "Decimal string",
+                  "example": "8400.00"
+                },
                 "cumulativeProfit": {
                   "type": "string",
                   "description": "Decimal string",
@@ -1473,6 +1484,7 @@
               },
               "required": [
                 "hour",
+                "cumulativeRevenue",
                 "cumulativeProfit"
               ]
             }
@@ -5621,7 +5633,7 @@
           "Live Performance"
         ],
         "summary": "Live Performance hourly profit curve (today vs. yesterday)",
-        "description": "Cumulative net profit per business-timezone hour (0–23), for today and yesterday, for a dual-line intraday chart. Each hour holds the running total through that hour. Money values are Decimal strings.",
+        "description": "Cumulative revenue and cumulative net profit per business-timezone hour (0–23), for today and yesterday, for the dual-mode (ciro/kâr) intraday chart. Revenue includes today's cost-missing buffer; profit is the costed subset. Each hour holds the running total through that hour. Money values are Decimal strings.",
         "security": [
           {
             "bearerAuth": []

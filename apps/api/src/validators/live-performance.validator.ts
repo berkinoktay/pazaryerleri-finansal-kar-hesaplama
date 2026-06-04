@@ -40,6 +40,7 @@ export const LivePerformanceKpisSchema = z
 
 const HourlyPointSchema = z.object({
   hour: z.number().int().min(0).max(23).openapi({ example: 14 }),
+  cumulativeRevenue: z.string().openapi({ description: 'Decimal string', example: '8400.00' }),
   cumulativeProfit: z.string().openapi({ description: 'Decimal string', example: '1820.00' }),
 });
 

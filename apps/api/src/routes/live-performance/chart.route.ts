@@ -25,9 +25,10 @@ const chartRoute = createRoute({
   tags: ['Live Performance'],
   summary: 'Live Performance hourly profit curve (today vs. yesterday)',
   description:
-    'Cumulative net profit per business-timezone hour (0–23), for today and yesterday, ' +
-    'for a dual-line intraday chart. Each hour holds the running total through that hour. ' +
-    'Money values are Decimal strings.',
+    'Cumulative revenue and cumulative net profit per business-timezone hour (0–23), ' +
+    'for today and yesterday, for the dual-mode (ciro/kâr) intraday chart. Revenue ' +
+    "includes today's cost-missing buffer; profit is the costed subset. Each hour holds " +
+    'the running total through that hour. Money values are Decimal strings.',
   security: [{ bearerAuth: [] }],
   request: { params: storeScopeParams },
   responses: {

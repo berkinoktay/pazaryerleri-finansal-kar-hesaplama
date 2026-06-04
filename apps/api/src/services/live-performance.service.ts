@@ -182,6 +182,7 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
 
 export interface ChartPoint {
   hour: number;
+  cumulativeRevenue: string;
   cumulativeProfit: string;
 }
 
@@ -190,10 +191,19 @@ export interface ChartResult {
   yesterday: ChartPoint[];
 }
 
+const HOURS_IN_DAY = 24;
+
+/**
+ * Hourly cumulative revenue + profit for a business day. Revenue buckets EVERY
+ * order's subtotal (plus the buffer, today only); profit buckets the costed
+ * subset (non-null estimate). The two running totals drive the front-end's
+ * ciro↔kâr toggle without a second request.
+ */
 async function hourlyCumulative(
   orgId: string,
   storeId: string,
   range: DayRange,
+  bufferAnchor: Date | null,
 ): Promise<ChartPoint[]> {
   const orders = await prisma.order.findMany({
     where: {
@@ -201,30 +211,57 @@ async function hourlyCumulative(
       storeId,
       orderDate: { gte: range.start, lt: range.end },
     },
-    select: { orderDate: true, estimatedNetProfit: true },
+    select: { orderDate: true, saleSubtotalNet: true, estimatedNetProfit: true },
   });
 
-  const buckets = Array.from({ length: 24 }, () => new Decimal(0));
+  const revenueBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
+  const profitBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
+
   for (const order of orders) {
-    if (order.estimatedNetProfit === null) continue;
     const hour = getBusinessHour(order.orderDate);
-    buckets[hour] = (buckets[hour] ?? new Decimal(0)).add(order.estimatedNetProfit.toString());
+    if (order.saleSubtotalNet !== null)
+      revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(
+        order.saleSubtotalNet.toString(),
+      );
+    if (order.estimatedNetProfit !== null)
+      profitBuckets[hour] = (profitBuckets[hour] ?? new Decimal(0)).add(
+        order.estimatedNetProfit.toString(),
+      );
   }
 
-  let running = new Decimal(0);
-  return buckets.map((bucket, hour) => {
-    running = running.add(bucket);
-    return { hour, cumulativeProfit: running.toFixed(2) };
+  if (bufferAnchor !== null) {
+    const bufferRows = await prisma.livePerformanceBuffer.findMany({
+      where: { organizationId: orgId, storeId, orderDate: bufferAnchor },
+      select: { mappedOrder: true },
+    });
+    for (const entry of bufferRows) {
+      const mapped = entry.mappedOrder as unknown as MappedOrder;
+      const hour = getBusinessHour(new Date(mapped.orderDate));
+      revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(mapped.saleSubtotalNet);
+    }
+  }
+
+  let runningRevenue = new Decimal(0);
+  let runningProfit = new Decimal(0);
+  return revenueBuckets.map((revenueBucket, hour) => {
+    runningRevenue = runningRevenue.add(revenueBucket);
+    runningProfit = runningProfit.add(profitBuckets[hour] ?? new Decimal(0));
+    return {
+      hour,
+      cumulativeRevenue: runningRevenue.toFixed(2),
+      cumulativeProfit: runningProfit.toFixed(2),
+    };
   });
 }
 
 export async function getChart(args: { orgId: string; storeId: string }): Promise<ChartResult> {
   const today = getBusinessDayRange();
   const yesterday = getBusinessDayRange(new Date(Date.now() - ONE_DAY_MS));
+  const todayAnchor = getBusinessDateAnchor();
 
   const [todayPoints, yesterdayPoints] = await Promise.all([
-    hourlyCumulative(args.orgId, args.storeId, today),
-    hourlyCumulative(args.orgId, args.storeId, yesterday),
+    hourlyCumulative(args.orgId, args.storeId, today, todayAnchor),
+    hourlyCumulative(args.orgId, args.storeId, yesterday, null),
   ]);
 
   return { today: todayPoints, yesterday: yesterdayPoints };
