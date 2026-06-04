@@ -3,6 +3,7 @@ import type { BufferEntryStatus, LivePerformanceBuffer } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { syncLog } from '@pazarsync/sync-core';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { isRetryDue, MAX_ATTEMPTS, RETRY_BACKOFF_MINUTES } from '../lib/buffer-promote-backoff';
 
@@ -141,5 +142,85 @@ async function markFailed(entry: LivePerformanceBuffer, err: unknown): Promise<v
     syncLog.error('buffer.promote-permanent-failed', fields);
   } else {
     syncLog.warn('buffer.promote-failed', fields);
+  }
+}
+
+const FLUSH_CHUNK_SIZE = 25;
+
+/**
+ * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries whose
+ * business date is before today into `orders` (null profit), then delete the
+ * buffer row — same atomic claim+upsert+delete as promoteOne.
+ *
+ * Scope is PENDING-only by design: PROMOTING (cost just attached) and FAILED
+ * (retry-due) past-day entries are already handled by processBufferPromote, so
+ * flush owns exactly the orders whose cost never arrived before midnight — the
+ * "never lose a sale" graduation. A flush that throws marks the entry FAILED,
+ * handing it to the promote retry path (and ultimately PERMANENT_FAILED, which
+ * the narrowed reset cron cleans up).
+ */
+export async function processPastDayBufferFlush(now: Date = new Date()): Promise<void> {
+  const todayAnchor = getBusinessDateAnchor(now);
+
+  const candidates = await prisma.livePerformanceBuffer.findMany({
+    where: { status: 'PENDING', orderDate: { lt: todayAnchor } },
+    orderBy: { createdAt: 'asc' },
+    take: FLUSH_CHUNK_SIZE,
+    select: { id: true },
+  });
+
+  for (const { id } of candidates) {
+    await flushOne(id);
+  }
+}
+
+async function flushOne(id: string): Promise<void> {
+  try {
+    const flushed = await prisma.$transaction(async (tx): Promise<LivePerformanceBuffer | null> => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM live_performance_buffer WHERE id = ${id}::uuid FOR UPDATE SKIP LOCKED
+        `;
+      if (locked.length === 0) {
+        return null;
+      }
+
+      const entry = await tx.livePerformanceBuffer.findUniqueOrThrow({ where: { id } });
+
+      // Re-check STATUS under the lock — cost may have been attached since the
+      // unlocked prefilter (PENDING → PROMOTING), in which case the promote tick
+      // owns the entry. order_date is immutable and the candidate query already
+      // filtered `order_date < todayAnchor`, so there is no date re-check here
+      // (avoids any @db.Date-vs-DateTime comparison ambiguity).
+      if (entry.status !== 'PENDING') {
+        return null;
+      }
+
+      const mapped = entry.mappedOrder as unknown as MappedOrder;
+      // Same tx → order write + buffer delete commit atomically (null cost OK).
+      await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx);
+      await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
+      return entry;
+    });
+
+    if (flushed !== null) {
+      syncLog.info('buffer.flush-graduated', {
+        entryId: flushed.id,
+        storeId: flushed.storeId,
+        platformOrderId: flushed.platformOrderId,
+        orderDate: flushed.orderDate.toISOString(),
+      });
+    }
+  } catch (err) {
+    // Graduation tx rolled back; record the failure so the promote retry path
+    // (and eventually PERMANENT_FAILED) takes over. Reuses the promote backoff.
+    const entry = await prisma.livePerformanceBuffer.findUnique({ where: { id } });
+    if (entry !== null) {
+      await markFailed(entry, err);
+    } else {
+      syncLog.error('buffer.flush-claim-failed', {
+        entryId: id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }

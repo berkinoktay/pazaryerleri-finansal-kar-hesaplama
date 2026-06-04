@@ -34,7 +34,7 @@ import { SyncErrorCode } from '@pazarsync/db/enums';
 import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
-import { processBufferPromote } from './handlers/buffer-promote';
+import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
@@ -109,6 +109,15 @@ async function main(): Promise<void> {
   const bufferPromoteTimer = setInterval(() => {
     void processBufferPromote().catch((err: unknown) => {
       syncLog.error('buffer.promote-tick-error', {
+        workerId: WORKER_ID,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    });
+    // Past-day graduation: PENDING entries whose calendar day has ended are
+    // moved to `orders` (null profit) instead of being deleted at midnight.
+    // Separate catch so a flush hiccup never stops the promote tick.
+    void processPastDayBufferFlush().catch((err: unknown) => {
+      syncLog.error('buffer.flush-tick-error', {
         workerId: WORKER_ID,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
