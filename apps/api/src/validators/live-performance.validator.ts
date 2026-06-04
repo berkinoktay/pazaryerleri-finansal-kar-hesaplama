@@ -5,16 +5,36 @@ import { z } from '@hono/zod-openapi';
 
 export const LivePerformanceKpisSchema = z
   .object({
+    // ── Volume (whole today-universe = orders ∪ today-buffer; yesterday = orders) ──
     revenueToday: z.string().openapi({ description: 'Decimal string', example: '12450.00' }),
     revenueYesterday: z.string().openapi({ example: '11530.00' }),
-    netProfitToday: z.string().openapi({ example: '3220.00' }),
-    netProfitYesterday: z.string().openapi({ example: '2875.00' }),
     orderCountToday: z.number().int().nonnegative().openapi({ example: 87 }),
     orderCountYesterday: z.number().int().nonnegative().openapi({ example: 80 }),
-    marginToday: z
-      .string()
-      .openapi({ description: 'Net profit / revenue × 100, decimal string', example: '25.86' }),
+    unitsSoldToday: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({ description: 'Σ line quantity across the universe', example: 134 }),
+    unitsSoldYesterday: z.number().int().nonnegative().openapi({ example: 121 }),
+    // ── Profit family (costed subset = orders with non-null estimatedNetProfit) ──
+    netProfitToday: z.string().openapi({ example: '3220.00' }),
+    netProfitYesterday: z.string().openapi({ example: '2875.00' }),
+    marginToday: z.string().openapi({
+      description: 'Net profit ÷ costed revenue × 100, decimal string',
+      example: '25.86',
+    }),
     marginYesterday: z.string().openapi({ example: '25.43' }),
+    profitCostRatioToday: z.string().openapi({
+      description: 'Net profit ÷ costed cost × 100, decimal string',
+      example: '38.40',
+    }),
+    profitCostRatioYesterday: z.string().openapi({ example: '37.10' }),
+    // ── Pending gap (today only: universe − costed) — drives the profit-card hint ──
+    pendingRevenueToday: z.string().openapi({
+      description: "Today's revenue counted but not yet costed, decimal string",
+      example: '1860.00',
+    }),
+    pendingOrderCountToday: z.number().int().nonnegative().openapi({ example: 4 }),
   })
   .openapi('LivePerformanceKpis');
 

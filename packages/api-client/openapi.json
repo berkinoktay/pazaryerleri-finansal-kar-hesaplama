@@ -1353,14 +1353,6 @@
             "type": "string",
             "example": "11530.00"
           },
-          "netProfitToday": {
-            "type": "string",
-            "example": "3220.00"
-          },
-          "netProfitYesterday": {
-            "type": "string",
-            "example": "2875.00"
-          },
           "orderCountToday": {
             "type": "integer",
             "minimum": 0,
@@ -1371,25 +1363,69 @@
             "minimum": 0,
             "example": 80
           },
+          "unitsSoldToday": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Σ line quantity across the universe",
+            "example": 134
+          },
+          "unitsSoldYesterday": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 121
+          },
+          "netProfitToday": {
+            "type": "string",
+            "example": "3220.00"
+          },
+          "netProfitYesterday": {
+            "type": "string",
+            "example": "2875.00"
+          },
           "marginToday": {
             "type": "string",
-            "description": "Net profit / revenue × 100, decimal string",
+            "description": "Net profit ÷ costed revenue × 100, decimal string",
             "example": "25.86"
           },
           "marginYesterday": {
             "type": "string",
             "example": "25.43"
+          },
+          "profitCostRatioToday": {
+            "type": "string",
+            "description": "Net profit ÷ costed cost × 100, decimal string",
+            "example": "38.40"
+          },
+          "profitCostRatioYesterday": {
+            "type": "string",
+            "example": "37.10"
+          },
+          "pendingRevenueToday": {
+            "type": "string",
+            "description": "Today's revenue counted but not yet costed, decimal string",
+            "example": "1860.00"
+          },
+          "pendingOrderCountToday": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 4
           }
         },
         "required": [
           "revenueToday",
           "revenueYesterday",
-          "netProfitToday",
-          "netProfitYesterday",
           "orderCountToday",
           "orderCountYesterday",
+          "unitsSoldToday",
+          "unitsSoldYesterday",
+          "netProfitToday",
+          "netProfitYesterday",
           "marginToday",
-          "marginYesterday"
+          "marginYesterday",
+          "profitCostRatioToday",
+          "profitCostRatioYesterday",
+          "pendingRevenueToday",
+          "pendingOrderCountToday"
         ]
       },
       "LivePerformanceChart": {
@@ -5463,7 +5499,7 @@
           "Live Performance"
         ],
         "summary": "Live Performance KPI summary (today vs. yesterday)",
-        "description": "Revenue, net profit, order count, and margin for the business day so far, with the previous business day for comparison. Money values are Decimal strings. Reads the orders table only — cost-missing orders sit in the buffer (see /missing-cost).",
+        "description": "Revenue, order count, and units sold over the whole business day (orders plus today's cost-missing buffer); net profit, margin, and profit/cost ratio over the costed subset only; plus the pending revenue/order gap awaiting cost. Today vs. yesterday. Money values are Decimal strings.",
         "security": [
           {
             "bearerAuth": []

@@ -25,9 +25,10 @@ const kpisRoute = createRoute({
   tags: ['Live Performance'],
   summary: 'Live Performance KPI summary (today vs. yesterday)',
   description:
-    'Revenue, net profit, order count, and margin for the business day so far, ' +
-    'with the previous business day for comparison. Money values are Decimal strings. ' +
-    'Reads the orders table only — cost-missing orders sit in the buffer (see /missing-cost).',
+    'Revenue, order count, and units sold over the whole business day (orders plus ' +
+    "today's cost-missing buffer); net profit, margin, and profit/cost ratio over the " +
+    'costed subset only; plus the pending revenue/order gap awaiting cost. Today vs. ' +
+    'yesterday. Money values are Decimal strings.',
   security: [{ bearerAuth: [] }],
   request: { params: storeScopeParams },
   responses: {

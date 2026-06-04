@@ -28,62 +28,153 @@ function computeMargin(profit: Decimal, revenue: Decimal): string {
 export interface KpisResult {
   revenueToday: string;
   revenueYesterday: string;
-  netProfitToday: string;
-  netProfitYesterday: string;
   orderCountToday: number;
   orderCountYesterday: number;
+  unitsSoldToday: number;
+  unitsSoldYesterday: number;
+  netProfitToday: string;
+  netProfitYesterday: string;
   marginToday: string;
   marginYesterday: string;
+  profitCostRatioToday: string;
+  profitCostRatioYesterday: string;
+  pendingRevenueToday: string;
+  pendingOrderCountToday: number;
 }
 
-interface RangeAggregate {
+interface OrdersAggregate {
+  revenue: Decimal; // universe (all orders in range)
+  orderCount: number; // universe
+  unitsSold: number; // universe
+  netProfit: Decimal; // costed subset
+  costedRevenue: Decimal; // costed subset (margin denominator)
+  costedCost: Decimal; // costed subset (Kâr/Maliyet denominator)
+  costedCount: number; // costed subset
+}
+
+interface BufferAggregate {
   revenue: Decimal;
-  netProfit: Decimal;
   orderCount: number;
+  unitsSold: number;
 }
 
-async function aggregateForRange(
+/**
+ * Aggregate the `orders` rows for a day. Volume (revenue / count / units) is over
+ * EVERY order; profit / costed-revenue / costed-cost / costed-count are over the
+ * costed subset only (orders with a non-null estimatedNetProfit). Today's
+ * cost-missing orders sit in the buffer (not here); yesterday's persisted
+ * null-profit orders are here but excluded from the costed aggregates.
+ */
+async function aggregateOrders(
   orgId: string,
   storeId: string,
   range: DayRange,
-): Promise<RangeAggregate> {
-  const rows = await prisma.order.findMany({
+): Promise<OrdersAggregate> {
+  const orders = await prisma.order.findMany({
     where: {
       organizationId: orgId,
       storeId,
       orderDate: { gte: range.start, lt: range.end },
     },
-    select: { saleSubtotalNet: true, estimatedNetProfit: true },
+    select: {
+      saleSubtotalNet: true,
+      estimatedNetProfit: true,
+      items: { select: { quantity: true, unitCostSnapshotNet: true } },
+    },
   });
 
   let revenue = new Decimal(0);
+  let unitsSold = 0;
   let netProfit = new Decimal(0);
-  for (const row of rows) {
-    if (row.saleSubtotalNet !== null) revenue = revenue.add(row.saleSubtotalNet.toString());
-    if (row.estimatedNetProfit !== null)
-      netProfit = netProfit.add(row.estimatedNetProfit.toString());
+  let costedRevenue = new Decimal(0);
+  let costedCost = new Decimal(0);
+  let costedCount = 0;
+
+  for (const order of orders) {
+    if (order.saleSubtotalNet !== null) revenue = revenue.add(order.saleSubtotalNet.toString());
+    for (const item of order.items) unitsSold += item.quantity;
+
+    if (order.estimatedNetProfit === null) continue;
+    netProfit = netProfit.add(order.estimatedNetProfit.toString());
+    costedCount += 1;
+    if (order.saleSubtotalNet !== null)
+      costedRevenue = costedRevenue.add(order.saleSubtotalNet.toString());
+    for (const item of order.items) {
+      if (item.unitCostSnapshotNet !== null)
+        costedCost = costedCost.add(
+          new Decimal(item.unitCostSnapshotNet.toString()).mul(item.quantity),
+        );
+    }
   }
-  return { revenue, netProfit, orderCount: rows.length };
+
+  return {
+    revenue,
+    orderCount: orders.length,
+    unitsSold,
+    netProfit,
+    costedRevenue,
+    costedCost,
+    costedCount,
+  };
+}
+
+/**
+ * Aggregate today's buffer (cost-missing orders not yet in `orders`). Revenue +
+ * units come from the stored `mappedOrder` JSON — known the moment the order
+ * arrives, no cost required. Mirrors the buffer read in `getLiveOrders`.
+ */
+async function aggregateBuffer(
+  orgId: string,
+  storeId: string,
+  anchor: Date,
+): Promise<BufferAggregate> {
+  const rows = await prisma.livePerformanceBuffer.findMany({
+    where: { organizationId: orgId, storeId, orderDate: anchor },
+    select: { mappedOrder: true },
+  });
+
+  let revenue = new Decimal(0);
+  let unitsSold = 0;
+  for (const entry of rows) {
+    const mapped = entry.mappedOrder as unknown as MappedOrder;
+    revenue = revenue.add(mapped.saleSubtotalNet);
+    for (const line of mapped.lines) unitsSold += line.quantity;
+  }
+  return { revenue, orderCount: rows.length, unitsSold };
 }
 
 export async function getKpis(args: { orgId: string; storeId: string }): Promise<KpisResult> {
   const today = getBusinessDayRange();
   const yesterday = getBusinessDayRange(new Date(Date.now() - ONE_DAY_MS));
+  const todayAnchor = getBusinessDateAnchor();
 
-  const [todayAgg, yesterdayAgg] = await Promise.all([
-    aggregateForRange(args.orgId, args.storeId, today),
-    aggregateForRange(args.orgId, args.storeId, yesterday),
+  // Yesterday never unions the buffer — its uncosted orders were graduated into
+  // `orders` (null profit) at midnight, so `orders` is already complete.
+  const [todayOrders, todayBuffer, yesterdayOrders] = await Promise.all([
+    aggregateOrders(args.orgId, args.storeId, today),
+    aggregateBuffer(args.orgId, args.storeId, todayAnchor),
+    aggregateOrders(args.orgId, args.storeId, yesterday),
   ]);
 
+  const todayRevenue = todayOrders.revenue.add(todayBuffer.revenue);
+  const todayCount = todayOrders.orderCount + todayBuffer.orderCount;
+  const todayUnits = todayOrders.unitsSold + todayBuffer.unitsSold;
+
   return {
-    revenueToday: todayAgg.revenue.toFixed(2),
-    revenueYesterday: yesterdayAgg.revenue.toFixed(2),
-    netProfitToday: todayAgg.netProfit.toFixed(2),
-    netProfitYesterday: yesterdayAgg.netProfit.toFixed(2),
-    orderCountToday: todayAgg.orderCount,
-    orderCountYesterday: yesterdayAgg.orderCount,
-    marginToday: computeMargin(todayAgg.netProfit, todayAgg.revenue),
-    marginYesterday: computeMargin(yesterdayAgg.netProfit, yesterdayAgg.revenue),
+    revenueToday: todayRevenue.toFixed(2),
+    revenueYesterday: yesterdayOrders.revenue.toFixed(2),
+    orderCountToday: todayCount,
+    orderCountYesterday: yesterdayOrders.orderCount,
+    unitsSoldToday: todayUnits,
+    unitsSoldYesterday: yesterdayOrders.unitsSold,
+    netProfitToday: todayOrders.netProfit.toFixed(2),
+    netProfitYesterday: yesterdayOrders.netProfit.toFixed(2),
+    marginToday: computeMargin(todayOrders.netProfit, todayOrders.costedRevenue),
+    marginYesterday: computeMargin(yesterdayOrders.netProfit, yesterdayOrders.costedRevenue),
+    profitCostRatioToday: computeMargin(todayOrders.netProfit, todayOrders.costedCost),
+    profitCostRatioYesterday: computeMargin(yesterdayOrders.netProfit, yesterdayOrders.costedCost),
+    pendingRevenueToday: todayRevenue.sub(todayOrders.costedRevenue).toFixed(2),
+    pendingOrderCountToday: todayCount - todayOrders.costedCount,
   };
 }
 
