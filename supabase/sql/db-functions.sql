@@ -1,15 +1,21 @@
 -- PostgreSQL functions for business logic that runs at DB level
 -- (e.g., trigger functions, RLS helper functions)
 
--- ─── Live Performance buffer daily reset ──────────────────────────────────────
--- Hard-deletes buffer entries whose business date is before today, so the
--- /live-performance surface starts each business day empty (Spec 2 §10). The
--- predicate is self-correcting: it deletes "everything before today" whenever it
--- runs, so the exact cron fire time only affects how soon stale rows are purged,
--- never which rows. Stale yesterday rows are invisible to the seller regardless
--- (the page filters the buffer to order_date = today), so this is pure
--- housekeeping: bound table growth + stop the promote worker (apps/sync-worker)
--- from churning yesterday's PENDING/FAILED entries.
+-- ─── Live Performance buffer daily reset (Slice 0: narrowed safety-net) ───────
+-- Hard-deletes ONLY past-day buffer entries that are PERMANENT_FAILED — rows the
+-- worker tried to graduate into `orders` and could not (a corrupt mapped_order
+-- that makes upsertOrderWithSnapshot throw on every retry). Those rows cannot be
+-- written to `orders` at all, so deleting them loses no recoverable sale; this
+-- just bounds table growth. Recoverable entries (PENDING / PROMOTING / FAILED)
+-- are graduated by apps/sync-worker (processPastDayBufferFlush + the promote
+-- tick) and must NEVER be deleted here — that is the "never lose an order"
+-- guarantee. The worker already logs each row on the PERMANENT_FAILED transition
+-- (markFailed → syncLog.error 'buffer.promote-permanent-failed' with lastError),
+-- so this delete is never silent.
+--
+-- The predicate is self-correcting: it removes "every past-day PERMANENT_FAILED"
+-- whenever it runs, so the exact cron fire time only affects how soon stale rows
+-- are purged, never which rows.
 --
 -- System-wide (all orgs/stores) — a maintenance job, not a tenant-scoped query.
 -- Returns the number of rows deleted (for the cron log + the integration test).
@@ -30,6 +36,7 @@ AS $$
   WITH deleted AS (
     DELETE FROM live_performance_buffer
     WHERE order_date < (now() AT TIME ZONE 'Europe/Istanbul')::date
+      AND status = 'PERMANENT_FAILED'
     RETURNING 1
   )
   SELECT count(*) FROM deleted;
