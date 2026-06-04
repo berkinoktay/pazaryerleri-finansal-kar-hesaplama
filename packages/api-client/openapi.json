@@ -1463,6 +1463,11 @@
                   "type": "string",
                   "example": "8680000000001"
                 },
+                "stockCode": {
+                  "type": "string",
+                  "description": "Seller's stock code (SKU)",
+                  "example": "TS-BEYAZ-M"
+                },
                 "productName": {
                   "type": "string",
                   "example": "Pamuklu Tişört Beyaz M"
@@ -1488,6 +1493,7 @@
               "required": [
                 "variantId",
                 "barcode",
+                "stockCode",
                 "productName",
                 "thumbUrl",
                 "orderCount",

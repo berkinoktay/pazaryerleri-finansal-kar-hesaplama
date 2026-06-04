@@ -4,12 +4,22 @@ import { Alert02Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { CopyableValue } from '@/components/patterns/copyable-value';
 import { Currency } from '@/components/patterns/currency';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ImageCell } from '@/components/patterns/image-cell';
+import { InfoHint } from '@/components/patterns/info-hint';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { CostCellPopover } from '@/features/costs/components/cost-cell-popover';
 
 import type { MissingCostRow } from '../api/get-live-missing-cost.api';
@@ -20,11 +30,16 @@ interface LiveMissingCostCardProps {
   storeId: string;
 }
 
+const SKELETON_ROW_COUNT = 3;
+
 /**
- * Today's cost-missing orders, grouped by variant. The seller's actionable
- * surface: attaching a cost (inline CostCellPopover) flips the buffer entry to
- * PROMOTING, and on the next Realtime tick the row leaves this list and folds
- * into the KPIs / orders feed — it is never deleted, only promoted.
+ * Today's cost-missing orders, grouped by variant — the seller's actionable
+ * surface. Each variant is one table row: its two copyable identifiers (stock
+ * code + barcode, the strings the seller pastes back into the Trendyol panel),
+ * the labelled blocked-revenue column, and an inline CostCellPopover. Attaching
+ * a cost flips the buffer entry to PROMOTING; on the next Realtime tick the row
+ * leaves this list and folds into the KPIs / orders feed — never deleted, only
+ * promoted.
  */
 export function LiveMissingCostCard({
   orgId,
@@ -32,13 +47,7 @@ export function LiveMissingCostCard({
 }: LiveMissingCostCardProps): React.ReactElement {
   const t = useTranslations('livePerformance.missingCost');
   const query = useLiveMissingCost(orgId, storeId);
-
-  if (query.data === undefined) {
-    return <MissingCostSkeleton title={t('title')} />;
-  }
-
-  const rows = query.data.data;
-  const orderCount = rows.reduce((sum, row) => sum + row.orderCount, 0);
+  const rows = query.data?.data;
 
   return (
     <Card>
@@ -46,24 +55,27 @@ export function LiveMissingCostCard({
         <CardTitle>{t('title')}</CardTitle>
       </CardHeader>
       <CardContent className="gap-md flex flex-col">
-        {rows.length === 0 ? (
+        {rows === undefined ? (
+          <MissingCostTable>
+            {Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
+              <MissingCostSkeletonRow key={index} />
+            ))}
+          </MissingCostTable>
+        ) : rows.length === 0 ? (
           <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
         ) : (
           <>
             <p role="status" className="text-warning text-sm">
-              {t('warning', { count: rows.length, orderCount })}
+              {t('warning', {
+                count: rows.length,
+                orderCount: rows.reduce((sum, row) => sum + row.orderCount, 0),
+              })}
             </p>
-            <ul className="gap-2xs flex flex-col">
+            <MissingCostTable>
               {rows.map((row) => (
-                <MissingCostRowItem
-                  key={row.variantId}
-                  orgId={orgId}
-                  row={row}
-                  addCostLabel={t('addCostButton')}
-                  metaLabel={t('orderCountLabel', { count: row.orderCount })}
-                />
+                <MissingCostRowItem key={row.variantId} orgId={orgId} row={row} />
               ))}
-            </ul>
+            </MissingCostTable>
           </>
         )}
       </CardContent>
@@ -71,59 +83,107 @@ export function LiveMissingCostCard({
   );
 }
 
-interface MissingCostRowItemProps {
-  orgId: string;
-  row: MissingCostRow;
-  addCostLabel: string;
-  metaLabel: string;
-}
-
-function MissingCostRowItem({
-  orgId,
-  row,
-  addCostLabel,
-  metaLabel,
-}: MissingCostRowItemProps): React.ReactElement {
+/**
+ * The table shell + column headers. The header band labels every column — the
+ * "give the right-hand number a heading" fix — and the blocked-revenue header
+ * carries an InfoHint that spells out exactly what the amount represents.
+ */
+function MissingCostTable({ children }: { children: React.ReactNode }): React.ReactElement {
+  const t = useTranslations('livePerformance.missingCost');
   return (
-    <li className="gap-sm hover:bg-muted/60 duration-fast -mx-xs px-xs py-2xs flex items-center rounded-md transition-colors">
-      <ImageCell src={row.thumbUrl} alt={row.productName} size="md" />
-      <div className="min-w-0 flex-1">
-        <p className="text-foreground truncate text-sm font-medium">{row.productName}</p>
-        <p className="text-muted-foreground text-xs tabular-nums">
-          {row.barcode} · {metaLabel}
-        </p>
-      </div>
-      <Currency
-        value={row.revenueImpact}
-        className="text-foreground shrink-0 text-sm font-medium tabular-nums"
-      />
-      <CostCellPopover orgId={orgId} variantId={row.variantId}>
-        <Button type="button" size="sm" variant="outline" className="shrink-0">
-          {addCostLabel}
-        </Button>
-      </CostCellPopover>
-    </li>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-full">{t('productColumn')}</TableHead>
+          <TableHead className="whitespace-nowrap">{t('stockCodeLabel')}</TableHead>
+          <TableHead className="whitespace-nowrap">{t('barcodeLabel')}</TableHead>
+          <TableHead className="text-right whitespace-nowrap">
+            <span className="gap-3xs inline-flex items-center">
+              {t('revenueImpactLabel')}
+              {/* No `label` prop: it would re-announce "Bekleyen ciro" as the icon's
+                  accessible name, stuttering the column header. The hint body stands
+                  alone; the button falls back to the generic "Bilgi" aria-label. */}
+              <InfoHint>{t('revenueImpactHint')}</InfoHint>
+            </span>
+          </TableHead>
+          <TableHead className="text-right">
+            <span className="sr-only">{t('actionColumn')}</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>{children}</TableBody>
+    </Table>
   );
 }
 
-function MissingCostSkeleton({ title }: { title: string }): React.ReactElement {
+interface MissingCostRowItemProps {
+  orgId: string;
+  row: MissingCostRow;
+}
+
+function MissingCostRowItem({ orgId, row }: MissingCostRowItemProps): React.ReactElement {
+  const t = useTranslations('livePerformance.missingCost');
   return (
-    <Card>
-      <CardHeader leadingIcon={<Alert02Icon className="text-warning" />}>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="gap-sm flex flex-col" aria-hidden>
-        {Array.from({ length: 3 }, (_, index) => (
-          <div key={index} className="gap-sm flex items-center">
-            <Skeleton className="size-thumb-md rounded-md" />
-            <div className="gap-2xs flex flex-1 flex-col">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-24" />
-            </div>
-            <Skeleton className="h-8 w-24" />
+    <TableRow>
+      <TableCell>
+        <div className="gap-sm flex items-center">
+          <ImageCell src={row.thumbUrl} alt={row.productName} size="md" />
+          <div className="min-w-0">
+            <p className="text-foreground line-clamp-1 text-sm font-medium">{row.productName}</p>
+            <p className="text-muted-foreground text-xs">
+              {t('orderCountLabel', { count: row.orderCount })}
+            </p>
           </div>
-        ))}
-      </CardContent>
-    </Card>
+        </div>
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <CopyableValue value={row.stockCode} label={t('stockCodeLabel')}>
+          <span className="text-foreground font-mono text-xs">{row.stockCode}</span>
+        </CopyableValue>
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <CopyableValue value={row.barcode} label={t('barcodeLabel')}>
+          <span className="text-foreground font-mono text-xs">{row.barcode}</span>
+        </CopyableValue>
+      </TableCell>
+      <TableCell data-numeric>
+        <Currency value={row.revenueImpact} className="text-foreground text-sm font-medium" />
+      </TableCell>
+      <TableCell className="text-right">
+        <CostCellPopover orgId={orgId} variantId={row.variantId}>
+          <Button type="button" size="sm" variant="outline" className="shrink-0">
+            {t('addCostButton')}
+          </Button>
+        </CostCellPopover>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function MissingCostSkeletonRow(): React.ReactElement {
+  return (
+    <TableRow aria-hidden>
+      <TableCell>
+        <div className="gap-sm flex items-center">
+          <Skeleton className="size-thumb-md rounded-md" />
+          <div className="gap-2xs flex flex-col">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Skeleton className="h-4 w-20" />
+      </TableCell>
+      <TableCell>
+        <Skeleton className="h-4 w-28" />
+      </TableCell>
+      <TableCell data-numeric>
+        <Skeleton className="ml-auto h-4 w-16" />
+      </TableCell>
+      <TableCell className="text-right">
+        <Skeleton className="ml-auto h-8 w-24" />
+      </TableCell>
+    </TableRow>
   );
 }

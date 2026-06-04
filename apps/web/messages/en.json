@@ -1561,7 +1561,13 @@
       "addCostButton": "Add Cost",
       "orderCountLabel": "{count} orders",
       "emptyTitle": "No missing costs today",
-      "emptyDescription": "All orders are being calculated."
+      "emptyDescription": "All orders are being calculated.",
+      "productColumn": "Product",
+      "stockCodeLabel": "Stock Code",
+      "barcodeLabel": "Barcode",
+      "revenueImpactLabel": "Pending revenue",
+      "revenueImpactHint": "Total net revenue of today's orders held back because this product's cost is missing. It won't count toward profit until you add the cost.",
+      "actionColumn": "Action"
     },
     "topProducts": {
       "title": "Today's Best Sellers",

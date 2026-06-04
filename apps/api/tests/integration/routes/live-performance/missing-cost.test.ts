@@ -17,6 +17,7 @@ interface MissingCostBody {
   data: {
     variantId: string;
     barcode: string;
+    stockCode: string;
     productName: string;
     thumbUrl: string | null;
     orderCount: number;
@@ -94,6 +95,7 @@ describe('GET /v1/.../live-performance/missing-cost', () => {
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.variantId).toBe(variantId);
     expect(body.data[0]?.barcode).toBe('BC-MISSING');
+    expect(body.data[0]?.stockCode).toBe('SC-1');
     expect(body.data[0]?.productName).toBe('Pamuklu Tişört');
     expect(body.data[0]?.orderCount).toBe(2);
     expect(body.data[0]?.revenueImpact).toBe('200.00');

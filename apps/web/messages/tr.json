@@ -1626,7 +1626,13 @@
       "addCostButton": "Maliyet Ekle",
       "orderCountLabel": "{count} sipariş",
       "emptyTitle": "Bugün eksik maliyet yok",
-      "emptyDescription": "Tüm siparişler hesaplanıyor."
+      "emptyDescription": "Tüm siparişler hesaplanıyor.",
+      "productColumn": "Ürün",
+      "stockCodeLabel": "Stok Kodu",
+      "barcodeLabel": "Barkod",
+      "revenueImpactLabel": "Bekleyen ciro",
+      "revenueImpactHint": "Bu ürünün maliyeti eksik olduğu için bekleyen bugünkü siparişlerin toplam net cirosu. Maliyet eklenene kadar kâr hesabına dahil edilmez.",
+      "actionColumn": "İşlem"
     },
     "topProducts": {
       "title": "Bugünün En Çok Satanları",

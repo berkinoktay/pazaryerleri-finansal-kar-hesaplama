@@ -21,6 +21,7 @@ const missingCost = {
     {
       variantId: 'v-1',
       barcode: '8690000000001',
+      stockCode: 'STK-KAZAK-01',
       productName: 'X Marka Kazak',
       thumbUrl: null,
       orderCount: 3,

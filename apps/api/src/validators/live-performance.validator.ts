@@ -33,6 +33,9 @@ export const LivePerformanceChartSchema = z
 const MissingCostRowSchema = z.object({
   variantId: z.string().uuid(),
   barcode: z.string().openapi({ example: '8680000000001' }),
+  stockCode: z
+    .string()
+    .openapi({ description: "Seller's stock code (SKU)", example: 'TS-BEYAZ-M' }),
   productName: z.string().openapi({ example: 'Pamuklu Tişört Beyaz M' }),
   thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
   orderCount: z.number().int().positive().openapi({ example: 3 }),

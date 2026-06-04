@@ -144,6 +144,7 @@ export async function getChart(args: { orgId: string; storeId: string }): Promis
 export interface MissingCostRow {
   variantId: string;
   barcode: string;
+  stockCode: string;
   productName: string;
   thumbUrl: string | null;
   orderCount: number;
@@ -184,6 +185,7 @@ export async function getMissingCost(args: {
     select: {
       id: true,
       barcode: true,
+      stockCode: true,
       product: {
         select: {
           title: true,
@@ -218,6 +220,7 @@ export async function getMissingCost(args: {
       {
         variantId: variant.id,
         barcode: row.barcode,
+        stockCode: variant.stockCode,
         productName: variant.product.title,
         thumbUrl: variant.product.images[0]?.url ?? null,
         orderCount: Number(row.orderCount),
