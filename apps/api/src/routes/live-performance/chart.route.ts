@@ -23,7 +23,7 @@ const chartRoute = createRoute({
   method: 'get',
   path: '/organizations/{orgId}/stores/{storeId}/live-performance/chart',
   tags: ['Live Performance'],
-  summary: 'Live Performance hourly profit curve (today vs. yesterday)',
+  summary: 'Live Performance hourly cumulative revenue + profit (today vs. yesterday)',
   description:
     'Cumulative revenue and cumulative net profit per business-timezone hour (0–23), ' +
     'for today and yesterday, for the dual-mode (ciro/kâr) intraday chart. Revenue ' +
@@ -34,7 +34,7 @@ const chartRoute = createRoute({
   responses: {
     200: {
       content: { 'application/json': { schema: LivePerformanceChartSchema } },
-      description: 'Hourly cumulative profit',
+      description: 'Hourly cumulative revenue + profit',
       headers: RateLimitHeaders,
     },
     401: {
