@@ -16,14 +16,16 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={createTestQueryClient()}>{children}</QueryClientProvider>;
 }
 
+// Each hourly point carries BOTH cumulative series (revenue + profit) so the
+// front-end ciro/kâr toggle can swap the measured series client-side (Slice A).
 const chart = {
   today: [
-    { hour: 0, cumulativeProfit: '0.00' },
-    { hour: 1, cumulativeProfit: '120.50' },
+    { hour: 0, cumulativeRevenue: '0.00', cumulativeProfit: '0.00' },
+    { hour: 1, cumulativeRevenue: '250.00', cumulativeProfit: '120.50' },
   ],
   yesterday: [
-    { hour: 0, cumulativeProfit: '0.00' },
-    { hour: 1, cumulativeProfit: '90.00' },
+    { hour: 0, cumulativeRevenue: '0.00', cumulativeProfit: '0.00' },
+    { hour: 1, cumulativeRevenue: '180.00', cumulativeProfit: '90.00' },
   ],
 };
 
@@ -34,6 +36,7 @@ describe('useLiveChart', () => {
     const { result } = renderHook(() => useLiveChart(ORG_ID, STORE_ID), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.today[1]?.cumulativeProfit).toBe('120.50');
+    expect(result.current.data?.today[1]?.cumulativeRevenue).toBe('250.00');
     expect(result.current.data?.yesterday).toHaveLength(2);
   });
 
