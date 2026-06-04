@@ -10,6 +10,7 @@ import {
   createOrganization,
   createUserProfile,
 } from '../../../helpers/factories';
+import { ensureFeeDefinitions } from '../../../helpers/seed-fee-definitions';
 
 /**
  * PR-B: webhook receiver Live Performance buffer rule.
@@ -139,6 +140,10 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
   beforeEach(async () => {
     _resetRateLimitStoreForTests();
     await truncateAll();
+    // Late-arrival cost-missing now persists to orders, which runs
+    // applyEstimateOnOrderCreate (PSF + Stopaj ESTIMATE fees) — needs the
+    // FeeDefinition seed even though the estimate itself stays null (no cost).
+    await ensureFeeDefinitions();
   });
 
   afterAll(() => {
@@ -159,8 +164,8 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(entries[0].platformOrderNumber).toBe('buf-ord-1');
   });
 
-  it('cost-missing + previous-day orderDate → skips, no buffer write', async () => {
-    const { storeId } = await setupStore();
+  it('cost-missing + previous-day orderDate → persists to orders (null profit), no buffer write', async () => {
+    const { orgId, storeId } = await setupStore();
     const yesterday = Date.now() - 36 * 60 * 60 * 1000;
 
     const res = await postWebhook(
@@ -173,7 +178,13 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
       authOk,
     );
     expect(res.status).toBe(200);
+
+    // Never lose a sale: persisted to orders with null profit, not buffered.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
+    expect(order.organizationId).toBe(orgId);
+    expect(order.platformOrderId).toBe('700000002');
+    expect(order.estimatedNetProfit).toBeNull();
   });
 
   it('duplicate webhook for the same package → P2002 dedupe, single buffer entry', async () => {
