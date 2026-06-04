@@ -1544,13 +1544,19 @@
       "description": "Connect or select a marketplace store to see live performance."
     },
     "kpis": {
-      "revenue": "Revenue",
+      "revenue": "Total Revenue",
+      "orderCount": "Net Orders",
+      "unitsSold": "Units Sold",
       "netProfit": "Net Profit",
-      "orderCount": "Orders",
-      "margin": "Margin"
+      "margin": "Profit Margin",
+      "profitCostRatio": "Profit/Cost Ratio",
+      "estimateHint": "Estimated — finalized after settlement reconciliation.",
+      "pendingHint": "{count} order(s) awaiting cost — not in profit yet"
     },
     "chart": {
-      "title": "Hourly Cumulative Profit",
+      "title": "Hourly Cumulative",
+      "metricRevenue": "Revenue",
+      "metricProfit": "Profit",
       "todayLabel": "Today",
       "yesterdayLabel": "Yesterday",
       "emptyHint": "No data yet for today"

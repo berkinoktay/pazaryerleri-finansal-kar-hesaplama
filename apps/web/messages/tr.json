@@ -1609,13 +1609,19 @@
       "description": "Canlı performansı görmek için bir pazaryeri mağazası bağlayın veya seçin."
     },
     "kpis": {
-      "revenue": "Ciro",
-      "netProfit": "Net Kâr",
-      "orderCount": "Sipariş",
-      "margin": "Marj"
+      "revenue": "Toplam Ciro",
+      "orderCount": "Net Sipariş Adedi",
+      "unitsSold": "Net Satış Adedi",
+      "netProfit": "Kâr Tutarı",
+      "margin": "Kâr Marjı",
+      "profitCostRatio": "Kâr/Maliyet Oranı",
+      "estimateHint": "Tahmini değer — kesin tutar mutabakat (settlement) sonrasında netleşir.",
+      "pendingHint": "{count} sipariş maliyet bekliyor — kâra henüz dahil değil"
     },
     "chart": {
-      "title": "Saatlik Kümülatif Kâr",
+      "title": "Saatlik Kümülatif",
+      "metricRevenue": "Ciro",
+      "metricProfit": "Kâr",
       "todayLabel": "Bugün",
       "yesterdayLabel": "Dün",
       "emptyHint": "Bugün için henüz veri yok"
