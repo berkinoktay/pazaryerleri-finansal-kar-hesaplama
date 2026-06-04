@@ -362,6 +362,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     // ORDER_DATE_MS is past-day → persisted to orders with null profit, not buffered.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.organizationId).toBe(org.id);
     expect(order.estimatedNetProfit).toBeNull();
   });
 
@@ -421,6 +422,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
     const entries = await prisma.livePerformanceBuffer.findMany({ where: { storeId: store.id } });
     expect(entries).toHaveLength(1);
+    expect(entries[0]!.organizationId).toBe(org.id);
     expect(entries[0]!.status).toBe('PENDING');
   });
 
