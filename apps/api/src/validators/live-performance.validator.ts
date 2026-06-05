@@ -130,3 +130,29 @@ export const LivePerformanceOrdersSchema = z
     }),
   })
   .openapi('LivePerformanceOrders');
+
+const BufferDetailLineSchema = z.object({
+  barcode: z.string().openapi({ example: '8680000000001' }),
+  productName: z
+    .string()
+    .openapi({ description: 'Product title, or the barcode when the variant is unresolved' }),
+  thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
+  variantId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({ description: 'ProductVariant.id when the barcode resolves; null otherwise' }),
+  stockCode: z.string().nullable(),
+  quantity: z.number().int().nonnegative(),
+  unitPriceNet: z.string().openapi({ description: 'Decimal string' }),
+});
+
+export const BufferDetailSchema = z
+  .object({
+    platformOrderNumber: z.string().nullable(),
+    orderDate: z.string().datetime(),
+    status: z.string(),
+    saleSubtotalNet: z.string().openapi({ description: 'Decimal string' }),
+    lines: z.array(BufferDetailLineSchema),
+  })
+  .openapi('BufferDetail');

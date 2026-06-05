@@ -3,6 +3,8 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
 
+import { NotFoundError } from '../lib/errors';
+
 // All "today"/"yesterday" windows come from the single business-timezone helpers
 // (packages/utils/src/timezone.ts) — never a hard-coded offset. Orders carry a
 // full timestamp, so they filter on the real UTC instant window
@@ -623,5 +625,86 @@ export async function getLiveOrders(args: {
       calculated: calculatedRows.length,
       pending: pendingRows.length,
     },
+  };
+}
+
+// --- Buffer Detail ---
+
+export interface BufferDetailLine {
+  barcode: string;
+  productName: string;
+  thumbUrl: string | null;
+  variantId: string | null;
+  stockCode: string | null;
+  quantity: number;
+  unitPriceNet: string;
+}
+
+export interface BufferDetail {
+  platformOrderNumber: string | null;
+  orderDate: string; // ISO
+  status: string;
+  saleSubtotalNet: string;
+  lines: BufferDetailLine[];
+}
+
+export async function getBufferDetail(args: {
+  orgId: string;
+  storeId: string;
+  bufferId: string;
+}): Promise<BufferDetail> {
+  const entry = await prisma.livePerformanceBuffer.findFirst({
+    where: { id: args.bufferId, organizationId: args.orgId, storeId: args.storeId },
+    select: {
+      id: true,
+      platformOrderNumber: true,
+      mappedOrder: true,
+    },
+  });
+  if (entry === null) {
+    throw new NotFoundError('BufferEntry', args.bufferId);
+  }
+
+  const mapped = entry.mappedOrder as unknown as MappedOrder;
+
+  const barcodes = [...new Set(mapped.lines.map((l) => l.barcode))];
+  const variants =
+    barcodes.length > 0
+      ? await prisma.productVariant.findMany({
+          where: { storeId: args.storeId, organizationId: args.orgId, barcode: { in: barcodes } },
+          select: {
+            id: true,
+            barcode: true,
+            stockCode: true,
+            product: {
+              select: {
+                title: true,
+                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+              },
+            },
+          },
+        })
+      : [];
+  const byBarcode = new Map(variants.map((v) => [v.barcode, v]));
+
+  const lines: BufferDetailLine[] = mapped.lines.map((line) => {
+    const variant = byBarcode.get(line.barcode);
+    return {
+      barcode: line.barcode,
+      productName: variant?.product.title ?? line.barcode,
+      thumbUrl: variant?.product.images[0]?.url ?? null,
+      variantId: variant?.id ?? null,
+      stockCode: variant?.stockCode ?? null,
+      quantity: line.quantity,
+      unitPriceNet: new Decimal(line.unitPriceNet).toFixed(2),
+    };
+  });
+
+  return {
+    platformOrderNumber: entry.platformOrderNumber,
+    orderDate: new Date(mapped.orderDate).toISOString(),
+    status: mapped.status,
+    saleSubtotalNet: new Decimal(mapped.saleSubtotalNet).toFixed(2),
+    lines,
   };
 }
