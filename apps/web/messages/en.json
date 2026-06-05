@@ -1603,6 +1603,40 @@
       "statusCalculated": "Calculated",
       "statusPending": "Pending",
       "emptyTitle": "No orders yet today"
+    },
+    "orderDetail": {
+      "sheetTitle": "Order detail",
+      "close": "Close",
+      "buffer": {
+        "pendingNotice": "This order is awaiting cost — once you enter a cost it counts toward profit.",
+        "columns": {
+          "product": "Product",
+          "quantity": "Qty",
+          "unitPriceNet": "Unit price (excl. VAT)"
+        },
+        "addCost": "Add cost",
+        "loadError": "Could not load the order detail."
+      },
+      "costEntry": {
+        "trigger": "Enter cost",
+        "tabs": {
+          "manual": "Custom amount",
+          "profile": "Saved profile"
+        },
+        "netAmount": "Amount (excl. VAT)",
+        "vatRate": "VAT rate (%)",
+        "profile": "Cost profile",
+        "profilePlaceholder": "Select a profile",
+        "save": "Save",
+        "cancel": "Cancel",
+        "noProfiles": "No saved cost profiles",
+        "errors": {
+          "netAmountRequired": "Amount is required",
+          "netAmountPositive": "Amount must be greater than 0",
+          "vatRateRange": "VAT rate must be between 0-100",
+          "profileRequired": "Select a profile"
+        }
+      }
     }
   }
 }

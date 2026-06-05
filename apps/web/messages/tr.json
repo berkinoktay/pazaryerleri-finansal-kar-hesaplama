@@ -1668,6 +1668,40 @@
       "statusCalculated": "Hesaplandı",
       "statusPending": "Bekliyor",
       "emptyTitle": "Bugün henüz sipariş yok"
+    },
+    "orderDetail": {
+      "sheetTitle": "Sipariş ayrıntısı",
+      "close": "Kapat",
+      "buffer": {
+        "pendingNotice": "Bu sipariş maliyet bekliyor — ürüne maliyet girince kâra dahil olur.",
+        "columns": {
+          "product": "Ürün",
+          "quantity": "Adet",
+          "unitPriceNet": "Birim fiyat (KDV hariç)"
+        },
+        "addCost": "Maliyet ekle",
+        "loadError": "Sipariş ayrıntısı yüklenemedi."
+      },
+      "costEntry": {
+        "trigger": "Maliyet gir",
+        "tabs": {
+          "manual": "Özel tutar",
+          "profile": "Kayıtlı profil"
+        },
+        "netAmount": "Tutar (KDV hariç)",
+        "vatRate": "KDV oranı (%)",
+        "profile": "Maliyet profili",
+        "profilePlaceholder": "Profil seçin",
+        "save": "Kaydet",
+        "cancel": "İptal",
+        "noProfiles": "Kayıtlı maliyet profili yok",
+        "errors": {
+          "netAmountRequired": "Tutar gerekli",
+          "netAmountPositive": "Tutar 0'dan büyük olmalı",
+          "vatRateRange": "KDV oranı 0-100 arası olmalı",
+          "profileRequired": "Profil seçin"
+        }
+      }
     }
   }
 }
