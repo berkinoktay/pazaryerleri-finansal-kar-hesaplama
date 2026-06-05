@@ -19,9 +19,8 @@ import { useLiveRealtime } from '../hooks/use-live-realtime';
 import { liveKeys } from '../query-keys';
 
 import { LiveKpiRow } from './live-kpi-row';
-import { LiveMissingCostCard } from './live-missing-cost-card';
 import { LiveOrdersTable } from './live-orders-table';
-import { LiveTopProducts } from './live-top-products';
+import { LiveTodayProducts } from './live-today-products';
 
 // Recharts is client-only and untestable in happy-dom — load it lazily
 // (ssr:false) behind a skeleton so it never enters the server render or the
@@ -40,9 +39,9 @@ interface LivePerformancePageClientProps {
 
 /**
  * Orchestration root for /live-performance. Owns the Realtime subscription
- * (health drives the live indicator + polling fallback) and composes the four
+ * (health drives the live indicator + polling fallback) and composes the three
  * sections in the locked vertical order: KPI strip + cumulative-profit chart
- * (hero) → missing-cost → top-3 → orders feed. Each section owns its own query
+ * (hero) → today's products → orders feed. Each section owns its own query
  * so it loads and errors independently. Renders the no-store empty state until
  * a marketplace account is connected.
  */
@@ -87,8 +86,7 @@ export function LivePerformancePageClient({
       />
       <LiveKpiRow orgId={orgId} storeId={storeId} />
       <LiveProfitChart orgId={orgId} storeId={storeId} live={health === 'healthy'} />
-      <LiveMissingCostCard orgId={orgId} storeId={storeId} />
-      <LiveTopProducts orgId={orgId} storeId={storeId} />
+      <LiveTodayProducts orgId={orgId} storeId={storeId} />
       <LiveOrdersTable orgId={orgId} storeId={storeId} />
     </div>
   );

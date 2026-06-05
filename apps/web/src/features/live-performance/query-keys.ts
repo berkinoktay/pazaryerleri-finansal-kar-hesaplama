@@ -26,10 +26,8 @@ export const liveKeys = {
   all: ['live-performance'] as const,
   kpis: (orgId: string, storeId: string) => [...liveKeys.all, 'kpis', orgId, storeId] as const,
   chart: (orgId: string, storeId: string) => [...liveKeys.all, 'chart', orgId, storeId] as const,
-  missingCost: (orgId: string, storeId: string) =>
-    [...liveKeys.all, 'missing-cost', orgId, storeId] as const,
-  topProducts: (orgId: string, storeId: string) =>
-    [...liveKeys.all, 'top-products', orgId, storeId] as const,
+  todayProducts: (orgId: string, storeId: string) =>
+    [...liveKeys.all, 'today-products', orgId, storeId] as const,
   orders: (orgId: string, storeId: string, filter: LiveOrdersFilter = 'all') =>
     [...liveKeys.all, 'orders', orgId, storeId, filter] as const,
 };

@@ -1626,23 +1626,29 @@
       "yesterdayLabel": "Dün",
       "emptyHint": "Bugün için henüz veri yok"
     },
-    "missingCost": {
-      "title": "Maliyeti Eksik Ürünler",
-      "warning": "{count} ürün, {orderCount} sipariş bekliyor. Bugün gece yarısına kadar maliyet eklenmezse kâr hesabına dahil edilmez.",
-      "addCostButton": "Maliyet Ekle",
-      "orderCountLabel": "{count} sipariş",
-      "emptyTitle": "Bugün eksik maliyet yok",
-      "emptyDescription": "Tüm siparişler hesaplanıyor.",
-      "productColumn": "Ürün",
+    "todayProducts": {
+      "title": "Bugün Sipariş Alan Ürünler",
+      "searchPlaceholder": "Ürün adında ara",
+      "tabs": {
+        "all": "Tümü",
+        "missing": "Maliyet bekleyen"
+      },
+      "columns": {
+        "rank": "Sıra",
+        "product": "Ürün",
+        "orderCount": "Sipariş",
+        "unitsSold": "Satış Adedi",
+        "revenue": "Ciro",
+        "cost": "Maliyet"
+      },
+      "rankLabel": "{rank}. sıra",
       "stockCodeLabel": "Stok Kodu",
       "barcodeLabel": "Barkod",
-      "revenueImpactLabel": "Bekleyen ciro",
-      "revenueImpactHint": "Bu ürünün maliyeti eksik olduğu için bekleyen bugünkü siparişlerin toplam net cirosu. Maliyet eklenene kadar kâr hesabına dahil edilmez.",
-      "actionColumn": "İşlem"
-    },
-    "topProducts": {
-      "title": "Bugünün En Çok Satanları",
-      "emptyTitle": "Bugün henüz satış yok"
+      "addCostButton": "Maliyet Ekle",
+      "emptyTitle": "Bugün henüz sipariş yok",
+      "noResultsTitle": "Sonuç bulunamadı",
+      "noResultsDescription": "Arama veya filtreyle eşleşen ürün yok.",
+      "clearFilters": "Filtreleri temizle"
     },
     "orders": {
       "title": "Bugünün Siparişleri",

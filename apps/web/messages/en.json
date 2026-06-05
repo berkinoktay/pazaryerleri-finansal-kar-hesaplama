@@ -1561,23 +1561,29 @@
       "yesterdayLabel": "Yesterday",
       "emptyHint": "No data yet for today"
     },
-    "missingCost": {
-      "title": "Products Missing Cost",
-      "warning": "{count} products across {orderCount} orders are waiting. If cost isn't added before midnight today, they won't be included in profit.",
-      "addCostButton": "Add Cost",
-      "orderCountLabel": "{count} orders",
-      "emptyTitle": "No missing costs today",
-      "emptyDescription": "All orders are being calculated.",
-      "productColumn": "Product",
+    "todayProducts": {
+      "title": "Products Ordered Today",
+      "searchPlaceholder": "Search by product name",
+      "tabs": {
+        "all": "All",
+        "missing": "Awaiting cost"
+      },
+      "columns": {
+        "rank": "Rank",
+        "product": "Product",
+        "orderCount": "Orders",
+        "unitsSold": "Units Sold",
+        "revenue": "Revenue",
+        "cost": "Cost"
+      },
+      "rankLabel": "Rank {rank}",
       "stockCodeLabel": "Stock Code",
       "barcodeLabel": "Barcode",
-      "revenueImpactLabel": "Pending revenue",
-      "revenueImpactHint": "Total net revenue of today's orders held back because this product's cost is missing. It won't count toward profit until you add the cost.",
-      "actionColumn": "Action"
-    },
-    "topProducts": {
-      "title": "Today's Best Sellers",
-      "emptyTitle": "No sales yet today"
+      "addCostButton": "Add Cost",
+      "emptyTitle": "No orders yet today",
+      "noResultsTitle": "No results",
+      "noResultsDescription": "No product matches the search or filter.",
+      "clearFilters": "Clear filters"
     },
     "orders": {
       "title": "Today's Orders",
