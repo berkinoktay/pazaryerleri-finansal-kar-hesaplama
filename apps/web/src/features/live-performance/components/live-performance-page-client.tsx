@@ -15,10 +15,12 @@ import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { type RealtimeHealth } from '@/lib/supabase/realtime';
 import { cn } from '@/lib/utils';
 
+import type { LiveOrderRow } from '../api/get-live-orders.api';
 import { useLiveRealtime } from '../hooks/use-live-realtime';
 import { liveKeys } from '../query-keys';
 
 import { LiveKpiRow } from './live-kpi-row';
+import { LiveOrderDetailSheet } from './live-order-detail-sheet';
 import { LiveOrdersTable } from './live-orders-table';
 import { LiveTodayProducts } from './live-today-products';
 
@@ -55,6 +57,7 @@ export function LivePerformancePageClient({
   const health = useLiveRealtime(orgId, storeId);
   const queryClient = useQueryClient();
   const isFetching = useIsFetching({ queryKey: liveKeys.all }) > 0;
+  const [selected, setSelected] = React.useState<LiveOrderRow | null>(null);
 
   if (orgId === null || storeId === null) {
     return (
@@ -87,7 +90,13 @@ export function LivePerformancePageClient({
       <LiveKpiRow orgId={orgId} storeId={storeId} />
       <LiveProfitChart orgId={orgId} storeId={storeId} live={health === 'healthy'} />
       <LiveTodayProducts orgId={orgId} storeId={storeId} />
-      <LiveOrdersTable orgId={orgId} storeId={storeId} />
+      <LiveOrdersTable orgId={orgId} storeId={storeId} onRowClick={setSelected} />
+      <LiveOrderDetailSheet
+        orgId={orgId}
+        storeId={storeId}
+        selected={selected}
+        onClose={() => setSelected(null)}
+      />
     </div>
   );
 }

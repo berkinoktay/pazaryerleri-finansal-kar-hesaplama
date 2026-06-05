@@ -17,6 +17,7 @@ import { type LiveOrdersFilter } from '../query-keys';
 interface LiveOrdersTableProps {
   orgId: string;
   storeId: string;
+  onRowClick?: (row: LiveOrderRow) => void;
 }
 
 const EMPTY_COUNTS = { all: 0, calculated: 0, pending: 0 } as const;
@@ -28,7 +29,11 @@ const EMPTY_COUNTS = { all: 0, calculated: 0, pending: 0 } as const;
  * stay honest. Rows persist all day — attaching a cost moves a row from Bekliyor
  * into Hesaplanmış, never off the feed (until the 00:00 reset).
  */
-export function LiveOrdersTable({ orgId, storeId }: LiveOrdersTableProps): React.ReactElement {
+export function LiveOrdersTable({
+  orgId,
+  storeId,
+  onRowClick,
+}: LiveOrdersTableProps): React.ReactElement {
   const t = useTranslations('livePerformance.orders');
   const formatter = useFormatter();
   const [filter, setFilter] = React.useState<LiveOrdersFilter>('all');
@@ -121,6 +126,7 @@ export function LiveOrdersTable({ orgId, storeId }: LiveOrdersTableProps): React
         loading={query.isLoading}
         error={query.isError}
         onRetry={() => void query.refetch()}
+        onRowClick={onRowClick !== undefined ? (row) => onRowClick(row) : undefined}
         tabs={tabs}
         empty={<EmptyState title={t('emptyTitle')} embedded />}
       />
