@@ -94,6 +94,14 @@ const LiveOrderRowSchema = z.object({
   }),
   platformOrderId: z.string(),
   platformOrderNumber: z.string().nullable(),
+  orderId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({ description: 'Order.id for source="orders" rows; null for buffer rows' }),
+  bufferId: z.string().uuid().nullable().openapi({
+    description: 'LivePerformanceBuffer.id for source="buffer" rows; null for order rows',
+  }),
   orderDate: z.string().datetime(),
   status: z.string(),
   revenue: z.string().openapi({ description: 'Decimal string' }),

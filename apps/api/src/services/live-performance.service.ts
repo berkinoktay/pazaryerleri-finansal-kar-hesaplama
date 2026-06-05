@@ -512,6 +512,8 @@ export interface LiveOrderRow {
   source: 'orders' | 'buffer';
   platformOrderId: string;
   platformOrderNumber: string | null;
+  orderId: string | null;
+  bufferId: string | null;
   orderDate: string;
   status: string;
   revenue: string;
@@ -543,6 +545,7 @@ export async function getLiveOrders(args: {
       },
       orderBy: { orderDate: 'desc' },
       select: {
+        id: true,
         platformOrderId: true,
         platformOrderNumber: true,
         orderDate: true,
@@ -555,6 +558,7 @@ export async function getLiveOrders(args: {
       where: { organizationId: args.orgId, storeId: args.storeId, orderDate: todayAnchor },
       orderBy: { createdAt: 'desc' },
       select: {
+        id: true,
         platformOrderId: true,
         platformOrderNumber: true,
         orderDate: true,
@@ -575,6 +579,8 @@ export async function getLiveOrders(args: {
       source: 'orders',
       platformOrderId: order.platformOrderId,
       platformOrderNumber: order.platformOrderNumber,
+      orderId: order.id,
+      bufferId: null,
       orderDate: order.orderDate.toISOString(),
       status: order.status,
       revenue: revenue.toFixed(2),
@@ -589,6 +595,8 @@ export async function getLiveOrders(args: {
       source: 'buffer',
       platformOrderId: entry.platformOrderId,
       platformOrderNumber: entry.platformOrderNumber,
+      orderId: null,
+      bufferId: entry.id,
       // The real order timestamp (hour-level) lives in the mapped payload; the
       // buffer's own `orderDate` column is date-only (midnight), which would
       // render every pending row at the same wrong "03:00".
