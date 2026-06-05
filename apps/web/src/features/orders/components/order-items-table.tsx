@@ -19,6 +19,12 @@ import { type OrderItemDetail } from '../api/get-order.api';
 
 export interface OrderItemsTableProps {
   items: OrderItemDetail[];
+  /**
+   * Optional per-item override for the cost cell. When provided, replaces the
+   * read-only cost snapshot cell - used by the live-performance order-detail Sheet
+   * to inject inline per-item cost entry without orders importing live-performance.
+   */
+  renderCostCell?: (item: OrderItemDetail) => React.ReactNode;
 }
 
 /**
@@ -28,7 +34,10 @@ export interface OrderItemsTableProps {
  * sorting, no pagination, no row-click navigation; the order detail is
  * already the deepest level).
  */
-export function OrderItemsTable({ items }: OrderItemsTableProps): React.ReactElement {
+export function OrderItemsTable({
+  items,
+  renderCostCell,
+}: OrderItemsTableProps): React.ReactElement {
   const t = useTranslations('orderDetail.items');
   const formatter = useFormatter();
 
@@ -84,7 +93,9 @@ export function OrderItemsTable({ items }: OrderItemsTableProps): React.ReactEle
                     <Currency value={item.refundedCommissionAmountNet} dimWhenZero />
                   </TableCell>
                   <TableCell className="text-right">
-                    {item.unitCostSnapshotNet === null ? (
+                    {renderCostCell !== undefined ? (
+                      renderCostCell(item)
+                    ) : item.unitCostSnapshotNet === null ? (
                       <span className="text-warning">{t('costMissing')}</span>
                     ) : (
                       <Currency value={item.unitCostSnapshotNet} />

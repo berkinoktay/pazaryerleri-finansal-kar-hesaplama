@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api-error';
 
+import { type OrderItemDetail } from '../api/get-order.api';
 import { useOrder } from '../hooks/use-order';
 
 import { OrderClaimsCard } from './order-claims-card';
@@ -27,6 +28,11 @@ interface OrderDetailClientProps {
   orgId: string | null;
   storeId: string | null;
   orderId: string;
+  /** 'page' (default) renders the full page chrome (back-nav + PageHeader).
+   *  'modal' omits both - the host (Sheet) owns the header + close. */
+  chrome?: 'page' | 'modal';
+  /** Forwarded to OrderItemsTable to inject inline per-item cost entry (modal use). */
+  renderItemCostCell?: (item: OrderItemDetail) => React.ReactNode;
 }
 
 /**
@@ -44,6 +50,8 @@ export function OrderDetailClient({
   orgId,
   storeId,
   orderId,
+  chrome = 'page',
+  renderItemCostCell,
 }: OrderDetailClientProps): React.ReactElement {
   const t = useTranslations('orderDetail');
   const formatter = useFormatter();
@@ -56,7 +64,7 @@ export function OrderDetailClient({
   if (noContext) {
     return (
       <>
-        <PageHeader title={t('title.placeholder')} />
+        {chrome === 'page' && <PageHeader title={t('title.placeholder')} />}
         <Alert tone="warning" size="md">
           <AlertDescription>{t('errors.noStoreContext')}</AlertDescription>
         </Alert>
@@ -72,18 +80,20 @@ export function OrderDetailClient({
     const notFound = orderQuery.error instanceof ApiError && orderQuery.error.status === 404;
     return (
       <>
-        <PageHeader title={t('title.placeholder')} />
+        {chrome === 'page' && <PageHeader title={t('title.placeholder')} />}
         <Alert tone={notFound ? 'neutral' : 'destructive'} size="md">
           <AlertDescription>
             {notFound ? t('errors.notFound') : t('errors.loadFailed')}
           </AlertDescription>
         </Alert>
-        <div>
-          <Button variant="outline" onClick={() => router.push('/orders')}>
-            <ArrowLeft01Icon className="size-icon-sm" />
-            {t('backToList')}
-          </Button>
-        </div>
+        {chrome === 'page' && (
+          <div>
+            <Button variant="outline" onClick={() => router.push('/orders')}>
+              <ArrowLeft01Icon className="size-icon-sm" />
+              {t('backToList')}
+            </Button>
+          </div>
+        )}
       </>
     );
   }
@@ -97,35 +107,39 @@ export function OrderDetailClient({
 
   return (
     <div className="gap-lg flex flex-col">
-      <div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push('/orders')}
-          className="gap-3xs"
-        >
-          <ArrowLeft01Icon className="size-icon-sm" />
-          {t('backToList')}
-        </Button>
-      </div>
-      <PageHeader
-        title={headerTitle}
-        intent={t('intent', {
-          date: formatter.dateTime(new Date(order.orderDate), 'long'),
-        })}
-        meta={
-          <div className="gap-xs flex flex-wrap items-center">
-            <MarketplaceLogo
-              platform={order.store.platform}
-              alt={order.store.platform}
-              className="size-icon-md"
-            />
-            <span className="text-sm">{order.store.name}</span>
-            <OrderStatusBadge status={order.status} />
-            <ReconciliationStatusBadge status={order.reconciliationStatus} />
+      {chrome === 'page' && (
+        <>
+          <div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push('/orders')}
+              className="gap-3xs"
+            >
+              <ArrowLeft01Icon className="size-icon-sm" />
+              {t('backToList')}
+            </Button>
           </div>
-        }
-      />
+          <PageHeader
+            title={headerTitle}
+            intent={t('intent', {
+              date: formatter.dateTime(new Date(order.orderDate), 'long'),
+            })}
+            meta={
+              <div className="gap-xs flex flex-wrap items-center">
+                <MarketplaceLogo
+                  platform={order.store.platform}
+                  alt={order.store.platform}
+                  className="size-icon-md"
+                />
+                <span className="text-sm">{order.store.name}</span>
+                <OrderStatusBadge status={order.status} />
+                <ReconciliationStatusBadge status={order.reconciliationStatus} />
+              </div>
+            }
+          />
+        </>
+      )}
 
       <OrderStatusBanner order={order} />
 
@@ -136,7 +150,7 @@ export function OrderDetailClient({
         <OrderFeeTimeline fees={order.fees} />
       </div>
 
-      <OrderItemsTable items={order.items} />
+      <OrderItemsTable items={order.items} renderCostCell={renderItemCostCell} />
 
       <OrderClaimsCard claims={order.claims} />
     </div>
