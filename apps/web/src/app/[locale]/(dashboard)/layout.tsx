@@ -5,6 +5,7 @@ import type { Organization } from '@/features/organization/api/organizations.api
 import type { Store as ApiStore } from '@/features/stores/api/list-stores.api';
 import { DashboardStoreLauncher } from '@/features/stores/components/dashboard-store-launcher';
 import { StoreAccessGate } from '@/features/stores/components/store-access-gate';
+import { NewOrderNotifierProvider } from '@/features/live-performance/providers/new-order-notifier-provider';
 import { OrgSyncsProvider } from '@/features/sync/providers/org-syncs-provider';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
@@ -56,14 +57,16 @@ export default async function DashboardLayout({
     <div className="h-screen">
       <OrgSyncsProvider orgId={activeOrgId ?? null}>
         <CurrentScopeProvider org={activeOrg} store={activeStore} accessibleStores={stores}>
-          <DashboardStoreLauncher
-            orgs={orgs}
-            activeOrgId={activeOrgId}
-            initialStores={stores}
-            initialActiveStoreId={activeStoreId}
-          >
-            <StoreAccessGate>{children}</StoreAccessGate>
-          </DashboardStoreLauncher>
+          <NewOrderNotifierProvider>
+            <DashboardStoreLauncher
+              orgs={orgs}
+              activeOrgId={activeOrgId}
+              initialStores={stores}
+              initialActiveStoreId={activeStoreId}
+            >
+              <StoreAccessGate>{children}</StoreAccessGate>
+            </DashboardStoreLauncher>
+          </NewOrderNotifierProvider>
         </CurrentScopeProvider>
       </OrgSyncsProvider>
     </div>

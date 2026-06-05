@@ -16,8 +16,8 @@ import { type RealtimeHealth } from '@/lib/supabase/realtime';
 import { cn } from '@/lib/utils';
 
 import type { LiveOrderRow } from '../api/get-live-orders.api';
-import { useLiveRealtime } from '../hooks/use-live-realtime';
 import { liveKeys } from '../query-keys';
+import { useNewOrderNotifier } from '../providers/new-order-notifier-provider';
 
 import { LiveKpiRow } from './live-kpi-row';
 import { LiveOrderDetailSheet } from './live-order-detail-sheet';
@@ -54,7 +54,7 @@ export function LivePerformancePageClient({
   pageIntent,
 }: LivePerformancePageClientProps): React.ReactElement {
   const t = useTranslations('livePerformance');
-  const health = useLiveRealtime(orgId, storeId);
+  const { health } = useNewOrderNotifier();
   const queryClient = useQueryClient();
   const isFetching = useIsFetching({ queryKey: liveKeys.all }) > 0;
   const [selected, setSelected] = React.useState<LiveOrderRow | null>(null);
