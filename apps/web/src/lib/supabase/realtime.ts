@@ -2,6 +2,8 @@
 
 import {
   isSyncErrorCode,
+  type BufferEntryStatus,
+  type OrderStatus,
   type SyncErrorCode,
   type SyncStatus,
   type SyncType,
@@ -58,6 +60,30 @@ interface SyncLogsRowWire {
    * layer's normalizer.
    */
   skipped_pages: unknown | null;
+}
+
+/**
+ * Wire shape of an `orders` row arriving over postgres_changes (INSERT only).
+ * Mirrors Postgres logical-decoding output; only `id` is consumed by the
+ * notifier, but the scope columns document what the row carries.
+ */
+interface OrdersRowWire {
+  id: string;
+  organization_id: string;
+  store_id: string;
+  status: OrderStatus;
+  order_date: string;
+  platform_order_number: string | null;
+}
+
+/** Wire shape of a `live_performance_buffer` row over postgres_changes. */
+interface BufferRowWire {
+  id: string;
+  organization_id: string;
+  store_id: string;
+  status: BufferEntryStatus;
+  order_date: string;
+  platform_order_number: string;
 }
 
 export interface SkippedPageWireShape {
@@ -297,6 +323,19 @@ export function subscribeToOrgSyncs(
   };
 }
 
+/**
+ * Map a postgres_changes payload to a new-order event, or null when the event
+ * is not an INSERT. Extracted so the INSERT-narrowing is unit-testable without
+ * mocking a Realtime channel. The INSERT discriminant gives `payload.new: T`.
+ */
+export function newOrderInsertEvent<T extends { id: string }>(
+  table: 'orders' | 'buffer',
+  payload: RealtimePostgresChangesPayload<T>,
+): { table: 'orders' | 'buffer'; id: string } | null {
+  if (payload.eventType !== 'INSERT') return null;
+  return { table, id: payload.new.id };
+}
+
 export interface SubscribeToLivePerformanceOptions {
   /**
    * Fires on any relevant row change. The live-performance aggregates
@@ -306,6 +345,8 @@ export interface SubscribeToLivePerformanceOptions {
    * this callback carries no row data (unlike the sync_logs subscription).
    */
   onEvent: () => void;
+  /** Fires ONLY on a buffer/orders INSERT -- a genuinely new order for the toast. */
+  onNewOrder?: (event: { table: 'orders' | 'buffer'; id: string }) => void;
   onHealthChange?: (health: RealtimeHealth) => void;
 }
 
@@ -333,7 +374,7 @@ export function subscribeToLivePerformance(
   storeId: string,
   options: SubscribeToLivePerformanceOptions,
 ): () => void {
-  const { onEvent, onHealthChange } = options;
+  const { onEvent, onNewOrder, onHealthChange } = options;
   const supabase = createClient();
   let channel: RealtimeChannel | null = null;
   let unsubscribed = false;
@@ -346,7 +387,7 @@ export function subscribeToLivePerformance(
     reportHealth('connecting');
     return supabase
       .channel(`live-performance:${storeId}`)
-      .on(
+      .on<BufferRowWire>(
         'postgres_changes',
         {
           event: '*',
@@ -354,9 +395,13 @@ export function subscribeToLivePerformance(
           table: 'live_performance_buffer',
           filter: `store_id=eq.${storeId}`,
         },
-        () => onEvent(),
+        (payload) => {
+          const event = newOrderInsertEvent('buffer', payload);
+          if (event !== null) onNewOrder?.(event);
+          onEvent();
+        },
       )
-      .on(
+      .on<OrdersRowWire>(
         'postgres_changes',
         {
           event: 'INSERT',
@@ -364,7 +409,11 @@ export function subscribeToLivePerformance(
           table: 'orders',
           filter: `store_id=eq.${storeId}`,
         },
-        () => onEvent(),
+        (payload) => {
+          const event = newOrderInsertEvent('orders', payload);
+          if (event !== null) onNewOrder?.(event);
+          onEvent();
+        },
       )
       .subscribe((status) => {
         if (unsubscribed) return;
