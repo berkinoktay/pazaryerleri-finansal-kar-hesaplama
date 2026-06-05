@@ -47,12 +47,33 @@ describe('buildChartSeries', () => {
 
   it('omits the today key for hours after currentHour so the subject line stops at "now"', () => {
     const rows = buildChartSeries(series(20, 10), series(8, 5), 14, 'profit');
-    expect(rows[14]?.today).toBe(140);
+    // At "now" the line carries the FULL accumulated total — any data recorded for
+    // hours after currentHour folds into the live edge (see the next test), so the
+    // chart total never falls short of the real total. Here that is 230 (hour-23
+    // cumulative), not 140 (the hour-14 partial).
+    expect(rows[14]?.today).toBe(230);
     expect('today' in (rows[14] ?? {})).toBe(true);
     expect('today' in (rows[15] ?? {})).toBe(false);
     expect('today' in (rows[23] ?? {})).toBe(false);
     expect(rows[15]?.yesterday).toBe(75);
     expect(rows[23]?.yesterday).toBe(115);
+  });
+
+  it('folds today revenue recorded after currentHour into the live total (timestamps ahead of the clock)', () => {
+    // Real-world trigger: a marketplace order whose recorded hour reads ahead of the
+    // wall clock (Trendyol stamps orderDate as Istanbul wall-clock-as-UTC, ~3h
+    // ahead; clock skew does the same). At currentHour 14 an order stamped at hour 17
+    // must still appear in today's live total — matching the KPI cards — instead of
+    // vanishing because 17 > 14. The line still stops at "now" (hours after
+    // currentHour stay omitted), but its value at "now" reaches the full total.
+    const today: CumulativePoint[] = [
+      { hour: 17, cumulativeRevenue: '1387.50', cumulativeProfit: '0.00' },
+    ];
+    const rows = buildChartSeries(today, [], 14, 'revenue');
+    expect(rows[13]?.today).toBe(0); // nothing accrued before the order
+    expect(rows[14]?.today).toBe(1387.5); // full total folded into "now"
+    expect('today' in (rows[15] ?? {})).toBe(false); // line still stops at "now"
+    expect('today' in (rows[23] ?? {})).toBe(false);
   });
 
   it('forward-fills missing hours with the last cumulative value (up to currentHour)', () => {
