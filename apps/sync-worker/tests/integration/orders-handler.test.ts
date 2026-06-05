@@ -20,6 +20,7 @@ import { prisma } from '@pazarsync/db';
 import type { TrendyolOrdersStreamResponse, TrendyolShipmentPackage } from '@pazarsync/marketplace';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import type { OrdersStreamWindowCursor } from '@pazarsync/sync-core';
+import { getBusinessDayRange } from '@pazarsync/utils';
 
 import {
   computeStreamChunkCount,
@@ -53,6 +54,19 @@ const ORDER_DATE_MS = Date.UTC(2026, 4, 19); // 2026-05-19
 const AGREED_DATE_MS = Date.UTC(2026, 4, 20);
 const DELIVERED_DATE_MS = Date.UTC(2026, 4, 20, 12);
 const LAST_MODIFIED_MS = Date.UTC(2026, 4, 20, 13);
+
+const MS_HOUR = 60 * 60 * 1000;
+
+/**
+ * A "today" orderDate as Trendyol sends it: GMT+3 (Istanbul wall-clock-as-UTC),
+ * which the mapper normalizes back to the true instant. Encode noon Istanbul today
+ * (real noon + the +3h offset) so the today→buffer gate is deterministic — a raw
+ * `Date.now()` would normalize into "yesterday" when the suite runs between 00:00
+ * and 03:00 Istanbul.
+ */
+function todayOrderDateGmt3(): number {
+  return getBusinessDayRange().start.getTime() + 15 * MS_HOUR;
+}
 
 function makeShipmentPackage(
   overrides: Partial<TrendyolShipmentPackage> = {},
@@ -398,7 +412,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
           nextCursor: null,
           content: [
             makeShipmentPackage({
-              orderDate: Date.now(), // today → buffer, not orders
+              orderDate: todayOrderDateGmt3(), // today → buffer, not orders
               lines: [
                 {
                   lineId: 1,

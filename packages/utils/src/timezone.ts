@@ -47,6 +47,21 @@ function appTimeZoneOffsetMs(at: Date): number {
 }
 
 /**
+ * Reinterpret an epoch that encodes an {@link APP_TIME_ZONE} wall-clock as if it
+ * were UTC, returning the true instant. Some marketplace feeds stamp local time
+ * this way: Trendyol documents its order `orderDate` as "GMT +3" (an Istanbul
+ * wall-clock value), so a raw `new Date(orderDate)` reads ~3h ahead of reality —
+ * which throws off every business-day / business-hour calculation downstream.
+ * This subtracts the zone's offset at that wall-clock to recover the real instant
+ * so the math lines up with what the seller actually sees in the marketplace
+ * panel. (Only use it for feeds known to send local-as-UTC; true-UTC fields like
+ * Trendyol's `createdDate` must NOT be passed through it.)
+ */
+export function businessZoneEpochToInstant(epochMs: number): Date {
+  return new Date(epochMs - appTimeZoneOffsetMs(new Date(epochMs)));
+}
+
+/**
  * The business calendar date of `at` as a `YYYY-MM-DD` string. `YYYY-MM-DD`
  * strings sort chronologically, so `getBusinessDate(a) < getBusinessDate(b)` is a
  * valid "earlier business day" test (used by the webhook late-arrival gate).

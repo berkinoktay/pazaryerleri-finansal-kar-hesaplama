@@ -539,7 +539,10 @@ export async function getLiveOrders(args: {
       source: 'buffer',
       platformOrderId: entry.platformOrderId,
       platformOrderNumber: entry.platformOrderNumber,
-      orderDate: entry.orderDate.toISOString(),
+      // The real order timestamp (hour-level) lives in the mapped payload; the
+      // buffer's own `orderDate` column is date-only (midnight), which would
+      // render every pending row at the same wrong "03:00".
+      orderDate: new Date(mapped.orderDate).toISOString(),
       status: mapped.status,
       revenue: new Decimal(mapped.saleSubtotalNet).toFixed(2),
       profit: null,

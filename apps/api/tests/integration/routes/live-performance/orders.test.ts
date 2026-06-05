@@ -45,7 +45,12 @@ async function seed(): Promise<{ orgId: string; storeId: string; token: string }
   await createBufferEntry(org.id, store.id, {
     orderDate: getBusinessDateAnchor(),
     platformOrderId: 'BUF-1',
-    mappedOrder: { status: 'PENDING', saleSubtotalNet: '50.00', lines: [] },
+    mappedOrder: {
+      status: 'PENDING',
+      orderDate: todayAt(10).toISOString(),
+      saleSubtotalNet: '50.00',
+      lines: [],
+    },
   });
 
   return { orgId: org.id, storeId: store.id, token: user.accessToken };
