@@ -1341,6 +1341,57 @@
           "resolved"
         ]
       },
+      "SetOrderItemCostBody": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "profile"
+                ]
+              },
+              "profileId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "source",
+              "profileId"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              },
+              "netAmount": {
+                "type": "string",
+                "pattern": "^\\d+(\\.\\d{1,2})?$",
+                "description": "NET cost (KDV haric), Decimal string",
+                "example": "42.00"
+              },
+              "vatRate": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "example": 20
+              }
+            },
+            "required": [
+              "source",
+              "netAmount",
+              "vatRate"
+            ]
+          }
+        ]
+      },
       "LivePerformanceKpis": {
         "type": "object",
         "properties": {
@@ -1606,6 +1657,22 @@
                     "null"
                   ]
                 },
+                "orderId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "Order.id for source=\"orders\" rows; null for buffer rows"
+                },
+                "bufferId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "LivePerformanceBuffer.id for source=\"buffer\" rows; null for order rows"
+                },
                 "orderDate": {
                   "type": "string",
                   "format": "date-time"
@@ -1636,6 +1703,8 @@
                 "source",
                 "platformOrderId",
                 "platformOrderNumber",
+                "orderId",
+                "bufferId",
                 "orderDate",
                 "status",
                 "revenue",
@@ -1675,6 +1744,89 @@
           "data",
           "total",
           "counts"
+        ]
+      },
+      "BufferDetail": {
+        "type": "object",
+        "properties": {
+          "platformOrderNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orderDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "saleSubtotalNet": {
+            "type": "string",
+            "description": "Decimal string"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "barcode": {
+                  "type": "string",
+                  "example": "8680000000001"
+                },
+                "productName": {
+                  "type": "string",
+                  "description": "Product title, or the barcode when the variant is unresolved"
+                },
+                "thumbUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Product image URL or null"
+                },
+                "variantId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "ProductVariant.id when the barcode resolves; null otherwise"
+                },
+                "stockCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unitPriceNet": {
+                  "type": "string",
+                  "description": "Decimal string"
+                }
+              },
+              "required": [
+                "barcode",
+                "productName",
+                "thumbUrl",
+                "variantId",
+                "stockCode",
+                "quantity",
+                "unitPriceNet"
+              ]
+            }
+          }
+        },
+        "required": [
+          "platformOrderNumber",
+          "orderDate",
+          "status",
+          "saleSubtotalNet",
+          "lines"
         ]
       },
       "StartSyncResponse": {
@@ -5469,6 +5621,176 @@
         }
       }
     },
+    "/v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}/items/{itemId}/cost": {
+      "patch": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Set a frozen per-item cost for a cost-missing order item",
+        "description": "Writes a write-once cost snapshot to a single OrderItem from a saved cost profile or a manual NET amount + VAT rate, then recomputes the order estimate. Frozen: once set, the item cost cannot be changed (409). Money values are Decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orderId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "itemId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetOrderItemCostBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated order detail",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store, order, or item not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Item already costed (frozen) or cost unresolvable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body or unknown cost profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/organizations/{orgId}/stores/{storeId}/live-performance/kpis": {
       "get": {
         "tags": [
@@ -5951,6 +6273,137 @@
           },
           "422": {
             "description": "Invalid query params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/buffer/{bufferId}": {
+      "get": {
+        "tags": [
+          "Live Performance"
+        ],
+        "summary": "Cost-missing buffer entry detail (enriched lines)",
+        "description": "A pending (buffer) order's detail from its mapped payload, each line enriched with product name + thumbnail via a barcode to ProductVariant lookup. No fees or profit (none exist until the order graduates). Money values are Decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "bufferId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Buffer detail",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BufferDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store or buffer entry not found",
             "content": {
               "application/json": {
                 "schema": {
