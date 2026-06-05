@@ -30,4 +30,6 @@ export const liveKeys = {
     [...liveKeys.all, 'today-products', orgId, storeId] as const,
   orders: (orgId: string, storeId: string, filter: LiveOrdersFilter = 'all') =>
     [...liveKeys.all, 'orders', orgId, storeId, filter] as const,
+  bufferDetail: (orgId: string, storeId: string, bufferId: string) =>
+    [...liveKeys.all, 'buffer-detail', orgId, storeId, bufferId] as const,
 };
