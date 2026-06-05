@@ -1829,6 +1829,75 @@
           "lines"
         ]
       },
+      "NewOrderNotificationSummary": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "orders",
+              "buffer"
+            ]
+          },
+          "orderId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "bufferId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "platformOrderNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revenue": {
+            "type": "string",
+            "description": "Sale subtotal (net), Decimal string",
+            "example": "149.90"
+          },
+          "profit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Estimated net profit, Decimal string; null when cost is pending",
+            "example": "38.40"
+          },
+          "costStatus": {
+            "type": "string",
+            "enum": [
+              "costed",
+              "pending"
+            ],
+            "description": "'costed' = profit known; 'pending' = cost-missing",
+            "example": "pending"
+          },
+          "isToday": {
+            "type": "boolean",
+            "description": "Whether the order falls in today's business day",
+            "example": true
+          }
+        },
+        "required": [
+          "source",
+          "orderId",
+          "bufferId",
+          "platformOrderNumber",
+          "revenue",
+          "profit",
+          "costStatus",
+          "isToday"
+        ]
+      },
       "StartSyncResponse": {
         "type": "object",
         "properties": {
@@ -6404,6 +6473,163 @@
           },
           "404": {
             "description": "Store or buffer entry not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/notification-summary": {
+      "get": {
+        "tags": [
+          "Live Performance"
+        ],
+        "summary": "Canonical revenue/profit summary for a realtime new-order toast",
+        "description": "Given a realtime INSERT event ({source, id}), returns the settled revenue (sale subtotal net), profit (estimated net profit; null when cost is pending), costStatus, and an isToday flag so the global notifier can drop backfills / historical inserts. Store-scoped (requireStoreAccess); money values are Decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "orders",
+                "buffer"
+              ],
+              "description": "Which table the realtime INSERT came from"
+            },
+            "required": true,
+            "description": "Which table the realtime INSERT came from",
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Row id from the INSERT event"
+            },
+            "required": true,
+            "description": "Row id from the INSERT event",
+            "name": "id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New-order notification summary",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewOrderNotificationSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store, order, or buffer entry not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
             "content": {
               "application/json": {
                 "schema": {
