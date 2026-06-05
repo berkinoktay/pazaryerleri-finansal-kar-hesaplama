@@ -49,6 +49,26 @@ export function LiveOrderDetailSheet({
 
   const title = selected.platformOrderNumber ?? selected.platformOrderId;
 
+  // Narrow the id into a const so the render-prop closure captures a string
+  // (TS widens `selected.orderId` back to string|null inside the closure).
+  let body: React.ReactNode = null;
+  if (selected.source === 'orders' && selected.orderId !== null) {
+    const orderId = selected.orderId;
+    body = (
+      <OrderDetailClient
+        orgId={orgId}
+        storeId={storeId}
+        orderId={orderId}
+        chrome="modal"
+        renderItemCostCell={(item) => (
+          <CostEntryCell orgId={orgId} storeId={storeId} orderId={orderId} item={item} />
+        )}
+      />
+    );
+  } else if (selected.source === 'buffer' && selected.bufferId !== null) {
+    body = <BufferOrderDetail orgId={orgId} storeId={storeId} bufferId={selected.bufferId} />;
+  }
+
   return (
     <Sheet
       open
@@ -71,26 +91,7 @@ export function LiveOrderDetailSheet({
           </SheetDescription>
         </SheetHeader>
         <ScrollArea className="min-h-0 flex-1">
-          <div className="px-lg pb-lg">
-            {selected.source === 'orders' && selected.orderId !== null ? (
-              <OrderDetailClient
-                orgId={orgId}
-                storeId={storeId}
-                orderId={selected.orderId}
-                chrome="modal"
-                renderItemCostCell={(item) => (
-                  <CostEntryCell
-                    orgId={orgId}
-                    storeId={storeId}
-                    orderId={selected.orderId as string}
-                    item={item}
-                  />
-                )}
-              />
-            ) : selected.source === 'buffer' && selected.bufferId !== null ? (
-              <BufferOrderDetail orgId={orgId} storeId={storeId} bufferId={selected.bufferId} />
-            ) : null}
-          </div>
+          <div className="px-lg pb-lg">{body}</div>
         </ScrollArea>
       </SheetContent>
     </Sheet>
