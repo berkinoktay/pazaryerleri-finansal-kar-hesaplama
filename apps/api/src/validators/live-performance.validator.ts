@@ -51,7 +51,7 @@ export const LivePerformanceChartSchema = z
   })
   .openapi('LivePerformanceChart');
 
-const MissingCostRowSchema = z.object({
+const TodayProductRowSchema = z.object({
   variantId: z.string().uuid(),
   barcode: z.string().openapi({ example: '8680000000001' }),
   stockCode: z
@@ -59,34 +59,34 @@ const MissingCostRowSchema = z.object({
     .openapi({ description: "Seller's stock code (SKU)", example: 'TS-BEYAZ-M' }),
   productName: z.string().openapi({ example: 'Pamuklu Tişört Beyaz M' }),
   thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
-  orderCount: z.number().int().positive().openapi({ example: 3 }),
-  revenueImpact: z.string().openapi({ description: 'Decimal string', example: '450.00' }),
+  orderCount: z.number().int().nonnegative().openapi({
+    description: 'Distinct orders + buffer entries containing this product today',
+    example: 5,
+  }),
+  unitsSold: z.number().int().nonnegative().openapi({
+    description: 'Sum of line quantity across orders + buffer',
+    example: 8,
+  }),
+  revenue: z.string().openapi({
+    description: 'Σ line revenue (unit price net × qty) over orders + buffer, Decimal string',
+    example: '3600.00',
+  }),
+  costStatus: z.enum(['costed', 'missing']).openapi({
+    description: "'costed' = variant has an active cost profile; 'missing' = needs a cost",
+    example: 'costed',
+  }),
+  unitCost: z.string().nullable().openapi({
+    description:
+      'Costed net unit cost (from the order-item snapshot), Decimal string; null when cost-missing',
+    example: '42.00',
+  }),
 });
 
-export const LivePerformanceMissingCostSchema = z
+export const LivePerformanceTodayProductsSchema = z
   .object({
-    data: z.array(MissingCostRowSchema),
+    data: z.array(TodayProductRowSchema),
   })
-  .openapi('LivePerformanceMissingCost');
-
-const TopProductRowSchema = z.object({
-  rank: z.number().int().min(1).max(3).openapi({ example: 1 }),
-  variantId: z.string().uuid(),
-  productName: z.string().openapi({ example: 'Pamuklu Tişört Beyaz M' }),
-  thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
-  orderCount: z.number().int().positive().openapi({ example: 12 }),
-  revenue: z.string().openapi({ description: 'Decimal string', example: '3600.00' }),
-  profit: z
-    .string()
-    .nullable()
-    .openapi({ description: 'Decimal string, null if any contributing order is cost-missing' }),
-});
-
-export const LivePerformanceTopProductsSchema = z
-  .object({
-    data: z.array(TopProductRowSchema),
-  })
-  .openapi('LivePerformanceTopProducts');
+  .openapi('LivePerformanceTodayProducts');
 
 const LiveOrderRowSchema = z.object({
   source: z.enum(['orders', 'buffer']).openapi({

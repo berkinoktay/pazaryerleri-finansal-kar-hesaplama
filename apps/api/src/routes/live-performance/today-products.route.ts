@@ -3,8 +3,8 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { createSubApp } from '../../lib/create-hono-app';
 import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
-import { getMissingCost } from '../../services/live-performance.service';
-import { LivePerformanceMissingCostSchema } from '../../validators/live-performance.validator';
+import { getTodayProducts } from '../../services/live-performance.service';
+import { LivePerformanceTodayProductsSchema } from '../../validators/live-performance.validator';
 
 const app = createSubApp<{ Variables: { userId: string } }>();
 
@@ -19,22 +19,23 @@ const storeScopeParams = z.object({
     .openapi({ param: { name: 'storeId', in: 'path' } }),
 });
 
-const missingCostRoute = createRoute({
+const todayProductsRoute = createRoute({
   method: 'get',
-  path: '/organizations/{orgId}/stores/{storeId}/live-performance/missing-cost',
+  path: '/organizations/{orgId}/stores/{storeId}/live-performance/today-products',
   tags: ['Live Performance'],
-  summary: 'Cost-missing variants blocking today’s buffer',
+  summary: 'Products that sold today (orders ∪ buffer, per barcode)',
   description:
-    'Variants in today’s PENDING buffer entries that still lack a cost profile, grouped ' +
-    'by barcode with the order count and blocked revenue. Attaching a cost here lets the ' +
-    'order graduate from the buffer into the calculated orders. Already-costed siblings of ' +
-    'a still-missing line are excluded.',
+    'Every product variant that sold today, one row per barcode, merged over the business-day ' +
+    "universe (the calculated orders table ∪ today's cost-missing buffer). Each row reports " +
+    'distinct order count, units sold and net revenue (all known without cost) plus a ' +
+    'cost-status flag and the costed net unit cost. No per-product profit. Money values are ' +
+    'Decimal strings; counts are ints.',
   security: [{ bearerAuth: [] }],
   request: { params: storeScopeParams },
   responses: {
     200: {
-      content: { 'application/json': { schema: LivePerformanceMissingCostSchema } },
-      description: 'Cost-missing variant list',
+      content: { 'application/json': { schema: LivePerformanceTodayProductsSchema } },
+      description: "Today's products list",
       headers: RateLimitHeaders,
     },
     401: {
@@ -53,12 +54,12 @@ const missingCostRoute = createRoute({
   },
 });
 
-app.openapi(missingCostRoute, async (c) => {
+app.openapi(todayProductsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
   await requireStoreAccess(userId, orgId, storeId);
 
-  const data = await getMissingCost({ orgId, storeId });
+  const data = await getTodayProducts({ orgId, storeId });
   return c.json({ data }, 200);
 });
 

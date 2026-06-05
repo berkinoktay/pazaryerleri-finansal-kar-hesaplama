@@ -1495,7 +1495,7 @@
           "yesterday"
         ]
       },
-      "LivePerformanceMissingCost": {
+      "LivePerformanceTodayProducts": {
         "type": "object",
         "properties": {
           "data": {
@@ -1529,13 +1529,37 @@
                 },
                 "orderCount": {
                   "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "example": 3
+                  "minimum": 0,
+                  "description": "Distinct orders + buffer entries containing this product today",
+                  "example": 5
                 },
-                "revenueImpact": {
+                "unitsSold": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Sum of line quantity across orders + buffer",
+                  "example": 8
+                },
+                "revenue": {
                   "type": "string",
-                  "description": "Decimal string",
-                  "example": "450.00"
+                  "description": "Σ line revenue (unit price net × qty) over orders + buffer, Decimal string",
+                  "example": "3600.00"
+                },
+                "costStatus": {
+                  "type": "string",
+                  "enum": [
+                    "costed",
+                    "missing"
+                  ],
+                  "description": "'costed' = variant has an active cost profile; 'missing' = needs a cost",
+                  "example": "costed"
+                },
+                "unitCost": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Costed net unit cost (from the order-item snapshot), Decimal string; null when cost-missing",
+                  "example": "42.00"
                 }
               },
               "required": [
@@ -1545,70 +1569,10 @@
                 "productName",
                 "thumbUrl",
                 "orderCount",
-                "revenueImpact"
-              ]
-            }
-          }
-        },
-        "required": [
-          "data"
-        ]
-      },
-      "LivePerformanceTopProducts": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "rank": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 3,
-                  "example": 1
-                },
-                "variantId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "productName": {
-                  "type": "string",
-                  "example": "Pamuklu Tişört Beyaz M"
-                },
-                "thumbUrl": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "Product image URL or null"
-                },
-                "orderCount": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "example": 12
-                },
-                "revenue": {
-                  "type": "string",
-                  "description": "Decimal string",
-                  "example": "3600.00"
-                },
-                "profit": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "Decimal string, null if any contributing order is cost-missing"
-                }
-              },
-              "required": [
-                "rank",
-                "variantId",
-                "productName",
-                "thumbUrl",
-                "orderCount",
+                "unitsSold",
                 "revenue",
-                "profit"
+                "costStatus",
+                "unitCost"
               ]
             }
           }
@@ -5749,13 +5713,13 @@
         }
       }
     },
-    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/missing-cost": {
+    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products": {
       "get": {
         "tags": [
           "Live Performance"
         ],
-        "summary": "Cost-missing variants blocking today’s buffer",
-        "description": "Variants in today’s PENDING buffer entries that still lack a cost profile, grouped by barcode with the order count and blocked revenue. Attaching a cost here lets the order graduate from the buffer into the calculated orders. Already-costed siblings of a still-missing line are excluded.",
+        "summary": "Products that sold today (orders ∪ buffer, per barcode)",
+        "description": "Every product variant that sold today, one row per barcode, merged over the business-day universe (the calculated orders table ∪ today's cost-missing buffer). Each row reports distinct order count, units sold and net revenue (all known without cost) plus a cost-status flag and the costed net unit cost. No per-product profit. Money values are Decimal strings; counts are ints.",
         "security": [
           {
             "bearerAuth": []
@@ -5783,7 +5747,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Cost-missing variant list",
+            "description": "Today's products list",
             "headers": {
               "X-RateLimit-Limit": {
                 "schema": {
@@ -5813,129 +5777,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LivePerformanceMissingCost"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid auth token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Not a member of this organization",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Store not found or not accessible",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Seconds to wait before retrying"
-                },
-                "required": true,
-                "description": "Seconds to wait before retrying"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/organizations/{orgId}/stores/{storeId}/live-performance/top-products": {
-      "get": {
-        "tags": [
-          "Live Performance"
-        ],
-        "summary": "Top 3 products sold today",
-        "description": "The three best-selling product variants of the business day so far, ranked by order count, with revenue and best-effort profit. profit is null when any contributing order has no estimate yet. Money values are Decimal strings.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "orgId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "storeId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Top products list (max 3)",
-            "headers": {
-              "X-RateLimit-Limit": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Maximum requests permitted in the current window"
-                },
-                "required": true,
-                "description": "Maximum requests permitted in the current window"
-              },
-              "X-RateLimit-Remaining": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Requests remaining in the current window"
-                },
-                "required": true,
-                "description": "Requests remaining in the current window"
-              },
-              "X-RateLimit-Reset": {
-                "schema": {
-                  "type": "integer",
-                  "description": "Epoch seconds when the current window resets"
-                },
-                "required": true,
-                "description": "Epoch seconds when the current window resets"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LivePerformanceTopProducts"
+                  "$ref": "#/components/schemas/LivePerformanceTodayProducts"
                 }
               }
             }

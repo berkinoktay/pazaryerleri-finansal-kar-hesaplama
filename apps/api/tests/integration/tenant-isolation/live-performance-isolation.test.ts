@@ -11,7 +11,7 @@ import {
   createStore,
 } from '../../helpers/factories';
 
-const SECTIONS = ['kpis', 'chart', 'missing-cost', 'top-products', 'orders'] as const;
+const SECTIONS = ['kpis', 'chart', 'today-products', 'orders'] as const;
 
 describe('Tenant isolation: live-performance endpoints', () => {
   const app = createApp();
