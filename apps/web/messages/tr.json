@@ -469,6 +469,9 @@
     "language": {
       "heading": "Dil"
     },
+    "sound": {
+      "heading": "Sipariş bildirim sesi"
+    },
     "help": {
       "docs": "Yardım & Dokümanlar",
       "shortcuts": "Klavye kısayolları",
@@ -1702,6 +1705,14 @@
           "profileRequired": "Profil seçin"
         }
       }
+    },
+    "realtime": {
+      "newOrderTitle": "Yeni sipariş · {amount}",
+      "profitLine": "{profit} net kâr",
+      "costMissingLine": "Maliyeti eksik ürünler var, kâr henüz belirlenemiyor",
+      "orderNumberLabel": "Sipariş no {number}",
+      "detail": "Detayı gör",
+      "burstTitle": "{count} yeni sipariş geldi"
     }
   }
 }
