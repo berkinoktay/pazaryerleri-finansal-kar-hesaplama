@@ -1645,7 +1645,7 @@
       "newOrderTitle": "New order · {amount}",
       "profitLine": "{profit} net profit",
       "costMissingLine": "Some items are missing a cost, profit can't be determined yet",
-      "orderNumberLabel": "Order no {number}",
+      "orderNumberLabel": "· Order no {number}",
       "detail": "View detail",
       "burstTitle": "{count} new orders arrived"
     }

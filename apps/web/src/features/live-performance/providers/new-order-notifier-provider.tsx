@@ -64,7 +64,7 @@ function emitSingleToast(
       : t('costMissingLine');
   const description =
     summary.platformOrderNumber !== null
-      ? `${base} -- ${t('orderNumberLabel', { number: summary.platformOrderNumber })}`
+      ? `${base} ${t('orderNumberLabel', { number: summary.platformOrderNumber })}`
       : base;
 
   toast(t('newOrderTitle', { amount: formatCurrency(summary.revenue) }), {

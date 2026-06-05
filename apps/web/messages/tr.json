@@ -1710,7 +1710,7 @@
       "newOrderTitle": "Yeni sipariş · {amount}",
       "profitLine": "{profit} net kâr",
       "costMissingLine": "Maliyeti eksik ürünler var, kâr henüz belirlenemiyor",
-      "orderNumberLabel": "Sipariş no {number}",
+      "orderNumberLabel": "· Sipariş no {number}",
       "detail": "Detayı gör",
       "burstTitle": "{count} yeni sipariş geldi"
     }
