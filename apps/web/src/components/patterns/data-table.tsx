@@ -228,6 +228,14 @@ export interface DataTableProps<TData, TValue> {
   sorting?: SortingState;
   onSortingChange?: OnChangeFn<SortingState>;
   /**
+   * Initial (uncontrolled) sort seed. Mirrors `initialColumnPinning`: seeds the
+   * internal sorting state once at mount so a table can declare a default sort
+   * (e.g. units desc) with the sort arrow shown. Ignored when the controlled
+   * `sorting` prop is supplied (which flips manualSorting and disables the
+   * client-side sort model).
+   */
+  initialSorting?: SortingState;
+  /**
    * Controlled column-filter state. Same controlled-when-supplied
    * pattern as `sorting` — supplying both flips `manualFiltering: true`
    * and the parent owns the filter pipeline (typically forwarded into
@@ -313,6 +321,7 @@ export function DataTable<TData, TValue>({
   onRowClick,
   sorting,
   onSortingChange,
+  initialSorting,
   columnFilters,
   onColumnFiltersChange,
   paginationState,
@@ -327,7 +336,7 @@ export function DataTable<TData, TValue>({
   // flips the matching `manualX` flag on TanStack so it stops doing
   // client-side X work and trusts the values it's given. Absence keeps
   // the original client-side behaviour byte-identical.
-  const [internalSorting, setInternalSorting] = React.useState<SortingState>([]);
+  const [internalSorting, setInternalSorting] = React.useState<SortingState>(initialSorting ?? []);
   const [internalColumnFilters, setInternalColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [internalPagination, setInternalPagination] = React.useState<PaginationState>({
     pageIndex: 0,
