@@ -156,3 +156,38 @@ export const BufferDetailSchema = z
     lines: z.array(BufferDetailLineSchema),
   })
   .openapi('BufferDetail');
+
+export const notificationSummaryQuerySchema = z.object({
+  source: z.enum(['orders', 'buffer']).openapi({
+    param: { name: 'source', in: 'query' },
+    description: 'Which table the realtime INSERT came from',
+  }),
+  id: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: 'id', in: 'query' }, description: 'Row id from the INSERT event' }),
+});
+
+export const NewOrderNotificationSummarySchema = z
+  .object({
+    source: z.enum(['orders', 'buffer']),
+    orderId: z.string().uuid().nullable(),
+    bufferId: z.string().uuid().nullable(),
+    platformOrderNumber: z.string().nullable(),
+    revenue: z
+      .string()
+      .openapi({ description: 'Sale subtotal (net), Decimal string', example: '149.90' }),
+    profit: z.string().nullable().openapi({
+      description: 'Estimated net profit, Decimal string; null when cost is pending',
+      example: '38.40',
+    }),
+    costStatus: z.enum(['costed', 'pending']).openapi({
+      description: "'costed' = profit known; 'pending' = cost-missing",
+      example: 'pending',
+    }),
+    isToday: z.boolean().openapi({
+      description: "Whether the order falls in today's business day",
+      example: true,
+    }),
+  })
+  .openapi('NewOrderNotificationSummary');
