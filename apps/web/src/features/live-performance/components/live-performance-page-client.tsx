@@ -15,7 +15,11 @@ import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { type RealtimeHealth } from '@/lib/supabase/realtime';
 import { cn } from '@/lib/utils';
 
+import { useQueryState } from 'nuqs';
+
 import type { LiveOrderRow } from '../api/get-live-orders.api';
+import { useLiveOrders } from '../hooks/use-live-orders';
+import { resolveDeepLinkRow } from '../lib/resolve-deep-link-row';
 import { liveKeys } from '../query-keys';
 import { useNewOrderNotifier } from '../providers/new-order-notifier-provider';
 
@@ -58,6 +62,22 @@ export function LivePerformancePageClient({
   const queryClient = useQueryClient();
   const isFetching = useIsFetching({ queryKey: liveKeys.all }) > 0;
   const [selected, setSelected] = React.useState<LiveOrderRow | null>(null);
+
+  // Deep-link: a toast's "Detayi gor" routes here with ?order=/?buffer=. Resolve
+  // the row from today's feed, open the Slice-C Sheet, then clear the param.
+  const [orderParam, setOrderParam] = useQueryState('order');
+  const [bufferParam, setBufferParam] = useQueryState('buffer');
+  const deepLinkOrders = useLiveOrders(orgId, storeId, 'all');
+
+  React.useEffect(() => {
+    if (orderParam === null && bufferParam === null) return;
+    const rows = deepLinkOrders.data?.data;
+    if (rows === undefined) return; // still loading -- keep the param for the next pass
+    const match = resolveDeepLinkRow(rows, orderParam, bufferParam);
+    if (match !== null) setSelected(match);
+    void setOrderParam(null);
+    void setBufferParam(null);
+  }, [orderParam, bufferParam, deepLinkOrders.data, setOrderParam, setBufferParam]);
 
   if (orgId === null || storeId === null) {
     return (
