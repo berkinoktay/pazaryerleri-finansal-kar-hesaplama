@@ -26,12 +26,14 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { SidebarMenuButton, useSidebar } from '@/components/ui/sidebar';
+import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useCurrentUser } from '@/features/auth/hooks/use-current-user';
 import { useSignOut } from '@/features/auth/hooks/use-sign-out';
 import { LOCALES, LOCALE_LABELS } from '@/i18n/config';
 import { Link } from '@/i18n/navigation';
 import { useLocaleSwitch } from '@/lib/use-locale-switch';
+import { useOrderSoundPref } from '@/lib/use-order-sound-pref';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/providers/theme-provider';
 
@@ -95,6 +97,8 @@ export function UserMenu({ placement = 'footer' }: UserMenuProps = {}): React.Re
   const popoverSide = isHeader ? 'bottom' : collapsed ? 'right' : 'top';
   const popoverAlign = isHeader ? 'end' : collapsed ? 'end' : 'start';
 
+  const { enabled: soundEnabled, setEnabled: setSoundEnabled } = useOrderSoundPref();
+  const soundLabelId = React.useId();
   const langLabelId = React.useId();
 
   const initials = deriveInitials(user?.email ?? '?');
@@ -241,6 +245,18 @@ export function UserMenu({ placement = 'footer' }: UserMenuProps = {}): React.Re
               ))}
             </ToggleGroup>
           </div>
+        </div>
+
+        <div className="gap-sm px-sm py-xs flex items-center justify-between">
+          <span id={soundLabelId} className="text-2xs text-muted-foreground font-medium">
+            {t('sound.heading')}
+          </span>
+          <Switch
+            size="sm"
+            checked={soundEnabled}
+            onCheckedChange={setSoundEnabled}
+            aria-labelledby={soundLabelId}
+          />
         </div>
 
         <Separator variant="muted" />

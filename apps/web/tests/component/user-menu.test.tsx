@@ -35,6 +35,7 @@ const messages = {
     settings: 'Hesap ayarları',
     theme: { heading: 'Tema', light: 'Açık', dark: 'Koyu', system: 'Sistem' },
     language: { heading: 'Dil' },
+    sound: { heading: 'Order notification sound' },
     help: { docs: 'Yardım', shortcuts: 'Kısayollar', feedback: 'Geri bildirim' },
   },
 };
@@ -93,5 +94,15 @@ describe('UserMenu', () => {
   it('renders the sign-out item', async () => {
     await openMenu();
     expect(await screen.findByText('Çıkış yap')).toBeInTheDocument();
+  });
+
+  it('sound switch is checked by default and unchecks on click', async () => {
+    const { user } = await openMenu();
+    // The sound Switch is the only role="switch" in the menu (theme is a
+    // dropdown, language is a toggle-group — neither produces a switch role).
+    const soundSwitch = await screen.findByRole('switch');
+    expect(soundSwitch).toBeChecked();
+    await user.click(soundSwitch);
+    expect(soundSwitch).not.toBeChecked();
   });
 });
