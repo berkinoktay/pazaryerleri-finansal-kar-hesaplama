@@ -628,6 +628,17 @@ export async function getLiveOrders(args: {
   };
 }
 
+export interface NewOrderNotificationSummary {
+  source: 'orders' | 'buffer';
+  orderId: string | null;
+  bufferId: string | null;
+  platformOrderNumber: string | null;
+  revenue: string;
+  profit: string | null;
+  costStatus: 'costed' | 'pending';
+  isToday: boolean;
+}
+
 // --- Buffer Detail ---
 
 export interface BufferDetailLine {
@@ -706,5 +717,66 @@ export async function getBufferDetail(args: {
     status: mapped.status,
     saleSubtotalNet: new Decimal(mapped.saleSubtotalNet).toFixed(2),
     lines,
+  };
+}
+
+/**
+ * Canonical revenue/profit summary for a realtime new-order toast. Looks the
+ * row up by id (org + store scoped) so a cross-tenant id returns NotFoundError
+ * and the post-event read sees the settled money columns. `isToday` lets the
+ * client drop backfills / historical inserts.
+ */
+export async function getNewOrderNotificationSummary(args: {
+  orgId: string;
+  storeId: string;
+  source: 'orders' | 'buffer';
+  id: string;
+}): Promise<NewOrderNotificationSummary> {
+  if (args.source === 'orders') {
+    const order = await prisma.order.findFirst({
+      where: { id: args.id, organizationId: args.orgId, storeId: args.storeId },
+      select: {
+        id: true,
+        platformOrderNumber: true,
+        saleSubtotalNet: true,
+        estimatedNetProfit: true,
+        orderDate: true,
+      },
+    });
+    if (order === null) {
+      throw new NotFoundError('Order', args.id);
+    }
+    const { start, end } = getBusinessDayRange();
+    const profit =
+      order.estimatedNetProfit !== null ? new Decimal(order.estimatedNetProfit).toFixed(2) : null;
+    return {
+      source: 'orders',
+      orderId: order.id,
+      bufferId: null,
+      platformOrderNumber: order.platformOrderNumber,
+      revenue: new Decimal(order.saleSubtotalNet ?? 0).toFixed(2),
+      profit,
+      costStatus: profit !== null ? 'costed' : 'pending',
+      isToday: order.orderDate >= start && order.orderDate < end,
+    };
+  }
+
+  const entry = await prisma.livePerformanceBuffer.findFirst({
+    where: { id: args.id, organizationId: args.orgId, storeId: args.storeId },
+    select: { id: true, platformOrderNumber: true, mappedOrder: true, orderDate: true },
+  });
+  if (entry === null) {
+    throw new NotFoundError('BufferEntry', args.id);
+  }
+  const mapped = entry.mappedOrder as unknown as MappedOrder;
+  return {
+    source: 'buffer',
+    orderId: null,
+    bufferId: entry.id,
+    platformOrderNumber: entry.platformOrderNumber,
+    revenue: new Decimal(mapped.saleSubtotalNet).toFixed(2),
+    profit: null,
+    costStatus: 'pending',
+    isToday: entry.orderDate.getTime() === getBusinessDateAnchor().getTime(),
   };
 }
