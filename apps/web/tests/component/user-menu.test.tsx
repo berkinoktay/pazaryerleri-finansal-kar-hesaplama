@@ -99,7 +99,7 @@ describe('UserMenu', () => {
   it('sound switch is checked by default and unchecks on click', async () => {
     const { user } = await openMenu();
     // The sound Switch is the only role="switch" in the menu (theme is a
-    // dropdown, language is a toggle-group — neither produces a switch role).
+    // dropdown, language is a toggle-group -- neither produces a switch role).
     const soundSwitch = await screen.findByRole('switch');
     expect(soundSwitch).toBeChecked();
     await user.click(soundSwitch);
