@@ -30,6 +30,10 @@ interface CostEntryCellProps {
   storeId: string;
   orderId: string;
   item: OrderItemDetail;
+  /** Optional post-success hook for callers that need extra invalidation
+   *  (e.g. live-performance refreshing its own liveKeys). The relocated hook
+   *  already invalidates orderKeys; this fires in addition, after it. */
+  onCosted?: () => void;
 }
 
 export function CostEntryCell({
@@ -37,8 +41,9 @@ export function CostEntryCell({
   storeId,
   orderId,
   item,
+  onCosted,
 }: CostEntryCellProps): React.ReactElement {
-  const t = useTranslations('livePerformance.orderDetail.costEntry');
+  const t = useTranslations('orderDetail.costEntry');
   const [open, setOpen] = React.useState(false);
   const [netAmount, setNetAmount] = React.useState('');
   const [vatRate, setVatRate] = React.useState('20');
@@ -56,7 +61,12 @@ export function CostEntryCell({
     if (!(net > 0) || rate < 0 || rate > 100) return;
     mutation.mutate(
       { itemId: item.id, body: { source: 'manual', netAmount, vatRate: rate } },
-      { onSuccess: () => setOpen(false) },
+      {
+        onSuccess: () => {
+          setOpen(false);
+          onCosted?.();
+        },
+      },
     );
   };
 
@@ -64,7 +74,12 @@ export function CostEntryCell({
     if (profileId === '') return;
     mutation.mutate(
       { itemId: item.id, body: { source: 'profile', profileId } },
-      { onSuccess: () => setOpen(false) },
+      {
+        onSuccess: () => {
+          setOpen(false);
+          onCosted?.();
+        },
+      },
     );
   };
 

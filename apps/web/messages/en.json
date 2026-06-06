@@ -1427,6 +1427,19 @@
     },
     "intent": "Order from {date} — profit breakdown, fee timeline, and return status.",
     "backToList": "Back to list",
+    "costEntry": {
+      "trigger": "Enter cost",
+      "tabs": {
+        "manual": "Custom amount",
+        "profile": "Saved profile"
+      },
+      "netAmount": "Amount (excl. VAT)",
+      "vatRate": "VAT rate (%)",
+      "profile": "Cost profile",
+      "profilePlaceholder": "Select a profile",
+      "save": "Save",
+      "noProfiles": "No saved cost profiles"
+    },
     "kpis": {
       "saleSubtotalNet": {
         "label": "Sale (net)"
@@ -1631,26 +1644,6 @@
         },
         "addCost": "Add cost",
         "loadError": "Could not load the order detail."
-      },
-      "costEntry": {
-        "trigger": "Enter cost",
-        "tabs": {
-          "manual": "Custom amount",
-          "profile": "Saved profile"
-        },
-        "netAmount": "Amount (excl. VAT)",
-        "vatRate": "VAT rate (%)",
-        "profile": "Cost profile",
-        "profilePlaceholder": "Select a profile",
-        "save": "Save",
-        "cancel": "Cancel",
-        "noProfiles": "No saved cost profiles",
-        "errors": {
-          "netAmountRequired": "Amount is required",
-          "netAmountPositive": "Amount must be greater than 0",
-          "vatRateRange": "VAT rate must be between 0-100",
-          "profileRequired": "Select a profile"
-        }
       }
     },
     "realtime": {
