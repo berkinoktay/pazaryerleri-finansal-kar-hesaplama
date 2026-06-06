@@ -2,6 +2,8 @@
 
 import {
   isSyncErrorCode,
+  type BufferEntryStatus,
+  type OrderStatus,
   type SyncErrorCode,
   type SyncStatus,
   type SyncType,
@@ -58,6 +60,30 @@ interface SyncLogsRowWire {
    * layer's normalizer.
    */
   skipped_pages: unknown | null;
+}
+
+/**
+ * Wire shape of an `orders` row arriving over postgres_changes (INSERT only).
+ * Mirrors Postgres logical-decoding output; only `id` is consumed by the
+ * notifier, but the scope columns document what the row carries.
+ */
+interface OrdersRowWire {
+  id: string;
+  organization_id: string;
+  store_id: string;
+  status: OrderStatus;
+  order_date: string;
+  platform_order_number: string | null;
+}
+
+/** Wire shape of a `live_performance_buffer` row over postgres_changes. */
+interface BufferRowWire {
+  id: string;
+  organization_id: string;
+  store_id: string;
+  status: BufferEntryStatus;
+  order_date: string;
+  platform_order_number: string;
 }
 
 export interface SkippedPageWireShape {
@@ -272,6 +298,139 @@ export function subscribeToOrgSyncs(
   // Visibility handler — only wired in real browsers. SSR / vitest-happy-dom
   // both expose `document` so the typeof check is enough to keep node-only
   // test contexts safe.
+  const handleVisibility = (): void => {
+    if (typeof document === 'undefined') return;
+    if (document.visibilityState === 'hidden') {
+      reportHealth('paused');
+      void teardown();
+    } else if (channel === null) {
+      channel = buildChannel();
+    }
+  };
+
+  channel = buildChannel();
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibility);
+  }
+
+  return () => {
+    unsubscribed = true;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    }
+    void teardown();
+  };
+}
+
+/**
+ * Map a postgres_changes payload to a new-order event, or null when the event
+ * is not an INSERT. Extracted so the INSERT-narrowing is unit-testable without
+ * mocking a Realtime channel. The INSERT discriminant gives `payload.new: T`.
+ */
+export function newOrderInsertEvent<T extends { id: string }>(
+  table: 'orders' | 'buffer',
+  payload: RealtimePostgresChangesPayload<T>,
+): { table: 'orders' | 'buffer'; id: string } | null {
+  if (payload.eventType !== 'INSERT') return null;
+  return { table, id: payload.new.id };
+}
+
+export interface SubscribeToLivePerformanceOptions {
+  /**
+   * Fires on any relevant row change. The live-performance aggregates
+   * (KPIs, chart, missing-cost, top-products, orders) are all derived
+   * server-side, so the consumer can't reconstruct them from a single row —
+   * it invalidates and refetches rather than reading the payload. That's why
+   * this callback carries no row data (unlike the sync_logs subscription).
+   */
+  onEvent: () => void;
+  /** Fires ONLY on a buffer/orders INSERT -- a genuinely new order for the toast. */
+  onNewOrder?: (event: { table: 'orders' | 'buffer'; id: string }) => void;
+  onHealthChange?: (health: RealtimeHealth) => void;
+}
+
+/**
+ * Subscribe to the two tables that drive a store's live-performance surface,
+ * both filtered by `store_id`:
+ *
+ *   - `live_performance_buffer` (event `*`) — a cost-missing order arriving,
+ *     a cost being attached (PENDING → PROMOTING), or a promotion completing
+ *     (row deleted). Refreshes the missing-cost list + orders feed.
+ *   - `orders` (event `INSERT`) — a brand-new fully-calculable order written
+ *     straight to `orders` (cost already known, never buffered), or the
+ *     promote worker writing a promoted order. Refreshes KPIs + top-products +
+ *     orders feed.
+ *
+ * Mirrors {@link subscribeToOrgSyncs}: browser Supabase client (the Realtime
+ * WebSocket authenticates through the cookie session — no `setAuth` on this
+ * path), health reported through `onHealthChange` so the consumer can gate a
+ * polling fallback, and tab-visibility teardown to free the socket in
+ * background tabs. Returns an unsubscribe function.
+ *
+ * Single store channel: `live-performance:${storeId}`.
+ */
+export function subscribeToLivePerformance(
+  storeId: string,
+  options: SubscribeToLivePerformanceOptions,
+): () => void {
+  const { onEvent, onNewOrder, onHealthChange } = options;
+  const supabase = createClient();
+  let channel: RealtimeChannel | null = null;
+  let unsubscribed = false;
+
+  const reportHealth = (next: RealtimeHealth): void => {
+    if (onHealthChange !== undefined) onHealthChange(next);
+  };
+
+  const buildChannel = (): RealtimeChannel => {
+    reportHealth('connecting');
+    return supabase
+      .channel(`live-performance:${storeId}`)
+      .on<BufferRowWire>(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'live_performance_buffer',
+          filter: `store_id=eq.${storeId}`,
+        },
+        (payload) => {
+          const event = newOrderInsertEvent('buffer', payload);
+          if (event !== null) onNewOrder?.(event);
+          onEvent();
+        },
+      )
+      .on<OrdersRowWire>(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'orders',
+          filter: `store_id=eq.${storeId}`,
+        },
+        (payload) => {
+          const event = newOrderInsertEvent('orders', payload);
+          if (event !== null) onNewOrder?.(event);
+          onEvent();
+        },
+      )
+      .subscribe((status) => {
+        if (unsubscribed) return;
+        if (status === 'SUBSCRIBED') reportHealth('healthy');
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          reportHealth('errored');
+        }
+      });
+  };
+
+  const teardown = async (): Promise<void> => {
+    if (channel === null) return;
+    const c = channel;
+    channel = null;
+    await supabase.removeChannel(c);
+  };
+
   const handleVisibility = (): void => {
     if (typeof document === 'undefined') return;
     if (document.visibilityState === 'hidden') {

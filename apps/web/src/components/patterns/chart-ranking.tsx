@@ -231,6 +231,19 @@ export function RankingChart({
           </>
         ) : null}
       </div>
+
+      {/* role="img" makes the grid's descendant text presentational, so the
+          per-row label + value — real HTML, since the ranking is the one chart
+          rendered as DOM text rather than an SVG plot — would be silent to
+          assistive tech. This sibling sr-only list (outside the img subtree)
+          carries the ranking data so screen readers announce each row. */}
+      <ul className="sr-only">
+        {rows.map((row, index) => (
+          <li key={index}>
+            {row.label}: {valueFormatter(row.value, format)}
+          </li>
+        ))}
+      </ul>
     </TooltipProvider>
   );
 }

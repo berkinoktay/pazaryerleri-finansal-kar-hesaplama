@@ -16,6 +16,7 @@ import { Decimal } from 'decimal.js';
 
 import type { StoreEnvironment } from '@pazarsync/db';
 import { MarketplaceUnreachable, RateLimitedError, syncLog } from '@pazarsync/sync-core';
+import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { mapTrendyolResponseToDomainError } from './errors';
 import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
@@ -251,7 +252,13 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
   return {
     platformOrderId: pkg.shipmentPackageId.toString(),
     platformOrderNumber: pkg.orderNumber,
-    orderDate: new Date(pkg.orderDate),
+    // Trendyol stamps `orderDate` as "GMT +3" (Istanbul wall-clock-as-UTC, per
+    // docs/integrations/.../siparis-entegrasyonu/ozet-ve-en-iyi-pratikler.md), so
+    // a raw `new Date(orderDate)` reads 3h ahead and corrupts every business-day /
+    // hour calculation. Normalize to the true instant. `lastModifiedDate` is true
+    // UTC ("GMT") and `actualDeliveryDate` derives from `createdDate` (also GMT) —
+    // both stay raw.
+    orderDate: businessZoneEpochToInstant(pkg.orderDate),
     lastModifiedDate: new Date(pkg.lastModifiedDate),
     // Sync path: bilinmeyen status'leri PROCESSING'e düşür (defensive — sync
     // devam etsin). Webhook caller (apps/api PR-C3b) farklı bir politika

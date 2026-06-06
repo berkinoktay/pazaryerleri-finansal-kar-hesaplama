@@ -2,6 +2,7 @@ export { formatCurrency, formatNumber, formatPercent } from './currency';
 export { formatDate, formatDateRange, getDateRange } from './date';
 export {
   APP_TIME_ZONE,
+  businessZoneEpochToInstant,
   getBusinessDate,
   getBusinessDateAnchor,
   getBusinessDayRange,

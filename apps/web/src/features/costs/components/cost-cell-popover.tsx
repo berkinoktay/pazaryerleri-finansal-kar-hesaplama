@@ -26,18 +26,23 @@ import type { CostProfile } from '@/features/costs/types/cost-profile.types';
 import { CostProfileType } from '@/features/costs/types/cost-profile.types';
 import { cn } from '@/lib/utils';
 
-import type { VariantSummary } from '../api/list-products.api';
-
 import { CostCellCreateBridge } from './cost-cell-create-bridge';
 
 export interface CostCellPopoverProps {
   orgId: string;
-  variant: VariantSummary;
+  /**
+   * The variant whose cost profiles this popover attaches/detaches. Only the
+   * id is needed — the popover resolves everything else from the costs hooks —
+   * so callers pass a bare id (products table row, live-performance missing-cost
+   * row) without constructing a full variant object.
+   */
+  variantId: string;
   children: React.ReactNode;
 }
 
 /**
- * Popover anchored to the cost cell in the products table.
+ * Popover anchored to a cost cell. Attaches / detaches cost profiles for a
+ * single variant and bridges to the create-profile dialog.
  *
  * Composition (top → bottom):
  *   Title row (name + attached count)
@@ -50,17 +55,21 @@ export interface CostCellPopoverProps {
  * live in the same layer as the panel. Borders between sections come
  * from the panel's own divider rule, not from the CommandInput's wrapper
  * (which is stripped to avoid the "input floating inside panel" look).
+ *
+ * Lives in the `costs` feature — a costs-domain primitive consumed
+ * cross-feature (products cost cell, live-performance missing-cost). The
+ * `products.costCell.popover` i18n namespace is retained for copy continuity.
  */
 export function CostCellPopover({
   orgId,
-  variant,
+  variantId,
   children,
 }: CostCellPopoverProps): React.ReactElement {
   const t = useTranslations('products.costCell.popover');
   const [open, setOpen] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
 
-  const attachedQuery = useVariantCostProfiles(open ? { orgId, variantId: variant.id } : null);
+  const attachedQuery = useVariantCostProfiles(open ? { orgId, variantId } : null);
   const allProfilesQuery = useCostProfiles(open ? { orgId, filters: { archived: 'false' } } : null);
 
   const attachMutation = useAttachCostProfiles();
@@ -82,7 +91,7 @@ export function CostCellPopover({
     attachMutation.mutate({
       orgId,
       profileIds: [profileId],
-      variantIds: [variant.id],
+      variantIds: [variantId],
       ...(profile !== undefined ? { optimisticProfiles: [profile] } : {}),
     });
   }
@@ -91,7 +100,7 @@ export function CostCellPopover({
     detachMutation.mutate({
       orgId,
       profileIds: [profile.id],
-      variantIds: [variant.id],
+      variantIds: [variantId],
     });
   }
 
@@ -193,7 +202,7 @@ export function CostCellPopover({
 
       <CostCellCreateBridge
         orgId={orgId}
-        variantId={variant.id}
+        variantId={variantId}
         open={createOpen}
         onOpenChange={setCreateOpen}
       />

@@ -1,8 +1,9 @@
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { processBufferPromote } from '../../src/handlers/buffer-promote';
+import { processBufferPromote, processPastDayBufferFlush } from '../../src/handlers/buffer-promote';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import {
   createBufferEntry,
@@ -178,5 +179,88 @@ describe('processBufferPromote', () => {
     const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
     expect(after.attempts).toBe(4);
     expect(after.status).toBe('PERMANENT_FAILED');
+  });
+});
+
+describe('processPastDayBufferFlush', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+  it('graduates a PENDING past-day entry into orders (null profit) and deletes the buffer row', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // No cost seeded → graduates with null estimatedNetProfit.
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-pending',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'flush-pending', barcode: 'EAN13-FLUSH' }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-pending');
+    expect(order.estimatedNetProfit).toBeNull();
+  });
+
+  it('does NOT flush a today PENDING entry (same-day cost window preserved)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-today',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'flush-today', barcode: 'EAN13-FLUSH' }),
+    });
+
+    await processPastDayBufferFlush();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('PENDING');
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('leaves PROMOTING / FAILED past-day entries to the promote tick (only PENDING is flushed)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const promoting = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-promoting',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'flush-promoting', barcode: 'EAN13-FLUSH' }),
+    });
+
+    await processPastDayBufferFlush();
+
+    // Untouched by flush — promote owns PROMOTING/FAILED.
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: promoting.id } })).toBe(1);
+  });
+
+  it('marks FAILED when graduation throws (handed off to the promote retry path)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-bad',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'flush-bad', invalid: true }),
+    });
+
+    await processPastDayBufferFlush();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('FAILED');
+    expect(after.attempts).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
   });
 });

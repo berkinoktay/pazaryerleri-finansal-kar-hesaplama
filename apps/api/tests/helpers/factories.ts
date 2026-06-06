@@ -150,6 +150,42 @@ export async function createOrder(
   });
 }
 
+export interface CreateOrderItemOverrides {
+  quantity?: number;
+  unitPrice?: string;
+  commissionRate?: string;
+  commissionAmount?: string;
+  // NET cost snapshot — drives the costed-cost aggregate (Σ unitCostSnapshotNet ×
+  // quantity over costed orders). null = cost-missing line.
+  unitCostSnapshotNet?: string | null;
+  productVariantId?: string | null;
+}
+
+/**
+ * One order line. `quantity` feeds "units sold"; `unitCostSnapshotNet` feeds the
+ * costed-cost denominator of the Kâr/Maliyet ratio. The three required money
+ * columns (unitPrice / commissionRate / commissionAmount) default to zero — tests
+ * that only exercise the live-performance aggregates don't depend on them.
+ */
+export async function createOrderItem(
+  orderId: string,
+  organizationId: string,
+  overrides: CreateOrderItemOverrides = {},
+) {
+  return prisma.orderItem.create({
+    data: {
+      orderId,
+      organizationId,
+      quantity: overrides.quantity ?? 1,
+      unitPrice: overrides.unitPrice ?? '0.00',
+      commissionRate: overrides.commissionRate ?? '0.00',
+      commissionAmount: overrides.commissionAmount ?? '0.00',
+      unitCostSnapshotNet: overrides.unitCostSnapshotNet ?? null,
+      productVariantId: overrides.productVariantId ?? null,
+    },
+  });
+}
+
 // ─── Profit Calculation V1 (PR-1) ──────────────────────────────────────
 // Minimal factory'ler — RLS tests sadece tenant izolasyon doğrular, business
 // data doğru olmak zorunda değil. Override interface'i ileride iş mantığı

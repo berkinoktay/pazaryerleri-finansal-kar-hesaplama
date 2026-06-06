@@ -1,5 +1,6 @@
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
+import { getBusinessDayRange } from '@pazarsync/utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../../src/app';
@@ -10,6 +11,7 @@ import {
   createOrganization,
   createUserProfile,
 } from '../../../helpers/factories';
+import { ensureFeeDefinitions } from '../../../helpers/seed-fee-definitions';
 
 /**
  * PR-B: webhook receiver Live Performance buffer rule.
@@ -34,8 +36,22 @@ interface PayloadOverrides {
   barcode?: string;
 }
 
+const MS_HOUR = 60 * 60 * 1000;
+
+/**
+ * A "today" orderDate as Trendyol actually sends it: GMT+3 (Istanbul
+ * wall-clock-as-UTC). The receiver normalizes it back to the true instant, so we
+ * encode noon Istanbul today (real noon + the +3h offset) — a `Date.now()` value
+ * would drift into "yesterday" after normalization when the suite runs between
+ * 00:00 and 03:00 Istanbul. Noon is 12h from either day boundary, so the
+ * today/yesterday gate is deterministic regardless of run time.
+ */
+function todayOrderDateGmt3(): number {
+  return getBusinessDayRange().start.getTime() + 15 * MS_HOUR;
+}
+
 function makeWebhookPayload(overrides: PayloadOverrides = {}) {
-  const orderDate = overrides.orderDate ?? Date.now();
+  const orderDate = overrides.orderDate ?? todayOrderDateGmt3();
   return {
     orderNumber: overrides.orderNumber ?? 'buf-ord-1',
     shipmentPackageId: overrides.shipmentPackageId ?? 700000001,
@@ -139,6 +155,10 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
   beforeEach(async () => {
     _resetRateLimitStoreForTests();
     await truncateAll();
+    // Late-arrival cost-missing now persists to orders, which runs
+    // applyEstimateOnOrderCreate (PSF + Stopaj ESTIMATE fees) — needs the
+    // FeeDefinition seed even though the estimate itself stays null (no cost).
+    await ensureFeeDefinitions();
   });
 
   afterAll(() => {
@@ -148,7 +168,11 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
   it("cost-missing + today's orderDate → writes a PENDING buffer entry", async () => {
     const { orgId, storeId } = await setupStore();
 
-    const res = await postWebhook(storeId, makeWebhookPayload({ orderDate: Date.now() }), authOk);
+    const res = await postWebhook(
+      storeId,
+      makeWebhookPayload({ orderDate: todayOrderDateGmt3() }),
+      authOk,
+    );
     expect(res.status).toBe(200);
 
     const entries = await prisma.livePerformanceBuffer.findMany({ where: { storeId } });
@@ -159,9 +183,9 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(entries[0].platformOrderNumber).toBe('buf-ord-1');
   });
 
-  it('cost-missing + previous-day orderDate → skips, no buffer write', async () => {
-    const { storeId } = await setupStore();
-    const yesterday = Date.now() - 36 * 60 * 60 * 1000;
+  it('cost-missing + previous-day orderDate → persists to orders (null profit), no buffer write', async () => {
+    const { orgId, storeId } = await setupStore();
+    const yesterday = todayOrderDateGmt3() - 24 * MS_HOUR;
 
     const res = await postWebhook(
       storeId,
@@ -173,12 +197,18 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
       authOk,
     );
     expect(res.status).toBe(200);
+
+    // Never lose a sale: persisted to orders with null profit, not buffered.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
+    expect(order.organizationId).toBe(orgId);
+    expect(order.platformOrderId).toBe('700000002');
+    expect(order.estimatedNetProfit).toBeNull();
   });
 
   it('duplicate webhook for the same package → P2002 dedupe, single buffer entry', async () => {
     const { storeId } = await setupStore();
-    const today = Date.now();
+    const today = todayOrderDateGmt3();
     const base = { shipmentPackageId: 700000003, orderNumber: 'buf-dup', orderDate: today };
 
     const r1 = await postWebhook(

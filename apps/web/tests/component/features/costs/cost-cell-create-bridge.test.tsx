@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CostCellCreateBridge } from '@/features/products/components/cost-cell-create-bridge';
+import { CostCellCreateBridge } from '@/features/costs/components/cost-cell-create-bridge';
 
 import { render, screen, waitFor } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';

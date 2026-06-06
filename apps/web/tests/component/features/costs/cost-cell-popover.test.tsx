@@ -1,7 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { CostCellPopover } from '@/features/products/components/cost-cell-popover';
-import type { VariantSummary } from '@/features/products/api/list-products.api';
+import { CostCellPopover } from '@/features/costs/components/cost-cell-popover';
 
 import { render, screen, waitFor } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';
@@ -13,38 +12,6 @@ const VARIANT_ID = 'variant-uuid-001';
 const TEST_API_BASE = 'http://localhost:3001';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
-
-function makeVariant(overrides: Partial<VariantSummary> = {}): VariantSummary {
-  return {
-    id: VARIANT_ID,
-    platformVariantId: '10010',
-    barcode: 'BC-0001',
-    stockCode: 'STK-A',
-    size: 'M',
-    salePrice: '100.00',
-    listPrice: '100.00',
-    vatRate: 20,
-    costPrice: null,
-    quantity: 5,
-    deliveryDuration: 1,
-    isRushDelivery: false,
-    fastDeliveryOptions: [],
-    productUrl: null,
-    locationBasedDelivery: 'DISABLED',
-    status: 'onSale',
-    currentCostTry: null,
-    profileCount: 0,
-    costStatus: 'NO_PROFILES',
-    dimensionalWeight: null,
-    syncedDimensionalWeight: null,
-    isDimensionalWeightOverridden: false,
-    estimatedShippingNet: null,
-    shippingCarrierCode: null,
-    shippingTariffApplied: null,
-    shippingEstimateStatus: 'NO_DESI',
-    ...overrides,
-  };
-}
 
 const attachedProfilesResponse = {
   data: [
@@ -122,9 +89,8 @@ describe('CostCellPopover', () => {
       ),
     );
 
-    const variant = makeVariant({ profileCount: 1, currentCostTry: '25.00', costStatus: 'OK' });
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variant={variant}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );
@@ -147,9 +113,8 @@ describe('CostCellPopover', () => {
       ),
     );
 
-    const variant = makeVariant({ profileCount: 1, currentCostTry: '25.00', costStatus: 'OK' });
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variant={variant}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );
@@ -183,9 +148,8 @@ describe('CostCellPopover', () => {
       ),
     );
 
-    const variant = makeVariant();
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variant={variant}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );
@@ -231,9 +195,8 @@ describe('CostCellPopover', () => {
       ),
     );
 
-    const variant = makeVariant({ profileCount: 1, currentCostTry: '25.00', costStatus: 'OK' });
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variant={variant}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );

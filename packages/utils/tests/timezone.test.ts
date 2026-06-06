@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   APP_TIME_ZONE,
+  businessZoneEpochToInstant,
   getBusinessDate,
   getBusinessDateAnchor,
   getBusinessDayRange,
@@ -81,5 +82,26 @@ describe('getBusinessHour', () => {
     expect(getBusinessHour(new Date('2026-05-27T20:30:00Z'))).toBe(23);
     expect(getBusinessHour(new Date('2026-05-27T22:00:00Z'))).toBe(1);
     expect(getBusinessHour(new Date('2026-05-27T21:00:00Z'))).toBe(0); // local midnight
+  });
+});
+
+describe('businessZoneEpochToInstant', () => {
+  it('reinterprets a GMT+3 (Istanbul wall-clock-as-UTC) epoch as the true instant', () => {
+    // A Trendyol-style orderDate: the order was placed at 14:30 Istanbul, but the
+    // epoch reads "14:30" in UTC (3h ahead of the real 11:30Z instant).
+    const gmt3Epoch = Date.UTC(2026, 5, 5, 14, 30, 0);
+    const instant = businessZoneEpochToInstant(gmt3Epoch);
+    expect(instant.toISOString()).toBe('2026-06-05T11:30:00.000Z');
+    // Business-hour math now sees 14 (the seller's real local hour), not 17.
+    expect(getBusinessHour(instant)).toBe(14);
+  });
+
+  it('keeps the value on the correct business day near local midnight', () => {
+    // 23:30 Istanbul stamped as 23:30Z → true instant 20:30Z, still business day
+    // 2026-06-05 — not 02:30 next day (the bug the +3h shift caused).
+    const gmt3Epoch = Date.UTC(2026, 5, 5, 23, 30, 0);
+    const instant = businessZoneEpochToInstant(gmt3Epoch);
+    expect(getBusinessDate(instant)).toBe('2026-06-05');
+    expect(getBusinessHour(instant)).toBe(23);
   });
 });

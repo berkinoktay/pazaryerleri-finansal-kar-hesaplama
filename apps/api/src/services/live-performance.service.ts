@@ -3,6 +3,8 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
 
+import { NotFoundError } from '../lib/errors';
+
 // All "today"/"yesterday" windows come from the single business-timezone helpers
 // (packages/utils/src/timezone.ts) — never a hard-coded offset. Orders carry a
 // full timestamp, so they filter on the real UTC instant window
@@ -28,62 +30,153 @@ function computeMargin(profit: Decimal, revenue: Decimal): string {
 export interface KpisResult {
   revenueToday: string;
   revenueYesterday: string;
-  netProfitToday: string;
-  netProfitYesterday: string;
   orderCountToday: number;
   orderCountYesterday: number;
+  unitsSoldToday: number;
+  unitsSoldYesterday: number;
+  netProfitToday: string;
+  netProfitYesterday: string;
   marginToday: string;
   marginYesterday: string;
+  profitCostRatioToday: string;
+  profitCostRatioYesterday: string;
+  pendingRevenueToday: string;
+  pendingOrderCountToday: number;
 }
 
-interface RangeAggregate {
+interface OrdersAggregate {
+  revenue: Decimal; // universe (all orders in range)
+  orderCount: number; // universe
+  unitsSold: number; // universe
+  netProfit: Decimal; // costed subset
+  costedRevenue: Decimal; // costed subset (margin denominator)
+  costedCost: Decimal; // costed subset (Kâr/Maliyet denominator)
+  costedCount: number; // costed subset
+}
+
+interface BufferAggregate {
   revenue: Decimal;
-  netProfit: Decimal;
   orderCount: number;
+  unitsSold: number;
 }
 
-async function aggregateForRange(
+/**
+ * Aggregate the `orders` rows for a day. Volume (revenue / count / units) is over
+ * EVERY order; profit / costed-revenue / costed-cost / costed-count are over the
+ * costed subset only (orders with a non-null estimatedNetProfit). Today's
+ * cost-missing orders sit in the buffer (not here); yesterday's persisted
+ * null-profit orders are here but excluded from the costed aggregates.
+ */
+async function aggregateOrders(
   orgId: string,
   storeId: string,
   range: DayRange,
-): Promise<RangeAggregate> {
-  const rows = await prisma.order.findMany({
+): Promise<OrdersAggregate> {
+  const orders = await prisma.order.findMany({
     where: {
       organizationId: orgId,
       storeId,
       orderDate: { gte: range.start, lt: range.end },
     },
-    select: { saleSubtotalNet: true, estimatedNetProfit: true },
+    select: {
+      saleSubtotalNet: true,
+      estimatedNetProfit: true,
+      items: { select: { quantity: true, unitCostSnapshotNet: true } },
+    },
   });
 
   let revenue = new Decimal(0);
+  let unitsSold = 0;
   let netProfit = new Decimal(0);
-  for (const row of rows) {
-    if (row.saleSubtotalNet !== null) revenue = revenue.add(row.saleSubtotalNet.toString());
-    if (row.estimatedNetProfit !== null)
-      netProfit = netProfit.add(row.estimatedNetProfit.toString());
+  let costedRevenue = new Decimal(0);
+  let costedCost = new Decimal(0);
+  let costedCount = 0;
+
+  for (const order of orders) {
+    if (order.saleSubtotalNet !== null) revenue = revenue.add(order.saleSubtotalNet.toString());
+    for (const item of order.items) unitsSold += item.quantity;
+
+    if (order.estimatedNetProfit === null) continue;
+    netProfit = netProfit.add(order.estimatedNetProfit.toString());
+    costedCount += 1;
+    if (order.saleSubtotalNet !== null)
+      costedRevenue = costedRevenue.add(order.saleSubtotalNet.toString());
+    for (const item of order.items) {
+      if (item.unitCostSnapshotNet !== null)
+        costedCost = costedCost.add(
+          new Decimal(item.unitCostSnapshotNet.toString()).mul(item.quantity),
+        );
+    }
   }
-  return { revenue, netProfit, orderCount: rows.length };
+
+  return {
+    revenue,
+    orderCount: orders.length,
+    unitsSold,
+    netProfit,
+    costedRevenue,
+    costedCost,
+    costedCount,
+  };
+}
+
+/**
+ * Aggregate today's buffer (cost-missing orders not yet in `orders`). Revenue +
+ * units come from the stored `mappedOrder` JSON — known the moment the order
+ * arrives, no cost required. Mirrors the buffer read in `getLiveOrders`.
+ */
+async function aggregateBuffer(
+  orgId: string,
+  storeId: string,
+  anchor: Date,
+): Promise<BufferAggregate> {
+  const rows = await prisma.livePerformanceBuffer.findMany({
+    where: { organizationId: orgId, storeId, orderDate: anchor },
+    select: { mappedOrder: true },
+  });
+
+  let revenue = new Decimal(0);
+  let unitsSold = 0;
+  for (const entry of rows) {
+    const mapped = entry.mappedOrder as unknown as MappedOrder;
+    revenue = revenue.add(mapped.saleSubtotalNet);
+    for (const line of mapped.lines) unitsSold += line.quantity;
+  }
+  return { revenue, orderCount: rows.length, unitsSold };
 }
 
 export async function getKpis(args: { orgId: string; storeId: string }): Promise<KpisResult> {
   const today = getBusinessDayRange();
   const yesterday = getBusinessDayRange(new Date(Date.now() - ONE_DAY_MS));
+  const todayAnchor = getBusinessDateAnchor();
 
-  const [todayAgg, yesterdayAgg] = await Promise.all([
-    aggregateForRange(args.orgId, args.storeId, today),
-    aggregateForRange(args.orgId, args.storeId, yesterday),
+  // Yesterday never unions the buffer — its uncosted orders were graduated into
+  // `orders` (null profit) at midnight, so `orders` is already complete.
+  const [todayOrders, todayBuffer, yesterdayOrders] = await Promise.all([
+    aggregateOrders(args.orgId, args.storeId, today),
+    aggregateBuffer(args.orgId, args.storeId, todayAnchor),
+    aggregateOrders(args.orgId, args.storeId, yesterday),
   ]);
 
+  const todayRevenue = todayOrders.revenue.add(todayBuffer.revenue);
+  const todayCount = todayOrders.orderCount + todayBuffer.orderCount;
+  const todayUnits = todayOrders.unitsSold + todayBuffer.unitsSold;
+
   return {
-    revenueToday: todayAgg.revenue.toFixed(2),
-    revenueYesterday: yesterdayAgg.revenue.toFixed(2),
-    netProfitToday: todayAgg.netProfit.toFixed(2),
-    netProfitYesterday: yesterdayAgg.netProfit.toFixed(2),
-    orderCountToday: todayAgg.orderCount,
-    orderCountYesterday: yesterdayAgg.orderCount,
-    marginToday: computeMargin(todayAgg.netProfit, todayAgg.revenue),
-    marginYesterday: computeMargin(yesterdayAgg.netProfit, yesterdayAgg.revenue),
+    revenueToday: todayRevenue.toFixed(2),
+    revenueYesterday: yesterdayOrders.revenue.toFixed(2),
+    orderCountToday: todayCount,
+    orderCountYesterday: yesterdayOrders.orderCount,
+    unitsSoldToday: todayUnits,
+    unitsSoldYesterday: yesterdayOrders.unitsSold,
+    netProfitToday: todayOrders.netProfit.toFixed(2),
+    netProfitYesterday: yesterdayOrders.netProfit.toFixed(2),
+    marginToday: computeMargin(todayOrders.netProfit, todayOrders.costedRevenue),
+    marginYesterday: computeMargin(yesterdayOrders.netProfit, yesterdayOrders.costedRevenue),
+    profitCostRatioToday: computeMargin(todayOrders.netProfit, todayOrders.costedCost),
+    profitCostRatioYesterday: computeMargin(yesterdayOrders.netProfit, yesterdayOrders.costedCost),
+    pendingRevenueToday: todayRevenue.sub(todayOrders.costedRevenue).toFixed(2),
+    pendingOrderCountToday: todayCount - todayOrders.costedCount,
   };
 }
 
@@ -91,6 +184,7 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
 
 export interface ChartPoint {
   hour: number;
+  cumulativeRevenue: string;
   cumulativeProfit: string;
 }
 
@@ -99,10 +193,19 @@ export interface ChartResult {
   yesterday: ChartPoint[];
 }
 
+const HOURS_IN_DAY = 24;
+
+/**
+ * Hourly cumulative revenue + profit for a business day. Revenue buckets EVERY
+ * order's subtotal (plus the buffer, today only); profit buckets the costed
+ * subset (non-null estimate). The two running totals drive the front-end's
+ * ciro↔kâr toggle without a second request.
+ */
 async function hourlyCumulative(
   orgId: string,
   storeId: string,
   range: DayRange,
+  bufferAnchor: Date | null,
 ): Promise<ChartPoint[]> {
   const orders = await prisma.order.findMany({
     where: {
@@ -110,219 +213,299 @@ async function hourlyCumulative(
       storeId,
       orderDate: { gte: range.start, lt: range.end },
     },
-    select: { orderDate: true, estimatedNetProfit: true },
+    select: { orderDate: true, saleSubtotalNet: true, estimatedNetProfit: true },
   });
 
-  const buckets = Array.from({ length: 24 }, () => new Decimal(0));
+  const revenueBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
+  const profitBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
+
   for (const order of orders) {
-    if (order.estimatedNetProfit === null) continue;
     const hour = getBusinessHour(order.orderDate);
-    buckets[hour] = (buckets[hour] ?? new Decimal(0)).add(order.estimatedNetProfit.toString());
+    if (order.saleSubtotalNet !== null)
+      revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(
+        order.saleSubtotalNet.toString(),
+      );
+    if (order.estimatedNetProfit !== null)
+      profitBuckets[hour] = (profitBuckets[hour] ?? new Decimal(0)).add(
+        order.estimatedNetProfit.toString(),
+      );
   }
 
-  let running = new Decimal(0);
-  return buckets.map((bucket, hour) => {
-    running = running.add(bucket);
-    return { hour, cumulativeProfit: running.toFixed(2) };
+  if (bufferAnchor !== null) {
+    const bufferRows = await prisma.livePerformanceBuffer.findMany({
+      where: { organizationId: orgId, storeId, orderDate: bufferAnchor },
+      select: { mappedOrder: true },
+    });
+    for (const entry of bufferRows) {
+      const mapped = entry.mappedOrder as unknown as MappedOrder;
+      const hour = getBusinessHour(new Date(mapped.orderDate));
+      revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(mapped.saleSubtotalNet);
+    }
+  }
+
+  let runningRevenue = new Decimal(0);
+  let runningProfit = new Decimal(0);
+  return revenueBuckets.map((revenueBucket, hour) => {
+    runningRevenue = runningRevenue.add(revenueBucket);
+    runningProfit = runningProfit.add(profitBuckets[hour] ?? new Decimal(0));
+    return {
+      hour,
+      cumulativeRevenue: runningRevenue.toFixed(2),
+      cumulativeProfit: runningProfit.toFixed(2),
+    };
   });
 }
 
 export async function getChart(args: { orgId: string; storeId: string }): Promise<ChartResult> {
   const today = getBusinessDayRange();
   const yesterday = getBusinessDayRange(new Date(Date.now() - ONE_DAY_MS));
+  const todayAnchor = getBusinessDateAnchor();
 
   const [todayPoints, yesterdayPoints] = await Promise.all([
-    hourlyCumulative(args.orgId, args.storeId, today),
-    hourlyCumulative(args.orgId, args.storeId, yesterday),
+    hourlyCumulative(args.orgId, args.storeId, today, todayAnchor),
+    hourlyCumulative(args.orgId, args.storeId, yesterday, null),
   ]);
 
   return { today: todayPoints, yesterday: yesterdayPoints };
 }
 
-// ─── Missing-Cost ─────────────────────────────────────────────────────────────
+// ─── Today's Products (orders ∪ today buffer, per barcode) ──────────────────────
 
-export interface MissingCostRow {
+export interface TodayProductRow {
   variantId: string;
   barcode: string;
+  stockCode: string;
   productName: string;
   thumbUrl: string | null;
   orderCount: number;
-  revenueImpact: string;
+  unitsSold: number;
+  revenue: string;
+  costStatus: 'costed' | 'missing';
+  unitCost: string | null;
 }
 
-export async function getMissingCost(args: {
+interface ProductAccumulator {
+  variantId: string;
+  barcode: string;
+  stockCode: string;
+  productName: string;
+  thumbUrl: string | null;
+  orderIds: Set<string>; // distinct orders (orders table) containing this variant
+  bufferEntryCount: number; // distinct buffer entries containing this barcode
+  unitsSold: number;
+  revenue: Decimal;
+  snapshotUnitCost: Decimal | null; // net unit cost actually applied (costed rows)
+}
+
+interface VariantIdentity {
+  id: string;
+  barcode: string;
+  stockCode: string;
+  productName: string;
+  thumbUrl: string | null;
+}
+
+/**
+ * One row per product variant that sold today, merged over the universe:
+ * `orders`(today) ∪ `buffer`(today). Volume (orderCount / unitsSold / revenue) is
+ * known the moment the order arrives — no cost required. costStatus is resolved
+ * from the active ProductVariantCostProfile (authoritative; matches the retired
+ * getMissingCost), and the displayed unitCost is the net snapshot the profit
+ * engine actually applied to today's costed orders. There is NO per-product
+ * profit (an order's net profit can't be cleanly attributed to one line). Rows
+ * are returned sorted by unitsSold desc for deterministic output; the frontend
+ * owns the live re-sort.
+ */
+export async function getTodayProducts(args: {
   orgId: string;
   storeId: string;
-}): Promise<MissingCostRow[]> {
+}): Promise<TodayProductRow[]> {
+  const { start, end } = getBusinessDayRange();
   const todayAnchor = getBusinessDateAnchor();
 
-  // Group today's PENDING buffer entries by the barcode of each mapped line.
-  // revenueImpact = the order subtotal blocked by the missing cost (whole order
-  // can't be computed until every line is costed).
-  const rows = await prisma.$queryRaw<
-    Array<{ barcode: string; orderCount: bigint; revenueImpact: string }>
-  >`
-    SELECT
-      line ->> 'barcode' AS barcode,
-      COUNT(*) AS "orderCount",
-      COALESCE(SUM((mapped_order ->> 'saleSubtotalNet')::numeric), 0)::text AS "revenueImpact"
-    FROM live_performance_buffer
-    CROSS JOIN LATERAL jsonb_array_elements(mapped_order -> 'lines') AS line
-    WHERE store_id = ${args.storeId}::uuid
-      AND organization_id = ${args.orgId}::uuid
-      AND status = 'PENDING'::buffer_entry_status
-      AND order_date = ${todayAnchor}::date
-    GROUP BY line ->> 'barcode'
-    ORDER BY "orderCount" DESC
-  `;
-
-  if (rows.length === 0) return [];
-
-  const barcodes = rows.map((row) => row.barcode);
-  const variants = await prisma.productVariant.findMany({
-    where: { storeId: args.storeId, organizationId: args.orgId, barcode: { in: barcodes } },
-    select: {
-      id: true,
-      barcode: true,
-      product: {
-        select: {
-          title: true,
-          images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
-        },
-      },
-    },
-  });
-
-  // A multi-line PENDING order can contain lines that DO have a cost (siblings of
-  // a still-missing one). Surface only the genuinely cost-missing variants — the
-  // actionable ones — so the seller's "add cost" list isn't polluted.
-  const costedVariantIds = new Set(
-    (
-      await prisma.productVariantCostProfile.findMany({
-        where: {
-          productVariantId: { in: variants.map((v) => v.id) },
+  const [orderItems, bufferRows] = await Promise.all([
+    prisma.orderItem.findMany({
+      where: {
+        productVariantId: { not: null },
+        order: {
           organizationId: args.orgId,
-          profile: { archivedAt: null },
+          storeId: args.storeId,
+          orderDate: { gte: start, lt: end },
         },
-        select: { productVariantId: true },
-      })
-    ).map((link) => link.productVariantId),
-  );
-
-  const byBarcode = new Map(variants.map((variant) => [variant.barcode, variant]));
-
-  return rows.flatMap((row) => {
-    const variant = byBarcode.get(row.barcode);
-    if (variant === undefined || costedVariantIds.has(variant.id)) return [];
-    return [
-      {
-        variantId: variant.id,
-        barcode: row.barcode,
-        productName: variant.product.title,
-        thumbUrl: variant.product.images[0]?.url ?? null,
-        orderCount: Number(row.orderCount),
-        revenueImpact: new Decimal(row.revenueImpact).toFixed(2),
       },
-    ];
-  });
-}
-
-// ─── Top-Products ─────────────────────────────────────────────────────────────
-
-export interface TopProductRow {
-  rank: number;
-  variantId: string;
-  productName: string;
-  thumbUrl: string | null;
-  orderCount: number;
-  revenue: string;
-  profit: string | null;
-}
-
-interface VariantAggregate {
-  variantId: string;
-  productName: string;
-  thumbUrl: string | null;
-  orderCount: number;
-  revenue: Decimal;
-  profit: Decimal | null;
-}
-
-const TOP_PRODUCTS_LIMIT = 3;
-
-export async function getTopProducts(args: {
-  orgId: string;
-  storeId: string;
-}): Promise<TopProductRow[]> {
-  const { start, end } = getBusinessDayRange();
-
-  const items = await prisma.orderItem.findMany({
-    where: {
-      order: {
-        organizationId: args.orgId,
-        storeId: args.storeId,
-        orderDate: { gte: start, lt: end },
-      },
-    },
-    select: {
-      quantity: true,
-      unitPriceNet: true,
-      productVariant: {
-        select: {
-          id: true,
-          product: {
-            select: {
-              title: true,
-              images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+      select: {
+        orderId: true,
+        quantity: true,
+        unitPriceNet: true,
+        unitCostSnapshotNet: true,
+        productVariant: {
+          select: {
+            id: true,
+            barcode: true,
+            stockCode: true,
+            product: {
+              select: {
+                title: true,
+                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+              },
             },
           },
         },
       },
-      order: { select: { estimatedNetProfit: true } },
-    },
-  });
+    }),
+    // No status filter (unlike getMissingCost, which is PENDING-only because it's
+    // the actionable "add cost now" list): every buffered sale counts toward volume
+    // regardless of promote state. Mirrors aggregateBuffer / getLiveOrders.
+    prisma.livePerformanceBuffer.findMany({
+      where: { organizationId: args.orgId, storeId: args.storeId, orderDate: todayAnchor },
+      select: { id: true, mappedOrder: true },
+    }),
+  ]);
 
-  const byVariant = new Map<string, VariantAggregate>();
-  for (const item of items) {
+  const byVariant = new Map<string, ProductAccumulator>();
+  const ensure = (identity: VariantIdentity): ProductAccumulator => {
+    const existing = byVariant.get(identity.id);
+    if (existing !== undefined) return existing;
+    const created: ProductAccumulator = {
+      variantId: identity.id,
+      barcode: identity.barcode,
+      stockCode: identity.stockCode,
+      productName: identity.productName,
+      thumbUrl: identity.thumbUrl,
+      orderIds: new Set<string>(),
+      bufferEntryCount: 0,
+      unitsSold: 0,
+      revenue: new Decimal(0),
+      snapshotUnitCost: null,
+    };
+    byVariant.set(identity.id, created);
+    return created;
+  };
+
+  // Orders: identity comes straight from the joined variant.
+  for (const item of orderItems) {
     const variant = item.productVariant;
-    if (variant === null) continue;
-
-    const existing = byVariant.get(variant.id) ?? {
-      variantId: variant.id,
+    if (variant === null) continue; // defensive — already filtered in the query
+    const acc = ensure({
+      id: variant.id,
+      barcode: variant.barcode,
+      stockCode: variant.stockCode,
       productName: variant.product.title,
       thumbUrl: variant.product.images[0]?.url ?? null,
-      orderCount: 0,
-      revenue: new Decimal(0),
-      profit: new Decimal(0) as Decimal | null,
-    };
-
-    const unitPriceNet =
-      item.unitPriceNet !== null ? new Decimal(item.unitPriceNet.toString()) : new Decimal(0);
-    existing.revenue = existing.revenue.add(unitPriceNet.mul(item.quantity));
-    existing.orderCount += 1;
-    // profit is informational and best-effort: an order's whole estimated profit
-    // is attributed to each of its variants. null if any contributing order has
-    // no estimate yet (settlement not reconciled / cost incomplete).
-    if (existing.profit !== null && item.order.estimatedNetProfit !== null) {
-      existing.profit = existing.profit.add(item.order.estimatedNetProfit.toString());
-    } else {
-      existing.profit = null;
+    });
+    acc.orderIds.add(item.orderId);
+    acc.unitsSold += item.quantity;
+    if (item.unitPriceNet !== null) {
+      acc.revenue = acc.revenue.add(new Decimal(item.unitPriceNet.toString()).mul(item.quantity));
     }
-    byVariant.set(variant.id, existing);
+    // First non-null snapshot wins. If the variant was costed at differing
+    // snapshots intraday, this shows a representative applied cost (the cell is
+    // a quiet reference, not a reconciled figure).
+    if (acc.snapshotUnitCost === null && item.unitCostSnapshotNet !== null) {
+      acc.snapshotUnitCost = new Decimal(item.unitCostSnapshotNet.toString());
+    }
   }
 
-  return Array.from(byVariant.values())
-    .sort((a, b) => b.orderCount - a.orderCount)
-    .slice(0, TOP_PRODUCTS_LIMIT)
-    .map((aggregate, index) => ({
-      rank: index + 1,
-      variantId: aggregate.variantId,
-      productName: aggregate.productName,
-      thumbUrl: aggregate.thumbUrl,
-      orderCount: aggregate.orderCount,
-      revenue: aggregate.revenue.toFixed(2),
-      profit: aggregate.profit !== null ? aggregate.profit.toFixed(2) : null,
-    }));
+  // Buffer: aggregate lines by barcode first (the entry carries no variant id),
+  // then resolve identity for barcodes not already seen in orders.
+  interface BufferBarcodeAggregate {
+    units: number;
+    revenue: Decimal;
+    entryIds: Set<string>;
+  }
+  const bufferByBarcode = new Map<string, BufferBarcodeAggregate>();
+  for (const entry of bufferRows) {
+    const mapped = entry.mappedOrder as unknown as MappedOrder;
+    for (const line of mapped.lines) {
+      const agg = bufferByBarcode.get(line.barcode) ?? {
+        units: 0,
+        revenue: new Decimal(0),
+        entryIds: new Set<string>(),
+      };
+      agg.units += line.quantity;
+      agg.revenue = agg.revenue.add(new Decimal(line.unitPriceNet).mul(line.quantity));
+      agg.entryIds.add(entry.id);
+      bufferByBarcode.set(line.barcode, agg);
+    }
+  }
+
+  const bufferBarcodes = [...bufferByBarcode.keys()];
+  const bufferVariants =
+    bufferBarcodes.length > 0
+      ? await prisma.productVariant.findMany({
+          where: {
+            storeId: args.storeId,
+            organizationId: args.orgId,
+            barcode: { in: bufferBarcodes },
+          },
+          select: {
+            id: true,
+            barcode: true,
+            stockCode: true,
+            product: {
+              select: {
+                title: true,
+                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+              },
+            },
+          },
+        })
+      : [];
+  const variantByBarcode = new Map(bufferVariants.map((variant) => [variant.barcode, variant]));
+
+  for (const [barcode, agg] of bufferByBarcode) {
+    const variant = variantByBarcode.get(barcode);
+    if (variant === undefined) continue; // unresolved barcode — no identity, skip
+    const acc = ensure({
+      id: variant.id,
+      barcode: variant.barcode,
+      stockCode: variant.stockCode,
+      productName: variant.product.title,
+      thumbUrl: variant.product.images[0]?.url ?? null,
+    });
+    acc.bufferEntryCount += agg.entryIds.size;
+    acc.unitsSold += agg.units;
+    acc.revenue = acc.revenue.add(agg.revenue);
+  }
+
+  // Cost status: a variant is costed iff it has an active (non-archived) cost
+  // profile — authoritative, independent of buffer/orders presence.
+  const variantIds = [...byVariant.keys()];
+  const costedVariantIds = new Set(
+    (variantIds.length > 0
+      ? await prisma.productVariantCostProfile.findMany({
+          where: {
+            productVariantId: { in: variantIds },
+            organizationId: args.orgId,
+            profile: { archivedAt: null },
+          },
+          select: { productVariantId: true },
+        })
+      : []
+    ).map((link) => link.productVariantId),
+  );
+
+  return [...byVariant.values()]
+    .map((acc) => {
+      const costed = costedVariantIds.has(acc.variantId);
+      const row: TodayProductRow = {
+        variantId: acc.variantId,
+        barcode: acc.barcode,
+        stockCode: acc.stockCode,
+        productName: acc.productName,
+        thumbUrl: acc.thumbUrl,
+        orderCount: acc.orderIds.size + acc.bufferEntryCount,
+        unitsSold: acc.unitsSold,
+        revenue: acc.revenue.toFixed(2),
+        costStatus: costed ? 'costed' : 'missing',
+        unitCost: costed && acc.snapshotUnitCost !== null ? acc.snapshotUnitCost.toFixed(2) : null,
+      };
+      // Retain the Decimal revenue for the tiebreaker so the sort compares
+      // numerically, not lexicographically over the `.toFixed(2)` string.
+      return { row, units: acc.unitsSold, revenue: acc.revenue };
+    })
+    .sort((a, b) => b.units - a.units || b.revenue.cmp(a.revenue))
+    .map((entry) => entry.row);
 }
 
 // ─── Orders (today orders + today buffer) ──────────────────────────────────────
@@ -331,6 +514,8 @@ export interface LiveOrderRow {
   source: 'orders' | 'buffer';
   platformOrderId: string;
   platformOrderNumber: string | null;
+  orderId: string | null;
+  bufferId: string | null;
   orderDate: string;
   status: string;
   revenue: string;
@@ -362,6 +547,7 @@ export async function getLiveOrders(args: {
       },
       orderBy: { orderDate: 'desc' },
       select: {
+        id: true,
         platformOrderId: true,
         platformOrderNumber: true,
         orderDate: true,
@@ -374,6 +560,7 @@ export async function getLiveOrders(args: {
       where: { organizationId: args.orgId, storeId: args.storeId, orderDate: todayAnchor },
       orderBy: { createdAt: 'desc' },
       select: {
+        id: true,
         platformOrderId: true,
         platformOrderNumber: true,
         orderDate: true,
@@ -394,6 +581,8 @@ export async function getLiveOrders(args: {
       source: 'orders',
       platformOrderId: order.platformOrderId,
       platformOrderNumber: order.platformOrderNumber,
+      orderId: order.id,
+      bufferId: null,
       orderDate: order.orderDate.toISOString(),
       status: order.status,
       revenue: revenue.toFixed(2),
@@ -408,7 +597,12 @@ export async function getLiveOrders(args: {
       source: 'buffer',
       platformOrderId: entry.platformOrderId,
       platformOrderNumber: entry.platformOrderNumber,
-      orderDate: entry.orderDate.toISOString(),
+      orderId: null,
+      bufferId: entry.id,
+      // The real order timestamp (hour-level) lives in the mapped payload; the
+      // buffer's own `orderDate` column is date-only (midnight), which would
+      // render every pending row at the same wrong "03:00".
+      orderDate: new Date(mapped.orderDate).toISOString(),
       status: mapped.status,
       revenue: new Decimal(mapped.saleSubtotalNet).toFixed(2),
       profit: null,
@@ -431,5 +625,158 @@ export async function getLiveOrders(args: {
       calculated: calculatedRows.length,
       pending: pendingRows.length,
     },
+  };
+}
+
+export interface NewOrderNotificationSummary {
+  source: 'orders' | 'buffer';
+  orderId: string | null;
+  bufferId: string | null;
+  platformOrderNumber: string | null;
+  revenue: string;
+  profit: string | null;
+  costStatus: 'costed' | 'pending';
+  isToday: boolean;
+}
+
+// --- Buffer Detail ---
+
+export interface BufferDetailLine {
+  barcode: string;
+  productName: string;
+  thumbUrl: string | null;
+  variantId: string | null;
+  stockCode: string | null;
+  quantity: number;
+  unitPriceNet: string;
+}
+
+export interface BufferDetail {
+  platformOrderNumber: string | null;
+  orderDate: string; // ISO
+  status: string;
+  saleSubtotalNet: string;
+  lines: BufferDetailLine[];
+}
+
+export async function getBufferDetail(args: {
+  orgId: string;
+  storeId: string;
+  bufferId: string;
+}): Promise<BufferDetail> {
+  const entry = await prisma.livePerformanceBuffer.findFirst({
+    where: { id: args.bufferId, organizationId: args.orgId, storeId: args.storeId },
+    select: {
+      id: true,
+      platformOrderNumber: true,
+      mappedOrder: true,
+    },
+  });
+  if (entry === null) {
+    throw new NotFoundError('BufferEntry', args.bufferId);
+  }
+
+  const mapped = entry.mappedOrder as unknown as MappedOrder;
+
+  const barcodes = [...new Set(mapped.lines.map((l) => l.barcode))];
+  const variants =
+    barcodes.length > 0
+      ? await prisma.productVariant.findMany({
+          where: { storeId: args.storeId, organizationId: args.orgId, barcode: { in: barcodes } },
+          select: {
+            id: true,
+            barcode: true,
+            stockCode: true,
+            product: {
+              select: {
+                title: true,
+                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+              },
+            },
+          },
+        })
+      : [];
+  const byBarcode = new Map(variants.map((v) => [v.barcode, v]));
+
+  const lines: BufferDetailLine[] = mapped.lines.map((line) => {
+    const variant = byBarcode.get(line.barcode);
+    return {
+      barcode: line.barcode,
+      productName: variant?.product.title ?? line.barcode,
+      thumbUrl: variant?.product.images[0]?.url ?? null,
+      variantId: variant?.id ?? null,
+      stockCode: variant?.stockCode ?? null,
+      quantity: line.quantity,
+      unitPriceNet: new Decimal(line.unitPriceNet).toFixed(2),
+    };
+  });
+
+  return {
+    platformOrderNumber: entry.platformOrderNumber,
+    orderDate: new Date(mapped.orderDate).toISOString(),
+    status: mapped.status,
+    saleSubtotalNet: new Decimal(mapped.saleSubtotalNet).toFixed(2),
+    lines,
+  };
+}
+
+/**
+ * Canonical revenue/profit summary for a realtime new-order toast. Looks the
+ * row up by id (org + store scoped) so a cross-tenant id returns NotFoundError
+ * and the post-event read sees the settled money columns. `isToday` lets the
+ * client drop backfills / historical inserts.
+ */
+export async function getNewOrderNotificationSummary(args: {
+  orgId: string;
+  storeId: string;
+  source: 'orders' | 'buffer';
+  id: string;
+}): Promise<NewOrderNotificationSummary> {
+  if (args.source === 'orders') {
+    const order = await prisma.order.findFirst({
+      where: { id: args.id, organizationId: args.orgId, storeId: args.storeId },
+      select: {
+        id: true,
+        platformOrderNumber: true,
+        saleSubtotalNet: true,
+        estimatedNetProfit: true,
+        orderDate: true,
+      },
+    });
+    if (order === null) {
+      throw new NotFoundError('Order', args.id);
+    }
+    const { start, end } = getBusinessDayRange();
+    const profit =
+      order.estimatedNetProfit !== null ? new Decimal(order.estimatedNetProfit).toFixed(2) : null;
+    return {
+      source: 'orders',
+      orderId: order.id,
+      bufferId: null,
+      platformOrderNumber: order.platformOrderNumber,
+      revenue: new Decimal(order.saleSubtotalNet ?? 0).toFixed(2),
+      profit,
+      costStatus: profit !== null ? 'costed' : 'pending',
+      isToday: order.orderDate >= start && order.orderDate < end,
+    };
+  }
+
+  const entry = await prisma.livePerformanceBuffer.findFirst({
+    where: { id: args.id, organizationId: args.orgId, storeId: args.storeId },
+    select: { id: true, platformOrderNumber: true, mappedOrder: true, orderDate: true },
+  });
+  if (entry === null) {
+    throw new NotFoundError('BufferEntry', args.id);
+  }
+  const mapped = entry.mappedOrder as unknown as MappedOrder;
+  return {
+    source: 'buffer',
+    orderId: null,
+    bufferId: entry.id,
+    platformOrderNumber: entry.platformOrderNumber,
+    revenue: new Decimal(mapped.saleSubtotalNet).toFixed(2),
+    profit: null,
+    costStatus: 'pending',
+    isToday: entry.orderDate.getTime() === getBusinessDateAnchor().getTime(),
   };
 }

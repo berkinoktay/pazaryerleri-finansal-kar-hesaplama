@@ -32,31 +32,60 @@ describe('reset_live_performance_buffer()', () => {
     await truncateAll();
   });
 
-  it('deletes entries before today and keeps today', async () => {
+  it('deletes a PERMANENT_FAILED past-day entry (un-graduatable safety-net)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-
-    const today = getBusinessDateAnchor();
     const yesterday = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
-
-    const keep = await createBufferEntry(org.id, store.id, {
-      orderDate: today,
-      platformOrderId: 'keep',
+    await createBufferEntry(org.id, store.id, {
+      orderDate: yesterday,
+      platformOrderId: 'perm',
+      status: 'PERMANENT_FAILED',
     });
-    await createBufferEntry(org.id, store.id, { orderDate: yesterday, platformOrderId: 'drop' });
 
     const deleted = await runReset();
 
     expect(deleted).toBe(1);
-    const remaining = await prisma.livePerformanceBuffer.findMany();
-    expect(remaining).toHaveLength(1);
-    expect(remaining[0]?.id).toBe(keep.id);
+    expect(await prisma.livePerformanceBuffer.count()).toBe(0);
   });
 
-  it("keeps an entry whose business date is exactly today (strict '<')", async () => {
+  it('KEEPS a PENDING past-day entry (the worker graduates it, cron must not delete)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    await createBufferEntry(org.id, store.id, { orderDate: getBusinessDateAnchor() });
+    const entry = await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      platformOrderId: 'pending-keep',
+      status: 'PENDING',
+    });
+
+    const deleted = await runReset();
+
+    expect(deleted).toBe(0);
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(1);
+  });
+
+  it('KEEPS a FAILED past-day entry (promote retry owns it, not the cron)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const entry = await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      platformOrderId: 'failed-keep',
+      status: 'FAILED',
+    });
+
+    const deleted = await runReset();
+
+    expect(deleted).toBe(0);
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(1);
+  });
+
+  it('KEEPS a PERMANENT_FAILED entry whose business date is today (strict past-day only)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      platformOrderId: 'perm-today',
+      status: 'PERMANENT_FAILED',
+    });
 
     const deleted = await runReset();
 
@@ -64,30 +93,53 @@ describe('reset_live_performance_buffer()', () => {
     expect(await prisma.livePerformanceBuffer.count()).toBe(1);
   });
 
-  it('purges stale entries across all orgs (system-wide housekeeping, not tenant-scoped)', async () => {
-    const orgA = await createOrganization();
-    const storeA = await createStore(orgA.id);
-    const orgB = await createOrganization();
-    const storeB = await createStore(orgB.id);
-
-    const twoDaysAgo = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
-    await createBufferEntry(orgA.id, storeA.id, { orderDate: twoDaysAgo });
-    await createBufferEntry(orgB.id, storeB.id, { orderDate: twoDaysAgo });
-
-    const deleted = await runReset();
-
-    expect(deleted).toBe(2);
-    expect(await prisma.livePerformanceBuffer.count()).toBe(0);
-  });
-
   it('is idempotent — a second run deletes nothing', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await createBufferEntry(org.id, store.id, {
       orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      platformOrderId: 'perm-idem',
+      status: 'PERMANENT_FAILED',
     });
 
     expect(await runReset()).toBe(1);
     expect(await runReset()).toBe(0);
+  });
+
+  it('empty buffer → returns 0, deletes nothing', async () => {
+    const org = await createOrganization();
+    await createStore(org.id);
+
+    expect(await runReset()).toBe(0);
+    expect(await prisma.livePerformanceBuffer.count()).toBe(0);
+  });
+
+  it('mixed past-day statuses → deletes only PERMANENT_FAILED, keeps PENDING and FAILED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const pastDay = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    await createBufferEntry(org.id, store.id, {
+      orderDate: pastDay,
+      platformOrderId: 'mixed-perm',
+      status: 'PERMANENT_FAILED',
+    });
+    const pending = await createBufferEntry(org.id, store.id, {
+      orderDate: pastDay,
+      platformOrderId: 'mixed-pending',
+      status: 'PENDING',
+    });
+    const failed = await createBufferEntry(org.id, store.id, {
+      orderDate: pastDay,
+      platformOrderId: 'mixed-failed',
+      status: 'FAILED',
+    });
+
+    const deleted = await runReset();
+
+    expect(deleted).toBe(1);
+    const remaining = await prisma.livePerformanceBuffer.findMany();
+    expect(remaining.map((r) => r.id).sort()).toEqual([failed.id, pending.id].sort());
+    expect(remaining.find((r) => r.id === pending.id)?.status).toBe('PENDING');
+    expect(remaining.find((r) => r.id === failed.id)?.status).toBe('FAILED');
   });
 });

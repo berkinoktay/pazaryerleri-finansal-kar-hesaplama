@@ -13,7 +13,13 @@ const intl = createIntlMiddleware(routing);
 // route group but the group itself doesn't gate access (route groups
 // are organizational, not authorization). Adding the path here makes
 // the gate explicit and uniform with /dashboard.
-const PROTECTED = ['/dashboard', '/onboarding', '/auth/verified', '/design'] as const;
+const PROTECTED = [
+  '/dashboard',
+  '/onboarding',
+  '/auth/verified',
+  '/design',
+  '/live-performance',
+] as const;
 
 // Routes where an already-authenticated user should bounce back to
 // the dashboard (guests only).

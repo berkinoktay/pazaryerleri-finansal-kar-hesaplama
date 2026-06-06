@@ -14,6 +14,7 @@
   "dependencies": {
     "@pazarsync/db": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
+    "@pazarsync/utils": "workspace:*",
     "decimal.js": "^10.5.0"
   },
   "devDependencies": {

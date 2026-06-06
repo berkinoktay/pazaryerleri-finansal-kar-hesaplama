@@ -87,6 +87,20 @@ export function evaluateCrossFeatureImport(imp: CrossFeatureImport): ViolationDe
     };
   }
 
+  // `live-performance` reuses the canonical `orders` detail view (OrderDetailClient
+  // in a modal/Sheet chrome) for the in-page order detail. PAIR-SPECIFIC, audited
+  // exception: ONLY live-performance may import from orders - every other source
+  // still errors. If a THIRD feature needs the order detail, do NOT widen this
+  // rule; promote OrderDetailClient (or an extracted read-only panel) to
+  // components/patterns/ instead.
+  // See docs/superpowers/specs/2026-06-05-live-performance-slice-c-order-detail-design.md s1.
+  if (imp.targetFeature === 'orders' && imp.sourceFeature === 'live-performance') {
+    return {
+      severity: 'allow',
+      message: `order detail modal reuses the canonical orders detail view (live-performance -> orders, audited)`,
+    };
+  }
+
   if (imp.isTypeOnly) {
     return {
       severity: 'warn',

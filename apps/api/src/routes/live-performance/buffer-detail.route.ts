@@ -3,12 +3,12 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { createSubApp } from '../../lib/create-hono-app';
 import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
-import { getTopProducts } from '../../services/live-performance.service';
-import { LivePerformanceTopProductsSchema } from '../../validators/live-performance.validator';
+import { getBufferDetail } from '../../services/live-performance.service';
+import { BufferDetailSchema } from '../../validators/live-performance.validator';
 
 const app = createSubApp<{ Variables: { userId: string } }>();
 
-const storeScopeParams = z.object({
+const bufferScopeParams = z.object({
   orgId: z
     .string()
     .uuid()
@@ -17,23 +17,27 @@ const storeScopeParams = z.object({
     .string()
     .uuid()
     .openapi({ param: { name: 'storeId', in: 'path' } }),
+  bufferId: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: 'bufferId', in: 'path' } }),
 });
 
-const topProductsRoute = createRoute({
+const bufferDetailRoute = createRoute({
   method: 'get',
-  path: '/organizations/{orgId}/stores/{storeId}/live-performance/top-products',
+  path: '/organizations/{orgId}/stores/{storeId}/live-performance/buffer/{bufferId}',
   tags: ['Live Performance'],
-  summary: 'Top 3 products sold today',
+  summary: 'Cost-missing buffer entry detail (enriched lines)',
   description:
-    'The three best-selling product variants of the business day so far, ranked by order ' +
-    'count, with revenue and best-effort profit. profit is null when any contributing order ' +
-    'has no estimate yet. Money values are Decimal strings.',
+    "A pending (buffer) order's detail from its mapped payload, each line enriched with " +
+    'product name + thumbnail via a barcode to ProductVariant lookup. No fees or profit (none ' +
+    'exist until the order graduates). Money values are Decimal strings.',
   security: [{ bearerAuth: [] }],
-  request: { params: storeScopeParams },
+  request: { params: bufferScopeParams },
   responses: {
     200: {
-      content: { 'application/json': { schema: LivePerformanceTopProductsSchema } },
-      description: 'Top products list (max 3)',
+      content: { 'application/json': { schema: BufferDetailSchema } },
+      description: 'Buffer detail',
       headers: RateLimitHeaders,
     },
     401: {
@@ -46,19 +50,18 @@ const topProductsRoute = createRoute({
     },
     404: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description: 'Store not found or not accessible',
+      description: 'Store or buffer entry not found',
     },
     429: Common429Response,
   },
 });
 
-app.openapi(topProductsRoute, async (c) => {
+app.openapi(bufferDetailRoute, async (c) => {
   const userId = c.get('userId');
-  const { orgId, storeId } = c.req.valid('param');
+  const { orgId, storeId, bufferId } = c.req.valid('param');
   await requireStoreAccess(userId, orgId, storeId);
-
-  const data = await getTopProducts({ orgId, storeId });
-  return c.json({ data }, 200);
+  const result = await getBufferDetail({ orgId, storeId, bufferId });
+  return c.json(result, 200);
 });
 
 export default app;

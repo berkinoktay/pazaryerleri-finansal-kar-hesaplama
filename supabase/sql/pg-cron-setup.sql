@@ -72,14 +72,16 @@ SELECT cron.schedule(
   $$
 );
 
--- ─── Live Performance buffer daily reset ──────────────────────────────────────
--- Purges yesterday's leftover buffer entries so the /live-performance surface
--- starts each business day empty (Spec 2 §10). Calls reset_live_performance_buffer()
--- from supabase/sql/db-functions.sql — the single source of truth for the DELETE
--- predicate, so the integration test exercises the exact same logic (pg_cron
--- cannot run in CI). The predicate is self-correcting: it removes everything
--- before today's business date whenever it fires, so the fire time only changes
--- how soon stale rows are purged, never which rows.
+-- ─── Live Performance buffer daily safety-net (Slice 0) ───────────────────────
+-- Calls reset_live_performance_buffer() (supabase/sql/db-functions.sql), which
+-- now deletes ONLY past-day PERMANENT_FAILED entries — un-graduatable corrupt
+-- rows that the sync-worker could not write to `orders`. Recoverable entries are
+-- graduated by the worker (processPastDayBufferFlush), never by this cron, so a
+-- real sale is never deleted. db-functions.sql is the single source of truth for
+-- the predicate, so the integration test exercises the exact same logic (pg_cron
+-- cannot run in CI). The predicate is self-correcting: it removes every past-day
+-- PERMANENT_FAILED row whenever it fires, so the fire time only changes how soon
+-- stale rows are purged, never which rows.
 --
 -- Schedule: '0 21 * * *' — 21:00 UTC = 00:00 business time. Türkiye is permanent
 -- GMT+3 (no DST since 2016), so this lands at business midnight, matching the

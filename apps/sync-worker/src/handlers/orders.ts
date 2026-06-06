@@ -34,8 +34,7 @@
 import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
 import { fetchShipmentPackagesStream, STREAM_WINDOW_MAX_DAYS } from '@pazarsync/marketplace';
-import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
-import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
+import { intakeOrder, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { parseOrdersCursor, syncLog, type OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 
 import { readSyncEnv } from '../lib/env';
@@ -241,29 +240,49 @@ export async function processOrdersChunk(input: {
 
   // Upsert per-order (own transaction). Trendyol can emit duplicate orders
   // across cursor pages on lastModified shifts — upsert is idempotent.
+  // Route per-order through the shared intake helper (own transaction each):
+  // calculable → orders; cost-missing today → buffer; cost-missing past-day →
+  // orders (null profit); variant_not_found → skip. Identical to the webhook.
+  // Trendyol can emit duplicate orders across cursor pages — upsert + buffer
+  // unique key are both idempotent.
   for (const order of batch) {
-    // Calculability gate — V1 hard skip (PR-B 2026-05-24). An order with any
-    // line missing a resolved variant or a cost snapshot is never written.
-    const calcLines = await buildCalcCheckLines(prisma, {
-      storeId: store.id,
-      lines: order.lines,
-    });
-    const calc = resolveOrderCalculability(calcLines);
-    if (calc.kind === 'skip') {
-      syncLog.info('orders.skipped', {
-        source: 'cron',
-        reason: calc.reason,
-        syncLogId: log.id,
-        storeId: log.storeId,
-        platformOrderId: order.platformOrderId,
-        barcode: calc.barcode,
-        ...(calc.reason === 'cost_missing' ? { variantId: calc.variantId } : {}),
-      });
-      continue;
-    }
-
     try {
-      await upsertOrderWithSnapshot(store.id, store.organizationId, order);
+      const outcome = await intakeOrder({
+        storeId: store.id,
+        organizationId: store.organizationId,
+        mapped: order,
+      });
+      // Exhaustive switch (mirrors the webhook route) — a new OrderIntakeOutcome
+      // kind becomes a compile error here, not a silent fallthrough.
+      switch (outcome.kind) {
+        case 'skipped':
+          syncLog.info('orders.skipped', {
+            source: 'cron',
+            reason: outcome.reason,
+            syncLogId: log.id,
+            storeId: log.storeId,
+            platformOrderId: order.platformOrderId,
+            barcode: outcome.barcode,
+          });
+          break;
+        case 'buffered':
+        case 'buffered_deduped':
+          syncLog.info('buffer.entry-created', {
+            source: 'cron',
+            syncLogId: log.id,
+            storeId: log.storeId,
+            platformOrderId: order.platformOrderId,
+            deduped: outcome.kind === 'buffered_deduped',
+          });
+          break;
+        case 'persisted':
+          // Steady-state happy path — no per-order log line.
+          break;
+        default: {
+          const _exhaustive: never = outcome;
+          throw new Error(`Unhandled intake outcome: ${JSON.stringify(_exhaustive)}`);
+        }
+      }
     } catch (err) {
       // Per-order resilience: one malformed order doesn't terminate the chunk.
       syncLog.error('orders.upsert.failed', {

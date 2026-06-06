@@ -284,3 +284,36 @@ export const OrderDetailSchema = z
   .openapi('OrderDetail');
 
 export type OrderDetailResponse = z.infer<typeof OrderDetailSchema>;
+
+// --- Per-item cost entry (Slice C) ----------------------------------------
+// Body for PATCH .../orders/{orderId}/items/{itemId}/cost. Money on the wire is
+// a Decimal string; the snapshot written is frozen (write-once).
+
+const MONEY_STRING = z
+  .string()
+  .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_AMOUNT')
+  .refine((v) => Number(v) > 0, 'AMOUNT_MUST_BE_POSITIVE');
+
+export const SetOrderItemCostBodySchema = z
+  .discriminatedUnion('source', [
+    z.object({
+      source: z.literal('profile'),
+      profileId: z.string().uuid('INVALID_PROFILE_ID'),
+    }),
+    z.object({
+      source: z.literal('manual'),
+      netAmount: MONEY_STRING.openapi({
+        description: 'NET cost (KDV haric), Decimal string',
+        example: '42.00',
+      }),
+      vatRate: z
+        .number()
+        .int()
+        .min(0, 'INVALID_VAT_RATE')
+        .max(100, 'INVALID_VAT_RATE')
+        .openapi({ example: 20 }),
+    }),
+  ])
+  .openapi('SetOrderItemCostBody');
+
+export type SetOrderItemCostBody = z.infer<typeof SetOrderItemCostBodySchema>;

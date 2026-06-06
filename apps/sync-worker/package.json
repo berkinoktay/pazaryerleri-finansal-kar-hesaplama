@@ -17,6 +17,7 @@
     "@pazarsync/order-sync": "workspace:*",
     "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
+    "@pazarsync/utils": "workspace:*",
     "decimal.js": "^10.6.0"
   },
   "devDependencies": {

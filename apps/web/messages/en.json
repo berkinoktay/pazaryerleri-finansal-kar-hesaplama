@@ -469,6 +469,9 @@
     "language": {
       "heading": "Language"
     },
+    "sound": {
+      "heading": "Order notification sound"
+    },
     "help": {
       "docs": "Help & Docs",
       "shortcuts": "Keyboard shortcuts",
@@ -1527,6 +1530,124 @@
       "noStoreContext": "An active store is required to view order detail.",
       "notFound": "Order not found or does not belong to this store.",
       "loadFailed": "Failed to load the order. Please try again."
+    }
+  },
+  "livePerformance": {
+    "metaTitle": "Live Performance | PazarSync",
+    "title": "Live Performance",
+    "subtitle": "Today's real-time profit, revenue and order performance",
+    "refresh": "Refresh",
+    "status": {
+      "live": "Live",
+      "offline": "Disconnected",
+      "connecting": "Connecting"
+    },
+    "noStore": {
+      "title": "No store selected",
+      "description": "Connect or select a marketplace store to see live performance."
+    },
+    "kpis": {
+      "revenue": "Total Revenue",
+      "orderCount": "Net Orders",
+      "unitsSold": "Units Sold",
+      "netProfit": "Net Profit",
+      "margin": "Profit Margin",
+      "profitCostRatio": "Profit/Cost Ratio",
+      "estimateHint": "Estimated — finalized after settlement reconciliation.",
+      "pendingHint": "{count} order(s) awaiting cost — not in profit yet"
+    },
+    "chart": {
+      "title": "Hourly Cumulative",
+      "metricRevenue": "Revenue",
+      "metricProfit": "Profit",
+      "todayLabel": "Today",
+      "yesterdayLabel": "Yesterday",
+      "emptyHint": "No data yet for today"
+    },
+    "todayProducts": {
+      "title": "Products Ordered Today",
+      "searchPlaceholder": "Search by product name",
+      "tabs": {
+        "all": "All",
+        "missing": "Awaiting cost"
+      },
+      "columns": {
+        "rank": "Rank",
+        "product": "Product",
+        "orderCount": "Orders",
+        "unitsSold": "Units Sold",
+        "revenue": "Revenue",
+        "cost": "Cost"
+      },
+      "rankLabel": "Rank {rank}",
+      "stockCodeLabel": "Stock Code",
+      "barcodeLabel": "Barcode",
+      "addCostButton": "Add Cost",
+      "emptyTitle": "No orders yet today",
+      "noResultsTitle": "No results",
+      "noResultsDescription": "No product matches the search or filter.",
+      "clearFilters": "Clear filters"
+    },
+    "orders": {
+      "title": "Today's Orders",
+      "tabs": {
+        "all": "All",
+        "calculated": "Calculated",
+        "pending": "Pending"
+      },
+      "columns": {
+        "orderNumber": "Order No",
+        "time": "Time",
+        "revenue": "Revenue",
+        "profit": "Net Profit",
+        "margin": "Margin",
+        "status": "Status"
+      },
+      "statusCalculated": "Calculated",
+      "statusPending": "Pending",
+      "emptyTitle": "No orders yet today"
+    },
+    "orderDetail": {
+      "sheetTitle": "Order detail",
+      "close": "Close",
+      "buffer": {
+        "pendingNotice": "This order is awaiting cost — once you enter a cost it counts toward profit.",
+        "columns": {
+          "product": "Product",
+          "quantity": "Qty",
+          "unitPriceNet": "Unit price (excl. VAT)"
+        },
+        "addCost": "Add cost",
+        "loadError": "Could not load the order detail."
+      },
+      "costEntry": {
+        "trigger": "Enter cost",
+        "tabs": {
+          "manual": "Custom amount",
+          "profile": "Saved profile"
+        },
+        "netAmount": "Amount (excl. VAT)",
+        "vatRate": "VAT rate (%)",
+        "profile": "Cost profile",
+        "profilePlaceholder": "Select a profile",
+        "save": "Save",
+        "cancel": "Cancel",
+        "noProfiles": "No saved cost profiles",
+        "errors": {
+          "netAmountRequired": "Amount is required",
+          "netAmountPositive": "Amount must be greater than 0",
+          "vatRateRange": "VAT rate must be between 0-100",
+          "profileRequired": "Select a profile"
+        }
+      }
+    },
+    "realtime": {
+      "newOrderTitle": "New order · {amount}",
+      "profitLine": "{profit} net profit",
+      "costMissingLine": "Some items are missing a cost, profit can't be determined yet",
+      "orderNumberLabel": "· Order no {number}",
+      "detail": "View detail",
+      "burstTitle": "{count} new orders arrived"
     }
   }
 }

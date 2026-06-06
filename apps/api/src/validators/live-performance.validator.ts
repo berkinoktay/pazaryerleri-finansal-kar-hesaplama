@@ -5,21 +5,42 @@ import { z } from '@hono/zod-openapi';
 
 export const LivePerformanceKpisSchema = z
   .object({
+    // ── Volume (whole today-universe = orders ∪ today-buffer; yesterday = orders) ──
     revenueToday: z.string().openapi({ description: 'Decimal string', example: '12450.00' }),
     revenueYesterday: z.string().openapi({ example: '11530.00' }),
-    netProfitToday: z.string().openapi({ example: '3220.00' }),
-    netProfitYesterday: z.string().openapi({ example: '2875.00' }),
     orderCountToday: z.number().int().nonnegative().openapi({ example: 87 }),
     orderCountYesterday: z.number().int().nonnegative().openapi({ example: 80 }),
-    marginToday: z
-      .string()
-      .openapi({ description: 'Net profit / revenue × 100, decimal string', example: '25.86' }),
+    unitsSoldToday: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({ description: 'Σ line quantity across the universe', example: 134 }),
+    unitsSoldYesterday: z.number().int().nonnegative().openapi({ example: 121 }),
+    // ── Profit family (costed subset = orders with non-null estimatedNetProfit) ──
+    netProfitToday: z.string().openapi({ example: '3220.00' }),
+    netProfitYesterday: z.string().openapi({ example: '2875.00' }),
+    marginToday: z.string().openapi({
+      description: 'Net profit ÷ costed revenue × 100, decimal string',
+      example: '25.86',
+    }),
     marginYesterday: z.string().openapi({ example: '25.43' }),
+    profitCostRatioToday: z.string().openapi({
+      description: 'Net profit ÷ costed cost × 100, decimal string',
+      example: '38.40',
+    }),
+    profitCostRatioYesterday: z.string().openapi({ example: '37.10' }),
+    // ── Pending gap (today only: universe − costed) — drives the profit-card hint ──
+    pendingRevenueToday: z.string().openapi({
+      description: "Today's revenue counted but not yet costed, decimal string",
+      example: '1860.00',
+    }),
+    pendingOrderCountToday: z.number().int().nonnegative().openapi({ example: 4 }),
   })
   .openapi('LivePerformanceKpis');
 
 const HourlyPointSchema = z.object({
   hour: z.number().int().min(0).max(23).openapi({ example: 14 }),
+  cumulativeRevenue: z.string().openapi({ description: 'Decimal string', example: '8400.00' }),
   cumulativeProfit: z.string().openapi({ description: 'Decimal string', example: '1820.00' }),
 });
 
@@ -30,39 +51,42 @@ export const LivePerformanceChartSchema = z
   })
   .openapi('LivePerformanceChart');
 
-const MissingCostRowSchema = z.object({
+const TodayProductRowSchema = z.object({
   variantId: z.string().uuid(),
   barcode: z.string().openapi({ example: '8680000000001' }),
-  productName: z.string().openapi({ example: 'Pamuklu Tişört Beyaz M' }),
-  thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
-  orderCount: z.number().int().positive().openapi({ example: 3 }),
-  revenueImpact: z.string().openapi({ description: 'Decimal string', example: '450.00' }),
-});
-
-export const LivePerformanceMissingCostSchema = z
-  .object({
-    data: z.array(MissingCostRowSchema),
-  })
-  .openapi('LivePerformanceMissingCost');
-
-const TopProductRowSchema = z.object({
-  rank: z.number().int().min(1).max(3).openapi({ example: 1 }),
-  variantId: z.string().uuid(),
-  productName: z.string().openapi({ example: 'Pamuklu Tişört Beyaz M' }),
-  thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
-  orderCount: z.number().int().positive().openapi({ example: 12 }),
-  revenue: z.string().openapi({ description: 'Decimal string', example: '3600.00' }),
-  profit: z
+  stockCode: z
     .string()
-    .nullable()
-    .openapi({ description: 'Decimal string, null if any contributing order is cost-missing' }),
+    .openapi({ description: "Seller's stock code (SKU)", example: 'TS-BEYAZ-M' }),
+  productName: z.string().openapi({ example: 'Pamuklu Tişört Beyaz M' }),
+  thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
+  orderCount: z.number().int().nonnegative().openapi({
+    description: 'Distinct orders + buffer entries containing this product today',
+    example: 5,
+  }),
+  unitsSold: z.number().int().nonnegative().openapi({
+    description: 'Sum of line quantity across orders + buffer',
+    example: 8,
+  }),
+  revenue: z.string().openapi({
+    description: 'Σ line revenue (unit price net × qty) over orders + buffer, Decimal string',
+    example: '3600.00',
+  }),
+  costStatus: z.enum(['costed', 'missing']).openapi({
+    description: "'costed' = variant has an active cost profile; 'missing' = needs a cost",
+    example: 'costed',
+  }),
+  unitCost: z.string().nullable().openapi({
+    description:
+      'Costed net unit cost (from the order-item snapshot), Decimal string; null when cost-missing',
+    example: '42.00',
+  }),
 });
 
-export const LivePerformanceTopProductsSchema = z
+export const LivePerformanceTodayProductsSchema = z
   .object({
-    data: z.array(TopProductRowSchema),
+    data: z.array(TodayProductRowSchema),
   })
-  .openapi('LivePerformanceTopProducts');
+  .openapi('LivePerformanceTodayProducts');
 
 const LiveOrderRowSchema = z.object({
   source: z.enum(['orders', 'buffer']).openapi({
@@ -70,6 +94,14 @@ const LiveOrderRowSchema = z.object({
   }),
   platformOrderId: z.string(),
   platformOrderNumber: z.string().nullable(),
+  orderId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({ description: 'Order.id for source="orders" rows; null for buffer rows' }),
+  bufferId: z.string().uuid().nullable().openapi({
+    description: 'LivePerformanceBuffer.id for source="buffer" rows; null for order rows',
+  }),
   orderDate: z.string().datetime(),
   status: z.string(),
   revenue: z.string().openapi({ description: 'Decimal string' }),
@@ -98,3 +130,64 @@ export const LivePerformanceOrdersSchema = z
     }),
   })
   .openapi('LivePerformanceOrders');
+
+const BufferDetailLineSchema = z.object({
+  barcode: z.string().openapi({ example: '8680000000001' }),
+  productName: z
+    .string()
+    .openapi({ description: 'Product title, or the barcode when the variant is unresolved' }),
+  thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
+  variantId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({ description: 'ProductVariant.id when the barcode resolves; null otherwise' }),
+  stockCode: z.string().nullable(),
+  quantity: z.number().int().nonnegative(),
+  unitPriceNet: z.string().openapi({ description: 'Decimal string' }),
+});
+
+export const BufferDetailSchema = z
+  .object({
+    platformOrderNumber: z.string().nullable(),
+    orderDate: z.string().datetime(),
+    status: z.string(),
+    saleSubtotalNet: z.string().openapi({ description: 'Decimal string' }),
+    lines: z.array(BufferDetailLineSchema),
+  })
+  .openapi('BufferDetail');
+
+export const notificationSummaryQuerySchema = z.object({
+  source: z.enum(['orders', 'buffer']).openapi({
+    param: { name: 'source', in: 'query' },
+    description: 'Which table the realtime INSERT came from',
+  }),
+  id: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: 'id', in: 'query' }, description: 'Row id from the INSERT event' }),
+});
+
+export const NewOrderNotificationSummarySchema = z
+  .object({
+    source: z.enum(['orders', 'buffer']),
+    orderId: z.string().uuid().nullable(),
+    bufferId: z.string().uuid().nullable(),
+    platformOrderNumber: z.string().nullable(),
+    revenue: z
+      .string()
+      .openapi({ description: 'Sale subtotal (net), Decimal string', example: '149.90' }),
+    profit: z.string().nullable().openapi({
+      description: 'Estimated net profit, Decimal string; null when cost is pending',
+      example: '38.40',
+    }),
+    costStatus: z.enum(['costed', 'pending']).openapi({
+      description: "'costed' = profit known; 'pending' = cost-missing",
+      example: 'pending',
+    }),
+    isToday: z.boolean().openapi({
+      description: "Whether the order falls in today's business day",
+      example: true,
+    }),
+  })
+  .openapi('NewOrderNotificationSummary');

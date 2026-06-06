@@ -10,10 +10,12 @@ describe('@pazarsync/order-sync — public API surface', () => {
     expect(orderSync.upsertOrderWithSnapshot.constructor.name).toBe('AsyncFunction');
   });
 
-  it('exposes exactly the one public symbol (single responsibility guard)', () => {
-    // Promotion'da paketin scope'unu küçük tutmak için tek bir public symbol.
-    // Bu test ileride yanlışlıkla private helper'lar export edilirse fail eder.
+  it('exposes exactly the intake + write helpers (public API guard)', () => {
+    // Paketin scope'unu küçük tutmak için yalnız iki public runtime symbol:
+    // order yazma (upsertOrderWithSnapshot) + paylaşılan intake routing
+    // (intakeOrder, Slice 0). OrderIntakeOutcome type-only export — runtime'da
+    // görünmez. Bu test ileride yanlışlıkla private helper export edilirse fail eder.
     const keys = Object.keys(orderSync).sort();
-    expect(keys).toEqual(['upsertOrderWithSnapshot']);
+    expect(keys).toEqual(['intakeOrder', 'upsertOrderWithSnapshot']);
   });
 });

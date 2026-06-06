@@ -21,6 +21,8 @@ interface OrdersBody {
   data: {
     source: 'orders' | 'buffer';
     platformOrderId: string;
+    orderId: string | null;
+    bufferId: string | null;
     status: string;
     revenue: string;
     profit: string | null;
@@ -30,25 +32,42 @@ interface OrdersBody {
   counts: { all: number; calculated: number; pending: number };
 }
 
-async function seed(): Promise<{ orgId: string; storeId: string; token: string }> {
+async function seed(): Promise<{
+  orgId: string;
+  storeId: string;
+  token: string;
+  orderId: string;
+  bufferId: string;
+}> {
   const user = await createAuthenticatedTestUser();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
   const store = await createStore(org.id);
 
-  await createOrder(org.id, store.id, {
+  const order = await createOrder(org.id, store.id, {
     orderDate: todayAt(10),
     platformOrderId: 'ORD-1',
     saleSubtotalNet: '100.00',
     estimatedNetProfit: '20.00',
   });
-  await createBufferEntry(org.id, store.id, {
+  const bufferEntry = await createBufferEntry(org.id, store.id, {
     orderDate: getBusinessDateAnchor(),
     platformOrderId: 'BUF-1',
-    mappedOrder: { status: 'PENDING', saleSubtotalNet: '50.00', lines: [] },
+    mappedOrder: {
+      status: 'PENDING',
+      orderDate: todayAt(10).toISOString(),
+      saleSubtotalNet: '50.00',
+      lines: [],
+    },
   });
 
-  return { orgId: org.id, storeId: store.id, token: user.accessToken };
+  return {
+    orgId: org.id,
+    storeId: store.id,
+    token: user.accessToken,
+    orderId: order.id,
+    bufferId: bufferEntry.id,
+  };
 }
 
 describe('GET /v1/.../live-performance/orders', () => {
@@ -62,8 +81,8 @@ describe('GET /v1/.../live-performance/orders', () => {
     await truncateAll();
   });
 
-  it('unions today’s calculated orders and cost-missing buffer (filter=all)', async () => {
-    const { orgId, storeId, token } = await seed();
+  it('unions calculated orders and cost-missing buffer for today (filter=all)', async () => {
+    const { orgId, storeId, token, orderId, bufferId } = await seed();
 
     const res = await app.request(
       `/v1/organizations/${orgId}/stores/${storeId}/live-performance/orders?filter=all`,
@@ -86,6 +105,14 @@ describe('GET /v1/.../live-performance/orders', () => {
     expect(pending?.profit).toBeNull();
     expect(pending?.margin).toBeNull();
     expect(pending?.status).toBe('PENDING');
+
+    // Identity bridge - orderId/bufferId for deep-link to detail sheet
+    const ordersRow = body.data.find((r) => r.source === 'orders');
+    expect(ordersRow?.orderId).toBe(orderId);
+    expect(ordersRow?.bufferId).toBeNull();
+    const bufferRow = body.data.find((r) => r.source === 'buffer');
+    expect(bufferRow?.bufferId).toBe(bufferId);
+    expect(bufferRow?.orderId).toBeNull();
   });
 
   it('filter=calculated returns only orders rows; counts stay complete', async () => {

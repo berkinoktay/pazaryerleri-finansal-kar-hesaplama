@@ -20,6 +20,7 @@ import { prisma } from '@pazarsync/db';
 import type { TrendyolOrdersStreamResponse, TrendyolShipmentPackage } from '@pazarsync/marketplace';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import type { OrdersStreamWindowCursor } from '@pazarsync/sync-core';
+import { getBusinessDayRange } from '@pazarsync/utils';
 
 import {
   computeStreamChunkCount,
@@ -53,6 +54,19 @@ const ORDER_DATE_MS = Date.UTC(2026, 4, 19); // 2026-05-19
 const AGREED_DATE_MS = Date.UTC(2026, 4, 20);
 const DELIVERED_DATE_MS = Date.UTC(2026, 4, 20, 12);
 const LAST_MODIFIED_MS = Date.UTC(2026, 4, 20, 13);
+
+const MS_HOUR = 60 * 60 * 1000;
+
+/**
+ * A "today" orderDate as Trendyol sends it: GMT+3 (Istanbul wall-clock-as-UTC),
+ * which the mapper normalizes back to the true instant. Encode noon Istanbul today
+ * (real noon + the +3h offset) so the today→buffer gate is deterministic — a raw
+ * `Date.now()` would normalize into "yesterday" when the suite runs between 00:00
+ * and 03:00 Istanbul.
+ */
+function todayOrderDateGmt3(): number {
+  return getBusinessDayRange().start.getTime() + 15 * MS_HOUR;
+}
 
 function makeShipmentPackage(
   overrides: Partial<TrendyolShipmentPackage> = {},
@@ -308,9 +322,9 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(await prisma.orderItem.count()).toBe(0);
   });
 
-  it('calculability gate: variant exists but no cost → order skipped (not written)', async () => {
+  it('cost-missing + past-day → order persisted with null profit (not skipped)', async () => {
     const { org, store, log } = await setupStoreAndSyncLog([]);
-    // Seed a variant WITHOUT a cost profile link.
+    // Seed a variant WITHOUT a cost profile link → cost_missing.
     const product = await prisma.product.create({
       data: {
         organizationId: org.id,
@@ -359,7 +373,71 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
+    // ORDER_DATE_MS is past-day → persisted to orders with null profit, not buffered.
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.organizationId).toBe(org.id);
+    expect(order.estimatedNetProfit).toBeNull();
+  });
+
+  it('cost-missing + today → buffers (PENDING), no orders row (1A symmetry)', async () => {
+    const { org, store, log } = await setupStoreAndSyncLog([]);
+    // Variant resolves (so not variant_not_found) but has NO cost profile.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        productMainId: 'pm-EAN13-TODAY',
+        title: 'Today No-cost Product',
+      },
+    });
+    await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        barcode: 'EAN13-TODAY',
+        stockCode: 'sk-EAN13-TODAY',
+        salePrice: '100',
+        listPrice: '120',
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
+          content: [
+            makeShipmentPackage({
+              orderDate: todayOrderDateGmt3(), // today → buffer, not orders
+              lines: [
+                {
+                  lineId: 1,
+                  barcode: 'EAN13-TODAY',
+                  quantity: 1,
+                  lineUnitPrice: 120,
+                  lineGrossAmount: 120,
+                  vatRate: 20,
+                  commission: 10,
+                },
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    // 1A: sync-worker mirrors the webhook — today's cost-missing → PENDING buffer.
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+    const entries = await prisma.livePerformanceBuffer.findMany({ where: { storeId: store.id } });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.organizationId).toBe(org.id);
+    expect(entries[0]!.status).toBe('PENDING');
   });
 
   it('idempotent: re-sync same page → no duplicate Order/OrderItem rows', async () => {

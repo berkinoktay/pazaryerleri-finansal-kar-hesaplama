@@ -469,6 +469,9 @@
     "language": {
       "heading": "Dil"
     },
+    "sound": {
+      "heading": "Sipariş bildirim sesi"
+    },
     "help": {
       "docs": "Yardım & Dokümanlar",
       "shortcuts": "Klavye kısayolları",
@@ -1592,6 +1595,124 @@
       "noStoreContext": "Sipariş detayını görmek için aktif bir mağaza gerekli.",
       "notFound": "Sipariş bulunamadı veya bu mağazaya ait değil.",
       "loadFailed": "Sipariş yüklenemedi. Lütfen tekrar deneyin."
+    }
+  },
+  "livePerformance": {
+    "metaTitle": "Canlı Performans | PazarSync",
+    "title": "Canlı Performans",
+    "subtitle": "Bugünün anlık kâr, ciro ve sipariş performansı",
+    "refresh": "Yenile",
+    "status": {
+      "live": "Canlı",
+      "offline": "Bağlantı yok",
+      "connecting": "Bağlanıyor"
+    },
+    "noStore": {
+      "title": "Mağaza seçilmedi",
+      "description": "Canlı performansı görmek için bir pazaryeri mağazası bağlayın veya seçin."
+    },
+    "kpis": {
+      "revenue": "Toplam Ciro",
+      "orderCount": "Net Sipariş Adedi",
+      "unitsSold": "Net Satış Adedi",
+      "netProfit": "Kâr Tutarı",
+      "margin": "Kâr Marjı",
+      "profitCostRatio": "Kâr/Maliyet Oranı",
+      "estimateHint": "Tahmini değer — kesin tutar mutabakat (settlement) sonrasında netleşir.",
+      "pendingHint": "{count} sipariş maliyet bekliyor — kâra henüz dahil değil"
+    },
+    "chart": {
+      "title": "Saatlik Kümülatif",
+      "metricRevenue": "Ciro",
+      "metricProfit": "Kâr",
+      "todayLabel": "Bugün",
+      "yesterdayLabel": "Dün",
+      "emptyHint": "Bugün için henüz veri yok"
+    },
+    "todayProducts": {
+      "title": "Bugün Sipariş Alan Ürünler",
+      "searchPlaceholder": "Ürün adında ara",
+      "tabs": {
+        "all": "Tümü",
+        "missing": "Maliyet bekleyen"
+      },
+      "columns": {
+        "rank": "Sıra",
+        "product": "Ürün",
+        "orderCount": "Sipariş",
+        "unitsSold": "Satış Adedi",
+        "revenue": "Ciro",
+        "cost": "Maliyet"
+      },
+      "rankLabel": "{rank}. sıra",
+      "stockCodeLabel": "Stok Kodu",
+      "barcodeLabel": "Barkod",
+      "addCostButton": "Maliyet Ekle",
+      "emptyTitle": "Bugün henüz sipariş yok",
+      "noResultsTitle": "Sonuç bulunamadı",
+      "noResultsDescription": "Arama veya filtreyle eşleşen ürün yok.",
+      "clearFilters": "Filtreleri temizle"
+    },
+    "orders": {
+      "title": "Bugünün Siparişleri",
+      "tabs": {
+        "all": "Tümü",
+        "calculated": "Hesaplanmış",
+        "pending": "Bekliyor"
+      },
+      "columns": {
+        "orderNumber": "Sipariş No",
+        "time": "Saat",
+        "revenue": "Ciro",
+        "profit": "Net Kâr",
+        "margin": "Marj",
+        "status": "Durum"
+      },
+      "statusCalculated": "Hesaplandı",
+      "statusPending": "Bekliyor",
+      "emptyTitle": "Bugün henüz sipariş yok"
+    },
+    "orderDetail": {
+      "sheetTitle": "Sipariş ayrıntısı",
+      "close": "Kapat",
+      "buffer": {
+        "pendingNotice": "Bu sipariş maliyet bekliyor — ürüne maliyet girince kâra dahil olur.",
+        "columns": {
+          "product": "Ürün",
+          "quantity": "Adet",
+          "unitPriceNet": "Birim fiyat (KDV hariç)"
+        },
+        "addCost": "Maliyet ekle",
+        "loadError": "Sipariş ayrıntısı yüklenemedi."
+      },
+      "costEntry": {
+        "trigger": "Maliyet gir",
+        "tabs": {
+          "manual": "Özel tutar",
+          "profile": "Kayıtlı profil"
+        },
+        "netAmount": "Tutar (KDV hariç)",
+        "vatRate": "KDV oranı (%)",
+        "profile": "Maliyet profili",
+        "profilePlaceholder": "Profil seçin",
+        "save": "Kaydet",
+        "cancel": "İptal",
+        "noProfiles": "Kayıtlı maliyet profili yok",
+        "errors": {
+          "netAmountRequired": "Tutar gerekli",
+          "netAmountPositive": "Tutar 0'dan büyük olmalı",
+          "vatRateRange": "KDV oranı 0-100 arası olmalı",
+          "profileRequired": "Profil seçin"
+        }
+      }
+    },
+    "realtime": {
+      "newOrderTitle": "Yeni sipariş · {amount}",
+      "profitLine": "{profit} net kâr",
+      "costMissingLine": "Maliyeti eksik ürünler var, kâr henüz belirlenemiyor",
+      "orderNumberLabel": "· Sipariş no {number}",
+      "detail": "Detayı gör",
+      "burstTitle": "{count} yeni sipariş geldi"
     }
   }
 }

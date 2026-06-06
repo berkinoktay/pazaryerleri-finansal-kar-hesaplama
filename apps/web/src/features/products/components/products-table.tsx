@@ -38,7 +38,7 @@ import {
 
 import { ColorAttribute } from './color-attribute';
 import { CostCell } from './cost-cell';
-import { CostCellPopover } from './cost-cell-popover';
+import { CostCellPopover } from '@/features/costs/components/cost-cell-popover';
 import { DeliveryBadge } from './delivery-badge';
 import { DesiCell } from './desi-cell';
 import { DesiCellPopover } from './desi-cell-popover';
@@ -534,7 +534,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
               const v = p.variants[0];
               if (v === undefined) return <span className="text-muted-foreground">—</span>;
               return (
-                <CostCellPopover orgId={props.orgId} variant={v}>
+                <CostCellPopover orgId={props.orgId} variantId={v.id}>
                   <span>
                     <CostCell variant={v} />
                   </span>
@@ -547,7 +547,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           // Variant sub-row: interactive cost cell.
           const v = row.original.variant;
           return (
-            <CostCellPopover orgId={props.orgId} variant={v}>
+            <CostCellPopover orgId={props.orgId} variantId={v.id}>
               <span>
                 <CostCell variant={v} />
               </span>
