@@ -97,12 +97,32 @@ describe('UserMenu', () => {
   });
 
   it('sound switch is checked by default and unchecks on click', async () => {
-    const { user } = await openMenu();
-    // The sound Switch is the only role="switch" in the menu (theme is a
-    // dropdown, language is a toggle-group -- neither produces a switch role).
-    const soundSwitch = await screen.findByRole('switch');
-    expect(soundSwitch).toBeChecked();
-    await user.click(soundSwitch);
-    expect(soundSwitch).not.toBeChecked();
+    // happy-dom's localStorage methods are inaccessible across the vitest VM
+    // boundary, so the useSyncExternalStore-backed pref can't round-trip without
+    // a stub (same in-memory pattern as the hook's own unit test).
+    const store: Record<string, string> = {};
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string): string | null => (k in store ? store[k]! : null),
+      setItem: (k: string, v: string): void => {
+        store[k] = String(v);
+      },
+      removeItem: (k: string): void => {
+        delete store[k];
+      },
+      clear: (): void => {
+        for (const k of Object.keys(store)) delete store[k];
+      },
+    });
+    try {
+      const { user } = await openMenu();
+      // The sound Switch is the only role="switch" in the menu (theme is a
+      // dropdown, language is a toggle-group -- neither produces a switch role).
+      const soundSwitch = await screen.findByRole('switch');
+      expect(soundSwitch).toBeChecked();
+      await user.click(soundSwitch);
+      expect(soundSwitch).not.toBeChecked();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

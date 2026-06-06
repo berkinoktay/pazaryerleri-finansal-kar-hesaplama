@@ -63,21 +63,18 @@ export function LivePerformancePageClient({
   const isFetching = useIsFetching({ queryKey: liveKeys.all }) > 0;
   const [selected, setSelected] = React.useState<LiveOrderRow | null>(null);
 
-  // Deep-link: a toast's "Detayi gor" routes here with ?order=/?buffer=. Resolve
-  // the row from today's feed, open the Slice-C Sheet, then clear the param.
+  // Deep-link: a toast's "Detayi gor" routes here with ?order=/?buffer=. We
+  // resolve the row from today's feed DURING RENDER (not an effect, so no
+  // setState-in-effect) and let it drive the Sheet. The param is cleared only
+  // when the user closes the Sheet -- so a brand-new order whose row arrives a
+  // beat later (via the realtime refetch) still opens instead of being dropped.
   const [orderParam, setOrderParam] = useQueryState('order');
   const [bufferParam, setBufferParam] = useQueryState('buffer');
   const deepLinkOrders = useLiveOrders(orgId, storeId, 'all');
+  const deepLinkRow = resolveDeepLinkRow(deepLinkOrders.data?.data, orderParam, bufferParam);
 
-  React.useEffect(() => {
-    if (orderParam === null && bufferParam === null) return;
-    const rows = deepLinkOrders.data?.data;
-    if (rows === undefined) return; // still loading -- keep the param for the next pass
-    const match = resolveDeepLinkRow(rows, orderParam, bufferParam);
-    if (match !== null) setSelected(match);
-    void setOrderParam(null);
-    void setBufferParam(null);
-  }, [orderParam, bufferParam, deepLinkOrders.data, setOrderParam, setBufferParam]);
+  // A row click takes precedence; otherwise the deep-linked row drives the Sheet.
+  const activeRow = selected ?? deepLinkRow;
 
   if (orgId === null || storeId === null) {
     return (
@@ -114,8 +111,12 @@ export function LivePerformancePageClient({
       <LiveOrderDetailSheet
         orgId={orgId}
         storeId={storeId}
-        selected={selected}
-        onClose={() => setSelected(null)}
+        selected={activeRow}
+        onClose={() => {
+          setSelected(null);
+          void setOrderParam(null);
+          void setBufferParam(null);
+        }}
       />
     </div>
   );
