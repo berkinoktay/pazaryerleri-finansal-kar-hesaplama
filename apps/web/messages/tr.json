@@ -767,8 +767,20 @@
         "saleSubtotalNet": "Satış (net)",
         "estimatedNetProfit": "Tahmini kâr",
         "settledNetProfit": "Fiili kâr",
-        "itemCount": "Kalem"
+        "itemCount": "Kalem",
+        "revenue": "Ciro",
+        "costStatus": "Maliyet durumu"
       }
+    },
+    "tabs": {
+      "calculated": "Hesaplanmış",
+      "pending": "Maliyet Bekleyen",
+      "emptyCalculated": "Henüz hesaplanmış sipariş yok"
+    },
+    "worklist": {
+      "costPending": "Maliyet bekliyor",
+      "addCost": "Maliyet Ekle",
+      "empty": "Tüm siparişlerin maliyeti hesaplanmış 🎉"
     },
     "empty": {
       "noStore": {

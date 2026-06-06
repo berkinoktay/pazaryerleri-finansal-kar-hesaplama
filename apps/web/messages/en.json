@@ -767,8 +767,20 @@
         "saleSubtotalNet": "Sale (net)",
         "estimatedNetProfit": "Estimated profit",
         "settledNetProfit": "Settled profit",
-        "itemCount": "Items"
+        "itemCount": "Items",
+        "revenue": "Revenue",
+        "costStatus": "Cost status"
       }
+    },
+    "tabs": {
+      "calculated": "Calculated",
+      "pending": "Awaiting Cost",
+      "emptyCalculated": "No calculated orders yet"
+    },
+    "worklist": {
+      "costPending": "Awaiting cost",
+      "addCost": "Add cost",
+      "empty": "All orders have their cost calculated 🎉"
     },
     "empty": {
       "noStore": {

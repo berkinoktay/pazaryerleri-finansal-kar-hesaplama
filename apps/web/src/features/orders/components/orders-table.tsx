@@ -1,6 +1,7 @@
 'use client';
 
 import { type ColumnDef, type PaginationState } from '@tanstack/react-table';
+import { Alert02Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
@@ -8,11 +9,13 @@ import * as React from 'react';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
+import { EmptyState } from '@/components/patterns/empty-state';
 
 import { type OrderListItem } from '../api/list-orders.api';
-import { ORDER_PER_PAGE_OPTIONS } from '../lib/orders-filter-parsers';
+import { type CostStatusValue, ORDER_PER_PAGE_OPTIONS } from '../lib/orders-filter-parsers';
 
 import { OrderStatusBadge } from './order-status-badge';
+import { OrdersCostStatusTabs } from './orders-cost-status-tabs';
 import { OrdersToolbar } from './orders-toolbar';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
@@ -34,6 +37,10 @@ export interface OrdersTableProps {
     from: string;
     to: string;
   };
+  costStatus: CostStatusValue;
+  counts: { calculated: number; pending: number };
+  tabsLoading?: boolean;
+  onCostStatusChange: (next: CostStatusValue) => void;
   onFiltersChange: OrdersToolbarProps['onChange'];
   onPaginationChange: (next: { page?: number; perPage?: number }) => void;
 }
@@ -48,15 +55,82 @@ export function OrdersTable({
   loading = false,
   pagination,
   filters,
+  costStatus,
+  counts,
+  tabsLoading = false,
+  onCostStatusChange,
   onFiltersChange,
   onPaginationChange,
 }: OrdersTableProps): React.ReactElement {
   const t = useTranslations('ordersPage.table');
+  const tPage = useTranslations('ordersPage');
   const formatter = useFormatter();
   const router = useRouter();
 
-  const columns = React.useMemo<ColumnDef<OrderListItem>[]>(
-    () => [
+  const columns = React.useMemo<ColumnDef<OrderListItem>[]>(() => {
+    if (costStatus === 'pending') {
+      return [
+        {
+          id: 'orderDate',
+          header: t('columns.orderDate'),
+          cell: ({ row }) => (
+            <span className="tabular-nums">
+              {formatter.dateTime(new Date(row.original.orderDate), 'short')}
+            </span>
+          ),
+        },
+        {
+          id: 'platformOrderNumber',
+          header: t('columns.orderNumber'),
+          cell: ({ row }) => {
+            const number = row.original.platformOrderNumber ?? row.original.platformOrderId;
+            return <span className="font-medium">{number}</span>;
+          },
+        },
+        {
+          id: 'saleSubtotalNet',
+          header: t('columns.revenue'),
+          cell: ({ row }) => {
+            const value = row.original.saleSubtotalNet;
+            return value === null ? (
+              <span className="text-muted-foreground">—</span>
+            ) : (
+              <Currency value={value} />
+            );
+          },
+        },
+        {
+          id: 'itemCount',
+          header: t('columns.itemCount'),
+          cell: ({ row }) => (
+            <span className="tabular-nums">
+              {formatter.number(row.original.itemCount, 'integer')}
+            </span>
+          ),
+        },
+        {
+          // Worklist trailing cell: cost-pending signal + "Maliyet Ekle"
+          // affordance. The ROW is the click target (navigates to the now-
+          // editable detail); this cell is a non-interactive visual cue, so
+          // there is no nested-button hydration trap.
+          id: 'costPending',
+          header: t('columns.costStatus'),
+          cell: () => (
+            <div className="gap-md flex items-center justify-between">
+              <span className="gap-2xs text-warning inline-flex items-center text-sm">
+                <Alert02Icon className="size-icon-sm" />
+                {tPage('worklist.costPending')}
+              </span>
+              <span className="gap-3xs text-muted-foreground inline-flex items-center text-sm">
+                {tPage('worklist.addCost')}
+                <ArrowRight01Icon className="size-icon-xs" />
+              </span>
+            </div>
+          ),
+        },
+      ];
+    }
+    return [
       {
         id: 'orderDate',
         header: t('columns.orderDate'),
@@ -129,9 +203,8 @@ export function OrdersTable({
           </span>
         ),
       },
-    ],
-    [t, formatter],
-  );
+    ];
+  }, [t, tPage, formatter, costStatus]);
 
   // Bridge the page-level (page, perPage) state to TanStack's PaginationState
   // ({ pageIndex, pageSize }). Manual pagination flips on as soon as we pass
@@ -160,6 +233,13 @@ export function OrdersTable({
     });
   };
 
+  const emptyState = (
+    <EmptyState
+      embedded
+      title={costStatus === 'pending' ? tPage('worklist.empty') : tPage('tabs.emptyCalculated')}
+    />
+  );
+
   return (
     <DataTable
       columns={columns}
@@ -174,6 +254,15 @@ export function OrdersTable({
       onClearFilters={() =>
         onFiltersChange({ q: '', status: null, reconciliationStatus: null, from: '', to: '' })
       }
+      tabs={
+        <OrdersCostStatusTabs
+          value={costStatus}
+          counts={counts}
+          loading={tabsLoading}
+          onChange={onCostStatusChange}
+        />
+      }
+      empty={emptyState}
       toolbar={() => (
         <OrdersToolbar
           q={filters.q}
