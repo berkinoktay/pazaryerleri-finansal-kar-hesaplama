@@ -656,11 +656,30 @@
           },
           "pagination": {
             "$ref": "#/components/schemas/TableMeta"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "calculated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pending": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "calculated",
+              "pending"
+            ],
+            "description": "Cost-status segment totals. Honor the sibling filters (status/recon/date/q) but ignore costStatus, so each tab shows its true count regardless of the active segment."
           }
         },
         "required": [
           "data",
-          "pagination"
+          "pagination",
+          "counts"
         ]
       },
       "OrderListItem": {
@@ -5456,6 +5475,21 @@
             "required": false,
             "description": "Substring match on platformOrderNumber or platformOrderId.",
             "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "calculated",
+                "pending"
+              ],
+              "description": "Filter by cost-calc state. 'calculated' = estimatedNetProfit set; 'pending' = awaiting cost. Omit for all.",
+              "example": "pending"
+            },
+            "required": false,
+            "description": "Filter by cost-calc state. 'calculated' = estimatedNetProfit set; 'pending' = awaiting cost. Omit for all.",
+            "name": "costStatus",
             "in": "query"
           }
         ],

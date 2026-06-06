@@ -30,6 +30,7 @@ section "Versioning" for details.
 
 ### Changed
 
+- `GET /v1/organizations/{orgId}/stores/{storeId}/orders` — new optional `costStatus` query param (`calculated` | `pending`) filtering on `estimatedNetProfit IS [NOT] NULL`, and a new `counts: { calculated, pending }` field in the response. Counts honor the sibling filters (status/reconciliationStatus/from/to/q) but ignore `costStatus`, so both segment tabs show honest totals.
 - `POST /v1/organizations/:orgId/stores` — successful TRENDYOL + PRODUCTION connects now also register a Trendyol webhook subscription (best-effort, non-blocking on failure). `Store.webhookId/Secret/ActiveAt` are populated on success; failures leave them null so the UI can surface a "webhook bağlı değil" badge and the user can rotate to retry.
 - `DELETE /v1/organizations/:orgId/stores/:storeId` — disconnect now also calls Trendyol DELETE `/webhooks/:id` (best-effort) before the local cascade delete, freeing the 15-webhook-per-seller cap (`webhook-model.md`). Failure does not block the local delete.
 

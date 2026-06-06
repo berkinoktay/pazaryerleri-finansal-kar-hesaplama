@@ -217,6 +217,78 @@ describe('Order routes', () => {
       expect(body1.data).toHaveLength(7);
     });
 
+    it('costStatus=pending returns only null-profit orders; costStatus=calculated only profit-known', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const calc = await seedSimpleOrder(org.id, store.id, { platformOrderNumber: 'CALC-1' });
+      const pending = await createOrder(org.id, store.id, { status: 'DELIVERED' }); // estimatedNetProfit null
+
+      const pendingRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=pending`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(pendingRes.status).toBe(200);
+      const pendingBody = (await pendingRes.json()) as { data: { id: string }[] };
+      expect(pendingBody.data.map((o) => o.id)).toEqual([pending.id]);
+
+      const calcRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=calculated`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const calcBody = (await calcRes.json()) as { data: { id: string }[] };
+      expect(calcBody.data.map((o) => o.id)).toEqual([calc.id]);
+    });
+
+    it('returns counts honoring sibling filters but ignoring costStatus', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      await seedSimpleOrder(org.id, store.id, { status: 'DELIVERED' }); // calc + delivered
+      await createOrder(org.id, store.id, { status: 'DELIVERED' }); // pending + delivered
+      await createOrder(org.id, store.id, { status: 'CANCELLED' }); // pending + cancelled
+
+      const allRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=calculated`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const allBody = (await allRes.json()) as {
+        counts: { calculated: number; pending: number };
+        data: unknown[];
+      };
+      expect(allBody.counts).toEqual({ calculated: 1, pending: 2 });
+      expect(allBody.data).toHaveLength(1);
+
+      const deliveredRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=pending&status=DELIVERED`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const deliveredBody = (await deliveredRes.json()) as {
+        counts: { calculated: number; pending: number };
+        data: unknown[];
+      };
+      expect(deliveredBody.counts).toEqual({ calculated: 1, pending: 1 });
+      expect(deliveredBody.data).toHaveLength(1);
+
+      // Flipping ONLY the segment (same scope, no sibling filter change) must
+      // leave the counts identical — the user-facing invariant "both tabs show
+      // the same honest totals regardless of which segment is active".
+      const pendingRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=pending`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const pendingBody = (await pendingRes.json()) as {
+        counts: { calculated: number; pending: number };
+        data: unknown[];
+      };
+      expect(pendingBody.counts).toEqual(allBody.counts);
+      expect(pendingBody.data).toHaveLength(2);
+    });
+
     it('rejects an invalid perPage value at the Zod boundary', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();

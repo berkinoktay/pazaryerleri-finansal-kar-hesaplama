@@ -74,6 +74,11 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
     description: 'Substring match on platformOrderNumber or platformOrderId.',
     example: 'TY-2024',
   }),
+  costStatus: z.enum(['calculated', 'pending']).optional().openapi({
+    description:
+      "Filter by cost-calc state. 'calculated' = estimatedNetProfit set; 'pending' = awaiting cost. Omit for all.",
+    example: 'pending',
+  }),
 }).openapi('ListOrdersQuery');
 
 export type ListOrdersQuery = z.infer<typeof listOrdersQuerySchema>;
@@ -133,6 +138,16 @@ export const ListOrdersResponseSchema = z
   .object({
     data: z.array(OrderListItemSchema),
     pagination: TableMetaSchema,
+    counts: z
+      .object({
+        calculated: z.number().int().nonnegative(),
+        pending: z.number().int().nonnegative(),
+      })
+      .openapi({
+        description:
+          'Cost-status segment totals. Honor the sibling filters (status/recon/date/q) but ' +
+          'ignore costStatus, so each tab shows its true count regardless of the active segment.',
+      }),
   })
   .openapi('ListOrdersResponse');
 
