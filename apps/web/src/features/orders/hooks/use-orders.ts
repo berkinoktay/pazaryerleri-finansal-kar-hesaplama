@@ -27,6 +27,7 @@ function argsToFilters(args: ListOrdersArgs): OrderListFilters {
   return {
     status: args.status ?? '',
     reconciliationStatus: args.reconciliationStatus ?? '',
+    costStatus: args.costStatus ?? '',
     from: args.from ?? '',
     to: args.to ?? '',
     q: args.q ?? '',
