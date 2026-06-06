@@ -16,12 +16,10 @@ function makeLocalStorageStub() {
       store[k] = String(v);
     },
     removeItem: (k: string): void => {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete store[k];
     },
     clear: (): void => {
       for (const k of Object.keys(store)) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete store[k];
       }
     },
