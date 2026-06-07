@@ -4,6 +4,7 @@
 export interface OrderListFilters {
   status: string;
   reconciliationStatus: string;
+  costStatus: string;
   from: string;
   to: string;
   q: string;

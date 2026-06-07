@@ -767,8 +767,20 @@
         "saleSubtotalNet": "Satış (net)",
         "estimatedNetProfit": "Tahmini kâr",
         "settledNetProfit": "Fiili kâr",
-        "itemCount": "Kalem"
+        "itemCount": "Kalem",
+        "revenue": "Ciro",
+        "costStatus": "Maliyet durumu"
       }
+    },
+    "tabs": {
+      "calculated": "Hesaplanmış",
+      "pending": "Maliyet Bekleyen",
+      "emptyCalculated": "Henüz hesaplanmış sipariş yok"
+    },
+    "worklist": {
+      "costPending": "Maliyet bekliyor",
+      "addCost": "Maliyet Ekle",
+      "empty": "Tüm siparişlerin maliyeti hesaplanmış 🎉"
     },
     "empty": {
       "noStore": {
@@ -1480,6 +1492,19 @@
     },
     "intent": "{date} tarihli sipariş — kâr dökümü, fatura zaman çizgisi ve iade durumu.",
     "backToList": "Listeye dön",
+    "costEntry": {
+      "trigger": "Maliyet gir",
+      "tabs": {
+        "manual": "Özel tutar",
+        "profile": "Kayıtlı profil"
+      },
+      "netAmount": "Tutar (KDV hariç)",
+      "vatRate": "KDV oranı (%)",
+      "profile": "Maliyet profili",
+      "profilePlaceholder": "Profil seçin",
+      "save": "Kaydet",
+      "noProfiles": "Kayıtlı maliyet profili yok"
+    },
     "kpis": {
       "saleSubtotalNet": {
         "label": "Satış (net)"
@@ -1684,26 +1709,6 @@
         },
         "addCost": "Maliyet ekle",
         "loadError": "Sipariş ayrıntısı yüklenemedi."
-      },
-      "costEntry": {
-        "trigger": "Maliyet gir",
-        "tabs": {
-          "manual": "Özel tutar",
-          "profile": "Kayıtlı profil"
-        },
-        "netAmount": "Tutar (KDV hariç)",
-        "vatRate": "KDV oranı (%)",
-        "profile": "Maliyet profili",
-        "profilePlaceholder": "Profil seçin",
-        "save": "Kaydet",
-        "cancel": "İptal",
-        "noProfiles": "Kayıtlı maliyet profili yok",
-        "errors": {
-          "netAmountRequired": "Tutar gerekli",
-          "netAmountPositive": "Tutar 0'dan büyük olmalı",
-          "vatRateRange": "KDV oranı 0-100 arası olmalı",
-          "profileRequired": "Profil seçin"
-        }
       }
     },
     "realtime": {

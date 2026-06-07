@@ -11,6 +11,7 @@ import type {
 interface OrderListResult {
   data: OrderListItemResponse[];
   total: number;
+  counts: { calculated: number; pending: number };
 }
 
 /**
@@ -58,6 +59,10 @@ function buildOrderListWhere(
     ];
   }
 
+  if (filters.costStatus !== undefined) {
+    where.estimatedNetProfit = filters.costStatus === 'calculated' ? { not: null } : null;
+  }
+
   return where;
 }
 
@@ -69,9 +74,10 @@ export async function listOrders(
   await ensureStoreInOrg(orgId, storeId);
 
   const where = buildOrderListWhere(orgId, storeId, filters);
+  const baseWhere = buildOrderListWhere(orgId, storeId, { ...filters, costStatus: undefined });
   const skip = (filters.page - 1) * filters.perPage;
 
-  const [rows, total] = await Promise.all([
+  const [rows, total, calculatedCount, pendingCount] = await Promise.all([
     prisma.order.findMany({
       where,
       orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
@@ -82,6 +88,8 @@ export async function listOrders(
       },
     }),
     prisma.order.count({ where }),
+    prisma.order.count({ where: { ...baseWhere, estimatedNetProfit: { not: null } } }),
+    prisma.order.count({ where: { ...baseWhere, estimatedNetProfit: null } }),
   ]);
 
   const data: OrderListItemResponse[] = rows.map((row) => ({
@@ -100,7 +108,7 @@ export async function listOrders(
     itemCount: row._count.items,
   }));
 
-  return { data, total };
+  return { data, total, counts: { calculated: calculatedCount, pending: pendingCount } };
 }
 
 export async function getOrderById(

@@ -24,6 +24,7 @@ export function useOrdersFilters(): {
       'q' in next ||
       'status' in next ||
       'reconciliationStatus' in next ||
+      'costStatus' in next ||
       'from' in next ||
       'to' in next;
     return setRaw({

@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import { useFormatter } from 'next-intl';
 import * as React from 'react';
 
@@ -11,11 +12,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { CostEntryCell } from '@/features/orders/components/cost-entry-cell';
 import { OrderDetailClient } from '@/features/orders/components/order-detail-client';
 
 import type { LiveOrderRow } from '../api/get-live-orders.api';
+import { liveKeys } from '../query-keys';
 import { BufferOrderDetail } from './buffer-order-detail';
-import { CostEntryCell } from './cost-entry-cell';
 
 interface LiveOrderDetailSheetProps {
   orgId: string;
@@ -44,6 +46,7 @@ export function LiveOrderDetailSheet({
   onClose,
 }: LiveOrderDetailSheetProps): React.ReactElement | null {
   const formatter = useFormatter();
+  const queryClient = useQueryClient();
 
   if (selected === null) return null;
 
@@ -61,7 +64,13 @@ export function LiveOrderDetailSheet({
         orderId={orderId}
         chrome="modal"
         renderItemCostCell={(item) => (
-          <CostEntryCell orgId={orgId} storeId={storeId} orderId={orderId} item={item} />
+          <CostEntryCell
+            orgId={orgId}
+            storeId={storeId}
+            orderId={orderId}
+            item={item}
+            onCosted={() => queryClient.invalidateQueries({ queryKey: liveKeys.all })}
+          />
         )}
       />
     );

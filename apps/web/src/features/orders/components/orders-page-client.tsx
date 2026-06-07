@@ -64,6 +64,7 @@ export function OrdersPageClient({
           q: filters.q.length > 0 ? filters.q : undefined,
           status: filters.status ?? undefined,
           reconciliationStatus: filters.reconciliationStatus ?? undefined,
+          costStatus: filters.costStatus,
           from: filters.from.length > 0 ? filters.from : undefined,
           to: filters.to.length > 0 ? filters.to : undefined,
           page: filters.page,
@@ -89,6 +90,8 @@ export function OrdersPageClient({
     total: 0,
     totalPages: 0,
   };
+  const counts = ordersQuery.data?.counts ?? { calculated: 0, pending: 0 };
+  const noOrdersAtAll = counts.calculated === 0 && counts.pending === 0;
 
   const hasAnyFilter =
     filters.q.length > 0 ||
@@ -137,7 +140,7 @@ export function OrdersPageClient({
   // Show the no-orders empty state only when the dataset is genuinely empty
   // (zero rows, no filter active). With filters active, the DataTable's
   // built-in empty state surfaces the "clear filters to see more" affordance.
-  if (!ordersQuery.isLoading && !hasAnyFilter && rows.length === 0 && pagination.total === 0) {
+  if (!ordersQuery.isLoading && !hasAnyFilter && noOrdersAtAll) {
     return (
       <>
         <PageHeader title={pageTitle} intent={pageIntent} actions={headerSlots.actions} />
@@ -167,6 +170,10 @@ export function OrdersPageClient({
             from: filters.from,
             to: filters.to,
           }}
+          costStatus={filters.costStatus}
+          counts={counts}
+          tabsLoading={ordersQuery.isLoading}
+          onCostStatusChange={(next) => setFilters({ costStatus: next })}
           onFiltersChange={(next) =>
             setFilters({
               ...(next.q !== undefined ? { q: next.q } : {}),

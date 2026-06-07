@@ -66,7 +66,7 @@ app.openapi(listOrdersRoute, async (c) => {
   const filters = c.req.valid('query');
   await requireStoreAccess(userId, orgId, storeId);
 
-  const { data, total } = await orderService.listOrders(orgId, storeId, filters);
+  const { data, total, counts } = await orderService.listOrders(orgId, storeId, filters);
 
   const totalPages = total === 0 ? 0 : Math.ceil(total / filters.perPage);
 
@@ -79,6 +79,7 @@ app.openapi(listOrdersRoute, async (c) => {
         total,
         totalPages,
       },
+      counts,
     },
     200,
   );

@@ -108,4 +108,26 @@ describe('Orders — tenant isolation', () => {
     const body = (await res.json()) as { data: { id: string }[] };
     expect(body.data.map((o) => o.id)).toEqual([orderA.id]);
   });
+
+  it('LIST: counts reflect only the queried org, never a sibling org', async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA = await createStore(orgA.id);
+    await createOrder(orgA.id, storeA.id, { estimatedNetProfit: '10.00' });
+    await createOrder(orgA.id, storeA.id); // pending
+
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    for (let i = 0; i < 5; i += 1) {
+      await createOrder(orgB.id, storeB.id, { estimatedNetProfit: '99.00' });
+    }
+
+    const res = await app.request(`/v1/organizations/${orgA.id}/stores/${storeA.id}/orders`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { counts: { calculated: number; pending: number } };
+    expect(body.counts).toEqual({ calculated: 1, pending: 1 });
+  });
 });

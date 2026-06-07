@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { CostEntryCell } from '@/features/live-performance/components/cost-entry-cell';
+import { CostEntryCell } from '@/features/orders/components/cost-entry-cell';
 import type { OrderItemDetail } from '@/features/orders/api/get-order.api';
 
-import { http, HttpResponse, server } from '../helpers/msw';
-import { render, screen } from '../helpers/render';
+import { http, HttpResponse, server } from '../../../helpers/msw';
+import { render, screen } from '../../../helpers/render';
 
 const ORG = '11111111-1111-1111-1111-111111111111';
 const STORE = '22222222-2222-2222-2222-222222222222';
@@ -111,7 +111,7 @@ describe('CostEntryCell', () => {
 
     await user.click(screen.getByRole('button', { name: /maliyet gir|enter cost/i }));
     // Switch to the profile tab. The tab label comes from tr.json:
-    // livePerformance.orderDetail.costEntry.tabs.profile = "Kayitli profil"
+    // orderDetail.costEntry.tabs.profile = "Kayitli profil"
     const profileTab = await screen.findByRole('tab', { name: /profil/i });
     await user.click(profileTab);
 
