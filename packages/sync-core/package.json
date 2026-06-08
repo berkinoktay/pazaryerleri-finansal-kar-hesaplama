@@ -11,7 +11,8 @@
   "scripts": {
     "test:unit": "vitest run src --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",
@@ -20,6 +21,8 @@
   "devDependencies": {
     "dotenv": "^16.4.0",
     "typescript": "^6",
-    "vitest": "^4"
+    "vitest": "^4",
+    "@pazarsync/eslint-config": "workspace:*",
+    "eslint": "^9"
   }
 }

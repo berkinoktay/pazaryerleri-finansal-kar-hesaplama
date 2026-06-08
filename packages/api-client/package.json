@@ -11,13 +11,16 @@
   "scripts": {
     "codegen": "openapi-typescript ./openapi.json -o ./src/generated/api.d.ts",
     "codegen:watch": "openapi-typescript ./openapi.json -o ./src/generated/api.d.ts --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
     "openapi-typescript": "^7.5.0",
-    "typescript": "^6"
+    "typescript": "^6",
+    "@pazarsync/eslint-config": "workspace:*",
+    "eslint": "^9"
   }
 }

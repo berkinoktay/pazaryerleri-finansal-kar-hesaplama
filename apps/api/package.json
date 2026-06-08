@@ -8,7 +8,8 @@
     "build": "tsup src/index.ts --format esm",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "clean": "rm -rf dist .turbo",
     "test": "vitest run",
     "test:unit": "PAZARSYNC_SKIP_RESEED=1 vitest run tests/unit --passWithNoTests",
@@ -35,7 +36,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
+    "@pazarsync/eslint-config": "workspace:*",
     "@types/node": "^20.19.41",
     "@vitest/ui": "^4.1.6",
     "dotenv": "^16.4.0",
@@ -43,7 +44,6 @@
     "tsup": "^8.4.0",
     "tsx": "^4.19.0",
     "typescript": "^6",
-    "typescript-eslint": "^8.59.3",
     "vitest": "^4.1.6"
   }
 }

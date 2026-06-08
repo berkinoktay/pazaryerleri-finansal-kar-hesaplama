@@ -24,8 +24,8 @@
     "test:component": "turbo run test:component",
     "test:integration": "turbo run test:integration",
     "test:watch": "turbo run test:watch --parallel",
-    "check:all": "turbo run typecheck lint test:unit test:component && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors",
-    "check:full": "turbo run typecheck lint test && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors",
+    "check:all": "turbo run typecheck lint test:unit test:component && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors && pnpm audit:lint",
+    "check:full": "turbo run typecheck lint test && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors && pnpm audit:lint",
     "clean": "turbo run clean",
     "api:openapi": "pnpm --filter @pazarsync/api openapi:dump",
     "api:codegen": "pnpm --filter @pazarsync/api-client codegen",
@@ -33,6 +33,7 @@
     "gen:encryption-key": "pnpm --filter @pazarsync/api gen:encryption-key",
     "audit:boundaries": "tsx scripts/audit-feature-boundaries.ts",
     "audit:errors": "tsx scripts/audit-error-codes.ts",
+    "audit:lint": "tsx scripts/audit-lint-coverage.ts",
     "emit:components-manifest": "tsx scripts/emit-component-manifest.ts",
     "prepare": "husky"
   },
