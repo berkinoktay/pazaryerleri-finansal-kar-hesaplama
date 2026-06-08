@@ -140,6 +140,22 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
   // (Trendyol payload has 30+ fields that we just forward to the mapper).
   const payload = c.req.valid('json') as unknown as TrendyolShipmentPackage;
 
+  // ─── 0. PRODUCTION-only intake gate (defense-in-depth) ─────────────────
+  // The `connect` path already blocks SANDBOX store creation in production
+  // via the ALLOW_SANDBOX_CONNECTIONS env flag (services/store.service.ts).
+  // This is the receiver-side mirror: if a SANDBOX store ever ends up in a
+  // production deployment (flag flipped, manual DB insert, code regression),
+  // drop the webhook silently with 200 OK so prod data sets stay clean of
+  // test orders. Non-production environments still intake SANDBOX webhooks
+  // normally so stage runbooks keep working.
+  if (process.env['NODE_ENV'] === 'production' && store.environment === 'SANDBOX') {
+    syncLog.info('webhook.sandbox-dropped-in-production', {
+      storeId: store.id,
+      platformOrderId: String(payload.shipmentPackageId),
+    });
+    return c.body(null, 200);
+  }
+
   // ─── 1. Defense-in-depth: payload supplier must match store ────────────
   // Root `supplierId` is the prod contract (webhook-model.md). Stage payloads
   // omit it; lines[].sellerId is the always-present fallback. We collect every
