@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",
@@ -22,6 +23,8 @@
   },
   "devDependencies": {
     "typescript": "^6",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.6",
+    "@pazarsync/eslint-config": "workspace:*",
+    "eslint": "^9"
   }
 }

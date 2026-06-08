@@ -75,8 +75,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
-      # Filter forces every workspace package into scope. Without it,
-      # turbo's affected-detection might skip packages it considers unchanged.
+      # Every workspace declares a `lint` script (enforced by `pnpm audit:lint`),
+      # so this genuinely lints all packages — including the profit engine, crypto,
+      # and marketplace adapters. The filter pulls every workspace into scope
+      # regardless of turbo's affected-detection.
       - run: pnpm turbo run lint --filter='@pazarsync/*'
       - name: Format check
         run: pnpm format:check

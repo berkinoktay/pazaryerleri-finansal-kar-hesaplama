@@ -84,9 +84,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@eslint/js':
-        specifier: ^9.39.4
-        version: 9.39.4
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/eslint-config
       '@types/node':
         specifier: ^20.19.41
         version: 20.19.41
@@ -108,9 +108,6 @@ importers:
       typescript:
         specifier: ^6
         version: 6.0.3
-      typescript-eslint:
-        specifier: ^8.59.3
-        version: 8.59.3(eslint@9.39.4(jiti@2.6.1))(typescript@6.0.3)
       vitest:
         specifier: ^4.1.6
         version: 4.1.6(@types/node@20.19.41)(@vitest/ui@4.1.6)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@20.19.41)(typescript@6.0.3))(vite@8.0.8(@types/node@20.19.41)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
@@ -139,9 +136,15 @@ importers:
         specifier: ^10.6.0
         version: 10.6.0
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/eslint-config
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
@@ -384,6 +387,12 @@ importers:
         specifier: ^0.17.0
         version: 0.17.0
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       openapi-typescript:
         specifier: ^7.5.0
         version: 7.13.0(typescript@6.0.3)
@@ -403,6 +412,9 @@ importers:
         specifier: ^8.13.0
         version: 8.20.0
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
       '@prisma/client':
         specifier: ^7.8.0
         version: 7.8.0(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3)
@@ -412,6 +424,9 @@ importers:
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       prisma:
         specifier: ^7.8.0
         version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)
@@ -421,6 +436,18 @@ importers:
       typescript:
         specifier: ^6
         version: 6.0.3
+
+  packages/eslint-config:
+    dependencies:
+      '@eslint/js':
+        specifier: ^9.39.4
+        version: 9.39.4
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
+      typescript-eslint:
+        specifier: ^8.59.3
+        version: 8.59.3(eslint@9.39.4(jiti@2.6.1))(typescript@6.0.3)
 
   packages/marketplace:
     dependencies:
@@ -437,6 +464,12 @@ importers:
         specifier: ^10.5.0
         version: 10.6.0
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       typescript:
         specifier: ^6
         version: 6.0.3
@@ -465,6 +498,12 @@ importers:
         specifier: ^10.5.0
         version: 10.6.0
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       typescript:
         specifier: ^6
         version: 6.0.3
@@ -481,6 +520,12 @@ importers:
         specifier: ^10.5.0
         version: 10.6.0
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       typescript:
         specifier: ^6
         version: 6.0.3
@@ -497,9 +542,15 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       typescript:
         specifier: ^6
         version: 6.0.3
@@ -519,9 +570,15 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
       '@types/node':
         specifier: ^20.19.41
         version: 20.19.41
+      eslint:
+        specifier: ^9
+        version: 9.39.4(jiti@2.6.1)
       typescript:
         specifier: ^6
         version: 6.0.3
