@@ -14,7 +14,7 @@ Detaylı ürün vizyonu için [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)
 | Layer               | Technology                                                  |
 | ------------------- | ----------------------------------------------------------- |
 | **Monorepo**        | Turborepo + pnpm workspaces                                 |
-| **Frontend**        | Next.js 16 (App Router) · React 19.2 · TypeScript 5         |
+| **Frontend**        | Next.js 16 (App Router) · React 19.2 · TypeScript 6         |
 | **Styling**         | Tailwind CSS 4 · shadcn/ui · Hugeicons                      |
 | **Backend**         | Hono on Node.js · `@hono/zod-openapi`                       |
 | **API Pattern**     | REST · OpenAPI 3.1 · Zod validation · cursor pagination     |
@@ -32,19 +32,29 @@ Detaylı ürün vizyonu için [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)
 ```
 .
 ├── apps/
-│   ├── web/                Next.js 16 frontend                (see apps/web/CLAUDE.md)
-│   └── api/                Hono backend                        (see apps/api/CLAUDE.md)
+│   ├── web/                Next.js 16 frontend                 (see apps/web/CLAUDE.md)
+│   ├── api/                Hono backend                        (see apps/api/CLAUDE.md)
+│   └── sync-worker/        Long-running worker — polls the SyncLog queue, runs sync
 ├── packages/
-│   ├── db/                 Prisma 7 schema + client + migrations
-│   ├── types/              Shared TypeScript types (API contracts, domain models)
-│   ├── utils/              Currency / date / cursor / validation helpers
-│   └── api-client/         Typed openapi-fetch client (codegen from apps/api)
+│   ├── db/                 Prisma 7 schema, client, migrations, domain enums
+│   ├── utils/              Currency / date / timezone / cursor / permissions / validation
+│   ├── api-client/         Typed openapi-fetch client (codegen from apps/api)
+│   ├── marketplace/        Marketplace adapters (Trendyol, Hepsiburada) + registry
+│   ├── sync-core/          Sync primitives: job claim, checkpoint, crypto, logger
+│   ├── order-sync/         Idempotent order upsert (marketplace payload → Order)
+│   ├── profit/             Profit engine: formula, estimates, settlement reconcile
+│   └── eslint-config/      Shared flat ESLint config
 ├── supabase/
-│   ├── functions/          Edge Functions (sync workers)
+│   ├── functions/          Edge Functions (fx-rates sync · Deno)
 │   └── sql/                RLS policies, pg_cron, DB functions
-├── docs/                   Architecture, security, API, integration docs
+├── scripts/                Repo audits (boundaries, error codes, lint coverage) + codegen
+├── docs/                   Architecture, security, API docs (local-only, gitignored)
 └── .github/workflows/      CI: typecheck · lint · tests · OpenAPI sync
 ```
+
+> Cross-app request/response contracts come from `@pazarsync/api-client` (generated
+> from the backend OpenAPI spec) and domain enums from `@pazarsync/db` — there is no
+> `packages/types`.
 
 ---
 
@@ -53,7 +63,7 @@ Detaylı ürün vizyonu için [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)
 ### Prerequisites
 
 - **Node.js** ≥ 20.19
-- **pnpm** ≥ 9.15
+- **pnpm** — managed via Corepack (pinned in the `packageManager` field of `package.json`)
 - **Docker** (or [OrbStack](https://orbstack.dev)) — required by `supabase start`
 - **Supabase CLI** — `brew install supabase/tap/supabase`
 

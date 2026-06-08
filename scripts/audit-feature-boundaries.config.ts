@@ -18,8 +18,9 @@
  *      `apps/web/src/components/patterns/` (components).
  *
  *   2. Type-only cross-feature imports are warnings. A shared type is a
- *      shared contract, and the long-term home for it is `packages/types/`
- *      (web + api) or a shared module under `apps/web/src/lib/`. Treating
+ *      shared contract: if web and api both consume it, its home is
+ *      `@pazarsync/api-client` (generated from the backend OpenAPI spec); if
+ *      only web consumes it, a shared module under `apps/web/src/lib/`. Treating
  *      these as warnings creates a backlog without blocking PRs that simply
  *      reference an existing shape.
  *
@@ -104,7 +105,7 @@ export function evaluateCrossFeatureImport(imp: CrossFeatureImport): ViolationDe
   if (imp.isTypeOnly) {
     return {
       severity: 'warn',
-      message: `Type imported from "${imp.targetFeature}" into "${imp.sourceFeature}" - move the shared type to packages/types/ or apps/web/src/lib/`,
+      message: `Type imported from "${imp.targetFeature}" into "${imp.sourceFeature}" - move the shared type to @pazarsync/api-client (web+api) or apps/web/src/lib/ (web-only)`,
     };
   }
   return {
