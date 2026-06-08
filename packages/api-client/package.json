@@ -19,8 +19,8 @@
   },
   "devDependencies": {
     "openapi-typescript": "^7.5.0",
-    "typescript": "^6",
+    "typescript": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "^9"
+    "eslint": "catalog:"
   }
 }

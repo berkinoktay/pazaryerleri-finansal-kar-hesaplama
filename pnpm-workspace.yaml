@@ -1,3 +1,26 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Single source of truth for versions shared across 2+ workspaces. Each
+# package references these via `"<dep>": "catalog:"`. Bump here once; pnpm
+# keeps every workspace on the same resolved version (no silent drift like
+# vitest 4.1.4 vs 4.1.6 or @types/node 20 vs 25). See issue #256.
+catalog:
+  "@supabase/supabase-js": ^2.105.4
+  "@types/node": ^20.19.41
+  "@vitest/ui": ^4.1.6
+  decimal.js: ^10.6.0
+  dotenv: ^16.4.0
+  eslint: ^9
+  tsx: ^4.21.0
+  typescript: ^6.0.0
+  vitest: ^4.1.6
+  zod: ^4.4.3
+
+# Pin the TRANSITIVE @types/node to the same major as the engines field
+# (Node >=20.19). Without this a dev-tool subtree drags in @types/node@25,
+# exposing Node-25 lib types to packages the runtime will never run on 25.
+# Keep in sync with the catalog entry above. See issue #256.
+overrides:
+  "@types/node": ^20.19.41

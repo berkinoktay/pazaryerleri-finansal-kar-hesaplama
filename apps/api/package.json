@@ -30,20 +30,20 @@
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",
     "@scalar/hono-api-reference": "^0.10.14",
-    "@supabase/supabase-js": "^2.105.4",
-    "decimal.js": "^10.5.0",
+    "@supabase/supabase-js": "catalog:",
+    "decimal.js": "catalog:",
     "hono": "^4.12.18",
-    "zod": "^4.4.3"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@pazarsync/eslint-config": "workspace:*",
-    "@types/node": "^20.19.41",
-    "@vitest/ui": "^4.1.6",
-    "dotenv": "^16.4.0",
-    "eslint": "^9",
+    "@types/node": "catalog:",
+    "@vitest/ui": "catalog:",
+    "dotenv": "catalog:",
+    "eslint": "catalog:",
     "tsup": "^8.4.0",
-    "tsx": "^4.19.0",
-    "typescript": "^6",
-    "vitest": "^4.1.6"
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

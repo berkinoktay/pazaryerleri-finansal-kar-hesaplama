@@ -17,14 +17,14 @@
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",
-    "decimal.js": "^10.5.0",
-    "zod": "^4.4.3"
+    "decimal.js": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "^20.19.41",
-    "typescript": "^6",
-    "vitest": "^4.1.6",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "^9"
+    "eslint": "catalog:"
   }
 }
