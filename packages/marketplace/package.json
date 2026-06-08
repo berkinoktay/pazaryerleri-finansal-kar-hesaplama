@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "typescript": "^6",
-    "vitest": "^4.1.6",
+    "vitest": "^4.1.8",
     "@pazarsync/eslint-config": "workspace:*",
     "eslint": "^9"
   }
