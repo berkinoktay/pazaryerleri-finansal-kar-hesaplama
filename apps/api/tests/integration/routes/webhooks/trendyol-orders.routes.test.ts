@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../../../../src/app';
 import { _resetRateLimitStoreForTests } from '../../../../src/middleware/rate-limit.middleware';
@@ -65,7 +65,9 @@ function makeWebhookPayload(overrides: WebhookPayloadOverrides = {}) {
   };
 }
 
-async function setupStore(): Promise<{ orgId: string; storeId: string }> {
+async function setupStore(
+  overrides: { environment?: 'PRODUCTION' | 'SANDBOX' } = {},
+): Promise<{ orgId: string; storeId: string }> {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -80,7 +82,7 @@ async function setupStore(): Promise<{ orgId: string; storeId: string }> {
       organizationId: org.id,
       name: 'Webhook Test Store',
       platform: STORE_PLATFORM,
-      environment: 'PRODUCTION',
+      environment: overrides.environment ?? 'PRODUCTION',
       externalAccountId: SUPPLIER_ID,
       credentials: encryptCredentials({
         supplierId: SUPPLIER_ID,
@@ -456,6 +458,66 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       expect(order.organizationId).toBe(orgId);
       expect(order.estimatedNetProfit).toBeNull();
       expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+    });
+  });
+
+  describe('PRODUCTION-only intake gate (defense-in-depth)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('drops SANDBOX-store webhooks in production with 200 + skip log, no DB write', async () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      const { storeId } = await setupStore({ environment: 'SANDBOX' });
+      const infoSpy = vi.spyOn(syncLog, 'info');
+
+      const res = await postWebhook(
+        storeId,
+        makeWebhookPayload(),
+        basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+      );
+
+      expect(res.status).toBe(200);
+      expect(infoSpy).toHaveBeenCalledWith(
+        'webhook.sandbox-dropped-in-production',
+        expect.objectContaining({ storeId, platformOrderId: '3734026895' }),
+      );
+      // Gate fires before the idempotency log INSERT, so nothing persists.
+      expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(0);
+      expect(await prisma.order.count({ where: { storeId } })).toBe(0);
+
+      infoSpy.mockRestore();
+    });
+
+    it('still intakes PRODUCTION-store webhooks normally when NODE_ENV=production', async () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      const { storeId } = await setupStore({ environment: 'PRODUCTION' });
+
+      const res = await postWebhook(
+        storeId,
+        makeWebhookPayload(),
+        basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+      );
+
+      expect(res.status).toBe(200);
+      // Gate does NOT fire — the receiver upserts the order as usual.
+      expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(1);
+      expect(await prisma.order.count({ where: { storeId } })).toBe(1);
+    });
+
+    it('still intakes SANDBOX-store webhooks when NODE_ENV is not production (dev/stage runbook)', async () => {
+      // Default test env is NODE_ENV=test — gate must not fire.
+      const { storeId } = await setupStore({ environment: 'SANDBOX' });
+
+      const res = await postWebhook(
+        storeId,
+        makeWebhookPayload(),
+        basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(1);
+      expect(await prisma.order.count({ where: { storeId } })).toBe(1);
     });
   });
 });
