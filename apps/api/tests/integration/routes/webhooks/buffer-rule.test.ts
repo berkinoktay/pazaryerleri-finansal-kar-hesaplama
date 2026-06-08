@@ -177,10 +177,10 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
 
     const entries = await prisma.livePerformanceBuffer.findMany({ where: { storeId } });
     expect(entries).toHaveLength(1);
-    expect(entries[0].status).toBe('PENDING');
-    expect(entries[0].organizationId).toBe(orgId);
-    expect(entries[0].platformOrderId).toBe('700000001');
-    expect(entries[0].platformOrderNumber).toBe('buf-ord-1');
+    expect(entries[0]!.status).toBe('PENDING');
+    expect(entries[0]!.organizationId).toBe(orgId);
+    expect(entries[0]!.platformOrderId).toBe('700000001');
+    expect(entries[0]!.platformOrderNumber).toBe('buf-ord-1');
   });
 
   it('cost-missing + previous-day orderDate → persists to orders (null profit), no buffer write', async () => {
