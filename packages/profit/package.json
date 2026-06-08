@@ -15,12 +15,12 @@
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",
-    "decimal.js": "^10.5.0"
+    "decimal.js": "catalog:"
   },
   "devDependencies": {
-    "typescript": "^6",
-    "vitest": "^4",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "^9"
+    "eslint": "catalog:"
   }
 }

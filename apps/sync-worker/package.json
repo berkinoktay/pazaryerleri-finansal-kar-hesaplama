@@ -19,14 +19,14 @@
     "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",
-    "decimal.js": "^10.6.0"
+    "decimal.js": "catalog:"
   },
   "devDependencies": {
-    "dotenv": "^16.4.0",
-    "tsx": "^4.19.0",
-    "typescript": "^6",
-    "vitest": "^4",
+    "dotenv": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "^9"
+    "eslint": "catalog:"
   }
 }

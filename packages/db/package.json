@@ -25,17 +25,17 @@
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
-    "@supabase/supabase-js": "^2.105.4",
+    "@supabase/supabase-js": "catalog:",
     "pg": "^8.13.0"
   },
   "devDependencies": {
     "@prisma/client": "^7.8.0",
     "@types/pg": "^8.11.0",
-    "dotenv": "^16.4.0",
+    "dotenv": "catalog:",
     "prisma": "^7.8.0",
-    "tsx": "^4.19.0",
-    "typescript": "^6",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "^9"
+    "eslint": "catalog:"
   }
 }
