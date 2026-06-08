@@ -26,7 +26,7 @@
 //     backend calls. authMiddleware verifies via supabase.auth.getUser.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { createCipheriv, randomBytes } from 'node:crypto';
+import { encrypt } from '@pazarsync/crypto-core';
 import { fileURLToPath } from 'node:url';
 
 import { config as loadEnv } from 'dotenv';
@@ -56,26 +56,15 @@ function supabaseAdmin() {
   });
 }
 
-// Mirror of apps/api/src/lib/crypto.ts encryptCredentials. Kept inline
-// because packages/db must not depend on apps/api (dependency direction
-// is apps → packages). If this ever drifts from the canonical helper,
-// the marketplace adapter will fail to decrypt.
+// Encrypt seed store credentials with the shared AES-256-GCM envelope
+// (@pazarsync/crypto-core) — the same one the marketplace adapter decrypts
+// with, so the seed's wire format can never drift from the canonical helper.
 function encryptCredentials(creds: Record<string, unknown>): string {
   const keyHex = process.env['ENCRYPTION_KEY'];
   if (keyHex === undefined || keyHex.length === 0) {
     throw new Error('ENCRYPTION_KEY is required to seed encrypted store credentials.');
   }
-  const key = Buffer.from(keyHex, 'hex');
-  if (key.length !== 32) {
-    throw new Error(
-      `ENCRYPTION_KEY must be 32 bytes (64 hex chars). Got ${key.length.toString()}.`,
-    );
-  }
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(creds), 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, authTag, ciphertext]).toString('base64');
+  return encrypt(JSON.stringify(creds), Buffer.from(keyHex, 'hex'));
 }
 
 // Fixed UUIDs so re-seeding stays stable and Supabase Studio keeps the

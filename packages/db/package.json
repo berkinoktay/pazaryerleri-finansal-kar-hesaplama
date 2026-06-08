@@ -35,6 +35,7 @@
     "prisma": "^7.8.0",
     "tsx": "catalog:",
     "typescript": "catalog:",
+    "@pazarsync/crypto-core": "workspace:*",
     "@pazarsync/eslint-config": "workspace:*",
     "eslint": "catalog:"
   }

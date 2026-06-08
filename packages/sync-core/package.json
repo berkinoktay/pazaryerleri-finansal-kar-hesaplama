@@ -15,6 +15,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@pazarsync/crypto-core": "workspace:*",
     "@pazarsync/db": "workspace:*",
     "zod": "catalog:"
   },

@@ -1,15 +1,9 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { decrypt, encrypt, KEY_LENGTH_BYTES } from '@pazarsync/crypto-core';
 
-// AES-256-GCM: NIST-recommended, authenticated encryption. The 12-byte IV
-// length is what SP 800-38D specifies as the default for GCM (other lengths
-// force an internal GHASH computation that reduces the per-key message limit).
-// The 16-byte auth tag is the GCM default and the only length accepted by
-// most compliance frameworks.
-const ALGORITHM = 'aes-256-gcm';
-const KEY_LENGTH_BYTES = 32;
-const IV_LENGTH_BYTES = 12;
-const AUTH_TAG_LENGTH_BYTES = 16;
-
+// The AES-256-GCM envelope (encrypt/decrypt) lives in @pazarsync/crypto-core,
+// a dependency-free leaf, so the wire format is shared with packages/db's seed
+// script without a workspace cycle. This module adds the env-keyed wrappers
+// used at runtime by the api + sync-worker.
 const ENCRYPTION_KEY_ENV = 'ENCRYPTION_KEY';
 
 /**
@@ -32,38 +26,9 @@ export class EncryptionKeyError extends Error {
   }
 }
 
-/**
- * Encrypt UTF-8 plaintext with AES-256-GCM. Returns a base64 string
- * containing `iv || authTag || ciphertext` — self-contained and safe to
- * store as a single DB column.
- */
-export function encrypt(plaintext: string, key: Buffer): string {
-  assertKeyLength(key);
-  const iv = randomBytes(IV_LENGTH_BYTES);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, authTag, ciphertext]).toString('base64');
-}
-
-/**
- * Decrypt a string produced by `encrypt`. Throws if the ciphertext has been
- * tampered with, was produced by a different key, or is otherwise malformed.
- */
-export function decrypt(encoded: string, key: Buffer): string {
-  assertKeyLength(key);
-  const buffer = Buffer.from(encoded, 'base64');
-  if (buffer.length < IV_LENGTH_BYTES + AUTH_TAG_LENGTH_BYTES) {
-    throw new Error('Ciphertext is too short to contain IV + auth tag');
-  }
-  const iv = buffer.subarray(0, IV_LENGTH_BYTES);
-  const authTag = buffer.subarray(IV_LENGTH_BYTES, IV_LENGTH_BYTES + AUTH_TAG_LENGTH_BYTES);
-  const ciphertext = buffer.subarray(IV_LENGTH_BYTES + AUTH_TAG_LENGTH_BYTES);
-  const decipher = createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(authTag);
-  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return plaintext.toString('utf8');
-}
+// Re-export the pure cipher primitives so existing `@pazarsync/sync-core`
+// imports keep working; the implementation is the crypto-core leaf.
+export { decrypt, encrypt };
 
 /**
  * Read the AES-256 key from the `ENCRYPTION_KEY` env var (hex-encoded,
@@ -106,12 +71,4 @@ export function encryptCredentials(credentials: Record<string, unknown>): string
  */
 export function decryptCredentials(encoded: string): unknown {
   return JSON.parse(decrypt(encoded, loadEncryptionKey()));
-}
-
-function assertKeyLength(key: Buffer): void {
-  if (key.length !== KEY_LENGTH_BYTES) {
-    throw new Error(
-      `Encryption key must be ${KEY_LENGTH_BYTES.toString()} bytes, got ${key.length.toString()}.`,
-    );
-  }
 }
