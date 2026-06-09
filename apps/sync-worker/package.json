@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rm -rf .turbo"
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",

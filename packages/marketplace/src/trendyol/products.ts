@@ -10,6 +10,8 @@
 import type { StoreEnvironment } from '@pazarsync/db';
 import { MarketplaceUnreachable, RateLimitedError } from '@pazarsync/sync-core';
 
+import { sleep } from '../lib/sleep';
+
 import { mapTrendyolResponseToDomainError } from './errors';
 import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
 import { mapTrendyolApprovedResponse, type MappedProductsPage } from './mapper';
@@ -64,23 +66,6 @@ function buildUrl(base: string, supplierId: string, req: PageRequest): string {
     url.searchParams.set('page', req.page.toString());
   }
   return url.toString();
-}
-
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    if (signal !== undefined) {
-      const onAbort = (): void => {
-        clearTimeout(timer);
-        reject(new DOMException('Aborted', 'AbortError'));
-      };
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-  });
 }
 
 interface FetcherDeps {

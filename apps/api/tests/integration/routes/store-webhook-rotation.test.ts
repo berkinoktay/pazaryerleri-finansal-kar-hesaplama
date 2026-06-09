@@ -115,6 +115,48 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/webhook/rotate-secret', 
     expect(secret.password).not.toBe('old-p');
   });
 
+  it('422 STORE_CREDENTIALS_CORRUPTED when stored credentials decrypt to a non-Trendyol shape', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createTrendyolStore(org.id);
+    // Decrypts cleanly, but is not a Trendyol credentials shape → user-fixable 422.
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { credentials: encryptCredentials({ not: 'trendyol' }) },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/webhook/rotate-secret`,
+      { method: 'POST', headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors?: { code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors?.[0]?.code).toBe('STORE_CREDENTIALS_CORRUPTED');
+  });
+
+  it('does NOT mask an undecryptable credentials blob as 422 (a decrypt failure keeps its 500 status, #266)', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createTrendyolStore(org.id);
+    // A blob that fails AES-GCM decryption (tampered / wrong key) is a server/
+    // security fault, not user-fixable — it must surface as 500, never as a 422
+    // "your credentials are corrupted" (the regression this guards against).
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { credentials: 'not-a-valid-encrypted-blob' },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/webhook/rotate-secret`,
+      { method: 'POST', headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).not.toBe(422);
+    expect(res.status).toBeGreaterThanOrEqual(500);
+  });
+
   it('404 when storeId does not exist in the calling org', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();

@@ -13,5 +13,8 @@
   },
   "peerDependencies": {
     "eslint": "^9"
+  },
+  "scripts": {
+    "clean": "rm -rf .turbo"
   }
 }

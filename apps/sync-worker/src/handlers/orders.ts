@@ -33,12 +33,15 @@
 
 import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
-import { fetchShipmentPackagesStream, STREAM_WINDOW_MAX_DAYS } from '@pazarsync/marketplace';
+import {
+  decryptStoreCredentials,
+  fetchShipmentPackagesStream,
+  STREAM_WINDOW_MAX_DAYS,
+} from '@pazarsync/marketplace';
 import { intakeOrder, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import { parseOrdersCursor, syncLog, type OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 
 import { readSyncEnv } from '../lib/env';
-import { decryptStoreCredentials } from '../lib/store-credentials';
 
 import type { ChunkResult, ModuleHandler } from './types';
 

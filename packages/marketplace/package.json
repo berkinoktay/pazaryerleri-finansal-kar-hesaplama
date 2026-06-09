@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rm -rf .turbo"
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",

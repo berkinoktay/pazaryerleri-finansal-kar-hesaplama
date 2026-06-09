@@ -23,6 +23,7 @@
 import { prisma } from '@pazarsync/db';
 import type { Store } from '@pazarsync/db';
 import {
+  decryptStoreCredentials,
   getTrendyolWebhooks,
   planWebhookReconcile,
   registerStoreWebhook,
@@ -31,8 +32,6 @@ import {
   type ReconcileStore,
 } from '@pazarsync/marketplace';
 import { syncLog } from '@pazarsync/sync-core';
-
-import { decryptStoreCredentials } from '../lib/store-credentials';
 
 /**
  * Our public base URL, normalized. `null` when unset or non-HTTPS — Trendyol

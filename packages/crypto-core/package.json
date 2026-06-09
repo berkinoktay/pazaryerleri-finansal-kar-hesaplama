@@ -11,7 +11,8 @@
   "scripts": {
     "lint": "eslint .",
     "test:unit": "vitest run src --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .turbo"
   },
   "devDependencies": {
     "@pazarsync/eslint-config": "workspace:*",

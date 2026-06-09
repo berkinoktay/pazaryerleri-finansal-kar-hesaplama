@@ -11,7 +11,8 @@
   "scripts": {
     "test:unit": "vitest run src --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rm -rf .turbo"
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",

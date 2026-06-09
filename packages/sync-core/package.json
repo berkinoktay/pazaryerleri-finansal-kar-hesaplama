@@ -12,7 +12,8 @@
     "test:unit": "vitest run src --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rm -rf .turbo"
   },
   "dependencies": {
     "@pazarsync/crypto-core": "workspace:*",

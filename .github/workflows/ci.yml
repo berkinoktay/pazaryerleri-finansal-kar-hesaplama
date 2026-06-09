@@ -47,14 +47,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      # Composite runs api:sync; the step below fails if the committed spec
-      # or generated types drifted from what api:sync produces.
+      # Composite runs api:sync; the step below fails if the committed OpenAPI
+      # spec drifted from what api:sync produces. The generated types under
+      # src/generated/ are gitignored, so `git diff` can never see them — they
+      # are regenerated fresh here, and a drift in them surfaces as a downstream
+      # typecheck/build failure, not as a diff. So we only gate on openapi.json.
       - uses: ./.github/actions/setup
-      - name: Fail if spec or generated types drifted
+      - name: Fail if the OpenAPI spec drifted
         run: |
-          if ! git diff --exit-code packages/api-client/openapi.json packages/api-client/src/generated/; then
+          if ! git diff --exit-code packages/api-client/openapi.json; then
             echo ""
-            echo "::error::OpenAPI spec or generated types are out of sync."
+            echo "::error::OpenAPI spec is out of sync."
             echo "::error::Run 'pnpm api:sync' locally and commit the result."
             exit 1
           fi
