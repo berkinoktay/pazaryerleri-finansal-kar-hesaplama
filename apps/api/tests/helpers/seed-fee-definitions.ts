@@ -25,32 +25,40 @@ import { prisma } from '@pazarsync/db';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const MIGRATION_SQL_PATH = resolve(
-  __dirname,
+// Every migration whose file embeds a FeeDefinition seed section. New fee
+// rows ship inside their own migration (PR-2 pattern) — append the path here
+// and bump EXPECTED_TRENDYOL_ROWS so tests pick the row up.
+const SEED_MIGRATION_PATHS = [
   '../../../../packages/db/prisma/migrations/20260519175540_fee_definitions_trendyol_seed/migration.sql',
-);
+  '../../../../packages/db/prisma/migrations/20260610090000_cargo_invoice_foundation/migration.sql',
+].map((rel) => resolve(__dirname, rel));
 
-const EXPECTED_TRENDYOL_ROWS = 4;
+// PR-2: PSF + PSF_FAST + STOPPAGE + RETURN_SHIPPING · PR-8: SHIPPING.
+const EXPECTED_TRENDYOL_ROWS = 5;
 const SEED_SECTION_MARKER = '-- ─── Seed: fee_definitions';
 
-let cachedSeedSql: string | null = null;
+let cachedSeedSqls: string[] | null = null;
 
-function loadSeedSql(): string {
-  if (cachedSeedSql !== null) return cachedSeedSql;
-  const full = readFileSync(MIGRATION_SQL_PATH, 'utf-8');
-  const seedStart = full.indexOf(SEED_SECTION_MARKER);
-  if (seedStart === -1) {
-    throw new Error(
-      `Could not find FeeDefinition seed section ("${SEED_SECTION_MARKER}") in ${MIGRATION_SQL_PATH}. ` +
-        'If the migration was renamed or restructured, update MIGRATION_SQL_PATH / SEED_SECTION_MARKER here.',
-    );
-  }
-  cachedSeedSql = full.substring(seedStart);
-  return cachedSeedSql;
+function loadSeedSqls(): string[] {
+  if (cachedSeedSqls !== null) return cachedSeedSqls;
+  cachedSeedSqls = SEED_MIGRATION_PATHS.map((path) => {
+    const full = readFileSync(path, 'utf-8');
+    const seedStart = full.indexOf(SEED_SECTION_MARKER);
+    if (seedStart === -1) {
+      throw new Error(
+        `Could not find FeeDefinition seed section ("${SEED_SECTION_MARKER}") in ${path}. ` +
+          'If the migration was renamed or restructured, update SEED_MIGRATION_PATHS / SEED_SECTION_MARKER here.',
+      );
+    }
+    return full.substring(seedStart);
+  });
+  return cachedSeedSqls;
 }
 
 export async function ensureFeeDefinitions(): Promise<void> {
   const count = await prisma.feeDefinition.count({ where: { platform: 'TRENDYOL' } });
   if (count >= EXPECTED_TRENDYOL_ROWS) return;
-  await prisma.$executeRawUnsafe(loadSeedSql());
+  for (const sql of loadSeedSqls()) {
+    await prisma.$executeRawUnsafe(sql);
+  }
 }

@@ -528,6 +528,27 @@ model Order {
   // referans verir). PR-5b veri taşıma mevcut yanlış dolu rows'u doğrultur (§9 PR-5b).
   platformOrderNumber String? @map("platform_order_number")
 
+  // ─── PR-8: Kargo alanları (research 2026-06-09) ─────────────────────
+  // cargoTrackingNumber: paket OLUŞURKEN atanır (kargoya verilmeden); kargo
+  //   faturası satırındaki parcelUniqueId ile BİREBİR AYNI (prod kanıtlı) —
+  //   fatura→sipariş eşleştirmesinin birincil anahtarı. İlk 3 hane kargocu
+  //   önekidir (733 TEX, 725 Yurtiçi, 734 PTT, 884 Horoz, 732 Alternatif).
+  // cargoDeci: Trendyol'un ÖLÇTÜĞÜ desi — tahmin-vs-fatura karşılaştırmasının
+  //   zemini. Stage'de hiç gelmez, prod'da kargo ölçümünden sonra dolar →
+  //   upsert UPDATE'i gelen null ile dolu değeri EZMEZ.
+  // usesSellerCargoAgreement: Trendyol whoPays==1 → satıcının KENDİ kargo
+  //   anlaşması: Trendyol kargo faturası KESMEZ, maliyet bizim satıcı-anlaşma
+  //   tarifemizden gelir. Alan yoksa Trendyol anlaşması (fatura bekleriz).
+  // platformCreatedBy: paket kaynağı ("order-creation" | "split" | "transfer"
+  //   | ...) — split soy ağacı görünürlüğü.
+  // originShipmentDate: kargoya-hazır anı (true UTC, RAW) — ship-time KPI.
+  cargoProviderName        String?   @map("cargo_provider_name")
+  cargoTrackingNumber      BigInt?   @map("cargo_tracking_number")
+  cargoDeci                Decimal?  @map("cargo_deci") @db.Decimal(8, 2)
+  usesSellerCargoAgreement Boolean   @default(false) @map("uses_seller_cargo_agreement")
+  platformCreatedBy        String?   @map("platform_created_by")
+  originShipmentDate       DateTime? @map("origin_shipment_date")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -542,6 +563,8 @@ model Order {
   @@index([orderDate])
   @@index([platformOrderNumber])
   @@index([storeId, paymentOrderId])
+  // Kargo faturası eşleştirmesi: parcelUniqueId == cargoTrackingNumber lookup.
+  @@index([storeId, cargoTrackingNumber])
   @@map("orders")
 }
 
@@ -550,6 +573,11 @@ model OrderItem {
   orderId            String    @map("order_id") @db.Uuid
   productVariantId   String?   @map("product_variant_id") @db.Uuid
   quantity           Int
+  // PR-8: Trendyol satır kimliği (lines[].lineId) + ham barkod. platformLineId
+  // platform-taraflı satır izi (aynı varianttan 2 ayrı satır ayrımı); barcode
+  // variant eşleşmediğinde elde kalan tek ürün izi ("variant bulunamadı" UI'ı).
+  platformLineId     BigInt?   @map("platform_line_id")
+  barcode            String?
   // Eski (KDV-dahil) kolonlar — PR-5c'de silinir, PR-5b veri taşıma sonrası.
   unitPrice          Decimal   @map("unit_price") @db.Decimal(12, 2)
   commissionRate     Decimal   @map("commission_rate") @db.Decimal(5, 2)
