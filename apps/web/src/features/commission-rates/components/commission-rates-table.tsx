@@ -7,6 +7,7 @@ import * as React from 'react';
 
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
+import { DefinitionList } from '@/components/patterns/definition-list';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -25,8 +26,20 @@ interface CommissionRatesTableProps {
   productScope: CommissionRateProductScope;
   sort: CommissionRateSort;
   loading: boolean;
-  empty?: React.ReactNode;
+  /** Rule-kind FilterTabs strip, mounted in the integrated panel's top zone. */
+  tabs?: React.ReactNode;
   toolbar?: React.ReactNode;
+  /** First-run empty (no tariff loaded yet). */
+  empty?: React.ReactNode;
+  /** No-results empty (search / scope narrowed the set to zero). */
+  noResultsState?: React.ReactNode;
+  /** True when search or scope filter is active — drives the no-results vs first-run split. */
+  hasActiveFilters?: boolean;
+  /** Clears search + scope; wires the no-results state's reset button. */
+  onClearFilters?: () => void;
+  /** Renders an in-table error state with a retry button. */
+  error?: boolean;
+  onRetry?: () => void;
   // Pagination state — controlled by the page client via nuqs
   page: number;
   perPage: number;
@@ -41,15 +54,66 @@ interface CommissionRatesTableProps {
 }
 
 /**
- * Commission-rates DataTable. Two column shapes selected by ruleKind
- * (CATEGORY shows parentCategoryName; CATEGORY_BRAND shows brandName).
- * Sorting is server-side: the table forwards click intent to
+ * The commission rate value cell. Renders the base rate as a value-first
+ * figure; when the row carries segment overrides (Trendyol tier rates),
+ * the figure becomes a hover/focus trigger that reveals the tier breakdown
+ * as a `DefinitionList` — the showcase-documented use for a commission
+ * breakdown. No overrides → a plain figure (no trigger).
+ */
+function BaseRateCell({ item }: { item: CommissionRateListItem }): React.ReactElement {
+  const t = useTranslations('features.commissionRates');
+  const formatter = useFormatter();
+
+  const value = formatter.number(Number.parseFloat(item.baseRate) / 100, 'percent');
+  const entries = orderedSegmentEntries(item.segmentOverrides);
+
+  if (entries.length === 0) {
+    return <span className="text-foreground text-sm font-semibold tabular-nums">{value}</span>;
+  }
+
+  const tierItems = entries.map((entry) => ({
+    id: entry.key,
+    term: entry.label,
+    description: formatter.number(Number.parseFloat(entry.value) / 100, 'percent'),
+  }));
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* Span (not button): this cell may later sit inside a clickable row,
+            and a real button would nest. role/tabIndex keep it focusable so the
+            tooltip opens on keyboard focus. */}
+        <span
+          className="text-foreground gap-3xs inline-flex cursor-help items-center text-sm font-semibold tabular-nums"
+          data-row-action
+          tabIndex={0}
+          role="button"
+        >
+          {value}
+          <InformationCircleIcon className="size-icon-xs text-muted-foreground-dim" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent align="end" className="max-w-input-narrow">
+        <div className="gap-2xs flex flex-col">
+          <span className="text-2xs text-muted-foreground font-medium">
+            {t('tooltip.segmentOverridesTitle')}
+          </span>
+          <DefinitionList items={tierItems} dense alignRight />
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Commission-rates DataTable. Two column shapes selected by ruleKind:
+ * CATEGORY consolidates the parent category into a two-line cell under the
+ * category name; CATEGORY_BRAND keeps brand + category as sibling columns.
+ *
+ * Sorting + pagination are server-side: the table forwards click intent to
  * `resolveSortIntent` and bubbles the resolved (sort, productScope,
- * autoSwitchedScope) tuple up — the parent handles the URL state
- * update + the auto-switch toast.
- * Pagination is also server-side: `page`/`perPage`/`total`/`totalPages` are
- * controlled by the page client via nuqs and forwarded to TanStack's
- * `manualPagination` mode.
+ * autoSwitchedScope) tuple up — the parent handles the URL state update,
+ * the auto-switch toast, and the page slice via nuqs.
  */
 export function CommissionRatesTable({
   rows,
@@ -57,8 +121,14 @@ export function CommissionRatesTable({
   productScope,
   sort,
   loading,
-  empty,
+  tabs,
   toolbar,
+  empty,
+  noResultsState,
+  hasActiveFilters,
+  onClearFilters,
+  error,
+  onRetry,
   page,
   perPage,
   total,
@@ -70,84 +140,56 @@ export function CommissionRatesTable({
   const formatter = useFormatter();
 
   const columns = React.useMemo<ColumnDef<CommissionRateListItem>[]>(() => {
-    const categoryColumn: ColumnDef<CommissionRateListItem> = {
+    // CATEGORY mode — category name with its parent as a quiet second line.
+    const categoryWithParentColumn: ColumnDef<CommissionRateListItem> = {
       id: 'categoryName',
       accessorKey: 'categoryName',
       header: () => t('columns.category'),
+      meta: { label: t('columns.category') },
       cell: ({ row }) => (
-        <span className="text-foreground text-sm">{row.original.categoryName}</span>
+        <div className="gap-3xs flex min-w-0 flex-col">
+          <span className="text-foreground truncate text-sm font-medium">
+            {row.original.categoryName}
+          </span>
+          {row.original.parentCategoryName !== null ? (
+            <span className="text-muted-foreground text-2xs truncate">
+              {row.original.parentCategoryName}
+            </span>
+          ) : null}
+        </div>
       ),
       enableSorting: true,
     };
 
-    const parentCategoryColumn: ColumnDef<CommissionRateListItem> = {
-      id: 'parentCategoryName',
-      header: () => t('columns.parentCategory'),
+    // CATEGORY_BRAND mode — brand is the row's identity, category is a
+    // sortable companion column.
+    const brandColumn: ColumnDef<CommissionRateListItem> = {
+      id: 'brandName',
+      header: () => t('columns.brand'),
+      meta: { label: t('columns.brand') },
       cell: ({ row }) => (
-        <span className="text-muted-foreground text-sm">
-          {row.original.parentCategoryName ?? '—'}
-        </span>
+        <span className="text-foreground text-sm font-medium">{row.original.brandName ?? '—'}</span>
       ),
       enableSorting: false,
     };
 
-    const brandColumn: ColumnDef<CommissionRateListItem> = {
-      id: 'brandName',
-      header: () => t('columns.brand'),
+    const categoryColumn: ColumnDef<CommissionRateListItem> = {
+      id: 'categoryName',
+      accessorKey: 'categoryName',
+      header: () => t('columns.category'),
+      meta: { label: t('columns.category') },
       cell: ({ row }) => (
-        <span className="text-foreground text-sm">{row.original.brandName ?? '—'}</span>
+        <span className="text-muted-foreground text-sm">{row.original.categoryName}</span>
       ),
-      enableSorting: false,
+      enableSorting: true,
     };
 
     const baseRateColumn: ColumnDef<CommissionRateListItem> = {
       id: 'baseRate',
       accessorKey: 'baseRate',
       header: () => t('columns.baseRate'),
-      meta: { numeric: true },
-      cell: ({ row }) => {
-        const overrides = row.original.segmentOverrides;
-        const entries = orderedSegmentEntries(overrides);
-        const value = formatter.number(Number.parseFloat(row.original.baseRate) / 100, 'percent');
-        if (entries.length === 0) {
-          return <span className="text-foreground text-sm tabular-nums">{value}</span>;
-        }
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                className="text-foreground gap-3xs inline-flex items-center text-sm tabular-nums"
-                data-row-action
-                tabIndex={0}
-                role="button"
-              >
-                {value}
-                <InformationCircleIcon className="size-icon-xs text-muted-foreground" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent align="end" className="max-w-input-narrow">
-              <div className="gap-3xs flex flex-col">
-                <span className="text-2xs text-muted-foreground">
-                  {t('tooltip.segmentOverridesTitle')}
-                </span>
-                <ul className="gap-3xs flex flex-col">
-                  {entries.map((entry) => (
-                    <li
-                      key={entry.key}
-                      className="gap-sm text-2xs flex items-center justify-between tabular-nums"
-                    >
-                      <span className="text-muted-foreground">{entry.label}</span>
-                      <span className="text-foreground">
-                        {formatter.number(Number.parseFloat(entry.value) / 100, 'percent')}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        );
-      },
+      meta: { numeric: true, label: t('columns.baseRate') },
+      cell: ({ row }) => <BaseRateCell item={row.original} />,
       enableSorting: true,
     };
 
@@ -155,9 +197,9 @@ export function CommissionRatesTable({
       id: 'paymentTermDays',
       accessorKey: 'paymentTermDays',
       header: () => t('columns.paymentTermDays'),
-      meta: { numeric: true },
+      meta: { numeric: true, label: t('columns.paymentTermDays') },
       cell: ({ row }) => (
-        <span className="text-foreground text-sm tabular-nums">
+        <span className="text-muted-foreground text-sm tabular-nums">
           {t('tooltip.paymentTermDaysSuffix', {
             days: formatter.number(row.original.paymentTermDays, 'integer'),
           })}
@@ -172,6 +214,13 @@ export function CommissionRatesTable({
       header: () => (
         <span className="gap-3xs inline-flex items-center">
           {t('columns.productCount')}
+          {/*
+            Span (not InfoHint's <button>): this header is sortable, so
+            DataTable wraps its whole content in a <button>. A nested button
+            is invalid HTML and breaks hydration — so the hint trigger stays a
+            role="button" span, focusable for keyboard users, opening the
+            tooltip on focus.
+          */}
           <Tooltip>
             <TooltipTrigger asChild>
               <span
@@ -179,9 +228,9 @@ export function CommissionRatesTable({
                 role="button"
                 aria-label={t('columns.productCountHint')}
                 data-row-action
-                className="inline-flex items-center"
+                className="text-muted-foreground-dim hover:text-muted-foreground inline-flex cursor-help items-center transition-colors"
               >
-                <InformationCircleIcon className="size-icon-xs text-muted-foreground" />
+                <InformationCircleIcon className="size-icon-xs" aria-hidden />
               </span>
             </TooltipTrigger>
             <TooltipContent align="end" className="max-w-input-narrow">
@@ -190,12 +239,14 @@ export function CommissionRatesTable({
           </Tooltip>
         </span>
       ),
-      meta: { numeric: true },
+      meta: { numeric: true, label: t('columns.productCount') },
       cell: ({ row }) => (
         <span
           className={cn(
             'text-sm tabular-nums',
-            row.original.productCount > 0 ? 'text-foreground' : 'text-muted-foreground',
+            row.original.productCount > 0
+              ? 'text-foreground font-medium'
+              : 'text-muted-foreground-dim',
           )}
         >
           {formatter.number(row.original.productCount, 'integer')}
@@ -205,13 +256,7 @@ export function CommissionRatesTable({
     };
 
     return ruleKind === 'CATEGORY'
-      ? [
-          categoryColumn,
-          parentCategoryColumn,
-          baseRateColumn,
-          paymentTermColumn,
-          productCountColumn,
-        ]
+      ? [categoryWithParentColumn, baseRateColumn, paymentTermColumn, productCountColumn]
       : [brandColumn, categoryColumn, baseRateColumn, paymentTermColumn, productCountColumn];
   }, [formatter, ruleKind, t]);
 
@@ -254,7 +299,13 @@ export function CommissionRatesTable({
       columns={columns}
       data={rows}
       loading={loading}
+      tabs={tabs}
       empty={empty}
+      noResultsState={noResultsState}
+      hasActiveFilters={hasActiveFilters}
+      onClearFilters={onClearFilters}
+      error={error}
+      onRetry={onRetry}
       toolbar={toolbar !== undefined ? () => toolbar : undefined}
       pagination={(table) => <DataTablePagination table={table} pageSizes={[10, 25, 50, 100]} />}
       sorting={sortingState}

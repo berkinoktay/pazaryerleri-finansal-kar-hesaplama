@@ -33,7 +33,7 @@ describe('CommissionRatesToolbar', () => {
     expect(onSearchChange).toHaveBeenCalledWith('a');
   });
 
-  it('toggles productScope to active when checkbox is checked', async () => {
+  it('switches productScope to active when the "Sattıklarım" segment is clicked', async () => {
     const onProductScopeChange = vi.fn();
     const { user } = render(
       <CommissionRatesToolbar
@@ -43,11 +43,12 @@ describe('CommissionRatesToolbar', () => {
         onProductScopeChange={onProductScopeChange}
       />,
     );
-    await user.click(screen.getByLabelText('Sadece sattıklarım'));
+    // The scope toggle is a FilterTabs segmented control; each option is a tab.
+    await user.click(screen.getByRole('tab', { name: 'Sattıklarım' }));
     expect(onProductScopeChange).toHaveBeenCalledWith('active');
   });
 
-  it('toggles productScope back to all when unchecked', async () => {
+  it('switches productScope back to all when the "Tümü" segment is clicked', async () => {
     const onProductScopeChange = vi.fn();
     const { user } = render(
       <CommissionRatesToolbar
@@ -57,7 +58,22 @@ describe('CommissionRatesToolbar', () => {
         onProductScopeChange={onProductScopeChange}
       />,
     );
-    await user.click(screen.getByLabelText('Sadece sattıklarım'));
+    await user.click(screen.getByRole('tab', { name: 'Tümü' }));
     expect(onProductScopeChange).toHaveBeenCalledWith('all');
+  });
+
+  it('names the scope tablist with its accessible group label', () => {
+    render(
+      <CommissionRatesToolbar
+        q=""
+        onSearchChange={() => {}}
+        productScope="all"
+        onProductScopeChange={() => {}}
+      />,
+    );
+    // The group label must reach the role="tablist" element so assistive tech
+    // announces what the segment filters (regression guard for FilterTabs
+    // forwarding aria-label to TabsList rather than the Radix Root).
+    expect(screen.getByRole('tablist', { name: 'Ürün kapsamı' })).toBeInTheDocument();
   });
 });

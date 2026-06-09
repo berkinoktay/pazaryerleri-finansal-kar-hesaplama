@@ -1301,23 +1301,28 @@
       },
       "tabs": {
         "category": "Categories",
-        "categoryBrand": "Category + Brand"
+        "categoryBrand": "Category + Brand",
+        "ruleKindLabel": "Tariff view"
       },
       "toolbar": {
         "searchPlaceholder": "Search category, parent category, or brand…",
-        "activeOnly": "Only what I sell"
+        "scopeLabel": "Product scope",
+        "scopeAll": "All",
+        "scopeActive": "What I sell"
       },
       "columns": {
         "category": "Category",
-        "parentCategory": "Parent Category",
         "brand": "Brand",
         "baseRate": "Commission",
         "paymentTermDays": "Settlement",
-        "productCount": "Products #",
+        "productCount": "Products",
         "productCountHint": "Number of synced, approved products you have in this category."
       },
+      "meta": {
+        "tariffUpdated": "Tariff updated"
+      },
       "tooltip": {
-        "segmentOverridesTitle": "Segment overrides",
+        "segmentOverridesTitle": "Tier-based rates",
         "paymentTermDaysSuffix": "{days} days"
       },
       "autoSwitchedToActive": "Switched to 'Only what I sell' — sorted by product count.",

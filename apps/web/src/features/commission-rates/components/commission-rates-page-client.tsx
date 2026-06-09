@@ -1,11 +1,13 @@
 'use client';
 
+import { Time04Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
 
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
+import { TimeAgo } from '@/components/patterns/time-ago';
 
 import { useCommissionRates } from '../hooks/use-commission-rates';
 import { useCommissionRatesFilters } from '../hooks/use-commission-rates-filters';
@@ -82,11 +84,12 @@ export function CommissionRatesPageClient({
   const rows = result?.data ?? [];
   const total = result?.pagination.total ?? 0;
   const totalPages = result?.pagination.totalPages ?? 0;
-  const pageRowCount = rows.length;
   const isInitialLoad = query.isLoading;
 
   const hasActiveFilter = filters.q.length > 0 || filters.productScope === 'active';
-  const isEmptyAfterLoad = !isInitialLoad && pageRowCount === 0;
+  // The tariff's import freshness — every row shares the same fetchedAt
+  // (platform-global reference data), so the first row is representative.
+  const tariffFetchedAt = rows[0]?.fetchedAt;
 
   const handleRuleKindChange = (next: CommissionRateRuleKind): void => {
     void setFilters({ ruleKind: next });
@@ -123,52 +126,64 @@ export function CommissionRatesPageClient({
     void setFilters({ q: '', productScope: 'all' });
   };
 
-  const emptyNode = isEmptyAfterLoad ? (
-    hasActiveFilter ? (
-      <CommissionRatesEmptyState variant="no-matches" onClearFilters={handleClearFilters} />
-    ) : (
-      <CommissionRatesEmptyState variant="no-rates" />
-    )
-  ) : undefined;
+  const ruleKindTabs = (
+    <FilterTabs<CommissionRateRuleKind>
+      value={filters.ruleKind}
+      onValueChange={handleRuleKindChange}
+      aria-label={t('tabs.ruleKindLabel')}
+      options={[
+        { value: 'CATEGORY', label: t('tabs.category') },
+        { value: 'CATEGORY_BRAND', label: t('tabs.categoryBrand') },
+      ]}
+    />
+  );
+
+  const freshnessMeta =
+    tariffFetchedAt !== undefined ? (
+      <span className="text-2xs text-muted-foreground gap-2xs inline-flex items-center">
+        <Time04Icon className="size-icon-xs" aria-hidden />
+        <span>{t('meta.tariffUpdated')}</span>
+        <span aria-hidden className="text-muted-foreground-dim">
+          ·
+        </span>
+        <TimeAgo value={tariffFetchedAt} className="text-foreground" />
+      </span>
+    ) : undefined;
 
   return (
     <div className="gap-lg flex flex-col">
-      <PageHeader title={pageTitle} intent={pageIntent} />
+      <PageHeader title={pageTitle} intent={pageIntent} meta={freshnessMeta} />
 
-      <div className="gap-md flex flex-col">
-        <FilterTabs<CommissionRateRuleKind>
-          value={filters.ruleKind}
-          onValueChange={handleRuleKindChange}
-          variant="underline"
-          options={[
-            { value: 'CATEGORY', label: t('tabs.category') },
-            { value: 'CATEGORY_BRAND', label: t('tabs.categoryBrand') },
-          ]}
-        />
-
-        <CommissionRatesTable
-          rows={rows}
-          ruleKind={filters.ruleKind}
-          productScope={filters.productScope}
-          sort={filters.sort}
-          loading={isInitialLoad}
-          empty={emptyNode}
-          toolbar={
-            <CommissionRatesToolbar
-              q={qInput}
-              onSearchChange={setQInput}
-              productScope={filters.productScope}
-              onProductScopeChange={handleProductScopeChange}
-            />
-          }
-          page={filters.page}
-          perPage={filters.perPage}
-          total={total}
-          totalPages={totalPages}
-          onPaginationChange={handlePaginationChange}
-          onSortChange={handleSortChange}
-        />
-      </div>
+      <CommissionRatesTable
+        rows={rows}
+        ruleKind={filters.ruleKind}
+        productScope={filters.productScope}
+        sort={filters.sort}
+        loading={isInitialLoad}
+        tabs={ruleKindTabs}
+        toolbar={
+          <CommissionRatesToolbar
+            q={qInput}
+            onSearchChange={setQInput}
+            productScope={filters.productScope}
+            onProductScopeChange={handleProductScopeChange}
+          />
+        }
+        empty={<CommissionRatesEmptyState variant="no-rates" />}
+        noResultsState={
+          <CommissionRatesEmptyState variant="no-matches" onClearFilters={handleClearFilters} />
+        }
+        hasActiveFilters={hasActiveFilter}
+        onClearFilters={handleClearFilters}
+        error={query.isError && rows.length === 0}
+        onRetry={() => void query.refetch()}
+        page={filters.page}
+        perPage={filters.perPage}
+        total={total}
+        totalPages={totalPages}
+        onPaginationChange={handlePaginationChange}
+        onSortChange={handleSortChange}
+      />
     </div>
   );
 }

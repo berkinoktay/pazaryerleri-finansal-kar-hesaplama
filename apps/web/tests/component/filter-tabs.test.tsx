@@ -39,6 +39,21 @@ describe('<FilterTabs>', () => {
       expect(screen.getAllByRole('tab')).toHaveLength(4);
     });
 
+    it('forwards aria-label to the tablist, not the role-less wrapper', () => {
+      renderWithIntl(
+        <FilterTabs<Status>
+          value="all"
+          onValueChange={() => {}}
+          options={BASE_OPTIONS}
+          aria-label="Sipariş durumu"
+        />,
+      );
+      // The accessible group name must land on the role="tablist" element so a
+      // screen reader announces it — not on the Radix Tabs.Root <div>, which
+      // carries no role.
+      expect(screen.getByRole('tablist', { name: 'Sipariş durumu' })).toBeInTheDocument();
+    });
+
     it('marks the option matching `value` as the selected tab', () => {
       renderWithIntl(
         <FilterTabs<Status> value="open" onValueChange={() => {}} options={BASE_OPTIONS} />,

@@ -1366,23 +1366,28 @@
       },
       "tabs": {
         "category": "Kategoriler",
-        "categoryBrand": "Kategori + Marka"
+        "categoryBrand": "Kategori + Marka",
+        "ruleKindLabel": "Tarife görünümü"
       },
       "toolbar": {
         "searchPlaceholder": "Kategori, üst kategori veya marka ara…",
-        "activeOnly": "Sadece sattıklarım"
+        "scopeLabel": "Ürün kapsamı",
+        "scopeAll": "Tümü",
+        "scopeActive": "Sattıklarım"
       },
       "columns": {
         "category": "Kategori",
-        "parentCategory": "Üst Kategori",
         "brand": "Marka",
         "baseRate": "Komisyon",
         "paymentTermDays": "Vade",
-        "productCount": "Ürün #",
+        "productCount": "Ürün",
         "productCountHint": "Bu kategoride senkronize edilmiş ve onaylı durumda olan ürünlerinin sayısı."
       },
+      "meta": {
+        "tariffUpdated": "Tarife güncellendi"
+      },
       "tooltip": {
-        "segmentOverridesTitle": "Segment override'lar",
+        "segmentOverridesTitle": "Seviye bazlı oranlar",
         "paymentTermDaysSuffix": "{days} gün"
       },
       "autoSwitchedToActive": "Sattıklarım moduna geçildi — ürün sayısına göre sıralandı.",
