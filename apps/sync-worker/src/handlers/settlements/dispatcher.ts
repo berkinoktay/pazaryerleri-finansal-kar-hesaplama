@@ -101,9 +101,11 @@ export async function dispatchOtherFinancialRow(
           await handleCommissionInvoice(storeId, organizationId, row, tx);
           break;
         case 'cargo_invoice':
-          // PR-8 scope — dispatcher only logs the trigger; cargo handler
-          // hits the cargo-invoice/{serial}/items endpoint separately.
-          syncLog.info('settlements.cargo-invoice.deferred-pr8', { id: row.id });
+          // PR-8: cron pre-handles cargo rows BEFORE dispatch (items fetch is
+          // a network call and must stay outside the row transaction). A row
+          // reaching this branch means the cron guard was bypassed — warn so
+          // the gap is visible, write nothing.
+          syncLog.warn('settlements.cargo-invoice.reached-dispatcher', { id: row.id });
           break;
         case 'penalty':
         case 'notification_fee':

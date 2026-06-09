@@ -263,6 +263,16 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
     actualDeliveryDate,
     fastDelivery: pkg.fastDelivery,
     micro: pkg.micro,
+    // PR-8 kargo alanları (research 2026-06-09). cargoTrackingNumber/cargoDeci
+    // raw String() — toFixed KULLANMA (tracking no bir kimliktir, desi Trendyol
+    // ne verdiyse o). originShipmentDate true UTC → RAW (normalize edilmez;
+    // yalnız orderDate local-as-UTC normalize edilir).
+    cargoProviderName: pkg.cargoProviderName ?? null,
+    cargoTrackingNumber: pkg.cargoTrackingNumber != null ? String(pkg.cargoTrackingNumber) : null,
+    cargoDeci: pkg.cargoDeci != null ? String(pkg.cargoDeci) : null,
+    usesSellerCargoAgreement: pkg.whoPays === 1,
+    platformCreatedBy: pkg.createdBy ?? null,
+    originShipmentDate: epochMsToDate(pkg.originShipmentDate),
     lines: mappedLines,
   };
 }
@@ -342,6 +352,7 @@ function mapLine(line: TrendyolOrderLine, ctx: { shipmentPackageId: number }): M
   return {
     barcode: line.barcode,
     quantity: safeQuantity,
+    platformLineId: line.lineId != null ? String(line.lineId) : null,
     unitPriceNet: unitPriceNet.toString(),
     unitVatRate: vatRate.toString(),
     unitVatAmount: unitVatAmount.toString(),

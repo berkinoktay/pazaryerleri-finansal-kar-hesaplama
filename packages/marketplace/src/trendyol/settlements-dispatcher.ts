@@ -210,6 +210,23 @@ export function classifyDeductionInvoice(
  * For all other types the row is unused by classification (handlers
  * consume it for the actual write).
  */
+/**
+ * PR-8: kargo faturasi tespiti — cron'un TX-DISI pre-fetch karari icin.
+ * DeductionInvoices satirinin TR-localized transactionType'i "Kargo Fatura(si)"
+ * ise fatura seri numarasini (row.id) dondurur; degilse null. Cron bu satiri
+ * dispatcher'a GONDERMEZ: once cargo-invoice/{serial}/items'i ag uzerinden
+ * ceker (transaction disinda), sonra handleCargoInvoiceItems ile tx icinde
+ * isler. Dispatcher'in cargo_invoice dali yalniz guvenlik logu olarak kalir.
+ */
+export function getCargoInvoiceSerial(
+  requestedType: OtherFinancialTransactionType,
+  row: TrendyolFinancialTransaction,
+): string | null {
+  if (requestedType !== 'DeductionInvoices') return null;
+  const subClass = classifyDeductionInvoice(row.transactionType);
+  return subClass.kind === 'cargo_invoice' ? row.id : null;
+}
+
 export function classifyOtherFinancialTransaction(
   requestedType: OtherFinancialTransactionType,
   row: TrendyolFinancialTransaction,

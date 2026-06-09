@@ -74,10 +74,17 @@ export {
   classifySettlementTransaction,
   classifyOtherFinancialTransaction,
   classifyDeductionInvoice,
+  getCargoInvoiceSerial,
   type SettlementDispatchTarget,
   type OtherFinancialDispatchTarget,
   type DeductionInvoiceSubClass,
 } from './trendyol/settlements-dispatcher';
+export {
+  CARGO_INVOICE_PAGE_SIZE,
+  fetchAllCargoInvoiceItems,
+  type CargoInvoiceItem,
+  type FetchCargoInvoiceItemsOpts,
+} from './trendyol/cargo-invoice';
 export { probeTrendyolCredentials } from './trendyol/client';
 export { trendyolFactory } from './trendyol/adapter';
 export {

@@ -266,6 +266,15 @@ export interface TrendyolShipmentPackage {
   packageTotalPrice?: number;
   cargoProviderName?: string;
   cargoTrackingNumber?: number;
+  /** Trendyol'un ölçtüğü desi — prod-only, kargo ölçümünden sonra dolar. */
+  cargoDeci?: number;
+  /** 1 = satıcının kendi kargo anlaşması (Trendyol kargo faturası kesmez);
+   * alan yoksa Trendyol anlaşması (research 2026-06-09 + Berkin teyidi). */
+  whoPays?: number;
+  /** Paket kaynağı: "order-creation" | "split" | "transfer" | … */
+  createdBy?: string;
+  /** Split soy ağacı — bölünerek oluşan paketlerde kaynak paket id'leri. */
+  originPackageIds?: number[] | null;
   deliveryType?: string;
   isCod?: boolean;
   commercial?: boolean;
@@ -321,6 +330,8 @@ export interface TrendyolOrdersStreamResponse {
 export interface MappedOrderLine {
   barcode: string;
   quantity: number;
+  /** Trendyol lines[].lineId — platform satır kimliği (string'e çevrilmiş). */
+  platformLineId: string | null;
   /** Decimal strings (boundary kontratı — caller Prisma Decimal'a çevirir). */
   unitPriceNet: string;
   unitVatRate: string;
@@ -360,6 +371,19 @@ export interface MappedOrder {
   actualDeliveryDate: Date | null;
   fastDelivery: boolean;
   micro: boolean;
+  // ── PR-8 kargo alanları (research 2026-06-09) ──
+  /** Kargo firması adı (örn. "Trendyol Express Marketplace"). */
+  cargoProviderName: string | null;
+  /** Kargo takip no — kargo faturası parcelUniqueId'si ile birebir aynı. */
+  cargoTrackingNumber: string | null;
+  /** Trendyol'un ölçtüğü desi (decimal string) — prod-only. */
+  cargoDeci: string | null;
+  /** whoPays==1 → satıcının kendi kargo anlaşması. */
+  usesSellerCargoAgreement: boolean;
+  /** Paket kaynağı ("order-creation" | "split" | …). */
+  platformCreatedBy: string | null;
+  /** Kargoya-hazır anı (true UTC, RAW — normalize edilmez). */
+  originShipmentDate: Date | null;
   lines: MappedOrderLine[];
 }
 
