@@ -17,13 +17,12 @@ import { prisma } from '@pazarsync/db';
 import type { Store, SyncLog } from '@pazarsync/db';
 import {
   APPROVED_PAGE_CAP_ITEMS,
+  decryptStoreCredentials,
   fetchApprovedProducts,
   PRODUCTS_PAGE_SIZE,
   type MappedProduct,
 } from '@pazarsync/marketplace';
 import { parseProductsCursor, syncLog, type ProductsCursor } from '@pazarsync/sync-core';
-
-import { decryptStoreCredentials } from '../lib/store-credentials';
 
 import type { ChunkResult, ModuleHandler } from './types';
 

@@ -1,5 +1,6 @@
 'use client';
 
+import type { components } from '@pazarsync/api-client';
 import {
   isSyncErrorCode,
   type BufferEntryStatus,
@@ -113,6 +114,21 @@ export interface SyncLogRealtimeShape {
   nextAttemptAt: string | null;
   skippedPages: SkippedPageWireShape[] | null;
 }
+
+// Drift guard (issue #266): SyncLogRealtimeShape is hand-sourced from the DB wire
+// row above — the Realtime payload IS the sync_logs row, mapped snake->camel — NOT
+// derived from the OpenAPI DTO. But the web client reconstructs a SyncLog from a
+// Realtime event, so the two must stay structurally identical. `pnpm api:sync` does
+// not touch this file, so without this compile-time assertion a change to
+// SyncLogResponse (a field added, removed, or retyped) would drift here silently.
+// The bidirectional check resolves to `never` — and fails typecheck — on divergence.
+type SyncLogResponseDto = components['schemas']['SyncLogResponse'];
+type ExactShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+// This binding exists only to evaluate the assertion above — it's never read at
+// runtime. apps/web's ESLint (next's config, not the shared base) doesn't honor
+// the `_` unused-var convention, so disable the rule explicitly here.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _syncLogShapeMatchesApiDto: ExactShape<SyncLogRealtimeShape, SyncLogResponseDto> = true;
 
 export interface SyncLogRealtimeEvent {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';

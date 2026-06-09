@@ -22,6 +22,8 @@
 import type { StoreEnvironment } from '@pazarsync/db';
 import { MarketplaceUnreachable, RateLimitedError } from '@pazarsync/sync-core';
 
+import { sleep } from '../lib/sleep';
+
 import { mapTrendyolResponseToDomainError } from './errors';
 import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
 import type { TrendyolCredentials } from './types';
@@ -215,28 +217,10 @@ function buildOtherFinancialsUrl(
 }
 
 // ─── HTTP fetch (products.ts/orders.ts pattern, retry-aware) ────────────
-// NOTE: TODO PR-N+1 — promote fetchOnce/sleep/parseRetryAfterSeconds/
-// safeReadBody to packages/marketplace/src/trendyol/client.ts as a generic
-// helper. This is the third duplicate (products.ts + orders.ts + here);
-// dedupe is overdue but kept out of this commit to keep its scope to
-// "settlement API client" alone.
-
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    if (signal !== undefined) {
-      const onAbort = (): void => {
-        clearTimeout(timer);
-        reject(new DOMException('Aborted', 'AbortError'));
-      };
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-  });
-}
+// NOTE: TODO PR-N+1 — promote fetchOnce/parseRetryAfterSeconds/safeReadBody to
+// packages/marketplace/src/trendyol/client.ts as a generic helper. These are
+// still the third duplicate (products.ts + orders.ts + here); dedupe is overdue
+// but kept out of scope here. (`sleep` was already extracted to ../lib/sleep, #266.)
 
 interface FetcherDeps {
   credentials: TrendyolCredentials;

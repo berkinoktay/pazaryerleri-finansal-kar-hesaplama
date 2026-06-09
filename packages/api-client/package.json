@@ -12,7 +12,8 @@
     "codegen": "openapi-typescript ./openapi.json -o ./src/generated/api.d.ts",
     "codegen:watch": "openapi-typescript ./openapi.json -o ./src/generated/api.d.ts --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rm -rf .turbo"
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"

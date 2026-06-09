@@ -1,12 +1,12 @@
 import { prisma } from '@pazarsync/db';
 import type { MemberRole, Store as PrismaStore } from '@pazarsync/db';
-import { getAdapter, isTrendyolCredentials } from '@pazarsync/marketplace';
 import {
-  decryptCredentials,
-  encryptCredentials,
-  mapPrismaError,
-  syncLog,
-} from '@pazarsync/sync-core';
+  decryptStoreCredentials,
+  getAdapter,
+  StoreCredentialShapeError,
+  type TrendyolCredentials,
+} from '@pazarsync/marketplace';
+import { encryptCredentials, mapPrismaError, syncLog } from '@pazarsync/sync-core';
 
 import { NotFoundError, ValidationError } from '../lib/errors';
 import type { ConnectStoreInput, Store } from '../validators/store.validator';
@@ -191,14 +191,11 @@ export async function disconnect(organizationId: string, storeId: string): Promi
   // the delete — orphan Trendyol subscription is recoverable manually.
   if (row.platform === 'TRENDYOL' && row.webhookId !== null && row.webhookId.length > 0) {
     try {
-      const decrypted = decryptCredentials(row.credentials as string);
-      if (isTrendyolCredentials(decrypted)) {
-        await unregisterStoreWebhook({
-          credentials: decrypted,
-          env: row.environment,
-          webhookId: row.webhookId,
-        });
-      }
+      await unregisterStoreWebhook({
+        credentials: decryptStoreCredentials(row),
+        env: row.environment,
+        webhookId: row.webhookId,
+      });
     } catch (err) {
       syncLog.warn('store.webhook-unregister-failed', {
         storeId: row.id,
@@ -238,9 +235,18 @@ export async function rotateWebhookSecret(
     ]);
   }
 
-  const decrypted = decryptCredentials(row.credentials as string);
-  if (!isTrendyolCredentials(decrypted)) {
-    throw new ValidationError([{ field: '(credentials)', code: 'STORE_CREDENTIALS_CORRUPTED' }]);
+  let decrypted: TrendyolCredentials;
+  try {
+    decrypted = decryptStoreCredentials(row);
+  } catch (err) {
+    // Only a well-decrypted-but-wrong-shape blob is the user's to fix (422).
+    // A decrypt-chain failure keeps its true status: a missing/rotated
+    // ENCRYPTION_KEY surfaces as 500 SERVER_CONFIG_ERROR, a tampered/corrupt
+    // blob as 500 — don't mask a server/security fault as "credentials corrupted".
+    if (err instanceof StoreCredentialShapeError) {
+      throw new ValidationError([{ field: '(credentials)', code: 'STORE_CREDENTIALS_CORRUPTED' }]);
+    }
+    throw err;
   }
 
   let encryptedSecret: string;

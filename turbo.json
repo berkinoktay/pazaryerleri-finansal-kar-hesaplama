@@ -12,10 +12,10 @@
       "outputs": [".next/**", "dist/**"]
     },
     "typecheck": {
-      "dependsOn": ["^build", "^generate", "generate"]
+      "dependsOn": ["^generate", "generate"]
     },
     "lint": {
-      "dependsOn": ["^build"]
+      "dependsOn": []
     },
     "clean": {
       "cache": false
@@ -29,7 +29,7 @@
       "outputs": ["generated/prisma/**"]
     },
     "test": {
-      "dependsOn": ["^build", "codegen", "^generate", "generate"],
+      "dependsOn": ["codegen", "^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",

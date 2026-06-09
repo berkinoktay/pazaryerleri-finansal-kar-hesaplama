@@ -43,6 +43,7 @@
 import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
 import {
+  decryptStoreCredentials,
   fetchOtherFinancials,
   fetchSettlements,
   FINANCIAL_WINDOW_MAX_DAYS,
@@ -51,8 +52,6 @@ import {
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 import { syncLog } from '@pazarsync/sync-core';
-
-import { decryptStoreCredentials } from '../../lib/store-credentials';
 import { bumpReconciliationStatusForStore } from './status-bump';
 import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
 import type { ChunkResult, ModuleHandler } from '../types';
