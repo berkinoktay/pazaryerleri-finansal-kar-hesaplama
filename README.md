@@ -70,9 +70,11 @@ Detaylı ürün vizyonu için [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)
 ### Install
 
 ```bash
-pnpm install
+pnpm install                # deps + Prisma client (generated via postinstall)
 cp .env.example .env        # then fill in the values (see .env.example)
 ```
+
+> The Prisma client is gitignored generated code. `pnpm install` regenerates it (postinstall), and Turbo regenerates it before any `typecheck` / `build` / `test` / `dev` task — so a fresh clone is type-checkable without a manual `pnpm db:generate`.
 
 ### Start the local stack
 

@@ -35,6 +35,7 @@
     "audit:errors": "tsx scripts/audit-error-codes.ts",
     "audit:lint": "tsx scripts/audit-lint-coverage.ts",
     "emit:components-manifest": "tsx scripts/emit-component-manifest.ts",
+    "postinstall": "pnpm --filter @pazarsync/db generate",
     "prepare": "husky"
   },
   "devDependencies": {

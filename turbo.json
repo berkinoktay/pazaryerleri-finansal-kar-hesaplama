@@ -3,15 +3,16 @@
   "globalDependencies": ["tsconfig.base.json"],
   "tasks": {
     "dev": {
+      "dependsOn": ["^generate", "generate"],
       "cache": false,
       "persistent": true
     },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "^generate", "generate"],
       "outputs": [".next/**", "dist/**"]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build", "^generate", "generate"]
     },
     "lint": {
       "dependsOn": ["^build"]
@@ -23,8 +24,12 @@
       "inputs": ["openapi.json"],
       "outputs": ["src/generated/**"]
     },
+    "generate": {
+      "inputs": ["prisma/schema.prisma", "prisma.config.ts"],
+      "outputs": ["generated/prisma/**"]
+    },
     "test": {
-      "dependsOn": ["^build", "codegen"],
+      "dependsOn": ["^build", "codegen", "^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",
@@ -45,6 +50,7 @@
       ]
     },
     "test:unit": {
+      "dependsOn": ["^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",
@@ -58,6 +64,7 @@
       ]
     },
     "test:component": {
+      "dependsOn": ["^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",
@@ -71,6 +78,7 @@
       ]
     },
     "test:integration": {
+      "dependsOn": ["^generate", "generate"],
       "outputs": [],
       "env": [
         "NODE_ENV",
