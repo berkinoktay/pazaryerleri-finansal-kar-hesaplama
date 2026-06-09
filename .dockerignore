@@ -1,0 +1,24 @@
+# Keep the Docker build context small + correct. The Dockerfiles install deps
+# and generate the Prisma client fresh inside the build, so nothing installed
+# or generated locally should leak in (it would only slow the COPY and risk a
+# host/container arch mismatch).
+**/node_modules
+.git
+.github
+out
+**/dist
+**/.next
+**/.turbo
+**/generated
+**/coverage
+
+# Never bake local env / secrets into an image layer.
+.env
+.env.*
+!.env.example
+
+# Editor / OS noise.
+.vscode
+.idea
+.DS_Store
+*.log
