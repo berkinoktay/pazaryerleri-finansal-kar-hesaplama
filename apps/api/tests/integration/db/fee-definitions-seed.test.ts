@@ -6,13 +6,14 @@ import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 /**
- * Trendyol FeeDefinition seed verification (PR-2).
+ * Trendyol FeeDefinition seed verification (PR-2 + PR-8).
  *
- * Design §3.4 — 4 satır V1 başlangıç için:
+ * Design §3.4 — 4 satır V1 başlangıç + PR-8'in SHIPPING satırı:
  *   - PLATFORM_SERVICE      FIXED 10.99   + KDV %20  (zorunlu)
  *   - PLATFORM_SERVICE_FAST FIXED 6.99    + KDV %20  (opsiyonel — Bugün Kargoda)
  *   - STOPPAGE              RATE  0.0100  + KDV %0   (zorunlu)
  *   - RETURN_SHIPPING       FIXED NULL    + KDV %20  (opsiyonel — cargo-invoice)
+ *   - SHIPPING              FIXED NULL    + KDV %20  (opsiyonel — cargo-invoice, PR-8)
  *
  * effectiveFrom = 2026-05-18, effectiveTo = NULL (açık ucu).
  */
@@ -26,9 +27,19 @@ describe('FeeDefinition seed — Trendyol V1', () => {
     await ensureFeeDefinitions();
   });
 
-  it('contains exactly 4 Trendyol rows', async () => {
+  it('contains exactly 5 Trendyol rows', async () => {
     const rows = await prisma.feeDefinition.findMany({ where: { platform: 'TRENDYOL' } });
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(5);
+  });
+
+  it('SHIPPING row exists (amount NULL — runtime from cargo-invoice, PR-8)', async () => {
+    const row = await prisma.feeDefinition.findFirst({
+      where: { platform: 'TRENDYOL', feeType: 'SHIPPING' },
+    });
+    expect(row?.calculationKind).toBe('FIXED');
+    expect(row?.fixedAmountNet).toBeNull();
+    expect(new Decimal(row?.defaultVatRate ?? '0').toString()).toBe('20');
+    expect(row?.isRequired).toBe(false);
   });
 
   it('PLATFORM_SERVICE row has correct values', async () => {
@@ -82,7 +93,7 @@ describe('FeeDefinition seed — Trendyol V1', () => {
     await ensureFeeDefinitions();
     await ensureFeeDefinitions();
     const rows = await prisma.feeDefinition.findMany({ where: { platform: 'TRENDYOL' } });
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(5);
   });
 
   it('effectiveFrom is set to 2026-05-18 for all seed rows', async () => {

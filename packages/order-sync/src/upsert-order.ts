@@ -233,14 +233,18 @@ export async function upsertOrderWithSnapshot(
         actualDeliveryDate: order.actualDeliveryDate,
         fastDelivery: order.fastDelivery,
         micro: order.micro,
-        // PR-8 kargo alanları (research 2026-06-09).
-        cargoProviderName: order.cargoProviderName,
+        // PR-8 kargo alanları (research 2026-06-09). DİKKAT: `mappedOrder`
+        // buffer'dan JSONB olarak da gelir — yeni alanlar eski kayıtlarda
+        // UNDEFINED'dır (null değil). Bu yüzden tüm korumalar gevşek `!= null`
+        // (null + undefined) kullanır; BigInt(undefined) fırlatır.
+        cargoProviderName: order.cargoProviderName ?? null,
         cargoTrackingNumber:
-          order.cargoTrackingNumber !== null ? BigInt(order.cargoTrackingNumber) : null,
-        cargoDeci: order.cargoDeci,
-        usesSellerCargoAgreement: order.usesSellerCargoAgreement,
-        platformCreatedBy: order.platformCreatedBy,
-        originShipmentDate: order.originShipmentDate,
+          order.cargoTrackingNumber != null ? BigInt(order.cargoTrackingNumber) : null,
+        cargoDeci: order.cargoDeci ?? null,
+        usesSellerCargoAgreement: order.usesSellerCargoAgreement ?? false,
+        platformCreatedBy: order.platformCreatedBy ?? null,
+        originShipmentDate:
+          order.originShipmentDate != null ? new Date(order.originShipmentDate) : null,
       },
       update: {
         status: order.status,
@@ -248,17 +252,22 @@ export async function upsertOrderWithSnapshot(
         ...(order.actualDeliveryDate !== null && { actualDeliveryDate: order.actualDeliveryDate }),
         // Kargo alanları null-koruma ile tazelenir: cargoDeci kargo ölçümünden
         // SONRA dolar, tracking no nadiren rotasyonla değişir — dolu gelen değer
-        // yazılır, null gelen mevcut dolu değeri EZMEZ (eski/webhook feed'leri
-        // alanları taşımayabilir). usesSellerCargoAgreement her zaman yazılır
-        // (alan-yokluğu da anlamlıdır: Trendyol anlaşması = false).
-        ...(order.cargoProviderName !== null && { cargoProviderName: order.cargoProviderName }),
-        ...(order.cargoTrackingNumber !== null && {
+        // yazılır, null/undefined gelen mevcut dolu değeri EZMEZ (eski/webhook
+        // feed'leri ve buffer JSONB'si alanları taşımayabilir).
+        // usesSellerCargoAgreement dolu geldiğinde yazılır (mapper her zaman
+        // boolean üretir; yalnız eski buffer JSONB'sinde undefined olabilir).
+        ...(order.cargoProviderName != null && { cargoProviderName: order.cargoProviderName }),
+        ...(order.cargoTrackingNumber != null && {
           cargoTrackingNumber: BigInt(order.cargoTrackingNumber),
         }),
-        ...(order.cargoDeci !== null && { cargoDeci: order.cargoDeci }),
-        usesSellerCargoAgreement: order.usesSellerCargoAgreement,
-        ...(order.platformCreatedBy !== null && { platformCreatedBy: order.platformCreatedBy }),
-        ...(order.originShipmentDate !== null && { originShipmentDate: order.originShipmentDate }),
+        ...(order.cargoDeci != null && { cargoDeci: order.cargoDeci }),
+        ...(order.usesSellerCargoAgreement != null && {
+          usesSellerCargoAgreement: order.usesSellerCargoAgreement,
+        }),
+        ...(order.platformCreatedBy != null && { platformCreatedBy: order.platformCreatedBy }),
+        ...(order.originShipmentDate != null && {
+          originShipmentDate: new Date(order.originShipmentDate),
+        }),
       },
     });
 
@@ -295,7 +304,9 @@ export async function upsertOrderWithSnapshot(
           productVariantId: variant?.id ?? null,
           quantity: line.quantity,
           // PR-8: platform satır izi + ham barkod (variant-eşleşmezse tek ürün izi).
-          platformLineId: line.platformLineId !== null ? BigInt(line.platformLineId) : null,
+          // Gevşek `!= null`: buffer JSONB'sinden gelen eski satırlarda alan
+          // undefined'dır — BigInt(undefined) fırlatır.
+          platformLineId: line.platformLineId != null ? BigInt(line.platformLineId) : null,
           barcode: line.barcode,
           // ESKI KDV-dahil kolonları (PR-5c'de silinmediler — backwards compat).
           // unitPrice = unitPriceNet + unitVatAmount; commissionAmount = gross.
