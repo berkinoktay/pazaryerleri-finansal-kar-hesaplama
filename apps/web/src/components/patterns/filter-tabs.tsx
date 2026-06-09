@@ -68,6 +68,12 @@ export function FilterTabs<V extends string = string>({
   variant = 'pill',
   size = 'md',
   className,
+  // The group label must land on the element carrying role="tablist"
+  // (TabsList), not on the role-less Radix Tabs.Root <div> that `...rest`
+  // spreads onto — an aria-label there names nothing for assistive tech.
+  // Pull it out of rest and forward it to TabsList below.
+  'aria-label': ariaLabel,
+  'aria-labelledby': ariaLabelledBy,
   ...rest
 }: FilterTabsProps<V>): React.ReactElement {
   const formatter = useFormatter();
@@ -87,7 +93,7 @@ export function FilterTabs<V extends string = string>({
         with a text-primary label; the muted track is the resting surface, so
         the control reads as a proper segmented control rather than bare text.
       */}
-      <TabsList>
+      <TabsList aria-label={ariaLabel} aria-labelledby={ariaLabelledBy}>
         {options.map((option) => (
           // `group` lets the count chip swap styles when the parent trigger
           // flips to data-state="active" — no parallel state tracking needed.

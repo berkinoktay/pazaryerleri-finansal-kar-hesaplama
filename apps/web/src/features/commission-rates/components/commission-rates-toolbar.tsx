@@ -3,24 +3,27 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { SearchInput } from '@/components/patterns/search-input';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
+
+import type { CommissionRateProductScope } from '../query-keys';
 
 interface CommissionRatesToolbarProps {
   q: string;
   onSearchChange: (next: string) => void;
-  productScope: 'all' | 'active';
-  onProductScopeChange: (next: 'all' | 'active') => void;
+  productScope: CommissionRateProductScope;
+  onProductScopeChange: (next: CommissionRateProductScope) => void;
 }
 
 /**
- * Search + scope toggle row, mounted in DataTable's `toolbar` slot.
+ * Search + product-scope row, mounted in DataTable's `toolbar` slot.
  * Two controls only (Q1 design — no facet filters in v1):
- *   1. SearchInput on `q` — matches categoryName / parentCategoryName
- *      / brandName backend-side. Debounce lives in the page client.
- *   2. "Sadece sattıklarım" checkbox — flips productScope between
- *      'all' and 'active' (Q2 design).
+ *   1. SearchInput on `q` — matches categoryName / parentCategoryName /
+ *      brandName backend-side. Debounce lives in the page client.
+ *   2. Product-scope segment ("Tümü" / "Sattıklarım") — a `FilterTabs`
+ *      pill that flips productScope between 'all' and 'active' (Q2 design).
+ *      Reads as a proper segmented control rather than the bare checkbox
+ *      it replaced, and stays consistent with the rule-kind strip above.
  */
 export function CommissionRatesToolbar({
   q,
@@ -41,16 +44,15 @@ export function CommissionRatesToolbar({
           aria-label={t('searchPlaceholder')}
         />
       </div>
-      <div className="gap-2xs flex items-center">
-        <Checkbox
-          id="commission-rates-active-only"
-          checked={productScope === 'active'}
-          onCheckedChange={(checked) => onProductScopeChange(checked === true ? 'active' : 'all')}
-        />
-        <Label htmlFor="commission-rates-active-only" className="cursor-pointer text-sm">
-          {t('activeOnly')}
-        </Label>
-      </div>
+      <FilterTabs<CommissionRateProductScope>
+        value={productScope}
+        onValueChange={onProductScopeChange}
+        aria-label={t('scopeLabel')}
+        options={[
+          { value: 'all', label: t('scopeAll') },
+          { value: 'active', label: t('scopeActive') },
+        ]}
+      />
     </div>
   );
 }

@@ -71,16 +71,22 @@ describe('CommissionRatesTable — segment tooltip', () => {
 });
 
 describe('CommissionRatesTable — column shape by ruleKind', () => {
-  it('shows the Üst Kategori column for CATEGORY', () => {
+  it('consolidates the parent category into a second line for CATEGORY', () => {
     render(
       <TooltipProvider>
         <CommissionRatesTable
           {...baseProps}
-          rows={[makeRow({ parentCategoryName: 'Günlük Ayakkabı' })]}
+          rows={[
+            makeRow({ categoryName: 'Casual Ayakkabı', parentCategoryName: 'Günlük Ayakkabı' }),
+          ]}
         />
       </TooltipProvider>,
     );
-    expect(screen.getByText('Üst Kategori')).toBeInTheDocument();
+    // Category name + its parent both render in the one consolidated cell;
+    // the standalone "Üst Kategori" / "Marka" header columns are gone.
+    expect(screen.getByText('Casual Ayakkabı')).toBeInTheDocument();
+    expect(screen.getByText('Günlük Ayakkabı')).toBeInTheDocument();
+    expect(screen.queryByText('Üst Kategori')).not.toBeInTheDocument();
     expect(screen.queryByText('Marka')).not.toBeInTheDocument();
   });
 
