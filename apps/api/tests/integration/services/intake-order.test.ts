@@ -31,10 +31,17 @@ function buildMapped(over: {
     actualDeliveryDate: null,
     fastDelivery: false,
     micro: false,
+    cargoProviderName: null,
+    cargoTrackingNumber: null,
+    cargoDeci: null,
+    usesSellerCargoAgreement: false,
+    platformCreatedBy: null,
+    originShipmentDate: null,
     lines: [
       {
         barcode: over.barcode ?? BARCODE,
         quantity: 1,
+        platformLineId: null,
         unitPriceNet: '84.75',
         unitVatRate: '18',
         unitVatAmount: '15.25',

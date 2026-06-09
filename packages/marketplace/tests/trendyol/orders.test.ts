@@ -392,6 +392,55 @@ describe('mapTrendyolShipmentPackage — dematerialized flag', () => {
   });
 });
 
+// ─── PR-8 cargo enrichment (research 2026-06-09) ───────────────────────
+
+describe('mapTrendyolShipmentPackage — cargo fields', () => {
+  it('maps cargo fields verbatim when present', () => {
+    const mapped = mapTrendyolShipmentPackage({
+      ...buildPackage(),
+      cargoProviderName: 'Trendyol Express Marketplace',
+      cargoTrackingNumber: 7330000167510333,
+      cargoDeci: 2.5,
+      whoPays: 1,
+      createdBy: 'split',
+      originShipmentDate: Date.UTC(2026, 5, 8, 11, 0, 0),
+    });
+
+    expect(mapped.cargoProviderName).toBe('Trendyol Express Marketplace');
+    // Identity, not money — raw String(), never toFixed.
+    expect(mapped.cargoTrackingNumber).toBe('7330000167510333');
+    expect(mapped.cargoDeci).toBe('2.5');
+    expect(mapped.usesSellerCargoAgreement).toBe(true);
+    expect(mapped.platformCreatedBy).toBe('split');
+    // originShipmentDate is true UTC — RAW passthrough, no zone normalisation.
+    expect(mapped.originShipmentDate?.toISOString()).toBe('2026-06-08T11:00:00.000Z');
+  });
+
+  it('defaults to null/false when Trendyol omits the fields (stage shape)', () => {
+    const mapped = mapTrendyolShipmentPackage(buildPackage());
+
+    expect(mapped.cargoProviderName).toBeNull();
+    expect(mapped.cargoTrackingNumber).toBeNull();
+    expect(mapped.cargoDeci).toBeNull();
+    // whoPays absent == Trendyol cargo agreement (Berkin-confirmed semantics).
+    expect(mapped.usesSellerCargoAgreement).toBe(false);
+    expect(mapped.platformCreatedBy).toBeNull();
+    expect(mapped.originShipmentDate).toBeNull();
+  });
+
+  it('whoPays values other than 1 do not flag a seller agreement', () => {
+    const mapped = mapTrendyolShipmentPackage({ ...buildPackage(), whoPays: 0 });
+    expect(mapped.usesSellerCargoAgreement).toBe(false);
+  });
+
+  it('carries the Trendyol line id onto each mapped line', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({ lines: [buildLine({ lineId: 10328256 })] }),
+    );
+    expect(mapped.lines[0]?.platformLineId).toBe('10328256');
+  });
+});
+
 // ─── Full-page response wrapper ────────────────────────────────────────
 
 describe('mapTrendyolOrdersResponse', () => {

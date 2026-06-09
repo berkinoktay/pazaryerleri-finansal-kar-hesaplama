@@ -625,10 +625,17 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       actualDeliveryDate: new Date('2026-05-19T18:00:00Z'),
       fastDelivery: true,
       micro: false,
+      cargoProviderName: 'Trendyol Express Marketplace',
+      cargoTrackingNumber: '7330000167510333',
+      cargoDeci: '2.00',
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      originShipmentDate: new Date('2026-05-19T09:00:00Z'),
       lines: [
         {
           barcode: 'EAN13-DIRECT',
           quantity: 1,
+          platformLineId: '10328256',
           unitPriceNet: '100',
           unitVatRate: '20',
           unitVatAmount: '20',
