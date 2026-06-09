@@ -32,7 +32,7 @@ Multi-tenant SaaS platform for Turkish e-commerce marketplace sellers. Connects 
 | **ORM**             | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                                                               |
 | **Auth**            | Supabase Auth (email/password, OAuth); backend delegates token verification to `supabase.auth.getUser`                    |
 | **Background Jobs** | Supabase Edge Functions + pg_cron                                                                                         |
-| **Crypto**          | Node `crypto` (AES-256-GCM via `apps/api/src/lib/crypto.ts`)                                                              |
+| **Crypto**          | Node `crypto` (AES-256-GCM envelope in `@pazarsync/crypto-core`, key wrappers in `@pazarsync/sync-core`)                  |
 | **Money**           | `decimal.js` end-to-end — never floating point                                                                            |
 | **Testing**         | Vitest 4 + React Testing Library + MSW v2 + happy-dom (NOT jsdom — see `apps/web/CLAUDE.md`)                              |
 | **Package Manager** | pnpm 10.33 (Node ≥ 20.19)                                                                                                 |
@@ -73,7 +73,8 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 │   ├── utils/            # Shared utilities (currency, date, business-timezone, cursor, permissions, validation)
 │   ├── api-client/       # Generated typed API contracts (OpenAPI → openapi-fetch); cross-app types live here
 │   ├── marketplace/      # Marketplace adapters (Trendyol, Hepsiburada) + MarketplaceAdapter interface + registry
-│   ├── sync-core/        # Sync primitives: job claim, checkpoint, crypto, logger, sync-log service
+│   ├── sync-core/        # Sync primitives: job claim, checkpoint, crypto wrappers, logger, sync-log service
+│   ├── crypto-core/      # Dependency-free AES-256-GCM envelope (shared by sync-core + db seed)
 │   ├── order-sync/       # Idempotent order upsert (marketplace payload → domain Order)
 │   └── profit/           # Profit engine: formula, on-create estimates, settlement reconcile, fee resolution
 ├── supabase/
@@ -556,7 +557,8 @@ If you genuinely need a cross-feature edge (e.g. a `dashboard` feature that aggr
 - `@pazarsync/utils` — Currency formatting (TRY), date + business-timezone helpers, cursor, permissions, Zod schemas shared between frontend and backend
 - `@pazarsync/api-client` — Generated typed API contracts (backend OpenAPI → `openapi-fetch`); the home for cross-app request/response types
 - `@pazarsync/marketplace` — Marketplace adapters (Trendyol, Hepsiburada), the `MarketplaceAdapter` interface, and the platform registry. Consumed by both `apps/api` and `apps/sync-worker`
-- `@pazarsync/sync-core` — Sync engine primitives: job claim, checkpoint, crypto, logger, `sync-log` service, `mapPrismaError`
+- `@pazarsync/crypto-core` — Dependency-free AES-256-GCM envelope (`encrypt`/`decrypt`) shared by `@pazarsync/sync-core` and the db seed — single source of truth for the credential wire format, importable by any package without a workspace cycle
+- `@pazarsync/sync-core` — Sync engine primitives: job claim, checkpoint, credential-crypto wrappers (envelope in `@pazarsync/crypto-core`), logger, `sync-log` service, `mapPrismaError`
 - `@pazarsync/order-sync` — Idempotent order upsert (marketplace payload → domain `Order`)
 - `@pazarsync/profit` — Profit calculation engine: formula, on-order-create estimates, settlement reconciliation, fee resolution, calculability inference
 
