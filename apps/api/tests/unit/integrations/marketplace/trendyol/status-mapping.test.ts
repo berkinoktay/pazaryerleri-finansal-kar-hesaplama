@@ -16,7 +16,11 @@ describe('mapTrendyolStatusToEnum — 13 statuses → 6 enum', () => {
     ['AWAITING', 'PENDING'],
     ['PICKING', 'PROCESSING'],
     ['INVOICED', 'PROCESSING'],
-    ['UNPACKED', 'PROCESSING'],
+    // UnPacked = split ghost (research 2026-06-09): intake DELETES the row via
+    // MappedOrder.dematerialized; CANCELLED here is the defense-in-depth fallback
+    // so a leaked persist stays out of revenue aggregates (was PROCESSING — that
+    // double-counted split orders).
+    ['UNPACKED', 'CANCELLED'],
     ['VERIFIED', 'PROCESSING'],
     ['SHIPPED', 'SHIPPED'],
     ['UNDELIVERED', 'SHIPPED'],

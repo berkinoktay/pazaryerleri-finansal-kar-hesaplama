@@ -281,6 +281,18 @@ export async function processOrdersChunk(input: {
         case 'persisted':
           // Steady-state happy path — no per-order log line.
           break;
+        case 'dematerialized':
+          // Split ghost (UnPacked) removed from the books — children re-carry
+          // the content under new shipmentPackageIds in the same batch/feed.
+          syncLog.info('orders.dematerialized', {
+            source: 'cron',
+            syncLogId: log.id,
+            storeId: log.storeId,
+            platformOrderId: order.platformOrderId,
+            deletedOrder: outcome.deletedOrder,
+            deletedBufferEntries: outcome.deletedBufferEntries,
+          });
+          break;
         default: {
           const _exhaustive: never = outcome;
           throw new Error(`Unhandled intake outcome: ${JSON.stringify(_exhaustive)}`);

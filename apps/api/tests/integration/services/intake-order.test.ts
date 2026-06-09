@@ -15,13 +15,16 @@ function buildMapped(over: {
   platformOrderId: string;
   orderDate: Date;
   barcode?: string;
+  status?: MappedOrder['status'];
+  dematerialized?: boolean;
 }): MappedOrder {
   return {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: `ord-${over.platformOrderId}`,
     orderDate: over.orderDate,
     lastModifiedDate: over.orderDate,
-    status: 'PROCESSING',
+    status: over.status ?? 'PROCESSING',
+    dematerialized: over.dematerialized ?? false,
     saleSubtotalNet: '84.75',
     saleVatTotal: '15.25',
     agreedDeliveryDate: null,
@@ -249,5 +252,142 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     // Org A order untouched (no cross-tenant upsert), org B has no orders row.
     expect(await prisma.order.count({ where: { organizationId: orgA.id } })).toBe(1);
     expect(await prisma.order.count({ where: { organizationId: orgB.id } })).toBe(0);
+  });
+
+  // ── Split-ghost dematerialization + cancel routing (research 2026-06-09) ──
+
+  it('dematerialized (UnPacked) → deletes the existing orders row (split ghost)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true);
+
+    // The pre-split package was persisted as a normal order…
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'split-ghost-1', orderDate: new Date() }),
+    });
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+
+    // …then Trendyol reports it UnPacked (split happened) → row must vanish.
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'split-ghost-1',
+        orderDate: new Date(),
+        status: 'CANCELLED',
+        dematerialized: true,
+      }),
+    });
+
+    expect(outcome).toEqual({
+      kind: 'dematerialized',
+      deletedOrder: true,
+      deletedBufferEntries: 0,
+    });
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('dematerialized (UnPacked) → clears the matching buffer entry', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+
+    // Cost-missing today → the pre-split package landed in the buffer…
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'split-ghost-2', orderDate: new Date() }),
+    });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+
+    // …then the split dissolves it → buffer row must vanish too.
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'split-ghost-2',
+        orderDate: new Date(),
+        status: 'CANCELLED',
+        dematerialized: true,
+      }),
+    });
+
+    expect(outcome).toEqual({
+      kind: 'dematerialized',
+      deletedOrder: false,
+      deletedBufferEntries: 1,
+    });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('dematerialized scope is org/store-bound — never deletes another tenant row', async () => {
+    const orgA = await createOrganization();
+    const storeA = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    await prisma.order.create({
+      data: {
+        organizationId: orgA.id,
+        storeId: storeA.id,
+        platformOrderId: 'ghost-shared',
+        platformOrderNumber: 'ord-ghost-shared',
+        orderDate: new Date(),
+        status: 'PROCESSING',
+      },
+    });
+
+    const outcome = await intakeOrder({
+      storeId: storeB.id,
+      organizationId: orgB.id,
+      mapped: buildMapped({
+        platformOrderId: 'ghost-shared',
+        orderDate: new Date(),
+        status: 'CANCELLED',
+        dematerialized: true,
+      }),
+    });
+
+    expect(outcome).toEqual({
+      kind: 'dematerialized',
+      deletedOrder: false,
+      deletedBufferEntries: 0,
+    });
+    // Org A's order survives — deletion is tenant-scoped.
+    expect(await prisma.order.count({ where: { organizationId: orgA.id } })).toBe(1);
+  });
+
+  it('CANCELLED → purges the buffer entry and persists an audit row', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+
+    // Cost-missing today → buffered (counting volume on the live page)…
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'cancel-1', orderDate: new Date() }),
+    });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+
+    // …then the customer cancels → buffer must empty, order persists as audit.
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'cancel-1',
+        orderDate: new Date(),
+        status: 'CANCELLED',
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'cancelled_audit' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('cancel-1');
+    expect(order.status).toBe('CANCELLED');
   });
 });
