@@ -233,11 +233,32 @@ export async function upsertOrderWithSnapshot(
         actualDeliveryDate: order.actualDeliveryDate,
         fastDelivery: order.fastDelivery,
         micro: order.micro,
+        // PR-8 kargo alanları (research 2026-06-09).
+        cargoProviderName: order.cargoProviderName,
+        cargoTrackingNumber:
+          order.cargoTrackingNumber !== null ? BigInt(order.cargoTrackingNumber) : null,
+        cargoDeci: order.cargoDeci,
+        usesSellerCargoAgreement: order.usesSellerCargoAgreement,
+        platformCreatedBy: order.platformCreatedBy,
+        originShipmentDate: order.originShipmentDate,
       },
       update: {
         status: order.status,
         // actualDeliveryDate sadece null → non-null geçişi için (delivered event'i)
         ...(order.actualDeliveryDate !== null && { actualDeliveryDate: order.actualDeliveryDate }),
+        // Kargo alanları null-koruma ile tazelenir: cargoDeci kargo ölçümünden
+        // SONRA dolar, tracking no nadiren rotasyonla değişir — dolu gelen değer
+        // yazılır, null gelen mevcut dolu değeri EZMEZ (eski/webhook feed'leri
+        // alanları taşımayabilir). usesSellerCargoAgreement her zaman yazılır
+        // (alan-yokluğu da anlamlıdır: Trendyol anlaşması = false).
+        ...(order.cargoProviderName !== null && { cargoProviderName: order.cargoProviderName }),
+        ...(order.cargoTrackingNumber !== null && {
+          cargoTrackingNumber: BigInt(order.cargoTrackingNumber),
+        }),
+        ...(order.cargoDeci !== null && { cargoDeci: order.cargoDeci }),
+        usesSellerCargoAgreement: order.usesSellerCargoAgreement,
+        ...(order.platformCreatedBy !== null && { platformCreatedBy: order.platformCreatedBy }),
+        ...(order.originShipmentDate !== null && { originShipmentDate: order.originShipmentDate }),
       },
     });
 
@@ -273,6 +294,9 @@ export async function upsertOrderWithSnapshot(
           organizationId,
           productVariantId: variant?.id ?? null,
           quantity: line.quantity,
+          // PR-8: platform satır izi + ham barkod (variant-eşleşmezse tek ürün izi).
+          platformLineId: line.platformLineId !== null ? BigInt(line.platformLineId) : null,
+          barcode: line.barcode,
           // ESKI KDV-dahil kolonları (PR-5c'de silinmediler — backwards compat).
           // unitPrice = unitPriceNet + unitVatAmount; commissionAmount = gross.
           unitPrice: new Decimal(line.unitPriceNet).add(new Decimal(line.unitVatAmount)),

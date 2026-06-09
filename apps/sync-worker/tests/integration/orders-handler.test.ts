@@ -653,10 +653,83 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('99999');
     expect(order.fastDelivery).toBe(true);
+    // PR-8 cargo enrichment lands on CREATE.
+    expect(order.cargoProviderName).toBe('Trendyol Express Marketplace');
+    expect(order.cargoTrackingNumber).toBe(7330000167510333n);
+    expect(new Decimal(order.cargoDeci!.toString()).toString()).toBe('2');
+    expect(order.usesSellerCargoAgreement).toBe(false);
+    expect(order.platformCreatedBy).toBe('order-creation');
+    expect(order.originShipmentDate?.toISOString()).toBe('2026-05-19T09:00:00.000Z');
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
     expect(item.productVariantId).not.toBeNull();
+    // PR-8 line trail.
+    expect(item.platformLineId).toBe(10328256n);
+    expect(item.barcode).toBe('EAN13-DIRECT');
+  });
+
+  it('UPDATE refreshes cargo fields but never erases them with incoming nulls (PR-8)', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-DIRECT']);
+
+    const base = {
+      platformOrderId: '99998',
+      platformOrderNumber: 'TY-98',
+      orderDate: new Date('2026-05-19T10:00:00Z'),
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      status: 'PROCESSING' as const,
+      dematerialized: false,
+      saleSubtotalNet: '100.00',
+      saleVatTotal: '20.00',
+      agreedDeliveryDate: null,
+      actualDeliveryDate: null,
+      fastDelivery: false,
+      micro: false,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      lines: [
+        {
+          barcode: 'EAN13-DIRECT',
+          quantity: 1,
+          platformLineId: '10328999',
+          unitPriceNet: '100',
+          unitVatRate: '20',
+          unitVatAmount: '20',
+          grossCommissionAmountNet: '10',
+          grossCommissionVatAmount: '2',
+          sellerDiscountNet: '0',
+          sellerDiscountVatAmount: '0',
+          commissionRate: '10',
+        },
+      ],
+    };
+
+    // First sync: tracking assigned at creation, deci not yet measured.
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...base,
+      cargoProviderName: 'Trendyol Express Marketplace',
+      cargoTrackingNumber: '7330000167519999',
+      cargoDeci: null,
+      originShipmentDate: new Date('2026-05-19T09:00:00Z'),
+    });
+
+    // Later feed: deci measured now, but this payload omits provider/tracking
+    // (mapped as nulls) — they must survive.
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...base,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: '3.50',
+      originShipmentDate: null,
+    });
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: '99998' },
+    });
+    expect(order.cargoProviderName).toBe('Trendyol Express Marketplace');
+    expect(order.cargoTrackingNumber).toBe(7330000167519999n);
+    expect(new Decimal(order.cargoDeci!.toString()).toString()).toBe('3.5');
+    expect(order.originShipmentDate?.toISOString()).toBe('2026-05-19T09:00:00.000Z');
   });
 });
 
