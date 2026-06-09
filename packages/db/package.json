@@ -19,6 +19,7 @@
     "purge-test-users": "tsx --env-file-if-exists=../../.env scripts/purge-test-users.ts",
     "reset-clean": "tsx --env-file-if-exists=../../.env scripts/reset-clean.ts",
     "seed": "tsx prisma/seed.ts",
+    "seed:reference": "tsx scripts/seed-reference.ts",
     "studio": "prisma studio",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
