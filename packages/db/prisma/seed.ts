@@ -24,7 +24,6 @@
 //     body: { email, password: SEED_PASSWORD }
 //   → response.access_token goes into `Authorization: Bearer …` for
 //     backend calls. authMiddleware verifies via supabase.auth.getUser.
-import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { encrypt } from '@pazarsync/crypto-core';
 import { fileURLToPath } from 'node:url';
@@ -175,10 +174,11 @@ async function seedStoresProductsOrders(orgs: {
 
   // The PROD-environment Trendyol store. externalAccountId maps to the
   // supplierId in tmp/trendyol/reference/prod-*.json captures (Berkin's real
-  // Trendyol panel session) so seedCommissionRatesFromCapture can attach the
-  // ~135 K captured prod rows to this store. The encrypted credentials here
-  // are still placeholders; replace via the real connect-store flow when
-  // hitting Trendyol's marketplace API rather than the panel BFF.
+  // Trendyol panel session) so the seed-reference loader can attach the
+  // ~135 K captured prod commission rows under the same platform=TRENDYOL
+  // scope. The encrypted credentials here are still placeholders; replace
+  // via the real connect-store flow when hitting Trendyol's marketplace API
+  // rather than the panel BFF.
   const akyildizStore = await prisma.store.create({
     data: {
       organizationId: orgs.akyildiz.id,
@@ -378,248 +378,6 @@ async function seedStoresProductsOrders(orgs: {
   };
 }
 
-// \u2500\u2500\u2500 Commission-rate snapshot loader \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-// Reads the wrapper-JSON snapshots under tmp/trendyol/reference/ that we
-// captured from the Trendyol partner panel BFF and bulk-inserts them into
-// marketplace_commission_rate. Data is platform-scoped (NOT per-store): the
-// tariff is the same for every Trendyol seller, so one shared row set
-// services every tenant.
-//
-//   prod-category-commissions.json        \u2192 TRENDYOL \u00b7 CATEGORY
-//   prod-category-brand-commissions.json  \u2192 TRENDYOL \u00b7 CATEGORY_BRAND
-//
-// Stage snapshots (stage-*.json) are kept under tmp/ for operator debug /
-// import-flow testing but are NOT loaded here \u2014 they come from Trendyol's
-// staging environment, where rates and category IDs may diverge from prod.
-// Loading both into platform=TRENDYOL would mean stage rows overwriting
-// prod rows on key collision. The seed treats prod as the source of truth.
-//
-// The files live under tmp/ which is gitignored \u2014 they are NOT shipped in
-// CI. If a file is missing the loader skips that bucket with a clear
-// message, so CI containers without a populated tmp/ stay green.
-//
-// Bulk insert is chunked (1000 rows per batch) to stay under Postgres's
-// 65 535 bind-parameter limit when running via @prisma/adapter-pg. At ~13
-// fields per row, ~5000 rows would already exceed the limit; 1000 leaves
-// a comfortable margin.
-
-interface SnapshotWrapper<TRow> {
-  fetchedAt: string;
-  env: 'stage' | 'prod';
-  supplierId: number;
-  source: { host: string; path: string; screen: string };
-  totalElements: number;
-  rows: TRow[];
-}
-
-// commission/commissionRate, paymentTerm, and categoryName are all nullable
-// in stage data: the Trendyol test panel returns rows for categories whose
-// rate/name hasn't been provisioned yet. Loader skips rows missing any
-// required field and reports the dropped count.
-interface CategoryRow {
-  categoryId: number;
-  parentCategoryName: string | null;
-  categoryName: string | null;
-  paymentTerm: number | null;
-  commission: number | string | null;
-  ka1Commission: number | string | null;
-  ka2Commission: number | string | null;
-  na1Commission: number | string | null;
-  microSegmentCommission: number | string | null;
-}
-
-interface CategoryBrandRow {
-  categoryId: number;
-  brandId: number;
-  categoryName: string;
-  brandName: string;
-  paymentTerm: number | null;
-  commissionRate: number | string | null;
-  ka1Commission: number | string | null;
-  ka2Commission: number | string | null;
-  na1Commission: number | string | null;
-}
-
-const SNAPSHOT_DIR = path.resolve(__dirname, '../../../tmp/trendyol/reference');
-const CHUNK_SIZE = 1000;
-
-function buildCategorySegmentOverrides(row: CategoryRow): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (row.ka1Commission !== null) out.ka1 = String(row.ka1Commission);
-  if (row.ka2Commission !== null) out.ka2 = String(row.ka2Commission);
-  if (row.na1Commission !== null) out.na1 = String(row.na1Commission);
-  if (row.microSegmentCommission !== null) out.microSegment = String(row.microSegmentCommission);
-  return out;
-}
-
-function buildCategoryBrandSegmentOverrides(row: CategoryBrandRow): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (row.ka1Commission !== null) out.ka1 = String(row.ka1Commission);
-  if (row.ka2Commission !== null) out.ka2 = String(row.ka2Commission);
-  if (row.na1Commission !== null) out.na1 = String(row.na1Commission);
-  return out;
-}
-
-async function loadSnapshot(args: {
-  fileName: string;
-  platform: 'TRENDYOL';
-  ruleKind: 'CATEGORY' | 'CATEGORY_BRAND';
-}): Promise<
-  | { status: 'loaded'; count: number; droppedNullRows: number }
-  | { status: 'skipped'; reason: string }
-> {
-  const fullPath = path.join(SNAPSHOT_DIR, args.fileName);
-  if (!existsSync(fullPath)) {
-    return { status: 'skipped', reason: `${args.fileName} not found under tmp/trendyol/reference` };
-  }
-
-  interface SeedRateRecord {
-    platform: 'TRENDYOL';
-    ruleKind: 'CATEGORY' | 'CATEGORY_BRAND';
-    categoryId: bigint;
-    brandId: bigint | null;
-    categoryName: string;
-    parentCategoryName: string | null;
-    brandName: string | null;
-    baseRate: string;
-    paymentTermDays: number;
-    segmentOverrides: Record<string, string>;
-    fetchedAt: Date;
-    sourceScreen: string;
-  }
-  let records: SeedRateRecord[];
-
-  // The stage snapshot has ~33 rows where both `commission` and `paymentTerm`
-  // are null — categories whose rate the panel hasn't computed yet. They're
-  // valid panel rows but carry no business value for us; skip them and
-  // surface the count to the operator. Prod snapshots don't have nulls
-  // (every prod category has at least a default rate).
-  let droppedNullRows = 0;
-
-  if (args.ruleKind === 'CATEGORY') {
-    const snapshot = JSON.parse(readFileSync(fullPath, 'utf-8')) as SnapshotWrapper<CategoryRow>;
-    const fetchedAt = new Date(snapshot.fetchedAt);
-    records = [];
-    for (const r of snapshot.rows) {
-      if (r.commission === null || r.paymentTerm === null || r.categoryName === null) {
-        droppedNullRows += 1;
-        continue;
-      }
-      records.push({
-        platform: args.platform,
-        ruleKind: 'CATEGORY',
-        categoryId: BigInt(r.categoryId),
-        brandId: null,
-        categoryName: r.categoryName,
-        parentCategoryName: r.parentCategoryName,
-        brandName: null,
-        baseRate: String(r.commission),
-        paymentTermDays: r.paymentTerm,
-        segmentOverrides: buildCategorySegmentOverrides(r),
-        fetchedAt,
-        sourceScreen: snapshot.source.screen,
-      });
-    }
-  } else {
-    const snapshot = JSON.parse(
-      readFileSync(fullPath, 'utf-8'),
-    ) as SnapshotWrapper<CategoryBrandRow>;
-    const fetchedAt = new Date(snapshot.fetchedAt);
-    records = [];
-    for (const r of snapshot.rows) {
-      if (r.commissionRate === null || r.paymentTerm === null) {
-        droppedNullRows += 1;
-        continue;
-      }
-      records.push({
-        platform: args.platform,
-        ruleKind: 'CATEGORY_BRAND',
-        categoryId: BigInt(r.categoryId),
-        brandId: BigInt(r.brandId),
-        categoryName: r.categoryName,
-        parentCategoryName: null,
-        brandName: r.brandName,
-        baseRate: String(r.commissionRate),
-        paymentTermDays: r.paymentTerm,
-        segmentOverrides: buildCategoryBrandSegmentOverrides(r),
-        fetchedAt,
-        sourceScreen: snapshot.source.screen,
-      });
-    }
-  }
-
-  // Idempotent REPLACE-by-(platform, ruleKind). Same contract a future
-  // refresh endpoint will use.
-  await prisma.marketplaceCommissionRate.deleteMany({
-    where: { platform: args.platform, ruleKind: args.ruleKind },
-  });
-
-  for (let i = 0; i < records.length; i += CHUNK_SIZE) {
-    const chunk = records.slice(i, i + CHUNK_SIZE);
-    await prisma.marketplaceCommissionRate.createMany({ data: chunk });
-  }
-
-  return { status: 'loaded', count: records.length, droppedNullRows };
-}
-
-async function seedCommissionRatesFromCapture(): Promise<void> {
-  const targets: Array<{
-    fileName: string;
-    platform: 'TRENDYOL';
-    ruleKind: 'CATEGORY' | 'CATEGORY_BRAND';
-    label: string;
-  }> = [
-    {
-      fileName: 'prod-category-commissions.json',
-      platform: 'TRENDYOL',
-      ruleKind: 'CATEGORY',
-      label: 'TRENDYOL \u00b7 category       ',
-    },
-    {
-      fileName: 'prod-category-brand-commissions.json',
-      platform: 'TRENDYOL',
-      ruleKind: 'CATEGORY_BRAND',
-      label: 'TRENDYOL \u00b7 category+brand ',
-    },
-  ];
-
-  let total = 0;
-  let loaded = 0;
-  let skipped = 0;
-
-  for (const t of targets) {
-    const result = await loadSnapshot({
-      fileName: t.fileName,
-      platform: t.platform,
-      ruleKind: t.ruleKind,
-    });
-    if (result.status === 'loaded') {
-      const tail =
-        result.droppedNullRows > 0
-          ? ` (${result.droppedNullRows.toString()} null-rate rows dropped)`
-          : '';
-      console.log(`  \u2713 ${t.label} ${result.count.toString().padStart(7)} rows${tail}`);
-      total += result.count;
-      loaded += 1;
-    } else {
-      console.log(`  \u00b7 ${t.label} skipped (${result.reason})`);
-      skipped += 1;
-    }
-  }
-
-  if (loaded === 0) {
-    console.log(
-      `\u2713 commission rates: no snapshots loaded (${skipped.toString()} skipped) \u2014 capture them and drop them under tmp/trendyol/reference/`,
-    );
-    return;
-  }
-  console.log(
-    `\u2713 commission rates: ${total.toString()} rows across ${loaded.toString()} snapshot(s)${
-      skipped > 0 ? ` (${skipped.toString()} skipped)` : ''
-    }`,
-  );
-}
-
 async function seedMemberStoreAccess(
   orgs: { akyildiz: { id: string } },
   storeIds: { akyildizTrendyol: string },
@@ -663,7 +421,10 @@ async function main(): Promise<void> {
   const orgs = await seedOrgsAndMemberships();
   const storeIds = await seedStoresProductsOrders(orgs);
   await seedMemberStoreAccess(orgs, storeIds);
-  await seedCommissionRatesFromCapture();
+  // Reference data (commission rates etc.) lives in scripts/seed-reference.ts —
+  // run `pnpm db:seed-reference` once after a fresh DB. Splitting it out keeps
+  // this seed about dev fixtures and lets reference re-loads run without
+  // touching users / orgs / stores.
 
   // Surface the RLS policy count as a quick "did db:apply-policies run?"
   // sanity check. Zero would mean the policy file never landed — seed
