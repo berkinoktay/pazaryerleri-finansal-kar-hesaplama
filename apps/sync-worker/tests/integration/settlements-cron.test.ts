@@ -313,6 +313,8 @@ function makeMockFetchers(scenario: {
       if (!rows) return;
       for (const r of rows) yield r;
     },
+    // PR-8: cargo invoices out of scope for the state-machine scenarios.
+    fetchCargoInvoiceItems: async () => [],
   };
 }
 

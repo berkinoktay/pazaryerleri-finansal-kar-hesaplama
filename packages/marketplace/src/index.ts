@@ -74,6 +74,7 @@ export {
   classifySettlementTransaction,
   classifyOtherFinancialTransaction,
   classifyDeductionInvoice,
+  getCargoInvoiceSerial,
   type SettlementDispatchTarget,
   type OtherFinancialDispatchTarget,
   type DeductionInvoiceSubClass,

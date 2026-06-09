@@ -44,9 +44,13 @@ import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
 import {
   decryptStoreCredentials,
+  fetchAllCargoInvoiceItems,
   fetchOtherFinancials,
   fetchSettlements,
   FINANCIAL_WINDOW_MAX_DAYS,
+  getCargoInvoiceSerial,
+  type CargoInvoiceItem,
+  type FetchCargoInvoiceItemsOpts,
   type FetchOtherFinancialsOpts,
   type FetchSettlementsOpts,
   type TrendyolFinancialTransaction,
@@ -54,6 +58,7 @@ import {
 import { syncLog } from '@pazarsync/sync-core';
 import { bumpReconciliationStatusForStore } from './status-bump';
 import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
+import { handleCargoInvoiceItems } from './cargo-invoice-fees';
 import type { ChunkResult, ModuleHandler } from '../types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -76,11 +81,14 @@ export interface SettlementsFetchers {
   fetchOtherFinancials: (
     opts: FetchOtherFinancialsOpts,
   ) => AsyncGenerator<TrendyolFinancialTransaction, void>;
+  /** PR-8: kargo faturasi item'lari — cron tx DISINDA ceker (ag cagrisi). */
+  fetchCargoInvoiceItems: (opts: FetchCargoInvoiceItemsOpts) => Promise<CargoInvoiceItem[]>;
 }
 
 const DEFAULT_FETCHERS: SettlementsFetchers = {
   fetchSettlements,
   fetchOtherFinancials,
+  fetchCargoInvoiceItems: fetchAllCargoInvoiceItems,
 };
 
 // ─── Handler ─────────────────────────────────────────────────────────────
@@ -161,6 +169,24 @@ export async function processSettlementsChunk(
       });
       for await (const row of generator) {
         try {
+          // PR-8: kargo faturasi satiri — once item'lari AG uzerinden cek
+          // (tx disinda), sonra eslestirme + OrderFee yazimini tx icinde isle.
+          // Dispatcher'a gondermiyoruz; oradaki cargo_invoice dali yalniz
+          // guvenlik logu olarak kalir.
+          const cargoSerial = getCargoInvoiceSerial(transactionType, row);
+          if (cargoSerial !== null) {
+            const items = await fetchers.fetchCargoInvoiceItems({
+              environment: store.environment,
+              credentials,
+              invoiceSerialNumber: cargoSerial,
+            });
+            await prisma.$transaction(async (tx) => {
+              await handleCargoInvoiceItems(store.id, store.organizationId, row, items, tx);
+            });
+            totalProcessed += 1;
+            continue;
+          }
+
           await prisma.$transaction(async (tx) => {
             await dispatchOtherFinancialRow(
               store.id,

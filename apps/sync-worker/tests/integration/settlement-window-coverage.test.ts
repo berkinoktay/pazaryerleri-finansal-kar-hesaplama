@@ -218,6 +218,8 @@ describe('processSettlementsChunk — scan window coverage', () => {
       ): AsyncGenerator<TrendyolFinancialTransaction, void> {
         // empty — window check is on the settlements path
       },
+      // PR-8: cargo invoices out of scope for the window-coverage check.
+      fetchCargoInvoiceItems: async () => [],
     };
 
     const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
