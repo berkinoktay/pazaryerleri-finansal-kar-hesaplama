@@ -334,7 +334,8 @@ describe('mapTrendyolStatusToEnum', () => {
     ['Awaiting', 'PENDING'],
     ['Picking', 'PROCESSING'],
     ['Invoiced', 'PROCESSING'],
-    ['Unpacked', 'PROCESSING'],
+    // Split ghost — defense-in-depth CANCELLED (intake deletes via dematerialized).
+    ['Unpacked', 'CANCELLED'],
     ['Verified', 'PROCESSING'],
     ['Shipped', 'SHIPPED'],
     ['UnDelivered', 'SHIPPED'],
@@ -366,6 +367,28 @@ describe('mapTrendyolShipmentPackage — status fallback (sync path)', () => {
   it("falls back to 'PROCESSING' on an unknown Trendyol status", () => {
     const mapped = mapTrendyolShipmentPackage(buildPackage({ status: 'NewlyInventedStatus' }));
     expect(mapped.status).toBe('PROCESSING');
+  });
+});
+
+// ─── Split-ghost dematerialization flag (research 2026-06-09) ──────────
+
+describe('mapTrendyolShipmentPackage — dematerialized flag', () => {
+  it('marks UnPacked packages as dematerialized (split ghost)', () => {
+    const mapped = mapTrendyolShipmentPackage(buildPackage({ status: 'UnPacked' }));
+    expect(mapped.dematerialized).toBe(true);
+    // Defense-in-depth: if a ghost ever persists, it stays out of revenue.
+    expect(mapped.status).toBe('CANCELLED');
+  });
+
+  it('is case-insensitive (webhook UPPERCASE form)', () => {
+    const mapped = mapTrendyolShipmentPackage(buildPackage({ status: 'UNPACKED' }));
+    expect(mapped.dematerialized).toBe(true);
+  });
+
+  it('stays false for every live status', () => {
+    for (const status of ['Created', 'Picking', 'Shipped', 'Delivered', 'Cancelled', 'Returned']) {
+      expect(mapTrendyolShipmentPackage(buildPackage({ status })).dematerialized).toBe(false);
+    }
   });
 });
 

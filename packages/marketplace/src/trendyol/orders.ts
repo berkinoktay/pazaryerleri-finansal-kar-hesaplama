@@ -167,8 +167,13 @@ function parseRetryAfterSeconds(header: string | null): number | null {
  *   - Shipped, UnDelivered, AtCollectionPoint      → SHIPPED
  *     (UnDelivered teslimat denemesi başarısız ama kargoda — Returned değil)
  *   - Delivered                                    → DELIVERED
- *   - Cancelled, Unsupplied                        → CANCELLED
- *     (Unsupplied = satıcı tedarik edemedi, cancel'a en yakın)
+ *   - Cancelled, Unsupplied, UnPacked              → CANCELLED
+ *     (Unsupplied = satıcı tedarik edemedi, cancel'a en yakın.
+ *      UnPacked = paket split ile BOZULDU — içerik `createdBy="split"` çocuk
+ *      paketlerde yeniden yaşar [research 2026-06-09]. Normal akışta
+ *      `MappedOrder.dematerialized` bayrağı intake'te kaydı SİLDİRİR; bu
+ *      enum eşlemesi defense-in-depth — bir şekilde persist edilirse ciro-dışı
+ *      CANCELLED dursun, PROCESSING gibi ciroyu 2× şişirmesin.)
  *   - Returned                                     → RETURNED
  *
  * Unknown / unmapped status → null. Caller decides:
@@ -182,7 +187,6 @@ export function mapTrendyolStatusToEnum(status: string): MappedOrder['status'] |
       return 'PENDING';
     case 'PICKING':
     case 'INVOICED':
-    case 'UNPACKED':
     case 'VERIFIED':
       return 'PROCESSING';
     case 'SHIPPED':
@@ -194,6 +198,7 @@ export function mapTrendyolStatusToEnum(status: string): MappedOrder['status'] |
       return 'DELIVERED';
     case 'CANCELLED':
     case 'UNSUPPLIED':
+    case 'UNPACKED':
       return 'CANCELLED';
     case 'RETURNED':
       return 'RETURNED';
@@ -249,6 +254,9 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
     // devam etsin). Webhook caller (apps/api PR-C3b) farklı bir politika
     // izler: Order.status DOKUNULMAZ + log warn (forward-compat).
     status: mapTrendyolStatusToEnum(pkg.status) ?? 'PROCESSING',
+    // Split artifact: UnPacked = paket bozuldu, içerik çocuk paketlerde.
+    // intakeOrder bu bayrakla kaydı (orders + buffer) SİLER (research 2026-06-09).
+    dematerialized: pkg.status.toUpperCase() === 'UNPACKED',
     saleSubtotalNet: saleSubtotalNet.toFixed(2),
     saleVatTotal: saleVatTotal.toFixed(2),
     agreedDeliveryDate: epochMsToDate(pkg.agreedDeliveryDate),

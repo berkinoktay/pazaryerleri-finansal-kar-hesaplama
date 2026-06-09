@@ -77,6 +77,9 @@ async function aggregateOrders(
       organizationId: orgId,
       storeId,
       orderDate: { gte: range.start, lt: range.end },
+      // Cancels produce no payout — they must not inflate revenue/volume.
+      // (Split ghosts are deleted at intake; this also belts any that leak.)
+      status: { not: 'CANCELLED' },
     },
     select: {
       saleSubtotalNet: true,
@@ -212,6 +215,8 @@ async function hourlyCumulative(
       organizationId: orgId,
       storeId,
       orderDate: { gte: range.start, lt: range.end },
+      // Mirrors aggregateOrders — cancelled orders carry no payout.
+      status: { not: 'CANCELLED' },
     },
     select: { orderDate: true, saleSubtotalNet: true, estimatedNetProfit: true },
   });
@@ -331,6 +336,8 @@ export async function getTodayProducts(args: {
           organizationId: args.orgId,
           storeId: args.storeId,
           orderDate: { gte: start, lt: end },
+          // Mirrors aggregateOrders — cancelled orders carry no payout.
+          status: { not: 'CANCELLED' },
         },
       },
       select: {
@@ -544,6 +551,8 @@ export async function getLiveOrders(args: {
         organizationId: args.orgId,
         storeId: args.storeId,
         orderDate: { gte: start, lt: end },
+        // Mirrors aggregateOrders — the live feed shows earnings, not cancels.
+        status: { not: 'CANCELLED' },
       },
       orderBy: { orderDate: 'desc' },
       select: {

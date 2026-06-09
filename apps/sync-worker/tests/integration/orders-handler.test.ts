@@ -618,6 +618,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       orderDate: new Date('2026-05-19T10:00:00Z'),
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'DELIVERED' as const,
+      dematerialized: false,
       saleSubtotalNet: '100.00',
       saleVatTotal: '20.00',
       agreedDeliveryDate: new Date('2026-05-20T00:00:00Z'),

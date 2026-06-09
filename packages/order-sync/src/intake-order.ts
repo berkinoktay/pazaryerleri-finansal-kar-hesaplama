@@ -3,7 +3,9 @@
  * webhook receiver (apps/api) and the polling sync-worker (apps/sync-worker)
  * so the two ingest paths behave identically (Slice 0, Decision 1A).
  *
- * Routing (see the spec's decision table):
+ * Routing (see the spec's decision table + split research 2026-06-09):
+ *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
+ *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → skip + caller logs (unmappable until product syncs)
  *   - calculable                   → upsertOrderWithSnapshot (full profit)
  *   - cost_missing + past-day      → upsertOrderWithSnapshot (null profit) — never lose a sale
@@ -28,10 +30,14 @@ import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 import { upsertOrderWithSnapshot } from './upsert-order';
 
 export type OrderIntakeOutcome =
-  | { kind: 'persisted'; reason: 'calculable' | 'cost_missing_past_day' | 'already_in_orders' }
+  | {
+      kind: 'persisted';
+      reason: 'calculable' | 'cost_missing_past_day' | 'already_in_orders' | 'cancelled_audit';
+    }
   | { kind: 'buffered' }
   | { kind: 'buffered_deduped' }
-  | { kind: 'skipped'; reason: 'variant_not_found'; barcode: string };
+  | { kind: 'skipped'; reason: 'variant_not_found'; barcode: string }
+  | { kind: 'dematerialized'; deletedOrder: boolean; deletedBufferEntries: number };
 
 export async function intakeOrder(args: {
   storeId: string;
@@ -45,6 +51,42 @@ export async function intakeOrder(args: {
   rawPayload?: Prisma.InputJsonValue;
 }): Promise<OrderIntakeOutcome> {
   const { storeId, organizationId, mapped } = args;
+
+  // ─── Split artifact: UnPacked package dematerialized ─────────────────────
+  // Trendyol keeps the pre-split package in the feed with status `UnPacked`
+  // while `createdBy="split"` children re-carry its full content under new
+  // shipmentPackageIds (research 2026-06-09). Persisting the ghost counts the
+  // revenue twice (ghost + children), so the ghost is REMOVED from both books.
+  // Hard delete matches the project convention (no soft delete); the
+  // WebhookEvent / SyncLog rows keep the audit trail.
+  if (mapped.dematerialized) {
+    const [orderDel, bufferDel] = await prisma.$transaction([
+      prisma.order.deleteMany({
+        where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
+      }),
+      prisma.livePerformanceBuffer.deleteMany({
+        where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
+      }),
+    ]);
+    return {
+      kind: 'dematerialized',
+      deletedOrder: orderDel.count > 0,
+      deletedBufferEntries: bufferDel.count,
+    };
+  }
+
+  // ─── Real cancels: purge buffer, persist as audit row ────────────────────
+  // A cancelled order produces no payout, so it must never sit in the Live
+  // Performance buffer counting volume until the midnight reset. Persist the
+  // order itself (audit + ledger visibility); revenue aggregates exclude
+  // status=CANCELLED at the query layer.
+  if (mapped.status === 'CANCELLED') {
+    await prisma.livePerformanceBuffer.deleteMany({
+      where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
+    });
+    await upsertOrderWithSnapshot(storeId, organizationId, mapped);
+    return { kind: 'persisted', reason: 'cancelled_audit' };
+  }
 
   const calcLines = await buildCalcCheckLines(prisma, { storeId, lines: mapped.lines });
   const calc = resolveOrderCalculability(calcLines);

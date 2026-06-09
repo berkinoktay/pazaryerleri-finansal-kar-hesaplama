@@ -292,6 +292,17 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
           platformOrderId,
         });
         break;
+      case 'dematerialized':
+        // Split ghost (UnPacked) — the pre-split package was removed from the
+        // books; the split children arrive as their own webhooks/sync rows.
+        syncLog.info('orders.dematerialized', {
+          source: 'webhook',
+          storeId: store.id,
+          platformOrderId,
+          deletedOrder: outcome.deletedOrder,
+          deletedBufferEntries: outcome.deletedBufferEntries,
+        });
+        break;
       default: {
         const _exhaustive: never = outcome;
         throw new Error(`Unhandled intake outcome: ${JSON.stringify(_exhaustive)}`);

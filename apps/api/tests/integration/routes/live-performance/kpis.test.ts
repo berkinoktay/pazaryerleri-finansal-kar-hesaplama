@@ -99,6 +99,43 @@ describe('GET /v1/.../live-performance/kpis', () => {
     expect(body.pendingOrderCountToday).toBe(1);
   });
 
+  it('excludes CANCELLED orders from every today aggregate (no payout, no revenue)', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // A live costed order: ₺100 revenue, ₺20 profit.
+    const live = await createOrder(org.id, store.id, {
+      orderDate: todayAt(11),
+      saleSubtotalNet: '100.00',
+      estimatedNetProfit: '20.00',
+    });
+    await createOrderItem(live.id, org.id, { quantity: 1, unitCostSnapshotNet: '30.00' });
+
+    // A cancelled order the same day — must not move any number. (Both real
+    // cancels and leaked UnPacked split-ghosts land on this status.)
+    const cancelled = await createOrder(org.id, store.id, {
+      orderDate: todayAt(12),
+      saleSubtotalNet: '500.00',
+      estimatedNetProfit: '90.00',
+      status: 'CANCELLED',
+    });
+    await createOrderItem(cancelled.id, org.id, { quantity: 4, unitCostSnapshotNet: '50.00' });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as KpisBody;
+    expect(body.revenueToday).toBe('100.00');
+    expect(body.orderCountToday).toBe(1);
+    expect(body.unitsSoldToday).toBe(1);
+    expect(body.netProfitToday).toBe('20.00');
+  });
+
   it('yesterday: complete in orders (Slice 0 payoff) — counts null-profit orders for volume, excludes them from profit', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();

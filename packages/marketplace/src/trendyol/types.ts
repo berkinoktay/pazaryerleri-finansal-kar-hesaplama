@@ -342,6 +342,16 @@ export interface MappedOrder {
   lastModifiedDate: Date;
   /** Mapped to DB OrderStatus enum (Created → PENDING, vs.). */
   status: 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
+  /**
+   * True when Trendyol reports the package as `UnPacked` — the package was
+   * dissolved by a split (research 2026-06-09: the original package stays in
+   * the feed with status UnPacked while `createdBy="split"` children re-carry
+   * its full content under new shipmentPackageIds). A dematerialized package
+   * must be REMOVED from our books, not persisted: keeping it counts the
+   * revenue twice (once on the ghost, once on the children). `intakeOrder`
+   * branches on this flag before any other routing.
+   */
+  dematerialized: boolean;
   /** Sipariş paket-toplamı agregat'ı (per-line VAT-aware). */
   saleSubtotalNet: string;
   saleVatTotal: string;
