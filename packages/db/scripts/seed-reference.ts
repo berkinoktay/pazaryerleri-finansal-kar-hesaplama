@@ -264,8 +264,40 @@ async function seedTrendyolCommissionRates(): Promise<void> {
   );
 }
 
+// ─── FeeDefinition seed (migration-embedded) ───────────────────────────
+// `db:push` (the dev loop) never executes migration SQL, so a fresh or
+// reset DB ends up with an EMPTY fee_definitions table — and order intake
+// then fails per-order with FeeDefinitionNotFoundError while the sync
+// still reports COMPLETED (found live during the 2026-06-10 PR-8 stage
+// validation). The rows live inside their migrations (PR-2 + PR-8
+// pattern); re-execute just the seed sections here, idempotent via
+// ON CONFLICT DO NOTHING. Mirrors apps/api/tests/helpers/seed-fee-definitions.ts.
+const FEE_SEED_MIGRATIONS = [
+  '../prisma/migrations/20260519175540_fee_definitions_trendyol_seed/migration.sql',
+  '../prisma/migrations/20260610090000_cargo_invoice_foundation/migration.sql',
+].map((rel) => path.resolve(__dirname, rel));
+
+const FEE_SEED_MARKER = '-- ─── Seed: fee_definitions';
+
+async function seedFeeDefinitions(): Promise<void> {
+  for (const file of FEE_SEED_MIGRATIONS) {
+    const full = readFileSync(file, 'utf-8');
+    const start = full.indexOf(FEE_SEED_MARKER);
+    if (start === -1) {
+      throw new Error(
+        `FeeDefinition seed section ("${FEE_SEED_MARKER}") not found in ${file} — ` +
+          'update FEE_SEED_MIGRATIONS/FEE_SEED_MARKER if the migration was restructured.',
+      );
+    }
+    await prisma.$executeRawUnsafe(full.substring(start));
+  }
+  const count = await prisma.feeDefinition.count({ where: { platform: 'TRENDYOL' } });
+  console.log(`✓ fee definitions: ${count.toString()} TRENDYOL rows ensured`);
+}
+
 async function main(): Promise<void> {
   console.log('Loading reference data — safe to re-run on a populated DB.\n');
+  await seedFeeDefinitions();
   await seedTrendyolCommissionRates();
   console.log('\n✓ Reference seed complete.');
 }
