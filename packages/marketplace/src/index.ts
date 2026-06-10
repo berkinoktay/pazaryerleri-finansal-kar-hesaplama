@@ -85,6 +85,22 @@ export {
   type CargoInvoiceItem,
   type FetchCargoInvoiceItemsOpts,
 } from './trendyol/cargo-invoice';
+export {
+  CLAIMS_PAGE_SIZE,
+  UNKNOWN_REASON_CODE,
+  fetchClaims,
+  isTerminalClaimItemStatus,
+  mapTrendyolClaim,
+  type FetchClaimsOpts,
+  type MappedClaim,
+  type MappedClaimItem,
+  type TrendyolClaim,
+  type TrendyolClaimItemWire,
+  type TrendyolClaimLineGroup,
+  type TrendyolClaimOrderLine,
+  type TrendyolClaimReason,
+  type TrendyolClaimsResponse,
+} from './trendyol/claims';
 export { probeTrendyolCredentials } from './trendyol/client';
 export { trendyolFactory } from './trendyol/adapter';
 export {

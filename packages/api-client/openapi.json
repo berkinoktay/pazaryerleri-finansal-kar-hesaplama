@@ -963,7 +963,7 @@
             "items": {
               "$ref": "#/components/schemas/OrderClaimDetail"
             },
-            "description": "Return claims. Empty until PR-13 GetClaims worker is live."
+            "description": "Return claims, synced from Trendyol getClaims by the CLAIMS worker (6h)."
           }
         },
         "required": [
@@ -1984,7 +1984,8 @@
             "enum": [
               "ORDERS",
               "PRODUCTS",
-              "SETTLEMENTS"
+              "SETTLEMENTS",
+              "CLAIMS"
             ],
             "example": "PRODUCTS"
           },
@@ -5599,7 +5600,7 @@
           "Orders"
         ],
         "summary": "Get a single order with items, fees, and claims",
-        "description": "Returns the full Order graph required by the detail surface: OrderItems with joined variant + product image, OrderFee timeline (capturedAt asc), and OrderClaim list (empty until PR-13 GetClaims worker is wired).",
+        "description": "Returns the full Order graph required by the detail surface: OrderItems with joined variant + product image, OrderFee timeline (capturedAt asc), and OrderClaim list (populated by the CLAIMS sync worker every 6 hours).",
         "security": [
           {
             "bearerAuth": []

@@ -55,7 +55,7 @@ import {
   type FetchSettlementsOpts,
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
-import { syncLog } from '@pazarsync/sync-core';
+import { syncLog, syncLogService } from '@pazarsync/sync-core';
 import { bumpReconciliationStatusForStore } from './status-bump';
 import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
 import { handleCargoInvoiceItems } from './cargo-invoice-fees';
@@ -124,6 +124,12 @@ export async function processSettlementsChunk(
   // values (e.g. 50d / 15d → 4 chunks but the 4th is 5d) still respect the
   // configured scan window.
   for (let chunkIdx = 0; chunkIdx < chunkCount; chunkIdx += 1) {
+    // Heartbeat: this handler is single-chunk (never ticks via loop.ts),
+    // and a full 60d scan can outlive the 90s stale-claim watchdog —
+    // stamp lastTickAt once per window slice so a live scan is never
+    // reaped and re-run concurrently by a peer worker.
+    await syncLogService.heartbeat(log.id);
+
     const chunkEndMs = endDate.getTime() - chunkIdx * FINANCIAL_WINDOW_MAX_DAYS * MS_PER_DAY;
     const chunkStartMs = Math.max(
       chunkEndMs - FINANCIAL_WINDOW_MAX_DAYS * MS_PER_DAY,
@@ -133,6 +139,7 @@ export async function processSettlementsChunk(
     const chunkStart = new Date(chunkStartMs);
 
     for (const transactionType of SETTLEMENT_TYPES) {
+      await syncLogService.heartbeat(log.id);
       const generator = fetchers.fetchSettlements({
         environment: store.environment,
         credentials,
@@ -160,6 +167,7 @@ export async function processSettlementsChunk(
     }
 
     for (const transactionType of OTHER_FINANCIAL_TYPES) {
+      await syncLogService.heartbeat(log.id);
       const generator = fetchers.fetchOtherFinancials({
         environment: store.environment,
         credentials,

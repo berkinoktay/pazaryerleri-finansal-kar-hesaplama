@@ -12,9 +12,15 @@ import {
 import { createRlsScopedClient } from '../../helpers/rls-client';
 
 /**
- * order_claims: org-scoped via denormalized organization_id (design §3.6).
- * Tasarım kararı: child table bile olsa orgId denormalize edilir, EXISTS
- * walk yerine flat is_org_member() — products / variants pattern'i.
+ * order_claims: the LIVE policy (rls-policies.sql) is a parent-walk —
+ * EXISTS(orders WHERE orders.id = order_claims.order_id AND
+ * can_access_store(orders.store_id)) — i.e. store-access-aware like
+ * order_fees, NOT the flat is_org_member() over the denormalized
+ * organization_id that design §3.6 originally sketched. The denormalized
+ * column still exists (handy for indexes/queries) but the policy doesn't
+ * read it. This comment was stale until PR-13; the test below asserts
+ * observable behavior (own-org visible, sibling-org invisible), which
+ * holds under either policy shape.
  */
 describe('RLS — order_claims', () => {
   beforeAll(async () => {

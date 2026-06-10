@@ -293,7 +293,7 @@ export const OrderDetailSchema = z
       description: 'Chronologically ordered (capturedAt asc). Renders as the fee timeline.',
     }),
     claims: z.array(OrderClaimDetailSchema).openapi({
-      description: 'Return claims. Empty until PR-13 GetClaims worker is live.',
+      description: 'Return claims, synced from Trendyol getClaims by the CLAIMS worker (6h).',
     }),
   })
   .openapi('OrderDetail');

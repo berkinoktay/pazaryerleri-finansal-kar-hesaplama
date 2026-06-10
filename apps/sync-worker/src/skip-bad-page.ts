@@ -7,9 +7,15 @@
 // instead of terminally failing the whole sync — partial-but-
 // completed beats fully-stuck.
 //
+// PRODUCTS-ONLY — the caller gates by syncType. The cursor decode
+// below assumes the products page cursor; cursorless full-window scans
+// (CLAIMS, SETTLEMENTS) must terminally FAIL instead (their next 6h
+// cron re-scan retries naturally; "skipping a page" has no meaning
+// for them and fabricated phantom skipped-page entries before PR-13).
+//
 // Boundaries:
 //   - Caller decides WHEN to invoke (handleRunError, only for
-//     MARKETPLACE_UNREACHABLE at the MAX_ATTEMPTS ceiling).
+//     MARKETPLACE_UNREACHABLE at the MAX_ATTEMPTS ceiling on PRODUCTS).
 //   - This module decides WHAT the next cursor is and assembles the
 //     SkippedPageEntry from whatever diagnostic the marketplace
 //     layer attached to the error.

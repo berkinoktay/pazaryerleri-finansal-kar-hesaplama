@@ -273,6 +273,21 @@ export async function tick(syncLogId: string, input: TickInput): Promise<void> {
 }
 
 /**
+ * Heartbeat for single-chunk handlers (CLAIMS, SETTLEMENTS): stamps
+ * `lastTickAt` WITHOUT touching cursor/progress so the 90s stale-claim
+ * watchdog can tell a long full-window scan from a crashed worker.
+ * Chunked handlers get this for free via tick(); cursorless scans must
+ * call it periodically mid-loop or a >90s scan gets reaped and re-run
+ * concurrently by a peer.
+ */
+export async function heartbeat(syncLogId: string): Promise<void> {
+  await prisma.syncLog.update({
+    where: { id: syncLogId },
+    data: { lastTickAt: new Date() },
+  });
+}
+
+/**
  * Hand a claimed row back to PENDING so another worker can pick it up.
  * Used by the graceful-shutdown path: the worker is going down, the
  * cursor is already persisted from the last tick, so dropping the
