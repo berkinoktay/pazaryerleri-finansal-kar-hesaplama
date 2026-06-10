@@ -11,23 +11,12 @@
 // fee_definitions.default_vat_rate, never from code.
 //
 // No date-window cap applies here (serial-scoped endpoint, page-based).
-//
-// NOTE: TODO PR-N+1 — fetchOnce/parseRetryAfterSeconds/safeReadBody are the
-// fourth duplicate (products.ts + orders.ts + settlements.ts + here); the
-// promote to a shared client helper is tracked, kept out of scope per PR.
 
 import type { StoreEnvironment } from '@pazarsync/db';
-import { MarketplaceUnreachable, RateLimitedError } from '@pazarsync/sync-core';
 
-import { sleep } from '../lib/sleep';
-import { mapTrendyolResponseToDomainError } from './errors';
-import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
+import { fetchOnce, type FetcherDeps } from './fetch-once';
+import { baseUrlFor } from './headers';
 import type { TrendyolCredentials } from './types';
-
-const PLATFORM = 'TRENDYOL';
-const REQUEST_TIMEOUT_MS = 30_000;
-const MAX_BACKOFF_RETRIES = 4;
-const INITIAL_BACKOFF_MS = 1_000;
 
 /** Page size for cargo-invoice items — Trendyol returns up to 500 per page. */
 export const CARGO_INVOICE_PAGE_SIZE = 500;
@@ -52,87 +41,6 @@ interface CargoInvoiceItemsResponse {
   totalPages: number;
   totalElements: number;
   content: CargoInvoiceItem[];
-}
-
-interface FetcherDeps {
-  credentials: TrendyolCredentials;
-  env: StoreEnvironment;
-  signal?: AbortSignal;
-  initialBackoffMs: number;
-}
-
-function parseRetryAfterSeconds(header: string | null): number | null {
-  if (header === null) return null;
-  const parsed = Number.parseInt(header, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-async function safeReadBody(res: Response): Promise<string | undefined> {
-  try {
-    const text = await res.text();
-    return text.slice(0, 1024);
-  } catch {
-    return undefined;
-  }
-}
-
-async function fetchOnce(url: string, deps: FetcherDeps): Promise<CargoInvoiceItemsResponse> {
-  let attempt = 0;
-  for (;;) {
-    let res: Response | undefined;
-    let networkError = false;
-    try {
-      res = await fetch(url, {
-        headers: {
-          Authorization: buildAuthHeader(deps.credentials),
-          'User-Agent': buildUserAgent(deps.credentials),
-          Accept: 'application/json',
-        },
-        signal: deps.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') throw err;
-      networkError = true;
-    }
-
-    if (res !== undefined && res.ok) {
-      // Type-cast follows the products/orders/settlements convention; runtime
-      // schema validation (Zod) is tracked under the fetchOnce promote cleanup.
-      return (await res.json()) as CargoInvoiceItemsResponse;
-    }
-
-    const sandbox503 = res !== undefined && res.status === 503 && deps.env === 'SANDBOX';
-    const isTransient =
-      networkError ||
-      (res !== undefined && (res.status === 429 || (res.status >= 500 && !sandbox503)));
-
-    if (isTransient && attempt < MAX_BACKOFF_RETRIES) {
-      const headerSeconds =
-        res !== undefined ? parseRetryAfterSeconds(res.headers.get('Retry-After')) : null;
-      const waitMs =
-        headerSeconds !== null
-          ? headerSeconds * 1000
-          : deps.initialBackoffMs * Math.pow(2, attempt);
-      attempt += 1;
-      await sleep(waitMs, deps.signal);
-      continue;
-    }
-
-    if (networkError || res === undefined) {
-      throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0, url });
-    }
-    if (res.status === 429) {
-      const seconds = parseRetryAfterSeconds(res.headers.get('Retry-After')) ?? 30;
-      throw new RateLimitedError(seconds, 'Trendyol rate limit hit (retries exhausted)');
-    }
-    const snippet = await safeReadBody(res);
-    const xRequestId = res.headers.get('X-Request-ID') ?? undefined;
-    mapTrendyolResponseToDomainError(res, deps.env, {
-      url,
-      xRequestId,
-      responseBodySnippet: snippet,
-    });
-  }
 }
 
 export interface FetchCargoInvoiceItemsOpts {
@@ -161,7 +69,7 @@ export async function fetchAllCargoInvoiceItems(
     credentials: opts.credentials,
     env,
     signal: opts.signal,
-    initialBackoffMs: opts.initialBackoffMs ?? INITIAL_BACKOFF_MS,
+    initialBackoffMs: opts.initialBackoffMs,
   };
 
   const items: CargoInvoiceItem[] = [];
@@ -177,7 +85,7 @@ export async function fetchAllCargoInvoiceItems(
     url.searchParams.set('page', page.toString());
     url.searchParams.set('size', CARGO_INVOICE_PAGE_SIZE.toString());
 
-    const raw = await fetchOnce(url.toString(), deps);
+    const raw = await fetchOnce<CargoInvoiceItemsResponse>(url.toString(), deps);
     items.push(...raw.content);
 
     if (raw.content.length === 0 || page + 1 >= raw.totalPages) return items;
