@@ -15,13 +15,11 @@
 import { Decimal } from 'decimal.js';
 
 import type { StoreEnvironment } from '@pazarsync/db';
-import { MarketplaceUnreachable, RateLimitedError, syncLog } from '@pazarsync/sync-core';
+import { syncLog } from '@pazarsync/sync-core';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
-import { sleep } from '../lib/sleep';
-
-import { mapTrendyolResponseToDomainError } from './errors';
-import { baseUrlFor, buildAuthHeader, buildUserAgent } from './headers';
+import { fetchOnce, type FetcherDeps } from './fetch-once';
+import { baseUrlFor } from './headers';
 import type {
   MappedOrder,
   MappedOrderLine,
@@ -33,9 +31,6 @@ import type {
   TrendyolShipmentPackage,
 } from './types';
 
-const PLATFORM = 'TRENDYOL';
-const REQUEST_TIMEOUT_MS = 30_000;
-
 /**
  * Trendyol getShipmentPackages page size.
  *
@@ -45,9 +40,6 @@ const REQUEST_TIMEOUT_MS = 30_000;
  */
 export const ORDERS_PAGE_SIZE = 200;
 
-const MAX_BACKOFF_RETRIES = 4;
-const INITIAL_BACKOFF_MS = 1_000;
-
 /**
  * Commission VAT rate is 20% per Trendyol convention. design §12.2 #1
  * notes the V1 assumption — once `fatura-entegrasyonu/` docs are read
@@ -56,7 +48,7 @@ const INITIAL_BACKOFF_MS = 1_000;
  */
 const COMMISSION_VAT_RATE = 20;
 
-// ─── HTTP fetch (products.ts pattern, retry-aware) ──────────────────────
+// ─── Request URL building ───────────────────────────────────────────────
 
 interface PageRequest {
   startDate: number;
@@ -74,82 +66,6 @@ function buildUrl(base: string, supplierId: string, req: PageRequest): string {
   url.searchParams.set('size', req.size.toString());
   url.searchParams.set('page', req.page.toString());
   return url.toString();
-}
-
-interface FetcherDeps {
-  credentials: TrendyolCredentials;
-  env: StoreEnvironment;
-  signal?: AbortSignal;
-}
-
-async function fetchOnce<T>(url: string, deps: FetcherDeps): Promise<T> {
-  let attempt = 0;
-  for (;;) {
-    let res: Response | undefined;
-    let networkError = false;
-    try {
-      res = await fetch(url, {
-        headers: {
-          Authorization: buildAuthHeader(deps.credentials),
-          'User-Agent': buildUserAgent(deps.credentials),
-          Accept: 'application/json',
-        },
-        signal: deps.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') throw err;
-      networkError = true;
-    }
-
-    if (res !== undefined && res.ok) {
-      return (await res.json()) as T;
-    }
-
-    const sandbox503 = res !== undefined && res.status === 503 && deps.env === 'SANDBOX';
-    const isTransient =
-      networkError ||
-      (res !== undefined && (res.status === 429 || (res.status >= 500 && !sandbox503)));
-
-    if (isTransient && attempt < MAX_BACKOFF_RETRIES) {
-      const headerSeconds =
-        res !== undefined ? parseRetryAfterSeconds(res.headers.get('Retry-After')) : null;
-      const waitMs =
-        headerSeconds !== null ? headerSeconds * 1000 : INITIAL_BACKOFF_MS * Math.pow(2, attempt);
-      attempt += 1;
-      await sleep(waitMs, deps.signal);
-      continue;
-    }
-
-    if (networkError || res === undefined) {
-      throw new MarketplaceUnreachable(PLATFORM, { httpStatus: 0, url });
-    }
-    if (res.status === 429) {
-      const seconds = parseRetryAfterSeconds(res.headers.get('Retry-After')) ?? 30;
-      throw new RateLimitedError(seconds, 'Trendyol rate limit hit (retries exhausted)');
-    }
-    const snippet = await safeReadBody(res);
-    const xRequestId = res.headers.get('X-Request-ID') ?? undefined;
-    mapTrendyolResponseToDomainError(res, deps.env, {
-      url,
-      xRequestId,
-      responseBodySnippet: snippet,
-    });
-  }
-}
-
-async function safeReadBody(res: Response): Promise<string | undefined> {
-  try {
-    const text = await res.text();
-    return text.slice(0, 1024);
-  } catch {
-    return undefined;
-  }
-}
-
-function parseRetryAfterSeconds(header: string | null): number | null {
-  if (header === null) return null;
-  const parsed = Number.parseInt(header, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 // ─── Mapping (Trendyol shipmentPackage → MappedOrder) ───────────────────
