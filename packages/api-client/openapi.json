@@ -1188,6 +1188,7 @@
               "RETURN_SHIPPING",
               "REFUND_DEDUCTION",
               "COMMISSION_REFUND",
+              "COST_RETURN",
               "PROVISION_ADJUSTMENT",
               "MANUAL_REFUND",
               "REVENUE_ADJUSTMENT",

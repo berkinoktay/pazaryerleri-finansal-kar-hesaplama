@@ -1575,6 +1575,7 @@
         "RETURN_SHIPPING": "İade kargosu",
         "REFUND_DEDUCTION": "İade kesintisi",
         "COMMISSION_REFUND": "Komisyon iadesi",
+        "COST_RETURN": "Maliyet iadesi",
         "PROVISION_ADJUSTMENT": "Provizyon düzeltme",
         "MANUAL_REFUND": "Manuel iade",
         "REVENUE_ADJUSTMENT": "Gelir düzeltme",

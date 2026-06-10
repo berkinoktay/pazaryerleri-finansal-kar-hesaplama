@@ -1510,6 +1510,7 @@
         "RETURN_SHIPPING": "Return shipping",
         "REFUND_DEDUCTION": "Refund deduction",
         "COMMISSION_REFUND": "Commission refund",
+        "COST_RETURN": "Cost reversal (returned unit)",
         "PROVISION_ADJUSTMENT": "Provision adjustment",
         "MANUAL_REFUND": "Manual refund",
         "REVENUE_ADJUSTMENT": "Revenue adjustment",
