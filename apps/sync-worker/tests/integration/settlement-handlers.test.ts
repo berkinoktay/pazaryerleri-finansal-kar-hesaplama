@@ -55,7 +55,7 @@ function makeSettlementRow(
   };
 }
 
-async function buildOrderWithItem(): Promise<{
+async function buildOrderWithItem(opts?: { withCostAndSale?: boolean }): Promise<{
   storeId: string;
   orderId: string;
   itemId: string;
@@ -95,8 +95,20 @@ async function buildOrderWithItem(): Promise<{
       organizationId: org.id,
       storeId: store.id,
       platformOrderId: SHIPMENT_PACKAGE_ID.toString(),
+      platformOrderNumber: '11101228439',
       orderDate: new Date(),
       status: 'DELIVERED',
+      // Sale aggregate enables recomputeSettledProfit in the Return trio
+      // test (it skips on null aggregates — old fixtures keep that path).
+      ...(opts?.withCostAndSale === true
+        ? {
+            saleSubtotalNet: new Decimal('100.00'),
+            saleVatTotal: new Decimal('20.00'),
+            // Payment cycle already ran (settled figure exists) — the
+            // late-return refresh path is the one under test.
+            settledNetProfit: new Decimal('50.00'),
+          }
+        : {}),
     },
   });
 
@@ -118,6 +130,13 @@ async function buildOrderWithItem(): Promise<{
       // have written during order arrival.
       grossCommissionAmountNet: new Decimal('10.00'),
       grossCommissionVatAmount: new Decimal('2.00'),
+      ...(opts?.withCostAndSale === true
+        ? {
+            unitCostSnapshotNet: new Decimal('40.00'),
+            unitCostSnapshotVatRate: new Decimal('20.00'),
+            unitCostSnapshotVatAmount: new Decimal('8.00'),
+          }
+        : {}),
     },
   });
 
@@ -250,13 +269,72 @@ describe('settlement handlers', () => {
   // ─── handleReturn ─────────────────────────────────────────────────────
 
   describe('handleReturn', () => {
-    it('inserts OrderFee REFUND_DEDUCTION with KDV split from item unitVatRate', async () => {
-      const { storeId, orderId } = await buildOrderWithItem();
-      // Return.debt = item gross price (KDV-dahil) → split via unitVatRate %20
+    it('writes the full trio (REFUND_DEDUCTION + COMMISSION_REFUND + COST_RETURN) and recomputes settled profit to exactly 0 on a full single-unit return', async () => {
+      // Issue #291 money-trail proof: Trendyol nets the commission inside
+      // the Return row, and the returned unit's cost never materialized.
+      // Numbers: sale net 100 + VAT 20; commission gross 12 (net 10 + 2);
+      // cost snapshot net 40 + VAT 8. A FULL return must therefore zero
+      // the order: 100 − 40(cost) − 10(comm) − 100(refund) + 10(comm
+      // refund) + 40(cost return) = 0.00.
+      const { storeId, orderId } = await buildOrderWithItem({ withCostAndSale: true });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      await prisma.$transaction(async (tx) => {
+        const result = await handleReturn(storeId, row, tx);
+        expect(result.applied).toBe(true);
+      });
+
+      const fees = await prisma.orderFee.findMany({
+        where: { orderId },
+        orderBy: { feeType: 'asc' },
+      });
+      expect(fees.map((f) => f.feeType).sort()).toEqual([
+        'COMMISSION_REFUND',
+        'COST_RETURN',
+        'REFUND_DEDUCTION',
+      ]);
+
+      const refund = fees.find((f) => f.feeType === 'REFUND_DEDUCTION')!;
+      expect(refund.direction).toBe('DEBIT');
+      // 120 / 1.20 = 100, 120 - 100 = 20 (item unitVatRate split)
+      expect(refund.amountNet.toFixed(2)).toBe('100.00');
+      expect(refund.vatAmount.toFixed(2)).toBe('20.00');
+      expect(refund.vatRate.toFixed(2)).toBe('20.00');
+      expect(refund.feeDefinitionId).toBeNull();
+      expect(refund.externalRef).toMatchObject({
+        trendyolId: row.id,
+        sellerId: row.sellerId,
+        receiptId: row.receiptId,
+      });
+
+      const commission = fees.find((f) => f.feeType === 'COMMISSION_REFUND')!;
+      expect(commission.direction).toBe('CREDIT');
+      // commissionAmount 12 KDV-dahil → fixed 20% commission-VAT split
+      expect(commission.amountNet.toFixed(2)).toBe('10.00');
+      expect(commission.vatAmount.toFixed(2)).toBe('2.00');
+      expect(commission.externalRef).toMatchObject({ trendyolId: row.id });
+
+      const costReturn = fees.find((f) => f.feeType === 'COST_RETURN')!;
+      expect(costReturn.direction).toBe('CREDIT');
+      // one UNIT's cost snapshot handed back
+      expect(costReturn.amountNet.toFixed(2)).toBe('40.00');
+      expect(costReturn.vatAmount.toFixed(2)).toBe('8.00');
+      expect(costReturn.vatRate.toFixed(2)).toBe('20.00');
+
+      // Orphan-fee fix: the handler refreshed the ALREADY-SETTLED figure
+      // itself (fixture pre-sets 50.00 as the payment cycle's output) —
+      // no PaymentOrder re-poll needed. Full return → exactly zero.
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      expect(order.settledNetProfit?.toFixed(2)).toBe('0.00');
+    });
+
+    it('skips the commission credit (loudly) when the row carries no commissionAmount', async () => {
+      const { storeId, orderId } = await buildOrderWithItem({ withCostAndSale: true });
       const row = makeSettlementRow({
         transactionType: 'İade',
         debt: 120,
         credit: 0,
+        commissionAmount: null,
       });
 
       await prisma.$transaction(async (tx) => {
@@ -265,25 +343,27 @@ describe('settlement handlers', () => {
       });
 
       const fees = await prisma.orderFee.findMany({ where: { orderId } });
-      expect(fees).toHaveLength(1);
-      expect(fees[0]!.feeType).toBe('REFUND_DEDUCTION');
-      expect(fees[0]!.source).toBe('SETTLEMENT');
-      expect(fees[0]!.direction).toBe('DEBIT');
-      // 120 / 1.20 = 100, 120 - 100 = 20
-      expect(fees[0]!.amountNet.toFixed(2)).toBe('100.00');
-      expect(fees[0]!.vatAmount.toFixed(2)).toBe('20.00');
-      expect(fees[0]!.vatRate.toFixed(2)).toBe('20.00');
-      expect(fees[0]!.feeDefinitionId).toBeNull(); // settlement-sourced
-      // externalRef carries Trendyol identifiers for audit + idempotency
-      expect(fees[0]!.externalRef).toMatchObject({
-        trendyolId: row.id,
-        sellerId: row.sellerId,
-        receiptId: row.receiptId,
-      });
+      expect(fees.map((f) => f.feeType).sort()).toEqual(['COST_RETURN', 'REFUND_DEDUCTION']);
     });
 
-    it('is idempotent — re-running on same row does not duplicate the fee', async () => {
-      const { storeId, orderId } = await buildOrderWithItem();
+    it('skips the cost reversal (loudly) when the item has no cost snapshot yet', async () => {
+      const { storeId, orderId } = await buildOrderWithItem(); // snapshot'sız fixture
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      await prisma.$transaction(async (tx) => {
+        const result = await handleReturn(storeId, row, tx);
+        expect(result.applied).toBe(true);
+      });
+
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees.map((f) => f.feeType).sort()).toEqual(['COMMISSION_REFUND', 'REFUND_DEDUCTION']);
+      // No sale aggregate on this fixture → recompute skipped, no write.
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      expect(order.settledNetProfit).toBeNull();
+    });
+
+    it('is idempotent — re-running on same row duplicates none of the trio', async () => {
+      const { storeId, orderId } = await buildOrderWithItem({ withCostAndSale: true });
       const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
 
       await prisma.$transaction(async (tx) => {
@@ -296,15 +376,125 @@ describe('settlement handlers', () => {
       });
 
       const fees = await prisma.orderFee.findMany({ where: { orderId } });
-      expect(fees).toHaveLength(1);
+      expect(fees).toHaveLength(3);
     });
 
-    it('skips with order_not_found when Order is missing', async () => {
+    it('matches via the OrderClaim bridge when shipmentPackageId is the RETURN parcel id (live finding 6/6)', async () => {
+      const { storeId, orderId } = await buildOrderWithItem({ withCostAndSale: true });
+      // PR-13 claims sync stamped the return-parcel id on the claim.
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      await prisma.orderClaim.create({
+        data: {
+          organizationId: order.organizationId,
+          orderId,
+          trendyolClaimId: randomUUID(),
+          claimDate: new Date(),
+          resolved: false,
+          externalRef: { orderShipmentPackageId: '999111222' },
+        },
+      });
+
+      const row = makeSettlementRow({
+        transactionType: 'İade',
+        debt: 120,
+        credit: 0,
+        shipmentPackageId: 999_111_222, // return parcel — NOT the outbound package
+        orderNumber: null, // force the bridge path, no fallback available
+      });
+
+      await prisma.$transaction(async (tx) => {
+        const result = await handleReturn(storeId, row, tx);
+        expect(result.applied).toBe(true);
+      });
+      expect(await prisma.orderFee.count({ where: { orderId } })).toBe(3);
+    });
+
+    it('falls back to orderNumber + barcode single-candidate when no claim bridge exists', async () => {
+      const { storeId, orderId } = await buildOrderWithItem({ withCostAndSale: true });
+      const row = makeSettlementRow({
+        transactionType: 'İade',
+        debt: 120,
+        credit: 0,
+        shipmentPackageId: 777_555_333, // unknown return parcel, no claim synced yet
+        // orderNumber default '11101228439' == fixture's platformOrderNumber
+      });
+
+      await prisma.$transaction(async (tx) => {
+        const result = await handleReturn(storeId, row, tx);
+        expect(result.applied).toBe(true);
+      });
+      expect(await prisma.orderFee.count({ where: { orderId } })).toBe(3);
+    });
+
+    it('SELF-HEAL: a cost snapshot entered after the first poll backfills COST_RETURN on re-poll', async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem(); // snapshot'sız
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      await prisma.$transaction(async (tx) => {
+        const r1 = await handleReturn(storeId, row, tx);
+        expect(r1.applied).toBe(true);
+      });
+      expect(await prisma.orderFee.count({ where: { orderId } })).toBe(2); // COST_RETURN eksik
+
+      // Berkin maliyeti sonradan girer (Maliyet Bekleyen akışı).
+      await prisma.orderItem.update({
+        where: { id: itemId },
+        data: {
+          unitCostSnapshotNet: new Decimal('40.00'),
+          unitCostSnapshotVatRate: new Decimal('20.00'),
+          unitCostSnapshotVatAmount: new Decimal('8.00'),
+        },
+      });
+
+      // 6h re-poll: aynı satır — eksik bacak tamamlanır.
+      await prisma.$transaction(async (tx) => {
+        const r2 = await handleReturn(storeId, row, tx);
+        expect(r2.applied).toBe(true);
+      });
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees.map((f) => f.feeType).sort()).toEqual([
+        'COMMISSION_REFUND',
+        'COST_RETURN',
+        'REFUND_DEDUCTION',
+      ]);
+    });
+
+    it('EARLY RETURN: skips the settled-profit refresh when the payment cycle has not run yet', async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem();
+      // Cost + sale aggregate present, but NO settled figure (cycle pending).
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { saleSubtotalNet: new Decimal('100.00'), saleVatTotal: new Decimal('20.00') },
+      });
+      await prisma.orderItem.update({
+        where: { id: itemId },
+        data: {
+          unitCostSnapshotNet: new Decimal('40.00'),
+          unitCostSnapshotVatRate: new Decimal('20.00'),
+          unitCostSnapshotVatAmount: new Decimal('8.00'),
+        },
+      });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      await prisma.$transaction(async (tx) => {
+        const result = await handleReturn(storeId, row, tx);
+        expect(result.applied).toBe(true);
+      });
+
+      // Fees landed, but no premature settled figure — the upcoming
+      // payment cycle will compute it with confirmed ESTIMATE fees.
+      expect(await prisma.orderFee.count({ where: { orderId } })).toBe(3);
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      expect(order.settledNetProfit).toBeNull();
+    });
+
+    it('skips with order_not_found when nothing matches (unknown parcel + unknown orderNumber)', async () => {
       const { storeId } = await buildOrderWithItem();
       const row = makeSettlementRow({
         transactionType: 'İade',
         debt: 120,
         shipmentPackageId: 888888,
+        orderNumber: 'NO-SUCH-ORDER',
       });
 
       await prisma.$transaction(async (tx) => {
