@@ -75,6 +75,7 @@ enum SyncType {
   ORDERS
   PRODUCTS
   SETTLEMENTS
+  CLAIMS
 }
 
 enum SyncStatus {
@@ -1110,10 +1111,16 @@ model OrderClaimItem {
   autoApproveDate     DateTime? @map("auto_approve_date")
   resolved            Boolean
 
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
   claim     OrderClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
   orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
 
-  @@index([claimId])
+  // trendyolClaimItemId is Trendyol's per-UNIT claimLineItem UUID (a 3-unit
+  // return produces 3 rows) — the upsert idempotency anchor for the CLAIMS
+  // sync worker. Covers the old claim_id lookup index too.
+  @@unique([claimId, trendyolClaimItemId])
   @@index([orderItemId])
   @@map("order_claim_items")
 }

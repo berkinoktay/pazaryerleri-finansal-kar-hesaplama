@@ -72,6 +72,67 @@ SELECT cron.schedule(
   $$
 );
 
+-- ─── Settlements scan (6h cadence) ────────────────────────────────────────────
+-- Enqueues a PENDING SETTLEMENTS sync_log per ACTIVE store every 6 hours.
+-- The worker's settlements handler scans the full 60-day window each tick
+-- (idempotent per-row anchors absorb the overlap — handlers/settlements/cron.ts).
+-- Job definition added in PR-13: design §5.5 always specified this cadence,
+-- but no cron job existed — settlements only ever ran via manual enqueue.
+-- NOTE: defining the job here does NOT schedule it anywhere by itself —
+-- per-environment apply is MANUAL (see issue #249 / file header).
+--
+-- Dedupe: same NOT EXISTS in-flight guard as sync-orders-delta.
+--
+-- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
+-- (cron.schedule upserts by job name, so re-applying is safe.)
+--
+SELECT cron.schedule(
+  'sync-settlements-6h',
+  '30 */6 * * *',
+  $$
+  INSERT INTO sync_logs (id, organization_id, store_id, sync_type, status, started_at)
+  SELECT gen_random_uuid(), s.organization_id, s.id, 'SETTLEMENTS', 'PENDING', now()
+  FROM stores s
+  WHERE s.status = 'ACTIVE'
+    AND NOT EXISTS (
+      SELECT 1 FROM sync_logs sl
+      WHERE sl.store_id = s.id
+        AND sl.sync_type = 'SETTLEMENTS'
+        AND sl.status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE')
+    );
+  $$
+);
+
+-- ─── Claims scan (6h cadence, PR-13) ──────────────────────────────────────────
+-- Enqueues a PENDING CLAIMS sync_log per ACTIVE store every 6 hours. The
+-- worker's claims handler re-reads the 60-day creation-date window each tick
+-- (getClaims date filters do NOT move on status updates) and upserts
+-- OrderClaim/OrderClaimItem idempotently — handlers/claims.ts.
+--
+-- Offset from the settlements tick (minute 45 vs 30) so a store's two
+-- financial scans don't contend for the same worker slot at once.
+-- NOTE: per-environment apply is MANUAL (see issue #249 / file header).
+--
+-- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
+-- (cron.schedule upserts by job name, so re-applying is safe.)
+--
+SELECT cron.schedule(
+  'sync-claims-6h',
+  '45 */6 * * *',
+  $$
+  INSERT INTO sync_logs (id, organization_id, store_id, sync_type, status, started_at)
+  SELECT gen_random_uuid(), s.organization_id, s.id, 'CLAIMS', 'PENDING', now()
+  FROM stores s
+  WHERE s.status = 'ACTIVE'
+    AND NOT EXISTS (
+      SELECT 1 FROM sync_logs sl
+      WHERE sl.store_id = s.id
+        AND sl.sync_type = 'CLAIMS'
+        AND sl.status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE')
+    );
+  $$
+);
+
 -- ─── Live Performance buffer daily safety-net (Slice 0) ───────────────────────
 -- Calls reset_live_performance_buffer() (supabase/sql/db-functions.sql), which
 -- now deletes ONLY past-day PERMANENT_FAILED entries — un-graduatable corrupt

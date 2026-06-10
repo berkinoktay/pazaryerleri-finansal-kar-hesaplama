@@ -31,7 +31,7 @@ const getOrderRoute = createRoute({
   description:
     'Returns the full Order graph required by the detail surface: OrderItems with joined ' +
     'variant + product image, OrderFee timeline (capturedAt asc), and OrderClaim list ' +
-    '(empty until PR-13 GetClaims worker is wired).',
+    '(populated by the CLAIMS sync worker every 6 hours).',
   security: [{ bearerAuth: [] }],
   request: { params: orderScopeParams },
   responses: {

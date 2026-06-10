@@ -30,15 +30,14 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { SyncErrorCode } from '@pazarsync/db/enums';
-import { markRetryable, syncLog, syncLogService, tryClaimNext } from '@pazarsync/sync-core';
+import { syncLog, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
-import { advanceCursorPastBadPage } from './skip-bad-page';
+import { errorMessageOf, handleRunError } from './run-error';
 import { sweepStaleClaims } from './watchdog';
 
 const WORKER_ID = `worker-${randomBytes(4).toString('hex')}`;
@@ -61,18 +60,6 @@ const BUFFER_PROMOTE_INTERVAL_MS = 5_000;
 // and need not run hot. Idempotent — steady state is one GET per seller, no writes.
 const WEBHOOK_RECONCILE_INTERVAL_MS = 5 * 60_000;
 const IDLE_LOG_THROTTLE_MS = 30_000;
-const MAX_ATTEMPTS = 5;
-
-// Permanent failure codes — markFailed terminally, never markRetryable.
-// Adding a new permanent code? Update this set + add a comment in the
-// handler that throws it explaining why retry would not help.
-// Note: CORRUPT_CHECKPOINT is not in SyncErrorCode; errorCodeOf() coerces
-// unknown codes to INTERNAL_ERROR, so a corrupt-checkpoint throw reaches
-// the markRetryable path (transient) rather than this set.
-const PERMANENT_FAILURE_CODES: ReadonlySet<SyncErrorCode> = new Set<SyncErrorCode>([
-  SyncErrorCode.MARKETPLACE_AUTH_FAILED,
-  SyncErrorCode.MARKETPLACE_ACCESS_DENIED,
-]);
 
 let shuttingDown = false;
 function isShuttingDown(): boolean {
@@ -183,7 +170,7 @@ async function main(): Promise<void> {
           errorCode: errorCodeOf(err),
           errorMessage: errorMessageOf(err),
         });
-        await handleRunError(claimed.id, claimed.attemptCount, err);
+        await handleRunError(claimed.id, claimed.syncType, claimed.attemptCount, err);
       }
     } catch (loopErr) {
       // Outer catch protects against systemic failures (DB connection
@@ -201,42 +188,6 @@ async function main(): Promise<void> {
   clearInterval(bufferPromoteTimer);
   clearInterval(webhookReconcileTimer);
   syncLog.info('worker.stopped', { workerId: WORKER_ID });
-}
-
-async function handleRunError(
-  syncLogId: string,
-  attemptCount: number,
-  err: unknown,
-): Promise<void> {
-  const code = errorCodeOf(err);
-  const message = errorMessageOf(err);
-
-  if (PERMANENT_FAILURE_CODES.has(code)) {
-    await syncLogService.fail(syncLogId, code, message);
-    return;
-  }
-
-  if (attemptCount >= MAX_ATTEMPTS) {
-    // Skip-bad-page recovery: a single deterministic upstream 5xx on
-    // one Trendyol page (real-world: a corrupted seller record at a
-    // specific catalog offset) used to terminate the whole sync at
-    // ~50% completion. Now we advance the cursor past the offending
-    // page and let the rest of the catalog finish; the skipped page
-    // is recorded on `SyncLog.skippedPages` and surfaced in the UI so
-    // the merchant sees what didn't sync.
-    if (code === SyncErrorCode.MARKETPLACE_UNREACHABLE) {
-      const advanced = await advanceCursorPastBadPage(syncLogId, err);
-      if (advanced) return;
-    }
-    await syncLogService.fail(syncLogId, code, `${message} (max retries reached)`);
-    return;
-  }
-
-  await markRetryable(syncLogId, attemptCount, code, message);
-}
-
-function errorMessageOf(err: unknown): string {
-  return err instanceof Error ? err.message : 'Unknown error';
 }
 
 function sleep(ms: number): Promise<void> {

@@ -5,6 +5,7 @@
 // SyncType is added without a handler binding.
 
 import type { Registry } from './dispatcher';
+import { claimsHandler } from './handlers/claims';
 import { ordersHandler } from './handlers/orders';
 import { productsHandler } from './handlers/products';
 import { settlementsHandler } from './handlers/settlements/cron';
@@ -13,4 +14,5 @@ export const REGISTRY: Registry = {
   PRODUCTS: productsHandler,
   ORDERS: ordersHandler,
   SETTLEMENTS: settlementsHandler,
+  CLAIMS: claimsHandler,
 };

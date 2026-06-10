@@ -25,7 +25,9 @@ function decodeCursor(syncLog: SyncLog): unknown | null {
       return parseProductsCursor(syncLog.pageCursor);
     case 'ORDERS':
     case 'SETTLEMENTS':
-      // future: dedicated parsers per module
+    case 'CLAIMS':
+      // future: dedicated parsers per module (CLAIMS is cursorless —
+      // single-chunk 60d window scan, see handlers/claims.ts)
       return syncLog.pageCursor;
     default: {
       const _exhaustive: never = syncLog.syncType;
