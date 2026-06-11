@@ -780,6 +780,10 @@
         "title": "No returns yet",
         "description": "Return claims sync from Trendyol every 6 hours; the first one will show up here."
       }
+    },
+    "refreshButton": {
+      "label": "Refresh",
+      "refreshing": "Refreshing…"
     }
   },
   "ordersPage": {

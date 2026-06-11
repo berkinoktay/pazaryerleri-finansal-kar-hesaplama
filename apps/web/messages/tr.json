@@ -780,6 +780,10 @@
         "title": "Henüz iade yok",
         "description": "İade talepleri 6 saatte bir Trendyol'dan çekilir; ilk iade düştüğünde burada görünür."
       }
+    },
+    "refreshButton": {
+      "label": "Yenile",
+      "refreshing": "Yenileniyor…"
     }
   },
   "ordersPage": {

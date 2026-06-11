@@ -175,7 +175,13 @@ export function ReturnsTable({
           onChange={onStatusChange}
         />
       }
-      empty={<EmptyState embedded title={tPage('empty.noReturns.title')} />}
+      empty={
+        <EmptyState
+          embedded
+          title={tPage('empty.noReturns.title')}
+          description={tPage('empty.noReturns.description')}
+        />
+      }
       toolbar={() => (
         <ReturnsToolbar
           q={filters.q}
