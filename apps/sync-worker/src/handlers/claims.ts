@@ -207,12 +207,13 @@ async function upsertClaim(
   // duplicate — the unique key is (orderId, trendyolClaimId), so a
   // plain upsert under the new order would silently double-count the
   // return. Stale item links are nulled; the item pass below re-resolves
-  // them against the new order's lines.
+  // them against the new order's lines. storeId is the denormalized
+  // column (#298) — no parent-walk.
   const existing = await tx.orderClaim.findFirst({
     where: {
       trendyolClaimId: claim.trendyolClaimId,
       orderId: { not: order.id },
-      order: { storeId },
+      storeId,
     },
     select: { id: true, orderId: true },
   });
@@ -225,7 +226,7 @@ async function upsertClaim(
     });
     await tx.orderClaim.update({
       where: { id: existing.id },
-      data: { orderId: order.id, organizationId: order.organizationId },
+      data: { orderId: order.id, organizationId: order.organizationId, storeId },
     });
     await tx.orderClaimItem.updateMany({
       where: { claimId: existing.id },
@@ -234,21 +235,26 @@ async function upsertClaim(
   }
 
   // Minimal NON-PII audit ref. Never the raw payload (it carries customer
-  // names); orderShipmentPackageId doubles as the stage test-endpoint input.
+  // names); audit-only since #298 — the bridge reads the COLUMNS below.
   const externalRef = {
     orderOutboundPackageId: claim.orderOutboundPackageId,
     orderShipmentPackageId: claim.orderShipmentPackageId,
     lastModifiedDate: claim.lastModifiedDate?.toISOString() ?? null,
   };
 
-  // 2. Claim upsert — organizationId denormalized from the PARENT ORDER,
-  //    never from the payload. claimDate is immutable after create.
+  // 2. Claim upsert — organizationId + storeId denormalized from the PARENT
+  //    ORDER side (never from the payload). claimDate is immutable after
+  //    create. Package-id columns (#298): orderShipmentPackageId is the
+  //    RETURN parcel id the settlement Return bridge looks up — load-bearing,
+  //    so unlike the audit blob it NULL-PRESERVES on update (a sparse tick
+  //    must never blank the bridge key).
   const dbClaim = await tx.orderClaim.upsert({
     where: {
       orderId_trendyolClaimId: { orderId: order.id, trendyolClaimId: claim.trendyolClaimId },
     },
     create: {
       organizationId: order.organizationId,
+      storeId,
       orderId: order.id,
       trendyolClaimId: claim.trendyolClaimId,
       claimDate: claim.claimDate,
@@ -256,18 +262,26 @@ async function upsertClaim(
       cargoTrackingNumber:
         claim.cargoTrackingNumber !== null ? BigInt(claim.cargoTrackingNumber) : null,
       resolved: claim.resolved,
+      orderShipmentPackageId: claim.orderShipmentPackageId,
+      orderOutboundPackageId: claim.orderOutboundPackageId,
       externalRef,
     },
     update: {
-      // Null-preserve on cargo fields (they can lag behind claim creation).
-      // resolved follows the latest scan ONLY when the scan carried item
-      // data — an itemless/sparse payload must never regress true→false.
-      // externalRef always refreshes.
+      // Null-preserve on cargo + package-id fields (they can lag behind
+      // claim creation). resolved follows the latest scan ONLY when the
+      // scan carried item data — an itemless/sparse payload must never
+      // regress true→false. externalRef always refreshes (audit-only).
       ...(claim.cargoProviderName !== null ? { cargoProviderName: claim.cargoProviderName } : {}),
       ...(claim.cargoTrackingNumber !== null
         ? { cargoTrackingNumber: BigInt(claim.cargoTrackingNumber) }
         : {}),
       ...(claim.items.length > 0 ? { resolved: claim.resolved } : {}),
+      ...(claim.orderShipmentPackageId !== null
+        ? { orderShipmentPackageId: claim.orderShipmentPackageId }
+        : {}),
+      ...(claim.orderOutboundPackageId !== null
+        ? { orderOutboundPackageId: claim.orderOutboundPackageId }
+        : {}),
       externalRef,
     },
     select: { id: true },

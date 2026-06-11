@@ -13,8 +13,9 @@ import {
 import { createRlsScopedClient } from '../../helpers/rls-client';
 
 /**
- * order_claim_items: no direct organization_id; reach via parent OrderClaim.
- * EXISTS walk pattern (settlement_items / order_items mirror).
+ * order_claim_items: no direct organization_id; reach via parent OrderClaim
+ * and gate on ITS denormalized store_id (#298 — the orders join dropped).
+ * EXISTS walk pattern (settlement_items mirror, one hop shorter now).
  */
 describe('RLS — order_claim_items', () => {
   beforeAll(async () => {
@@ -37,8 +38,8 @@ describe('RLS — order_claim_items', () => {
       createOrder(orgB.id, storeB.id),
     ]);
     const [claimA, claimB] = await Promise.all([
-      createOrderClaim(orgA.id, orderA.id),
-      createOrderClaim(orgB.id, orderB.id),
+      createOrderClaim(orgA.id, storeA.id, orderA.id),
+      createOrderClaim(orgB.id, storeB.id, orderB.id),
     ]);
     const [itemA] = await Promise.all([
       createOrderClaimItem(claimA.id),

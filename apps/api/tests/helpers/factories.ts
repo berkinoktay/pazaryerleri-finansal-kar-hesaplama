@@ -249,20 +249,24 @@ export async function createOrderFee(
 
 export async function createOrderClaim(
   organizationId: string,
+  storeId: string,
   orderId: string,
   overrides: {
     trendyolClaimId?: string;
     claimDate?: Date;
     resolved?: boolean;
+    orderShipmentPackageId?: string | null;
   } = {},
 ) {
   return prisma.orderClaim.create({
     data: {
       organizationId,
+      storeId,
       orderId,
       trendyolClaimId: overrides.trendyolClaimId ?? `claim-${randomUUID().slice(0, 8)}`,
       claimDate: overrides.claimDate ?? new Date(),
       resolved: overrides.resolved ?? false,
+      orderShipmentPackageId: overrides.orderShipmentPackageId ?? null,
     },
   });
 }

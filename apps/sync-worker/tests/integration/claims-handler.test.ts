@@ -198,6 +198,12 @@ describe('processClaimsChunk', () => {
     expect(claim.cargoTrackingNumber).toBe(7330000166478931n);
     expect(claim.cargoProviderName).toBe('Trendyol Express Marketplace');
     expect(claim.resolved).toBe(false);
+    // #298: store_id denormalized from the parent order; package ids live in
+    // indexed columns — the settlement Return bridge reads these, so a
+    // missing stamp would silently break refund matching.
+    expect(claim.storeId).toBe(ctx.storeId);
+    expect(claim.orderShipmentPackageId).toBe('91982454');
+    expect(claim.orderOutboundPackageId).toBe(OUTBOUND_PACKAGE_ID.toString());
 
     expect(claim.items).toHaveLength(2);
     for (const item of claim.items) {

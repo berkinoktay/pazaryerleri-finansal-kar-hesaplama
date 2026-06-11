@@ -384,16 +384,21 @@ describe('settlement handlers', () => {
 
     it('matches via the OrderClaim bridge when shipmentPackageId is the RETURN parcel id (live finding 6/6)', async () => {
       const { storeId, orderId } = await buildOrderWithItem({ withCostAndSale: true });
-      // PR-13 claims sync stamped the return-parcel id on the claim.
+      // Claims sync stamped the return-parcel id on the claim — since #298
+      // in the indexed orderShipmentPackageId column. externalRef is a
+      // DECOY on purpose: audit-only, and if the bridge ever regressed to
+      // the old JSONB path filter it would match nothing → applied=false.
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
       await prisma.orderClaim.create({
         data: {
           organizationId: order.organizationId,
+          storeId,
           orderId,
           trendyolClaimId: randomUUID(),
           claimDate: new Date(),
           resolved: false,
-          externalRef: { orderShipmentPackageId: '999111222' },
+          orderShipmentPackageId: '999111222',
+          externalRef: { orderShipmentPackageId: 'stale-audit-decoy' },
         },
       });
 
