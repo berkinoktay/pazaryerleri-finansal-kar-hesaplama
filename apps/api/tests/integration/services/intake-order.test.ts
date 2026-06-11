@@ -254,6 +254,92 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     });
     expect(item.productVariantId).toBeNull();
     expect(item.barcode).toBe('UNKNOWN-XYZ');
+
+    // Legacy-key idempotency: the template line carries NO platformLineId, so a
+    // re-scan dedupes on the (orderId, null-variant) fallback — still one item.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'novar-past',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+        barcode: 'UNKNOWN-XYZ',
+      }),
+    });
+    expect(
+      await prisma.orderItem.count({
+        where: { order: { storeId: store.id, platformOrderId: 'novar-past' } },
+      }),
+    ).toBe(1);
+  });
+
+  it('mixed order: matched line gets its cost snapshot, unmatched line persists null-FK alongside', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, 'EAN13-MIX-OK', true); // variant + cost profile
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'mixed-1',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+        lines: [
+          { barcode: 'EAN13-MIX-OK', platformLineId: '8001' },
+          { barcode: 'UNKNOWN-MIX', platformLineId: '8002' },
+        ],
+      }),
+    });
+
+    // One unmatched line makes the order cost_missing — but BOTH lines persist.
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    const items = await prisma.orderItem.findMany({
+      where: { order: { storeId: store.id, platformOrderId: 'mixed-1' } },
+      orderBy: { barcode: 'asc' },
+    });
+    expect(items).toHaveLength(2);
+    const [matched, unmatched] = items;
+    expect(matched!.barcode).toBe('EAN13-MIX-OK');
+    expect(matched!.productVariantId).not.toBeNull();
+    // The matched line's snapshot discipline is untouched by the unmatched sibling.
+    expect(matched!.unitCostSnapshotNet).not.toBeNull();
+    expect(unmatched!.barcode).toBe('UNKNOWN-MIX');
+    expect(unmatched!.productVariantId).toBeNull();
+    expect(unmatched!.unitCostSnapshotNet).toBeNull();
+  });
+
+  it('legacy item without platformLineId is matched (not duplicated) by a re-delivery carrying one, and backfilled', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // variant resolves, no cost
+    const past = new Date(Date.now() - PAST_DAY_MS);
+
+    // 1st intake: template line has NO platformLineId (pre-PR-8 / legacy buffer
+    // JSONB shape) → item stored with platformLineId NULL.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'transition-1', orderDate: past }),
+    });
+
+    // 2nd intake: the same physical line now carries its platform line id
+    // (e.g. a Delivered webhook after the mapper upgrade). Must dedupe against
+    // the stored NULL row — not insert a twin — and self-heal the id.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'transition-1',
+        orderDate: past,
+        lines: [{ barcode: BARCODE, platformLineId: '7001' }],
+      }),
+    });
+
+    const items = await prisma.orderItem.findMany({
+      where: { order: { storeId: store.id, platformOrderId: 'transition-1' } },
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.platformLineId).toBe(7001n);
   });
 
   it('two different unmatched lines in one order both persist, and re-intake stays idempotent', async () => {

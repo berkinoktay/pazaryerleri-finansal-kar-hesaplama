@@ -81,8 +81,9 @@ function makeWebhookPayload(overrides: PayloadOverrides = {}) {
 
 /**
  * Store with webhook Basic-Auth creds + a COST-MISSING variant: the variant
- * resolves by barcode (so it is not variant_not_found) but has NO costProfileLinks,
- * so resolveOrderCalculability returns `cost_missing` — the buffer trigger.
+ * resolves by barcode (the gap is the cost, not the variant) but has NO
+ * costProfileLinks, so resolveOrderCalculability returns `cost_missing` —
+ * the buffer trigger.
  */
 async function setupStore(): Promise<{ orgId: string; storeId: string }> {
   const user = await createUserProfile();

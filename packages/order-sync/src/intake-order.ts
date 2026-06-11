@@ -6,7 +6,7 @@
  * Routing (see the spec's decision table + split research 2026-06-09):
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
- *   - variant_not_found            → cost_missing rotası (sipariş YAZILIR; satır null-FK + barkod izi; resolution PR-2)
+ *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
  *   - calculable                   → upsertOrderWithSnapshot (full profit)
  *   - cost_missing + past-day      → upsertOrderWithSnapshot (null profit) — never lose a sale
  *   - cost_missing + today + in orders → upsertOrderWithSnapshot (idempotent, no buffer)
