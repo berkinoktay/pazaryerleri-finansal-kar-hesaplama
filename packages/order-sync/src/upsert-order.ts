@@ -278,11 +278,16 @@ export async function upsertOrderWithSnapshot(
         select: { id: true },
       });
 
-      // Existing check (write-once snapshot): productVariantId null olabilir
-      // (variant barcode'la match'lenemeyen senaryo) — bu durumda findFirst
-      // null check'i barcode bazlı değil, productVariantId+orderId bazlı.
+      // Dedupe (write-once item): platformLineId platform-taraflı satır
+      // kimliği — varsa anahtar odur (variant'sız satırlar NULL-FK üzerinden
+      // çakışamaz; resolution-öncesi re-scan duplike üretemez). Yalnız eski
+      // buffer JSONB satırlarında platformLineId yoktur → legacy variant
+      // anahtarına düşülür.
       const existing = await tx.orderItem.findFirst({
-        where: { orderId: upserted.id, productVariantId: variant?.id ?? null },
+        where:
+          line.platformLineId != null
+            ? { orderId: upserted.id, platformLineId: BigInt(line.platformLineId) }
+            : { orderId: upserted.id, productVariantId: variant?.id ?? null },
         select: { id: true },
       });
       if (existing !== null) continue;

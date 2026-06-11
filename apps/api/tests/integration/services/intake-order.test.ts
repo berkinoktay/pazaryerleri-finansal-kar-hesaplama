@@ -17,7 +17,20 @@ function buildMapped(over: {
   barcode?: string;
   status?: MappedOrder['status'];
   dematerialized?: boolean;
+  /** Multi-line orders: each entry clones the single-line template below. */
+  lines?: Array<{ barcode: string; platformLineId: string }>;
 }): MappedOrder {
+  const lineTemplate = {
+    quantity: 1,
+    unitPriceNet: '84.75',
+    unitVatRate: '18',
+    unitVatAmount: '15.25',
+    grossCommissionAmountNet: '12.71',
+    grossCommissionVatAmount: '2.29',
+    sellerDiscountNet: '0',
+    sellerDiscountVatAmount: '0',
+    commissionRate: '15',
+  };
   return {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: `ord-${over.platformOrderId}`,
@@ -37,21 +50,20 @@ function buildMapped(over: {
     usesSellerCargoAgreement: false,
     platformCreatedBy: null,
     originShipmentDate: null,
-    lines: [
-      {
-        barcode: over.barcode ?? BARCODE,
-        quantity: 1,
-        platformLineId: null,
-        unitPriceNet: '84.75',
-        unitVatRate: '18',
-        unitVatAmount: '15.25',
-        grossCommissionAmountNet: '12.71',
-        grossCommissionVatAmount: '2.29',
-        sellerDiscountNet: '0',
-        sellerDiscountVatAmount: '0',
-        commissionRate: '15',
-      },
-    ],
+    lines:
+      over.lines !== undefined
+        ? over.lines.map((line) => ({
+            ...lineTemplate,
+            barcode: line.barcode,
+            platformLineId: line.platformLineId,
+          }))
+        : [
+            {
+              ...lineTemplate,
+              barcode: over.barcode ?? BARCODE,
+              platformLineId: null,
+            },
+          ],
   };
 }
 
@@ -242,6 +254,30 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     });
     expect(item.productVariantId).toBeNull();
     expect(item.barcode).toBe('UNKNOWN-XYZ');
+  });
+
+  it('two different unmatched lines in one order both persist, and re-intake stays idempotent', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const mapped = buildMapped({
+      platformOrderId: 'novar-two-lines',
+      orderDate: new Date(Date.now() - PAST_DAY_MS),
+      lines: [
+        { barcode: 'UNKNOWN-A', platformLineId: '9001' },
+        { barcode: 'UNKNOWN-B', platformLineId: '9002' },
+      ],
+    });
+
+    await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    // Idempotent re-scan (saatlik cron senaryosu) — satır sayısı sabit kalmalı.
+    await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+
+    const items = await prisma.orderItem.findMany({
+      where: { order: { storeId: store.id, platformOrderId: 'novar-two-lines' } },
+      orderBy: { barcode: 'asc' },
+    });
+    expect(items.map((i) => i.barcode)).toEqual(['UNKNOWN-A', 'UNKNOWN-B']);
+    expect(items.every((i) => i.productVariantId === null)).toBe(true);
   });
 
   it('already-in-orders guard is org/store-scoped — org B never matches org A order', async () => {
