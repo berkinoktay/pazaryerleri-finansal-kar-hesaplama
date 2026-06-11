@@ -18,6 +18,7 @@ import type { StoreEnvironment } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
+import { TRENDYOL_COMMISSION_VAT_DIVISOR } from './constants';
 import { fetchOnce, type FetcherDeps } from './fetch-once';
 import { baseUrlFor } from './headers';
 import type {
@@ -40,13 +41,8 @@ import type {
  */
 export const ORDERS_PAGE_SIZE = 200;
 
-/**
- * Commission VAT rate is 20% per Trendyol convention. design §12.2 #1
- * notes the V1 assumption — once `fatura-entegrasyonu/` docs are read
- * this becomes empirically verifiable. Until then, sabit %20 yeterli
- * (Trendyol invoice surface tutarlı çıktı veriyor — research §3.1).
- */
-const COMMISSION_VAT_RATE = 20;
+// Commission VAT convention (%20) lives in './constants' —
+// TRENDYOL_COMMISSION_VAT_DIVISOR (single source, #300).
 
 // ─── Request URL building ───────────────────────────────────────────────
 
@@ -252,9 +248,8 @@ function mapLine(line: TrendyolOrderLine, ctx: { shipmentPackageId: number }): M
       ? new Decimal(line.commission)
       : new Decimal(0);
   const grossCommissionGross = new Decimal(safeGrossAmount).mul(commissionRate).div(100);
-  const commissionVatMultiplier = new Decimal(1).add(new Decimal(COMMISSION_VAT_RATE).div(100));
   const grossCommissionAmountNet = grossCommissionGross
-    .div(commissionVatMultiplier)
+    .div(TRENDYOL_COMMISSION_VAT_DIVISOR)
     .toDecimalPlaces(2);
   const grossCommissionVatAmount = grossCommissionGross
     .sub(grossCommissionAmountNet)

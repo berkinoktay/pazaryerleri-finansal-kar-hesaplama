@@ -55,12 +55,17 @@ function makeSettlementRow(
   };
 }
 
-async function buildOrderWithItem(opts?: { withCostAndSale?: boolean }): Promise<{
+async function buildOrderWithItem(opts?: {
+  withCostAndSale?: boolean;
+  /** Line quantity — sale/commission/cost aggregates scale with it (default 1). */
+  quantity?: number;
+}): Promise<{
   storeId: string;
   orderId: string;
   itemId: string;
   variantId: string;
 }> {
+  const quantity = opts?.quantity ?? 1;
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -100,13 +105,15 @@ async function buildOrderWithItem(opts?: { withCostAndSale?: boolean }): Promise
       status: 'DELIVERED',
       // Sale aggregate enables recomputeSettledProfit in the Return trio
       // test (it skips on null aggregates — old fixtures keep that path).
+      // Per-unit base: 100 net + 20 VAT sale, 50 settled profit — scaled
+      // by quantity so the qty>1 partial-return test composes.
       ...(opts?.withCostAndSale === true
         ? {
-            saleSubtotalNet: new Decimal('100.00'),
-            saleVatTotal: new Decimal('20.00'),
+            saleSubtotalNet: new Decimal('100.00').mul(quantity),
+            saleVatTotal: new Decimal('20.00').mul(quantity),
             // Payment cycle already ran (settled figure exists) — the
             // late-return refresh path is the one under test.
-            settledNetProfit: new Decimal('50.00'),
+            settledNetProfit: new Decimal('50.00').mul(quantity),
           }
         : {}),
     },
@@ -117,7 +124,7 @@ async function buildOrderWithItem(opts?: { withCostAndSale?: boolean }): Promise
       orderId: order.id,
       organizationId: org.id,
       productVariantId: variant.id,
-      quantity: 1,
+      quantity,
       unitPrice: new Decimal('120.00'),
       commissionRate: new Decimal('10.00'),
       commissionAmount: new Decimal('12.00'),
@@ -127,9 +134,9 @@ async function buildOrderWithItem(opts?: { withCostAndSale?: boolean }): Promise
       // Pre-fill gross commission so the CHECK constraint
       // (refunded <= gross) tolerates the Discount handler writes
       // in the happy-path test. Mirrors what Order Sync mapper would
-      // have written during order arrival.
-      grossCommissionAmountNet: new Decimal('10.00'),
-      grossCommissionVatAmount: new Decimal('2.00'),
+      // have written during order arrival. LINE-level (× quantity).
+      grossCommissionAmountNet: new Decimal('10.00').mul(quantity),
+      grossCommissionVatAmount: new Decimal('2.00').mul(quantity),
       ...(opts?.withCostAndSale === true
         ? {
             unitCostSnapshotNet: new Decimal('40.00'),
@@ -329,6 +336,44 @@ describe('settlement handlers', () => {
       // no PaymentOrder re-poll needed. Full return → exactly zero.
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
       expect(order.settledNetProfit?.toFixed(2)).toBe('0.00');
+    });
+
+    it('qty=2 line, ONE unit returned — trio amounts are per-unit, profit lands on the remaining unit (#300)', async () => {
+      // PER-UNIT semantics pin (feeds #299 item-level attribution design):
+      // research §3.2 — Trendyol emits one Return row per returned UNIT, so
+      // row.debt and row.commissionAmount are that unit's figures and the
+      // handler books exactly ONE unit's cost snapshot. None of the legs
+      // may scale with OrderItem.quantity.
+      //
+      // Fixture (qty=2): sale 200 net + 40 VAT; line commission 20 net + 4;
+      // cost 40 net/unit; payment cycle settled 100 (= 200 − 80 − 20).
+      const { storeId, orderId } = await buildOrderWithItem({
+        withCostAndSale: true,
+        quantity: 2,
+      });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      await prisma.$transaction(async (tx) => {
+        const result = await handleReturn(storeId, row, tx);
+        expect(result.applied).toBe(true);
+      });
+
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      const byType = new Map(fees.map((f) => [f.feeType, f]));
+
+      // Row-level figures, NOT × quantity.
+      expect(byType.get('REFUND_DEDUCTION')?.amountNet.toFixed(2)).toBe('100.00');
+      expect(byType.get('REFUND_DEDUCTION')?.vatAmount.toFixed(2)).toBe('20.00');
+      expect(byType.get('COMMISSION_REFUND')?.amountNet.toFixed(2)).toBe('10.00');
+      // ONE unit's cost snapshot handed back — 40.00, never 80.00.
+      expect(byType.get('COST_RETURN')?.amountNet.toFixed(2)).toBe('40.00');
+      expect(byType.get('COST_RETURN')?.vatAmount.toFixed(2)).toBe('8.00');
+
+      // 200 − 80(cost) − 20(comm) − 100(refund) + 10(comm-refund) +
+      // 40(cost-return) = 50.00 — exactly the REMAINING unit's standalone
+      // profit (100 − 40 − 10), proving per-unit legs compose at order level.
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      expect(order.settledNetProfit?.toFixed(2)).toBe('50.00');
     });
 
     it('skips the commission credit (loudly) when the row carries no commissionAmount', async () => {
