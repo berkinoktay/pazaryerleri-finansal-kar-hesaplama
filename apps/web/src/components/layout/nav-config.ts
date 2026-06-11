@@ -8,6 +8,7 @@ import {
   Megaphone01Icon,
   PackageIcon,
   ReceiptDollarIcon,
+  ReturnRequestIcon,
   ShoppingBag01Icon,
   Tag01Icon,
 } from 'hugeicons-react';
@@ -111,6 +112,12 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         labelKey: 'nav.orders',
         href: '/orders',
         icon: ShoppingBag01Icon,
+      },
+      {
+        key: 'returns',
+        labelKey: 'nav.returns',
+        href: '/returns',
+        icon: ReturnRequestIcon,
       },
       {
         key: 'products',

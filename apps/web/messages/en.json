@@ -259,6 +259,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "orders": "Orders",
+    "returns": "Returns",
     "products": "Products",
     "costs": "Costs",
     "profitability": "Profitability",
@@ -734,6 +735,56 @@
   "placeholderPage": {
     "comingSoon": "Coming soon",
     "description": "This page is still under development. It will be active in upcoming updates."
+  },
+  "returnsPage": {
+    "title": "Returns",
+    "intent": "Track your store's return claims and their profit impact in one place",
+    "kpi": {
+      "open": "Open claims",
+      "resolvedInPeriod": "Resolved (period)",
+      "refundDeduction": "Refund deductions (period)",
+      "netImpact": "Net profit impact (period)"
+    },
+    "tabs": { "all": "All", "open": "Open", "resolved": "Resolved" },
+    "toolbar": { "searchPlaceholder": "Search order or claim number" },
+    "table": {
+      "columns": {
+        "claimDate": "Date",
+        "orderNumber": "Order No",
+        "product": "Product",
+        "reason": "Reason",
+        "scope": "Coverage",
+        "status": "Status"
+      }
+    },
+    "status": {
+      "OPEN": "Open",
+      "ACCEPTED": "Accepted",
+      "REJECTED": "Rejected",
+      "CANCELLED": "Cancelled",
+      "MIXED": "Resolved"
+    },
+    "scope": { "FULL": "Full", "PARTIAL": "Partial" },
+    "summary": {
+      "units": "×{count}",
+      "more": "+{count}",
+      "unknownProduct": "Unknown product"
+    },
+    "empty": {
+      "noStore": {
+        "title": "No store selected",
+        "description": "Connect or select a store to see its returns.",
+        "cta": "Connect a store"
+      },
+      "noReturns": {
+        "title": "No returns yet",
+        "description": "Return claims sync from Trendyol every 6 hours; the first one will show up here."
+      }
+    },
+    "refreshButton": {
+      "label": "Refresh",
+      "refreshing": "Refreshing…"
+    }
   },
   "ordersPage": {
     "title": "Orders",

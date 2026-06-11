@@ -19,6 +19,7 @@ const PROTECTED = [
   '/auth/verified',
   '/design',
   '/live-performance',
+  '/returns',
 ] as const;
 
 // Routes where an already-authenticated user should bounce back to
