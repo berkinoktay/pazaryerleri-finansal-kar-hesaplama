@@ -250,7 +250,8 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
 
   // ─── Intake routing (Slice 0 shared helper) ────────────────────────────
   // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders (null profit); variant_not_found → skip. Identical to the sync-worker.
+  // orders (null profit). Unmatched variant lines fold into cost_missing —
+  // the order is ALWAYS written. Identical to the sync-worker.
   try {
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -260,15 +261,6 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
     });
 
     switch (outcome.kind) {
-      case 'skipped':
-        syncLog.info('orders.skipped', {
-          source: 'webhook',
-          reason: outcome.reason,
-          storeId: store.id,
-          platformOrderId,
-          barcode: outcome.barcode,
-        });
-        break;
       case 'buffered':
         syncLog.info('buffer.entry-created', {
           source: 'webhook',

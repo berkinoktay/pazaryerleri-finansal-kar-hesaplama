@@ -245,7 +245,8 @@ export async function processOrdersChunk(input: {
   // across cursor pages on lastModified shifts — upsert is idempotent.
   // Route per-order through the shared intake helper (own transaction each):
   // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders (null profit); variant_not_found → skip. Identical to the webhook.
+  // orders (null profit). Unmatched variant lines fold into cost_missing —
+  // the order is ALWAYS written. Identical to the webhook.
   // Trendyol can emit duplicate orders across cursor pages — upsert + buffer
   // unique key are both idempotent.
   for (const order of batch) {
@@ -258,16 +259,6 @@ export async function processOrdersChunk(input: {
       // Exhaustive switch (mirrors the webhook route) — a new OrderIntakeOutcome
       // kind becomes a compile error here, not a silent fallthrough.
       switch (outcome.kind) {
-        case 'skipped':
-          syncLog.info('orders.skipped', {
-            source: 'cron',
-            reason: outcome.reason,
-            syncLogId: log.id,
-            storeId: log.storeId,
-            platformOrderId: order.platformOrderId,
-            barcode: outcome.barcode,
-          });
-          break;
         case 'buffered':
         case 'buffered_deduped':
           syncLog.info('buffer.entry-created', {
