@@ -4,8 +4,10 @@
 // order-level fields (shipmentPackageId / orderNumber / barcode) are NULL
 // on otherfinancials rows.
 //
-// Idempotency: pre-insert findFirst on `externalRef.trendyolId` — same
-// pattern as handleReturn. Json path filter avoids needing a UNIQUE index.
+// Idempotency (#297): pre-insert findFirst on the indexed
+// `trendyolTransactionId` column — same pattern as handleReturn. The
+// partial unique (organization_id, fee_type, trendyol_transaction_id)
+// backs it at the DB level; externalRef is audit-only.
 //
 // Period model: schema has no `period` column — `paymentOrderId` is the
 // cycle key, `paymentDate` is the row's settlement date. A single cycle
@@ -52,7 +54,7 @@ export async function insertOrgPeriodFee(
     where: {
       organizationId,
       feeType,
-      externalRef: { path: ['trendyolId'], equals: row.id },
+      trendyolTransactionId: row.id,
     },
     select: { id: true },
   });
@@ -73,6 +75,8 @@ export async function insertOrgPeriodFee(
         ? { invoiceSerialNumber: row.commissionInvoiceSerialNumber }
         : {}),
       ...(row.description !== null ? { description: row.description } : {}),
+      trendyolTransactionId: row.id,
+      // Audit-only blob — idempotency reads use the column above.
       externalRef: {
         trendyolId: row.id,
         sellerId: row.sellerId,

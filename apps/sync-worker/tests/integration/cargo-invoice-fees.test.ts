@@ -151,6 +151,10 @@ describe('handleCargoInvoiceItems (PR-8)', () => {
     expect(new Decimal(fee.vatAmount.toString()).toString()).toBe('15.51');
     expect(new Decimal(fee.vatRate.toString()).toString()).toBe('20');
     expect(fee.feeDefinitionId).not.toBeNull();
+    // #297: identity columns stamped — without them the partial unique
+    // guard would never apply and dedupe would silently break.
+    expect(fee.invoiceSerialNumber).toBe(SERIAL);
+    expect(fee.parcelUniqueId).toBe(TRACKING.toString());
     expect(fee.externalRef).toEqual({
       invoiceSerialNumber: SERIAL,
       parcelUniqueId: TRACKING.toString(),
@@ -229,6 +233,28 @@ describe('handleCargoInvoiceItems (PR-8)', () => {
     expect(second.writtenFees).toBe(0);
     expect(second.dedupedItems).toBe(1);
     expect(await prisma.orderFee.count({ where: { orderId } })).toBe(1);
+  });
+
+  it('a reclassified line (same serial+parcel, flipped type) dedupes instead of tripping the DB guard (#297)', async () => {
+    // The pre-check deliberately omits feeType to mirror the partial unique
+    // (order_id, invoice_serial_number, parcel_unique_id). Restoring feeType
+    // to the pre-check would let this re-scan slip past it and 23505-abort
+    // the invoice transaction — this test pins the dedupe at the handler layer.
+    const ctx = await buildStore();
+    const orderId = await createCargoOrder(ctx, {
+      platformOrderId: 'pkg-reclass',
+      cargoTrackingNumber: TRACKING,
+    });
+
+    const first = await runInTx(ctx, [item()]);
+    const second = await runInTx(ctx, [item({ shipmentPackageType: 'İade Kargo Bedeli' })]);
+
+    expect(first.writtenFees).toBe(1);
+    expect(second.writtenFees).toBe(0);
+    expect(second.dedupedItems).toBe(1);
+    const fees = await prisma.orderFee.findMany({ where: { orderId } });
+    expect(fees).toHaveLength(1);
+    expect(fees[0]?.feeType).toBe('SHIPPING');
   });
 
   it('unknown shipmentPackageType is counted and skipped', async () => {

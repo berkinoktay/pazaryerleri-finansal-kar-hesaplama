@@ -12,8 +12,11 @@ import {
 import { createRlsScopedClient } from '../../helpers/rls-client';
 
 /**
- * order_fees: org-scoped via denormalized organization_id.
- * Pattern matches stores / orders / products — flat is_org_member() check.
+ * order_fees: reached via the parent order — the policy EXISTS-walks
+ * order_id → orders and gates on can_access_store(orders.store_id).
+ * Pattern matches order_items / settlement_items (parent-walk), NOT the
+ * flat is_org_member() check this comment used to claim (policy moved to
+ * store-access parent-walk in the member-store-access epic).
  */
 describe('RLS — order_fees', () => {
   beforeAll(async () => {

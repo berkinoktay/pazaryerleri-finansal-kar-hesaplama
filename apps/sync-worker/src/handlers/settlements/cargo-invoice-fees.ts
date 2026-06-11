@@ -14,10 +14,16 @@
 // rate comes from fee_definitions.default_vat_rate via resolveFeeDefinition
 // (at = order.orderDate) — data-driven, never a code constant.
 //
-// Idempotency: externalRef carries {invoiceSerialNumber, parcelUniqueId,
-// desi}; an existing CARGO_INVOICE fee on the same order+feeType with the
-// same serial+parcel pair short-circuits the insert (weekly re-scans hit
-// the same invoices repeatedly by design — 60d window).
+// Idempotency (#297): the invoice line identity lives in the indexed
+// invoiceSerialNumber + parcelUniqueId columns; an existing CARGO_INVOICE
+// fee on the same order with the same serial+parcel pair short-circuits
+// the insert (weekly re-scans hit the same invoices repeatedly by design
+// — 60d window). The lookup deliberately matches the DB partial unique
+// (order_id, invoice_serial_number, parcel_unique_id) WHERE
+// source='CARGO_INVOICE' exactly — feeType is NOT part of the key, so a
+// reclassified line (Gönderi↔İade on a re-scan) dedupes instead of
+// tripping the unique. externalRef keeps {invoiceSerialNumber,
+// parcelUniqueId, desi} as audit-only.
 
 import { Decimal } from 'decimal.js';
 
@@ -72,19 +78,6 @@ async function matchOrder(
   return { order: null, ambiguous: byNumber.length > 1 };
 }
 
-function isSameParcelRef(
-  ref: Prisma.JsonValue | null,
-  invoiceSerialNumber: string,
-  parcelUniqueId: string,
-): boolean {
-  if (typeof ref !== 'object' || ref === null || Array.isArray(ref)) return false;
-  const record = ref as Record<string, unknown>;
-  return (
-    record['invoiceSerialNumber'] === invoiceSerialNumber &&
-    record['parcelUniqueId'] === parcelUniqueId
-  );
-}
-
 export async function handleCargoInvoiceItems(
   storeId: string,
   organizationId: string,
@@ -137,15 +130,11 @@ export async function handleCargoInvoiceItems(
     }
 
     const parcelUniqueId = String(item.parcelUniqueId);
-    const existingFees = await tx.orderFee.findMany({
-      where: { orderId: order.id, feeType, source: 'CARGO_INVOICE' },
-      select: { externalRef: true },
+    const existingFee = await tx.orderFee.findFirst({
+      where: { orderId: order.id, source: 'CARGO_INVOICE', invoiceSerialNumber, parcelUniqueId },
+      select: { id: true },
     });
-    if (
-      existingFees.some((fee) =>
-        isSameParcelRef(fee.externalRef, invoiceSerialNumber, parcelUniqueId),
-      )
-    ) {
+    if (existingFee !== null) {
       result.dedupedItems += 1;
       continue;
     }
@@ -184,6 +173,9 @@ export async function handleCargoInvoiceItems(
         vatRate,
         vatAmount,
         displayName: item.shipmentPackageType,
+        invoiceSerialNumber,
+        parcelUniqueId,
+        // Audit-only blob — idempotency reads use the columns above.
         externalRef: { invoiceSerialNumber, parcelUniqueId, desi: item.desi },
       },
     });

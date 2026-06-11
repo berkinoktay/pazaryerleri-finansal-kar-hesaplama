@@ -3,7 +3,7 @@
 // Verifies:
 //   - Eligibility matrix: fastDelivery × onTime × delivery-data presence
 //   - CREDIT OrderFee write semantics (₺4.00 net + ₺0.80 KDV)
-//   - Idempotency via externalRef.derivedFrom = 'fast-delivery' filter
+//   - Idempotency via the indexed derivedFrom column (#297)
 //   - Boundary: actualDeliveryDate == agreedDeliveryDate is on-time (≤)
 //
 // Cascade integration is verified end-to-end in payment-order-cascade
@@ -90,6 +90,9 @@ describe('applyFastDeliveryCorrection', () => {
     expect(fees[0]!.vatRate.toFixed(2)).toBe('20.00');
     expect(fees[0]!.displayName).toBe('Bugün Kargoda PSF İndirimi');
     expect(fees[0]!.organizationId).toBe(organizationId);
+    // #297: marker column stamped — without it the (order_id, fee_type,
+    // derived_from) partial unique never applies and dedupe silently breaks.
+    expect(fees[0]!.derivedFrom).toBe('fast-delivery');
     expect(fees[0]!.externalRef).toMatchObject({ derivedFrom: 'fast-delivery' });
   });
 

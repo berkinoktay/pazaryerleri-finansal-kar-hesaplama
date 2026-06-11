@@ -13,12 +13,16 @@
 // for this discount — the seller's PSF invoice already reflects the
 // reduced rate (research §4.4 spot check confirms this is implicit, not
 // itemised). We derive the correction from our own delivery-time data
-// and tag externalRef.derivedFrom = 'fast-delivery' so audit can
-// distinguish settled-from-Trendyol fees from client-derived corrections.
+// and stamp the indexed `derivedFrom` column (= 'fast-delivery') so audit
+// can distinguish settled-from-Trendyol fees from client-derived
+// corrections. There is no Trendyol transaction behind this row, so
+// trendyolTransactionId stays NULL — the (order_id, fee_type,
+// derived_from) partial unique is the DB-level guard instead (#297):
+// one correction per order, enforced by schema, not code discipline.
 //
 // Source enum: SETTLEMENT (no SYSTEM_DERIVED enum value exists; adding
 // one would require a mini-migration that's out of PR-7 scope). The
-// `externalRef.derivedFrom` flag carries the distinction.
+// `derivedFrom` column carries the distinction.
 //
 // PR-9 invariant: this writes a NEW OrderFee CREDIT row; the existing
 // ESTIMATE PSF DEBIT row is untouched. recomputeSettledProfit aggregates
@@ -34,6 +38,9 @@ import { syncLog } from '@pazarsync/sync-core';
 const FAST_CORRECTION_NET = new Decimal('4.00');
 const FAST_CORRECTION_VAT_RATE = new Decimal('20');
 const FAST_CORRECTION_VAT_AMOUNT = new Decimal('0.80');
+
+/** derivedFrom marker — the idempotency key for this client-derived row. */
+const FAST_DELIVERY_MARKER = 'fast-delivery';
 
 export interface ApplyFastDeliveryCorrectionResult {
   applied: boolean;
@@ -68,15 +75,15 @@ export async function applyFastDeliveryCorrection(
   }
   if (onTime === false) return { applied: false, skipReason: 'not_on_time' };
 
-  // Idempotency — detect prior correction via the derivedFrom marker.
-  // Same Json-path filter pattern as handleReturn / handleCommissionInvoice.
+  // Idempotency (#297) — detect prior correction via the indexed derivedFrom
+  // column. The lookup matches the (order_id, fee_type, derived_from)
+  // partial unique exactly, so the DB guard can never fire a violation the
+  // pre-check did not predict.
   const existing = await tx.orderFee.findFirst({
     where: {
       orderId,
       feeType: 'PLATFORM_SERVICE',
-      direction: 'CREDIT',
-      source: 'SETTLEMENT',
-      externalRef: { path: ['derivedFrom'], equals: 'fast-delivery' },
+      derivedFrom: FAST_DELIVERY_MARKER,
     },
     select: { id: true },
   });
@@ -93,8 +100,10 @@ export async function applyFastDeliveryCorrection(
       vatRate: FAST_CORRECTION_VAT_RATE,
       vatAmount: FAST_CORRECTION_VAT_AMOUNT,
       displayName: 'Bugün Kargoda PSF İndirimi',
+      derivedFrom: FAST_DELIVERY_MARKER,
+      // Audit-only blob — idempotency reads use the column above.
       externalRef: {
-        derivedFrom: 'fast-delivery',
+        derivedFrom: FAST_DELIVERY_MARKER,
         psfDiscountNet: FAST_CORRECTION_NET.toFixed(2),
         psfDiscountVat: FAST_CORRECTION_VAT_AMOUNT.toFixed(2),
       },
