@@ -293,6 +293,9 @@ describe('settlement handlers', () => {
         'COST_RETURN',
         'REFUND_DEDUCTION',
       ]);
+      // #297: every leg stamps the identity column — without it the
+      // settlement partial unique never applies and dedupe silently breaks.
+      expect(fees.map((f) => f.trendyolTransactionId)).toEqual([row.id, row.id, row.id]);
 
       const refund = fees.find((f) => f.feeType === 'REFUND_DEDUCTION')!;
       expect(refund.direction).toBe('DEBIT');

@@ -1035,6 +1035,16 @@ model FeeDefinition {
 // karışık yaşar, recomputeSettledProfit filtreyle toplar. PSF/Stopaj ESTIMATE
 // satırları PaymentOrder geldiğinde SETTLEMENT'a confirm edilir (§3.7 — confirmedAt
 // + confirmedBy bunu izler). organizationId denormalize: insert sırasında stamp.
+//
+// Idempotency (#297): kaynak-bazlı kimlik kolonlarda yaşar, externalRef JSONB
+// AUDIT-ONLY'dir — hiçbir okuma yolu JSONB path filtresi kullanamaz.
+//   SETTLEMENT     → trendyolTransactionId (Return üçlüsü aynı id'yi paylaşır,
+//                    bacaklar feeType ile ayrışır)
+//   CARGO_INVOICE  → invoiceSerialNumber + parcelUniqueId (fatura satırı kimliği)
+//   derived        → derivedFrom marker ('fast-delivery' — Trendyol satırı yok,
+//                    client-side türetilen düzeltme)
+// Partial unique indexler Prisma'da ifade edilemez; check-constraints.sql'de
+// (governance) + tanıtan migration'da aynalanmış halde yaşar.
 model OrderFee {
   id              String  @id @default(uuid()) @db.Uuid
   orderId         String  @map("order_id") @db.Uuid
@@ -1052,6 +1062,11 @@ model OrderFee {
   displayName String? @map("display_name")
   externalRef Json?   @map("external_ref")
 
+  trendyolTransactionId String? @map("trendyol_transaction_id")
+  invoiceSerialNumber   String? @map("invoice_serial_number")
+  parcelUniqueId        String? @map("parcel_unique_id")
+  derivedFrom           String? @map("derived_from")
+
   capturedAt  DateTime  @default(now()) @map("captured_at")
   // confirmedAt + confirmedBy: PSF/Stopaj ESTIMATE → SETTLEMENT confirmation
   // PaymentOrder ('Ödeme') entry geldiğinde set'lenir (§3.7). Amount comparison
@@ -1059,6 +1074,8 @@ model OrderFee {
   // hesaplandı).
   confirmedAt DateTime? @map("confirmed_at")
   confirmedBy String?   @map("confirmed_by")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   order      Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   definition FeeDefinition? @relation(fields: [feeDefinitionId], references: [id], onDelete: SetNull)
@@ -1149,6 +1166,11 @@ model OrgPeriodFee {
   invoiceSerialNumber String? @map("invoice_serial_number")
   description         String?
   externalRef         Json?   @map("external_ref")
+
+  // #297: settlement satırı kimliği — idempotency okuması bu kolondan,
+  // externalRef audit-only. Partial unique (organization_id, fee_type,
+  // trendyol_transaction_id) check-constraints.sql'de yaşar.
+  trendyolTransactionId String? @map("trendyol_transaction_id")
 
   capturedAt DateTime @default(now()) @map("captured_at")
 

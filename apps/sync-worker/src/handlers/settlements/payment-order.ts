@@ -82,8 +82,8 @@ export async function handlePaymentOrderEntry(
 
     // 2. Apply fastDelivery PSF correction BEFORE recompute — the new
     //    CREDIT OrderFee row needs to land before the profit aggregate.
-    //    Idempotent via `externalRef.derivedFrom = 'fast-delivery'` filter
-    //    (PR-7 commit 7).
+    //    Idempotent via the indexed `derivedFrom` column + the
+    //    (order_id, fee_type, derived_from) partial unique (#297).
     await applyFastDeliveryCorrection(order.id, tx);
 
     // 3. Recompute settledNetProfit from confirmed fees + cost snapshots.

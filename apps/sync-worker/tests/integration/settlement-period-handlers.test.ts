@@ -96,6 +96,9 @@ describe('settlement period-level handlers', () => {
       expect(fees[0]!.vatAmount.toFixed(2)).toBe('2.20');
       expect(fees[0]!.paymentOrderId).toBe(BigInt(PAYMENT_ORDER_ID));
       expect(fees[0]!.invoiceSerialNumber).toBe('DDF2026009472156');
+      // #297: identity column stamped — without it the org_period_fees
+      // partial unique never applies and dedupe silently breaks.
+      expect(fees[0]!.trendyolTransactionId).toBe(row.id);
     });
 
     it('skips with sparse_field when paymentOrderId is null', async () => {

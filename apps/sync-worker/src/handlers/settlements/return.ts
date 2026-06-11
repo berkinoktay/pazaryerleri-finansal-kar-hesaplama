@@ -26,12 +26,13 @@
 // OrderItem's unitVatRate (per-line VAT, not fixed) — research §3.2
 // proved Return is per-OrderItem just like Sale/Discount.
 //
-// Idempotency: handler checks `(orderId, source=SETTLEMENT, externalRef
-// trendyolId = row.id)` BEFORE insert. All three fees share the same
-// trendyolId and are written in the same transaction, so the single
-// pre-check guards the trio. Re-poll cron may surface the same Return
-// row multiple times; the existence check skips duplicates without
-// a UNIQUE constraint (one would need a generated column to index Json).
+// Idempotency (#297): handler checks `(orderId, source=SETTLEMENT,
+// trendyolTransactionId = row.id)` BEFORE insert — indexed column
+// equality, not a JSONB path. All three legs share the same
+// trendyolTransactionId and differ by feeType; the DB-level partial
+// unique (order_id, fee_type, trendyol_transaction_id) WHERE
+// source='SETTLEMENT' makes a double write impossible even if the
+// pre-check races. externalRef stays as an audit-only JSON blob.
 //
 // feeDefinitionId is left NULL — schema makes it nullable (line 959) and
 // settlement-sourced fees have no fee_definition entry (deterministic
@@ -158,7 +159,7 @@ export async function handleReturn(
     where: {
       orderId: order.id,
       source: 'SETTLEMENT',
-      externalRef: { path: ['trendyolId'], equals: row.id },
+      trendyolTransactionId: row.id,
     },
     select: { feeType: true },
   });
@@ -184,12 +185,14 @@ export async function handleReturn(
     vatAmount = new Decimal(0);
   }
 
+  // Audit-only blob — idempotency reads NEVER touch this (column below).
   const externalRef = {
     trendyolId: row.id,
     sellerId: row.sellerId,
     ...(row.receiptId !== null ? { receiptId: row.receiptId } : {}),
     ...(row.paymentOrderId !== null ? { paymentOrderId: row.paymentOrderId } : {}),
   };
+  const trendyolTransactionId = row.id;
 
   if (!hasLeg.has('REFUND_DEDUCTION')) {
     await tx.orderFee.create({
@@ -203,6 +206,7 @@ export async function handleReturn(
         vatRate,
         vatAmount,
         displayName: 'İade',
+        trendyolTransactionId,
         externalRef,
       },
     });
@@ -231,6 +235,7 @@ export async function handleReturn(
         vatRate: new Decimal(COMMISSION_VAT_RATE),
         vatAmount: commissionGross.sub(commissionNet),
         displayName: 'Komisyon iadesi',
+        trendyolTransactionId,
         externalRef,
       },
     });
@@ -259,6 +264,7 @@ export async function handleReturn(
         vatRate: item.unitCostSnapshotVatRate ?? new Decimal(0),
         vatAmount: item.unitCostSnapshotVatAmount,
         displayName: 'Maliyet iadesi',
+        trendyolTransactionId,
         externalRef,
       },
     });
