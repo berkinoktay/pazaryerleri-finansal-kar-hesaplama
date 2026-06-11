@@ -683,6 +683,47 @@ describe('settlement handlers', () => {
       ]);
     });
 
+    it("#299 INHERIT: a late COST_RETURN leg reuses the trio's unit instead of grabbing a free one", async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem(); // snapshot'sız
+      // Sale aggregate yok → recompute zaten atlanır; bağ davranışı izole kalır.
+      const { claimItemIds } = await createClaimWithUnits({
+        storeId,
+        orderId,
+        orderItemId: itemId,
+        units: 2, // boşta İKİ birim — yanlış implementasyon ikinciye kayar
+      });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      // Poll 1 — cost snapshot yok: 2 bacak yazılır, birim-1'e bağlanır.
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, row, tx);
+      });
+      const firstLegs = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(firstLegs).toHaveLength(2);
+      const trioUnit = firstLegs[0]?.orderClaimItemId;
+      expect(trioUnit).not.toBeNull();
+      expect(new Set(firstLegs.map((f) => f.orderClaimItemId)).size).toBe(1);
+
+      // Berkin maliyeti girer (Maliyet Bekleyen akışı).
+      await prisma.orderItem.update({
+        where: { id: itemId },
+        data: {
+          unitCostSnapshotNet: new Decimal('40.00'),
+          unitCostSnapshotVatRate: new Decimal('20.00'),
+          unitCostSnapshotVatAmount: new Decimal('8.00'),
+        },
+      });
+
+      // Poll 2 — eksik COST_RETURN yazılır: aynı birimde KALMALI.
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, row, tx);
+      });
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees).toHaveLength(3);
+      expect(new Set(fees.map((f) => f.orderClaimItemId))).toEqual(new Set([trioUnit]));
+      expect(claimItemIds).toContain(trioUnit);
+    });
+
     it('skips with order_not_found when nothing matches (unknown parcel + unknown orderNumber)', async () => {
       const { storeId } = await buildOrderWithItem();
       const row = makeSettlementRow({
