@@ -377,7 +377,7 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
   });
 
   describe('Calculability gate (PR-B)', () => {
-    it('skips the order (200, no write) when a line has no matching variant', async () => {
+    it('persists the order with a null-variant item when a line has no matching variant', async () => {
       const { storeId } = await setupStore();
       const payload = makeWebhookPayload({
         orderNumber: 'NO-VARIANT-1',
@@ -398,9 +398,16 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       });
       const res = await postWebhook(storeId, payload, basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS));
       expect(res.status).toBe(200);
-      expect(await prisma.order.count({ where: { storeId, platformOrderId: '555000001' } })).toBe(
-        0,
-      );
+      // Spec 2026-06-11: the variant gap no longer skips — ORDER_DATE_MS is
+      // past-day, so cost_missing routing writes the order with null profit
+      // and the unmatched line keeps the barcode trail (null variant FK).
+      const order = await prisma.order.findFirstOrThrow({
+        where: { storeId, platformOrderId: '555000001' },
+      });
+      expect(order.estimatedNetProfit).toBeNull();
+      const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
+      expect(item.productVariantId).toBeNull();
+      expect(item.barcode).toBe('UNKNOWN-BARCODE-XYZ');
       const event = await prisma.webhookEvent.findFirstOrThrow({
         where: { storeId, platformOrderId: '555000001' },
       });
