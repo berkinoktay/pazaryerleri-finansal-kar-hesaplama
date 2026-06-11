@@ -1,33 +1,47 @@
 -- pg_cron job definitions for marketplace sync
--- Requires: pg_cron and pg_net extensions enabled in Supabase Dashboard
+--
+-- Applied AUTOMATICALLY by apply-policies.ts (cron step) on db:push (dev) and
+-- db:deploy (prod) — the script creates the pg_cron + pg_net extensions first
+-- and skips this file with a warning when the image doesn't ship them. CI sets
+-- CI=true, which skips scheduling so cron ticks never race the test suite; the
+-- fan-out SQL itself is exercised by packages/sync-core's pg-cron-fanout
+-- integration test instead.
+--
+-- This file is environment-independent: the only env-specific values (the fx
+-- Edge Function URL + service-role key) are read at RUN time from DB settings
+-- (`app.supabase_functions_url`, `app.supabase_service_role_key`) that
+-- apply-policies.ts sets from PG_CRON_FUNCTIONS_URL / SUPABASE_SECRET_KEY when
+-- present. Unset → the fx job is a silent no-op; all queue fan-out jobs work
+-- everywhere with no configuration.
+--
+-- cron.schedule upserts by job name, so re-applying is always safe.
 
 -- ─── FX rates daily sync ──────────────────────────────────────────────────────
 -- Fetches USD/EUR rates from TCMB (Türkiye Cumhuriyet Merkez Bankası) and
--- upserts them into fx_rates.
+-- upserts them into fx_rates via the fx-rates-sync Edge Function.
 --
 -- Schedule: 16:00 Istanbul time on business days (Mon–Fri).
 -- Istanbul is UTC+3, so 16:00 IST = 13:00 UTC.
 -- Cron expression: '0 13 * * 1-5'
 --
--- The Edge Function URL and service-role key are environment-specific.
--- Replace <SUPABASE_PROJECT_REF> with your project reference (e.g. "abcdefghijklmn")
--- and set <SUPABASE_SERVICE_ROLE_KEY> via a Postgres secret or vault lookup.
--- DO NOT commit a real service-role key here — use the vault pattern below.
---
--- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
+-- The WHERE guard makes the call a no-op until apply-policies.ts has set both
+-- app.* settings for this database — so the job can be scheduled everywhere
+-- without a key, and configured environments start firing on the next tick.
 --
 SELECT cron.schedule(
   'fx-rates-sync-daily',
   '0 13 * * 1-5',
   $$
   SELECT net.http_post(
-    url     := 'https://<SUPABASE_PROJECT_REF>.supabase.co/functions/v1/fx-rates-sync',
+    url     := current_setting('app.supabase_functions_url', true) || '/fx-rates-sync',
     headers := jsonb_build_object(
       'Content-Type',  'application/json',
       'Authorization', 'Bearer ' || current_setting('app.supabase_service_role_key', true)
     ),
     body    := '{}'::jsonb
-  );
+  )
+  WHERE current_setting('app.supabase_functions_url', true) IS NOT NULL
+    AND current_setting('app.supabase_service_role_key', true) IS NOT NULL;
   $$
 );
 
@@ -52,9 +66,6 @@ SELECT cron.schedule(
 -- delta window (start from now − SYNC_SAFETY_NET_HOURS) is a follow-up handler
 -- optimization; until then an hourly tick re-scans [cutoff, now] idempotently.
 --
--- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
--- (cron.schedule upserts by job name, so re-applying is safe.)
---
 SELECT cron.schedule(
   'sync-orders-delta',
   '0 * * * *',
@@ -72,19 +83,42 @@ SELECT cron.schedule(
   $$
 );
 
+-- ─── Products daily refresh ───────────────────────────────────────────────────
+-- Enqueues a PENDING PRODUCTS sync_log per ACTIVE store once a day. The
+-- catalog has no webhook feed, so without this job new products / price
+-- changes only ever arrived via manual sync (or the connect-time bootstrap).
+-- A full catalog scan is the heaviest sync (~5 min for a 5.5k-product store),
+-- so it runs once a day at the lowest-traffic hour.
+--
+-- Schedule: '0 0 * * *' — 00:00 UTC = 03:00 Istanbul (permanent GMT+3).
+--
+-- Dedupe: same NOT EXISTS in-flight guard as sync-orders-delta.
+--
+SELECT cron.schedule(
+  'sync-products-daily',
+  '0 0 * * *',
+  $$
+  INSERT INTO sync_logs (id, organization_id, store_id, sync_type, status, started_at)
+  SELECT gen_random_uuid(), s.organization_id, s.id, 'PRODUCTS', 'PENDING', now()
+  FROM stores s
+  WHERE s.status = 'ACTIVE'
+    AND NOT EXISTS (
+      SELECT 1 FROM sync_logs sl
+      WHERE sl.store_id = s.id
+        AND sl.sync_type = 'PRODUCTS'
+        AND sl.status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE')
+    );
+  $$
+);
+
 -- ─── Settlements scan (6h cadence) ────────────────────────────────────────────
 -- Enqueues a PENDING SETTLEMENTS sync_log per ACTIVE store every 6 hours.
 -- The worker's settlements handler scans the full 60-day window each tick
 -- (idempotent per-row anchors absorb the overlap — handlers/settlements/cron.ts).
 -- Job definition added in PR-13: design §5.5 always specified this cadence,
 -- but no cron job existed — settlements only ever ran via manual enqueue.
--- NOTE: defining the job here does NOT schedule it anywhere by itself —
--- per-environment apply is MANUAL (see issue #249 / file header).
 --
 -- Dedupe: same NOT EXISTS in-flight guard as sync-orders-delta.
---
--- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
--- (cron.schedule upserts by job name, so re-applying is safe.)
 --
 SELECT cron.schedule(
   'sync-settlements-6h',
@@ -111,10 +145,6 @@ SELECT cron.schedule(
 --
 -- Offset from the settlements tick (minute 45 vs 30) so a store's two
 -- financial scans don't contend for the same worker slot at once.
--- NOTE: per-environment apply is MANUAL (see issue #249 / file header).
---
--- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
--- (cron.schedule upserts by job name, so re-applying is safe.)
 --
 SELECT cron.schedule(
   'sync-claims-6h',
@@ -150,10 +180,7 @@ SELECT cron.schedule(
 -- time; pg_cron 1.6.4 has no per-job timezone support — verified empirically).
 --
 -- Prerequisite: db-functions.sql must be applied first (it is — apply-policies
--- runs it ahead of this manual file, and prod applies functions before crons).
---
--- To apply: psql "$DATABASE_URL" -f supabase/sql/pg-cron-setup.sql
--- (cron.schedule upserts by job name, so re-applying is safe.)
+-- runs every AUTO_APPLIED file before this cron step).
 --
 SELECT cron.schedule(
   'live-performance-buffer-daily-reset',
