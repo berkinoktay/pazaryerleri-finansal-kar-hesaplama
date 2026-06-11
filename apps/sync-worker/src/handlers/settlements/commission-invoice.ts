@@ -29,12 +29,13 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import {
+  TRENDYOL_COMMISSION_VAT_DIVISOR,
+  type TrendyolFinancialTransaction,
+} from '@pazarsync/marketplace';
 import { syncLog } from '@pazarsync/sync-core';
 
 import type { HandleSettlementResult } from './sale';
-
-const COMMISSION_VAT_DIVISOR = new Decimal('1.20');
 
 export interface HandleCommissionInvoiceResult extends HandleSettlementResult {
   /** Number of OrderItem rows that received the FK. Useful for telemetry. */
@@ -62,7 +63,7 @@ export async function handleCommissionInvoice(
   const trendyolSerialNumber = row.id;
   const paymentDate = new Date(row.paymentDate);
   const gross = new Decimal(row.debt);
-  const totalNet = gross.div(COMMISSION_VAT_DIVISOR).toDecimalPlaces(2);
+  const totalNet = gross.div(TRENDYOL_COMMISSION_VAT_DIVISOR).toDecimalPlaces(2);
   const totalVat = gross.sub(totalNet);
 
   const invoice = await tx.commissionInvoice.upsert({

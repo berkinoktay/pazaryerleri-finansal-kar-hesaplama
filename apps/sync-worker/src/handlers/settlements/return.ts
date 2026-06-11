@@ -14,8 +14,8 @@
 // So one Return row now writes:
 //   1. REFUND_DEDUCTION  DEBIT   from row.debt          (gross claw-back)
 //   2. COMMISSION_REFUND CREDIT  from row.commissionAmount (KDV-dahil,
-//      split at the fixed 20% commission-VAT convention — orders.ts
-//      COMMISSION_VAT_RATE precedent)
+//      split at the fixed 20% commission-VAT convention —
+//      TRENDYOL_COMMISSION_VAT_RATE, shared in @pazarsync/marketplace)
 //   3. COST_RETURN       CREDIT  from the item's unit cost snapshot
 //      (one UNIT per Return row — research §3.2: per-item like Sale)
 // and then refreshes Order.settledNetProfit so a late return (outside
@@ -41,18 +41,15 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import {
+  TRENDYOL_COMMISSION_VAT_DIVISOR,
+  TRENDYOL_COMMISSION_VAT_RATE,
+  type TrendyolFinancialTransaction,
+} from '@pazarsync/marketplace';
 import { recomputeSettledProfit } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 import type { HandleSettlementResult } from './sale';
-
-/**
- * Commission VAT is the fixed 20% convention (orders.ts COMMISSION_VAT_RATE
- * — design §12.2 #1). row.commissionAmount arrives KDV-dahil, same as the
- * sale-side commission this credit reverses.
- */
-const COMMISSION_VAT_RATE = 20;
 
 export async function handleReturn(
   storeId: string,
@@ -218,9 +215,10 @@ export async function handleReturn(
     row.commissionAmount !== null &&
     row.commissionAmount !== undefined
   ) {
+    // row.commissionAmount arrives KDV-dahil, same fixed %20 convention as
+    // the sale-side commission this credit reverses (shared constant, #300).
     const commissionGross = new Decimal(row.commissionAmount);
-    const commissionDivisor = new Decimal(COMMISSION_VAT_RATE).div(100).add(1);
-    const commissionNet = commissionGross.div(commissionDivisor).toDecimalPlaces(2);
+    const commissionNet = commissionGross.div(TRENDYOL_COMMISSION_VAT_DIVISOR).toDecimalPlaces(2);
     await tx.orderFee.create({
       data: {
         orderId: order.id,
@@ -229,7 +227,7 @@ export async function handleReturn(
         source: 'SETTLEMENT',
         direction: 'CREDIT',
         amountNet: commissionNet,
-        vatRate: new Decimal(COMMISSION_VAT_RATE),
+        vatRate: new Decimal(TRENDYOL_COMMISSION_VAT_RATE),
         vatAmount: commissionGross.sub(commissionNet),
         displayName: 'Komisyon iadesi',
         trendyolTransactionId,

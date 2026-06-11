@@ -11,7 +11,8 @@
 //        - grossCommissionVatAmount = commissionAmount − net
 //        - commissionInvoiceSerialNumber = raw DCFxxx string
 //
-// COMMISSION_VAT_RATE = 20% per design §12.2 #1 (sabit varsayım, V1).
+// Commission VAT = 20% per design §12.2 #1 (sabit varsayım, V1) —
+// TRENDYOL_COMMISSION_VAT_DIVISOR, shared in @pazarsync/marketplace (#300).
 //
 // Order Sync (PR-A) already wrote grossCommissionAmountNet/VatAmount in
 // the mapper using `lineGrossAmount × commissionRate / 100 / 1.20`. The
@@ -36,11 +37,11 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import {
+  TRENDYOL_COMMISSION_VAT_DIVISOR,
+  type TrendyolFinancialTransaction,
+} from '@pazarsync/marketplace';
 import { syncLog } from '@pazarsync/sync-core';
-
-/** Trendyol commission VAT is 20% by convention (design §12.2 #1). */
-const COMMISSION_VAT_DIVISOR = new Decimal('1.20');
 
 export interface HandleSettlementResult {
   /** True if the row was applied to the DB; false if skipped (logged). */
@@ -111,7 +112,9 @@ export async function handleSale(
   // Commission KDV split — Trendyol's commissionAmount is GROSS (KDV-dahil),
   // design §5.2 line 1083.
   const commissionGross = new Decimal(row.commissionAmount);
-  const grossCommissionAmountNet = commissionGross.div(COMMISSION_VAT_DIVISOR).toDecimalPlaces(2);
+  const grossCommissionAmountNet = commissionGross
+    .div(TRENDYOL_COMMISSION_VAT_DIVISOR)
+    .toDecimalPlaces(2);
   const grossCommissionVatAmount = commissionGross.sub(grossCommissionAmountNet);
 
   await tx.orderItem.update({

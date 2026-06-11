@@ -258,6 +258,35 @@ function makePsfRow(): TrendyolFinancialTransaction {
   };
 }
 
+function makeReturnRow(): TrendyolFinancialTransaction {
+  return {
+    id: 'return-cron-1',
+    transactionDate: 1715900000000,
+    barcode: BARCODE,
+    transactionType: 'İade',
+    receiptId: 7002,
+    description: 'İade',
+    debt: 120, // KDV-dahil gross claw-back (one unit)
+    credit: 0,
+    paymentPeriod: null,
+    commissionRate: 10,
+    commissionAmount: 12, // KDV-dahil commission handed back
+    commissionInvoiceSerialNumber: null,
+    sellerRevenue: null,
+    orderNumber: '11101228439',
+    paymentOrderId: null,
+    paymentDate: null,
+    sellerId: 123456,
+    storeId: null,
+    storeName: null,
+    storeAddress: null,
+    country: 'Türkiye',
+    orderDate: 1715000000000,
+    affiliate: 'TRENDYOLTR',
+    shipmentPackageId: SHIPMENT_PACKAGE_ID,
+  };
+}
+
 function makePaymentOrderRow(): TrendyolFinancialTransaction {
   return {
     id: PAYMENT_ORDER_ID.toString(),
@@ -412,6 +441,54 @@ describe('processSettlementsChunk — state machine mega-test', () => {
       where: { storeId, feeType: 'STOPPAGE' },
     });
     expect(stoppageAudits).toHaveLength(1);
+  });
+
+  it('Return row through the cron path writes the full trio; re-poll is idempotent (#300)', async () => {
+    // Composition-root coverage (#296 follow-up): every existing Return-trio
+    // test called handleReturn directly, bypassing the request-type
+    // classifier + dispatcher routing that stage Mode A1 once shipped
+    // broken. This tick drives the SAME registry-bound entrypoint the
+    // worker claims (processSettlementsChunk) with transactionType
+    // 'Return' and asserts the trio lands end-to-end.
+    const { orderId, syncLogId } = await buildScenario();
+    const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
+
+    const result = await processSettlementsChunk(
+      { syncLog, cursor: null },
+      makeMockFetchers({
+        settlements: { Return: [makeReturnRow()] },
+        otherFinancials: {},
+      }),
+    );
+    expect(result.kind).toBe('done');
+
+    const fees = await prisma.orderFee.findMany({
+      where: { orderId, source: 'SETTLEMENT' },
+    });
+    expect(fees.map((f) => f.feeType).sort()).toEqual([
+      'COMMISSION_REFUND',
+      'COST_RETURN',
+      'REFUND_DEDUCTION',
+    ]);
+    // Amounts prove the dispatcher routed into the real handler (VAT
+    // splits applied), not a stub: 120/1.2, 12/1.2, one unit's cost.
+    const byType = new Map(fees.map((f) => [f.feeType, f]));
+    expect(byType.get('REFUND_DEDUCTION')?.amountNet.toFixed(2)).toBe('100.00');
+    expect(byType.get('COMMISSION_REFUND')?.amountNet.toFixed(2)).toBe('10.00');
+    expect(byType.get('COST_RETURN')?.amountNet.toFixed(2)).toBe('40.00');
+    // #297 idempotency anchor stamped on every leg by the cron path too.
+    expect(fees.every((f) => f.trendyolTransactionId === 'return-cron-1')).toBe(true);
+
+    // Re-poll tick: same row again — the trio must not duplicate.
+    const result2 = await processSettlementsChunk(
+      { syncLog, cursor: null },
+      makeMockFetchers({
+        settlements: { Return: [makeReturnRow()] },
+        otherFinancials: {},
+      }),
+    );
+    expect(result2.kind).toBe('done');
+    expect(await prisma.orderFee.count({ where: { orderId, source: 'SETTLEMENT' } })).toBe(3);
   });
 
   it('empty cycle — no rows, status unchanged', async () => {

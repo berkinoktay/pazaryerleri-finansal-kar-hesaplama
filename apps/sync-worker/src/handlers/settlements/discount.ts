@@ -22,13 +22,13 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import {
+  TRENDYOL_COMMISSION_VAT_DIVISOR,
+  type TrendyolFinancialTransaction,
+} from '@pazarsync/marketplace';
 import { syncLog } from '@pazarsync/sync-core';
 
 import type { HandleSettlementResult } from './sale';
-
-/** Trendyol commission VAT is 20% by convention (design §12.2 #1). */
-const COMMISSION_VAT_DIVISOR = new Decimal('1.20');
 
 export async function handleDiscount(
   storeId: string,
@@ -79,7 +79,9 @@ export async function handleDiscount(
 
   // Refunded commission split — same %20 convention as Sale (design §5.2).
   const refundedGross = new Decimal(row.commissionAmount);
-  const refundedCommissionAmountNet = refundedGross.div(COMMISSION_VAT_DIVISOR).toDecimalPlaces(2);
+  const refundedCommissionAmountNet = refundedGross
+    .div(TRENDYOL_COMMISSION_VAT_DIVISOR)
+    .toDecimalPlaces(2);
   const refundedCommissionVatAmount = refundedGross.sub(refundedCommissionAmountNet);
 
   // Seller discount split — uses the line's own unitVatRate (varies per
