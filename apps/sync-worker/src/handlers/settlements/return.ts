@@ -287,6 +287,23 @@ export async function handleReturn(
     syncLog.warn('settlements.return.cost-snapshot-missing', { id: row.id, itemId: item.id });
   }
 
+  // #299 backfill — UNCONDITIONAL: the settlements cron (:30) fires before
+  // the claims cron (:45), so a fresh return's trio is often written with
+  // null links; later re-polls skip every leg (idempotent no-op) and would
+  // never link without this. Also covers the partial case where only the
+  // newly-written leg got the link. Idempotent + cheap (≤3 rows).
+  if (orderClaimItemId !== null) {
+    await tx.orderFee.updateMany({
+      where: {
+        orderId: order.id,
+        source: 'SETTLEMENT',
+        trendyolTransactionId,
+        orderClaimItemId: null,
+      },
+      data: { orderClaimItemId },
+    });
+  }
+
   if (!wroteAnyLeg) {
     // Full idempotent no-op — every leg already exists (re-poll overlap).
     return { applied: false, skipReason: undefined };

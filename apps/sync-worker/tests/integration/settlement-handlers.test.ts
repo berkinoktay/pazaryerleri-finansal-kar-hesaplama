@@ -647,6 +647,42 @@ describe('settlement handlers', () => {
       expect(claimed).toEqual(new Set(claimItemIds));
     });
 
+    it('#299 BACKFILL: trio written before the claim sync gets linked on the next re-poll', async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem({ withCostAndSale: true });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      // Poll 1 — settlements cron fires first (:30), claim not synced yet.
+      await prisma.$transaction(async (tx) => {
+        const r1 = await handleReturn(storeId, row, tx);
+        expect(r1.applied).toBe(true);
+      });
+      const beforeLinks = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(beforeLinks.map((f) => f.orderClaimItemId)).toEqual([null, null, null]);
+
+      // Claims cron lands 15 minutes later (:45).
+      const { claimItemIds } = await createClaimWithUnits({
+        storeId,
+        orderId,
+        orderItemId: itemId,
+        units: 1,
+      });
+
+      // Poll 2 — every leg already exists (idempotent no-op), but the link
+      // backfill must still run.
+      await prisma.$transaction(async (tx) => {
+        const r2 = await handleReturn(storeId, row, tx);
+        expect(r2.applied).toBe(false); // hiçbir bacak yazılmadı
+      });
+
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees).toHaveLength(3); // backfill çoğaltmaz
+      expect(fees.map((f) => f.orderClaimItemId)).toEqual([
+        claimItemIds[0],
+        claimItemIds[0],
+        claimItemIds[0],
+      ]);
+    });
+
     it('skips with order_not_found when nothing matches (unknown parcel + unknown orderNumber)', async () => {
       const { storeId } = await buildOrderWithItem();
       const row = makeSettlementRow({
