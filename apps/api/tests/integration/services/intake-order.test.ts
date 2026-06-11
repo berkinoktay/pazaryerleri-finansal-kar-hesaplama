@@ -203,7 +203,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
   });
 
-  it('variant_not_found → skipped, nothing written', async () => {
+  it('unmatched variant + today order → buffered (revenue visible, cost waits)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     // No variant seeded → barcode resolves to no variant.
@@ -212,19 +212,36 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       storeId: store.id,
       organizationId: org.id,
       mapped: buildMapped({
-        platformOrderId: 'novar-1',
+        platformOrderId: 'novar-today',
         orderDate: new Date(),
         barcode: 'UNKNOWN-XYZ',
       }),
     });
 
-    expect(outcome).toEqual({
-      kind: 'skipped',
-      reason: 'variant_not_found',
-      barcode: 'UNKNOWN-XYZ',
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+  });
+
+  it('unmatched variant + past-day order → persisted with a null-variant item carrying the barcode', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'novar-past',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+        barcode: 'UNKNOWN-XYZ',
+      }),
     });
-    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
-    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    const item = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: 'novar-past' } },
+    });
+    expect(item.productVariantId).toBeNull();
+    expect(item.barcode).toBe('UNKNOWN-XYZ');
   });
 
   it('already-in-orders guard is org/store-scoped — org B never matches org A order', async () => {
