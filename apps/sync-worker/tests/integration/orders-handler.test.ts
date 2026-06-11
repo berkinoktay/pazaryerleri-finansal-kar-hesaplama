@@ -287,9 +287,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(item.productVariantId).not.toBeNull();
   });
 
-  // PR-B calculability gate: the old "graceful null-variant item" behavior is
-  // gone — an unresolvable variant now hard-skips the whole order.
-  it('calculability gate: variant not found → order skipped (not written)', async () => {
+  // Spec 2026-06-11: the variant_not_found hard-skip is gone — an unresolvable
+  // variant routes through cost_missing and the order is ALWAYS written (the
+  // unmatched line keeps the barcode trail with a null variant FK).
+  it('calculability gate: variant not found → order persisted with a null-variant item', async () => {
     const { store, log } = await setupStoreAndSyncLog([]); // no variants seeded
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -318,8 +319,12 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
-    expect(await prisma.orderItem.count()).toBe(0);
+    // ORDER_DATE_MS is past-day → cost_missing routing persists with null profit.
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.estimatedNetProfit).toBeNull();
+    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(item.productVariantId).toBeNull();
+    expect(item.barcode).toBe('EAN13-UNKNOWN');
   });
 
   it('cost-missing + past-day → order persisted with null profit (not skipped)', async () => {
@@ -382,7 +387,7 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
   it('cost-missing + today → buffers (PENDING), no orders row (1A symmetry)', async () => {
     const { org, store, log } = await setupStoreAndSyncLog([]);
-    // Variant resolves (so not variant_not_found) but has NO cost profile.
+    // Variant resolves (the gap is the cost, not the variant) — NO cost profile.
     const product = await prisma.product.create({
       data: {
         organizationId: org.id,

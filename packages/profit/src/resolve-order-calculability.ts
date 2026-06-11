@@ -1,11 +1,10 @@
 /**
- * V1 hard-skip gate for order calculability (spec §6, brainstorm 2026-05-24).
+ * Calculability gate (spec 2026-06-11 order-line-variant-recovery).
  *
- * If any line on an order lacks either a resolved product variant OR a
- * non-null cost snapshot, the entire order is rejected at the sync
- * boundary — never written to the `orders` table. Past suppliers' costs are
- * not recoverable; reflecting "current" cost onto a past order would break
- * snapshot discipline. Uncomputable record = does not exist.
+ * Orders are ALWAYS written — this gate only decides full-profit vs
+ * cost-missing routing. A line with no resolved variant is by definition
+ * cost-missing (no variant ⇒ no cost profile link); `variantId: null` lets
+ * callers log the variant gap distinctly.
  *
  * Caller responsibility: assemble `lines[]` by resolving variant via
  * `barcode` and reading `unitCostSnapshotNet` from the cost profile link.
@@ -22,15 +21,11 @@ export interface OrderLineForCalcCheck {
 
 export type CalcResult =
   | { kind: 'calculable' }
-  | { kind: 'skip'; reason: 'variant_not_found'; barcode: string }
-  | { kind: 'skip'; reason: 'cost_missing'; barcode: string; variantId: string };
+  | { kind: 'skip'; reason: 'cost_missing'; barcode: string; variantId: string | null };
 
 export function resolveOrderCalculability(lines: OrderLineForCalcCheck[]): CalcResult {
   for (const line of lines) {
-    if (line.variantId === null) {
-      return { kind: 'skip', reason: 'variant_not_found', barcode: line.barcode };
-    }
-    if (line.unitCostSnapshotNet === null) {
+    if (line.variantId === null || line.unitCostSnapshotNet === null) {
       return {
         kind: 'skip',
         reason: 'cost_missing',

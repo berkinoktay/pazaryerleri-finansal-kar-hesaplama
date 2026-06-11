@@ -17,7 +17,20 @@ function buildMapped(over: {
   barcode?: string;
   status?: MappedOrder['status'];
   dematerialized?: boolean;
+  /** Multi-line orders: each entry clones the single-line template below. */
+  lines?: Array<{ barcode: string; platformLineId: string }>;
 }): MappedOrder {
+  const lineTemplate = {
+    quantity: 1,
+    unitPriceNet: '84.75',
+    unitVatRate: '18',
+    unitVatAmount: '15.25',
+    grossCommissionAmountNet: '12.71',
+    grossCommissionVatAmount: '2.29',
+    sellerDiscountNet: '0',
+    sellerDiscountVatAmount: '0',
+    commissionRate: '15',
+  };
   return {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: `ord-${over.platformOrderId}`,
@@ -37,21 +50,20 @@ function buildMapped(over: {
     usesSellerCargoAgreement: false,
     platformCreatedBy: null,
     originShipmentDate: null,
-    lines: [
-      {
-        barcode: over.barcode ?? BARCODE,
-        quantity: 1,
-        platformLineId: null,
-        unitPriceNet: '84.75',
-        unitVatRate: '18',
-        unitVatAmount: '15.25',
-        grossCommissionAmountNet: '12.71',
-        grossCommissionVatAmount: '2.29',
-        sellerDiscountNet: '0',
-        sellerDiscountVatAmount: '0',
-        commissionRate: '15',
-      },
-    ],
+    lines:
+      over.lines !== undefined
+        ? over.lines.map((line) => ({
+            ...lineTemplate,
+            barcode: line.barcode,
+            platformLineId: line.platformLineId,
+          }))
+        : [
+            {
+              ...lineTemplate,
+              barcode: over.barcode ?? BARCODE,
+              platformLineId: null,
+            },
+          ],
   };
 }
 
@@ -203,7 +215,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
   });
 
-  it('variant_not_found → skipped, nothing written', async () => {
+  it('unmatched variant + today order → buffered (revenue visible, cost waits)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     // No variant seeded → barcode resolves to no variant.
@@ -212,19 +224,146 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       storeId: store.id,
       organizationId: org.id,
       mapped: buildMapped({
-        platformOrderId: 'novar-1',
+        platformOrderId: 'novar-today',
         orderDate: new Date(),
         barcode: 'UNKNOWN-XYZ',
       }),
     });
 
-    expect(outcome).toEqual({
-      kind: 'skipped',
-      reason: 'variant_not_found',
-      barcode: 'UNKNOWN-XYZ',
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+  });
+
+  it('unmatched variant + past-day order → persisted with a null-variant item carrying the barcode', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'novar-past',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+        barcode: 'UNKNOWN-XYZ',
+      }),
     });
-    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
-    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    const item = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id, platformOrderId: 'novar-past' } },
+    });
+    expect(item.productVariantId).toBeNull();
+    expect(item.barcode).toBe('UNKNOWN-XYZ');
+
+    // Legacy-key idempotency: the template line carries NO platformLineId, so a
+    // re-scan dedupes on the (orderId, null-variant) fallback — still one item.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'novar-past',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+        barcode: 'UNKNOWN-XYZ',
+      }),
+    });
+    expect(
+      await prisma.orderItem.count({
+        where: { order: { storeId: store.id, platformOrderId: 'novar-past' } },
+      }),
+    ).toBe(1);
+  });
+
+  it('mixed order: matched line gets its cost snapshot, unmatched line persists null-FK alongside', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, 'EAN13-MIX-OK', true); // variant + cost profile
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'mixed-1',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+        lines: [
+          { barcode: 'EAN13-MIX-OK', platformLineId: '8001' },
+          { barcode: 'UNKNOWN-MIX', platformLineId: '8002' },
+        ],
+      }),
+    });
+
+    // One unmatched line makes the order cost_missing — but BOTH lines persist.
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    const items = await prisma.orderItem.findMany({
+      where: { order: { storeId: store.id, platformOrderId: 'mixed-1' } },
+      orderBy: { barcode: 'asc' },
+    });
+    expect(items).toHaveLength(2);
+    const [matched, unmatched] = items;
+    expect(matched!.barcode).toBe('EAN13-MIX-OK');
+    expect(matched!.productVariantId).not.toBeNull();
+    // The matched line's snapshot discipline is untouched by the unmatched sibling.
+    expect(matched!.unitCostSnapshotNet).not.toBeNull();
+    expect(unmatched!.barcode).toBe('UNKNOWN-MIX');
+    expect(unmatched!.productVariantId).toBeNull();
+    expect(unmatched!.unitCostSnapshotNet).toBeNull();
+  });
+
+  it('legacy item without platformLineId is matched (not duplicated) by a re-delivery carrying one, and backfilled', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // variant resolves, no cost
+    const past = new Date(Date.now() - PAST_DAY_MS);
+
+    // 1st intake: template line has NO platformLineId (pre-PR-8 / legacy buffer
+    // JSONB shape) → item stored with platformLineId NULL.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'transition-1', orderDate: past }),
+    });
+
+    // 2nd intake: the same physical line now carries its platform line id
+    // (e.g. a Delivered webhook after the mapper upgrade). Must dedupe against
+    // the stored NULL row — not insert a twin — and self-heal the id.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'transition-1',
+        orderDate: past,
+        lines: [{ barcode: BARCODE, platformLineId: '7001' }],
+      }),
+    });
+
+    const items = await prisma.orderItem.findMany({
+      where: { order: { storeId: store.id, platformOrderId: 'transition-1' } },
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.platformLineId).toBe(7001n);
+  });
+
+  it('two different unmatched lines in one order both persist, and re-intake stays idempotent', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const mapped = buildMapped({
+      platformOrderId: 'novar-two-lines',
+      orderDate: new Date(Date.now() - PAST_DAY_MS),
+      lines: [
+        { barcode: 'UNKNOWN-A', platformLineId: '9001' },
+        { barcode: 'UNKNOWN-B', platformLineId: '9002' },
+      ],
+    });
+
+    await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    // Idempotent re-scan (saatlik cron senaryosu) — satır sayısı sabit kalmalı.
+    await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+
+    const items = await prisma.orderItem.findMany({
+      where: { order: { storeId: store.id, platformOrderId: 'novar-two-lines' } },
+      orderBy: { barcode: 'asc' },
+    });
+    expect(items.map((i) => i.barcode)).toEqual(['UNKNOWN-A', 'UNKNOWN-B']);
+    expect(items.every((i) => i.productVariantId === null)).toBe(true);
   });
 
   it('already-in-orders guard is org/store-scoped — org B never matches org A order', async () => {

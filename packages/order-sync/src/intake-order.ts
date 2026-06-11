@@ -6,7 +6,7 @@
  * Routing (see the spec's decision table + split research 2026-06-09):
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
- *   - variant_not_found            → skip + caller logs (unmappable until product syncs)
+ *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
  *   - calculable                   → upsertOrderWithSnapshot (full profit)
  *   - cost_missing + past-day      → upsertOrderWithSnapshot (null profit) — never lose a sale
  *   - cost_missing + today + in orders → upsertOrderWithSnapshot (idempotent, no buffer)
@@ -36,7 +36,6 @@ export type OrderIntakeOutcome =
     }
   | { kind: 'buffered' }
   | { kind: 'buffered_deduped' }
-  | { kind: 'skipped'; reason: 'variant_not_found'; barcode: string }
   | { kind: 'dematerialized'; deletedOrder: boolean; deletedBufferEntries: number };
 
 export async function intakeOrder(args: {
@@ -95,11 +94,6 @@ export async function intakeOrder(args: {
   if (calc.kind === 'calculable') {
     await upsertOrderWithSnapshot(storeId, organizationId, mapped);
     return { kind: 'persisted', reason: 'calculable' };
-  }
-
-  // No resolvable variant → skip (locked decision; reappears once the product syncs).
-  if (calc.reason === 'variant_not_found') {
-    return { kind: 'skipped', reason: 'variant_not_found', barcode: calc.barcode };
   }
 
   // calc is { kind: 'skip', reason: 'cost_missing', ... } from here.

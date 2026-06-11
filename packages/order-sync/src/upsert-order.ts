@@ -16,7 +16,8 @@
  *
  * Idempotent:
  *   - Order UPSERT on (storeId, platformOrderId)
- *   - OrderItem INSERT skip-if-exists on (orderId, productVariantId)
+ *   - OrderItem INSERT skip-if-exists, platformLineId-first (legacy fallback:
+ *     (orderId, productVariantId) for lines/rows without a platform line id)
  *   - captureCostSnapshot inner guard ile write-once
  *   - applyEstimateOnOrderCreate inner guard ile write-once
  *     (estimatedNetProfit non-null ise no-op)
@@ -278,14 +279,40 @@ export async function upsertOrderWithSnapshot(
         select: { id: true },
       });
 
-      // Existing check (write-once snapshot): productVariantId null olabilir
-      // (variant barcode'la match'lenemeyen senaryo) — bu durumda findFirst
-      // null check'i barcode bazlı değil, productVariantId+orderId bazlı.
+      // Dedupe (write-once item): platformLineId platform-taraflı satır
+      // kimliği — varsa birincil anahtar odur (variant'sız satırlar NULL-FK
+      // üzerinden çakışamaz; resolution-öncesi re-scan duplike üretemez).
+      // platformLineId'siz satır (eski buffer JSONB replay'i, sparse payload)
+      // legacy variant anahtarına düşer. DB tarafı da NULL taşıyabilir
+      // (pre-PR-8 satırlar + legacy replay ürünleri) → gelen satır
+      // platformLineId'li olsa bile NULL'da kalmış mevcut satırı legacy
+      // anahtarla da ara; yoksa aynı fiziksel satır re-delivery'de İKİNCİ kez
+      // yazılır (çift sayım — eski anahtar bunu yakalıyordu).
       const existing = await tx.orderItem.findFirst({
-        where: { orderId: upserted.id, productVariantId: variant?.id ?? null },
-        select: { id: true },
+        where:
+          line.platformLineId != null
+            ? {
+                orderId: upserted.id,
+                OR: [
+                  { platformLineId: BigInt(line.platformLineId) },
+                  { platformLineId: null, productVariantId: variant?.id ?? null },
+                ],
+              }
+            : { orderId: upserted.id, productVariantId: variant?.id ?? null },
+        select: { id: true, platformLineId: true },
       });
-      if (existing !== null) continue;
+      if (existing !== null) {
+        // Self-heal: legacy anahtarla yakalanan satıra platform kimliğini
+        // damgala — sonraki re-scan'ler birincil anahtardan eşleşir, claims
+        // eşleştirmesi (platformLineId) doğru satırı görür.
+        if (line.platformLineId != null && existing.platformLineId === null) {
+          await tx.orderItem.update({
+            where: { id: existing.id },
+            data: { platformLineId: BigInt(line.platformLineId) },
+          });
+        }
+        continue;
+      }
 
       if (variant === null) {
         // Variant resolution gap (edge case): productVariantId null bırakılır.

@@ -36,6 +36,11 @@ section "Versioning" for details.
 
 ### Changed
 
+- `POST /v1/webhooks/orders/:storeId` — behavior only: an order line whose barcode resolves
+  to no variant no longer hard-skips the whole order. The order now routes through the
+  cost-missing path (today → live-performance buffer; past-day → persisted with null profit;
+  the unmatched line keeps its barcode with a null variant FK). The `orders.skipped`
+  log event is gone. No wire-shape change. (#311)
 - `POST /v1/organizations/:orgId/stores` — a successful connect now also bootstraps the
   initial sync chain: four PENDING `sync_logs` rows enqueued in priority order
   (PRODUCTS → ORDERS → SETTLEMENTS → CLAIMS, FIFO via staggered `started_at`), so the

@@ -18,9 +18,10 @@ import { ensureFeeDefinitions } from '../../../helpers/seed-fee-definitions';
  *
  * A cost-missing order (variant resolves, but no cost profile attached) is no
  * longer always hard-skipped. If its orderDate is TODAY (Europe/Istanbul) it is
- * written to live_performance_buffer (seller's grace window). An older orderDate
- * or an unresolved variant stays a hard skip. Mirrors the proven store/Basic-Auth
- * setup from trendyol-orders.routes.test.ts.
+ * written to live_performance_buffer (seller's grace window); an older orderDate
+ * persists straight to orders with null profit. Unresolved variants route the
+ * same way — cost_missing (spec 2026-06-11, no hard skip). Mirrors the proven
+ * store/Basic-Auth setup from trendyol-orders.routes.test.ts.
  */
 const STORE_PLATFORM = 'TRENDYOL' as const;
 const SUPPLIER_ID = '99999';
@@ -80,8 +81,9 @@ function makeWebhookPayload(overrides: PayloadOverrides = {}) {
 
 /**
  * Store with webhook Basic-Auth creds + a COST-MISSING variant: the variant
- * resolves by barcode (so it is not variant_not_found) but has NO costProfileLinks,
- * so resolveOrderCalculability returns `cost_missing` — the buffer trigger.
+ * resolves by barcode (the gap is the cost, not the variant) but has NO
+ * costProfileLinks, so resolveOrderCalculability returns `cost_missing` —
+ * the buffer trigger.
  */
 async function setupStore(): Promise<{ orgId: string; storeId: string }> {
   const user = await createUserProfile();
@@ -229,7 +231,7 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(1);
   });
 
-  it('variant_not_found → hard skip, no buffer write (Spec 1 discipline preserved)', async () => {
+  it('unmatched variant + today → buffered like cost_missing (spec 2026-06-11)', async () => {
     const { storeId } = await setupStore();
 
     const res = await postWebhook(
@@ -242,6 +244,9 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
       authOk,
     );
     expect(res.status).toBe(200);
-    expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+    // The variant gap no longer hard-skips: today's order takes the buffer
+    // route (revenue visible immediately; cost waits for resolution).
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId } })).toBe(0);
   });
 });
