@@ -38,6 +38,7 @@ export {
   APPROVED_PAGE_CAP_ITEMS,
   PRODUCTS_PAGE_SIZE,
   fetchApprovedProducts,
+  fetchProductsByBarcode,
   type FetchApprovedProductsOpts,
 } from './trendyol/products';
 export {

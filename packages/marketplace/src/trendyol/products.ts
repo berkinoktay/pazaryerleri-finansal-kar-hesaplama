@@ -61,6 +61,34 @@ function buildUrl(base: string, supplierId: string, req: PageRequest): string {
   return url.toString();
 }
 
+/**
+ * Tekil barkod sorgusu — "Ürün Filtreleme – Onaylı Ürün v2" endpoint'inin
+ * `barcode` giriş parametresi (urun-entegrasyonlari-v2.md:91). Tek sayfa,
+ * sayfalama yok: bir barkod en fazla bir avuç variant döndürür. Yanıt tam
+ * katalog senkronuyla AYNI şekildedir → aynı mapper'dan geçer; çağıran
+ * (variant-resolution tick) sonucu products upsert hattına verir.
+ */
+export async function fetchProductsByBarcode(
+  opts: Omit<FetchApprovedProductsOpts, 'initialCursor'> & { barcode: string },
+): Promise<MappedProductsPage> {
+  const env = opts.environment ?? 'PRODUCTION';
+  const base = opts.baseUrl ?? baseUrlFor(env);
+  const deps: FetcherDeps = {
+    credentials: opts.credentials,
+    env,
+    signal: opts.signal,
+  };
+
+  const url = new URL(
+    `${base}/integration/product/sellers/${opts.credentials.supplierId}/products/approved`,
+  );
+  url.searchParams.set('barcode', opts.barcode);
+  url.searchParams.set('size', PRODUCTS_PAGE_SIZE.toString());
+
+  const raw = await fetchOnce<TrendyolApprovedProductsResponse>(url.toString(), deps);
+  return mapTrendyolApprovedResponse(raw);
+}
+
 export interface FetchApprovedProductsOpts {
   baseUrl?: string;
   environment?: StoreEnvironment;
