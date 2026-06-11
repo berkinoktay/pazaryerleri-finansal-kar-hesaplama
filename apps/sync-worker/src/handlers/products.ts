@@ -203,7 +203,13 @@ export function computeProductAggregates(variants: { quantity: number; salePrice
   };
 }
 
-async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: string): Promise<void> {
+// Exported: the variant-resolution tick reuses this exact upsert pipeline for
+// targeted single-barcode fetches (syncLogId: null — no SyncLog row to anchor).
+export async function upsertBatch(
+  store: Store,
+  batch: MappedProduct[],
+  syncLogId: string | null,
+): Promise<void> {
   // ─── PORTED VERBATIM from apps/api/src/services/product-sync.service.ts ──
   // One transaction per content (parent + its variants + image replace).
   // Each content also runs inside a try/catch — a single malformed
@@ -348,7 +354,7 @@ async function upsertBatch(store: Store, batch: MappedProduct[], syncLogId: stri
       });
     } catch (err) {
       syncLog.error('content.upsert.failed', {
-        syncLogId,
+        ...(syncLogId !== null && { syncLogId }),
         storeId: store.id,
         platformContentId: mapped.platformContentId.toString(),
         productMainId: mapped.productMainId,

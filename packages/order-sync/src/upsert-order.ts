@@ -99,8 +99,11 @@ async function resolveFx(
  *
  * Mirrors apps/api/src/services/cost-snapshot.service.ts#captureCostSnapshot.
  * The two implementations must stay in sync if the spec changes.
+ *
+ * Exported (variant-recovery PR-2): the worker's variant-resolution tick calls
+ * this after linking a late-resolved variant, inside its own order transaction.
  */
-async function captureCostSnapshot(
+export async function captureCostSnapshot(
   orderItemId: string,
   tx: Prisma.TransactionClient,
 ): Promise<void> {
