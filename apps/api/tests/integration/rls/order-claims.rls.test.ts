@@ -12,15 +12,12 @@ import {
 import { createRlsScopedClient } from '../../helpers/rls-client';
 
 /**
- * order_claims: the LIVE policy (rls-policies.sql) is a parent-walk —
- * EXISTS(orders WHERE orders.id = order_claims.order_id AND
- * can_access_store(orders.store_id)) — i.e. store-access-aware like
- * order_fees, NOT the flat is_org_member() over the denormalized
- * organization_id that design §3.6 originally sketched. The denormalized
- * column still exists (handy for indexes/queries) but the policy doesn't
- * read it. This comment was stale until PR-13; the test below asserts
- * observable behavior (own-org visible, sibling-org invisible), which
- * holds under either policy shape.
+ * order_claims: store-scoped via the denormalized store_id (#298) — the
+ * policy is a direct can_access_store(store_id) gate, sync_logs pattern.
+ * The old parent-walk through orders is gone; the sync worker stamps
+ * store_id from the parent order on every insert. The tests assert
+ * observable behavior: own-org visible, sibling-org invisible, and a
+ * MEMBER without a store grant sees nothing (store-access-awareness).
  */
 describe('RLS — order_claims', () => {
   beforeAll(async () => {
@@ -43,13 +40,27 @@ describe('RLS — order_claims', () => {
       createOrder(orgB.id, storeB.id),
     ]);
     const [claimA] = await Promise.all([
-      createOrderClaim(orgA.id, orderA.id),
-      createOrderClaim(orgB.id, orderB.id),
+      createOrderClaim(orgA.id, storeA.id, orderA.id),
+      createOrderClaim(orgB.id, storeB.id, orderB.id),
     ]);
 
     const { data, error } = await client.from('order_claims').select('id,trendyol_claim_id');
 
     expect(error).toBeNull();
     expect(data?.map((c) => c.id)).toEqual([claimA.id]);
+  });
+
+  it('MEMBER without a store grant sees no claims of that store', async () => {
+    const { user, client } = await createRlsScopedClient();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'MEMBER');
+    const store = await createStore(org.id);
+    const order = await createOrder(org.id, store.id);
+    await createOrderClaim(org.id, store.id, order.id);
+
+    const { data, error } = await client.from('order_claims').select('id');
+
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
   });
 });

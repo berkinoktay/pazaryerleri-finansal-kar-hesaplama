@@ -305,6 +305,7 @@ model Store {
   commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
   livePerformanceBuffer  LivePerformanceBuffer[]
+  orderClaims            OrderClaim[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -1090,25 +1091,40 @@ model OrderFee {
 // UI'da "iade riski" badge için kullanılır. Settlement Return geldiğinde resolved
 // set edilir + REFUND_DEDUCTION / COMMISSION_REFUND / RETURN_SHIPPING OrderFee
 // satırları yazılır. trendyolClaimId order başına unique.
+//
+// #298: storeId denormalize (insert sırasında parent order'dan stamp) — tenant
+// filtreleme artık `order: { storeId }` parent-walk'u değil doğrudan kolon;
+// RLS de can_access_store(store_id) (sync_logs pattern). Paket id'leri kolonda:
+// orderShipmentPackageId İADE kolisinin id'si — settlement Return → sipariş
+// köprüsünün (return.ts katman-2) indexli anahtarı. orderOutboundPackageId
+// orijinal sevkiyat (== Order.platformOrderId). externalRef audit-only.
 model OrderClaim {
   id                  String   @id @default(uuid()) @db.Uuid
   organizationId      String   @map("organization_id") @db.Uuid
+  storeId             String   @map("store_id") @db.Uuid
   orderId             String   @map("order_id") @db.Uuid
   trendyolClaimId     String   @map("trendyol_claim_id")
   claimDate           DateTime @map("claim_date")
   cargoProviderName   String?  @map("cargo_provider_name")
   cargoTrackingNumber BigInt?  @map("cargo_tracking_number")
   resolved            Boolean
-  externalRef         Json?    @map("external_ref")
+
+  orderShipmentPackageId String? @map("order_shipment_package_id")
+  orderOutboundPackageId String? @map("order_outbound_package_id")
+
+  externalRef Json? @map("external_ref")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  store Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   order Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items OrderClaimItem[]
 
   @@unique([orderId, trendyolClaimId])
   @@index([organizationId, resolved])
+  @@index([storeId, orderShipmentPackageId])
+  @@index([storeId, resolved])
   @@map("order_claims")
 }
 

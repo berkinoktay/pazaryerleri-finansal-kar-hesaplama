@@ -341,7 +341,7 @@ describe('Order routes', () => {
         vatAmount: '0.00',
       });
 
-      const claim = await createOrderClaim(org.id, order.id, { resolved: false });
+      const claim = await createOrderClaim(org.id, store.id, order.id, { resolved: false });
       await createOrderClaimItem(claim.id, {
         reasonCode: 'DAMAGEDITEM',
         reasonName: 'Üründe hasar var',

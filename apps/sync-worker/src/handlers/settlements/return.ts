@@ -74,9 +74,9 @@ export async function handleReturn(
   // platformOrderId lookup never matched on prod, silently skipping
   // every refund since PR-7.
   //   1. platformOrderId == row.shipmentPackageId (kept — defensive)
-  //   2. OrderClaim bridge: PR-13 stores the return-parcel id in
-  //      externalRef.orderShipmentPackageId — exact, store-safe via the
-  //      claim's order relation
+  //   2. OrderClaim bridge: the claims sync stores the return-parcel id
+  //      in the indexed orderShipmentPackageId column (#298) — exact,
+  //      store-safe via the denormalized storeId
   //   3. orderNumber + barcode single-candidate fallback (claim not
   //      synced yet); ambiguous → skip + natural 6h retry
   const platformOrderId = row.shipmentPackageId.toString();
@@ -87,10 +87,7 @@ export async function handleReturn(
 
   if (order === null) {
     const claim = await tx.orderClaim.findFirst({
-      where: {
-        order: { storeId },
-        externalRef: { path: ['orderShipmentPackageId'], equals: platformOrderId },
-      },
+      where: { storeId, orderShipmentPackageId: platformOrderId },
       select: { order: { select: { id: true, organizationId: true, settledNetProfit: true } } },
     });
     order = claim?.order ?? null;

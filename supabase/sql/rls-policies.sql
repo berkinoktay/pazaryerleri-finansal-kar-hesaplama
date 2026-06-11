@@ -383,25 +383,21 @@ CREATE POLICY order_fees_org_member_read ON order_fees
     )
   );
 
--- ─── order_claims — reach via parent order ─────────────────────────────
--- İade talep görünürlüğü; getclaims sync worker (PR-13) yazar. No store_id of
--- its own; walk up to the parent order and gate on that order's store access.
+-- ─── order_claims — store-scoped ───────────────────────────────────────
+-- İade talep görünürlüğü; getclaims sync worker (PR-13) yazar. store_id
+-- denormalize (#298) — parent-walk yerine doğrudan can_access_store(store_id),
+-- sync_logs pattern'i. Sync worker store_id'yi her insert'te parent order'dan
+-- stamp'ler.
 ALTER TABLE order_claims ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS order_claims_org_member_read ON order_claims;
 CREATE POLICY order_claims_org_member_read ON order_claims
   FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM orders
-      WHERE orders.id = order_claims.order_id
-        AND can_access_store(orders.store_id)
-    )
-  );
+  USING (can_access_store(store_id));
 
--- ─── order_claim_items — reach via parent claim → order ────────────────
--- No store_id; walk to the parent claim, then to that claim's order, and gate
--- on the order's store access. Recursion-safe: can_access_store is a SECURITY
--- DEFINER helper, same as is_org_member before it.
+-- ─── order_claim_items — reach via parent claim ────────────────────────
+-- No store_id; walk to the parent claim and gate on ITS denormalized
+-- store_id (#298 — the orders join dropped). Recursion-safe:
+-- can_access_store is a SECURITY DEFINER helper, same as is_org_member.
 ALTER TABLE order_claim_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS order_claim_items_org_member_read ON order_claim_items;
 CREATE POLICY order_claim_items_org_member_read ON order_claim_items
@@ -409,9 +405,8 @@ CREATE POLICY order_claim_items_org_member_read ON order_claim_items
   USING (
     EXISTS (
       SELECT 1 FROM order_claims
-      JOIN orders ON orders.id = order_claims.order_id
       WHERE order_claims.id = order_claim_items.claim_id
-        AND can_access_store(orders.store_id)
+        AND can_access_store(order_claims.store_id)
     )
   );
 
