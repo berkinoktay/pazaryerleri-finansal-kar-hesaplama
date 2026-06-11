@@ -259,6 +259,7 @@
   "nav": {
     "dashboard": "Panel",
     "orders": "Siparişler",
+    "returns": "İadeler",
     "products": "Ürünler",
     "costs": "Maliyetler",
     "profitability": "Karlılık",
@@ -734,6 +735,52 @@
   "placeholderPage": {
     "comingSoon": "Yakında geliştirilecek",
     "description": "Bu sayfa henüz geliştirme aşamasında. İlerleyen güncellemelerde aktif olacak."
+  },
+  "returnsPage": {
+    "title": "İadeler",
+    "intent": "Mağazanın iade taleplerini ve kâr etkisini tek yerden izleyin",
+    "kpi": {
+      "open": "Açık iade",
+      "resolvedInPeriod": "Sonuçlanan (dönem)",
+      "refundDeduction": "İade kesintisi (dönem)",
+      "netImpact": "Net kâr etkisi (dönem)"
+    },
+    "tabs": { "all": "Tümü", "open": "Açık", "resolved": "Sonuçlanan" },
+    "toolbar": { "searchPlaceholder": "Sipariş no veya iade no ara" },
+    "table": {
+      "columns": {
+        "claimDate": "Tarih",
+        "orderNumber": "Sipariş No",
+        "product": "Ürün",
+        "reason": "Sebep",
+        "scope": "Kapsam",
+        "status": "Durum"
+      }
+    },
+    "status": {
+      "OPEN": "Açık",
+      "ACCEPTED": "Kabul edildi",
+      "REJECTED": "Reddedildi",
+      "CANCELLED": "İptal edildi",
+      "MIXED": "Sonuçlandı"
+    },
+    "scope": { "FULL": "Tümü", "PARTIAL": "Parçalı" },
+    "summary": {
+      "units": "×{count}",
+      "more": "+{count}",
+      "unknownProduct": "Bilinmeyen ürün"
+    },
+    "empty": {
+      "noStore": {
+        "title": "Mağaza seçili değil",
+        "description": "İadeleri görmek için bir mağaza bağlayın veya seçin.",
+        "cta": "Mağaza bağla"
+      },
+      "noReturns": {
+        "title": "Henüz iade yok",
+        "description": "İade talepleri 6 saatte bir Trendyol'dan çekilir; ilk iade düştüğünde burada görünür."
+      }
+    }
   },
   "ordersPage": {
     "title": "Siparişler",
