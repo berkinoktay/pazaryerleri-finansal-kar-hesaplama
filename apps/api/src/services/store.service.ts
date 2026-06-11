@@ -6,7 +6,14 @@ import {
   StoreCredentialShapeError,
   type TrendyolCredentials,
 } from '@pazarsync/marketplace';
-import { encryptCredentials, mapPrismaError, syncLog } from '@pazarsync/sync-core';
+import {
+  encryptCredentials,
+  mapPrismaError,
+  syncLog,
+  syncLogService,
+  SyncInProgressError,
+} from '@pazarsync/sync-core';
+import type { SyncType } from '@pazarsync/db';
 
 import { NotFoundError, ValidationError } from '../lib/errors';
 import type { ConnectStoreInput, Store } from '../validators/store.validator';
@@ -86,6 +93,61 @@ export async function requireOwnedStore(
     throw new NotFoundError('Store', storeId);
   }
   return row;
+}
+
+/**
+ * Initial sync types in PRIORITY order — the worker claims FIFO by
+ * `started_at`, so this array order IS the execution order:
+ *
+ *   1. PRODUCTS    — variants must exist or webhook order intake skips the
+ *                    order entirely (observed: 9 orders silently dropped on
+ *                    2026-06-11 because the catalog synced 4 h after connect).
+ *   2. ORDERS      — first run scans `[store.createdAt, now]` (no historical
+ *                    backfill by design); settlements/claims attach to these.
+ *   3. SETTLEMENTS — books fees onto existing orders (60 d window, idempotent).
+ *   4. CLAIMS      — matches returns to orders; unmatched rows self-heal on
+ *                    the next 6 h cron pass.
+ *
+ * Design: docs/plans/2026-06-11-sync-bootstrap-cron-parity.md
+ */
+const BOOTSTRAP_SYNC_SEQUENCE: readonly SyncType[] = [
+  'PRODUCTS',
+  'ORDERS',
+  'SETTLEMENTS',
+  'CLAIMS',
+];
+
+/**
+ * Enqueue the initial sync chain for a freshly connected store.
+ *
+ * Non-blocking by contract (same stance as webhook registration): the store
+ * row is already committed, so an enqueue failure must never surface to the
+ * user — the hourly/6-hourly pg_cron fan-outs re-enqueue every type with the
+ * same dedupe guard, so a missed bootstrap heals itself on the next tick.
+ *
+ * Each type gets `started_at = base + index` (ms) so the worker's
+ * `ORDER BY started_at` claim preserves the priority order even when all
+ * four rows land in the same millisecond.
+ */
+async function bootstrapInitialSyncs(organizationId: string, storeId: string): Promise<void> {
+  const baseTimeMs = Date.now();
+  for (const [index, syncType] of BOOTSTRAP_SYNC_SEQUENCE.entries()) {
+    try {
+      await syncLogService.acquireSlot(organizationId, storeId, syncType, {
+        startedAt: new Date(baseTimeMs + index),
+      });
+    } catch (err) {
+      if (err instanceof SyncInProgressError) {
+        // Slot already active for this (store, type) — nothing to do.
+        continue;
+      }
+      syncLog.warn('store.bootstrap-sync-enqueue-failed', {
+        storeId,
+        syncType,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 /**
@@ -173,6 +235,12 @@ export async function connect(organizationId: string, input: ConnectStoreInput):
       // Store fields stay null → UI will show "webhook bağlı değil" badge.
     }
   }
+
+  // ─── Initial sync bootstrap — priority-ordered, non-blocking ───────────
+  // The seller's data starts flowing the moment the store is connected
+  // instead of waiting for the first cron tick (worst case: 1 h for orders,
+  // 6 h for settlements/claims, and PRODUCTS had no schedule at all).
+  await bootstrapInitialSyncs(organizationId, row.id);
 
   return toStoreResponse(row);
 }

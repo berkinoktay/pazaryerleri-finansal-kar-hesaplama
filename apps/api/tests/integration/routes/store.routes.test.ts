@@ -123,6 +123,43 @@ describe('Store routes', () => {
       expect(typeof row.credentials).toBe('string');
       expect(String(row.credentials)).not.toContain('seed-trendyol-api-key');
     });
+
+    it('bootstraps the initial sync chain in priority order (PRODUCTS → ORDERS → SETTLEMENTS → CLAIMS)', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id, 'OWNER');
+      mockProbe(new Response('[]', { status: 200 }));
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: bearer(user.accessToken),
+        },
+        body: JSON.stringify(CONNECT_BODY),
+      });
+      expect(res.status).toBe(201);
+
+      const store = await prisma.store.findFirstOrThrow({ where: { organizationId: org.id } });
+      const logs = await prisma.syncLog.findMany({
+        where: { storeId: store.id },
+        orderBy: { startedAt: 'asc' },
+      });
+
+      // One PENDING row per type, FIFO order = priority order. The worker
+      // claims `ORDER BY started_at`, so this ordering is the execution order.
+      expect(logs.map((l) => l.syncType)).toEqual(['PRODUCTS', 'ORDERS', 'SETTLEMENTS', 'CLAIMS']);
+      expect(logs.every((l) => l.status === 'PENDING')).toBe(true);
+      expect(logs.every((l) => l.organizationId === org.id)).toBe(true);
+      // started_at strictly increasing — same-millisecond ties would make
+      // the claim order non-deterministic.
+      for (let i = 1; i < logs.length; i += 1) {
+        const prev = logs[i - 1];
+        const curr = logs[i];
+        if (prev === undefined || curr === undefined) throw new Error('unreachable');
+        expect(curr.startedAt.getTime()).toBeGreaterThan(prev.startedAt.getTime());
+      }
+    });
   });
 
   describe('POST — sandbox gate (D4)', () => {

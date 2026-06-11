@@ -88,6 +88,26 @@ describe('syncLogService.markRetryable backoff schedule', () => {
       expect(actualSec).toBeLessThan(expectedBackoffSec + 2);
     },
   );
+
+  it('complete() clears stale error fields left behind by a recovered retryable run', async () => {
+    const id = await setupRunningRow(3);
+    // Simulate the transient-failure → backoff → re-claim → success arc.
+    await syncLogService.markRetryable(
+      id,
+      3,
+      SyncErrorCode.MARKETPLACE_UNREACHABLE,
+      'simulated transient',
+    );
+
+    await syncLogService.complete(id, 42);
+
+    const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
+    expect(after.status).toBe('COMPLETED');
+    expect(after.recordsProcessed).toBe(42);
+    // A COMPLETED row must not advertise the error of an attempt it survived.
+    expect(after.errorCode).toBeNull();
+    expect(after.errorMessage).toBeNull();
+  });
 });
 
 describe('syncLogService.recordSkippedPageAndContinue', () => {
