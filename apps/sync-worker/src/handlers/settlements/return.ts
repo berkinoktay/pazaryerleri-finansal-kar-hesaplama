@@ -160,6 +160,22 @@ export async function handleReturn(
   const hasLeg = new Set(existingLegs.map((f) => f.feeType));
   let wroteAnyLeg = false;
 
+  // #299: pick the returned UNIT this trio belongs to — the oldest claim
+  // item on this order's matching line that no fee has claimed yet
+  // ("first free unit"; a second Return row for the same line lands on
+  // the next free unit). Null when the claim isn't synced yet — the
+  // unconditional backfill below heals it on the next re-poll.
+  const selectedClaimItem = await tx.orderClaimItem.findFirst({
+    where: {
+      orderItemId: item.id,
+      claim: { orderId: order.id },
+      fees: { none: {} },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  const orderClaimItemId = selectedClaimItem?.id ?? null;
+
   // KDV split via item's unitVatRate. Null fallback writes the gross
   // amount as NET with vatRate=0 — reconciliation tolerates this
   // (1-line edge) and audit log surfaces the gap.
@@ -201,6 +217,7 @@ export async function handleReturn(
         vatAmount,
         displayName: 'İade',
         trendyolTransactionId,
+        orderClaimItemId,
         externalRef,
       },
     });
@@ -231,6 +248,7 @@ export async function handleReturn(
         vatAmount: commissionGross.sub(commissionNet),
         displayName: 'Komisyon iadesi',
         trendyolTransactionId,
+        orderClaimItemId,
         externalRef,
       },
     });
@@ -260,6 +278,7 @@ export async function handleReturn(
         vatAmount: item.unitCostSnapshotVatAmount,
         displayName: 'Maliyet iadesi',
         trendyolTransactionId,
+        orderClaimItemId,
         externalRef,
       },
     });
