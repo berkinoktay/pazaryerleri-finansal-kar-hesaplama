@@ -11,6 +11,7 @@ import { REQUEST_ID_HEADER } from './lib/constants';
 import { createSubApp } from './lib/create-hono-app';
 import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
+import claimRoutes from './routes/claims/index';
 import commissionRateRoutes from './routes/commission-rates/index';
 import costProfileRoutes from './routes/cost-profiles/index';
 import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index';
@@ -150,6 +151,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', memberRoutes);
   app.route('/', storeRoutes);
   app.route('/', orderRoutes);
+  app.route('/', claimRoutes);
   app.route('/', livePerformanceRoutes);
   app.route('/', productRoutes);
   app.route('/', productsSubRoutes);

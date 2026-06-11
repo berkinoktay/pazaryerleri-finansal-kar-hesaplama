@@ -1412,6 +1412,216 @@
           }
         ]
       },
+      "ClaimsSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "openCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Unresolved claims RIGHT NOW — date filters do not apply (current workload)."
+          },
+          "resolvedInPeriod": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Claims with claimDate in the period that are resolved."
+          },
+          "refundDeductionGross": {
+            "type": "string",
+            "description": "Sum of REFUND_DEDUCTION (net+VAT) captured in the period. Decimal string.",
+            "example": "785.50"
+          },
+          "commissionRefundGross": {
+            "type": "string"
+          },
+          "costReturnGross": {
+            "type": "string"
+          },
+          "netImpactGross": {
+            "type": "string",
+            "description": "−refundDeduction + commissionRefund + costReturn — usually negative.",
+            "example": "-471.30"
+          }
+        },
+        "required": [
+          "openCount",
+          "resolvedInPeriod",
+          "refundDeductionGross",
+          "commissionRefundGross",
+          "costReturnGross",
+          "netImpactGross"
+        ]
+      },
+      "ListClaimsResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimListItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/TableMeta"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "all": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "open": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "resolved": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "all",
+              "open",
+              "resolved"
+            ],
+            "description": "Status-tab totals. Honor sibling filters (q, from/to) but ignore status so every tab shows its true size."
+          }
+        },
+        "required": [
+          "data",
+          "pagination",
+          "counts"
+        ]
+      },
+      "ClaimListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platformOrderNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trendyolClaimId": {
+            "type": "string"
+          },
+          "claimDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "derivedStatus": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "ACCEPTED",
+              "REJECTED",
+              "CANCELLED",
+              "MIXED"
+            ],
+            "description": "OPEN while unresolved; on resolution, derived from item statuses — uniform Accepted/Rejected/Cancelled map 1:1, anything heterogeneous is MIXED."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "FULL",
+              "PARTIAL"
+            ],
+            "description": "FULL when the claim covers every ordered unit, PARTIAL otherwise."
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Per-unit claim item count (a 3-unit return = 3)."
+          },
+          "productSummary": {
+            "$ref": "#/components/schemas/ClaimProductSummary"
+          },
+          "reasonSummary": {
+            "$ref": "#/components/schemas/ClaimReasonSummary"
+          },
+          "cargoProviderName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cargoTrackingNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cargo tracking number as string — original DB column is BigInt."
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "platformOrderNumber",
+          "trendyolClaimId",
+          "claimDate",
+          "resolved",
+          "derivedStatus",
+          "scope",
+          "itemCount",
+          "productSummary",
+          "reasonSummary",
+          "cargoProviderName",
+          "cargoTrackingNumber"
+        ]
+      },
+      "ClaimProductSummary": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First product title in the claim; null when items are not linked to a line."
+          },
+          "units": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "otherCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of OTHER distinct products beyond the first — \"+N\" in the UI."
+          }
+        },
+        "required": [
+          "firstName",
+          "units",
+          "otherCount"
+        ]
+      },
+      "ClaimReasonSummary": {
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string"
+          },
+          "otherCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first",
+          "otherCount"
+        ]
+      },
       "LivePerformanceKpis": {
         "type": "object",
         "properties": {
@@ -5865,6 +6075,378 @@
           },
           "422": {
             "description": "Invalid body or unknown cost profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/claims/summary": {
+      "get": {
+        "tags": [
+          "Claims"
+        ],
+        "summary": "Return-claims KPI summary for a store",
+        "description": "KPI strip data for the returns page: current open-claim count, resolved count in the period, and the financial totals of the return trio (REFUND_DEDUCTION / COMMISSION_REFUND / COST_RETURN) captured in the period. Count KPIs use claimDate; financial KPIs use OrderFee.capturedAt. Period defaults to the last 30 days.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Period start — defaults to 30 days before `to` when absent."
+            },
+            "required": false,
+            "description": "Period start — defaults to 30 days before `to` when absent.",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Period end — defaults to now."
+            },
+            "required": false,
+            "description": "Period end — defaults to now.",
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns KPI summary",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimsSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/claims": {
+      "get": {
+        "tags": [
+          "Claims"
+        ],
+        "summary": "List return claims for a store",
+        "description": "Returns paginated return claims (Trendyol iade talepleri) sorted by claimDate desc, with composable filters: status tab (open/resolved), date range (from/to on claimDate), and a substring search (q) over platformOrderNumber and trendyolClaimId. Each row carries derived fields (derivedStatus, scope, product/reason summaries) so the UI renders without recomputation. Populated by the 6h CLAIMS sync worker.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "1-indexed page number",
+              "example": 1
+            },
+            "required": false,
+            "description": "1-indexed page number",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "description": "Items per page. Locked to {10, 25, 50, 100}.",
+              "example": 25
+            },
+            "required": false,
+            "description": "Items per page. Locked to {10, 25, 50, 100}.",
+            "name": "perPage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "resolved"
+              ],
+              "description": "Tab filter — open (resolved=false) or resolved. Absent = all claims.",
+              "example": "open"
+            },
+            "required": false,
+            "description": "Tab filter — open (resolved=false) or resolved. Absent = all claims.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "claimDate >= (ISO date)."
+            },
+            "required": false,
+            "description": "claimDate >= (ISO date).",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "claimDate <= (ISO date)."
+            },
+            "required": false,
+            "description": "claimDate <= (ISO date).",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "Substring search over platformOrderNumber and trendyolClaimId."
+            },
+            "required": false,
+            "description": "Substring search over platformOrderNumber and trendyolClaimId.",
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of return claims",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListClaimsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
             "content": {
               "application/json": {
                 "schema": {

@@ -13,6 +13,12 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/claims`** — paginated return-claims list
+  with status tab counts and derived per-row fields (`derivedStatus`, `scope`, product/reason
+  summaries). Feeds the new `/returns` page. (#295)
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/claims/summary`** — returns-KPI strip:
+  open/resolved counts plus the return trio's gross totals and `netImpactGross` for the period
+  (default last 30 days; counts on `claimDate`, financials on `OrderFee.capturedAt`). (#295)
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/kpis`** — today vs. yesterday KPI summary. Volume (revenue, order count, units sold) is aggregated over the whole business-day universe (`orders` ∪ today's cost-missing buffer); net profit, margin (÷ costed revenue), and profit/cost ratio (÷ costed cost) over the costed subset only (`orders` with a non-null estimate); plus `pendingRevenueToday` / `pendingOrderCountToday` = today's universe − costed (the gap awaiting cost). Store-scoped (`requireStoreAccess`); money values are Decimal strings, counts are ints. (Live Performance — Slice A)
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/chart`** — hourly cumulative **revenue + net-profit** curves for today and yesterday (24 business-hour buckets), for the dual-mode (ciro/kâr) intraday chart toggled client-side. Today's revenue includes the cost-missing buffer; profit is the costed subset. (Live Performance — Slice A)
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products`** — every product variant that sold today, one row per barcode, merged over the business-day universe (`orders` ∪ today's cost-missing buffer). Reports distinct `orderCount`, `unitsSold`, `revenue` (all known without cost), a `costStatus` (`costed` if the variant has an active cost profile, else `missing`) and the costed net `unitCost` (from the order-item snapshot). No per-product profit. Store-scoped (`requireStoreAccess`); money values are Decimal strings, counts are ints. Supersedes the removed `missing-cost` + `top-products` endpoints. (Live Performance — Slice B)

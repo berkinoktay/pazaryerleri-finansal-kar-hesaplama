@@ -230,6 +230,11 @@ export async function createOrderFee(
     vatRate?: string;
     vatAmount?: string;
     feeDefinitionId?: string | null;
+    // SETTLEMENT rows carry the Trendyol row id (#297 idempotency column).
+    trendyolTransactionId?: string | null;
+    // Omit to take the DB default (now()); set to place a fee outside a
+    // capturedAt-windowed aggregate (e.g. the claims summary period).
+    capturedAt?: Date;
   } = {},
 ) {
   return prisma.orderFee.create({
@@ -243,6 +248,8 @@ export async function createOrderFee(
       amountNet: overrides.amountNet ?? '10.99',
       vatRate: overrides.vatRate ?? '20.00',
       vatAmount: overrides.vatAmount ?? '2.20',
+      trendyolTransactionId: overrides.trendyolTransactionId ?? null,
+      ...(overrides.capturedAt !== undefined ? { capturedAt: overrides.capturedAt } : {}),
     },
   });
 }
