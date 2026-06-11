@@ -13,6 +13,31 @@
 --   - Idempotent: DROP POLICY IF EXISTS before each CREATE POLICY so
 --     `pnpm db:apply-policies` can run repeatedly without conflict.
 
+-- ─── Grant baseline (issue #305) ───────────────────────────────────────
+-- GRANT and RLS are SEPARATE Postgres layers: the grant is the table-level
+-- gate, the policy is the row-level filter. Until 2026-06-11 the Supabase
+-- image's default public-schema privileges silently provided the grants our
+-- policies sit on; Supabase CLI v2.106.0 changed that default and every
+-- RLS-scoped read started failing with 42501 (CI red on main while local
+-- CLIs were still pre-2.106). The repo now states its own baseline so the
+-- security surface never depends on an image default again.
+--
+-- `authenticated` gets table DML — actual row access is still default-deny
+-- under RLS until a policy explicitly allows it (write policies don't exist
+-- yet, so writes stay blocked even with the grant). `service_role` carries
+-- BYPASSRLS in Supabase images but still needs plain grants. `anon` is
+-- deliberately absent: no pre-login surface reads the database.
+-- Idempotent; ON ALL TABLES re-runs on every apply, and DEFAULT PRIVILEGES
+-- covers tables created between two applies.
+GRANT USAGE ON SCHEMA public TO authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON TABLES TO service_role;
+
 -- ─── is_org_member helper ──────────────────────────────────────────────
 -- A naive policy like
 --   USING (EXISTS (SELECT 1 FROM organization_members WHERE …))
