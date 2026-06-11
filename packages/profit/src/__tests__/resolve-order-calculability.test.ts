@@ -11,12 +11,17 @@ describe('resolveOrderCalculability', () => {
     expect(result).toEqual({ kind: 'calculable' });
   });
 
-  it('returns skip variant_not_found when first line variant is null', () => {
+  it('treats a missing variant as cost_missing — the order is still written (spec 2026-06-11)', () => {
     const result = resolveOrderCalculability([
       { barcode: 'A', variantId: null, unitCostSnapshotNet: null },
       { barcode: 'B', variantId: 'v2', unitCostSnapshotNet: '8.00' },
     ]);
-    expect(result).toEqual({ kind: 'skip', reason: 'variant_not_found', barcode: 'A' });
+    expect(result).toEqual({
+      kind: 'skip',
+      reason: 'cost_missing',
+      barcode: 'A',
+      variantId: null,
+    });
   });
 
   it('returns skip cost_missing when variant exists but cost null', () => {
@@ -27,11 +32,16 @@ describe('resolveOrderCalculability', () => {
     expect(result).toEqual({ kind: 'skip', reason: 'cost_missing', barcode: 'B', variantId: 'v2' });
   });
 
-  it('variant_not_found wins when both fail on the same line', () => {
+  it('a line missing both variant and cost maps to cost_missing with a null variantId', () => {
     const result = resolveOrderCalculability([
       { barcode: 'A', variantId: null, unitCostSnapshotNet: null },
     ]);
-    expect(result).toEqual({ kind: 'skip', reason: 'variant_not_found', barcode: 'A' });
+    expect(result).toEqual({
+      kind: 'skip',
+      reason: 'cost_missing',
+      barcode: 'A',
+      variantId: null,
+    });
   });
 
   it('returns calculable for empty lines (edge case — order with zero items)', () => {
