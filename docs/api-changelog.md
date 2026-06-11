@@ -36,6 +36,12 @@ section "Versioning" for details.
 
 ### Changed
 
+- `POST /v1/organizations/:orgId/stores` — a successful connect now also bootstraps the
+  initial sync chain: four PENDING `sync_logs` rows enqueued in priority order
+  (PRODUCTS → ORDERS → SETTLEMENTS → CLAIMS, FIFO via staggered `started_at`), so the
+  seller's data starts flowing immediately instead of waiting for the first cron tick.
+  Best-effort/non-blocking like webhook registration — an enqueue failure never fails the
+  connect; the cron fan-outs re-enqueue with the same dedupe guard. No wire-shape change.
 - `GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}` — description only: the `claims` array is no longer "empty until PR-13"; it is populated by the new CLAIMS sync worker (6h cadence, 60-day creation-date window, Trendyol getClaims). No wire-shape change — `OrderClaimDetail`/`OrderClaimItemDetail` schemas were already final. (PR-13)
 - `GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}` — `fees[].feeType` enum domain gains `COST_RETURN`: a CREDIT leg the settlement Return handler books from the returned unit's cost snapshot (the unit went back to stock, so its cost never materialized — product decision 2026-06-10). Emitted alongside `REFUND_DEDUCTION` + `COMMISSION_REFUND` per Trendyol Return row. (#291/#296)
 - `GET /v1/organizations/{orgId}/stores/{storeId}/orders` — new optional `costStatus` query param (`calculated` | `pending`) filtering on `estimatedNetProfit IS [NOT] NULL`, and a new `counts: { calculated, pending }` field in the response. Counts honor the sibling filters (status/reconciliationStatus/from/to/q) but ignore `costStatus`, so both segment tabs show honest totals.

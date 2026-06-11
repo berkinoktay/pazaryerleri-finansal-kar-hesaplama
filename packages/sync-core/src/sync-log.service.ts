@@ -36,6 +36,10 @@ export async function complete(id: string, syncedCount: number): Promise<void> {
       completedAt: new Date(),
       recordsProcessed: syncedCount,
       progressCurrent: syncedCount,
+      // A run that recovered via markRetryable carries the last transient
+      // error in these fields — a COMPLETED row must not advertise one.
+      errorCode: null,
+      errorMessage: null,
     },
   });
 }
@@ -71,11 +75,16 @@ export async function fail(
  * stale runs are recovered by the worker's stale-claim watchdog (90 s
  * heartbeat threshold) — there is no longer a need to reap from the
  * acquire path.
+ *
+ * `opts.startedAt` lets a caller enqueueing SEVERAL types pin a strict
+ * FIFO order: `tryClaimNext` claims `ORDER BY started_at`, and rows
+ * created in the same millisecond would otherwise tie non-deterministically.
  */
 export async function acquireSlot(
   organizationId: string,
   storeId: string,
   syncType: SyncType,
+  opts?: { startedAt?: Date },
 ): Promise<SyncLog> {
   syncLog.info('slot.acquire.attempt', { organizationId, storeId, syncType });
   try {
@@ -85,7 +94,7 @@ export async function acquireSlot(
         storeId,
         syncType,
         status: 'PENDING',
-        startedAt: new Date(),
+        startedAt: opts?.startedAt ?? new Date(),
       },
     });
     syncLog.info('slot.acquired', {
