@@ -190,10 +190,19 @@ jobs:
       # DB integration tests run against a fresh local Supabase instance
       # spun up just for this job. Schema applied via prisma db push so
       # no migration artifacts leak into the run.
+      #
+      # PINNED (issue #305): `version: latest` pulled v2.106.0 the hour it
+      # shipped (2026-06-11) and broke CI two independent ways — the new
+      # image drops the default public-schema grants the RLS suite sat on
+      # (now also mitigated by the explicit grant baseline in
+      # rls-policies.sql), and `supabase start` itself dies on the
+      # edge_runtime health check (Error status 502). A day-zero CLI in CI
+      # is a gamble; pin to the last known-good stable and bump
+      # deliberately — re-evaluate on the next stable release.
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v2
         with:
-          version: latest
+          version: 2.105.0
 
       - name: Start Supabase local
         run: supabase start
