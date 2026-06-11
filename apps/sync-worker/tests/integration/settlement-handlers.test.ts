@@ -609,6 +609,44 @@ describe('settlement handlers', () => {
       ]);
     });
 
+    it('#299: two Return rows on a qty=2 line land on two DIFFERENT claim units (greedy)', async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem({
+        withCostAndSale: true,
+        quantity: 2,
+      });
+      const { claimItemIds } = await createClaimWithUnits({
+        storeId,
+        orderId,
+        orderItemId: itemId,
+        units: 2,
+      });
+      const rowUnit1 = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+      const rowUnit2 = makeSettlementRow({
+        id: '725041341', // ikinci birimin KENDİ settlement satırı (farklı Trendyol id)
+        transactionType: 'İade',
+        debt: 120,
+        credit: 0,
+      });
+
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, rowUnit1, tx);
+      });
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, rowUnit2, tx);
+      });
+
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees).toHaveLength(6);
+      const unit1Fees = fees.filter((f) => f.trendyolTransactionId === rowUnit1.id);
+      const unit2Fees = fees.filter((f) => f.trendyolTransactionId === '725041341');
+      // Each trio is internally consistent...
+      expect(new Set(unit1Fees.map((f) => f.orderClaimItemId)).size).toBe(1);
+      expect(new Set(unit2Fees.map((f) => f.orderClaimItemId)).size).toBe(1);
+      // ...and the two trios claimed two DIFFERENT units, covering both.
+      const claimed = new Set([unit1Fees[0]?.orderClaimItemId, unit2Fees[0]?.orderClaimItemId]);
+      expect(claimed).toEqual(new Set(claimItemIds));
+    });
+
     it('skips with order_not_found when nothing matches (unknown parcel + unknown orderNumber)', async () => {
       const { storeId } = await buildOrderWithItem();
       const row = makeSettlementRow({
