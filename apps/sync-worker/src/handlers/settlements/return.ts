@@ -34,6 +34,11 @@
 // source='SETTLEMENT' makes a double write impossible even if the
 // pre-check races. externalRef stays as an audit-only JSON blob.
 //
+// #299: every leg also carries orderClaimItemId — the specific returned
+// UNIT (OrderClaimItem). Selection = inherit-from-existing-legs, else the
+// oldest fee-free unit on the matching line; an unconditional updateMany
+// backfill heals the settlements-before-claims cron ordering (:30 vs :45).
+//
 // feeDefinitionId is left NULL — schema makes it nullable (line 959) and
 // settlement-sourced fees have no fee_definition entry (deterministic
 // ESTIMATE rows do, settlement rows don't).
@@ -155,10 +160,33 @@ export async function handleReturn(
       source: 'SETTLEMENT',
       trendyolTransactionId: row.id,
     },
-    select: { feeType: true },
+    select: { feeType: true, orderClaimItemId: true },
   });
   const hasLeg = new Set(existingLegs.map((f) => f.feeType));
   let wroteAnyLeg = false;
+
+  // #299: pick the returned UNIT this trio belongs to. INHERIT first — if
+  // an earlier poll already linked some legs, a late leg (self-healed
+  // COST_RETURN after the cost snapshot arrives) must stay on the SAME
+  // unit; falling through to the greedy pick would split the trio across
+  // units when more free units exist. Greedy ("first free unit") only
+  // applies to a brand-new trio; null when the claim isn't synced yet —
+  // the unconditional backfill below heals it on the next re-poll.
+  const inheritedClaimItemId =
+    existingLegs.find((l) => l.orderClaimItemId !== null)?.orderClaimItemId ?? null;
+  const selectedClaimItem =
+    inheritedClaimItemId !== null
+      ? null
+      : await tx.orderClaimItem.findFirst({
+          where: {
+            orderItemId: item.id,
+            claim: { orderId: order.id },
+            fees: { none: {} },
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        });
+  const orderClaimItemId = inheritedClaimItemId ?? selectedClaimItem?.id ?? null;
 
   // KDV split via item's unitVatRate. Null fallback writes the gross
   // amount as NET with vatRate=0 — reconciliation tolerates this
@@ -201,6 +229,7 @@ export async function handleReturn(
         vatAmount,
         displayName: 'İade',
         trendyolTransactionId,
+        orderClaimItemId,
         externalRef,
       },
     });
@@ -231,6 +260,7 @@ export async function handleReturn(
         vatAmount: commissionGross.sub(commissionNet),
         displayName: 'Komisyon iadesi',
         trendyolTransactionId,
+        orderClaimItemId,
         externalRef,
       },
     });
@@ -260,12 +290,30 @@ export async function handleReturn(
         vatAmount: item.unitCostSnapshotVatAmount,
         displayName: 'Maliyet iadesi',
         trendyolTransactionId,
+        orderClaimItemId,
         externalRef,
       },
     });
     wroteAnyLeg = true;
   } else if (!hasLeg.has('COST_RETURN')) {
     syncLog.warn('settlements.return.cost-snapshot-missing', { id: row.id, itemId: item.id });
+  }
+
+  // #299 backfill — UNCONDITIONAL: the settlements cron (:30) fires before
+  // the claims cron (:45), so a fresh return's trio is often written with
+  // null links; later re-polls skip every leg (idempotent no-op) and would
+  // never link without this. Also covers the partial case where only the
+  // newly-written leg got the link. Idempotent + cheap (≤3 rows).
+  if (orderClaimItemId !== null) {
+    await tx.orderFee.updateMany({
+      where: {
+        orderId: order.id,
+        source: 'SETTLEMENT',
+        trendyolTransactionId,
+        orderClaimItemId: null,
+      },
+      data: { orderClaimItemId },
+    });
   }
 
   if (!wroteAnyLeg) {

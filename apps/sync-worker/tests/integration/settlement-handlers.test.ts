@@ -150,6 +150,49 @@ async function buildOrderWithItem(opts?: {
   return { storeId: store.id, orderId: order.id, itemId: item.id, variantId: variant.id };
 }
 
+/**
+ * #299 fixtures: a synced OrderClaim with N per-unit claim items, all
+ * pointing at the given OrderItem (Trendyol emits one claimItem per UNIT).
+ */
+async function createClaimWithUnits(args: {
+  storeId: string;
+  orderId: string;
+  orderItemId: string;
+  units: number;
+}): Promise<{ claimId: string; claimItemIds: string[] }> {
+  const order = await prisma.order.findUniqueOrThrow({
+    where: { id: args.orderId },
+    select: { organizationId: true },
+  });
+  const claim = await prisma.orderClaim.create({
+    data: {
+      organizationId: order.organizationId,
+      storeId: args.storeId,
+      orderId: args.orderId,
+      trendyolClaimId: randomUUID(),
+      claimDate: new Date(),
+      resolved: false,
+    },
+  });
+  const claimItemIds: string[] = [];
+  for (let i = 0; i < args.units; i += 1) {
+    const item = await prisma.orderClaimItem.create({
+      data: {
+        claimId: claim.id,
+        orderItemId: args.orderItemId,
+        trendyolClaimItemId: randomUUID(),
+        reasonCode: 'DAMAGEDITEM',
+        reasonName: 'Hasarlı ürün',
+        status: 'Created',
+        acceptedBySeller: false,
+        resolved: false,
+      },
+    });
+    claimItemIds.push(item.id);
+  }
+  return { claimId: claim.id, claimItemIds };
+}
+
 describe('settlement handlers', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -539,6 +582,146 @@ describe('settlement handlers', () => {
       expect(await prisma.orderFee.count({ where: { orderId } })).toBe(3);
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
       expect(order.settledNetProfit).toBeNull();
+    });
+
+    it('#299: links all three trio legs to the same claim item when the claim is synced', async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem({ withCostAndSale: true });
+      const { claimItemIds } = await createClaimWithUnits({
+        storeId,
+        orderId,
+        orderItemId: itemId,
+        units: 1,
+      });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      await prisma.$transaction(async (tx) => {
+        const result = await handleReturn(storeId, row, tx);
+        expect(result.applied).toBe(true);
+      });
+
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees).toHaveLength(3);
+      // Every leg points at the SAME unit — the trio is one return event.
+      expect(fees.map((f) => f.orderClaimItemId)).toEqual([
+        claimItemIds[0],
+        claimItemIds[0],
+        claimItemIds[0],
+      ]);
+    });
+
+    it('#299: two Return rows on a qty=2 line land on two DIFFERENT claim units (greedy)', async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem({
+        withCostAndSale: true,
+        quantity: 2,
+      });
+      const { claimItemIds } = await createClaimWithUnits({
+        storeId,
+        orderId,
+        orderItemId: itemId,
+        units: 2,
+      });
+      const rowUnit1 = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+      const rowUnit2 = makeSettlementRow({
+        id: '725041341', // ikinci birimin KENDİ settlement satırı (farklı Trendyol id)
+        transactionType: 'İade',
+        debt: 120,
+        credit: 0,
+      });
+
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, rowUnit1, tx);
+      });
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, rowUnit2, tx);
+      });
+
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees).toHaveLength(6);
+      const unit1Fees = fees.filter((f) => f.trendyolTransactionId === rowUnit1.id);
+      const unit2Fees = fees.filter((f) => f.trendyolTransactionId === '725041341');
+      // Each trio is internally consistent...
+      expect(new Set(unit1Fees.map((f) => f.orderClaimItemId)).size).toBe(1);
+      expect(new Set(unit2Fees.map((f) => f.orderClaimItemId)).size).toBe(1);
+      // ...and the two trios claimed two DIFFERENT units, covering both.
+      const claimed = new Set([unit1Fees[0]?.orderClaimItemId, unit2Fees[0]?.orderClaimItemId]);
+      expect(claimed).toEqual(new Set(claimItemIds));
+    });
+
+    it('#299 BACKFILL: trio written before the claim sync gets linked on the next re-poll', async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem({ withCostAndSale: true });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      // Poll 1 — settlements cron fires first (:30), claim not synced yet.
+      await prisma.$transaction(async (tx) => {
+        const r1 = await handleReturn(storeId, row, tx);
+        expect(r1.applied).toBe(true);
+      });
+      const beforeLinks = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(beforeLinks.map((f) => f.orderClaimItemId)).toEqual([null, null, null]);
+
+      // Claims cron lands 15 minutes later (:45).
+      const { claimItemIds } = await createClaimWithUnits({
+        storeId,
+        orderId,
+        orderItemId: itemId,
+        units: 1,
+      });
+
+      // Poll 2 — every leg already exists (idempotent no-op), but the link
+      // backfill must still run.
+      await prisma.$transaction(async (tx) => {
+        const r2 = await handleReturn(storeId, row, tx);
+        expect(r2.applied).toBe(false); // hiçbir bacak yazılmadı
+      });
+
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees).toHaveLength(3); // backfill çoğaltmaz
+      expect(fees.map((f) => f.orderClaimItemId)).toEqual([
+        claimItemIds[0],
+        claimItemIds[0],
+        claimItemIds[0],
+      ]);
+    });
+
+    it("#299 INHERIT: a late COST_RETURN leg reuses the trio's unit instead of grabbing a free one", async () => {
+      const { storeId, orderId, itemId } = await buildOrderWithItem(); // snapshot'sız
+      // Sale aggregate yok → recompute zaten atlanır; bağ davranışı izole kalır.
+      const { claimItemIds } = await createClaimWithUnits({
+        storeId,
+        orderId,
+        orderItemId: itemId,
+        units: 2, // boşta İKİ birim — yanlış implementasyon ikinciye kayar
+      });
+      const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
+
+      // Poll 1 — cost snapshot yok: 2 bacak yazılır, birim-1'e bağlanır.
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, row, tx);
+      });
+      const firstLegs = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(firstLegs).toHaveLength(2);
+      const trioUnit = firstLegs[0]?.orderClaimItemId;
+      expect(trioUnit).not.toBeNull();
+      expect(new Set(firstLegs.map((f) => f.orderClaimItemId)).size).toBe(1);
+
+      // Berkin maliyeti girer (Maliyet Bekleyen akışı).
+      await prisma.orderItem.update({
+        where: { id: itemId },
+        data: {
+          unitCostSnapshotNet: new Decimal('40.00'),
+          unitCostSnapshotVatRate: new Decimal('20.00'),
+          unitCostSnapshotVatAmount: new Decimal('8.00'),
+        },
+      });
+
+      // Poll 2 — eksik COST_RETURN yazılır: aynı birimde KALMALI.
+      await prisma.$transaction(async (tx) => {
+        await handleReturn(storeId, row, tx);
+      });
+      const fees = await prisma.orderFee.findMany({ where: { orderId } });
+      expect(fees).toHaveLength(3);
+      expect(new Set(fees.map((f) => f.orderClaimItemId))).toEqual(new Set([trioUnit]));
+      expect(claimItemIds).toContain(trioUnit);
     });
 
     it('skips with order_not_found when nothing matches (unknown parcel + unknown orderNumber)', async () => {

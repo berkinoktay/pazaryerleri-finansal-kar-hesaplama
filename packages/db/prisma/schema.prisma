@@ -1068,6 +1068,12 @@ model OrderFee {
   parcelUniqueId        String? @map("parcel_unique_id")
   derivedFrom           String? @map("derived_from")
 
+  // #299: which returned UNIT this settlement fee belongs to. Nullable —
+  // populated only for the Return trio when the claim row is already
+  // synced; the unconditional backfill in return.ts heals the
+  // settlements-before-claims cron ordering (:30 vs :45). UI in V2.
+  orderClaimItemId String? @map("order_claim_item_id") @db.Uuid
+
   capturedAt  DateTime  @default(now()) @map("captured_at")
   // confirmedAt + confirmedBy: PSF/Stopaj ESTIMATE → SETTLEMENT confirmation
   // PaymentOrder ('Ödeme') entry geldiğinde set'lenir (§3.7). Amount comparison
@@ -1078,11 +1084,13 @@ model OrderFee {
 
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  order      Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  definition FeeDefinition? @relation(fields: [feeDefinitionId], references: [id], onDelete: SetNull)
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  definition     FeeDefinition?  @relation(fields: [feeDefinitionId], references: [id], onDelete: SetNull)
+  orderClaimItem OrderClaimItem? @relation(fields: [orderClaimItemId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, feeType])
   @@index([orderId, feeType, source])
+  @@index([orderClaimItemId])
   @@map("order_fees")
 }
 
@@ -1150,6 +1158,7 @@ model OrderClaimItem {
 
   claim     OrderClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
   orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  fees      OrderFee[]
 
   // trendyolClaimItemId is Trendyol's per-UNIT claimLineItem UUID (a 3-unit
   // return produces 3 rows) — the upsert idempotency anchor for the CLAIMS
