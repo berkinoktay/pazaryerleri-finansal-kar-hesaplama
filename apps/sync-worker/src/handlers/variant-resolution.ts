@@ -7,13 +7,12 @@
 // intake ile birebir: (storeId, barcode) first-match (build-calc-check-lines).
 // Tick crash-safe: çağıran (index.ts) catch'ler; burada mağaza-başına izolasyon.
 
+import { upsertCatalogBatch } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import { decryptStoreCredentials, fetchProductsByBarcode } from '@pazarsync/marketplace';
 import { captureCostSnapshot } from '@pazarsync/order-sync';
 import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
-
-import { upsertBatch } from './products';
 
 const MAX_BARCODES_PER_STORE_PER_TICK = 25;
 const DUE_ITEMS_PER_TICK = 500;
@@ -140,7 +139,7 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
       barcode,
     });
     if (page.batch.length > 0) {
-      await upsertBatch(store, page.batch, null);
+      await upsertCatalogBatch(store, page.batch, null);
     }
   }
 
