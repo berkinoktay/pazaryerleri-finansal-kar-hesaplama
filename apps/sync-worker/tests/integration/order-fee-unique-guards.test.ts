@@ -91,7 +91,7 @@ describe('order fee unique guards (#297)', () => {
     expect(legs).toBe(3);
   });
 
-  it('ESTIMATE rows carry no identity columns and are never constrained', async () => {
+  it('ESTIMATE rows are unique per (order, feeType) — late re-entry cannot double-book (variant-recovery PR-2)', async () => {
     const { orderId, organizationId } = await buildOrder();
     const estimate = {
       orderId,
@@ -102,10 +102,15 @@ describe('order fee unique guards (#297)', () => {
       ...MONEY,
     } as const;
 
-    // Same shape twice — partial predicates exclude NULL identities.
+    // #297 left ESTIMATE unconstrained (no identity columns); the estimate
+    // re-entry defect (cost arrives late → applyEstimateOnOrderCreate re-runs
+    // → 2x PSF/Stopaj → wrong write-once profit) showed that gap is itself a
+    // double-write hole. order_fees_estimate_fee_type_uniq now closes it.
     await prisma.orderFee.create({ data: estimate });
-    await prisma.orderFee.create({ data: estimate });
+    await expect(prisma.orderFee.create({ data: estimate })).rejects.toSatisfy(isUniqueViolation);
 
+    // A DIFFERENT feeType on the same order still lives (PSF + Stopaj pair).
+    await prisma.orderFee.create({ data: { ...estimate, feeType: 'STOPPAGE' } });
     const rows = await prisma.orderFee.count({ where: { orderId, source: 'ESTIMATE' } });
     expect(rows).toBe(2);
   });
