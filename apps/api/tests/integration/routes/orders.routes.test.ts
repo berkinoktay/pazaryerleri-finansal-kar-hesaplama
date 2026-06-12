@@ -217,22 +217,26 @@ describe('Order routes', () => {
       expect(body1.data).toHaveLength(7);
     });
 
-    it('costStatus=pending returns only null-profit orders; costStatus=calculated only profit-known', async () => {
+    it('costStatus=excluded returns only profit-excluded orders; costStatus=calculated only profit-known', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
       const calc = await seedSimpleOrder(org.id, store.id, { platformOrderNumber: 'CALC-1' });
-      const pending = await createOrder(org.id, store.id, { status: 'DELIVERED' }); // estimatedNetProfit null
+      const excluded = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: excluded.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+      });
 
-      const pendingRes = await app.request(
-        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=pending`,
+      const excludedRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=excluded`,
         { headers: { Authorization: bearer(user.accessToken) } },
       );
-      expect(pendingRes.status).toBe(200);
-      const pendingBody = (await pendingRes.json()) as { data: { id: string }[] };
-      expect(pendingBody.data.map((o) => o.id)).toEqual([pending.id]);
+      expect(excludedRes.status).toBe(200);
+      const excludedBody = (await excludedRes.json()) as { data: { id: string }[] };
+      expect(excludedBody.data.map((o) => o.id)).toEqual([excluded.id]);
 
       const calcRes = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=calculated`,
@@ -249,44 +253,48 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       await seedSimpleOrder(org.id, store.id, { status: 'DELIVERED' }); // calc + delivered
-      await createOrder(org.id, store.id, { status: 'DELIVERED' }); // pending + delivered
-      await createOrder(org.id, store.id, { status: 'CANCELLED' }); // pending + cancelled
+      const exDelivered = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const exCancelled = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      await prisma.order.updateMany({
+        where: { id: { in: [exDelivered.id, exCancelled.id] } },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'LATE_UNCOSTED_ARRIVAL' },
+      });
 
       const allRes = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=calculated`,
         { headers: { Authorization: bearer(user.accessToken) } },
       );
       const allBody = (await allRes.json()) as {
-        counts: { calculated: number; pending: number };
+        counts: { calculated: number; excluded: number };
         data: unknown[];
       };
-      expect(allBody.counts).toEqual({ calculated: 1, pending: 2 });
+      expect(allBody.counts).toEqual({ calculated: 1, excluded: 2 });
       expect(allBody.data).toHaveLength(1);
 
       const deliveredRes = await app.request(
-        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=pending&status=DELIVERED`,
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=excluded&status=DELIVERED`,
         { headers: { Authorization: bearer(user.accessToken) } },
       );
       const deliveredBody = (await deliveredRes.json()) as {
-        counts: { calculated: number; pending: number };
+        counts: { calculated: number; excluded: number };
         data: unknown[];
       };
-      expect(deliveredBody.counts).toEqual({ calculated: 1, pending: 1 });
+      expect(deliveredBody.counts).toEqual({ calculated: 1, excluded: 1 });
       expect(deliveredBody.data).toHaveLength(1);
 
       // Flipping ONLY the segment (same scope, no sibling filter change) must
       // leave the counts identical — the user-facing invariant "both tabs show
       // the same honest totals regardless of which segment is active".
-      const pendingRes = await app.request(
-        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=pending`,
+      const excludedRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?costStatus=excluded`,
         { headers: { Authorization: bearer(user.accessToken) } },
       );
-      const pendingBody = (await pendingRes.json()) as {
-        counts: { calculated: number; pending: number };
+      const excludedBody = (await excludedRes.json()) as {
+        counts: { calculated: number; excluded: number };
         data: unknown[];
       };
-      expect(pendingBody.counts).toEqual(allBody.counts);
-      expect(pendingBody.data).toHaveLength(2);
+      expect(excludedBody.counts).toEqual(allBody.counts);
+      expect(excludedBody.data).toHaveLength(2);
     });
 
     it('rejects an invalid perPage value at the Zod boundary', async () => {
@@ -378,6 +386,8 @@ describe('Order routes', () => {
         claims: { trendyolClaimId: string; items: { reasonCode: string }[] }[];
         saleSubtotalNet: string | null;
         items: { barcode: string | null; variant: unknown }[];
+        profitExcludedAt: string | null;
+        profitExclusionReason: string | null;
       };
       expect(body.id).toBe(order.id);
       expect(body.store.id).toBe(store.id);
@@ -390,6 +400,35 @@ describe('Order routes', () => {
       expect(body.items).toHaveLength(1);
       expect(body.items[0]?.variant).toBeNull();
       expect(body.items[0]?.barcode).toBe('8680000000001');
+      // Calculated order: exclusion fields present and null (spec 2026-06-12).
+      expect(body.profitExcludedAt).toBeNull();
+      expect(body.profitExclusionReason).toBeNull();
+    });
+
+    it('returns the exclusion fields for a profit-excluded order', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const order = await createOrder(org.id, store.id);
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        profitExcludedAt: string | null;
+        profitExclusionReason: string | null;
+        estimatedNetProfit: string | null;
+      };
+      expect(body.profitExcludedAt).not.toBeNull();
+      expect(body.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+      expect(body.estimatedNetProfit).toBeNull();
     });
   });
 });

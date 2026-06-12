@@ -11,6 +11,21 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Removed
+
+- **`PATCH /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}/items/{itemId}/cost`** —
+  late per-item cost entry is gone (spec 2026-06-12, decision K2): the ONLY cost window is the
+  order's business day (buffer + product-level cost-profile attach). Orders persist either
+  CALCULATED or permanently profit-EXCLUDED. (#322)
+
+### Changed
+
+- `GET /v1/organizations/{orgId}/stores/{storeId}/orders` — `costStatus` vocabulary:
+  `pending` → `excluded` (filter is now `profit_excluded_at IS NOT NULL`); `counts` is
+  `{ calculated, excluded }`. There is no "pending" order state anymore — orders persist
+  CALCULATED or EXCLUDED (spec 2026-06-12). Detail gains `profitExcludedAt` +
+  `profitExclusionReason`. (#322)
+
 ### Added
 
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/claims`** — paginated return-claims list
