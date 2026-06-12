@@ -107,6 +107,13 @@ async function resolveDueOrderItems(): Promise<void> {
   }
 }
 
+// Buffer-gap onarımının vendor nezaketi: buffer satırında attempts/backoff
+// kolonu YOK (satır gece yarısı flush'la ölür), bu yüzden vade İN-MEMORY
+// tutulur — vendor'da da olmayan barkod her 60s tick'inde yeniden sorgulanmaz
+// (üstel: 5 dk → 24 saat cap; item-backoff'la aynı eğri). Süreç yeniden
+// başlarsa harita sıfırlanır — kabul: en kötü ihtimalle bir tur erken dener.
+const bufferGapNextTryAt = new Map<string, { attempts: number; nextTryAt: number }>();
+
 /**
  * 2. kaynak: PENDING buffer satırlarının çözülmemiş barkodları (spec
  * 2026-06-12 §4/K6). Eager intake onarımı vendor hatasıyla kaçtıysa gün
@@ -126,18 +133,43 @@ async function repairBufferCatalogGaps(): Promise<void> {
       )
     LIMIT 200
   `;
+  if (bufferGaps.length === 0) {
+    // Açık kalmış vade kayıtları birikmesin (gap kapandı ya da flush'landı).
+    bufferGapNextTryAt.clear();
+    return;
+  }
+
+  const now = Date.now();
   const gapsByStore = new Map<string, string[]>();
   for (const row of bufferGaps) {
+    const due = bufferGapNextTryAt.get(`${row.store_id}:${row.barcode}`);
+    if (due !== undefined && due.nextTryAt > now) continue;
     const list = gapsByStore.get(row.store_id) ?? [];
     list.push(row.barcode);
     gapsByStore.set(row.store_id, list);
   }
-  for (const [storeId, barcodes] of gapsByStore) {
+
+  for (const [storeId, allBarcodes] of gapsByStore) {
     try {
       const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-      await ensureBarcodesInCatalog(store, barcodes, {
+      // Dilim ÇAĞRIDAN önce: ensure'un `missing`'i cap-dışı (denenmemiş)
+      // barkodları da içerir — denenmeyene backoff yazılmaz, sıradaki tick alır.
+      const barcodes = allBarcodes.slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
+      const result = await ensureBarcodesInCatalog(store, barcodes, {
         maxVendorCalls: MAX_BARCODES_PER_STORE_PER_TICK,
       });
+      for (const barcode of result.resolved) {
+        bufferGapNextTryAt.delete(`${storeId}:${barcode}`);
+      }
+      for (const barcode of result.missing) {
+        const key = `${storeId}:${barcode}`;
+        const prev = bufferGapNextTryAt.get(key);
+        const attempts = (prev?.attempts ?? 0) + 1;
+        bufferGapNextTryAt.set(key, {
+          attempts,
+          nextTryAt: nextBackoff(attempts - 1).getTime(),
+        });
+      }
     } catch (err) {
       syncLog.error('resolution.buffer-repair-failed', {
         storeId,

@@ -55,7 +55,18 @@ export async function ensureBarcodesInCatalog(
     });
   }
 
-  const credentials = decryptStoreCredentials(store);
+  // K6 sözü fonksiyonun TAMAMI için geçerli: bozuk credential da intake'i
+  // bloke edemez — vendor'a hiç çıkamayız, bilinmeyenler missing döner.
+  let credentials: ReturnType<typeof decryptStoreCredentials>;
+  try {
+    credentials = decryptStoreCredentials(store);
+  } catch (err) {
+    syncLog.warn('catalog.eager-credentials-failed', {
+      storeId: store.id,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    return { resolved: distinct.filter((b) => known.has(b)), missing: unknown };
+  }
   for (const barcode of toFetch) {
     try {
       const page = await fetchProductsByBarcode({
