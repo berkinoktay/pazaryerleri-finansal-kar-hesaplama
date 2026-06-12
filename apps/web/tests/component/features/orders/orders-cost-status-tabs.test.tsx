@@ -8,7 +8,7 @@ import { OrdersCostStatusTabs } from '@/features/orders/components/orders-cost-s
 
 const messages = {
   ordersPage: {
-    tabs: { calculated: 'Hesaplanmış', pending: 'Maliyet Bekleyen', emptyCalculated: 'x' },
+    tabs: { calculated: 'Hesaplanmış', excluded: 'Kâr Hesabı Dışı', emptyCalculated: 'x' },
   },
 };
 
@@ -24,14 +24,14 @@ describe('OrdersCostStatusTabs', () => {
   it('renders both segments with their counts and drives onChange', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    renderTabs({ value: 'calculated', counts: { calculated: 12, pending: 3 }, onChange });
+    renderTabs({ value: 'calculated', counts: { calculated: 12, excluded: 3 }, onChange });
 
     expect(screen.getByText('Hesaplanmış')).toBeInTheDocument();
-    expect(screen.getByText('Maliyet Bekleyen')).toBeInTheDocument();
+    expect(screen.getByText('Kâr Hesabı Dışı')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
 
-    await user.click(screen.getByText('Maliyet Bekleyen'));
-    expect(onChange).toHaveBeenCalledWith('pending');
+    await user.click(screen.getByText('Kâr Hesabı Dışı'));
+    expect(onChange).toHaveBeenCalledWith('excluded');
   });
 });

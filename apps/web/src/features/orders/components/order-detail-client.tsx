@@ -7,12 +7,11 @@ import * as React from 'react';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { PageHeader } from '@/components/patterns/page-header';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api-error';
 
-import { type OrderItemDetail } from '../api/get-order.api';
 import { useOrder } from '../hooks/use-order';
 
 import { OrderClaimsCard } from './order-claims-card';
@@ -31,8 +30,6 @@ interface OrderDetailClientProps {
   /** 'page' (default) renders the full page chrome (back-nav + PageHeader).
    *  'modal' omits both - the host (Sheet) owns the header + close. */
   chrome?: 'page' | 'modal';
-  /** Forwarded to OrderItemsTable to inject inline per-item cost entry (modal use). */
-  renderItemCostCell?: (item: OrderItemDetail) => React.ReactNode;
 }
 
 /**
@@ -51,7 +48,6 @@ export function OrderDetailClient({
   storeId,
   orderId,
   chrome = 'page',
-  renderItemCostCell,
 }: OrderDetailClientProps): React.ReactElement {
   const t = useTranslations('orderDetail');
   const formatter = useFormatter();
@@ -143,6 +139,19 @@ export function OrderDetailClient({
 
       <OrderStatusBanner order={order} />
 
+      {/* Kalıcı kâr-dışı banner'ı (spec 2026-06-12 §7): pencere kaçtı, dışlama
+          geri dönüşsüz — satıcı nedenini ve tarihini her zaman görür. */}
+      {order.profitExcludedAt !== null ? (
+        <Alert tone="warning" size="md">
+          <AlertTitle>{t('exclusion.title')}</AlertTitle>
+          <AlertDescription>
+            {t('exclusion.description', {
+              date: formatter.dateTime(new Date(order.profitExcludedAt), 'short'),
+            })}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <OrderKpiGrid order={order} />
 
       <div className="gap-lg grid grid-cols-1 lg:grid-cols-2">
@@ -150,7 +159,7 @@ export function OrderDetailClient({
         <OrderFeeTimeline fees={order.fees} />
       </div>
 
-      <OrderItemsTable items={order.items} renderCostCell={renderItemCostCell} />
+      <OrderItemsTable items={order.items} profitExcluded={order.profitExcludedAt !== null} />
 
       <OrderClaimsCard claims={order.claims} />
     </div>

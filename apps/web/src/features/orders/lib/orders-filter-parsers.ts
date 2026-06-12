@@ -22,7 +22,7 @@ export const RECONCILIATION_STATUSES = [
 ] as const;
 export type ReconciliationStatusValue = (typeof RECONCILIATION_STATUSES)[number];
 
-export const COST_STATUSES = ['calculated', 'pending'] as const;
+export const COST_STATUSES = ['calculated', 'excluded'] as const;
 export type CostStatusValue = (typeof COST_STATUSES)[number];
 
 export const ORDER_PER_PAGE_OPTIONS = [10, 25, 50, 100] as const;

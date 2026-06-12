@@ -1,3 +1,4 @@
+import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../src/app';
@@ -115,19 +116,27 @@ describe('Orders — tenant isolation', () => {
     await createMembership(orgA.id, user.id);
     const storeA = await createStore(orgA.id);
     await createOrder(orgA.id, storeA.id, { estimatedNetProfit: '10.00' });
-    await createOrder(orgA.id, storeA.id); // pending
+    const excludedA = await createOrder(orgA.id, storeA.id);
+    await prisma.order.update({
+      where: { id: excludedA.id },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+    });
 
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
     for (let i = 0; i < 5; i += 1) {
-      await createOrder(orgB.id, storeB.id, { estimatedNetProfit: '99.00' });
+      const excludedB = await createOrder(orgB.id, storeB.id);
+      await prisma.order.update({
+        where: { id: excludedB.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'LATE_UNCOSTED_ARRIVAL' },
+      });
     }
 
     const res = await app.request(`/v1/organizations/${orgA.id}/stores/${storeA.id}/orders`, {
       headers: { Authorization: bearer(user.accessToken) },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { counts: { calculated: number; pending: number } };
-    expect(body.counts).toEqual({ calculated: 1, pending: 1 });
+    const body = (await res.json()) as { counts: { calculated: number; excluded: number } };
+    expect(body.counts).toEqual({ calculated: 1, excluded: 1 });
   });
 });

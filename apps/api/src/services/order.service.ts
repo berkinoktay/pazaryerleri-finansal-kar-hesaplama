@@ -11,7 +11,7 @@ import type {
 interface OrderListResult {
   data: OrderListItemResponse[];
   total: number;
-  counts: { calculated: number; pending: number };
+  counts: { calculated: number; excluded: number };
 }
 
 /**
@@ -59,8 +59,14 @@ function buildOrderListWhere(
     ];
   }
 
+  // Calculated-or-excluded (spec 2026-06-12): the segment key is the exclusion
+  // stamp, not "estimate still null" — there is no pending state anymore.
   if (filters.costStatus !== undefined) {
-    where.estimatedNetProfit = filters.costStatus === 'calculated' ? { not: null } : null;
+    if (filters.costStatus === 'calculated') {
+      where.estimatedNetProfit = { not: null };
+    } else {
+      where.profitExcludedAt = { not: null };
+    }
   }
 
   return where;
@@ -77,7 +83,7 @@ export async function listOrders(
   const baseWhere = buildOrderListWhere(orgId, storeId, { ...filters, costStatus: undefined });
   const skip = (filters.page - 1) * filters.perPage;
 
-  const [rows, total, calculatedCount, pendingCount] = await Promise.all([
+  const [rows, total, calculatedCount, excludedCount] = await Promise.all([
     prisma.order.findMany({
       where,
       orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
@@ -89,7 +95,7 @@ export async function listOrders(
     }),
     prisma.order.count({ where }),
     prisma.order.count({ where: { ...baseWhere, estimatedNetProfit: { not: null } } }),
-    prisma.order.count({ where: { ...baseWhere, estimatedNetProfit: null } }),
+    prisma.order.count({ where: { ...baseWhere, profitExcludedAt: { not: null } } }),
   ]);
 
   const data: OrderListItemResponse[] = rows.map((row) => ({
@@ -108,7 +114,7 @@ export async function listOrders(
     itemCount: row._count.items,
   }));
 
-  return { data, total, counts: { calculated: calculatedCount, pending: pendingCount } };
+  return { data, total, counts: { calculated: calculatedCount, excluded: excludedCount } };
 }
 
 export async function getOrderById(
@@ -186,6 +192,9 @@ export async function getOrderById(
     saleVatTotal: row.saleVatTotal?.toString() ?? null,
     estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
     settledNetProfit: row.settledNetProfit?.toString() ?? null,
+
+    profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
+    profitExclusionReason: row.profitExclusionReason,
 
     reconciliationStatus: row.reconciliationStatus,
     paymentOrderId: row.paymentOrderId?.toString() ?? null,

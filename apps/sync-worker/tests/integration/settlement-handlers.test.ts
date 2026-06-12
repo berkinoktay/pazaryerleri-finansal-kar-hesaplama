@@ -532,7 +532,8 @@ describe('settlement handlers', () => {
       });
       expect(await prisma.orderFee.count({ where: { orderId } })).toBe(2); // COST_RETURN eksik
 
-      // Berkin maliyeti sonradan girer (Maliyet Bekleyen akışı).
+      // Maliyet snapshot'ı sonradan dolar (variant-resolution tick'inin geç
+      // bağlaması — kâr-dışı OLMAYAN sipariş; spec 2026-06-12 sonrası tek geç yol).
       await prisma.orderItem.update({
         where: { id: itemId },
         data: {
@@ -704,7 +705,8 @@ describe('settlement handlers', () => {
       expect(trioUnit).not.toBeNull();
       expect(new Set(firstLegs.map((f) => f.orderClaimItemId)).size).toBe(1);
 
-      // Berkin maliyeti girer (Maliyet Bekleyen akışı).
+      // Maliyet snapshot'ı sonradan dolar (variant-resolution tick'inin geç
+      // bağlaması — kâr-dışı OLMAYAN sipariş; spec 2026-06-12 sonrası tek geç yol).
       await prisma.orderItem.update({
         where: { id: itemId },
         data: {

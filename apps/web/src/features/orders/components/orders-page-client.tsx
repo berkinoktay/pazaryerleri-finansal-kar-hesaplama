@@ -90,8 +90,8 @@ export function OrdersPageClient({
     total: 0,
     totalPages: 0,
   };
-  const counts = ordersQuery.data?.counts ?? { calculated: 0, pending: 0 };
-  const noOrdersAtAll = counts.calculated === 0 && counts.pending === 0;
+  const counts = ordersQuery.data?.counts ?? { calculated: 0, excluded: 0 };
+  const noOrdersAtAll = counts.calculated === 0 && counts.excluded === 0;
 
   const hasAnyFilter =
     filters.q.length > 0 ||

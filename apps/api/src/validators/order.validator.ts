@@ -6,6 +6,7 @@ import {
   OrderFeeType,
   OrderStatus,
   Platform,
+  ProfitExclusionReason,
   ReconciliationStatus,
 } from '@pazarsync/db/enums';
 
@@ -74,11 +75,16 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
     description: 'Substring match on platformOrderNumber or platformOrderId.',
     example: 'TY-2024',
   }),
-  costStatus: z.enum(['calculated', 'pending']).optional().openapi({
-    description:
-      "Filter by cost-calc state. 'calculated' = estimatedNetProfit set; 'pending' = awaiting cost. Omit for all.",
-    example: 'pending',
-  }),
+  costStatus: z
+    .enum(['calculated', 'excluded'])
+    .optional()
+    .openapi({
+      description:
+        "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = " +
+        "estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — " +
+        'permanent). There is no pending state: orders persist in one of the two. Omit for all.',
+      example: 'excluded',
+    }),
 }).openapi('ListOrdersQuery');
 
 export type ListOrdersQuery = z.infer<typeof listOrdersQuerySchema>;
@@ -141,11 +147,13 @@ export const ListOrdersResponseSchema = z
     counts: z
       .object({
         calculated: z.number().int().nonnegative(),
-        pending: z.number().int().nonnegative(),
+        excluded: z.number().int().nonnegative().openapi({
+          description: 'Profit-excluded orders (profit_excluded_at set — permanent).',
+        }),
       })
       .openapi({
         description:
-          'Cost-status segment totals. Honor the sibling filters (status/recon/date/q) but ' +
+          'Profit-universe segment totals. Honor the sibling filters (status/recon/date/q) but ' +
           'ignore costStatus, so each tab shows its true count regardless of the active segment.',
       }),
   })
@@ -285,6 +293,21 @@ export const OrderDetailSchema = z
     estimatedNetProfit: z.string().nullable(),
     settledNetProfit: z.string().nullable(),
 
+    profitExcludedAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .openapi({
+        description:
+          'Set when the order is permanently outside the profit universe (cost window missed). ' +
+          'Irreversible — enforced by a DB trigger (spec 2026-06-12).',
+        example: null,
+      }),
+    profitExclusionReason: z.enum(ProfitExclusionReason).nullable().openapi({
+      description: 'Why the order left the profit universe. Paired with profitExcludedAt.',
+      example: null,
+    }),
+
     reconciliationStatus: ReconciliationStatusSchema,
     paymentOrderId: z.string().nullable().openapi({
       description: 'PaymentOrder cycle id (BigInt → string). Null until reconciliation closes.',
@@ -306,35 +329,6 @@ export const OrderDetailSchema = z
 
 export type OrderDetailResponse = z.infer<typeof OrderDetailSchema>;
 
-// --- Per-item cost entry (Slice C) ----------------------------------------
-// Body for PATCH .../orders/{orderId}/items/{itemId}/cost. Money on the wire is
-// a Decimal string; the snapshot written is frozen (write-once).
-
-const MONEY_STRING = z
-  .string()
-  .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_AMOUNT')
-  .refine((v) => Number(v) > 0, 'AMOUNT_MUST_BE_POSITIVE');
-
-export const SetOrderItemCostBodySchema = z
-  .discriminatedUnion('source', [
-    z.object({
-      source: z.literal('profile'),
-      profileId: z.string().uuid('INVALID_PROFILE_ID'),
-    }),
-    z.object({
-      source: z.literal('manual'),
-      netAmount: MONEY_STRING.openapi({
-        description: 'NET cost (KDV haric), Decimal string',
-        example: '42.00',
-      }),
-      vatRate: z
-        .number()
-        .int()
-        .min(0, 'INVALID_VAT_RATE')
-        .max(100, 'INVALID_VAT_RATE')
-        .openapi({ example: 20 }),
-    }),
-  ])
-  .openapi('SetOrderItemCostBody');
-
-export type SetOrderItemCostBody = z.infer<typeof SetOrderItemCostBodySchema>;
+// Per-item late cost entry (Slice C) was REMOVED by spec 2026-06-12 (decision
+// K2): the only cost window is the order's business day. Orders persist either
+// CALCULATED or permanently profit-EXCLUDED — there is no later entry path.

@@ -26,7 +26,7 @@ const baseRow = {
   itemCount: 2,
 };
 
-function renderTable(costStatus: 'calculated' | 'pending'): void {
+function renderTable(costStatus: 'calculated' | 'excluded'): void {
   render(
     <NextIntlClientProvider
       locale="tr"
@@ -39,7 +39,7 @@ function renderTable(costStatus: 'calculated' | 'pending'): void {
         pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
         filters={{ q: '', status: null, reconciliationStatus: null, from: '', to: '' }}
         costStatus={costStatus}
-        counts={{ calculated: 1, pending: 1 }}
+        counts={{ calculated: 1, excluded: 1 }}
         onCostStatusChange={vi.fn()}
         onFiltersChange={vi.fn()}
         onPaginationChange={vi.fn()}
@@ -49,10 +49,11 @@ function renderTable(costStatus: 'calculated' | 'pending'): void {
 }
 
 describe('OrdersTable segments', () => {
-  it('pending segment shows the cost CTA and omits the profit column', () => {
-    renderTable('pending');
-    expect(screen.getByText(messages.ordersPage.worklist.costPending)).toBeInTheDocument();
-    expect(screen.getByText(messages.ordersPage.worklist.addCost)).toBeInTheDocument();
+  it('excluded segment shows the info label (no CTA) and omits the profit column', () => {
+    renderTable('excluded');
+    expect(screen.getByText(messages.ordersPage.excludedList.label)).toBeInTheDocument();
+    // Bilgilendirme segmenti — eski iş-listesi CTA'sı yok (spec 2026-06-12 K2).
+    expect(screen.queryByText('Maliyet Ekle')).toBeNull();
     expect(screen.queryByText(messages.ordersPage.table.columns.estimatedNetProfit)).toBeNull();
   });
 
