@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { OrderDetailCostable } from '@/features/orders/components/order-detail-costable';
+import { OrderDetailClient } from '@/features/orders/components/order-detail-client';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
@@ -50,10 +50,11 @@ export default async function OrderDetailPage({
   }
 
   return (
-    <OrderDetailCostable
+    <OrderDetailClient
       orgId={activeOrgId ?? null}
       storeId={activeStoreId ?? null}
       orderId={orderId}
+      chrome="page"
     />
   );
 }

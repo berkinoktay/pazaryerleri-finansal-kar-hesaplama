@@ -25,7 +25,7 @@ describe('useOrders', () => {
         return HttpResponse.json({
           data: [],
           pagination: { page: 1, perPage: 25, total: 0, totalPages: 0 },
-          counts: { calculated: 0, pending: 3 },
+          counts: { calculated: 0, excluded: 3 },
         });
       }),
     );
@@ -35,7 +35,7 @@ describe('useOrders', () => {
         useOrders({
           orgId: ORG_ID,
           storeId: STORE_ID,
-          costStatus: 'pending',
+          costStatus: 'excluded',
           page: 1,
           perPage: 25,
         }),
@@ -43,7 +43,7 @@ describe('useOrders', () => {
     );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(receivedCostStatus).toBe('pending');
-    expect(result.current.data?.counts).toEqual({ calculated: 0, pending: 3 });
+    expect(receivedCostStatus).toBe('excluded');
+    expect(result.current.data?.counts).toEqual({ calculated: 0, excluded: 3 });
   });
 });

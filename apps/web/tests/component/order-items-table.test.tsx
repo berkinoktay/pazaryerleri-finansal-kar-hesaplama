@@ -50,4 +50,16 @@ describe('OrderItemsTable', () => {
     expect(screen.queryByText('8680000000001')).not.toBeInTheDocument();
     expect(screen.getByText('Test Ürünü — M')).toBeInTheDocument();
   });
+
+  it('kâr-dışı siparişte maliyet hücresi "Kâr hesabı dışı" gösterir (uyarı değil)', () => {
+    render(<OrderItemsTable items={[makeItem()]} profitExcluded />);
+    expect(screen.getByText('Kâr hesabı dışı')).toBeInTheDocument();
+    expect(screen.queryByText('Maliyet eksik')).not.toBeInTheDocument();
+  });
+
+  it('normal siparişte maliyetsiz kalem "Maliyet eksik" uyarısını korur', () => {
+    render(<OrderItemsTable items={[makeItem()]} />);
+    expect(screen.getByText('Maliyet eksik')).toBeInTheDocument();
+    expect(screen.queryByText('Kâr hesabı dışı')).not.toBeInTheDocument();
+  });
 });

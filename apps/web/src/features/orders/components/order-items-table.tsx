@@ -22,11 +22,11 @@ import { UnmatchedVariantBadge } from './unmatched-variant-badge';
 export interface OrderItemsTableProps {
   items: OrderItemDetail[];
   /**
-   * Optional per-item override for the cost cell. When provided, replaces the
-   * read-only cost snapshot cell - used by the live-performance order-detail Sheet
-   * to inject inline per-item cost entry without orders importing live-performance.
+   * Kâr-dışı sipariş (spec 2026-06-12): maliyet hücresi "Maliyet eksik" uyarısı
+   * yerine nötr "Kâr hesabı dışı" gösterir — pencere kapandı, doldurulacak bir
+   * eksik yok (eski satır-bazlı maliyet girişi K2 ile kalktı).
    */
-  renderCostCell?: (item: OrderItemDetail) => React.ReactNode;
+  profitExcluded?: boolean;
 }
 
 /**
@@ -38,7 +38,7 @@ export interface OrderItemsTableProps {
  */
 export function OrderItemsTable({
   items,
-  renderCostCell,
+  profitExcluded = false,
 }: OrderItemsTableProps): React.ReactElement {
   const t = useTranslations('orderDetail.items');
   const formatter = useFormatter();
@@ -100,12 +100,12 @@ export function OrderItemsTable({
                       <Currency value={item.refundedCommissionAmountNet} dimWhenZero />
                     </TableCell>
                     <TableCell className="text-right">
-                      {renderCostCell !== undefined ? (
-                        renderCostCell(item)
-                      ) : item.unitCostSnapshotNet === null ? (
-                        <span className="text-warning">{t('costMissing')}</span>
-                      ) : (
+                      {item.unitCostSnapshotNet !== null ? (
                         <Currency value={item.unitCostSnapshotNet} />
+                      ) : profitExcluded ? (
+                        <span className="text-muted-foreground">{t('costFrozen')}</span>
+                      ) : (
+                        <span className="text-warning">{t('costMissing')}</span>
                       )}
                     </TableCell>
                   </TableRow>

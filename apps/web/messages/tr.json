@@ -745,8 +745,14 @@
       "refundDeduction": "İade kesintisi (dönem)",
       "netImpact": "Net kâr etkisi (dönem)"
     },
-    "tabs": { "all": "Tümü", "open": "Açık", "resolved": "Sonuçlanan" },
-    "toolbar": { "searchPlaceholder": "Sipariş no veya iade no ara" },
+    "tabs": {
+      "all": "Tümü",
+      "open": "Açık",
+      "resolved": "Sonuçlanan"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Sipariş no veya iade no ara"
+    },
     "table": {
       "columns": {
         "claimDate": "Tarih",
@@ -764,7 +770,10 @@
       "CANCELLED": "İptal edildi",
       "MIXED": "Sonuçlandı"
     },
-    "scope": { "FULL": "Tümü", "PARTIAL": "Parçalı" },
+    "scope": {
+      "FULL": "Tümü",
+      "PARTIAL": "Parçalı"
+    },
     "summary": {
       "units": "×{count}",
       "more": "+{count}",
@@ -825,13 +834,8 @@
     },
     "tabs": {
       "calculated": "Hesaplanmış",
-      "pending": "Maliyet Bekleyen",
+      "excluded": "Kâr Hesabı Dışı",
       "emptyCalculated": "Henüz hesaplanmış sipariş yok"
-    },
-    "worklist": {
-      "costPending": "Maliyet bekliyor",
-      "addCost": "Maliyet Ekle",
-      "empty": "Tüm siparişlerin maliyeti hesaplanmış 🎉"
     },
     "empty": {
       "noStore": {
@@ -847,6 +851,10 @@
     "refreshButton": {
       "label": "Yenile",
       "refreshing": "Yenileniyor…"
+    },
+    "excludedList": {
+      "label": "Kâr hesabı dışı",
+      "empty": "Kâr hesabı dışında kalan sipariş yok"
     }
   },
   "productsPage": {
@@ -1550,19 +1558,6 @@
     },
     "intent": "{date} tarihli sipariş — kâr dökümü, fatura zaman çizgisi ve iade durumu.",
     "backToList": "Listeye dön",
-    "costEntry": {
-      "trigger": "Maliyet gir",
-      "tabs": {
-        "manual": "Özel tutar",
-        "profile": "Kayıtlı profil"
-      },
-      "netAmount": "Tutar (KDV hariç)",
-      "vatRate": "KDV oranı (%)",
-      "profile": "Maliyet profili",
-      "profilePlaceholder": "Profil seçin",
-      "save": "Kaydet",
-      "noProfiles": "Kayıtlı maliyet profili yok"
-    },
     "kpis": {
       "saleSubtotalNet": {
         "label": "Satış (net)"
@@ -1665,7 +1660,8 @@
       },
       "unmatchedBadge": "Eşleşme bekliyor",
       "unknownVariant": "Varyant bağlı değil",
-      "costMissing": "Maliyet eksik"
+      "costMissing": "Maliyet eksik",
+      "costFrozen": "Kâr hesabı dışı"
     },
     "claims": {
       "title": "İade talepleri",
@@ -1680,6 +1676,10 @@
       "noStoreContext": "Sipariş detayını görmek için aktif bir mağaza gerekli.",
       "notFound": "Sipariş bulunamadı veya bu mağazaya ait değil.",
       "loadFailed": "Sipariş yüklenemedi. Lütfen tekrar deneyin."
+    },
+    "exclusion": {
+      "title": "Kâr hesabı dışı",
+      "description": "Maliyet penceresi {date} tarihinde kapandı — bu sipariş kâr hesaplamalarına dahil edilmez. Ciro kayıtlarda görünmeye devam eder."
     }
   },
   "livePerformance": {
@@ -1761,7 +1761,7 @@
       "sheetTitle": "Sipariş ayrıntısı",
       "close": "Kapat",
       "buffer": {
-        "pendingNotice": "Bu sipariş maliyet bekliyor — ürüne maliyet girince kâra dahil olur.",
+        "pendingNotice": "Maliyet bugün 00:00'a kadar girilmezse bu sipariş kâr hesabına alınmaz.",
         "columns": {
           "product": "Ürün",
           "quantity": "Adet",

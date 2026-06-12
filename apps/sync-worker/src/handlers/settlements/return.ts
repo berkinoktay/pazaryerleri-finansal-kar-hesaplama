@@ -149,8 +149,8 @@ export async function handleReturn(
 
   // Idempotency — PER-LEG (review finding, issue #291): a single
   // REFUND_DEDUCTION pre-check made the trio one-shot, so a cost
-  // snapshot entered AFTER the first poll (the product's CORE
-  // \"Maliyet Bekleyen\" flow) could never backfill its COST_RETURN.
+  // snapshot entered AFTER the first poll (a late variant-resolution
+  // link on a non-excluded order) could never backfill its COST_RETURN.
   // Each leg now checks its own existence under the shared trendyolId,
   // letting the 6h re-poll self-heal missing legs (including rows
   // written before this fix that carry only the deduction).

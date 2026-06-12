@@ -745,8 +745,14 @@
       "refundDeduction": "Refund deductions (period)",
       "netImpact": "Net profit impact (period)"
     },
-    "tabs": { "all": "All", "open": "Open", "resolved": "Resolved" },
-    "toolbar": { "searchPlaceholder": "Search order or claim number" },
+    "tabs": {
+      "all": "All",
+      "open": "Open",
+      "resolved": "Resolved"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Search order or claim number"
+    },
     "table": {
       "columns": {
         "claimDate": "Date",
@@ -764,7 +770,10 @@
       "CANCELLED": "Cancelled",
       "MIXED": "Resolved"
     },
-    "scope": { "FULL": "Full", "PARTIAL": "Partial" },
+    "scope": {
+      "FULL": "Full",
+      "PARTIAL": "Partial"
+    },
     "summary": {
       "units": "×{count}",
       "more": "+{count}",
@@ -825,13 +834,8 @@
     },
     "tabs": {
       "calculated": "Calculated",
-      "pending": "Awaiting Cost",
+      "excluded": "Profit-excluded",
       "emptyCalculated": "No calculated orders yet"
-    },
-    "worklist": {
-      "costPending": "Awaiting cost",
-      "addCost": "Add cost",
-      "empty": "All orders have their cost calculated 🎉"
     },
     "empty": {
       "noStore": {
@@ -847,6 +851,10 @@
     "refreshButton": {
       "label": "Refresh",
       "refreshing": "Refreshing…"
+    },
+    "excludedList": {
+      "label": "Outside profit",
+      "empty": "No orders are excluded from profit"
     }
   },
   "productsPage": {
@@ -1485,19 +1493,6 @@
     },
     "intent": "Order from {date} — profit breakdown, fee timeline, and return status.",
     "backToList": "Back to list",
-    "costEntry": {
-      "trigger": "Enter cost",
-      "tabs": {
-        "manual": "Custom amount",
-        "profile": "Saved profile"
-      },
-      "netAmount": "Amount (excl. VAT)",
-      "vatRate": "VAT rate (%)",
-      "profile": "Cost profile",
-      "profilePlaceholder": "Select a profile",
-      "save": "Save",
-      "noProfiles": "No saved cost profiles"
-    },
     "kpis": {
       "saleSubtotalNet": {
         "label": "Sale (net)"
@@ -1600,7 +1595,8 @@
       },
       "unmatchedBadge": "Awaiting match",
       "unknownVariant": "Variant not linked",
-      "costMissing": "Cost missing"
+      "costMissing": "Cost missing",
+      "costFrozen": "Excluded"
     },
     "claims": {
       "title": "Return claims",
@@ -1615,6 +1611,10 @@
       "noStoreContext": "An active store is required to view order detail.",
       "notFound": "Order not found or does not belong to this store.",
       "loadFailed": "Failed to load the order. Please try again."
+    },
+    "exclusion": {
+      "title": "Outside profit calculations",
+      "description": "The cost window closed on {date} — this order is permanently excluded from profit. Revenue still appears in records."
     }
   },
   "livePerformance": {
@@ -1696,7 +1696,7 @@
       "sheetTitle": "Order detail",
       "close": "Close",
       "buffer": {
-        "pendingNotice": "This order is awaiting cost — once you enter a cost it counts toward profit.",
+        "pendingNotice": "Add the cost before midnight or this order is permanently excluded from profit.",
         "columns": {
           "product": "Product",
           "quantity": "Qty",

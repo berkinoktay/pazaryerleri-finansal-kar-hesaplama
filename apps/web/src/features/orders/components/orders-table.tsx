@@ -1,7 +1,7 @@
 'use client';
 
 import { type ColumnDef, type PaginationState } from '@tanstack/react-table';
-import { Alert02Icon, ArrowRight01Icon } from 'hugeicons-react';
+import { Alert02Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
@@ -38,7 +38,7 @@ export interface OrdersTableProps {
     to: string;
   };
   costStatus: CostStatusValue;
-  counts: { calculated: number; pending: number };
+  counts: { calculated: number; excluded: number };
   tabsLoading?: boolean;
   onCostStatusChange: (next: CostStatusValue) => void;
   onFiltersChange: OrdersToolbarProps['onChange'];
@@ -68,7 +68,7 @@ export function OrdersTable({
   const router = useRouter();
 
   const columns = React.useMemo<ColumnDef<OrderListItem>[]>(() => {
-    if (costStatus === 'pending') {
+    if (costStatus === 'excluded') {
       return [
         {
           id: 'orderDate',
@@ -86,6 +86,11 @@ export function OrdersTable({
             const number = row.original.platformOrderNumber ?? row.original.platformOrderId;
             return <span className="font-medium">{number}</span>;
           },
+        },
+        {
+          id: 'status',
+          header: t('columns.status'),
+          cell: ({ row }) => <OrderStatusBadge status={row.original.status} />,
         },
         {
           id: 'saleSubtotalNet',
@@ -109,23 +114,17 @@ export function OrdersTable({
           ),
         },
         {
-          // Worklist trailing cell: cost-pending signal + "Maliyet Ekle"
-          // affordance. The ROW is the click target (navigates to the now-
-          // editable detail); this cell is a non-interactive visual cue, so
-          // there is no nested-button hydration trap.
-          id: 'costPending',
+          // Bilgilendirme hücresi (iş listesi DEĞİL — spec 2026-06-12): pencere
+          // kaçmış, dışlama kalıcı; satıcının yapacağı bir aksiyon yok. Ciro
+          // kayıtlı kalır, kâr alanları donuk. Satır tıklaması detaydaki kalıcı
+          // banner'a götürür.
+          id: 'profitExcluded',
           header: t('columns.costStatus'),
           cell: () => (
-            <div className="gap-md flex items-center justify-between">
-              <span className="gap-2xs text-warning inline-flex items-center text-sm">
-                <Alert02Icon className="size-icon-sm" />
-                {tPage('worklist.costPending')}
-              </span>
-              <span className="gap-3xs text-muted-foreground inline-flex items-center text-sm">
-                {tPage('worklist.addCost')}
-                <ArrowRight01Icon className="size-icon-xs" />
-              </span>
-            </div>
+            <span className="gap-2xs text-muted-foreground inline-flex items-center text-sm">
+              <Alert02Icon className="size-icon-sm" />
+              {tPage('excludedList.label')}
+            </span>
           ),
         },
       ];
@@ -236,7 +235,9 @@ export function OrdersTable({
   const emptyState = (
     <EmptyState
       embedded
-      title={costStatus === 'pending' ? tPage('worklist.empty') : tPage('tabs.emptyCalculated')}
+      title={
+        costStatus === 'excluded' ? tPage('excludedList.empty') : tPage('tabs.emptyCalculated')
+      }
     />
   );
 

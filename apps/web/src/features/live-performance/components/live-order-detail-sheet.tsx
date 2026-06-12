@@ -1,6 +1,5 @@
 'use client';
 
-import { useQueryClient } from '@tanstack/react-query';
 import { useFormatter } from 'next-intl';
 import * as React from 'react';
 
@@ -12,11 +11,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { CostEntryCell } from '@/features/orders/components/cost-entry-cell';
 import { OrderDetailClient } from '@/features/orders/components/order-detail-client';
 
 import type { LiveOrderRow } from '../api/get-live-orders.api';
-import { liveKeys } from '../query-keys';
 import { BufferOrderDetail } from './buffer-order-detail';
 
 interface LiveOrderDetailSheetProps {
@@ -30,11 +27,12 @@ interface LiveOrderDetailSheetProps {
  * In-page detail Sheet for the live-performance order feed.
  *
  * Two order kinds drive two detail flavors:
- * - source='orders': reuses the canonical OrderDetailClient in modal chrome,
- *   injecting CostEntryCell as the per-item cost render-prop so the orders
- *   feature never imports live-performance (boundary-clean).
- * - source='buffer': shows BufferOrderDetail with the enriched buffer lines
- *   and variant-level cost entry via CostCellPopover.
+ * - source='orders': reuses the canonical OrderDetailClient in modal chrome —
+ *   read-only money cells; the late per-item cost entry was removed by spec
+ *   2026-06-12 (K2): a persisted order is either CALCULATED or EXCLUDED.
+ * - source='buffer': shows BufferOrderDetail with the enriched buffer lines,
+ *   the midnight deadline notice, and variant-level cost-profile attach via
+ *   CostCellPopover (attach → flip → promote chain).
  *
  * Layout: SheetContent as flex column (fixed header + flex-1 ScrollArea) with
  * no arbitrary height values -- token-free flex layout fills remaining height.
@@ -46,32 +44,19 @@ export function LiveOrderDetailSheet({
   onClose,
 }: LiveOrderDetailSheetProps): React.ReactElement | null {
   const formatter = useFormatter();
-  const queryClient = useQueryClient();
 
   if (selected === null) return null;
 
   const title = selected.platformOrderNumber ?? selected.platformOrderId;
 
-  // Narrow the id into a const so the render-prop closure captures a string
-  // (TS widens `selected.orderId` back to string|null inside the closure).
   let body: React.ReactNode = null;
   if (selected.source === 'orders' && selected.orderId !== null) {
-    const orderId = selected.orderId;
     body = (
       <OrderDetailClient
         orgId={orgId}
         storeId={storeId}
-        orderId={orderId}
+        orderId={selected.orderId}
         chrome="modal"
-        renderItemCostCell={(item) => (
-          <CostEntryCell
-            orgId={orgId}
-            storeId={storeId}
-            orderId={orderId}
-            item={item}
-            onCosted={() => queryClient.invalidateQueries({ queryKey: liveKeys.all })}
-          />
-        )}
       />
     );
   } else if (selected.source === 'buffer' && selected.bufferId !== null) {
