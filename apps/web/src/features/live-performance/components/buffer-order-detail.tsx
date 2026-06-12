@@ -5,6 +5,7 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { UnmatchedVariantBadge } from '@/components/patterns/unmatched-variant-badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -76,6 +77,7 @@ export function BufferOrderDetail({
                 <TableCell>
                   <div className="gap-3xs flex flex-col">
                     <span className="font-medium">{line.productName}</span>
+                    {line.variantId === null ? <UnmatchedVariantBadge className="w-fit" /> : null}
                     <span className="text-2xs text-muted-foreground tabular-nums">
                       {line.barcode}
                     </span>

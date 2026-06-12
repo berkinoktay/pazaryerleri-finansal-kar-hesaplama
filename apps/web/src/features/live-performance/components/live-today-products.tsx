@@ -12,6 +12,7 @@ import * as React from 'react';
 
 import { CopyableValue } from '@/components/patterns/copyable-value';
 import { Currency } from '@/components/patterns/currency';
+import { UnmatchedVariantBadge } from '@/components/patterns/unmatched-variant-badge';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
@@ -78,7 +79,9 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
     const term = search.trim().toLocaleLowerCase('tr');
     return allRows.filter((row) => {
       if (tab === 'missing' && row.costStatus !== 'missing') return false;
-      if (term !== '' && !row.productName.toLocaleLowerCase('tr').includes(term)) return false;
+      // Çözülemeyen satırın aranabilir kimliği barkoddur (ürün adı yok).
+      const haystack = row.productName ?? row.barcode;
+      if (term !== '' && !haystack.toLocaleLowerCase('tr').includes(term)) return false;
       return true;
     });
   }, [allRows, tab, search]);
@@ -119,19 +122,29 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
         meta: { label: t('columns.product') },
         cell: ({ row }) => {
           const product = row.original;
+          // Çözülemeyen satır (görünürlük sözleşmesi, spec 2026-06-12 §7):
+          // kimlik ham barkoda düşer + "Eşleşme bekliyor" rozeti — satır asla
+          // sessizce kaybolmaz. Eager onarım sonrası nadir istisna halidir.
           return (
             <div className="gap-sm flex items-center">
-              <ImageCell src={product.thumbUrl} alt={product.productName} size="md" />
+              <ImageCell
+                src={product.thumbUrl}
+                alt={product.productName ?? product.barcode}
+                size="md"
+              />
               <div className="gap-3xs flex min-w-0 flex-col">
                 <span className="text-foreground line-clamp-1 text-sm font-medium">
-                  {product.productName}
+                  {product.productName ?? product.barcode}
                 </span>
                 <div className="gap-sm flex items-center">
-                  <CopyableValue value={product.stockCode} label={t('stockCodeLabel')}>
-                    <span className="text-muted-foreground font-mono text-xs">
-                      {product.stockCode}
-                    </span>
-                  </CopyableValue>
+                  {product.unresolved ? <UnmatchedVariantBadge className="w-fit" /> : null}
+                  {product.stockCode !== null ? (
+                    <CopyableValue value={product.stockCode} label={t('stockCodeLabel')}>
+                      <span className="text-muted-foreground font-mono text-xs">
+                        {product.stockCode}
+                      </span>
+                    </CopyableValue>
+                  ) : null}
                   <CopyableValue value={product.barcode} label={t('barcodeLabel')}>
                     <span className="text-muted-foreground font-mono text-xs">
                       {product.barcode}
@@ -180,6 +193,11 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
               <span className="text-muted-foreground">—</span>
             );
           }
+          // Çözülemeyen satıra maliyet bağlanamaz (variant yok) — attach CTA'sı
+          // yerine nötr çizgi; kimlik rozetini ürün hücresi taşıyor.
+          if (product.variantId === null) {
+            return <span className="text-muted-foreground">—</span>;
+          }
           return (
             <CostCellPopover orgId={orgId} variantId={product.variantId}>
               <Button type="button" size="sm" variant="outline" className="gap-2xs shrink-0">
@@ -224,7 +242,7 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
       <DataTable
         columns={columns}
         data={rows}
-        getRowId={(row) => row.variantId}
+        getRowId={(row) => row.variantId ?? `barcode:${row.barcode}`}
         initialSorting={[{ id: 'unitsSold', desc: true }]}
         loading={query.isLoading}
         error={query.isError}

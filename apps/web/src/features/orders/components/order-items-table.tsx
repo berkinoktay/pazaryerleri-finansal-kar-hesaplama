@@ -17,7 +17,7 @@ import {
 
 import { type OrderItemDetail } from '../api/get-order.api';
 
-import { UnmatchedVariantBadge } from './unmatched-variant-badge';
+import { UnmatchedVariantBadge } from '@/components/patterns/unmatched-variant-badge';
 
 export interface OrderItemsTableProps {
   items: OrderItemDetail[];
