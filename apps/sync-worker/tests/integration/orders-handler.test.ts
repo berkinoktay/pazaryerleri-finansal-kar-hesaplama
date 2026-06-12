@@ -319,15 +319,16 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // ORDER_DATE_MS is past-day → cost_missing routing persists with null profit.
+    // ORDER_DATE_MS is past-day → persists PROFIT-EXCLUDED (spec 2026-06-12).
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(item.productVariantId).toBeNull();
     expect(item.barcode).toBe('EAN13-UNKNOWN');
   });
 
-  it('cost-missing + past-day → order persisted with null profit (not skipped)', async () => {
+  it('cost-missing + past-day → order persisted PROFIT-EXCLUDED (not skipped)', async () => {
     const { org, store, log } = await setupStoreAndSyncLog([]);
     // Seed a variant WITHOUT a cost profile link → cost_missing.
     const product = await prisma.product.create({
@@ -378,11 +379,12 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
-    // ORDER_DATE_MS is past-day → persisted to orders with null profit, not buffered.
+    // ORDER_DATE_MS is past-day → persisted PROFIT-EXCLUDED, not buffered.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.organizationId).toBe(org.id);
     expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 
   it('cost-missing + today → buffers (PENDING), no orders row (1A symmetry)', async () => {
