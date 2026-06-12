@@ -116,3 +116,19 @@ DROP INDEX IF EXISTS order_items_resolution_due_idx;
 CREATE INDEX order_items_resolution_due_idx
   ON order_items (next_resolution_at)
   WHERE product_variant_id IS NULL AND barcode IS NOT NULL;
+
+-- ─── 2026-06-12 profit-freeze: calculated-or-excluded ──────────────────
+-- Orders'a giren her sipariş iki nihai durumdan birindedir: HESAPLANMIŞ
+-- (estimated_net_profit NOT NULL) ya da KÂR-DIŞI (profit_excluded_at NOT
+-- NULL). Üçüncü durum ("maliyeti sonra girilecek") yok — spec §3.
+-- Mirror: prisma/migrations/20260612120000_order_profit_freeze.
+
+-- Bir sipariş aynı anda hem hesaplanmış hem kâr-dışı olamaz.
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_profit_freeze_xor_check;
+ALTER TABLE orders ADD CONSTRAINT orders_profit_freeze_xor_check
+  CHECK (NOT (estimated_net_profit IS NOT NULL AND profit_excluded_at IS NOT NULL));
+
+-- Çift kolon tutarlılığı: damga ve gerekçe birlikte yaşar.
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_profit_exclusion_pair_check;
+ALTER TABLE orders ADD CONSTRAINT orders_profit_exclusion_pair_check
+  CHECK ((profit_excluded_at IS NULL) = (profit_exclusion_reason IS NULL));
