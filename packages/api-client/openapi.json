@@ -1769,20 +1769,31 @@
               "type": "object",
               "properties": {
                 "variantId": {
-                  "type": "string",
-                  "format": "uuid"
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "Catalog variant id; null on an unresolved (barcode-fallback) row."
                 },
                 "barcode": {
                   "type": "string",
                   "example": "8680000000001"
                 },
                 "stockCode": {
-                  "type": "string",
-                  "description": "Seller's stock code (SKU)",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Seller's stock code (SKU); null when unresolved",
                   "example": "TS-BEYAZ-M"
                 },
                 "productName": {
-                  "type": "string",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Null when unresolved",
                   "example": "Pamuklu Tişört Beyaz M"
                 },
                 "thumbUrl": {
@@ -1825,6 +1836,11 @@
                   ],
                   "description": "Costed net unit cost (from the order-item snapshot), Decimal string; null when cost-missing",
                   "example": "42.00"
+                },
+                "unresolved": {
+                  "type": "boolean",
+                  "description": "Barcode resolves to no catalog variant — identity falls back to the raw barcode; rare after eager repair (spec 2026-06-12 §7).",
+                  "example": false
                 }
               },
               "required": [
@@ -1837,7 +1853,8 @@
                 "unitsSold",
                 "revenue",
                 "costStatus",
-                "unitCost"
+                "unitCost",
+                "unresolved"
               ]
             }
           }

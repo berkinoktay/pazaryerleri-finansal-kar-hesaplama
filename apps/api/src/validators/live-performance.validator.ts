@@ -52,12 +52,21 @@ export const LivePerformanceChartSchema = z
   .openapi('LivePerformanceChart');
 
 const TodayProductRowSchema = z.object({
-  variantId: z.string().uuid(),
+  variantId: z.string().uuid().nullable().openapi({
+    description: 'Catalog variant id; null on an unresolved (barcode-fallback) row.',
+  }),
   barcode: z.string().openapi({ example: '8680000000001' }),
   stockCode: z
     .string()
-    .openapi({ description: "Seller's stock code (SKU)", example: 'TS-BEYAZ-M' }),
-  productName: z.string().openapi({ example: 'Pamuklu Tişört Beyaz M' }),
+    .nullable()
+    .openapi({
+      description: "Seller's stock code (SKU); null when unresolved",
+      example: 'TS-BEYAZ-M',
+    }),
+  productName: z
+    .string()
+    .nullable()
+    .openapi({ description: 'Null when unresolved', example: 'Pamuklu Tişört Beyaz M' }),
   thumbUrl: z.string().nullable().openapi({ description: 'Product image URL or null' }),
   orderCount: z.number().int().nonnegative().openapi({
     description: 'Distinct orders + buffer entries containing this product today',
@@ -79,6 +88,12 @@ const TodayProductRowSchema = z.object({
     description:
       'Costed net unit cost (from the order-item snapshot), Decimal string; null when cost-missing',
     example: '42.00',
+  }),
+  unresolved: z.boolean().openapi({
+    description:
+      'Barcode resolves to no catalog variant — identity falls back to the raw barcode; ' +
+      'rare after eager repair (spec 2026-06-12 §7).',
+    example: false,
   }),
 });
 

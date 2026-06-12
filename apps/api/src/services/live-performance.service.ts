@@ -277,37 +277,45 @@ export async function getChart(args: { orgId: string; storeId: string }): Promis
 // ─── Today's Products (orders ∪ today buffer, per barcode) ──────────────────────
 
 export interface TodayProductRow {
-  variantId: string;
+  /** Null on an unresolved row — the barcode has no catalog variant (yet). */
+  variantId: string | null;
   barcode: string;
-  stockCode: string;
-  productName: string;
+  stockCode: string | null;
+  productName: string | null;
   thumbUrl: string | null;
   orderCount: number;
   unitsSold: number;
   revenue: string;
   costStatus: 'costed' | 'missing';
   unitCost: string | null;
+  /** Barcode resolves to no catalog variant — identity falls back to the raw
+   *  barcode; rare after eager repair (spec 2026-06-12 §7). */
+  unresolved: boolean;
 }
 
 interface ProductAccumulator {
-  variantId: string;
+  variantId: string | null;
   barcode: string;
-  stockCode: string;
-  productName: string;
+  stockCode: string | null;
+  productName: string | null;
   thumbUrl: string | null;
   orderIds: Set<string>; // distinct orders (orders table) containing this variant
   bufferEntryCount: number; // distinct buffer entries containing this barcode
   unitsSold: number;
   revenue: Decimal;
   snapshotUnitCost: Decimal | null; // net unit cost actually applied (costed rows)
+  unresolved: boolean;
 }
 
 interface VariantIdentity {
+  /** Accumulator map key: variant uuid, or `barcode:<code>` for the fallback. */
   id: string;
+  variantId: string | null;
   barcode: string;
-  stockCode: string;
-  productName: string;
+  stockCode: string | null;
+  productName: string | null;
   thumbUrl: string | null;
+  unresolved: boolean;
 }
 
 /**
@@ -374,7 +382,7 @@ export async function getTodayProducts(args: {
     const existing = byVariant.get(identity.id);
     if (existing !== undefined) return existing;
     const created: ProductAccumulator = {
-      variantId: identity.id,
+      variantId: identity.variantId,
       barcode: identity.barcode,
       stockCode: identity.stockCode,
       productName: identity.productName,
@@ -384,6 +392,7 @@ export async function getTodayProducts(args: {
       unitsSold: 0,
       revenue: new Decimal(0),
       snapshotUnitCost: null,
+      unresolved: identity.unresolved,
     };
     byVariant.set(identity.id, created);
     return created;
@@ -395,10 +404,12 @@ export async function getTodayProducts(args: {
     if (variant === null) continue; // defensive — already filtered in the query
     const acc = ensure({
       id: variant.id,
+      variantId: variant.id,
       barcode: variant.barcode,
       stockCode: variant.stockCode,
       productName: variant.product.title,
       thumbUrl: variant.product.images[0]?.url ?? null,
+      unresolved: false,
     });
     acc.orderIds.add(item.orderId);
     acc.unitsSold += item.quantity;
@@ -462,22 +473,42 @@ export async function getTodayProducts(args: {
 
   for (const [barcode, agg] of bufferByBarcode) {
     const variant = variantByBarcode.get(barcode);
-    if (variant === undefined) continue; // unresolved barcode — no identity, skip
-    const acc = ensure({
-      id: variant.id,
-      barcode: variant.barcode,
-      stockCode: variant.stockCode,
-      productName: variant.product.title,
-      thumbUrl: variant.product.images[0]?.url ?? null,
-    });
+    // Çözülemeyen barkod DÜŞÜRÜLMEZ (görünürlük sözleşmesi, spec 2026-06-12
+    // §7): satıcı "1 sipariş var ama ürün listesi boş" tutarsızlığını asla
+    // görmez. Eager onarım (PR-2) sayesinde bu satır nadir istisnadır.
+    const acc = ensure(
+      variant !== undefined
+        ? {
+            id: variant.id,
+            variantId: variant.id,
+            barcode: variant.barcode,
+            stockCode: variant.stockCode,
+            productName: variant.product.title,
+            thumbUrl: variant.product.images[0]?.url ?? null,
+            unresolved: false,
+          }
+        : {
+            id: `barcode:${barcode}`,
+            variantId: null,
+            barcode,
+            stockCode: null,
+            productName: null,
+            thumbUrl: null,
+            unresolved: true,
+          },
+    );
     acc.bufferEntryCount += agg.entryIds.size;
     acc.unitsSold += agg.units;
     acc.revenue = acc.revenue.add(agg.revenue);
   }
 
   // Cost status: a variant is costed iff it has an active (non-archived) cost
-  // profile — authoritative, independent of buffer/orders presence.
-  const variantIds = [...byVariant.keys()];
+  // profile — authoritative, independent of buffer/orders presence. Fallback
+  // rows carry no variant id (their map key is `barcode:`-prefixed) and can
+  // never enter the costed set — costStatus is always 'missing' for them.
+  const variantIds = [...byVariant.values()].flatMap((acc) =>
+    acc.variantId === null ? [] : [acc.variantId],
+  );
   const costedVariantIds = new Set(
     (variantIds.length > 0
       ? await prisma.productVariantCostProfile.findMany({
@@ -494,7 +525,7 @@ export async function getTodayProducts(args: {
 
   return [...byVariant.values()]
     .map((acc) => {
-      const costed = costedVariantIds.has(acc.variantId);
+      const costed = acc.variantId !== null && costedVariantIds.has(acc.variantId);
       const row: TodayProductRow = {
         variantId: acc.variantId,
         barcode: acc.barcode,
@@ -506,6 +537,7 @@ export async function getTodayProducts(args: {
         revenue: acc.revenue.toFixed(2),
         costStatus: costed ? 'costed' : 'missing',
         unitCost: costed && acc.snapshotUnitCost !== null ? acc.snapshotUnitCost.toFixed(2) : null,
+        unresolved: acc.unresolved,
       };
       // Retain the Decimal revenue for the tiebreaker so the sort compares
       // numerically, not lexicographically over the `.toFixed(2)` string.

@@ -20,6 +20,10 @@ section "Versioning" for details.
 
 ### Changed
 
+- `GET .../live-performance/today-products` — unresolved barcodes are no longer dropped:
+  the row falls back to barcode identity (`unresolved: true`, `variantId: null`, nullable
+  name/stockCode/thumb). Closes the "1 order today but empty product list" inconsistency. (#324)
+
 - `GET /v1/organizations/{orgId}/stores/{storeId}/orders` — `costStatus` vocabulary:
   `pending` → `excluded` (filter is now `profit_excluded_at IS NOT NULL`); `counts` is
   `{ calculated, excluded }`. There is no "pending" order state anymore — orders persist

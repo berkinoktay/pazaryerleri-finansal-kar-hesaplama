@@ -21,16 +21,17 @@ function todayAt(hours: number): Date {
 
 interface TodayProductsBody {
   data: {
-    variantId: string;
+    variantId: string | null;
     barcode: string;
-    stockCode: string;
-    productName: string;
+    stockCode: string | null;
+    productName: string | null;
     thumbUrl: string | null;
     orderCount: number;
     unitsSold: number;
     revenue: string;
     costStatus: 'costed' | 'missing';
     unitCost: string | null;
+    unresolved: boolean;
   }[];
 }
 
@@ -143,6 +144,45 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.unitsSold).toBe(5); // 2 + 3
     expect(row?.revenue).toBe('230.00'); // 80 + 150
     // No cost profile attached → missing.
+    expect(row?.costStatus).toBe('missing');
+    expect(row?.unitCost).toBeNull();
+    expect(row?.unresolved).toBe(false);
+  });
+
+  it('çözülemeyen barkodlu buffer satırı listede BARKOD kimliğiyle görünür (düşürülmez)', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // Katalogda karşılığı OLMAYAN barkod — eager onarım vendor'da da bulamadı
+    // senaryosu (görünürlük sözleşmesi, spec 2026-06-12 §7): satır düşürülmez.
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'tp-unresolved-1',
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleSubtotalNet: '90.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'GHOST-BARCODE-1', quantity: 2, unitPriceNet: '45.00' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    const row = body.data.find((r) => r.barcode === 'GHOST-BARCODE-1');
+    expect(row).toBeDefined();
+    expect(row?.unresolved).toBe(true);
+    expect(row?.variantId).toBeNull();
+    expect(row?.productName).toBeNull();
+    expect(row?.stockCode).toBeNull();
+    expect(row?.thumbUrl).toBeNull();
+    expect(row?.unitsSold).toBe(2);
+    expect(row?.revenue).toBe('90.00');
     expect(row?.costStatus).toBe('missing');
     expect(row?.unitCost).toBeNull();
   });
