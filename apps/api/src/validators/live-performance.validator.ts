@@ -56,13 +56,10 @@ const TodayProductRowSchema = z.object({
     description: 'Catalog variant id; null on an unresolved (barcode-fallback) row.',
   }),
   barcode: z.string().openapi({ example: '8680000000001' }),
-  stockCode: z
-    .string()
-    .nullable()
-    .openapi({
-      description: "Seller's stock code (SKU); null when unresolved",
-      example: 'TS-BEYAZ-M',
-    }),
+  stockCode: z.string().nullable().openapi({
+    description: "Seller's stock code (SKU); null when unresolved",
+    example: 'TS-BEYAZ-M',
+  }),
   productName: z
     .string()
     .nullable()
