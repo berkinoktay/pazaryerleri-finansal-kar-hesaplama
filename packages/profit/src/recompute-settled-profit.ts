@@ -37,7 +37,11 @@ import { computeProfit } from './profit-formula';
 export interface RecomputeSettledProfitResult {
   /** True when settledNetProfit was written. False when skipped (logged in caller). */
   recomputed: boolean;
-  skipReason?: 'missing_sale_aggregate' | 'incomplete_cost_snapshots' | 'order_not_found';
+  skipReason?:
+    | 'missing_sale_aggregate'
+    | 'incomplete_cost_snapshots'
+    | 'order_not_found'
+    | 'profit_excluded';
   settledNetProfit?: Decimal;
 }
 
@@ -47,9 +51,16 @@ export async function recomputeSettledProfit(
 ): Promise<RecomputeSettledProfitResult> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { saleSubtotalNet: true, saleVatTotal: true },
+    select: { saleSubtotalNet: true, saleVatTotal: true, profitExcludedAt: true },
   });
   if (order === null) return { recomputed: false, skipReason: 'order_not_found' };
+
+  // Karar K1 (spec 2026-06-12): kâr-dışı sipariş settled kâr da almaz —
+  // settlement fee SATIRLARI işlenmeye devam eder (finansal gerçek), yalnız
+  // order-level settled kâr yazımı atlanır.
+  if (order.profitExcludedAt !== null) {
+    return { recomputed: false, skipReason: 'profit_excluded' };
+  }
 
   if (order.saleSubtotalNet === null || order.saleVatTotal === null) {
     return { recomputed: false, skipReason: 'missing_sale_aggregate' };

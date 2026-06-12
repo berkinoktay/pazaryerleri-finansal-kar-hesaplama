@@ -115,10 +115,15 @@ export async function captureCostSnapshot(
 ): Promise<void> {
   const item = await tx.orderItem.findUnique({
     where: { id: orderItemId },
-    include: { productVariant: true },
+    include: { productVariant: true, order: { select: { profitExcludedAt: true } } },
   });
 
-  if (!item || item.unitCostSnapshotNet !== null || !item.productVariantId) {
+  if (
+    !item ||
+    item.unitCostSnapshotNet !== null ||
+    !item.productVariantId ||
+    item.order.profitExcludedAt !== null // kâr-dışı: snapshot da donuk (spec 2026-06-12)
+  ) {
     return;
   }
 
