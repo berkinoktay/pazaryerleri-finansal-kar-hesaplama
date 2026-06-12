@@ -73,3 +73,46 @@ CREATE UNIQUE INDEX IF NOT EXISTS order_fees_derived_correction_uniq
 CREATE UNIQUE INDEX IF NOT EXISTS org_period_fees_settlement_row_uniq
   ON org_period_fees (organization_id, fee_type, trendyol_transaction_id)
   WHERE trendyol_transaction_id IS NOT NULL;
+
+-- ─── variant-recovery PR-2: ESTIMATE fee idempotency ───────────────────
+-- T+0 PSF/Stopaj sipariş başına TEK'tir; geç maliyet re-entry'si (Slice C
+-- manuel giriş, variant-resolution tick) veya yarışan iki tx çift yazamasın.
+-- #297 guard'ları ESTIMATE'i bilinçli dışarıda bırakmıştı (kimlik kolonu
+-- yok) — anahtar (order_id, fee_type). Derived düzeltme source='SETTLEMENT'
+-- olduğundan kapsam dışı. Mirror: prisma/migrations/20260612020000.
+-- Index'ten önce idempotent dedup: paylaşılan re-entry defekti çift yazmış
+-- olabilir; en eski satır kalır, etkilenen siparişlerin yanlış kilitlenmiş
+-- estimated_net_profit'i NULL'a çekilir (re-entry doğru değeri yazar).
+WITH doomed AS (
+  SELECT id, order_id
+  FROM (
+    SELECT id, order_id,
+           row_number() OVER (
+             PARTITION BY order_id, fee_type
+             ORDER BY captured_at, id
+           ) AS rn
+    FROM order_fees
+    WHERE source = 'ESTIMATE'
+  ) ranked
+  WHERE rn > 1
+),
+reset_orders AS (
+  UPDATE orders SET estimated_net_profit = NULL
+  WHERE id IN (SELECT DISTINCT order_id FROM doomed)
+)
+DELETE FROM order_fees WHERE id IN (SELECT id FROM doomed);
+
+CREATE UNIQUE INDEX IF NOT EXISTS order_fees_estimate_fee_type_uniq
+  ON order_fees (order_id, fee_type)
+  WHERE source = 'ESTIMATE';
+
+-- ─── variant-recovery PR-2: resolution kuyruğu partial index ───────────
+-- Kuyruk sorgusu: product_variant_id IS NULL AND barcode IS NOT NULL AND
+-- (next_resolution_at IS NULL OR <= now). Düz full-table index bu şekle
+-- hizmet edemez; partial index çözülmemiş küçük kümeyi taşır. Şemadaki eski
+-- düz sürümün kalıntısına karşı önce DROP (idempotent geçiş).
+-- Mirror: prisma/migrations/20260612020000.
+DROP INDEX IF EXISTS order_items_resolution_due_idx;
+CREATE INDEX order_items_resolution_due_idx
+  ON order_items (next_resolution_at)
+  WHERE product_variant_id IS NULL AND barcode IS NOT NULL;

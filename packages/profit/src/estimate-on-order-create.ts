@@ -64,9 +64,24 @@ export async function applyEstimateOnOrderCreate(
   // Write-once guard (application layer; DB trigger PR-9'da defense-in-depth)
   if (order.estimatedNetProfit !== null) return;
 
+  // Re-entry fee guard: cost_missing siparişlerde T+0 çağrısı PSF/Stopaj'ı
+  // YAZAR ama estimate'i null bırakır (allHaveCostSnapshot, aşağıda). Maliyet
+  // sonradan gelince (Slice C manuel giriş, variant-resolution tick) fonksiyon
+  // yeniden çağrılır — fee'ler tekrar yazılırsa computeProfit 2x PSF + 2x
+  // Stopaj toplar ve YANLIŞ kâr write-once kilitlenir. ESTIMATE fee'ler T+0
+  // deterministik olduğundan feeType-başına skip-if-exists yeterli.
+  const existingEstimateFeeTypes = new Set(
+    (
+      await tx.orderFee.findMany({
+        where: { orderId, source: 'ESTIMATE' },
+        select: { feeType: true },
+      })
+    ).map((fee) => fee.feeType),
+  );
+
   // ─── 1. PSF (Platform Hizmet Bedeli) — deterministic per-order ─────────
   // Muafiyetler: RETURNED, micro=true, all-digital → PSF=0 (OrderFee yazılmaz).
-  const psfApplicable = !isPsfExempt(order);
+  const psfApplicable = !isPsfExempt(order) && !existingEstimateFeeTypes.has('PLATFORM_SERVICE');
   if (psfApplicable) {
     // T+0'da deliveredOnTime null → conservative standart ₺10.99 kullanılır.
     // T+~5 sale settlement'tan sonra fastDelivery + deliveredOnTime=true doğrulanırsa
@@ -102,7 +117,7 @@ export async function applyEstimateOnOrderCreate(
   // ─── 2. Stopaj (E-ticaret Stopajı) — deterministic per-order ───────────
   // Matrah: saleSubtotalNet × %1 (KDV=0). PSF üzerine stopaj YAPILMAZ
   // (design §3.4 — 330 Tebliği Md 5/2).
-  if (order.saleSubtotalNet !== null) {
+  if (order.saleSubtotalNet !== null && !existingEstimateFeeTypes.has('STOPPAGE')) {
     const stopajDef = await resolveFeeDefinition(tx, {
       platform: order.store.platform,
       feeType: 'STOPPAGE',

@@ -32,8 +32,29 @@ function nextBackoff(attempts: number): Date {
   return new Date(Date.now() + delay);
 }
 
+// Aynı-proses çakışma guard'ı: boot koşumu + 60s interval (veya vendor
+// yavaşlamasıyla 60s'i aşan bir tick) üst üste binerse ikincisi no-op olur.
+// Çoklu worker instance'ı için satır-claim YOK (buffer-promote'un SKIP
+// LOCKED'ının aksine) — bilinçli: tick'in tüm yazıları idempotent/write-once,
+// çakışmanın maliyeti yalnız mükerrer vendor sorgusu. Çok-instance deployment
+// gündeme gelirse SKIP LOCKED claim'e geçir.
+let tickInFlight = false;
+
 export async function processVariantResolution(): Promise<void> {
-  // Vadesi gelmiş, çözülmemiş satırlar — mağaza başına gruplanır.
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try {
+    await runResolutionTick();
+  } finally {
+    tickInFlight = false;
+  }
+}
+
+async function runResolutionTick(): Promise<void> {
+  // Vadesi gelmiş, çözülmemiş satırlar — mağaza başına gruplanır. Sıralama
+  // deterministik (vade önce, null=hiç denenmemiş en önde): take-500
+  // penceresi tick'ler arasında kararlı dolaşır, tek mağazanın taşması
+  // diğerlerini rastgele aç bırakamaz.
   const due: DueItem[] = await prisma.orderItem.findMany({
     where: {
       productVariantId: null,
@@ -46,6 +67,7 @@ export async function processVariantResolution(): Promise<void> {
       variantResolutionAttempts: true,
       order: { select: { id: true, storeId: true, organizationId: true } },
     },
+    orderBy: [{ nextResolutionAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
     take: DUE_ITEMS_PER_TICK,
   });
   if (due.length === 0) return;
@@ -61,14 +83,41 @@ export async function processVariantResolution(): Promise<void> {
     try {
       await resolveForStore(storeId, items);
     } catch (err) {
-      // Mağaza-başına izolasyon: bir mağazanın hatası (ör. vendor 5xx)
-      // diğerlerini durdurmaz; satırlar vadeleri değişmediği için sonraki
-      // tick'te yeniden ele alınır.
+      // Mağaza-başına izolasyon: bir mağazanın hatası (ör. vendor 5xx, bozuk
+      // credential) diğerlerini durdurmaz. Kalıcı hata 60s hot-loop'a ve
+      // pencere işgaline dönüşmesin diye mağazanın satırlarına da backoff
+      // yazılır (best-effort) — transient hata 5 dk gecikme öder, kalıcı
+      // hata üstel olarak pencereden çekilir.
       syncLog.error('resolution.store-failed', {
         storeId,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
+      await applyBackoff(storeId, items).catch((backoffErr: unknown) => {
+        syncLog.error('resolution.store-backoff-failed', {
+          storeId,
+          errorMessage: backoffErr instanceof Error ? backoffErr.message : String(backoffErr),
+        });
+      });
     }
+  }
+}
+
+/** attempts++ + üstel vade — hem barkod-bulunamadı hem mağaza-hatası yolu. */
+async function applyBackoff(storeId: string, items: DueItem[]): Promise<void> {
+  for (const item of items) {
+    await prisma.orderItem.update({
+      where: { id: item.id },
+      data: {
+        variantResolutionAttempts: item.variantResolutionAttempts + 1,
+        nextResolutionAt: nextBackoff(item.variantResolutionAttempts),
+      },
+    });
+    syncLog.info('resolution.deferred', {
+      storeId,
+      orderItemId: item.id,
+      barcode: item.barcode,
+      attempts: item.variantResolutionAttempts + 1,
+    });
   }
 }
 
@@ -95,23 +144,14 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
     }
   }
 
-  // 3) Tekrar eşle; (4) kalanlara backoff.
+  // 3) Tekrar eşle; (4) yalnız bu tick'te GERÇEKTEN sorgulanan barkodların
+  // satırlarına backoff — cap'e sığmayanlar denenmeden cezalandırılmaz,
+  // vadesiz (null) kaldıkları için sıralama gereği sonraki tick'in
+  // penceresinde öne geçerler.
   remaining = await linkAgainstLocalCatalog(storeId, remaining);
-  for (const item of remaining) {
-    await prisma.orderItem.update({
-      where: { id: item.id },
-      data: {
-        variantResolutionAttempts: item.variantResolutionAttempts + 1,
-        nextResolutionAt: nextBackoff(item.variantResolutionAttempts),
-      },
-    });
-    syncLog.info('resolution.deferred', {
-      storeId,
-      orderItemId: item.id,
-      barcode: item.barcode,
-      attempts: item.variantResolutionAttempts + 1,
-    });
-  }
+  const queried = new Set(distinctBarcodes);
+  const attempted = remaining.filter((i) => i.barcode !== null && queried.has(i.barcode));
+  await applyBackoff(storeId, attempted);
 }
 
 /** Bağlananları listeden düşürür; bağlama + snapshot + estimate tek tx/order. */

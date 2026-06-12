@@ -637,7 +637,9 @@ model OrderItem {
 
   @@index([organizationId, snapshotCapturedAt])
   @@index([commissionInvoiceId])
-  @@index([nextResolutionAt], map: "order_items_resolution_due_idx")
+  // Resolution kuyruğu index'i PARTIAL (WHERE product_variant_id IS NULL) —
+  // Prisma kısmi index yazamadığı için check-constraints.sql + migration
+  // aynasında yaşar (order_items_resolution_due_idx).
   @@map("order_items")
 }
 
