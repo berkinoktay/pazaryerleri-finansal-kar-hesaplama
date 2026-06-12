@@ -149,15 +149,17 @@ const FLUSH_CHUNK_SIZE = 25;
 
 /**
  * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries whose
- * business date is before today into `orders` (null profit), then delete the
- * buffer row — same atomic claim+upsert+delete as promoteOne.
+ * business date is before today into `orders` as PROFIT-EXCLUDED
+ * (COST_DEADLINE_MISSED — spec 2026-06-12), then delete the buffer row —
+ * same atomic claim+upsert+delete as promoteOne. Ciro kaydı korunur; kâr
+ * alanları kalıcı donuk ("null kârla mezuniyet + sonradan maliyet" kalktı).
  *
  * Scope is PENDING-only by design: PROMOTING (cost just attached) and FAILED
  * (retry-due) past-day entries are already handled by processBufferPromote, so
- * flush owns exactly the orders whose cost never arrived before midnight — the
- * "never lose a sale" graduation. A flush that throws marks the entry FAILED,
- * handing it to the promote retry path (and ultimately PERMANENT_FAILED, which
- * the narrowed reset cron cleans up).
+ * flush owns exactly the orders whose cost never arrived before midnight. A
+ * flush that throws marks the entry FAILED, handing it to the promote retry
+ * path (and ultimately PERMANENT_FAILED, which the narrowed reset cron cleans
+ * up).
  */
 export async function processPastDayBufferFlush(now: Date = new Date()): Promise<void> {
   const todayAnchor = getBusinessDateAnchor(now);
@@ -196,8 +198,11 @@ async function flushOne(id: string): Promise<void> {
       }
 
       const mapped = entry.mappedOrder as unknown as MappedOrder;
-      // Same tx → order write + buffer delete commit atomically (null cost OK).
-      await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx);
+      // Pencere kapandı: KÂR-DIŞI mezuniyet (spec 2026-06-12). Ciro kaydı
+      // korunur; kâr alanları kalıcı donuk. Aynı tx → order + buffer-delete atomik.
+      await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
+        profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
+      });
       await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
       return entry;
     });

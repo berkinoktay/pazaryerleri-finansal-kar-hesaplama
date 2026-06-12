@@ -194,10 +194,10 @@ describe('processPastDayBufferFlush', () => {
 
   const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-  it('graduates a PENDING past-day entry into orders (null profit) and deletes the buffer row', async () => {
+  it('graduates a PENDING past-day entry PROFIT-EXCLUDED and deletes the buffer row', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    // No cost seeded → graduates with null estimatedNetProfit.
+    // No cost seeded → cost window missed → permanent exclusion (spec 2026-06-12).
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-pending',
       orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
@@ -211,6 +211,10 @@ describe('processPastDayBufferFlush', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('flush-pending');
     expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+    expect(order.profitExcludedAt).not.toBeNull();
+    // Kâr-dışı sipariş PSF/Stopaj ESTIMATE satırı da taşımaz.
+    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
   });
 
   it('does NOT flush a today PENDING entry (same-day cost window preserved)', async () => {
