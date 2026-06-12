@@ -28,6 +28,10 @@ import {
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+import {
+  approvedProductsResponse,
+  jsonResponse,
+} from '../../../../apps/api/tests/helpers/trendyol-fixtures';
 
 const SANDBOX_BASE = 'https://stageapigw.trendyol.test';
 const SUPPLIER_ID = '2738';
@@ -196,52 +200,8 @@ async function seedCatalogVariant(
   });
 }
 
-/** Real approved-products wire fixture (same shape the full catalog sync maps). */
-function approvedProductsResponse(barcode: string, count: number): unknown {
-  return {
-    totalElements: count,
-    totalPages: 1,
-    page: 0,
-    size: 100,
-    nextPageToken: null,
-    content: Array.from({ length: count }, (_, i) => ({
-      contentId: 700_000 + i,
-      productMainId: `pmid-${barcode}`,
-      brand: { id: 1, name: 'Brand' },
-      category: { id: 1, name: 'Category' },
-      creationDate: 1777246115403,
-      lastModifiedDate: 1777246115403,
-      title: 'Vendor Product',
-      description: 'desc',
-      images: [{ url: 'https://cdn.example.com/x.jpg' }],
-      attributes: [],
-      variants: [
-        {
-          variantId: 7_000_000 + i,
-          supplierId: Number(SUPPLIER_ID),
-          barcode,
-          attributes: [],
-          onSale: true,
-          deliveryOptions: { deliveryDuration: 1, isRushDelivery: false, fastDeliveryOptions: [] },
-          stock: { quantity: 5, lastModifiedDate: 0 },
-          price: { salePrice: 100, listPrice: 120 },
-          stockCode: `sk-${barcode}`,
-          vatRate: 20,
-          locked: false,
-          archived: false,
-          blacklisted: false,
-        },
-      ],
-    })),
-  };
-}
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
+// approvedProductsResponse + jsonResponse: apps/api/tests/helpers/trendyol-fixtures
+// (PR-2 terfisi — webhook eager-repair testleriyle paylaşılıyor).
 
 describe('processVariantResolution', () => {
   beforeAll(async () => {

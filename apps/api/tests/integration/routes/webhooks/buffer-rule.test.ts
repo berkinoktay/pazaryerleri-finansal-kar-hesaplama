@@ -1,7 +1,7 @@
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import { getBusinessDayRange } from '@pazarsync/utils';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../../../../src/app';
 import { _resetRateLimitStoreForTests } from '../../../../src/middleware/rate-limit.middleware';
@@ -12,6 +12,7 @@ import {
   createUserProfile,
 } from '../../../helpers/factories';
 import { ensureFeeDefinitions } from '../../../helpers/seed-fee-definitions';
+import { approvedProductsResponse, jsonResponse } from '../../../helpers/trendyol-fixtures';
 
 /**
  * PR-B: webhook receiver Live Performance buffer rule.
@@ -168,6 +169,10 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     _resetRateLimitStoreForTests();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("cost-missing + today's orderDate → writes a PENDING buffer entry", async () => {
     const { orgId, storeId } = await setupStore();
 
@@ -209,6 +214,62 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(order.estimatedNetProfit).toBeNull();
     expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
     expect(order.profitExcludedAt).not.toBeNull();
+  });
+
+  it('katalogda olmayan barkod intake anında vendor sorgusuyla eklenir ve satır eşleşmiş olarak buffera düşer', async () => {
+    const { storeId } = await setupStore();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/products/approved') && url.includes('barcode=EAGER-NEW-1')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('EAGER-NEW-1', 1)));
+      }
+      throw new Error(`beklenmeyen fetch: ${url}`);
+    });
+
+    const res = await postWebhook(
+      storeId,
+      makeWebhookPayload({
+        shipmentPackageId: 700000010,
+        orderNumber: 'eager-1',
+        barcode: 'EAGER-NEW-1',
+      }),
+      authOk,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalled();
+    // Ürün kataloğa anında girdi…
+    expect(await prisma.productVariant.count({ where: { storeId, barcode: 'EAGER-NEW-1' } })).toBe(
+      1,
+    );
+    // …maliyetsiz doğduğu için sipariş bugünkü pencereye (buffer) düştü.
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId } })).toBe(0);
+  });
+
+  it('vendor hatası intake sürecini bloke etmez — satır eşleşmeden buffera düşer (K6)', async () => {
+    const { storeId } = await setupStore();
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/products/approved')) {
+        return Promise.resolve(new Response('bad credentials', { status: 401 }));
+      }
+      throw new Error(`beklenmeyen fetch: ${url}`);
+    });
+
+    const res = await postWebhook(
+      storeId,
+      makeWebhookPayload({
+        shipmentPackageId: 700000011,
+        orderNumber: 'eager-2',
+        barcode: 'EAGER-GONE-2',
+      }),
+      authOk,
+    );
+    expect(res.status).toBe(200);
+    expect(await prisma.productVariant.count({ where: { storeId, barcode: 'EAGER-GONE-2' } })).toBe(
+      0,
+    );
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(1);
   });
 
   it('duplicate webhook for the same package → P2002 dedupe, single buffer entry', async () => {
