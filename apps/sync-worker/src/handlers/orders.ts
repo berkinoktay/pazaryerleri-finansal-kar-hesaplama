@@ -31,6 +31,7 @@
  * per-page resilience.
  */
 
+import { ensureBarcodesInCatalog } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import type { SyncLog } from '@pazarsync/db';
 import {
@@ -241,12 +242,18 @@ export async function processOrdersChunk(input: {
 
   const { batch, nextCursor, hasMore } = value;
 
+  // Anında katalog onarımı (spec 2026-06-12 §4): batch'teki bilinmeyen
+  // barkodlar tek tek tekil sorguyla eklenir; hata akışı durdurmaz (K6).
+  // Cap 25 = tick'le aynı bütçe; cron yolunda webhook gecikme baskısı yok.
+  const batchBarcodes = [...new Set(batch.flatMap((o) => o.lines.map((l) => l.barcode)))];
+  await ensureBarcodesInCatalog(store, batchBarcodes, { maxVendorCalls: 25 });
+
   // Upsert per-order (own transaction). Trendyol can emit duplicate orders
   // across cursor pages on lastModified shifts — upsert is idempotent.
   // Route per-order through the shared intake helper (own transaction each):
   // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders (null profit). Unmatched variant lines fold into cost_missing —
-  // the order is ALWAYS written. Identical to the webhook.
+  // orders PROFIT-EXCLUDED (spec 2026-06-12). Unmatched variant lines fold
+  // into cost_missing — the order is ALWAYS written. Identical to the webhook.
   // Trendyol can emit duplicate orders across cursor pages — upsert + buffer
   // unique key are both idempotent.
   for (const order of batch) {
