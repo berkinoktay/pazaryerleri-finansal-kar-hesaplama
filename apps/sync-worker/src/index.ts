@@ -34,6 +34,7 @@ import { syncLog, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
+import { processVariantResolution } from './handlers/variant-resolution';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
@@ -59,6 +60,12 @@ const BUFFER_PROMOTE_INTERVAL_MS = 5_000;
 // reconciler only heals drift (db reset, ngrok/base-URL change, failed connect)
 // and need not run hot. Idempotent — steady state is one GET per seller, no writes.
 const WEBHOOK_RECONCILE_INTERVAL_MS = 5 * 60_000;
+// Variant-resolution tick — links order lines that persisted without a variant
+// (spec 2026-06-11): local catalog first-match, then a targeted single-barcode
+// vendor query. 60 s cadence: the seller's "eşleşme bekliyor" gap should close
+// within a minute of the product appearing, while per-store batching + the
+// per-item exponential backoff keep vendor traffic negligible.
+const VARIANT_RESOLUTION_INTERVAL_MS = 60_000;
 const IDLE_LOG_THROTTLE_MS = 30_000;
 
 let shuttingDown = false;
@@ -130,6 +137,25 @@ async function main(): Promise<void> {
     });
   }, WEBHOOK_RECONCILE_INTERVAL_MS);
 
+  // Variant resolution: once on boot (a freshly restarted worker drains the
+  // queue immediately — e.g. right after the daily product sync landed), then
+  // on the interval. Wrapped like the other ticks so a vendor/DB hiccup never
+  // crashes the worker.
+  void processVariantResolution().catch((err: unknown) => {
+    syncLog.error('resolution.boot-error', {
+      workerId: WORKER_ID,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+  });
+  const variantResolutionTimer = setInterval(() => {
+    void processVariantResolution().catch((err: unknown) => {
+      syncLog.error('resolution.tick-error', {
+        workerId: WORKER_ID,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }, VARIANT_RESOLUTION_INTERVAL_MS);
+
   let backoff = POLL_BACKOFF_INITIAL_MS;
   let lastIdleLogAt = 0;
 
@@ -187,6 +213,7 @@ async function main(): Promise<void> {
   clearInterval(watchdogTimer);
   clearInterval(bufferPromoteTimer);
   clearInterval(webhookReconcileTimer);
+  clearInterval(variantResolutionTimer);
   syncLog.info('worker.stopped', { workerId: WORKER_ID });
 }
 

@@ -214,6 +214,49 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     expect(updated.estimatedNetProfit).toBeNull();
   });
 
+  it('Null-estimate re-entry — fee duplike edilmez, snapshot dolunca estimate tamamlanır', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      unitCostSnapshotNet: null,
+      unitCostSnapshotVatAmount: null,
+    });
+
+    // T+0: cost_missing — PSF + Stopaj yazılır, estimate null kalır.
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+    const feesBefore = await prisma.orderFee.count({
+      where: { orderId: order.id, source: 'ESTIMATE' },
+    });
+    expect(feesBefore).toBe(2);
+
+    // Maliyet sonradan gelir (Slice C manuel giriş / variant-resolution tick)
+    // ve fonksiyon yeniden çağrılır — estimate guard'ı (null) GEÇER; fee'ler
+    // feeType-başına skip-if-exists ile İKİNCİ kez yazılmamalı, profit tek
+    // fee setiyle hesaplanmalı (regresyon: 2x PSF + 2x Stopaj → yanlış kâr).
+    await prisma.orderItem.updateMany({
+      where: { orderId: order.id },
+      data: { unitCostSnapshotNet: '40.00', unitCostSnapshotVatAmount: '8.00' },
+    });
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    const estimateFees = await prisma.orderFee.groupBy({
+      by: ['feeType'],
+      where: { orderId: order.id, source: 'ESTIMATE' },
+      _count: { _all: true },
+    });
+    expect(Object.fromEntries(estimateFees.map((f) => [f.feeType, f._count._all]))).toEqual({
+      PLATFORM_SERVICE: 1,
+      STOPPAGE: 1,
+    });
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(updated.estimatedNetProfit).not.toBeNull();
+  });
+
   it('Write-once — re-entry idempotent (estimatedNetProfit set ise no-op)', async () => {
     const { org, store } = await setup();
     const order = await createOrderWithItem({ orgId: org.id, storeId: store.id });

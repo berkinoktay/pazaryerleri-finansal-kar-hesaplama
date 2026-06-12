@@ -581,6 +581,11 @@ model OrderItem {
   // variant eşleşmediğinde elde kalan tek ürün izi ("variant bulunamadı" UI'ı).
   platformLineId     BigInt?   @map("platform_line_id")
   barcode            String?
+  // Variant-resolution kuyruğu (spec 2026-06-11 §5): productVariantId NULL
+  // satırlar için deneme sayacı + backoff vadesi. Tick yalnız vadesi gelmiş
+  // satırları tarar; bağlanınca alanlar anlamını yitirir (sıfırlanmaz).
+  variantResolutionAttempts Int       @default(0) @map("variant_resolution_attempts")
+  nextResolutionAt          DateTime? @map("next_resolution_at")
   // Eski (KDV-dahil) kolonlar — PR-5c'de silinir, PR-5b veri taşıma sonrası.
   unitPrice          Decimal   @map("unit_price") @db.Decimal(12, 2)
   commissionRate     Decimal   @map("commission_rate") @db.Decimal(5, 2)
@@ -632,6 +637,9 @@ model OrderItem {
 
   @@index([organizationId, snapshotCapturedAt])
   @@index([commissionInvoiceId])
+  // Resolution kuyruğu index'i PARTIAL (WHERE product_variant_id IS NULL) —
+  // Prisma kısmi index yazamadığı için check-constraints.sql + migration
+  // aynasında yaşar (order_items_resolution_due_idx).
   @@map("order_items")
 }
 

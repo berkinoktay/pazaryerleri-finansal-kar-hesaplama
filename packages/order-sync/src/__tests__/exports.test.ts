@@ -11,11 +11,13 @@ describe('@pazarsync/order-sync — public API surface', () => {
   });
 
   it('exposes exactly the intake + write helpers (public API guard)', () => {
-    // Paketin scope'unu küçük tutmak için yalnız iki public runtime symbol:
+    // Paketin scope'unu küçük tutmak için yalnız üç public runtime symbol:
     // order yazma (upsertOrderWithSnapshot) + paylaşılan intake routing
-    // (intakeOrder, Slice 0). OrderIntakeOutcome type-only export — runtime'da
-    // görünmez. Bu test ileride yanlışlıkla private helper export edilirse fail eder.
+    // (intakeOrder, Slice 0) + geç-bağlanan variant'ın snapshot re-entry'si
+    // (captureCostSnapshot, variant-recovery PR-2). OrderIntakeOutcome
+    // type-only export — runtime'da görünmez. Bu test ileride yanlışlıkla
+    // private helper export edilirse fail eder.
     const keys = Object.keys(orderSync).sort();
-    expect(keys).toEqual(['intakeOrder', 'upsertOrderWithSnapshot']);
+    expect(keys).toEqual(['captureCostSnapshot', 'intakeOrder', 'upsertOrderWithSnapshot']);
   });
 });
