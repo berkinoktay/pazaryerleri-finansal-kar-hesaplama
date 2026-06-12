@@ -13,6 +13,7 @@ import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import type { Prisma } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -388,6 +389,52 @@ describe('processVariantResolution', () => {
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(after.estimatedNetProfit).toBeNull();
     expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
+  it('PENDING buffer satırının bilinmeyen barkodu tick ile kataloğa onarılır (item bağlanmaz)', async () => {
+    const ctx = await buildStore();
+    // Buffer satırı: intake'in bugünkü cost_missing yazdığı şekil — mappedOrder
+    // JSONB'sinde BC-BUF-REPAIR barkodlu tek satır, katalogda karşılığı yok.
+    // Order item YOK — onarımın due-item kuyruğundan bağımsız koştuğunu kanıtlar.
+    await prisma.livePerformanceBuffer.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        orderDate: new Date(),
+        platformOrderId: 'buf-repair-1',
+        platformOrderNumber: 'buf-repair-1',
+        rawPayload: {},
+        mappedOrder: buildMappedOrder({
+          platformOrderId: 'buf-repair-1',
+          orderDate: new Date(),
+          barcode: 'BC-BUF-REPAIR',
+        }) as unknown as Prisma.InputJsonValue,
+        status: 'PENDING',
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-REPAIR')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-REPAIR', 1)));
+      }
+      throw new Error(`beklenmeyen fetch: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    // Katalog onarıldı — satıcı artık maliyet profili ekleyebilir (attach →
+    // flip → promote zinciri devralır). Item YOK ve yaratılmaz.
+    expect(
+      await prisma.productVariant.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-BUF-REPAIR' },
+      }),
+    ).toBe(1);
+    expect(await prisma.orderItem.count()).toBe(0);
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'buf-repair-1' },
+    });
+    expect(entry.status).toBe('PENDING'); // maliyet YOK → hâlâ bekliyor (doğru)
   });
 
   it('kâr-dışı siparişin kalemi KİMLİK için bağlanır ama para alanları donuk kalır', async () => {
