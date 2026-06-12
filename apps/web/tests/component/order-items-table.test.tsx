@@ -42,9 +42,12 @@ describe('OrderItemsTable', () => {
   });
 
   it('shows neither badge nor fallback barcode for a matched item (variant barcode wins)', () => {
-    render(<OrderItemsTable items={[makeItem()]} />);
+    // BOTH barcodes present — locks the precedence (variant ?? item, not the
+    // reverse): the line-level barcode must NOT replace the catalog identity.
+    render(<OrderItemsTable items={[makeItem({ barcode: '8680000000001' })]} />);
     expect(screen.queryByText('Eşleşme bekliyor')).not.toBeInTheDocument();
     expect(screen.getByText('8690000000000')).toBeInTheDocument();
+    expect(screen.queryByText('8680000000001')).not.toBeInTheDocument();
     expect(screen.getByText('Test Ürünü — M')).toBeInTheDocument();
   });
 });

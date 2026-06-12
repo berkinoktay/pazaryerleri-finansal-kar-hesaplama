@@ -64,48 +64,53 @@ export function OrderItemsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>
-                    <div className="gap-3xs flex flex-col">
-                      <span className="font-medium">
-                        {item.variant?.productName ?? t('unknownVariant')}
-                      </span>
-                      {item.variant === null ? <UnmatchedVariantBadge className="w-fit" /> : null}
-                      {(item.variant?.barcode ?? item.barcode) != null ? (
-                        <span className="text-2xs text-muted-foreground tabular-nums">
-                          {item.variant?.barcode ?? item.barcode}
+              {items.map((item) => {
+                // Variant barkodu önceliklidir; eşleşmemiş satırda kalem-düzeyi
+                // barkod tek ürün izidir (PR-1 her zaman yazar).
+                const displayBarcode = item.variant?.barcode ?? item.barcode;
+                return (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <div className="gap-3xs flex flex-col">
+                        <span className="font-medium">
+                          {item.variant?.productName ?? t('unknownVariant')}
                         </span>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatter.number(item.quantity, 'integer')}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {item.unitPriceNet === null ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <Currency value={item.unitPriceNet} />
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Currency value={item.grossCommissionAmountNet} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Currency value={item.refundedCommissionAmountNet} dimWhenZero />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {renderCostCell !== undefined ? (
-                      renderCostCell(item)
-                    ) : item.unitCostSnapshotNet === null ? (
-                      <span className="text-warning">{t('costMissing')}</span>
-                    ) : (
-                      <Currency value={item.unitCostSnapshotNet} />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
+                        {item.variant === null ? <UnmatchedVariantBadge className="w-fit" /> : null}
+                        {displayBarcode !== null ? (
+                          <span className="text-2xs text-muted-foreground tabular-nums">
+                            {displayBarcode}
+                          </span>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatter.number(item.quantity, 'integer')}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {item.unitPriceNet === null ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <Currency value={item.unitPriceNet} />
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Currency value={item.grossCommissionAmountNet} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Currency value={item.refundedCommissionAmountNet} dimWhenZero />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {renderCostCell !== undefined ? (
+                        renderCostCell(item)
+                      ) : item.unitCostSnapshotNet === null ? (
+                        <span className="text-warning">{t('costMissing')}</span>
+                      ) : (
+                        <Currency value={item.unitCostSnapshotNet} />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
