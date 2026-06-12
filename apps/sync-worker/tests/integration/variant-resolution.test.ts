@@ -13,6 +13,7 @@ import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import type { Prisma } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -27,6 +28,10 @@ import {
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+import {
+  approvedProductsResponse,
+  jsonResponse,
+} from '../../../../apps/api/tests/helpers/trendyol-fixtures';
 
 const SANDBOX_BASE = 'https://stageapigw.trendyol.test';
 const SUPPLIER_ID = '2738';
@@ -195,52 +200,8 @@ async function seedCatalogVariant(
   });
 }
 
-/** Real approved-products wire fixture (same shape the full catalog sync maps). */
-function approvedProductsResponse(barcode: string, count: number): unknown {
-  return {
-    totalElements: count,
-    totalPages: 1,
-    page: 0,
-    size: 100,
-    nextPageToken: null,
-    content: Array.from({ length: count }, (_, i) => ({
-      contentId: 700_000 + i,
-      productMainId: `pmid-${barcode}`,
-      brand: { id: 1, name: 'Brand' },
-      category: { id: 1, name: 'Category' },
-      creationDate: 1777246115403,
-      lastModifiedDate: 1777246115403,
-      title: 'Vendor Product',
-      description: 'desc',
-      images: [{ url: 'https://cdn.example.com/x.jpg' }],
-      attributes: [],
-      variants: [
-        {
-          variantId: 7_000_000 + i,
-          supplierId: Number(SUPPLIER_ID),
-          barcode,
-          attributes: [],
-          onSale: true,
-          deliveryOptions: { deliveryDuration: 1, isRushDelivery: false, fastDeliveryOptions: [] },
-          stock: { quantity: 5, lastModifiedDate: 0 },
-          price: { salePrice: 100, listPrice: 120 },
-          stockCode: `sk-${barcode}`,
-          vatRate: 20,
-          locked: false,
-          archived: false,
-          blacklisted: false,
-        },
-      ],
-    })),
-  };
-}
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
+// approvedProductsResponse + jsonResponse: apps/api/tests/helpers/trendyol-fixtures
+// (PR-2 terfisi — webhook eager-repair testleriyle paylaşılıyor).
 
 describe('processVariantResolution', () => {
   beforeAll(async () => {
@@ -388,6 +349,52 @@ describe('processVariantResolution', () => {
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(after.estimatedNetProfit).toBeNull();
     expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
+  it('PENDING buffer satırının bilinmeyen barkodu tick ile kataloğa onarılır (item bağlanmaz)', async () => {
+    const ctx = await buildStore();
+    // Buffer satırı: intake'in bugünkü cost_missing yazdığı şekil — mappedOrder
+    // JSONB'sinde BC-BUF-REPAIR barkodlu tek satır, katalogda karşılığı yok.
+    // Order item YOK — onarımın due-item kuyruğundan bağımsız koştuğunu kanıtlar.
+    await prisma.livePerformanceBuffer.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        orderDate: new Date(),
+        platformOrderId: 'buf-repair-1',
+        platformOrderNumber: 'buf-repair-1',
+        rawPayload: {},
+        mappedOrder: buildMappedOrder({
+          platformOrderId: 'buf-repair-1',
+          orderDate: new Date(),
+          barcode: 'BC-BUF-REPAIR',
+        }) as unknown as Prisma.InputJsonValue,
+        status: 'PENDING',
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-REPAIR')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-REPAIR', 1)));
+      }
+      throw new Error(`beklenmeyen fetch: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    // Katalog onarıldı — satıcı artık maliyet profili ekleyebilir (attach →
+    // flip → promote zinciri devralır). Item YOK ve yaratılmaz.
+    expect(
+      await prisma.productVariant.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-BUF-REPAIR' },
+      }),
+    ).toBe(1);
+    expect(await prisma.orderItem.count()).toBe(0);
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { platformOrderId: 'buf-repair-1' },
+    });
+    expect(entry.status).toBe('PENDING'); // maliyet YOK → hâlâ bekliyor (doğru)
   });
 
   it('kâr-dışı siparişin kalemi KİMLİK için bağlanır ama para alanları donuk kalır', async () => {

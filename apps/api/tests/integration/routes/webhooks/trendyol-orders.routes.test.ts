@@ -156,6 +156,11 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
     await ensureFeeDefinitions();
   });
 
+  afterEach(() => {
+    // Eager-repair fetch spy'ları (spec 2026-06-12 PR-2) testler arasında sızmasın.
+    vi.restoreAllMocks();
+  });
+
   afterAll(async () => {
     _resetRateLimitStoreForTests();
   });
@@ -379,6 +384,28 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
   describe('Calculability gate (PR-B)', () => {
     it('persists the order with a null-variant item when a line has no matching variant', async () => {
       const { storeId } = await setupStore();
+      // Eager katalog onarımı (spec 2026-06-12 PR-2) bilinmeyen barkod için
+      // vendor'a çıkar — deterministik vendor-miss: barkod Trendyol'da da yok,
+      // satır eşleşmeden devam eder (gerçek ağ çağrısı testte yasak).
+      vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes('/products/approved')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                totalElements: 0,
+                totalPages: 0,
+                page: 0,
+                size: 100,
+                nextPageToken: null,
+                content: [],
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+          );
+        }
+        throw new Error(`beklenmeyen fetch: ${url}`);
+      });
       const payload = makeWebhookPayload({
         orderNumber: 'NO-VARIANT-1',
         shipmentPackageId: 555000001,

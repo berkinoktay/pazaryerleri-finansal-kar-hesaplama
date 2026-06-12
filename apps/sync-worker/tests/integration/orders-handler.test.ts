@@ -37,6 +37,7 @@ import {
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+import { approvedProductsResponse } from '../../../../apps/api/tests/helpers/trendyol-fixtures';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const ORIGINAL_ENV = process.env;
@@ -293,29 +294,41 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
   it('calculability gate: variant not found → order persisted with a null-variant item', async () => {
     const { store, log } = await setupStoreAndSyncLog([]); // no variants seeded
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      jsonResponse(
-        makeStreamResponse({
-          hasMore: false,
-          nextCursor: null,
-          content: [
-            makeShipmentPackage({
-              lines: [
-                {
-                  lineId: 1,
-                  barcode: 'EAN13-UNKNOWN',
-                  quantity: 1,
-                  lineUnitPrice: 120,
-                  lineGrossAmount: 120,
-                  vatRate: 20,
-                  commission: 10,
-                },
+    // Eager onarım (spec 2026-06-12 PR-2) artık stream'den SONRA approved-products
+    // sorgusu da atar → tek-atımlık mock yerine endpoint-dallı implementasyon;
+    // vendor-miss (0 sonuç) → satır eşleşmeden devam eder.
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/products/approved') && url.includes('barcode=EAN13-UNKNOWN')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('EAN13-UNKNOWN', 0)));
+      }
+      if (url.includes('/integration/order/')) {
+        return Promise.resolve(
+          jsonResponse(
+            makeStreamResponse({
+              hasMore: false,
+              nextCursor: null,
+              content: [
+                makeShipmentPackage({
+                  lines: [
+                    {
+                      lineId: 1,
+                      barcode: 'EAN13-UNKNOWN',
+                      quantity: 1,
+                      lineUnitPrice: 120,
+                      lineGrossAmount: 120,
+                      vatRate: 20,
+                      commission: 10,
+                    },
+                  ],
+                }),
               ],
             }),
-          ],
-        }),
-      ),
-    );
+          ),
+        );
+      }
+      throw new Error(`beklenmeyen fetch: ${url}`);
+    });
 
     await processOrdersChunk({ syncLog: log, cursor: null });
 
@@ -326,6 +339,55 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(item.productVariantId).toBeNull();
     expect(item.barcode).toBe('EAN13-UNKNOWN');
+  });
+
+  it('cron intake: bilinmeyen barkod anında vendor sorgusuyla kataloğa eklenir', async () => {
+    const { store, log } = await setupStoreAndSyncLog([]); // katalog boş
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/products/approved') && url.includes('barcode=EAGER-CRON-1')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('EAGER-CRON-1', 1)));
+      }
+      if (url.includes('/integration/order/')) {
+        return Promise.resolve(
+          jsonResponse(
+            makeStreamResponse({
+              hasMore: false,
+              nextCursor: null,
+              content: [
+                makeShipmentPackage({
+                  lines: [
+                    {
+                      lineId: 1,
+                      barcode: 'EAGER-CRON-1',
+                      quantity: 1,
+                      lineUnitPrice: 120,
+                      lineGrossAmount: 120,
+                      vatRate: 20,
+                      commission: 10,
+                    },
+                  ],
+                }),
+              ],
+            }),
+          ),
+        );
+      }
+      throw new Error(`beklenmeyen fetch: ${url}`);
+    });
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    expect(
+      await prisma.productVariant.count({ where: { storeId: store.id, barcode: 'EAGER-CRON-1' } }),
+    ).toBe(1);
+    // ORDER_DATE_MS geçmiş gün → maliyetsiz ürün → KÂR-DIŞI yazım (PR-1) ama
+    // kalem ürün KİMLİĞİYLE bağlı (görünürlük sözleşmesi).
+    const item = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id } },
+    });
+    expect(item.productVariantId).not.toBeNull();
   });
 
   it('cost-missing + past-day → order persisted PROFIT-EXCLUDED (not skipped)', async () => {

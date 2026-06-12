@@ -32,6 +32,7 @@
  */
 
 import { createRoute, z } from '@hono/zod-openapi';
+import { ensureBarcodesInCatalog } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import { Prisma, type Store } from '@pazarsync/db';
 import {
@@ -248,10 +249,19 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
     throw new ValidationError([{ field: '(payload)', code: 'PAYLOAD_MAPPING_FAILED' }]);
   }
 
+  // ─── Anında katalog onarımı (spec 2026-06-12 §4 + K6) ───────────────────
+  // Bilinmeyen barkod tekil vendor sorgusuyla kataloğa eklenir — sipariş satırı
+  // kimliğiyle doğar, satıcı pencere içinde maliyet ekleyebilir. Başarısızlık
+  // intake'i BLOKE ETMEZ (satır eşleşmeden devam eder; tick gün içinde onarır).
+  // Gecikme bütçesi: cap=5 tekil sorgu, kötü durumda ~4 sn — Trendyol webhook
+  // teslim zaman aşımı içinde.
+  await ensureBarcodesInCatalog(store, [...new Set(mapped.lines.map((line) => line.barcode))]);
+
   // ─── Intake routing (Slice 0 shared helper) ────────────────────────────
   // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders (null profit). Unmatched variant lines fold into cost_missing —
-  // the order is ALWAYS written. Identical to the sync-worker.
+  // orders PROFIT-EXCLUDED (spec 2026-06-12). Unmatched variant lines fold
+  // into cost_missing — the order is ALWAYS written. Identical to the
+  // sync-worker.
   try {
     const outcome = await intakeOrder({
       storeId: store.id,

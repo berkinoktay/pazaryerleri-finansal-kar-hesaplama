@@ -1,32 +1,26 @@
 {
-  "name": "@pazarsync/sync-worker",
+  "name": "@pazarsync/catalog-sync",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
-    "start": "tsx src/index.ts",
-    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "test:unit": "vitest run src --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
     "lint": "eslint .",
     "clean": "rm -rf .turbo"
   },
   "dependencies": {
-    "@pazarsync/catalog-sync": "workspace:*",
     "@pazarsync/db": "workspace:*",
     "@pazarsync/marketplace": "workspace:*",
-    "@pazarsync/order-sync": "workspace:*",
-    "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
-    "@pazarsync/utils": "workspace:*",
     "decimal.js": "catalog:"
   },
   "devDependencies": {
-    "dotenv": "catalog:",
-    "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",

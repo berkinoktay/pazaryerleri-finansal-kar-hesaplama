@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeProductAggregates } from '../../src/handlers/products';
+import { computeProductAggregates } from '../upsert-catalog-batch';
 
 describe('computeProductAggregates — denormalized Product.totalStock + min/maxSalePrice', () => {
   it('sums quantities and spans the sale prices across multiple variants (2-dp strings)', () => {

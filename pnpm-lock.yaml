@@ -83,6 +83,9 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.8.0
         version: 0.8.0(hono@4.12.18)(zod@4.4.3)
+      '@pazarsync/catalog-sync':
+        specifier: workspace:*
+        version: link:../../packages/catalog-sync
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -147,6 +150,9 @@ importers:
 
   apps/sync-worker:
     dependencies:
+      '@pazarsync/catalog-sync':
+        specifier: workspace:*
+        version: link:../../packages/catalog-sync
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -432,6 +438,34 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
+
+  packages/catalog-sync:
+    dependencies:
+      '@pazarsync/db':
+        specifier: workspace:*
+        version: link:../db
+      '@pazarsync/marketplace':
+        specifier: workspace:*
+        version: link:../marketplace
+      '@pazarsync/sync-core':
+        specifier: workspace:*
+        version: link:../sync-core
+      decimal.js:
+        specifier: 'catalog:'
+        version: 10.6.0
+    devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      eslint:
+        specifier: 'catalog:'
+        version: 9.39.4(jiti@2.6.1)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.6(@types/node@20.19.41)(@vitest/ui@4.1.6)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@20.19.41)(typescript@6.0.3))(vite@8.0.8(@types/node@20.19.41)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   packages/crypto-core:
     devDependencies:

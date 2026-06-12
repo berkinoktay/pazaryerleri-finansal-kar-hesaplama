@@ -7,13 +7,11 @@
 // intake ile birebir: (storeId, barcode) first-match (build-calc-check-lines).
 // Tick crash-safe: çağıran (index.ts) catch'ler; burada mağaza-başına izolasyon.
 
+import { ensureBarcodesInCatalog } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
-import { decryptStoreCredentials, fetchProductsByBarcode } from '@pazarsync/marketplace';
 import { captureCostSnapshot } from '@pazarsync/order-sync';
 import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
-
-import { upsertBatch } from './products';
 
 const MAX_BARCODES_PER_STORE_PER_TICK = 25;
 const DUE_ITEMS_PER_TICK = 500;
@@ -51,6 +49,13 @@ export async function processVariantResolution(): Promise<void> {
 }
 
 async function runResolutionTick(): Promise<void> {
+  await resolveDueOrderItems();
+  // 2. kaynak buradan KOŞULSUZ koşar — due item olmaması buffer onarımını
+  // atlatamaz (buffer entry'nin order item'ı yoktur; spec 2026-06-12 §4/K6).
+  await repairBufferCatalogGaps();
+}
+
+async function resolveDueOrderItems(): Promise<void> {
   // Vadesi gelmiş, çözülmemiş satırlar — mağaza başına gruplanır. Sıralama
   // deterministik (vade önce, null=hiç denenmemiş en önde): take-500
   // penceresi tick'ler arasında kararlı dolaşır, tek mağazanın taşması
@@ -102,6 +107,78 @@ async function runResolutionTick(): Promise<void> {
   }
 }
 
+// Buffer-gap onarımının vendor nezaketi: buffer satırında attempts/backoff
+// kolonu YOK (satır gece yarısı flush'la ölür), bu yüzden vade İN-MEMORY
+// tutulur — vendor'da da olmayan barkod her 60s tick'inde yeniden sorgulanmaz
+// (üstel: 5 dk → 24 saat cap; item-backoff'la aynı eğri). Süreç yeniden
+// başlarsa harita sıfırlanır — kabul: en kötü ihtimalle bir tur erken dener.
+const bufferGapNextTryAt = new Map<string, { attempts: number; nextTryAt: number }>();
+
+/**
+ * 2. kaynak: PENDING buffer satırlarının çözülmemiş barkodları (spec
+ * 2026-06-12 §4/K6). Eager intake onarımı vendor hatasıyla kaçtıysa gün
+ * İÇİNDE kataloğu onarır — satıcı pencere kapanmadan maliyet ekleyebilsin.
+ * Item bağlama gerekmez: mezuniyet/promote yazımı variant'ı kendisi bulur.
+ */
+async function repairBufferCatalogGaps(): Promise<void> {
+  const bufferGaps = await prisma.$queryRaw<Array<{ store_id: string; barcode: string }>>`
+    SELECT DISTINCT b.store_id, line->>'barcode' AS barcode
+    FROM live_performance_buffer b,
+         jsonb_array_elements(b.mapped_order->'lines') AS line
+    WHERE b.status = 'PENDING'
+      AND line->>'barcode' IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM product_variants pv
+        WHERE pv.store_id = b.store_id AND pv.barcode = line->>'barcode'
+      )
+    LIMIT 200
+  `;
+  if (bufferGaps.length === 0) {
+    // Açık kalmış vade kayıtları birikmesin (gap kapandı ya da flush'landı).
+    bufferGapNextTryAt.clear();
+    return;
+  }
+
+  const now = Date.now();
+  const gapsByStore = new Map<string, string[]>();
+  for (const row of bufferGaps) {
+    const due = bufferGapNextTryAt.get(`${row.store_id}:${row.barcode}`);
+    if (due !== undefined && due.nextTryAt > now) continue;
+    const list = gapsByStore.get(row.store_id) ?? [];
+    list.push(row.barcode);
+    gapsByStore.set(row.store_id, list);
+  }
+
+  for (const [storeId, allBarcodes] of gapsByStore) {
+    try {
+      const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+      // Dilim ÇAĞRIDAN önce: ensure'un `missing`'i cap-dışı (denenmemiş)
+      // barkodları da içerir — denenmeyene backoff yazılmaz, sıradaki tick alır.
+      const barcodes = allBarcodes.slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
+      const result = await ensureBarcodesInCatalog(store, barcodes, {
+        maxVendorCalls: MAX_BARCODES_PER_STORE_PER_TICK,
+      });
+      for (const barcode of result.resolved) {
+        bufferGapNextTryAt.delete(`${storeId}:${barcode}`);
+      }
+      for (const barcode of result.missing) {
+        const key = `${storeId}:${barcode}`;
+        const prev = bufferGapNextTryAt.get(key);
+        const attempts = (prev?.attempts ?? 0) + 1;
+        bufferGapNextTryAt.set(key, {
+          attempts,
+          nextTryAt: nextBackoff(attempts - 1).getTime(),
+        });
+      }
+    } catch (err) {
+      syncLog.error('resolution.buffer-repair-failed', {
+        storeId,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
 /** attempts++ + üstel vade — hem barkod-bulunamadı hem mağaza-hatası yolu. */
 async function applyBackoff(storeId: string, items: DueItem[]): Promise<void> {
   for (const item of items) {
@@ -126,28 +203,22 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   let remaining = await linkAgainstLocalCatalog(storeId, items);
   if (remaining.length === 0) return;
 
-  // 2) Hedefli vendor sorgusu — tekil barkodlar, tick-başına üst sınırlı.
+  // 2) Hedefli vendor sorgusu — ensureBarcodesInCatalog'a delege (spec
+  // 2026-06-12 PR-2): tekil barkod fetch + tam katalog hattı + hata yutma
+  // tek yerde yaşar. Dilim burada atılır ki backoff yalnız bu tick'te
+  // GERÇEKTEN sorgulanan barkodlara işlesin — cap'e sığmayanlar denenmeden
+  // cezalandırılmaz, vadesiz (null) kaldıkları için sıralama gereği sonraki
+  // tick'in penceresinde öne geçerler.
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-  const credentials = decryptStoreCredentials(store);
   const distinctBarcodes = [
     ...new Set(remaining.flatMap((i) => (i.barcode === null ? [] : [i.barcode]))),
   ].slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
 
-  for (const barcode of distinctBarcodes) {
-    const page = await fetchProductsByBarcode({
-      environment: store.environment,
-      credentials,
-      barcode,
-    });
-    if (page.batch.length > 0) {
-      await upsertBatch(store, page.batch, null);
-    }
-  }
+  await ensureBarcodesInCatalog(store, distinctBarcodes, {
+    maxVendorCalls: MAX_BARCODES_PER_STORE_PER_TICK,
+  });
 
-  // 3) Tekrar eşle; (4) yalnız bu tick'te GERÇEKTEN sorgulanan barkodların
-  // satırlarına backoff — cap'e sığmayanlar denenmeden cezalandırılmaz,
-  // vadesiz (null) kaldıkları için sıralama gereği sonraki tick'in
-  // penceresinde öne geçerler.
+  // 3) Tekrar eşle; (4) sorgulanıp hâlâ çözülemeyenlere backoff.
   remaining = await linkAgainstLocalCatalog(storeId, remaining);
   const queried = new Set(distinctBarcodes);
   const attempted = remaining.filter((i) => i.barcode !== null && queried.has(i.barcode));
