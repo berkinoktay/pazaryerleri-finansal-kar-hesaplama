@@ -17,6 +17,8 @@ import {
 
 import { type OrderItemDetail } from '../api/get-order.api';
 
+import { UnmatchedVariantBadge } from './unmatched-variant-badge';
+
 export interface OrderItemsTableProps {
   items: OrderItemDetail[];
   /**
@@ -69,9 +71,10 @@ export function OrderItemsTable({
                       <span className="font-medium">
                         {item.variant?.productName ?? t('unknownVariant')}
                       </span>
-                      {item.variant?.barcode !== null && item.variant?.barcode !== undefined ? (
+                      {item.variant === null ? <UnmatchedVariantBadge className="w-fit" /> : null}
+                      {(item.variant?.barcode ?? item.barcode) != null ? (
                         <span className="text-2xs text-muted-foreground tabular-nums">
-                          {item.variant.barcode}
+                          {item.variant?.barcode ?? item.barcode}
                         </span>
                       ) : null}
                     </div>
