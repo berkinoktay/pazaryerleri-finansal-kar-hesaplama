@@ -22,6 +22,7 @@ const response = {
       revenue: '3600.00',
       costStatus: 'costed',
       unitCost: '42.00',
+      unresolved: false,
     },
     {
       variantId: 'v-mid',
@@ -34,6 +35,7 @@ const response = {
       revenue: '900.00',
       costStatus: 'missing',
       unitCost: null,
+      unresolved: false,
     },
     {
       variantId: 'v-low1',
@@ -46,6 +48,7 @@ const response = {
       revenue: '300.00',
       costStatus: 'missing',
       unitCost: null,
+      unresolved: false,
     },
     {
       variantId: 'v-low2',
@@ -58,6 +61,7 @@ const response = {
       revenue: '200.00',
       costStatus: 'costed',
       unitCost: '12.00',
+      unresolved: false,
     },
   ],
 };
@@ -85,6 +89,40 @@ describe('LiveTodayProducts', () => {
     if (!(rank4Row instanceof HTMLElement)) throw new Error('rank-4 row not found');
     expect(within(rank4Row).getByText('4')).toBeInTheDocument();
     expect(within(rank4Row).queryByText('4. sıra')).toBeNull();
+  });
+
+  it('çözülemeyen satır barkod kimliği + rozetle görünür; attach CTA yerine nötr çizgi', async () => {
+    const unresolvedResponse = {
+      data: [
+        ...response.data,
+        {
+          variantId: null,
+          barcode: 'GHOST-1',
+          stockCode: null,
+          productName: null,
+          thumbUrl: null,
+          orderCount: 1,
+          unitsSold: 1,
+          revenue: '45.00',
+          costStatus: 'missing',
+          unitCost: null,
+          unresolved: true,
+        },
+      ],
+    };
+    server.use(http.get(URL, () => HttpResponse.json(unresolvedResponse)));
+
+    render(<LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />);
+
+    // Kimlik ham barkoda düşer + rozet — satır asla sessizce kaybolmaz
+    // (görünürlük sözleşmesi, spec 2026-06-12 §7).
+    await waitFor(() => expect(screen.getAllByText('GHOST-1').length).toBeGreaterThan(0));
+    expect(screen.getByText('Eşleşme bekliyor')).toBeInTheDocument();
+    const ghostRow = screen.getAllByText('GHOST-1')[0]?.closest('tr');
+    if (!(ghostRow instanceof HTMLElement)) throw new Error('unresolved row not found');
+    // Variant yok → maliyet bağlanamaz: CTA yerine nötr çizgi.
+    expect(within(ghostRow).queryByRole('button', { name: /Maliyet Ekle/ })).toBeNull();
+    expect(within(ghostRow).getByText('—')).toBeInTheDocument();
   });
 
   it('filters to cost-missing products when the "Maliyet bekleyen" tab is selected', async () => {

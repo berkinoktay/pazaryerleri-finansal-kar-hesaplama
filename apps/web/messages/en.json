@@ -187,7 +187,8 @@
       "SHIPPING_CARRIER_PLATFORM_MISMATCH": "The selected carrier does not match this store's marketplace.",
       "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found.",
       "generic": "Something went wrong. Please try again."
-    }
+    },
+    "unmatchedBadge": "Awaiting match"
   },
   "stores": {
     "platforms": {
@@ -1593,7 +1594,6 @@
         "refundedCommissionNet": "Refunded com.",
         "unitCostSnapshotNet": "Cost (net)"
       },
-      "unmatchedBadge": "Awaiting match",
       "unknownVariant": "Variant not linked",
       "costMissing": "Cost missing",
       "costFrozen": "Excluded"

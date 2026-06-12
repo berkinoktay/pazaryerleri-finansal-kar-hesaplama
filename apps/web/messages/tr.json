@@ -187,7 +187,8 @@
       "SHIPPING_CARRIER_PLATFORM_MISMATCH": "Seçilen kargo firması bu mağazanın pazaryeriyle uyumlu değil.",
       "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı.",
       "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
-    }
+    },
+    "unmatchedBadge": "Eşleşme bekliyor"
   },
   "stores": {
     "platforms": {
@@ -1658,7 +1659,6 @@
         "refundedCommissionNet": "İade kom.",
         "unitCostSnapshotNet": "Maliyet (net)"
       },
-      "unmatchedBadge": "Eşleşme bekliyor",
       "unknownVariant": "Varyant bağlı değil",
       "costMissing": "Maliyet eksik",
       "costFrozen": "Kâr hesabı dışı"
