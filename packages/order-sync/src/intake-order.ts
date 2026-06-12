@@ -3,12 +3,13 @@
  * webhook receiver (apps/api) and the polling sync-worker (apps/sync-worker)
  * so the two ingest paths behave identically (Slice 0, Decision 1A).
  *
- * Routing (see the spec's decision table + split research 2026-06-09):
+ * Routing (see the spec's decision table + split research 2026-06-09 +
+ * cost-deadline-profit-freeze spec 2026-06-12):
  *   - dematerialized (UnPacked)    → DELETE order + buffer rows (split ghost — children re-carry content)
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
  *   - calculable                   → upsertOrderWithSnapshot (full profit)
- *   - cost_missing + past-day      → upsertOrderWithSnapshot (null profit) — never lose a sale
+ *   - cost_missing + past-day      → KÂR-DIŞI yazım (LATE_UNCOSTED_ARRIVAL; ciro kalır, kâr donuk — spec 2026-06-12)
  *   - cost_missing + today + in orders → upsertOrderWithSnapshot (idempotent, no buffer)
  *   - cost_missing + today + new   → live_performance_buffer (PENDING, same-day cost-flip window)
  *
@@ -16,9 +17,11 @@
  * was costed earlier then had its cost profile archived (would otherwise live in
  * BOTH orders and buffer → double-count on the Live Performance page).
  *
- * cost-missing is graceful in upsertOrderWithSnapshot: captureCostSnapshot leaves
- * the snapshot null and applyEstimateOnOrderCreate leaves estimatedNetProfit null
- * — both re-entry-safe — so a null-profit order can be costed later (Slice C).
+ * Calculated-or-excluded (spec 2026-06-12 §3): orders'a giren her sipariş ya
+ * HESAPLANMIŞ (estimatedNetProfit dolu) ya KÂR-DIŞI (profitExcludedAt dolu)
+ * biter. Eski "null kârla yaz, maliyeti sonra gir" üçüncü durumu kalktı — tek
+ * maliyet penceresi sipariş gününün sonudur (buffer), kaçıran sipariş kalıcı
+ * olarak kâr evreninin dışında kalır.
  */
 
 import { prisma } from '@pazarsync/db';
@@ -32,7 +35,7 @@ import { upsertOrderWithSnapshot } from './upsert-order';
 export type OrderIntakeOutcome =
   | {
       kind: 'persisted';
-      reason: 'calculable' | 'cost_missing_past_day' | 'already_in_orders' | 'cancelled_audit';
+      reason: 'calculable' | 'excluded_late_arrival' | 'already_in_orders' | 'cancelled_audit';
     }
   | { kind: 'buffered' }
   | { kind: 'buffered_deduped' }
@@ -97,10 +100,14 @@ export async function intakeOrder(args: {
   }
 
   // calc is { kind: 'skip', reason: 'cost_missing', ... } from here.
-  // Past-day cost-missing → persist null profit (no recovery window for the buffer).
+  // Geçmiş-gün maliyetsiz sipariş: pencere (sipariş gününün sonu) çoktan
+  // kapandı → KÂR-DIŞI yazılır (spec 2026-06-12 K3). Ciro kayıtlı kalır,
+  // kâr alanları kalıcı donuk — "null kâr + sonradan maliyet" akışı kalktı.
   if (getBusinessDate(mapped.orderDate) < getBusinessDate()) {
-    await upsertOrderWithSnapshot(storeId, organizationId, mapped);
-    return { kind: 'persisted', reason: 'cost_missing_past_day' };
+    await upsertOrderWithSnapshot(storeId, organizationId, mapped, undefined, {
+      profitExclusion: { reason: 'LATE_UNCOSTED_ARRIVAL' },
+    });
+    return { kind: 'persisted', reason: 'excluded_late_arrival' };
   }
 
   // Today's cost-missing — but if it is already in orders, persist (idempotent),

@@ -32,7 +32,13 @@
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { CostProfileType, Currency, FxRateMode, Prisma } from '@pazarsync/db';
+import type {
+  CostProfileType,
+  Currency,
+  FxRateMode,
+  Prisma,
+  ProfitExclusionReason,
+} from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
@@ -109,10 +115,15 @@ export async function captureCostSnapshot(
 ): Promise<void> {
   const item = await tx.orderItem.findUnique({
     where: { id: orderItemId },
-    include: { productVariant: true },
+    include: { productVariant: true, order: { select: { profitExcludedAt: true } } },
   });
 
-  if (!item || item.unitCostSnapshotNet !== null || !item.productVariantId) {
+  if (
+    !item ||
+    item.unitCostSnapshotNet !== null ||
+    !item.productVariantId ||
+    item.order.profitExcludedAt !== null // kâr-dışı: snapshot da donuk (spec 2026-06-12)
+  ) {
     return;
   }
 
@@ -205,11 +216,23 @@ export async function captureCostSnapshot(
  *     olarak çağrılır — PSF + Stopaj ESTIMATE OrderFee rows + Order.estimatedNetProfit
  *     write-once. Cost snapshot eksikse profit null kalır.
  */
+export interface UpsertOrderOpts {
+  /**
+   * Kâr-dondurma (spec 2026-06-12): set'liyse sipariş KÂR-DIŞI yazılır —
+   * yalnız CREATE verisine işlenir (var olan satırın durumu asla değişmez;
+   * geç webhook'un already-calculated siparişe çarpması update yoludur ve
+   * exclusion alanları update data'da YOKTUR → trigger'a takılmaz).
+   * Snapshot + estimate adımları atlanır; item'lar barkod iziyle yazılır.
+   */
+  profitExclusion?: { reason: ProfitExclusionReason };
+}
+
 export async function upsertOrderWithSnapshot(
   storeId: string,
   organizationId: string,
   order: MappedOrder,
   existingTx?: Prisma.TransactionClient,
+  opts?: UpsertOrderOpts,
 ): Promise<void> {
   // The transactional body. The default path (webhook / polling sync handlers)
   // opens its own transaction; the buffer-promote worker (PR-C) passes its own
@@ -249,6 +272,12 @@ export async function upsertOrderWithSnapshot(
         platformCreatedBy: order.platformCreatedBy ?? null,
         originShipmentDate:
           order.originShipmentDate != null ? new Date(order.originShipmentDate) : null,
+        // Kâr-dondurma (spec 2026-06-12): yalnız CREATE — pencereyi kaçırmış
+        // sipariş KÂR-DIŞI doğar; mevcut satırın durumu update'le değişmez.
+        ...(opts?.profitExclusion !== undefined && {
+          profitExcludedAt: new Date(),
+          profitExclusionReason: opts.profitExclusion.reason,
+        }),
       },
       update: {
         status: order.status,
@@ -359,7 +388,10 @@ export async function upsertOrderWithSnapshot(
       });
 
       // Cost snapshot capture (write-once iç guard).
-      await captureCostSnapshot(item.id, tx);
+      // Kâr-dışı yazım — para alanları donuk; item yalnız barkod iziyle yazıldı.
+      if (opts?.profitExclusion === undefined) {
+        await captureCostSnapshot(item.id, tx);
+      }
     }
 
     // 3. applyEstimateOnOrderCreate — T+0 write-once tahmini kar.
@@ -367,7 +399,10 @@ export async function upsertOrderWithSnapshot(
     //    Order.estimatedNetProfit set'ler. Cost snapshot eksikse profit null
     //    kalır (re-entry idempotent — cost profile sonradan eklenirse caller
     //    yeniden çağırır).
-    await applyEstimateOnOrderCreate(upserted.id, tx);
+    //    Kâr-dışı yazım — para alanları donuk: ne fee ne estimate (spec 2026-06-12).
+    if (opts?.profitExclusion === undefined) {
+      await applyEstimateOnOrderCreate(upserted.id, tx);
+    }
   };
 
   if (existingTx !== undefined) {

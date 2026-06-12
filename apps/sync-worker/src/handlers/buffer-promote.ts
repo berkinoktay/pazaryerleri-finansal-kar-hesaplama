@@ -2,6 +2,7 @@ import { prisma } from '@pazarsync/db';
 import type { BufferEntryStatus, LivePerformanceBuffer } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
 
@@ -84,6 +85,45 @@ async function promoteOne(id: string, now: Date): Promise<void> {
         }
 
         const mapped = entry.mappedOrder as unknown as MappedOrder;
+
+        // Calculated-or-excluded bekçisi (spec 2026-06-12): PROMOTING/FAILED
+        // damgası maliyetin HÂLÂ yerinde olduğunu garanti etmez — flush-fail'li
+        // PENDING entry FAILED üzerinden bu yola düşer, flip sonrası profil
+        // arşivlenmiş olabilir. Maliyetsiz bir entry tam-yazım yolundan ASLA
+        // geçemez (estimate null + exclusion yok = ölü üçüncü durum doğardı).
+        // Kilit altında calculability yeniden çözülür ve yönlendirilir.
+        const calcLines = await buildCalcCheckLines(tx, {
+          storeId: entry.storeId,
+          lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+        });
+        if (resolveOrderCalculability(calcLines).kind !== 'calculable') {
+          if (entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime()) {
+            // Pencere kapalı → flush semantiği: KÂR-DIŞI mezuniyet.
+            syncLog.info('buffer.promote-excluded-graduation', {
+              entryId: entry.id,
+              storeId: entry.storeId,
+              platformOrderId: entry.platformOrderId,
+            });
+            await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
+              profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
+            });
+            await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
+            return entry;
+          }
+          // Aynı gün: pencere hâlâ açık — entry PENDING'e iade edilir; maliyet
+          // gün içinde gelirse attach-tetikli flip yeniden PROMOTING'e çeker.
+          syncLog.warn('buffer.promote-demoted-pending', {
+            entryId: entry.id,
+            storeId: entry.storeId,
+            platformOrderId: entry.platformOrderId,
+          });
+          await tx.livePerformanceBuffer.update({
+            where: { id: entry.id },
+            data: { status: 'PENDING' },
+          });
+          return null;
+        }
+
         // Same tx → order write + buffer delete commit atomically.
         await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx);
         await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
@@ -149,15 +189,17 @@ const FLUSH_CHUNK_SIZE = 25;
 
 /**
  * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries whose
- * business date is before today into `orders` (null profit), then delete the
- * buffer row — same atomic claim+upsert+delete as promoteOne.
+ * business date is before today into `orders` as PROFIT-EXCLUDED
+ * (COST_DEADLINE_MISSED — spec 2026-06-12), then delete the buffer row —
+ * same atomic claim+upsert+delete as promoteOne. Ciro kaydı korunur; kâr
+ * alanları kalıcı donuk ("null kârla mezuniyet + sonradan maliyet" kalktı).
  *
  * Scope is PENDING-only by design: PROMOTING (cost just attached) and FAILED
  * (retry-due) past-day entries are already handled by processBufferPromote, so
- * flush owns exactly the orders whose cost never arrived before midnight — the
- * "never lose a sale" graduation. A flush that throws marks the entry FAILED,
- * handing it to the promote retry path (and ultimately PERMANENT_FAILED, which
- * the narrowed reset cron cleans up).
+ * flush owns exactly the orders whose cost never arrived before midnight. A
+ * flush that throws marks the entry FAILED, handing it to the promote retry
+ * path (and ultimately PERMANENT_FAILED, which the narrowed reset cron cleans
+ * up).
  */
 export async function processPastDayBufferFlush(now: Date = new Date()): Promise<void> {
   const todayAnchor = getBusinessDateAnchor(now);
@@ -196,8 +238,11 @@ async function flushOne(id: string): Promise<void> {
       }
 
       const mapped = entry.mappedOrder as unknown as MappedOrder;
-      // Same tx → order write + buffer delete commit atomically (null cost OK).
-      await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx);
+      // Pencere kapandı: KÂR-DIŞI mezuniyet (spec 2026-06-12). Ciro kaydı
+      // korunur; kâr alanları kalıcı donuk. Aynı tx → order + buffer-delete atomik.
+      await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
+        profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
+      });
       await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
       return entry;
     });

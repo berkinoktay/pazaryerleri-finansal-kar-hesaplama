@@ -19,9 +19,10 @@ import { ensureFeeDefinitions } from '../../../helpers/seed-fee-definitions';
  * A cost-missing order (variant resolves, but no cost profile attached) is no
  * longer always hard-skipped. If its orderDate is TODAY (Europe/Istanbul) it is
  * written to live_performance_buffer (seller's grace window); an older orderDate
- * persists straight to orders with null profit. Unresolved variants route the
- * same way — cost_missing (spec 2026-06-11, no hard skip). Mirrors the proven
- * store/Basic-Auth setup from trendyol-orders.routes.test.ts.
+ * persists straight to orders PROFIT-EXCLUDED (spec 2026-06-12 — the cost
+ * window is the order day, missing it is permanent). Unresolved variants route
+ * the same way — cost_missing (spec 2026-06-11, no hard skip). Mirrors the
+ * proven store/Basic-Auth setup from trendyol-orders.routes.test.ts.
  */
 const STORE_PLATFORM = 'TRENDYOL' as const;
 const SUPPLIER_ID = '99999';
@@ -185,7 +186,7 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(entries[0]!.platformOrderNumber).toBe('buf-ord-1');
   });
 
-  it('cost-missing + previous-day orderDate → persists to orders (null profit), no buffer write', async () => {
+  it('cost-missing + previous-day orderDate → persists PROFIT-EXCLUDED, no buffer write', async () => {
     const { orgId, storeId } = await setupStore();
     const yesterday = todayOrderDateGmt3() - 24 * MS_HOUR;
 
@@ -200,12 +201,14 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     );
     expect(res.status).toBe(200);
 
-    // Never lose a sale: persisted to orders with null profit, not buffered.
+    // Spec 2026-06-12: pencere kapandı → kâr-dışı yazım; ciro kayıtlı, buffer yok.
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
     expect(order.organizationId).toBe(orgId);
     expect(order.platformOrderId).toBe('700000002');
     expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(order.profitExcludedAt).not.toBeNull();
   });
 
   it('duplicate webhook for the same package → P2002 dedupe, single buffer entry', async () => {

@@ -170,7 +170,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
   });
 
-  it('cost-missing + past-day → persists to orders with null profit (no buffer)', async () => {
+  it('cost-missing + past-day → persists PROFIT-EXCLUDED (no later cost entry)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, BARCODE, false);
@@ -184,11 +184,15 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('late-1');
     expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(order.profitExcludedAt).not.toBeNull();
+    // Fee de yazılmaz: kâr-dışı sipariş PSF/Stopaj ESTIMATE satırı taşımaz.
+    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
   });
 
   it('cost-missing + today but already in orders → persists (idempotent), never buffers', async () => {
@@ -248,7 +252,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
     const item = await prisma.orderItem.findFirstOrThrow({
       where: { order: { storeId: store.id, platformOrderId: 'novar-past' } },
     });
@@ -273,7 +277,7 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     ).toBe(1);
   });
 
-  it('mixed order: matched line gets its cost snapshot, unmatched line persists null-FK alongside', async () => {
+  it('mixed order past-day: BOTH lines persist with frozen money — order is excluded as a whole (K5)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, 'EAN13-MIX-OK', true); // variant + cost profile
@@ -291,8 +295,10 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       }),
     });
 
-    // One unmatched line makes the order cost_missing — but BOTH lines persist.
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    // One unmatched line makes the order cost_missing — both lines persist, but
+    // the order is EXCLUDED atomically (decision K5): even the costed line's
+    // snapshot stays frozen (null). Identity (variant FK) is still linked.
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
     const items = await prisma.orderItem.findMany({
       where: { order: { storeId: store.id, platformOrderId: 'mixed-1' } },
       orderBy: { barcode: 'asc' },
@@ -301,11 +307,15 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const [matched, unmatched] = items;
     expect(matched!.barcode).toBe('EAN13-MIX-OK');
     expect(matched!.productVariantId).not.toBeNull();
-    // The matched line's snapshot discipline is untouched by the unmatched sibling.
-    expect(matched!.unitCostSnapshotNet).not.toBeNull();
+    // Excluded order carries NO money snapshot — even on the costed line.
+    expect(matched!.unitCostSnapshotNet).toBeNull();
     expect(unmatched!.barcode).toBe('UNKNOWN-MIX');
     expect(unmatched!.productVariantId).toBeNull();
     expect(unmatched!.unitCostSnapshotNet).toBeNull();
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'mixed-1' },
+    });
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 
   it('legacy item without platformLineId is matched (not duplicated) by a re-delivery carrying one, and backfilled', async () => {

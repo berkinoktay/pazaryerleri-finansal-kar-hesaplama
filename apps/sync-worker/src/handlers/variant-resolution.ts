@@ -167,6 +167,15 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
 
   for (const [orderId, orderItems] of byOrder) {
     await prisma.$transaction(async (tx) => {
+      // Kâr-dışı sipariş (spec 2026-06-12): kalem KİMLİK için yine bağlanır
+      // (görünürlük sözleşmesi — ürün adı/görseli görünsün) ama para
+      // re-entry'si atlanır. Alt guard'lar zaten no-op yapar — bu şart
+      // niyeti koda yazar ve gereksiz sorguları keser.
+      const orderRow = await tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        select: { profitExcludedAt: true },
+      });
+      const moneyFrozen = orderRow.profitExcludedAt !== null;
       let linkedAny = false;
       for (const item of orderItems) {
         if (item.barcode === null) {
@@ -185,7 +194,9 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
           where: { id: item.id },
           data: { productVariantId: variant.id },
         });
-        await captureCostSnapshot(item.id, tx);
+        if (!moneyFrozen) {
+          await captureCostSnapshot(item.id, tx);
+        }
         linkedAny = true;
         syncLog.info('resolution.linked', {
           storeId,
@@ -194,7 +205,7 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
           productVariantId: variant.id,
         });
       }
-      if (linkedAny) {
+      if (linkedAny && !moneyFrozen) {
         // Write-once + re-entry-safe: estimatedNetProfit doluysa no-op; eksik
         // snapshot kaldıysa null bırakır, sonraki bağlamada yeniden denenir.
         await applyEstimateOnOrderCreate(orderId, tx);

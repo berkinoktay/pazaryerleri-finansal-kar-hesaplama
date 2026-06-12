@@ -64,6 +64,9 @@ export async function applyEstimateOnOrderCreate(
   // Write-once guard (application layer; DB trigger PR-9'da defense-in-depth)
   if (order.estimatedNetProfit !== null) return;
 
+  // Kâr-dışı sipariş: ne fee ne estimate — kalıcı donuk (spec 2026-06-12).
+  if (order.profitExcludedAt !== null) return;
+
   // Re-entry fee guard: cost_missing siparişlerde T+0 çağrısı PSF/Stopaj'ı
   // YAZAR ama estimate'i null bırakır (allHaveCostSnapshot, aşağıda). Maliyet
   // sonradan gelince (Slice C manuel giriş, variant-resolution tick) fonksiyon

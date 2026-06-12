@@ -140,6 +140,14 @@ enum ReconciliationStatus {
   FULLY_SETTLED
 }
 
+// Kâr-dışı bırakma gerekçesi (spec 2026-06-12 cost-deadline-profit-freeze §5).
+// Order.profitExclusionReason ile birlikte yaşar — bkz. Order modelindeki blok.
+enum ProfitExclusionReason {
+  COST_DEADLINE_MISSED // gece-yarısı flush'ı — pencere kaçtı
+  LATE_UNCOSTED_ARRIVAL // geçmiş-gün gelen maliyetsiz sipariş (karar K3)
+  LEGACY_BACKFILL // spec öncesi null-kârla yazılmış mevcut satırlar (migration)
+}
+
 // OrderFee tipi — pazaryeri ücretlerinin tek kaynağı (design §3.3).
 // İki kategori: sipariş-düzeyi (OrderFee tablosuna yazılır) ve org-düzeyi
 // (OrgPeriodFee tablosuna yazılır — Reklam, Penalty, Notification, COMMISSION_INVOICE).
@@ -511,6 +519,15 @@ model Order {
   // - settledNetProfit:   T+~5+ recomputeSettledProfit yazar, mutable (iade güncellemeleri).
   estimatedNetProfit   Decimal?             @map("estimated_net_profit") @db.Decimal(12, 2)
   settledNetProfit     Decimal?             @map("settled_net_profit") @db.Decimal(12, 2)
+
+  // ─── Kâr dondurma (spec 2026-06-12 cost-deadline-profit-freeze) ──────
+  // Maliyet penceresi (sipariş gününün sonu, İstanbul) kaçırıldıysa sipariş
+  // KALICI olarak kâr evreninin dışında: estimatedNetProfit sonsuza dek null,
+  // settledNetProfit hesaplanmaz (karar K1); ciro raporlanır. Geri dönüş yok —
+  // reject_profit_freeze_breach trigger'ı + CHECK her yolu kapatır.
+  profitExcludedAt      DateTime?              @map("profit_excluded_at")
+  profitExclusionReason ProfitExclusionReason? @map("profit_exclusion_reason")
+
   // Durum makinesi: NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED (design §6.1).
   // İlk SETTLEMENT/CARGO_INVOICE OrderFee yazıldığında PARTIALLY_SETTLED, Sale
   // satırının paymentOrderId'si dolu görüldüğünde FULLY_SETTLED.

@@ -276,6 +276,23 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     expect(fees2).toBe(fees1);
   });
 
+  it('kâr-dışı sipariş: re-entry ne fee yazar ne estimate (kalıcı donuk)', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({ orgId: org.id, storeId: store.id });
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(after.estimatedNetProfit).toBeNull();
+  });
+
   it('saleSubtotalNet null → Stopaj OrderFee yazılmaz, profit null kalır', async () => {
     const { org, store } = await setup();
     // createOrderWithItem zorla saleSubtotalNet'i set'ler — null senaryosu için

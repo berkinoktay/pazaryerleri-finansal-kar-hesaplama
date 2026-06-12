@@ -351,11 +351,11 @@ describe('processVariantResolution', () => {
     expect(secondDelay).toBeLessThanOrEqual(11 * 60_000);
   });
 
-  it('full pipeline: T+0 intake fees are NOT duplicated by the late-link estimate re-entry', async () => {
+  it('full pipeline: late-arrival intake persists EXCLUDED; tick links identity, money stays frozen', async () => {
     const ctx = await buildStore();
 
-    // REAL intake path: past-day order with an unknown barcode → persisted
-    // cost_missing (PR-1), T+0 writes ONE PSF + ONE Stopaj, estimate null.
+    // REAL intake path (spec 2026-06-12): past-day order with an unknown
+    // barcode → persisted PROFIT-EXCLUDED — no fees, no estimate, ever.
     const outcome = await intakeOrder({
       storeId: ctx.storeId,
       organizationId: ctx.organizationId,
@@ -365,16 +365,16 @@ describe('processVariantResolution', () => {
         barcode: 'BC-FEEDEDUP',
       }),
     });
-    expect(outcome).toEqual({ kind: 'persisted', reason: 'cost_missing_past_day' });
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'excluded_late_arrival' });
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: ctx.storeId, platformOrderId: 'feededup-1' },
     });
     expect(order.estimatedNetProfit).toBeNull();
-    expect(await prisma.orderFee.count({ where: { orderId: order.id, source: 'ESTIMATE' } })).toBe(
-      2,
-    );
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
 
-    // Catalog catches up (variant + cost profile) → tick links + re-enters.
+    // Catalog catches up (variant + cost profile) → tick links IDENTITY only
+    // (görünürlük sözleşmesi): money re-entry is skipped on excluded orders.
     await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-FEEDEDUP', true);
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
       throw new Error('vendor must NOT be called — local catalog has the barcode');
@@ -382,18 +382,34 @@ describe('processVariantResolution', () => {
 
     await processVariantResolution();
 
-    // Re-entry computed the estimate WITHOUT duplicating the T+0 fees.
-    const fees = await prisma.orderFee.groupBy({
-      by: ['feeType'],
-      where: { orderId: order.id, source: 'ESTIMATE' },
-      _count: { _all: true },
+    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
+    expect(item.unitCostSnapshotNet).toBeNull(); // para donuk
+    const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(after.estimatedNetProfit).toBeNull();
+    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
+  it('kâr-dışı siparişin kalemi KİMLİK için bağlanır ama para alanları donuk kalır', async () => {
+    const ctx = await buildStore();
+    const { orderId, itemIds } = await buildUnresolvedOrder(ctx, ['BC-FROZEN-1']);
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
     });
-    expect(Object.fromEntries(fees.map((f) => [f.feeType, f._count._all]))).toEqual({
-      PLATFORM_SERVICE: 1,
-      STOPPAGE: 1,
+    await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-FROZEN-1', true);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor cagrisi olmamali — yerel katalog dolu');
     });
-    const recomputed = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(recomputed.estimatedNetProfit).not.toBeNull();
+
+    await processVariantResolution();
+
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemIds[0]! } });
+    expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
+    expect(item.unitCostSnapshotNet).toBeNull(); // para donuk
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(order.estimatedNetProfit).toBeNull();
+    expect(await prisma.orderFee.count({ where: { orderId } })).toBe(0);
   });
 
   it('partial link on a multi-item order: estimate stays null until EVERY line is costed', async () => {
