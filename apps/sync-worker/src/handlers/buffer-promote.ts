@@ -2,6 +2,7 @@ import { prisma } from '@pazarsync/db';
 import type { BufferEntryStatus, LivePerformanceBuffer } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
 
@@ -84,6 +85,45 @@ async function promoteOne(id: string, now: Date): Promise<void> {
         }
 
         const mapped = entry.mappedOrder as unknown as MappedOrder;
+
+        // Calculated-or-excluded bekçisi (spec 2026-06-12): PROMOTING/FAILED
+        // damgası maliyetin HÂLÂ yerinde olduğunu garanti etmez — flush-fail'li
+        // PENDING entry FAILED üzerinden bu yola düşer, flip sonrası profil
+        // arşivlenmiş olabilir. Maliyetsiz bir entry tam-yazım yolundan ASLA
+        // geçemez (estimate null + exclusion yok = ölü üçüncü durum doğardı).
+        // Kilit altında calculability yeniden çözülür ve yönlendirilir.
+        const calcLines = await buildCalcCheckLines(tx, {
+          storeId: entry.storeId,
+          lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+        });
+        if (resolveOrderCalculability(calcLines).kind !== 'calculable') {
+          if (entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime()) {
+            // Pencere kapalı → flush semantiği: KÂR-DIŞI mezuniyet.
+            syncLog.info('buffer.promote-excluded-graduation', {
+              entryId: entry.id,
+              storeId: entry.storeId,
+              platformOrderId: entry.platformOrderId,
+            });
+            await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
+              profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
+            });
+            await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
+            return entry;
+          }
+          // Aynı gün: pencere hâlâ açık — entry PENDING'e iade edilir; maliyet
+          // gün içinde gelirse attach-tetikli flip yeniden PROMOTING'e çeker.
+          syncLog.warn('buffer.promote-demoted-pending', {
+            entryId: entry.id,
+            storeId: entry.storeId,
+            platformOrderId: entry.platformOrderId,
+          });
+          await tx.livePerformanceBuffer.update({
+            where: { id: entry.id },
+            data: { status: 'PENDING' },
+          });
+          return null;
+        }
+
         // Same tx → order write + buffer delete commit atomically.
         await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx);
         await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });

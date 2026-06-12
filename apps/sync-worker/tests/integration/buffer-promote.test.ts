@@ -144,7 +144,9 @@ describe('processBufferPromote', () => {
   it('marks FAILED + increments attempts when the promote throws', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    // No variant needed: the invalid unitPriceNet makes upsert throw.
+    // Calculable variant: the calc gate passes, then the invalid unitPriceNet
+    // makes the upsert throw — pins the tx-failure retry machinery.
+    await seedCalculableVariant(org.id, store.id, BARCODE);
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'pkg-fail',
       status: 'PROMOTING',
@@ -163,6 +165,7 @@ describe('processBufferPromote', () => {
   it('marks PERMANENT_FAILED when the final (4th) attempt still fails', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
+    await seedCalculableVariant(org.id, store.id, BARCODE);
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'pkg-perm',
       status: 'FAILED',
@@ -179,6 +182,53 @@ describe('processBufferPromote', () => {
     const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
     expect(after.attempts).toBe(4);
     expect(after.status).toBe('PERMANENT_FAILED');
+  });
+
+  it('flush-failed handoff: past-day FAILED entry with missing cost graduates PROFIT-EXCLUDED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // No cost seeded — the entry is NOT calculable. A flush failure handed it
+    // to the promote retry path; the retry must keep the exclusion semantics,
+    // never the full write (that would resurrect the dead third state).
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-flush-handoff',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000)),
+      status: 'FAILED',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-flush-handoff' }),
+    });
+    // attempts=1, failed 10 min ago (> 5) → due for retry.
+    await prisma.livePerformanceBuffer.update({
+      where: { id: entry.id },
+      data: { attempts: 1, lastFailedAt: new Date(Date.now() - 10 * 60_000), lastError: 'x' },
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+    expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+  });
+
+  it('cost vanished on a today PROMOTING entry → demoted back to PENDING (window still open)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // PROMOTING but no cost in the catalog (e.g. profile archived after the
+    // flip): today's window is still open → entry returns to PENDING, no
+    // orders row is written.
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-demote',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-demote' }),
+    });
+
+    await processBufferPromote();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('PENDING');
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
   });
 });
 
