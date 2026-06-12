@@ -350,6 +350,22 @@ describe('Order routes', () => {
         resolved: false,
       });
 
+      // Unmatched line (PR-1 always-persist): variant null, item-level barcode
+      // is the only product trace until variant resolution links it (#315).
+      await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: '8680000000001',
+          platformLineId: 9001n,
+          quantity: 1,
+          unitPrice: '120.00',
+          commissionRate: '10.00',
+          commissionAmount: '12.00',
+        },
+      });
+
       const res = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
         { headers: { Authorization: bearer(user.accessToken) } },
@@ -361,7 +377,7 @@ describe('Order routes', () => {
         fees: { feeType: string; amountNet: string }[];
         claims: { trendyolClaimId: string; items: { reasonCode: string }[] }[];
         saleSubtotalNet: string | null;
-        items: unknown[];
+        items: { barcode: string | null; variant: unknown }[];
       };
       expect(body.id).toBe(order.id);
       expect(body.store.id).toBe(store.id);
@@ -370,7 +386,10 @@ describe('Order routes', () => {
       expect(body.fees.map((f) => f.feeType).sort()).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
       expect(body.claims).toHaveLength(1);
       expect(body.claims[0]?.items[0]?.reasonCode).toBe('DAMAGEDITEM');
-      expect(body.items).toEqual([]);
+      // Unmatched line: variant null, the item-level barcode carries the trace.
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0]?.variant).toBeNull();
+      expect(body.items[0]?.barcode).toBe('8680000000001');
     });
   });
 });

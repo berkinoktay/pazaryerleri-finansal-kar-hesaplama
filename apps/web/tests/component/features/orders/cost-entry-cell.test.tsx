@@ -28,6 +28,7 @@ function itemFixture(over: Partial<OrderItemDetail> = {}): OrderItemDetail {
     unitCostSnapshotVatRate: null,
     unitCostSnapshotVatAmount: null,
     commissionInvoiceSerialNumber: null,
+    barcode: null,
     variant: {
       id: 'v1',
       barcode: 'BC-1',

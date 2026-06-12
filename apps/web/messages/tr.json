@@ -1663,6 +1663,7 @@
         "refundedCommissionNet": "İade kom.",
         "unitCostSnapshotNet": "Maliyet (net)"
       },
+      "unmatchedBadge": "Eşleşme bekliyor",
       "unknownVariant": "Varyant bağlı değil",
       "costMissing": "Maliyet eksik"
     },

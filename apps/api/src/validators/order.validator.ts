@@ -185,8 +185,14 @@ const OrderItemDetailSchema = z
     unitCostSnapshotVatAmount: z.string().nullable(),
     // Komisyon Faturası anchor (Sale satırı yazdığında set'lenir).
     commissionInvoiceSerialNumber: z.string().nullable().openapi({ example: 'DCF2024000123' }),
+    barcode: z.string().nullable().openapi({
+      description:
+        'Vendor barcode on the order line — the only product trace while productVariantId is null (unmatched line).',
+      example: '8680000000001',
+    }),
     variant: OrderItemVariantSchema.nullable().openapi({
-      description: 'Joined product variant data. Null if the variant was unlinked.',
+      description:
+        'Joined product variant data. Null while the line is unmatched (variant-resolution links it).',
     }),
   })
   .openapi('OrderItemDetail');

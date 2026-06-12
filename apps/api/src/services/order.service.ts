@@ -210,6 +210,7 @@ export async function getOrderById(
       unitCostSnapshotVatRate: item.unitCostSnapshotVatRate?.toString() ?? null,
       unitCostSnapshotVatAmount: item.unitCostSnapshotVatAmount?.toString() ?? null,
       commissionInvoiceSerialNumber: item.commissionInvoiceSerialNumber,
+      barcode: item.barcode,
       variant:
         item.productVariant === null
           ? null
