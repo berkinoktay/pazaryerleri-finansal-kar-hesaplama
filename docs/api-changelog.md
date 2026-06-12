@@ -36,6 +36,9 @@ section "Versioning" for details.
 
 ### Changed
 
+- `GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}` — `items[]` gains
+  `barcode` (nullable): the vendor barcode is the only product trace on an unmatched line
+  (`productVariantId` null) until variant resolution links it. (#315)
 - `POST /v1/webhooks/orders/:storeId` — behavior only: an order line whose barcode resolves
   to no variant no longer hard-skips the whole order. The order now routes through the
   cost-missing path (today → live-performance buffer; past-day → persisted with null profit;

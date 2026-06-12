@@ -1102,6 +1102,14 @@
             ],
             "example": "DCF2024000123"
           },
+          "barcode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Vendor barcode on the order line — the only product trace while productVariantId is null (unmatched line).",
+            "example": "8680000000001"
+          },
           "variant": {
             "$ref": "#/components/schemas/OrderItemVariant"
           }
@@ -1122,6 +1130,7 @@
           "unitCostSnapshotVatRate",
           "unitCostSnapshotVatAmount",
           "commissionInvoiceSerialNumber",
+          "barcode",
           "variant"
         ]
       },
@@ -1169,7 +1178,7 @@
           "productImageUrl",
           "marketplaceProductCode"
         ],
-        "description": "Joined product variant data. Null if the variant was unlinked."
+        "description": "Joined product variant data. Null while the line is unmatched (variant-resolution links it)."
       },
       "OrderFeeDetail": {
         "type": "object",
