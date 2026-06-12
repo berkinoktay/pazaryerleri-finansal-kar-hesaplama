@@ -28,7 +28,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@supabase/supabase-js": "catalog:",
-    "pg": "^8.13.0"
+    "pg": "^8.21.0"
   },
   "devDependencies": {
     "@prisma/client": "^7.8.0",
