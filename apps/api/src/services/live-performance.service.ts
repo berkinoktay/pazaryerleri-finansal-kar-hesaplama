@@ -65,7 +65,8 @@ interface BufferAggregate {
  * EVERY order; profit / costed-revenue / costed-cost / costed-count are over the
  * costed subset only (orders with a non-null estimatedNetProfit). Today's
  * cost-missing orders sit in the buffer (not here); yesterday's persisted
- * null-profit orders are here but excluded from the costed aggregates.
+ * profit-excluded orders (estimate null) are here but excluded from the costed
+ * aggregates.
  */
 async function aggregateOrders(
   orgId: string,
@@ -154,7 +155,7 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
   const todayAnchor = getBusinessDateAnchor();
 
   // Yesterday never unions the buffer — its uncosted orders were graduated into
-  // `orders` (null profit) at midnight, so `orders` is already complete.
+  // `orders` as PROFIT-EXCLUDED at midnight, so `orders` is already complete.
   const [todayOrders, todayBuffer, yesterdayOrders] = await Promise.all([
     aggregateOrders(args.orgId, args.storeId, today),
     aggregateBuffer(args.orgId, args.storeId, todayAnchor),
