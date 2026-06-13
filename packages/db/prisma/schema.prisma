@@ -427,7 +427,16 @@ model ProductVariant {
   // back to synced at read time. The sync worker writes ONLY to the synced
   // column — never to dimensionalWeight — so the "user value is sacred"
   // invariant is structural, not just enforced in code.
-  syncedDimensionalWeight Decimal? @map("synced_dimensional_weight") @db.Decimal(6, 2)
+  //
+  // Desi floor = 0: the synced column is NON-NULL with default 0. Trendyol
+  // omits desi on most products; the mapper stores 0 (not null) so the
+  // products page shows 0 and the data has no nulls. Desi 0 is a VALID tariff
+  // tier — cargo fee is matched from the tariff table (carrier + ceil(desi)),
+  // which covers desi 0 onward, so a 0-desi variant still gets a real cargo
+  // cost. The override stays nullable (null = "no override"). A CHECK
+  // constraint forbids any value below 0 on either column (see migration
+  // dimensional_weight_zero_floor).
+  syncedDimensionalWeight Decimal  @default(0) @map("synced_dimensional_weight") @db.Decimal(6, 2)
   dimensionalWeight       Decimal? @map("dimensional_weight") @db.Decimal(6, 2)
   quantity                Int      @default(0)
   deliveryDuration        Int?     @map("delivery_duration")

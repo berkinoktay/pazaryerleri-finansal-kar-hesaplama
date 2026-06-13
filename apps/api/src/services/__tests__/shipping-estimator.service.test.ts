@@ -24,7 +24,7 @@ interface VariantFixtureOptions {
   defaultShippingCarrierId?: string | null;
   salePrice?: string;
   dimensionalWeight?: string | null;
-  syncedDimensionalWeight?: string | null;
+  syncedDimensionalWeight?: string;
   deliveryDuration?: number | null;
   isRushDelivery?: boolean;
   fastDeliveryOptions?: string[];
@@ -72,7 +72,9 @@ async function createVariantFixture(opts: VariantFixtureOptions = {}) {
       salePrice: opts.salePrice ?? '100.00',
       listPrice: opts.salePrice ?? '100.00',
       dimensionalWeight: opts.dimensionalWeight ?? null,
-      syncedDimensionalWeight: opts.syncedDimensionalWeight ?? null,
+      // Synced desi is NON-NULL with floor 0 (the marketplace omits it on most
+      // products → stored 0, never null). Desi 0 is a valid tariff tier.
+      syncedDimensionalWeight: opts.syncedDimensionalWeight ?? '0',
       deliveryDuration: opts.deliveryDuration ?? null,
       isRushDelivery: opts.isRushDelivery ?? false,
       fastDeliveryOptions: opts.fastDeliveryOptions ?? [],
@@ -127,18 +129,27 @@ describe('estimateShippingCostForVariant', () => {
     expect(outcome).toEqual({ ok: false, reason: 'NO_CARRIER' });
   });
 
-  it('returns NO_DESI when both dimensionalWeight and syncedDimensionalWeight are null', async () => {
+  it('matches the desi-0 tariff when there is no override and synced desi is 0 (the default)', async () => {
+    // Desi 0 is a VALID tariff tier — the marketplace omits desi on most
+    // products (stored 0, not null), and a 0-desi parcel still resolves the
+    // lowest tier (SENDEOMP desi-0 = 91.99). "No desi → no estimate" no longer
+    // exists.
     const carrier = await getSendeomp();
     const { variant } = await createVariantFixture({
       defaultShippingCarrierId: carrier.id,
       dimensionalWeight: null,
-      syncedDimensionalWeight: null,
+      syncedDimensionalWeight: '0',
     });
 
     const outcome = await prisma.$transaction((tx) =>
       estimateShippingCostForVariant(variant.id, tx),
     );
-    expect(outcome).toEqual({ ok: false, reason: 'NO_DESI' });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) expect.fail('Expected outcome.ok to be true');
+    expect(outcome.estimate.tariffApplied).toBe('NORMAL');
+    expect(outcome.estimate.carrierCode).toBe('SENDEOMP');
+    expect(outcome.estimate.amount.toString()).toBe('91.99');
+    expect(outcome.estimate.baseDesiAtEstimate.toString()).toBe('0');
   });
 
   it('returns a NORMAL tariff when salePrice is above every Barem range (fall-through path)', async () => {
@@ -223,17 +234,19 @@ describe('estimateShippingCostForVariant', () => {
     expect(outcome).toEqual({ ok: false, reason: 'OWN_CONTRACT_EMPTY' });
   });
 
-  it('returns NO_DESI when shippingTariffSource is OWN_CONTRACT and the variant has no desi (NO_DESI takes precedence over OWN_CONTRACT_EMPTY)', async () => {
+  it('returns OWN_CONTRACT_EMPTY for an OWN_CONTRACT store when desi is 0 and no own_shipping_tariffs row exists', async () => {
+    // Desi 0 resolves a tariff lookup (ceil(0) = 0); with no own-contract row
+    // seeded for desi 0 the outcome is OWN_CONTRACT_EMPTY, not NO_DESI.
     const { variant } = await createVariantFixture({
       shippingTariffSource: 'OWN_CONTRACT',
       dimensionalWeight: null,
-      syncedDimensionalWeight: null,
+      syncedDimensionalWeight: '0',
     });
 
     const outcome = await prisma.$transaction((tx) =>
       estimateShippingCostForVariant(variant.id, tx),
     );
-    expect(outcome).toEqual({ ok: false, reason: 'NO_DESI' });
+    expect(outcome).toEqual({ ok: false, reason: 'OWN_CONTRACT_EMPTY' });
   });
 
   it('returns a NORMAL tariff (skipping the Barem path) when the carrier does not support Barem destek', async () => {

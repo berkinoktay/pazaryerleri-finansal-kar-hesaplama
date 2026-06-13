@@ -109,6 +109,63 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     return order;
   }
 
+  it('carrier configured → SHIPPING ESTIMATE fee yazılır ve estimatedNetProfit kargoyu içerir', async () => {
+    // design 2026-06-13 §3: order-level kargo tahmini (desi 0 → en alt tarife).
+    const org = await createOrganization();
+    const carrier = await prisma.shippingCarrier.findFirstOrThrow({ where: { code: 'SENDEOMP' } });
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { defaultShippingCarrierId: carrier.id },
+    });
+    const order = await createOrderWithItem({ orgId: org.id, storeId: store.id });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const shippingFee = await prisma.orderFee.findFirst({
+      where: { orderId: order.id, feeType: 'SHIPPING', source: 'ESTIMATE' },
+    });
+    expect(shippingFee).not.toBeNull();
+    expect(shippingFee?.direction).toBe('DEBIT');
+    expect(new Decimal(shippingFee!.amountNet).gt(0)).toBe(true);
+
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(updated.estimatedNetProfit).not.toBeNull();
+  });
+
+  it('cargoDeci dolunca re-entry SHIPPING fee satirini gunceller (write-once gevsedi)', async () => {
+    const org = await createOrganization();
+    const carrier = await prisma.shippingCarrier.findFirstOrThrow({ where: { code: 'SENDEOMP' } });
+    const store = await createStore(org.id, { platform: 'TRENDYOL' });
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { defaultShippingCarrierId: carrier.id },
+    });
+    const order = await createOrderWithItem({ orgId: org.id, storeId: store.id });
+
+    // T+0: cargoDeci yok → desi-0 tahmini.
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+    const feeT0 = await prisma.orderFee.findFirstOrThrow({
+      where: { orderId: order.id, feeType: 'SHIPPING', source: 'ESTIMATE' },
+    });
+    const estimatedT0 = (await prisma.order.findUniqueOrThrow({ where: { id: order.id } }))
+      .estimatedNetProfit;
+
+    // Kargoya verildi: cargoDeci = 8 → re-entry tahmini günceller (write-once yok).
+    await prisma.order.update({ where: { id: order.id }, data: { cargoDeci: '8' } });
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const fees = await prisma.orderFee.findMany({
+      where: { orderId: order.id, feeType: 'SHIPPING', source: 'ESTIMATE' },
+    });
+    expect(fees).toHaveLength(1); // UPSERT — yeni satır YOK
+    expect(fees[0]?.id).toBe(feeT0.id);
+    const estimatedAfter = (await prisma.order.findUniqueOrThrow({ where: { id: order.id } }))
+      .estimatedNetProfit;
+    // desi 8 > 0 → daha pahalı kargo → tahmini kâr düştü (rafine oldu).
+    expect(new Decimal(estimatedAfter!).lt(estimatedT0!)).toBe(true);
+  });
+
   it('happy path — PSF + Stopaj OrderFee yazılır, estimatedNetProfit hesaplanır', async () => {
     const { org, store } = await setup();
     const order = await createOrderWithItem({

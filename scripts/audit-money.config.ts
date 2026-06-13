@@ -11,7 +11,9 @@
  * integer row counts (`Number(row.profile_count)`) and the desi weight tier
  * (`Math.ceil(desi.toNumber())`) -- neither is money, both would be false
  * positives. Widen ROOTS only alongside an ALLOWED entry for each non-money
- * coercion you drag in.
+ * coercion you drag in. (The desi tier resolver moved into packages/profit/src
+ * with the shipping-into-profit-estimate work, so its desi-ceil now lives in
+ * ROOTS and carries an ALLOWED entry below.)
  *
  * To exempt a genuinely-legitimate coercion, add an ALLOWED entry keyed by
  * repo-relative file + 1-based line, with a reason. An audited exception in
@@ -37,4 +39,14 @@ export interface AllowedCoercion {
  * exactly the invariant this gate pins. Add entries here (never silence in
  * source) if a legitimate non-money coercion ever lands in ROOTS.
  */
-export const ALLOWED: readonly AllowedCoercion[] = [] as const;
+export const ALLOWED: readonly AllowedCoercion[] = [
+  {
+    file: 'packages/profit/src/shipping/resolve-tariff.ts',
+    line: 66,
+    reason:
+      'desi is a dimensional-weight quantity, NOT money. Math.ceil(desi.toNumber()) yields the ' +
+      'integer desi tier for the (own_/shipping_)desi_tariffs Int key lookup. Prisma needs a JS ' +
+      'number for that Int column, so the coercion is unavoidable and non-money. Exactly the ' +
+      'desi-tier false positive this gate anticipates; the resolver moved into ROOTS with PR shipping.',
+  },
+] as const;

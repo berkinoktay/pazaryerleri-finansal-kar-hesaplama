@@ -132,3 +132,11 @@ ALTER TABLE orders ADD CONSTRAINT orders_profit_freeze_xor_check
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_profit_exclusion_pair_check;
 ALTER TABLE orders ADD CONSTRAINT orders_profit_exclusion_pair_check
   CHECK ((profit_excluded_at IS NULL) = (profit_exclusion_reason IS NULL));
+
+-- ─── 2026-06-13 desi sıfır-taban ───────────────────────────────────────
+-- synced_dimensional_weight NON-NULL default 0; hiçbir desi 0'ın altına
+-- inemez (negatif desi imkânsız). override (dimensional_weight) nullable
+-- kalır. Mirror: prisma/migrations/20260613120000_dimensional_weight_zero_floor.
+ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_dimensional_weight_nonneg_check;
+ALTER TABLE product_variants ADD CONSTRAINT product_variants_dimensional_weight_nonneg_check
+  CHECK (synced_dimensional_weight >= 0 AND (dimensional_weight IS NULL OR dimensional_weight >= 0));

@@ -38,7 +38,7 @@ async function setupCtx(): Promise<Ctx> {
 
 async function seedVariant(
   ctx: Ctx,
-  opts: { syncedDimensionalWeight?: string | null; dimensionalWeight?: string | null } = {},
+  opts: { syncedDimensionalWeight?: string; dimensionalWeight?: string | null } = {},
 ): Promise<string> {
   const product = await prisma.product.create({
     data: {
@@ -177,12 +177,20 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
     expect(body.errors.some((e) => e.code === 'INVALID_VARIANT_IDS_TOO_MANY')).toBe(true);
   });
 
-  it('rejects out-of-range dimensionalWeight with 422', async () => {
+  it('rejects out-of-range dimensionalWeight with 422 (above the cap); 0 is the valid floor', async () => {
     const ctx = await setupCtx();
     const v = await seedVariant(ctx);
-    const res = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: '0' });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { errors: { code: string }[] };
-    expect(body.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL')).toBe(true);
+
+    // Above the cap → TOO_LARGE.
+    const tooLarge = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: '1500.00' });
+    expect(tooLarge.status).toBe(422);
+    const tooLargeBody = (await tooLarge.json()) as { errors: { code: string }[] };
+    expect(tooLargeBody.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE')).toBe(
+      true,
+    );
+
+    // 0 is the floor — accepted.
+    const zero = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: '0' });
+    expect(zero.status).toBe(200);
   });
 });

@@ -634,7 +634,7 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
     await truncateAll();
   });
 
-  it('includes shipping fields with correct OK + NO_DESI values per variant', async () => {
+  it('includes shipping fields with correct OK values per variant (desi 0 resolves the lowest tier)', async () => {
     // Build a store wired to SENDEOMP with two products:
     //   - okProduct → variant has desi=3.0 → OK / NORMAL / SENDEOMP desi-3 = 101.99
     //   - noDesiProduct → variant has no desi at all → NO_DESI
@@ -683,14 +683,16 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
       },
     });
 
-    // NO_DESI variant: no override, no synced
+    // Desi-0 variant: no override, synced desi defaults to 0 → resolves the
+    // lowest tariff tier (SENDEOMP desi-0 = 91.99). "No desi → no estimate" is
+    // retired: desi is always ≥ 0 and the tariff table covers desi 0.
     const noDesiProduct = await prisma.product.create({
       data: {
         organizationId: org.id,
         storeId: store.id,
         platformContentId: 9002n,
         productMainId: 'PM-SHIP-NODESI',
-        title: 'No Desi Product',
+        title: 'Zero Desi Product',
       },
     });
     const noDesiVariant = await prisma.productVariant.create({
@@ -704,7 +706,7 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
         salePrice: '500.00',
         listPrice: '500.00',
         dimensionalWeight: null,
-        syncedDimensionalWeight: null,
+        syncedDimensionalWeight: '0',
       },
     });
 
@@ -725,12 +727,10 @@ describe('GET /v1/.../products — shipping estimate fields', () => {
     expect(okV?.estimatedShippingNet).toBe('101.99');
 
     expect(noDesiV).toBeDefined();
-    expect(noDesiV?.shippingEstimateStatus).toBe('NO_DESI');
-    expect(noDesiV?.shippingTariffApplied).toBeNull();
-    expect(noDesiV?.estimatedShippingNet).toBeNull();
-    // Carrier is still resolved on the join even when desi is missing — the
-    // SHIPPING_ESTIMATE_CTE_SQL contract is "always echo the configured
-    // carrier when the store has one", so the UI can suggest a switch.
+    // Desi 0 resolves the lowest tariff tier — a real estimate, not NO_DESI.
+    expect(noDesiV?.shippingEstimateStatus).toBe('OK');
+    expect(noDesiV?.shippingTariffApplied).toBe('NORMAL');
+    expect(noDesiV?.estimatedShippingNet).toBe('91.99');
     expect(noDesiV?.shippingCarrierCode).toBe('SENDEOMP');
   });
 });

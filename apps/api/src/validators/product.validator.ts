@@ -735,12 +735,15 @@ function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] 
 
 // ─── PATCH variant dimensional weight (Desi) ──────────────────────────
 // Bounds: Decimal(6,2) max is 9999.99 at the DB level; the cap below is a
-// UX guard against typos. 0 is rejected because a 0-desi parcel is
-// nonsensical for shipping cost calculations. Negative is rejected
-// because… negative weight. Null is permitted and clears the override
-// (the read path then falls back to syncedDimensionalWeight).
+// UX guard against typos. Floor is 0 (inclusive): desi 0 is a VALID tariff
+// tier — the cargo fee is matched from the DB tariff table (carrier +
+// ceil(desi)), which covers desi 0 onward, so a 0-desi variant still gets a
+// real (lowest-tier) shipping cost. Below 0 is impossible — the format regex
+// (`^\d+...`) admits no minus sign, and a DB CHECK constraint mirrors the
+// floor. Null is permitted and clears the override (the read path then falls
+// back to syncedDimensionalWeight, now always ≥ 0).
 
-const DIMENSIONAL_WEIGHT_MIN_INCLUSIVE = 0.01;
+const DIMENSIONAL_WEIGHT_MIN_INCLUSIVE = 0;
 const DIMENSIONAL_WEIGHT_MAX_INCLUSIVE = 999.99;
 
 export const UpdateVariantDimensionalWeightBodySchema = z
