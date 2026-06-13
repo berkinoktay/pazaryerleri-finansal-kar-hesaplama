@@ -1,54 +1,35 @@
 /**
- * Shipping cost estimator service.
+ * Variant-level shipping cost estimator (products-list display).
  *
- * Per spec §5.2 (docs/superpowers/specs/2026-05-17-shipping-cost-estimation-design.md):
- * resolves a `ShippingEstimate` from variant + store config + tariff data, or
- * one of the 5 documented unavailable reasons. Algorithm:
+ * Prepares the variant's inputs — desi = `dimensionalWeight ?? syncedDimensionalWeight`
+ * (synced is non-null, ≥ 0), Barem range = `variant.salePrice`, fast-eligibility via
+ * `hasFastDeliverySetup` — and delegates the Barem-vs-desi tariff resolution to the
+ * shared `resolveTariffForDesi` (in `@pazarsync/profit`), the single source of truth
+ * also used by the order-level estimator (`estimateShippingCostForOrder`).
  *
- *   1. Fetch variant with store + defaultShippingCarrier.
- *   2. No store → STORE_NOT_FOUND.
- *   3. OWN_CONTRACT branch: look up own_shipping_tariffs by (storeId, ceil(desi)).
- *      V1 always empty → OWN_CONTRACT_EMPTY.
- *   4. TRENDYOL_CONTRACT branch:
- *      - no carrier → NO_CARRIER
- *      - no desi (neither dimensional nor synced) → NO_DESI
- *      - Barem path: carrier supports it AND desi within carrier.maxBaremDesi AND
- *        variant has fast-delivery setup → look up barem tier by salePrice range.
- *        Found → BAREM estimate. Not found (price ≥ all ranges) → fall through.
- *      - Normal path: look up shipping_desi_tariffs by (carrierId, ceil(desi)).
- *        Found → NORMAL estimate. Not found → DESI_OVERFLOW.
- *
- * All money handled via `decimal.js`. Carrier thresholds (Barem cap, eligibility
- * window) live on `ShippingCarrier` rows so SQL updates suffice for re-tuning.
- *
- * Called from the products list endpoint (V1) via Prisma transaction client.
- * Order-level estimator (`estimateShippingCostForOrder`) is a V2 placeholder.
+ * Outcomes: STORE_NOT_FOUND / NO_CARRIER / OWN_CONTRACT_EMPTY / DESI_OVERFLOW, or a
+ * `ShippingEstimate` (NORMAL / BAREM / OWN_CONTRACT). All money via `decimal.js`;
+ * carrier thresholds live on `ShippingCarrier` rows (SQL-tunable). Called from the
+ * products-list endpoint via a Prisma transaction client.
  */
 
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types + shared core (single source: @pazarsync/profit) ──────────────────
+// Barem-vs-desi çözücü `resolveTariffForDesi` + ShippingEstimate/EstimateOutcome
+// @pazarsync/profit'te yaşar (order-level estimator ile ORTAK çekirdek). Tipler
+// buradan re-export edilir ki mevcut apps/api tüketicileri (products-list, sql
+// CTE, validator) import yolu değiştirmeden çalışsın.
+import { resolveTariffForDesi } from '@pazarsync/profit';
+import type {
+  EstimateOutcome,
+  EstimateUnavailableReason,
+  ShippingEstimate,
+} from '@pazarsync/profit';
 
-export interface ShippingEstimate {
-  amount: Decimal;
-  carrierCode: string;
-  tariffApplied: 'NORMAL' | 'BAREM' | 'OWN_CONTRACT';
-  sourceTariffId: string | null;
-  baseDesiAtEstimate: Decimal;
-}
-
-export type EstimateUnavailableReason =
-  | 'STORE_NOT_FOUND'
-  | 'NO_CARRIER'
-  | 'NO_DESI'
-  | 'DESI_OVERFLOW'
-  | 'OWN_CONTRACT_EMPTY';
-
-export type EstimateOutcome =
-  | { ok: true; estimate: ShippingEstimate }
-  | { ok: false; reason: EstimateUnavailableReason };
+export type { EstimateOutcome, EstimateUnavailableReason, ShippingEstimate };
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -96,100 +77,28 @@ export async function estimateShippingCostForVariant(
   });
   if (!variant?.store) return { ok: false, reason: 'STORE_NOT_FOUND' };
 
-  // OWN_CONTRACT branch — look up tenant-private tariff by ceil(desi)
-  if (variant.store.shippingTariffSource === 'OWN_CONTRACT') {
-    const desi = variant.dimensionalWeight ?? variant.syncedDimensionalWeight;
-    if (!desi) return { ok: false, reason: 'NO_DESI' };
-
-    const desiCeil = Math.ceil(desi.toNumber());
-    const row = await tx.ownShippingTariff.findUnique({
-      where: { storeId_desi: { storeId: variant.store.id, desi: desiCeil } },
-    });
-    if (!row) return { ok: false, reason: 'OWN_CONTRACT_EMPTY' };
-
-    return {
-      ok: true,
-      estimate: {
-        amount: new Decimal(row.priceNet.toString()),
-        carrierCode: 'OWN',
-        tariffApplied: 'OWN_CONTRACT',
-        sourceTariffId: row.id,
-        baseDesiAtEstimate: new Decimal(desi.toString()),
-      },
-    };
-  }
-
-  // TRENDYOL_CONTRACT branch
+  // Desi: synced kolonu non-null (≥ 0) → her zaman değer; override öncelikli.
+  const desi = new Decimal(
+    (variant.dimensionalWeight ?? variant.syncedDimensionalWeight).toString(),
+  );
   const carrier = variant.store.defaultShippingCarrier;
-  if (!carrier) return { ok: false, reason: 'NO_CARRIER' };
 
-  const desi = variant.dimensionalWeight ?? variant.syncedDimensionalWeight;
-  if (!desi) return { ok: false, reason: 'NO_DESI' };
-
-  // Barem path — all thresholds DB-driven (no inline 350 / 10 magic numbers).
-  // Falls through to the normal desi tariff when:
-  //   - the variant's salePrice lies above every Barem range, OR
-  //   - the variant is not Barem-eligible (no fast delivery setup), OR
-  //   - the carrier is in the "supportsBaremDestek = false" set, OR
-  //   - the variant's desi exceeds the carrier's Barem cap (`maxBaremDesi`)
-  if (
-    carrier.supportsBaremDestek &&
-    desi.lte(carrier.maxBaremDesi) &&
-    hasFastDeliverySetup(variant, carrier)
-  ) {
-    const barem = await tx.shippingBaremTariff.findFirst({
-      where: {
-        carrierId: carrier.id,
-        minOrderAmount: { lte: variant.salePrice.toString() },
-        maxOrderAmount: { gte: variant.salePrice.toString() },
-      },
-    });
-    if (barem) {
-      return {
-        ok: true,
-        estimate: {
-          amount: new Decimal(barem.priceNet.toString()),
-          carrierCode: carrier.code,
-          tariffApplied: 'BAREM',
-          sourceTariffId: barem.id,
-          baseDesiAtEstimate: new Decimal(desi.toString()),
-        },
-      };
-    }
-    // salePrice outside any Barem range → fall through to normal desi tariff.
-  }
-
-  // Normal desi-bazlı tariff
-  const desiCeil = Math.ceil(desi.toNumber());
-  const desiRow = await tx.shippingDesiTariff.findFirst({
-    where: { carrierId: carrier.id, desi: desiCeil },
+  // Barem-vs-desi çözümü ortak çekirdekte (resolveTariffForDesi, @pazarsync/profit).
+  // grossTotalForBarem = variant salePrice (products-list gösterim tahmini).
+  return resolveTariffForDesi(tx, {
+    storeId: variant.store.id,
+    tariffSource: variant.store.shippingTariffSource,
+    carrier:
+      carrier !== null
+        ? {
+            id: carrier.id,
+            code: carrier.code,
+            supportsBaremDestek: carrier.supportsBaremDestek,
+            maxBaremDesi: new Decimal(carrier.maxBaremDesi.toString()),
+          }
+        : null,
+    desi,
+    grossTotalForBarem: new Decimal(variant.salePrice.toString()),
+    fastEligible: carrier !== null && hasFastDeliverySetup(variant, carrier),
   });
-  if (!desiRow) return { ok: false, reason: 'DESI_OVERFLOW' };
-
-  return {
-    ok: true,
-    estimate: {
-      amount: new Decimal(desiRow.priceNet.toString()),
-      carrierCode: carrier.code,
-      tariffApplied: 'NORMAL',
-      sourceTariffId: desiRow.id,
-      baseDesiAtEstimate: new Decimal(desi.toString()),
-    },
-  };
-}
-
-/**
- * V2: Order-level estimator. Reads MAX(items[].variant.dimensionalWeight) for
- * package desi, uses order.totalAmount for Barem range. NOT implemented in V1 —
- * the orders feature lands with sync integration. Signature kept stable so V2
- * callers can wire it in without breaking V1.
- */
-export async function estimateShippingCostForOrder(
-  orderId: string,
-  tx: Prisma.TransactionClient,
-): Promise<EstimateOutcome> {
-  // Touch the params so the V2-stable signature does not fail no-unused-vars.
-  void orderId;
-  void tx;
-  throw new Error('estimateShippingCostForOrder: implemented in V2 (orders integration)');
 }

@@ -1,52 +1,43 @@
 /**
- * Sipariş anlık tahmin (T+0 write-once kar hesabı) — design §4.2.
+ * "Tahmini kâr" hesabı — design §4.2 + 2026-06-13 §5 (kargo rafinesi).
  *
- * Sipariş webhook'u geldiği an `applyEstimateOnOrderCreate(orderId, tx)` çağrılır:
+ * `applyEstimateOnOrderCreate(orderId, tx)` her order upsert'te (T+0 + her re-sync)
+ * çağrılır:
  *   1. PSF (Platform Hizmet Bedeli) deterministic per-order — muafiyet kontrolü ile
  *   2. Stopaj (E-ticaret Stopajı) deterministic per-order
- *   3. Shipping estimate (mevcut shipping-estimator entegrasyonu — V1 variant-level fallback)
- *   4. `computeProfit()` çağrı + `Order.estimatedNetProfit` yaz (write-once guard)
+ *   3. Kargo tahmini (order-level estimator; desi = cargoDeci ?? adet-ağırlıklı
+ *      ortalama) → SHIPPING ESTIMATE OrderFee (upsert)
+ *   4. `computeProfit()` + `Order.estimatedNetProfit` yaz
  *
- * **Write-once invariant** (design §6.2): Eğer `order.estimatedNetProfit !== null`,
- * fonksiyon erken return eder (idempotent). DB-level trigger PR-9'da eklenecek
- * (defense-in-depth).
+ * **Rafine edilebilir (write-MANY)** — design 2026-06-13: estimatedNetProfit artık
+ * write-once DEĞİL. Kargoya verilip `cargoDeci` gelince fonksiyon yeniden çağrılır
+ * ve kargo bedeli rafine olur. Idempotent: PSF/Stopaj skip-if-exists, SHIPPING
+ * upsert, maliyet snapshot DB-immutable → aynı (veya kargo-rafine) sonuç.
  *
- * **Maliyet snapshot eksikse**: Eğer herhangi bir item'ın `unitCostSnapshotNet`'i
- * null ise (cost profile henüz eklenmemiş veya KDV split backfill bekleniyor),
- * `estimatedNetProfit` null bırakılır. Cost profile sonradan eklenirse caller
- * fonksiyonu tekrar çağırır (re-entry idempotent).
+ * **Maliyet snapshot eksikse**: herhangi bir item'ın `unitCostSnapshotNet`'i null
+ * ise `estimatedNetProfit` null bırakılır (cost sonradan gelince re-entry yazar).
  *
- * **Caller'lar:**
- *   - `apps/sync-worker/src/handlers/orders.ts:upsertOrderWithSnapshot` —
- *     T+0 Trendyol order sync sırasında write-once çağrılır (Order Sync PR-B2).
- *   - Standalone integration test'ler (`apps/api/tests/integration/services/
- *     apply-estimate-on-order-create.test.ts`) — mock data ile doğrulama.
+ * **Kâr-dışı sipariş** (`profitExcludedAt !== null`): ne fee ne estimate yazılır.
  *
- * Modül `apps/api/src/services/profit/`'ten `packages/profit/`'e promote edildi
- * (PR-B2): apps/api ve apps/sync-worker iki ayrı consumer; promotion paylaşımı
- * tek `@pazarsync/profit` paketine indirir, code-duplication önlenir.
+ * Modül `packages/profit/`'te yaşar — apps/api + apps/sync-worker ortak tüketici.
  */
 
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
+import { syncLog } from '@pazarsync/sync-core';
 
 import { computeProfit, type ProfitInputFee, type ProfitInputItem } from './profit-formula';
 import { isPsfExempt, resolveFeeDefinition } from './resolve-fee-definition';
-
-export class EstimateAlreadyAppliedError extends Error {
-  constructor(public readonly orderId: string) {
-    super(`Order ${orderId} already has estimatedNetProfit — write-once`);
-    this.name = 'EstimateAlreadyAppliedError';
-  }
-}
+import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
 
 /**
- * Computes and persists `Order.estimatedNetProfit` (write-once) along with
- * the supporting ESTIMATE-source OrderFee rows (PSF + Stopaj + Shipping).
+ * Computes and persists `Order.estimatedNetProfit` (refinable) along with the
+ * supporting ESTIMATE-source OrderFee rows (PSF + Stopaj + Shipping).
  *
- * Idempotent — safe to call multiple times. Re-entry skips early when
- * `estimatedNetProfit` is already non-null.
+ * Idempotent — safe to call multiple times. Re-entry refines the estimate
+ * (esp. shipping once `cargoDeci` lands); it does NOT early-return on a
+ * non-null estimate.
  */
 export async function applyEstimateOnOrderCreate(
   orderId: string,
@@ -61,8 +52,11 @@ export async function applyEstimateOnOrderCreate(
   });
   if (order === null) return;
 
-  // Write-once guard (application layer; DB trigger PR-9'da defense-in-depth)
-  if (order.estimatedNetProfit !== null) return;
+  // Kâr rafinesi (design 2026-06-13): estimatedNetProfit artık WRITE-ONCE DEĞİL.
+  // Kargo bilgisi geldikçe (T+0 ürün-desi → kargoya verilince cargoDeci) yeniden
+  // hesaplanır, bu yüzden estimatedNetProfit dolu olsa bile erken return YOK.
+  // Fonksiyon idempotent: PSF/Stopaj skip-if-exists, SHIPPING upsert, maliyet
+  // snapshot DB-immutable → tekrar çağrı aynı (veya kargo-rafine) sonucu verir.
 
   // Kâr-dışı sipariş: ne fee ne estimate — kalıcı donuk (spec 2026-06-12).
   if (order.profitExcludedAt !== null) return;
@@ -149,12 +143,53 @@ export async function applyEstimateOnOrderCreate(
     });
   }
 
-  // ─── 3. Shipping estimate (V1 variant-level fallback) ─────────────────
-  // Mevcut `estimateShippingCostForOrder` placeholder; V1'de tek variant'lı
-  // siparişler için ilk OrderItem'ın variant'ı üzerinden estimate alınır.
-  // Multi-variant order'lar için Order-level estimator V2'ye ertelenmiş.
-  // Shipping başarısız ise OrderFee yazılmaz — kar hesabı yine yapılır.
-  // (PR-7 cargo-invoice gerçek tutarı CARGO_INVOICE source'lu OrderFee olarak yazar.)
+  // ─── 3. Shipping estimate (order-level, design 2026-06-13 §3) ──────────
+  // Desi = cargoDeci ?? ürün-ayarı adet-ağırlıklı ortalama → Barem/desi tarifesi.
+  // SHIPPING ESTIMATE fee (DEBIT) estimatedNetProfit'i besler. CONFIRMABLE_FEE_TYPES'ta
+  // DEĞİL → settled kâra girmez (gerçek CARGO_INVOICE settled'ı besler; çift-sayım yok).
+  // Re-entry'de (cargoDeci dolunca / cost backfill) UPSERT: mevcut fee güncellenir.
+  // Üretilemezse (carrier yok / desi taşma / own boş) fee yazılmaz, loglanır.
+  const shippingOutcome = await estimateShippingCostForOrder(orderId, tx);
+  if (shippingOutcome.ok) {
+    const shipDef = await resolveFeeDefinition(tx, {
+      platform: order.store.platform,
+      feeType: 'SHIPPING',
+      at: order.orderDate,
+    });
+    const shipNet = shippingOutcome.estimate.amount;
+    const shipVatRate = new Decimal(shipDef.defaultVatRate);
+    const shipVat = shipNet.mul(shipVatRate).div(100).toDecimalPlaces(2);
+    const existingShip = await tx.orderFee.findFirst({
+      where: { orderId, feeType: 'SHIPPING', source: 'ESTIMATE' },
+      select: { id: true },
+    });
+    if (existingShip !== null) {
+      await tx.orderFee.update({
+        where: { id: existingShip.id },
+        data: { amountNet: shipNet, vatRate: shipVatRate, vatAmount: shipVat },
+      });
+    } else {
+      await tx.orderFee.create({
+        data: {
+          orderId,
+          organizationId: order.organizationId,
+          feeDefinitionId: shipDef.id,
+          feeType: 'SHIPPING',
+          source: 'ESTIMATE',
+          direction: 'DEBIT',
+          amountNet: shipNet,
+          vatRate: shipVatRate,
+          vatAmount: shipVat,
+          displayName: shipDef.displayName,
+        },
+      });
+    }
+  } else {
+    syncLog.warn('estimate.shipping.unavailable', {
+      orderId,
+      reason: shippingOutcome.reason,
+    });
+  }
 
   // ─── 4. computeProfit + Order.estimatedNetProfit yaz ───────────────────
   // Tüm cost snapshot'lar dolu mu? Eksikse profit null kalır.

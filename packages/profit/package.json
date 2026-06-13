@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@pazarsync/db": "workspace:*",
+    "@pazarsync/sync-core": "workspace:*",
     "decimal.js": "catalog:"
   },
   "devDependencies": {

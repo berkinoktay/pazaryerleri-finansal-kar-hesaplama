@@ -604,6 +604,9 @@ importers:
       '@pazarsync/db':
         specifier: workspace:*
         version: link:../db
+      '@pazarsync/sync-core':
+        specifier: workspace:*
+        version: link:../sync-core
       decimal.js:
         specifier: 'catalog:'
         version: 10.6.0

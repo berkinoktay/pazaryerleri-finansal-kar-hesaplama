@@ -2869,7 +2869,7 @@
               "null"
             ],
             "pattern": "^\\d+(\\.\\d{1,2})?$",
-            "description": "Decimal string with up to 2 fractional digits, in the (closed) range [0.01, 999.99], or null. Null clears the user override and reverts the read path to the marketplace's last synced value.",
+            "description": "Decimal string with up to 2 fractional digits, in the (closed) range [0, 999.99], or null. Null clears the user override and reverts the read path to the marketplace's last synced value.",
             "example": "1.50"
           }
         },

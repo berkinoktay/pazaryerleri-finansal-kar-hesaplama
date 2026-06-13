@@ -107,39 +107,27 @@ CREATE TRIGGER order_items_snapshot_immutable
   FOR EACH ROW
   EXECUTE FUNCTION public.reject_snapshot_update();
 
--- ─── reject_estimated_net_profit_update (PR-9 second half) ─────────────
--- Enforces write-once semantics on Order.estimated_net_profit. T+0 estimate
--- is captured by applyEstimateOnOrderCreate as part of the order arrival
--- transaction; once written, it must never be overwritten — settlements
--- reconcile by writing settled_net_profit instead (spec §3 / §8.3 line 1369).
+-- ─── estimated_net_profit write-once GEVŞETİLDİ (2026-06-13) ───────────
+-- PR-9'daki write-once kilidi KALDIRILDI. Gerekçe (design 2026-06-13 §5):
+-- kargo bedeli fatura çıkana kadar bir TAHMİNDİR ve daha iyi bilgi geldikçe
+-- rafine olur (T+0 ürün-desi → kargoya verilince cargoDeci). Bu yüzden
+-- estimated_net_profit ("tahmini kâr") GÜNCELLENEBİLİR olmalı.
 --
--- IS DISTINCT FROM semantics:
---   null → value : allowed (first write; null IS DISTINCT FROM value = true,
---                  but OLD IS NOT NULL guard short-circuits before reject)
---   value → value: no-op UPDATE allowed (IS DISTINCT FROM = false)
---   value → different value: reject (42501)
---   value → null : reject (a write-once invariant means no unset either)
---   0 → value    : reject (0 is a value; null/value boundary is strict)
-CREATE OR REPLACE FUNCTION public.reject_estimated_net_profit_update()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF OLD.estimated_net_profit IS NOT NULL AND
-     NEW.estimated_net_profit IS DISTINCT FROM OLD.estimated_net_profit THEN
-    RAISE EXCEPTION 'estimated_net_profit is write-once'
-      USING ERRCODE = '42501',
-            HINT = 'T+0 estimate is immutable; settlements update settled_net_profit instead.';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
+-- MALİYET-DONDURMA korunur: order_items snapshot immutability (yukarıdaki
+-- reject_snapshot_update) maliyetin değişmezliğini garanti eder; estimate
+-- recompute her zaman donmuş maliyeti kullanır. EXCLUDED sipariş donması da
+-- korunur (aşağıdaki reject_profit_freeze_breach — kâr-dışı siparişte iki
+-- kâr kolonu da donuk kalır).
 DROP TRIGGER IF EXISTS orders_estimated_net_profit_write_once ON orders;
-CREATE TRIGGER orders_estimated_net_profit_write_once
-  BEFORE UPDATE ON orders
-  FOR EACH ROW
-  EXECUTE FUNCTION public.reject_estimated_net_profit_update();
+DROP FUNCTION IF EXISTS public.reject_estimated_net_profit_update();
+-- KABUL EDİLEN ZAYIFLAMA (review M1): write-once gidince "hesaplanmış sipariş
+-- kâr-dışına çekilemez" garantisi (reject_profit_freeze_breach ELSIF, aşağıda)
+-- yalnız OLD.estimated_net_profit NOT NULL iken tutuyor. Teorik 2-UPDATE açığı:
+-- estimate'i NULL'la → sonra exclude et. App kodundan ULAŞILMAZ: tek NULL'layan
+-- check-constraints.sql'deki dedup-repair (rn>1 yinelenenler, re-entry yeniden
+-- yazar); estimate yazan tek yol non-null yazar + profitExcludedAt'te erken döner;
+-- exclusion yalnız CREATE'te damgalanır. Estimate write-many olduğundan saf
+-- write-once trigger geri konamaz; garanti app-katmanı disipliniyle korunuyor.
 
 -- ─── reject_profit_freeze_breach ───────────────────────────────────────
 -- Calculated-or-excluded sözleşmesinin (spec 2026-06-12 §3) DB bekçisi.
@@ -172,7 +160,7 @@ BEGIN
   ELSIF NEW.profit_excluded_at IS NOT NULL AND OLD.estimated_net_profit IS NOT NULL THEN
     RAISE EXCEPTION 'calculated order cannot be excluded'
       USING ERRCODE = '42501',
-            HINT = 'estimated_net_profit already written (write-once).';
+            HINT = 'Calculated profit already in aggregates; excluding would rewrite history.';
   END IF;
   RETURN NEW;
 END;

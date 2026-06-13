@@ -32,7 +32,7 @@ interface Ctx {
   variantId: string;
 }
 
-async function setup(opts: { syncedDimensionalWeight?: string | null } = {}): Promise<Ctx> {
+async function setup(opts: { syncedDimensionalWeight?: string } = {}): Promise<Ctx> {
   const user = await createAuthenticatedTestUser();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -161,13 +161,27 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(body.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE')).toBe(true);
   });
 
-  it('returns 422 INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL when value is zero or below the floor', async () => {
-    const ctx = await setup();
+  it('accepts 0 (the floor) as a valid desi override; rejects negatives as a format error', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: '1.20' });
 
-    const res = await patchDesi(ctx, { dimensionalWeight: '0' });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { errors: { code: string }[] };
-    expect(body.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL')).toBe(true);
+    // 0 is the floor — a valid override (desi 0 resolves the lowest tariff tier).
+    const ok = await patchDesi(ctx, { dimensionalWeight: '0' });
+    expect(ok.status).toBe(200);
+    const okBody = (await ok.json()) as {
+      dimensionalWeight: string;
+      isDimensionalWeightOverridden: boolean;
+    };
+    expect(okBody.dimensionalWeight).toBe('0');
+    expect(okBody.isDimensionalWeightOverridden).toBe(true);
+    const row = await prisma.productVariant.findFirstOrThrow({ where: { id: ctx.variantId } });
+    expect(row.dimensionalWeight?.toString()).toBe('0');
+
+    // Below 0 is impossible — the format regex admits no minus sign, so a
+    // negative is a FORMAT error, never reaching the DB CHECK floor.
+    const neg = await patchDesi(ctx, { dimensionalWeight: '-1' });
+    expect(neg.status).toBe(422);
+    const negBody = (await neg.json()) as { errors: { code: string }[] };
+    expect(negBody.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')).toBe(true);
   });
 
   it('returns 404 NOT_FOUND when the variant does not exist within the store', async () => {

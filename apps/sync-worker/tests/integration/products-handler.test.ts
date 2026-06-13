@@ -611,7 +611,7 @@ describe('processProductsChunk', () => {
     expect(variant.syncedDimensionalWeight?.toString()).toBe('2');
   });
 
-  it('treats omitted or zero dimensionalWeight from Trendyol as null (preserves "unknown" vs "0 desi")', async () => {
+  it('stores omitted or zero dimensionalWeight from Trendyol as 0 (desi floor is 0, never null)', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -631,10 +631,10 @@ describe('processProductsChunk', () => {
             title: 'Desi Missing Product',
             variants: [
               // Omitted (real Trendyol responses often skip this field
-              // until their pricing pipeline computes it).
+              // until their pricing pipeline computes it) → stored as 0.
               { variantId: 800_103, barcode: 'desi-bc-3a', stockCode: 'desi-sk-3a' },
-              // Explicit 0 — Trendyol's "not yet computed" sentinel,
-              // distinct from a real 0-desi claim.
+              // Explicit 0 → also stored as 0. Desi 0 is the floor and a valid
+              // tariff tier (the tariff table covers desi 0 onward).
               {
                 variantId: 800_104,
                 barcode: 'desi-bc-3b',
@@ -668,7 +668,7 @@ describe('processProductsChunk', () => {
     const zero = await prisma.productVariant.findFirstOrThrow({
       where: { storeId, platformVariantId: BigInt(800_104) },
     });
-    expect(missing.syncedDimensionalWeight).toBeNull();
-    expect(zero.syncedDimensionalWeight).toBeNull();
+    expect(missing.syncedDimensionalWeight.toString()).toBe('0');
+    expect(zero.syncedDimensionalWeight.toString()).toBe('0');
   });
 });

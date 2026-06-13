@@ -1,7 +1,4 @@
-export {
-  applyEstimateOnOrderCreate,
-  EstimateAlreadyAppliedError,
-} from './estimate-on-order-create';
+export { applyEstimateOnOrderCreate } from './estimate-on-order-create';
 export { computeProfit } from './profit-formula';
 export type {
   ProfitBreakdown,
@@ -26,3 +23,11 @@ export {
   type OrderLineForCalcCheck,
 } from './resolve-order-calculability';
 export { buildCalcCheckLines } from './build-calc-check-lines';
+export {
+  resolveTariffForDesi,
+  type EstimateOutcome,
+  type EstimateUnavailableReason,
+  type ResolveTariffInput,
+  type ShippingEstimate,
+} from './shipping/resolve-tariff';
+export { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';

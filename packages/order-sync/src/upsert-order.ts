@@ -394,11 +394,12 @@ export async function upsertOrderWithSnapshot(
       }
     }
 
-    // 3. applyEstimateOnOrderCreate — T+0 write-once tahmini kar.
-    //    Aynı tx içinde PSF + Stopaj ESTIMATE OrderFee yazar +
-    //    Order.estimatedNetProfit set'ler. Cost snapshot eksikse profit null
-    //    kalır (re-entry idempotent — cost profile sonradan eklenirse caller
-    //    yeniden çağırır).
+    // 3. applyEstimateOnOrderCreate — "tahmini kâr" (PSF + Stopaj + SHIPPING
+    //    ESTIMATE OrderFee + Order.estimatedNetProfit). HER upsert'te çağrılır
+    //    (create + re-sync); write-once gevşedi (design 2026-06-13) → kargoya
+    //    verilip cargoDeci yenilenince bu çağrı kargoyu cargoDeci ile RAFINE
+    //    eder (idempotent: PSF/Stopaj skip-if-exists, SHIPPING upsert, maliyet
+    //    snapshot immutable). Cost snapshot eksikse estimatedNetProfit null kalır.
     //    Kâr-dışı yazım — para alanları donuk: ne fee ne estimate (spec 2026-06-12).
     if (opts?.profitExclusion === undefined) {
       await applyEstimateOnOrderCreate(upserted.id, tx);

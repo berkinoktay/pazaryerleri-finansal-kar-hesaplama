@@ -162,10 +162,12 @@ export interface MappedProductVariant {
   locked: boolean;
   size: string | null;
   attributes: TrendyolAttribute[];
-  // null when Trendyol omits the value. Always lands in the
-  // syncedDimensionalWeight column — never in dimensionalWeight, which is
-  // exclusively the user's override (see ProductVariant schema comment).
-  syncedDimensionalWeight: string | null;
+  // Desi. Trendyol omits it on most products (or sends an uncomputed 0); both
+  // collapse to '0' (the mapper applies `?? '0'`) so the value is never null.
+  // Always lands in the syncedDimensionalWeight column — never in
+  // dimensionalWeight, which is exclusively the user's override (see
+  // ProductVariant schema comment).
+  syncedDimensionalWeight: string;
 }
 
 export interface MappedProduct {

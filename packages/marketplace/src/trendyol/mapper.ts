@@ -35,12 +35,10 @@ function priceToDecimalString(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
-// Nullable variant of the decimal mapper, used for fields where "absent on
-// the wire" must remain distinguishable from zero in the DB (e.g. desi,
-// where 0 has a different shipping cost meaning than "unknown"). Also
-// treats 0 as null — Trendyol commonly emits 0 when its own pipeline has
-// not computed the value yet, and we don't want to mistake that for a
-// real "0 desi" claim.
+// Maps an optional wire decimal to a string, returning null for absent / 0 /
+// non-finite values. NOTE: the desi caller intentionally floors that null to
+// '0' (`?? '0'`) — desi has a zero-floor and 0 is a valid lowest tariff tier,
+// so "Trendyol omitted it" and "0" collapse to a stored 0 (not null).
 function nullableDecimalString(value: number | null | undefined): string | null {
   if (value === null || value === undefined || !Number.isFinite(value) || value === 0) return null;
   return value.toFixed(2);
@@ -106,7 +104,14 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     locked: variant.locked ?? false,
     size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
-    syncedDimensionalWeight: nullableDecimalString(variant.dimensionalWeight),
+    // Desi: Trendyol bu alanı çoğu üründe hiç göndermez (ya da hesaplamadan
+    // 0 yollar). İkisi de "bilinmiyor" demek — ama veride null DEĞİL, 0 olarak
+    // saklarız: ürünler sayfası null yerine 0 gösterir. Desi 0 GEÇERLİ bir
+    // tarife kademesidir: kargo ücreti DB tarife tablosundan (kargo firması +
+    // ceil(desi)) eşleştirilir ve tablo desi 0'dan itibaren kapsar — yani
+    // desi-0 ürün de gerçek (en alt kademe) kargo ücretini alır. Negatif zaten
+    // imkânsız. `nullableDecimalString` 0/absent → null, `?? '0'` tabana indirir.
+    syncedDimensionalWeight: nullableDecimalString(variant.dimensionalWeight) ?? '0',
   };
 }
 
