@@ -1,7 +1,8 @@
 // `db:reset:clean` — wipe the dev DB to a true blank baseline.
 //
-// TRUNCATEs every application table (tenant + catalog + account + reference) and
-// purges leaked `@test.local` auth users, leaving the schema intact but empty.
+// TRUNCATEs every application table (tenant + catalog + account + reference),
+// purges leaked `@test.local` auth users, then re-creates `user_profiles` rows
+// for the auth users that survive — leaving the schema intact but empty.
 // After this, run `pnpm db:seed` for a minimal login and re-sync products (real
 // Trendyol product sync) before testing orders — an order line with no resolvable
 // variant is a hard skip, so a blank catalog cannot ingest orders.
@@ -39,6 +40,21 @@ try {
 
   const purged = await client.query(`DELETE FROM auth.users WHERE email LIKE '%@test.local'`);
   console.log(`✓ Purged ${purged.rowCount ?? 0} test auth user(s)`);
+
+  // Re-create user_profiles for the surviving auth.users. The TRUNCATE above
+  // emptied public.user_profiles, but the `handle_new_user` trigger fires ONLY
+  // on an auth.users INSERT — it never backfills users that already exist. So a
+  // returning developer (whose auth account survives) is left profile-less and
+  // hits 422 INVALID_REFERENCE on org creation (the org-membership FK has no
+  // profile to point at). Mirror the trigger's columns exactly (id, email,
+  // updated_at); created_at / timezone / preferred_language use their DB
+  // defaults. Idempotent via ON CONFLICT so re-running never errors.
+  const profiles = await client.query(
+    `INSERT INTO public.user_profiles (id, email, updated_at)
+     SELECT id, email, now() FROM auth.users
+     ON CONFLICT (id) DO NOTHING`,
+  );
+  console.log(`✓ Recreated ${profiles.rowCount ?? 0} user profile(s) for surviving auth user(s)`);
 
   console.log(
     '✓ Blank baseline ready. Next: `pnpm db:seed` (minimal login), then re-sync products before testing orders.',
