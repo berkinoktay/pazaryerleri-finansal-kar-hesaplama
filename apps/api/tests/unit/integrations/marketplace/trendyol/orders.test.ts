@@ -289,7 +289,7 @@ describe('mapTrendyolShipmentPackage — sparse pricing tolerance (PR-A regressi
   // declares quantity/lineUnitPrice/etc. as TS-required — at runtime Trendyol
   // may still emit null/undefined.
 
-  it('lineUnitPrice null → unitPriceNet/unitVatAmount = 0, line stays in batch', () => {
+  it('lineUnitPrice null is irrelevant — sale derives from lineGrossAmount (effectiveSale)', () => {
     const mapped = mapTrendyolShipmentPackage(
       makePackage({
         lines: [
@@ -307,13 +307,15 @@ describe('mapTrendyolShipmentPackage — sparse pricing tolerance (PR-A regressi
       }),
     );
     expect(mapped.lines).toHaveLength(1);
-    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('0');
-    expect(new Decimal(mapped.lines[0]!.unitVatAmount).toString()).toBe('0');
+    // Denetim #1: satış artık lineGrossAmount'tan (effectiveSale), lineUnitPrice'tan DEĞİL.
+    // lineUnitPrice null olsa da effectiveSale = 120 − 0 = 120 → net 100, KDV 20.
+    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('100');
+    expect(new Decimal(mapped.lines[0]!.unitVatAmount).toString()).toBe('20');
     // commission still uses lineGrossAmount=120 (non-null)
     expect(new Decimal(mapped.lines[0]!.grossCommissionAmountNet).toString()).toBe('10');
   });
 
-  it('lineGrossAmount null → grossCommission = 0', () => {
+  it('lineGrossAmount null → grossCommission AND sale both 0 (gross is the sole sparse trigger)', () => {
     const mapped = mapTrendyolShipmentPackage(
       makePackage({
         lines: [
@@ -334,8 +336,8 @@ describe('mapTrendyolShipmentPackage — sparse pricing tolerance (PR-A regressi
     // commission = 0 because lineGrossAmount is 0 (sparse)
     expect(new Decimal(mapped.lines[0]!.grossCommissionAmountNet).toString()).toBe('0');
     expect(new Decimal(mapped.lines[0]!.grossCommissionVatAmount).toString()).toBe('0');
-    // unitPriceNet still computed from lineUnitPrice=120 (non-null)
-    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('100');
+    // Denetim #1: satış da lineGrossAmount'tan türetildiği için 0 (lineUnitPrice artık kullanılmaz).
+    expect(new Decimal(mapped.lines[0]!.unitPriceNet).toString()).toBe('0');
   });
 
   it('vatRate null → vatRate = 0, no division by zero', () => {
@@ -390,16 +392,15 @@ describe('mapTrendyolShipmentPackage — sparse pricing tolerance (PR-A regressi
     const mapped = mapTrendyolShipmentPackage(
       makePackage({
         lines: [
-          // Sparse line — null lineUnitPrice
+          // Sparse line — no lineGrossAmount (gross is the sale source post-denetim #1)
           {
             lineId: 1,
             barcode: 'B-sparse',
             quantity: 1,
-            lineGrossAmount: 100,
             vatRate: 20,
             commission: 10,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ...({ lineUnitPrice: null } as any),
+            ...({ lineUnitPrice: null, lineGrossAmount: null } as any),
           },
           // Valid line
           {

@@ -36,7 +36,8 @@ export interface ProfitInputItem {
   grossCommissionVatAmount: Decimal;
   refundedCommissionAmountNet: Decimal;
   refundedCommissionVatAmount: Decimal;
-  // Satıcı kaynaklı indirim (gerçek gelir azaltıcı).
+  // Satıcı kaynaklı indirim — YALNIZCA breakdown gösterimi için (denetim #1).
+  // netProfit'ten DÜŞÜLMEZ: saleSubtotalNet zaten effectiveSale (indirim düşülmüş).
   sellerDiscountNet: Decimal;
   sellerDiscountVatAmount: Decimal;
 }
@@ -78,16 +79,18 @@ export interface ProfitResult {
  *   netProfit = saleSubtotalNet
  *             − Σ(items: unitCostSnapshotNet × quantity)
  *             − Σ(items: effectiveCommissionNet)
- *             + Σ(items: sellerDiscountNet)              // gelir azaltıcı, NEGATIVE etki
  *             − Σ(fees: DEBIT amountNet) + Σ(fees: CREDIT amountNet)
  *
- * Wait — sellerDiscount sign convention'ı netleştir: design §3.2 "İndirim — satıcı
- * kaynaklı (gerçek gelir azaltıcı)" → kar formülünden DÜŞÜLÜR. Yani:
+ * **Satıcı indirimi TEKRAR DÜŞÜLMEZ (denetim #1, 2026-06-13):** `saleSubtotalNet`
+ * artık `effectiveSale = lineGrossAmount − lineSellerDiscount` (mapper'da düşülmüş,
+ * research §7.3). Eskiden formül indirimi bir daha çıkarıyordu → çift-düşme bug'ı
+ * (Trendyol-finanslı siparişte gelir negatife düşebiliyordu). `sellerDiscount*`
+ * artık yalnızca `breakdown.sellerDiscountGross` için akümüle edilir (UI liste'yi
+ * `net satış + satıcı indirimi` ile geri kurar). Trendyol-finanslı indirim
+ * (tyDiscount) formüle hiç girmez — Trendyol geri ödüyor, "kâra etkisi YOK".
  *
- *   netProfit = saleSubtotalNet − sellerDiscountNet − itemCostNet − effectiveCommissionNet
- *             − debitFeesNet + creditFeesNet
- *
- * netVat aynı yapıda (KDV'lerin algebraic toplamı).
+ * netVat aynı yapıda (KDV'lerin algebraic toplamı; satıcı indirim KDV'si de
+ * saleVatTotal'a gömülü, tekrar düşülmez).
  */
 export function computeProfit(input: ProfitInputs): ProfitResult {
   const saleSubtotalNet = new Decimal(input.saleSubtotalNet);
@@ -137,11 +140,14 @@ export function computeProfit(input: ProfitInputs): ProfitResult {
   }
 
   // ─── Net profit ─────────────────────────────────────────────────────
-  // Income (net) = saleSubtotalNet − sellerDiscountNet + creditFeesNet
-  // Expense (net) = itemCostNet + commissionNet + debitFeesNet
-  // Net profit = Income − Expense
+  // saleSubtotalNet ZATEN effectiveSale = liste − satıcı indirimi (mapper'da
+  // düşülmüş, research §7.3). Satıcı indirimi burada TEKRAR DÜŞÜLMEZ — eski
+  // çift-düşme bug'ıydı (denetim #1). sellerDiscount* yalnız breakdown gösterimi
+  // (UI: liste = net satış + indirim) için akümüle edilir. Trendyol-finanslı
+  // indirim (tyDiscount) hiç gelmez (kâra etkisi YOK, geri ödeniyor).
+  //   Income (net)  = saleSubtotalNet + creditFeesNet
+  //   Expense (net) = itemCostNet + commissionNet + debitFeesNet
   const netProfit = saleSubtotalNet
-    .sub(sellerDiscountNet)
     .add(creditFeesNet)
     .sub(itemCostNet)
     .sub(commissionNet)
@@ -149,9 +155,9 @@ export function computeProfit(input: ProfitInputs): ProfitResult {
 
   // ─── Net VAT (algebraic sum of all VAT components) ──────────────────
   // Pass-through tax; tracked separately for UI display + reconciliation.
-  // Sale VAT seller collects; cost/commission/fee VAT seller pays.
+  // Sale VAT seller collects; cost/commission/fee VAT seller pays. saleVatTotal
+  // de effectiveSale tabanından gelir → satıcı indirimi KDV'si TEKRAR düşülmez.
   const netVat = saleVatTotal
-    .sub(sellerDiscountVat)
     .add(creditFeesVat)
     .sub(itemCostVat)
     .sub(commissionVat)

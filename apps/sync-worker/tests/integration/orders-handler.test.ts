@@ -253,6 +253,57 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(item.grossCommissionVatAmount).toString()).toBe('2');
   });
 
+  it('co-funded order: saleSubtotalNet = effectiveSale (liste − satıcı indirimi), tyDiscount excluded (denetim #1)', async () => {
+    // Stage-tipi Trendyol-finanslı sipariş — bu boşluğun (denetim #1) kör noktası:
+    // hiçbir eski test tyDiscount>0 kapsamıyordu. Eski bug'da saleSubtotalNet lineUnitPrice'tan
+    // (120 → net 100) kurulup formül satıcı indirimini BİR DAHA düşerdi → kâr eksik (hatta negatif).
+    // Doğru: saleSubtotalNet = effectiveSale = (200 − 50) → net 125; Trendyol indirimi (30) HARİÇ
+    // (geri ödeniyor, kâra etkisi YOK). Ayırt edici nokta: '125' ≠ eski '100'.
+    const { store, log } = await setupStoreAndSyncLog(['EAN13-COFUND']);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        makeStreamResponse({
+          hasMore: false,
+          nextCursor: null,
+          content: [
+            makeShipmentPackage({
+              packageGrossAmount: 200,
+              lines: [
+                {
+                  lineId: 1,
+                  barcode: 'EAN13-COFUND',
+                  quantity: 1,
+                  lineGrossAmount: 200,
+                  lineSellerDiscount: 50,
+                  lineTyDiscount: 30,
+                  lineUnitPrice: 120, // 200 − 50 − 30 = müşterinin ödediği (satış DEĞİL)
+                  vatRate: 20,
+                  commission: 10,
+                },
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    // effectiveSale = 200 − 50 = 150 → net 125 (KDV 25). NOT 120/1.2=100, tyDiscount(30) hariç.
+    expect(new Decimal(order.saleSubtotalNet!).toString()).toBe('125');
+    expect(new Decimal(order.saleVatTotal!).toString()).toBe('25');
+    // Pipeline çalıştı (variant + cost seeded → calculable); kâr indirimi çift düşmeden hesaplandı.
+    expect(order.estimatedNetProfit).not.toBeNull();
+
+    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(new Decimal(item.unitPriceNet!).toString()).toBe('125'); // effective birim-net
+    // Satıcı indirimi yalnız breakdown gösterimi için ayrıştırılır (50 / 1.2).
+    expect(new Decimal(item.sellerDiscountNet).toString()).toBe('41.67');
+    expect(new Decimal(item.sellerDiscountVatAmount).toString()).toBe('8.33');
+  });
+
   it('variant barcode match: OrderItem.productVariantId set when barcode exists', async () => {
     const { store, log } = await setupStoreAndSyncLog(['EAN13-MATCH']);
 

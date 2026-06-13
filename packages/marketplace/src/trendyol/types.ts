@@ -316,15 +316,18 @@ export interface TrendyolOrdersStreamResponse {
 }
 
 // ─── Mapped Order DTO — KDV-split, ready for Order/OrderItem upsert ─────
-// design §2.3 + research §7.3 — per-line KDV ayrıştırma:
-//   unitPriceNet         = lineUnitPrice / (1 + vatRate/100)
-//   unitVatAmount        = lineUnitPrice − unitPriceNet
-//   grossCommissionGross = lineGrossAmount × commission / 100
-//   grossCommissionNet   = grossCommissionGross / 1.20  (%20 sabit, design §12.2 #1)
-//   sellerDiscountNet    = lineSellerDiscount / (1 + vatRate/100)
+// design §2.3 + research §7.3 — per-line KDV ayrıştırma. unitPriceNet artık
+// EFFECTIVE SALE (satıcının gerçek geliri) bazlıdır; müşteri-ödediği lineUnitPrice
+// DEĞİL (denetim #1, 2026-06-13 — satıcı indirimi çift-düşme düzeltmesi):
+//   effectiveSaleLineGross = lineGrossAmount − lineSellerDiscount   (tyDiscount HARİÇ — geri ödenir, kâra etkisi yok)
+//   unitPriceNet           = (effectiveSaleLineGross / qty) / (1 + vatRate/100)
+//   unitVatAmount          = (effectiveSaleLineGross / qty) − unitPriceNet
+//   grossCommissionGross   = lineGrossAmount × commission / 100
+//   grossCommissionNet     = grossCommissionGross / 1.20  (%20 sabit, design §12.2 #1)
+//   sellerDiscountNet      = lineSellerDiscount / (1 + vatRate/100)   (YALNIZ breakdown gösterimi; kâra DÜŞÜLMEZ)
 //
 // Package aggregates per-line VAT-aware (multi-rate orders correct):
-//   saleSubtotalNet = Σ (qty × unitPriceNet)
+//   saleSubtotalNet = Σ (qty × unitPriceNet)   → effectiveSale toplamı (kâr/ciro/stopaj/Barem'in tek tabanı)
 //   saleVatTotal    = Σ (qty × unitVatAmount)
 
 export interface MappedOrderLine {

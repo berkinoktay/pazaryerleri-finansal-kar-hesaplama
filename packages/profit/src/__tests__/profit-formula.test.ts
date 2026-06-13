@@ -91,10 +91,13 @@ describe('computeProfit() — design §2 formula', () => {
     expect(r.netVat.toString()).toBe('17'); // 20 − (4 − 1) = 17
   });
 
-  it('seller discount reduces profit (gerçek gelir azaltıcı)', () => {
+  it('seller discount is NOT re-subtracted — saleSubtotalNet is already effectiveSale', () => {
+    // Yeni model (research §7.3): saleSubtotalNet = effectiveSale = liste − satıcı indirimi,
+    // yani satıcı indirimi mapper'da ZATEN düşülmüş. Formül onu TEKRAR düşmez (eski çift-düşme
+    // bug'ı). sellerDiscountNet alanı yalnız breakdown gösterimi (liste'yi geri kurma) için taşınır.
     const r = computeProfit({
-      saleSubtotalNet: D('100'),
-      saleVatTotal: D('20'),
+      saleSubtotalNet: D('90'), // effectiveSale = liste(100) − satıcı indirim(10)
+      saleVatTotal: D('18'),
       items: [
         defaultItem({
           sellerDiscountNet: D('10'),
@@ -103,8 +106,10 @@ describe('computeProfit() — design §2 formula', () => {
       ],
       fees: [],
     });
-    expect(r.netProfit.toString()).toBe('90'); // 100 − 10
-    expect(r.netVat.toString()).toBe('18'); // 20 − 2
+    expect(r.netProfit.toString()).toBe('90'); // 90 — indirim TEKRAR düşülmez
+    expect(r.netVat.toString()).toBe('18'); // 18 — TEKRAR düşülmez
+    // Breakdown indirim'i bilgi olarak taşır (UI: liste = net satış + indirim).
+    expect(r.breakdown.sellerDiscountGross.toString()).toBe('12'); // 10 + 2
   });
 
   it('DEBIT fees subtract from profit (PSF / Stopaj / Shipping)', () => {

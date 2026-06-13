@@ -278,6 +278,98 @@ describe('mapTrendyolShipmentPackage — saleSubtotalNet aggregate', () => {
     expect(mapped.saleSubtotalNet).toBe('200.00');
     expect(mapped.saleVatTotal).toBe('30.00');
   });
+
+  // ─── effectiveSale = liste − satıcı indirimi (denetim #1) ───────────
+  it('builds saleSubtotalNet from effectiveSale (liste − satıcı indirimi), ignoring Trendyol discount', () => {
+    // Stage co-funded sipariş #1359065292: liste 1690, satıcı indirim 845,
+    // Trendyol indirim 507, müşteri öder (lineUnitPrice) 338, vatRate %10.
+    // effectiveSale = 1690 − 845 = 845 → net 768.18 (845 / 1.10). Trendyol indirimi
+    // (507) DÜŞÜLMEZ (geri ödeniyor, kâra etkisi YOK). Eski buggy mapper lineUnitPrice'tan
+    // 338 / 1.10 = 307.27 kurardı — bu testin ayırt edici noktası tam burası.
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        lines: [
+          buildLine({
+            quantity: 1,
+            lineGrossAmount: 1690,
+            lineSellerDiscount: 845,
+            lineTyDiscount: 507,
+            lineUnitPrice: 338,
+            vatRate: 10,
+          }),
+        ],
+      }),
+    );
+
+    expect(mapped.saleSubtotalNet).toBe('768.18'); // 845 / 1.10 — NOT 338 / 1.10
+    expect(mapped.saleVatTotal).toBe('76.82');
+    // Satıcı indirimi yine de breakdown için ayrıştırılır (845 / 1.10).
+    expect(mapped.lines[0]?.sellerDiscountNet).toBe('768.18');
+    expect(mapped.lines[0]?.sellerDiscountVatAmount).toBe('76.82');
+  });
+
+  it('with no Trendyol discount, effectiveSale equals customer-paid (production parity)', () => {
+    // Production sipariş #11319381127: liste 1340, satıcı indirim 24, ty 0.
+    // effectiveSale = 1316 = müşteri öder (ty=0 olduğu için çakışır). net 1196.36.
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        lines: [
+          buildLine({
+            quantity: 1,
+            lineGrossAmount: 1340,
+            lineSellerDiscount: 24,
+            lineTyDiscount: 0,
+            lineUnitPrice: 1316,
+            vatRate: 10,
+          }),
+        ],
+      }),
+    );
+
+    expect(mapped.saleSubtotalNet).toBe('1196.36'); // 1316 / 1.10
+    expect(mapped.saleVatTotal).toBe('119.64');
+  });
+
+  it('multi-line co-funded: her satır kendi effectiveSale + vatRate; aggregate tyDiscount hariç', () => {
+    // İki indirimli satır, ikisinde de Trendyol payı. Her satır kendi effectiveSale'i
+    // (liste − satıcı indirimi) ve vatRate'iyle; tyDiscount HİÇ düşülmez.
+    // Σ(qty × unitPriceNet) == saleSubtotalNet invariant'ı (review gap'i) doğrulanır.
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        lines: [
+          // Satır 1: liste 1200, satıcı 120, ty 300 → effectiveSale 1080 → net 900 (@%20)
+          buildLine({
+            lineId: 1,
+            barcode: 'B-CF-1',
+            quantity: 1,
+            lineGrossAmount: 1200,
+            lineSellerDiscount: 120,
+            lineTyDiscount: 300,
+            lineUnitPrice: 780,
+            vatRate: 20,
+          }),
+          // Satır 2: liste 720, satıcı 120, ty 100, qty 2 → effectiveSale 600 → birim net 250 (@%20)
+          buildLine({
+            lineId: 2,
+            barcode: 'B-CF-2',
+            quantity: 2,
+            lineGrossAmount: 720,
+            lineSellerDiscount: 120,
+            lineTyDiscount: 100,
+            lineUnitPrice: 250,
+            vatRate: 20,
+          }),
+        ],
+      }),
+    );
+
+    // Per-line effectiveSale birim-net (müşteri-ödediği lineUnitPrice DEĞİL).
+    expect(mapped.lines[0]?.unitPriceNet).toBe('900'); // 1080 / 1.2
+    expect(mapped.lines[1]?.unitPriceNet).toBe('250'); // (600 / 2) / 1.2
+    // Σ(qty × unitPriceNet) = 1×900 + 2×250 = 1400 (tyDiscount toplam 400 HARİÇ).
+    expect(mapped.saleSubtotalNet).toBe('1400.00');
+    expect(mapped.saleVatTotal).toBe('280.00');
+  });
 });
 
 // ─── Sparse-line defensive fallback (PR-A regression hotfix) ──────────
