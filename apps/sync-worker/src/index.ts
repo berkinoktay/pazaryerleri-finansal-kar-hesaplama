@@ -108,7 +108,9 @@ async function main(): Promise<void> {
       });
     });
     // Past-day graduation: PENDING entries whose calendar day has ended are
-    // moved to `orders` (null profit) instead of being deleted at midnight.
+    // graduated into `orders` as PROFIT-EXCLUDED (COST_DEADLINE_MISSED, spec
+    // 2026-06-12) instead of being deleted at midnight — revenue is kept, the
+    // profit fields stay permanently frozen.
     // Separate catch so a flush hiccup never stops the promote tick.
     void processPastDayBufferFlush().catch((err: unknown) => {
       syncLog.error('buffer.flush-tick-error', {
