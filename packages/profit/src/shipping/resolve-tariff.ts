@@ -23,10 +23,12 @@ export interface ShippingEstimate {
   baseDesiAtEstimate: Decimal;
 }
 
+// NO_DESI emekli: desi'nin sıfır-tabanı (@default(0)) olduğundan "desi yok" durumu
+// üretilemez — desi-bazlı tek başarısızlık DESI_OVERFLOW. Ürünler listesinin
+// `ShippingEstimateStatus.NO_DESI`'si AYRI (SQL CTE'den gelir, canlı) — ona dokunulmadı.
 export type EstimateUnavailableReason =
   | 'STORE_NOT_FOUND'
   | 'NO_CARRIER'
-  | 'NO_DESI'
   | 'DESI_OVERFLOW'
   | 'OWN_CONTRACT_EMPTY';
 
