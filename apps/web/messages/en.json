@@ -1532,6 +1532,8 @@
     "vatBreakdown": {
       "title": "Net & VAT breakdown",
       "saleSubtotalNet": "Sale (net)",
+      "listePriceNet": "List price (net)",
+      "netSaleNet": "Net sale (net)",
       "saleVatTotal": "Sale VAT",
       "grossCommissionNet": "Gross commission (net)",
       "refundedCommissionNet": "Refunded commission (net)",

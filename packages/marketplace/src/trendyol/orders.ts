@@ -228,17 +228,27 @@ function mapLine(line: TrendyolOrderLine, ctx: { shipmentPackageId: number }): M
   }
 
   const safeQuantity = line.quantity ?? 0;
-  const safeUnitPrice = line.lineUnitPrice ?? 0;
   const safeGrossAmount = line.lineGrossAmount ?? 0;
+  const safeSellerDiscount = line.lineSellerDiscount ?? 0;
   const safeVatRate = line.vatRate ?? 0;
 
   const vatRate = new Decimal(safeVatRate);
   const vatMultiplier = new Decimal(1).add(vatRate.div(100));
 
-  // Per-unit KDV split. Trendyol lineUnitPrice'ı KDV dahil (research §7).
-  const unitPriceGross = new Decimal(safeUnitPrice);
-  const unitPriceNet = unitPriceGross.div(vatMultiplier).toDecimalPlaces(4);
-  const unitVatAmount = unitPriceGross.sub(unitPriceNet).toDecimalPlaces(4);
+  // Per-unit KDV split — EFFECTIVE SALE (satıcının gerçek geliri), müşterinin
+  // ödediği (lineUnitPrice) DEĞİL. effectiveSale = lineGrossAmount − lineSellerDiscount
+  // (research §7.3). Trendyol-finanslı indirim (lineTyDiscount) ÇIKARILMAZ — Trendyol
+  // geri öder, "kâra etkisi YOK" (research satır 336). lineUnitPrice Trendyol indirimini
+  // de düştüğü için satıcı geliri değildir; ondan kâr/ciro hesaplamak co-funded siparişte
+  // indirimi çift düşürür (denetim #1, 2026-06-13). unitPriceNet artık satıcı-birim-geliri.
+  const effectiveSaleLineGross = Decimal.max(
+    new Decimal(safeGrossAmount).sub(safeSellerDiscount),
+    new Decimal(0),
+  );
+  const effectiveSaleUnitGross =
+    safeQuantity > 0 ? effectiveSaleLineGross.div(safeQuantity) : new Decimal(0);
+  const unitPriceNet = effectiveSaleUnitGross.div(vatMultiplier).toDecimalPlaces(4);
+  const unitVatAmount = effectiveSaleUnitGross.sub(unitPriceNet).toDecimalPlaces(4);
 
   // Gross commission — Trendyol formülü: lineGrossAmount × commission / 100,
   // sonra %20 KDV split. (Discount commission iadesi T+0'da YOK — Settlement
@@ -255,8 +265,9 @@ function mapLine(line: TrendyolOrderLine, ctx: { shipmentPackageId: number }): M
     .sub(grossCommissionAmountNet)
     .toDecimalPlaces(2);
 
-  // Seller discount KDV split (her line kendi vatRate'iyle).
-  const sellerDiscountGross = new Decimal(line.lineSellerDiscount ?? 0);
+  // Seller discount KDV split (her line kendi vatRate'iyle) — yalnız breakdown
+  // gösterimi için taşınır; saleSubtotalNet'e zaten effectiveSale olarak gömülü (yukarıda).
+  const sellerDiscountGross = new Decimal(safeSellerDiscount);
   const sellerDiscountNet = sellerDiscountGross.div(vatMultiplier).toDecimalPlaces(2);
   const sellerDiscountVatAmount = sellerDiscountGross.sub(sellerDiscountNet).toDecimalPlaces(2);
 

@@ -26,12 +26,42 @@ export function OrderVatBreakdown({ order }: OrderVatBreakdownProps): React.Reac
 
   const totals = aggregateLineTotals(order.items);
 
+  // saleSubtotalNet ZATEN effectiveSale (mapper'da satıcı indirimi düşülmüş, denetim #1).
+  // Şeffaf gösterim: Liste = net satış + satıcı indirimi → Satıcı indirimi (−) → Net satış.
+  // İndirim yoksa tek "Satış (net)" satırı (gürültüsüz). Trendyol-finanslı indirim
+  // gösterilmez — satıcı gelirini etkilemiyor (geri ödeniyor, kâra etkisi yok).
+  const saleSubtotalNet = new Decimal(order.saleSubtotalNet ?? '0');
+  const hasSellerDiscount = totals.sellerDiscountNet.gt(0);
+  const listePriceNet = saleSubtotalNet.add(totals.sellerDiscountNet);
+
+  const saleSection: DefinitionListItem[] = hasSellerDiscount
+    ? [
+        {
+          id: 'listePriceNet',
+          term: t('listePriceNet'),
+          description: <Currency value={listePriceNet.toString()} />,
+        },
+        {
+          id: 'sellerDiscountNet',
+          term: t('sellerDiscountNet'),
+          description: <Currency value={totals.sellerDiscountNet.negated().toString()} />,
+        },
+        {
+          id: 'saleSubtotalNet',
+          term: t('netSaleNet'),
+          description: <Currency value={saleSubtotalNet.toString()} emphasis />,
+        },
+      ]
+    : [
+        {
+          id: 'saleSubtotalNet',
+          term: t('saleSubtotalNet'),
+          description: <Currency value={saleSubtotalNet.toString()} />,
+        },
+      ];
+
   const items: DefinitionListItem[] = [
-    {
-      id: 'saleSubtotalNet',
-      term: t('saleSubtotalNet'),
-      description: <Currency value={order.saleSubtotalNet ?? '0'} />,
-    },
+    ...saleSection,
     {
       id: 'saleVatTotal',
       term: t('saleVatTotal'),
@@ -57,11 +87,6 @@ export function OrderVatBreakdown({ order }: OrderVatBreakdownProps): React.Reac
           emphasis
         />
       ),
-    },
-    {
-      id: 'sellerDiscountNet',
-      term: t('sellerDiscountNet'),
-      description: <Currency value={totals.sellerDiscountNet} />,
     },
     {
       id: 'costSnapshotNet',
