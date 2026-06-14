@@ -125,6 +125,12 @@ function epochMsToDate(ms: number | null | undefined): Date | null {
   return new Date(ms);
 }
 
+/** Trendyol fast değilken `fastDeliveryType=""` döner — boş/undefined → null. */
+function normalizeFastDeliveryType(value: string | undefined): string | null {
+  if (value === undefined || value.length === 0) return null;
+  return value;
+}
+
 /**
  * Map a single Trendyol shipmentPackage to KDV-split DTO. Pure function,
  * no I/O. Per-line VAT-aware (multi-rate orders aggregate correctly).
@@ -177,8 +183,11 @@ export function mapTrendyolShipmentPackage(
     saleSubtotalNet: saleSubtotalNet.toFixed(2),
     saleVatTotal: saleVatTotal.toFixed(2),
     agreedDeliveryDate: epochMsToDate(pkg.agreedDeliveryDate),
+    estimatedDeliveryStartDate: epochMsToDate(pkg.estimatedDeliveryStartDate),
+    estimatedDeliveryEndDate: epochMsToDate(pkg.estimatedDeliveryEndDate),
     actualDeliveryDate,
     fastDelivery: pkg.fastDelivery,
+    fastDeliveryType: normalizeFastDeliveryType(pkg.fastDeliveryType),
     micro: pkg.micro,
     // PR-8 kargo alanları (research 2026-06-09). cargoTrackingNumber/cargoDeci
     // raw String() — toFixed KULLANMA (tracking no bir kimliktir, desi Trendyol

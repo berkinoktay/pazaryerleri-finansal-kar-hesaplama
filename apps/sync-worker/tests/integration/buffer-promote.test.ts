@@ -26,6 +26,9 @@ function buildMappedOrder(over: {
   platformOrderNumber?: string;
   barcode?: string;
   invalid?: boolean;
+  fastDeliveryType?: string;
+  estimatedDeliveryStartDate?: string;
+  estimatedDeliveryEndDate?: string;
 }): Prisma.InputJsonValue {
   const value = {
     platformOrderId: over.platformOrderId,
@@ -37,7 +40,10 @@ function buildMappedOrder(over: {
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
     fastDelivery: false,
+    fastDeliveryType: over.fastDeliveryType ?? null,
     micro: false,
+    estimatedDeliveryStartDate: over.estimatedDeliveryStartDate ?? null,
+    estimatedDeliveryEndDate: over.estimatedDeliveryEndDate ?? null,
     lines: [
       {
         barcode: over.barcode ?? BARCODE,
@@ -105,7 +111,13 @@ describe('processBufferPromote', () => {
       platformOrderId: 'pkg-001',
       platformOrderNumber: 'ord-001',
       status: 'PROMOTING',
-      mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-001', platformOrderNumber: 'ord-001' }),
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-001',
+        platformOrderNumber: 'ord-001',
+        fastDeliveryType: 'FastDelivery',
+        estimatedDeliveryStartDate: '2026-06-12T15:57:28.000Z',
+        estimatedDeliveryEndDate: '2026-06-13T11:38:56.000Z',
+      }),
     });
 
     await processBufferPromote();
@@ -115,6 +127,11 @@ describe('processBufferPromote', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('pkg-001');
     expect(order.estimatedNetProfit).not.toBeNull();
+    // Buffer JSONB round-trip: ISO-string tarihler new Date() ile coerce edilir,
+    // fastDeliveryType ?? null ile geçer (2026-06-14 capture — review gap kapatma).
+    expect(order.fastDeliveryType).toBe('FastDelivery');
+    expect(order.estimatedDeliveryStartDate?.toISOString()).toBe('2026-06-12T15:57:28.000Z');
+    expect(order.estimatedDeliveryEndDate?.toISOString()).toBe('2026-06-13T11:38:56.000Z');
   });
 
   it('does not pick up a FAILED entry before its backoff window elapses', async () => {

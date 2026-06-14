@@ -281,6 +281,10 @@ export interface TrendyolShipmentPackage {
   isCod?: boolean;
   commercial?: boolean;
   fastDelivery: boolean;
+  /** Hızlı-teslim tipi: "TodayDelivery" | "SameDayShipping" | "FastDelivery"
+   * (doc satır 50). Fast değilse "" döner. Sipariş-seviyesinde yalnız PROD'da
+   * dolar (stage test siparişleri "" verir — 2026-06-14 gözlem). */
+  fastDeliveryType?: string;
   micro: boolean;
   containsDangerousProduct?: boolean;
   lines: TrendyolOrderLine[];
@@ -387,7 +391,14 @@ export interface MappedOrder {
   /** packageHistories[status='Delivered'].createdAt'tan türetilir; teslim olmadıysa null. */
   actualDeliveryDate: Date | null;
   fastDelivery: boolean;
+  /** Sipariş-seviyesi hızlı-teslim tipi (PROD'da dolu: "FastDelivery" /
+   * "SameDayShipping" / "TodayDelivery"; fast değil/boş → null). Kriter hangi
+   * tip kuralını uygulayacağını buradan bilir (2026-06-14 hibrit tasarım). */
+  fastDeliveryType: string | null;
   micro: boolean;
+  /** Trendyol tahmini teslim penceresi (PROD'da dolu; stage'de 0 → null). */
+  estimatedDeliveryStartDate: Date | null;
+  estimatedDeliveryEndDate: Date | null;
   // ── PR-8 kargo alanları (research 2026-06-09) ──
   /** Kargo firması adı (örn. "Trendyol Express Marketplace"). */
   cargoProviderName: string | null;

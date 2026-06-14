@@ -258,7 +258,18 @@ export async function upsertOrderWithSnapshot(
         saleVatTotal: order.saleVatTotal,
         agreedDeliveryDate: order.agreedDeliveryDate,
         actualDeliveryDate: order.actualDeliveryDate,
+        // Tahmini teslim penceresi (PROD'da dolu). Buffer JSONB'sinden string
+        // gelebilir → new Date() ile sarılır (originShipmentDate ile aynı koruma).
+        estimatedDeliveryStartDate:
+          order.estimatedDeliveryStartDate != null
+            ? new Date(order.estimatedDeliveryStartDate)
+            : null,
+        estimatedDeliveryEndDate:
+          order.estimatedDeliveryEndDate != null ? new Date(order.estimatedDeliveryEndDate) : null,
         fastDelivery: order.fastDelivery,
+        // fastDeliveryType: sipariş-seviyesi tip (PROD'da dolu). Eski buffer
+        // JSONB'sinde UNDEFINED olabilir → ?? null.
+        fastDeliveryType: order.fastDeliveryType ?? null,
         micro: order.micro,
         // PR-8 kargo alanları (research 2026-06-09). DİKKAT: `mappedOrder`
         // buffer'dan JSONB olarak da gelir — yeni alanlar eski kayıtlarda
