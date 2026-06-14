@@ -234,6 +234,31 @@ describe('settlement handlers', () => {
       expect(updated.settledSaleAmount?.toFixed(2)).toBe('120.00');
     });
 
+    it('qty>1: scales commission + settledSaleAmount by quantity (N özdeş per-unit Sale satırı → line-toplamı); idempotent', async () => {
+      // EMPİRİK (2026-06-14): Trendyol qty=3 için 3 ÖZDEŞ per-unit Sale satırı
+      // gönderir (her credit=120 birim liste, commission=12 birim). Handler her
+      // satırı × quantity ile line-toplamına çıkarır → overwrite idempotent.
+      const { storeId, itemId } = await buildOrderWithItem({ quantity: 3 });
+      const row = makeSettlementRow({ commissionAmount: 12, credit: 120 });
+
+      await prisma.$transaction(async (tx) => {
+        expect((await handleSale(storeId, row, tx)).applied).toBe(true);
+      });
+      let updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
+      // 12 × 3 / 1.20 = 30; vat 36 − 30 = 6; credit 120 × 3 = 360
+      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('30.00');
+      expect(updated.grossCommissionVatAmount.toFixed(2)).toBe('6.00');
+      expect(updated.settledSaleAmount?.toFixed(2)).toBe('360.00');
+
+      // Idempotent: aynı (veya kardeş özdeş) satırı tekrar uygulamak line-toplamını korur.
+      await prisma.$transaction(async (tx) => {
+        expect((await handleSale(storeId, row, tx)).applied).toBe(true);
+      });
+      updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
+      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('30.00');
+      expect(updated.settledSaleAmount?.toFixed(2)).toBe('360.00');
+    });
+
     it('skips with sparse_field when shipmentPackageId is null', async () => {
       const { storeId } = await buildOrderWithItem();
       const row = makeSettlementRow({ shipmentPackageId: null });
@@ -291,6 +316,30 @@ describe('settlement handlers', () => {
       // 24 / 1.20 = 20 (item's unitVatRate %20)
       expect(updated.sellerDiscountNet.toFixed(2)).toBe('20.00');
       expect(updated.sellerDiscountVatAmount.toFixed(2)).toBe('4.00');
+    });
+
+    it('qty>1: scales refundedCommission + sellerDiscount by quantity (line-toplamı)', async () => {
+      // Trendyol qty=3 için 3 per-unit Discount satırı; handler × quantity ile
+      // line-toplamına çıkarır. CHECK refunded ≤ gross: fixture gross=10×3=30, refunded=15 ✓.
+      const { storeId, itemId } = await buildOrderWithItem({ quantity: 3 });
+      const row = makeSettlementRow({
+        transactionType: 'İndirim',
+        debt: 24,
+        credit: 0,
+        commissionAmount: 6,
+      });
+
+      await prisma.$transaction(async (tx) => {
+        expect((await handleDiscount(storeId, row, tx)).applied).toBe(true);
+      });
+
+      const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
+      // 6 × 3 / 1.20 = 15; vat 18 − 15 = 3
+      expect(updated.refundedCommissionAmountNet.toFixed(2)).toBe('15.00');
+      expect(updated.refundedCommissionVatAmount.toFixed(2)).toBe('3.00');
+      // 24 × 3 / 1.20 = 60; vat 72 − 60 = 12
+      expect(updated.sellerDiscountNet.toFixed(2)).toBe('60.00');
+      expect(updated.sellerDiscountVatAmount.toFixed(2)).toBe('12.00');
     });
 
     // PR-C orphan invariant: a Discount row whose order was hard-skipped

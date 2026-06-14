@@ -1,26 +1,39 @@
 // Sale settlement row → OrderItem reconciliation handler.
 //
-// Trendyol's /settlements endpoint emits one Sale row per OrderItem
-// (research §3.1 — barcode + shipmentPackageId pair uniquely identifies
-// the line). This handler:
-//   1. Looks up the local Order via (storeId, platformOrderId =
-//      shipmentPackageId.toString()).
-//   2. Looks up the OrderItem via (orderId, productVariant.barcode).
-//   3. Writes Trendyol-authoritative commission values:
-//        - grossCommissionAmountNet = commissionAmount / 1.20
-//        - grossCommissionVatAmount = commissionAmount − net
+// QUANTITY (2026-06-14, prod read-only ile EMPİRİK doğrulandı): Trendyol qty=N
+// bir satır için N adet AYRI PER-UNIT Sale satırı gönderir — her satırın
+// `credit`/`commissionAmount`'ı BİRİM başınadır ve N satır ÖZDEŞTİR (credit =
+// ürünün birim liste fiyatı, tüm adetlerde aynı). Σ(N satır) = line-toplamı =
+// lineGrossAmount × quantity. Kanıt: sipariş 11313045474 qty3 → 3 satır × 285 =
+// 855; 11310655788 qty5 → 5 satır × 152 = 760. Detay:
+// docs/plans/2026-06-14-settlement-qty-per-unit-findings.md.
+//
+// → OrderItem alanları LINE-TOPLAMIDIR (profit-formula bunları ×qty YAPMADAN
+// ekler; mapper estimate'i de #337'den beri line-toplamı). Bu yüzden settlement
+// değerleri × `OrderItem.quantity` ile line-toplamına çıkarılır. Satırlar özdeş
+// olduğundan ×quantity overwrite IDEMPOTENT (her Sale satırı aynı line-toplamını
+// yazar) ve CHECK-güvenli (gross tam line-toplamı tek atomik set; transient
+// `refunded > gross` ihlali doğmaz). Tüm N Sale satırı tek hakediş döngüsünde
+// birlikte gelir (iadeler AYRI Return satırı) → kısmi-settlement sapması yok.
+//
+// Bu handler:
+//   1. Yerel Order'ı (storeId, platformOrderId = shipmentPackageId.toString()) ile bulur.
+//   2. OrderItem'ı (orderId, productVariant.barcode) ile bulur.
+//   3. Trendyol-otoriter komisyon değerlerini yazar (× quantity, line-toplamı):
+//        - grossCommissionAmountNet = commissionAmount × quantity / 1.20
+//        - grossCommissionVatAmount = commissionAmount × quantity − net
 //        - commissionInvoiceSerialNumber = raw DCFxxx string
 //
 // Commission VAT rate is DB-driven (denetim A) — resolved per order via
 // resolveFeeDefinition(fee_definitions ALL/COMMISSION_INVOICE) at order.orderDate,
 // then commissionVatDivisor(rate) splits the KDV-dahil amount.
 //
-// Order Sync (PR-A) already wrote grossCommissionAmountNet/VatAmount in
-// the mapper using `lineGrossAmount × commissionRate / 100 / 1.20`. The
-// settlement value is mathematically identical when the commission rate
-// hasn't changed between order arrival and settlement, but Trendyol's
-// invoice is the canonical source — we overwrite either way to absorb
-// any commission-rate change Trendyol applied in the interim.
+// Order Sync (PR-A + #337) already wrote grossCommissionAmountNet/VatAmount in
+// the mapper as a LINE TOTAL (`lineGrossAmount × quantity × commissionRate /
+// 100 / 1.20`). The settlement value is mathematically identical when the
+// commission rate hasn't changed between order arrival and settlement, but
+// Trendyol's invoice is the canonical source — we overwrite either way to
+// absorb any commission-rate change Trendyol applied in the interim.
 //
 // PR-9 write-once triggers (estimated_net_profit + unit_cost_snapshot_*)
 // are NOT touched here — handler writes only to OrderItem fields that
@@ -97,7 +110,7 @@ export async function handleSale(
 
   const item = await tx.orderItem.findFirst({
     where: { orderId: order.id, productVariantId: variant.id },
-    select: { id: true },
+    select: { id: true, quantity: true },
   });
   if (item === null) {
     syncLog.warn('settlements.sale.item-not-found', {
@@ -111,12 +124,14 @@ export async function handleSale(
   // Commission KDV split — Trendyol's commissionAmount is GROSS (KDV-dahil),
   // design §5.2 line 1083. Komisyon KDV oranı DB'den (denetim A), order.orderDate'e
   // göre çözülür; seed eksikse loud throw (PSF/STOPPAGE ile aynı).
+  // × quantity: row.commissionAmount BİRİM başınadır (header) → line-toplamına çıkar.
+  const quantity = new Decimal(item.quantity);
   const commissionVatDef = await resolveFeeDefinition(tx, {
     platform: 'TRENDYOL',
     feeType: 'COMMISSION_INVOICE',
     at: order.orderDate,
   });
-  const commissionGross = new Decimal(row.commissionAmount);
+  const commissionGross = new Decimal(row.commissionAmount).mul(quantity);
   const grossCommissionAmountNet = commissionGross
     .div(commissionVatDivisor(commissionVatDef.defaultVatRate.toString()))
     .toDecimalPlaces(2);
@@ -130,8 +145,9 @@ export async function handleSale(
       // Hakediş Kontrolü TEMELİ (2026-06-14): Trendyol'un kredilediği GERÇEK satışı
       // (ham `credit`, KDV-dahil) çıpa olarak yakala. KÂRA GİRMEZ — settled kâr
       // HAK EDİLEN'den (effectiveSale) hesaplanır; bu yalnız gelecek beklenen-vs-
-      // gerçek mutabakatı için. Defansif `!= null`: sparse satır capture'ı bozmasın.
-      ...(row.credit != null ? { settledSaleAmount: new Decimal(row.credit) } : {}),
+      // gerçek mutabakatı için. `credit` de BİRİM → × quantity ile line-toplamı.
+      // Defansif `!= null`: sparse satır capture'ı bozmasın.
+      ...(row.credit != null ? { settledSaleAmount: new Decimal(row.credit).mul(quantity) } : {}),
       // commissionInvoiceSerialNumber may be null on stage / older rows;
       // only write when present so we don't blank a previously-set value.
       ...(row.commissionInvoiceSerialNumber !== null
