@@ -7,7 +7,7 @@ export type {
   ProfitInputs,
   ProfitResult,
 } from './profit-formula';
-export { inferDeliveredOnTime } from './infer-delivered-on-time';
+export { inferShippedSameDay, type OrderForShipTiming } from './infer-shipped-same-day';
 export {
   recomputeSettledProfit,
   type RecomputeSettledProfitResult,

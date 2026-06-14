@@ -48,6 +48,9 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     unitCostSnapshotNet?: string | null;
     unitCostSnapshotVatAmount?: string | null;
     isDigital?: boolean;
+    fastDeliveryType?: string | null;
+    actualShipDate?: Date | null;
+    orderDate?: Date;
   }) {
     const order = await prisma.order.update({
       where: {
@@ -61,6 +64,9 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         saleSubtotalNet: args.saleSubtotalNet ?? '100.00',
         saleVatTotal: args.saleVatTotal ?? '20.00',
         micro: args.micro ?? false,
+        ...(args.fastDeliveryType !== undefined && { fastDeliveryType: args.fastDeliveryType }),
+        ...(args.actualShipDate !== undefined && { actualShipDate: args.actualShipDate }),
+        ...(args.orderDate !== undefined && { orderDate: args.orderDate }),
       },
     });
 
@@ -403,5 +409,107 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(updated.estimatedNetProfit).toBeNull();
+  });
+
+  // ─── SameDayShipping ("Bugün Kargoda") PSF — 6.99 vs 10.99 (2026-06-14) ──
+  // Resmi Trendyol kuralı: 6.99 indirimi YALNIZ fastDeliveryType='SameDayShipping'
+  // + aynı-gün SEVK (actualShipDate). Estimate refinable: T+0 optimistik 6.99,
+  // sevk re-sync'inde aynı-gün değilse 10.99'a refine. İstanbul-gün karşılaştırması.
+  const SDS_ORDER_DATE = new Date('2026-06-12T07:28:45.000Z'); // İST 10:28 → 06-12
+  const SDS_SHIP_SAME = new Date('2026-06-12T11:35:54.000Z'); // İST 14:35 → 06-12
+  const SDS_SHIP_LATE = new Date('2026-06-13T05:00:00.000Z'); // İST 08:00 → 06-13
+
+  async function psfOf(orderId: string) {
+    return prisma.orderFee.findFirstOrThrow({
+      where: { orderId, feeType: 'PLATFORM_SERVICE', source: 'ESTIMATE' },
+    });
+  }
+
+  it('SameDayShipping + henüz sevk yok → optimistik PSF 6.99', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      fastDeliveryType: 'SameDayShipping',
+      actualShipDate: null,
+      orderDate: SDS_ORDER_DATE,
+    });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const psf = await psfOf(order.id);
+    expect(new Decimal(psf.amountNet).toString()).toBe('6.99');
+    expect(new Decimal(psf.vatAmount).toString()).toBe('1.4'); // 6.99 × %20
+    expect(psf.displayName).toContain('Bugün Kargoda');
+  });
+
+  it('SameDayShipping + aynı gün sevk → PSF 6.99 (hak edildi)', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      fastDeliveryType: 'SameDayShipping',
+      actualShipDate: SDS_SHIP_SAME,
+      orderDate: SDS_ORDER_DATE,
+    });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('6.99');
+  });
+
+  it('SameDayShipping + geç (ertesi gün) sevk → PSF 10.99 (hak EDİLMEDİ)', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      fastDeliveryType: 'SameDayShipping',
+      actualShipDate: SDS_SHIP_LATE,
+      orderDate: SDS_ORDER_DATE,
+    });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('10.99');
+  });
+
+  it('FastDelivery → PSF 10.99 (6.99 indirimi SADECE SameDayShipping)', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      fastDeliveryType: 'FastDelivery',
+      actualShipDate: SDS_SHIP_SAME, // aynı gün sevk olsa bile FastDelivery indirim almaz
+      orderDate: SDS_ORDER_DATE,
+    });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('10.99');
+  });
+
+  it('refine: SameDayShipping T+0 optimistik 6.99 → geç sevk re-sync → 10.99 (tek PSF satırı)', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      fastDeliveryType: 'SameDayShipping',
+      actualShipDate: null,
+      orderDate: SDS_ORDER_DATE,
+    });
+
+    // T+0: henüz sevk yok → optimistik 6.99
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('6.99');
+
+    // Sevk re-sync: geç (ertesi gün) sevk → 10.99'a refine, ÇİFT satır YOK
+    await prisma.order.update({ where: { id: order.id }, data: { actualShipDate: SDS_SHIP_LATE } });
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const psfRows = await prisma.orderFee.findMany({
+      where: { orderId: order.id, feeType: 'PLATFORM_SERVICE', source: 'ESTIMATE' },
+    });
+    expect(psfRows).toHaveLength(1);
+    expect(new Decimal(psfRows[0]!.amountNet).toString()).toBe('10.99');
   });
 });

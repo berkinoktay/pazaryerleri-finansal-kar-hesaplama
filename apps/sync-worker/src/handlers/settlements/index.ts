@@ -16,10 +16,6 @@ export { handleStoppage } from './stoppage';
 export { handleAdvertising } from './advertising';
 export { handlePaymentOrderEntry, type HandlePaymentOrderEntryResult } from './payment-order';
 export { handleCommissionInvoice, type HandleCommissionInvoiceResult } from './commission-invoice';
-export {
-  applyFastDeliveryCorrection,
-  type ApplyFastDeliveryCorrectionResult,
-} from './fast-delivery-correction';
 export { dispatchSettlementRow, dispatchOtherFinancialRow } from './dispatcher';
 export {
   bumpReconciliationStatusForStore,

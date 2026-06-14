@@ -3,8 +3,8 @@
 // from a single input row — every other handler is per-line.
 //
 // Cascade scope (per Order in the cycle):
-//   1. Confirm ESTIMATE OrderFees (PSF + PLATFORM_SERVICE_FAST + STOPPAGE)
-//      → set confirmedAt + confirmedBy. Idempotent via `confirmedAt: null`
+//   1. Confirm ESTIMATE OrderFees (PSF + STOPPAGE) → set confirmedAt +
+//      confirmedBy. Idempotent via `confirmedAt: null`
 //      filter (no PR-9-style trigger; updateMany skips already-confirmed rows).
 //   2. recomputeSettledProfit(orderId) → writes Order.settledNetProfit
 //      using @pazarsync/profit's computeProfit. Skips if cost snapshots
@@ -28,10 +28,12 @@ import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { recomputeSettledProfit } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
-import { applyFastDeliveryCorrection } from './fast-delivery-correction';
 import type { HandleSettlementResult } from './sale';
 
-const CONFIRMABLE_FEE_TYPES = ['PLATFORM_SERVICE', 'PLATFORM_SERVICE_FAST', 'STOPPAGE'] as const;
+// PSF artık tek refinable PLATFORM_SERVICE satırı (SameDayShipping 6.99/10.99 rate
+// estimate'te belirlenir; feeType hep PLATFORM_SERVICE). PLATFORM_SERVICE_FAST feeType'ı
+// hiçbir kod yazmaz → confirmation listesinden çıkarıldı (2026-06-14).
+const CONFIRMABLE_FEE_TYPES = ['PLATFORM_SERVICE', 'STOPPAGE'] as const;
 
 export interface HandlePaymentOrderEntryResult extends HandleSettlementResult {
   /** Number of orders the cycle touched. Useful for cron telemetry. */
@@ -80,19 +82,15 @@ export async function handlePaymentOrderEntry(
       data: { confirmedAt, confirmedBy },
     });
 
-    // 2. Apply fastDelivery PSF correction BEFORE recompute — the new
-    //    CREDIT OrderFee row needs to land before the profit aggregate.
-    //    Idempotent via the indexed `derivedFrom` column + the
-    //    (order_id, fee_type, derived_from) partial unique (#297).
-    await applyFastDeliveryCorrection(order.id, tx);
-
-    // 3. Recompute settledNetProfit from confirmed fees + cost snapshots.
-    //    recomputeSettledProfit only writes when all cost snapshots
-    //    present + saleSubtotalNet/saleVatTotal non-null — skip in
-    //    incomplete state is safe (subsequent cron run picks it up).
+    // 2. Recompute settledNetProfit from confirmed fees + cost snapshots.
+    //    (SameDayShipping PSF refinesi artık estimate'te yapılıyor: sevk
+    //    re-sync'inde 6.99↔10.99; ayrı fast-delivery correction OrderFee'ye
+    //    gerek yok — 2026-06-14.) recomputeSettledProfit only writes when all
+    //    cost snapshots present + saleSubtotalNet/saleVatTotal non-null — skip
+    //    in incomplete state is safe (subsequent cron run picks it up).
     await recomputeSettledProfit(order.id, tx);
 
-    // 4. Mark order FULLY_SETTLED. Mutable column — set regardless of
+    // 3. Mark order FULLY_SETTLED. Mutable column — set regardless of
     //    whether settledNetProfit was written (status reflects cycle
     //    completion; profit value reflects calculation completeness).
     await tx.order.update({
