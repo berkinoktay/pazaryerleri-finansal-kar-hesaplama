@@ -390,6 +390,9 @@ export interface MappedOrder {
   agreedDeliveryDate: Date | null;
   /** packageHistories[status='Delivered'].createdAt'tan türetilir; teslim olmadıysa null. */
   actualDeliveryDate: Date | null;
+  /** packageHistories[status='Shipped'].createdAt'tan türetilir ("taşıma durumuna
+   * geçiş"); sevk olmadıysa null. SameDayShipping PSF kriterinin (aynı-gün sevk) tabanı. */
+  actualShipDate: Date | null;
   fastDelivery: boolean;
   /** Sipariş-seviyesi hızlı-teslim tipi (PROD'da dolu: "FastDelivery" /
    * "SameDayShipping" / "TodayDelivery"; fast değil/boş → null). Kriter hangi

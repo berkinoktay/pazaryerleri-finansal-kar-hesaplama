@@ -29,6 +29,7 @@ function buildMappedOrder(over: {
   fastDeliveryType?: string;
   estimatedDeliveryStartDate?: string;
   estimatedDeliveryEndDate?: string;
+  actualShipDate?: string;
 }): Prisma.InputJsonValue {
   const value = {
     platformOrderId: over.platformOrderId,
@@ -39,6 +40,7 @@ function buildMappedOrder(over: {
     saleVatTotal: '15.25',
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
+    actualShipDate: over.actualShipDate ?? null,
     fastDelivery: false,
     fastDeliveryType: over.fastDeliveryType ?? null,
     micro: false,
@@ -117,6 +119,7 @@ describe('processBufferPromote', () => {
         fastDeliveryType: 'FastDelivery',
         estimatedDeliveryStartDate: '2026-06-12T15:57:28.000Z',
         estimatedDeliveryEndDate: '2026-06-13T11:38:56.000Z',
+        actualShipDate: '2026-06-12T11:35:54.000Z',
       }),
     });
 
@@ -132,6 +135,7 @@ describe('processBufferPromote', () => {
     expect(order.fastDeliveryType).toBe('FastDelivery');
     expect(order.estimatedDeliveryStartDate?.toISOString()).toBe('2026-06-12T15:57:28.000Z');
     expect(order.estimatedDeliveryEndDate?.toISOString()).toBe('2026-06-13T11:38:56.000Z');
+    expect(order.actualShipDate?.toISOString()).toBe('2026-06-12T11:35:54.000Z');
   });
 
   it('does not pick up a FAILED entry before its backoff window elapses', async () => {

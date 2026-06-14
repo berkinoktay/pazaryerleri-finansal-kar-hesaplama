@@ -258,6 +258,9 @@ export async function upsertOrderWithSnapshot(
         saleVatTotal: order.saleVatTotal,
         agreedDeliveryDate: order.agreedDeliveryDate,
         actualDeliveryDate: order.actualDeliveryDate,
+        // actualShipDate: Shipped event'i (taşıma durumuna geçiş). Buffer JSONB'sinden
+        // string/undefined gelebilir → != null + new Date() ile sarılır.
+        actualShipDate: order.actualShipDate != null ? new Date(order.actualShipDate) : null,
         // Tahmini teslim penceresi (PROD'da dolu). Buffer JSONB'sinden string
         // gelebilir → new Date() ile sarılır (originShipmentDate ile aynı koruma).
         estimatedDeliveryStartDate:
@@ -294,6 +297,8 @@ export async function upsertOrderWithSnapshot(
         status: order.status,
         // actualDeliveryDate sadece null → non-null geçişi için (delivered event'i)
         ...(order.actualDeliveryDate !== null && { actualDeliveryDate: order.actualDeliveryDate }),
+        // actualShipDate: Shipped event'i sonraki sync'te gelir → null→non-null tazele.
+        ...(order.actualShipDate != null && { actualShipDate: new Date(order.actualShipDate) }),
         // Kargo alanları null-koruma ile tazelenir: cargoDeci kargo ölçümünden
         // SONRA dolar, tracking no nadiren rotasyonla değişir — dolu gelen değer
         // yazılır, null/undefined gelen mevcut dolu değeri EZMEZ (eski/webhook

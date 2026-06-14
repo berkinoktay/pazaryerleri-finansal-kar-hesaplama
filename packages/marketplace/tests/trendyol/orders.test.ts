@@ -173,6 +173,46 @@ describe('mapTrendyolShipmentPackage — actualDeliveryDate derivation', () => {
 
     expect(mapped.actualDeliveryDate).toBeNull();
   });
+
+  it("derives actualShipDate from the 'Shipped' packageHistory createdDate (raw GMT)", () => {
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        packageHistories: [
+          { status: 'Created', createdDate: Date.UTC(2026, 5, 8, 14, 0, 0) },
+          { status: 'Shipped', createdDate: Date.UTC(2026, 5, 10, 10, 0, 0) },
+          { status: 'Delivered', createdDate: Date.UTC(2026, 5, 11, 9, 30, 0) },
+        ],
+      }),
+    );
+
+    expect(mapped.actualShipDate?.toISOString()).toBe('2026-06-10T10:00:00.000Z');
+  });
+
+  it('returns null actualShipDate when packageHistories has no Shipped event', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        packageHistories: [{ status: 'Created', createdDate: Date.UTC(2026, 5, 8, 14, 0, 0) }],
+      }),
+    );
+
+    expect(mapped.actualShipDate).toBeNull();
+  });
+
+  it("uses the FIRST 'Shipped' event when there are multiple (ship → UnDelivered → re-ship)", () => {
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        packageHistories: [
+          { status: 'Created', createdDate: Date.UTC(2026, 5, 8, 14, 0, 0) },
+          { status: 'Shipped', createdDate: Date.UTC(2026, 5, 10, 10, 0, 0) },
+          { status: 'UnDelivered', createdDate: Date.UTC(2026, 5, 11, 9, 0, 0) },
+          { status: 'Shipped', createdDate: Date.UTC(2026, 5, 12, 8, 0, 0) },
+        ],
+      }),
+    );
+
+    // İlk transport-handoff anı aynı-gün-sevk kriterinin tabanı — re-ship onu geç yapmaz.
+    expect(mapped.actualShipDate?.toISOString()).toBe('2026-06-10T10:00:00.000Z');
+  });
 });
 
 // ─── Per-line KDV split ────────────────────────────────────────────────
