@@ -26,6 +26,7 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const BARCODE = 'EAN13-PMT';
 const SHIPMENT_PACKAGE_ID = 555_777_999;
@@ -206,6 +207,8 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // handleSale komisyon KDV oranını fee_definitions ALL/COMMISSION_INVOICE'tan çözer.
+    await ensureFeeDefinitions();
   });
 
   it('handleSale backfills Order.paymentOrderId from Sale settlement row', async () => {

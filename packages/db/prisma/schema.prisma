@@ -24,6 +24,18 @@ enum Platform {
   HEPSIBURADA
 }
 
+// FeeDefinition kapsamı — `Platform`'tan AYRI tutulur (denetim A, 2026-06-14).
+// Stores/Orders gerçek bir pazaryerine bağlıdır (TRENDYOL | HEPSIBURADA) ve bu
+// alanları `z.enum(Platform)` doğrular. Ücret tanımları ise pazaryeri-bağımsız
+// olabilir: e-ticaret stopajı ve komisyon KDV oranı TÜM pazaryerlerinde aynıdır
+// → `ALL`. `ALL`'ı `Platform`'a eklemek stores/orders/adapter/UI switcher'a
+// sızar (platform='ALL' bir mağaza kabul edilirdi). Bu yüzden ayrı enum.
+enum FeeScope {
+  TRENDYOL
+  HEPSIBURADA
+  ALL
+}
+
 enum StoreEnvironment {
   PRODUCTION
   SANDBOX
@@ -1041,7 +1053,7 @@ model OwnShippingTariff {
 // Return shipping. effectiveFrom: 2026-05-18 (Trendyol PSF doc okuma tarihi).
 model FeeDefinition {
   id          String       @id @default(uuid()) @db.Uuid
-  platform    Platform
+  platform    FeeScope
   feeType     OrderFeeType @map("fee_type")
   displayName String       @map("display_name")
 

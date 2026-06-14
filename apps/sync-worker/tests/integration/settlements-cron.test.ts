@@ -29,6 +29,7 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const BARCODE = 'EAN13-CRON';
 const SHIPMENT_PACKAGE_ID = 444_555_666;
@@ -356,6 +357,9 @@ describe('processSettlementsChunk — state machine mega-test', () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // Settlement dispatcher Sale/Discount/Return handler'ları komisyon KDV oranını
+    // fee_definitions ALL/COMMISSION_INVOICE'tan çözer (denetim A).
+    await ensureFeeDefinitions();
   });
 
   it('NOT_SETTLED → PARTIALLY_SETTLED → FULLY_SETTLED across 2 ticks; idempotent on tick 3', async () => {

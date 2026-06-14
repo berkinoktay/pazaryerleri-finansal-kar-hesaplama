@@ -11,8 +11,9 @@
 //        - grossCommissionVatAmount = commissionAmount − net
 //        - commissionInvoiceSerialNumber = raw DCFxxx string
 //
-// Commission VAT = 20% per design §12.2 #1 (sabit varsayım, V1) —
-// TRENDYOL_COMMISSION_VAT_DIVISOR, shared in @pazarsync/marketplace (#300).
+// Commission VAT rate is DB-driven (denetim A) — resolved per order via
+// resolveFeeDefinition(fee_definitions ALL/COMMISSION_INVOICE) at order.orderDate,
+// then commissionVatDivisor(rate) splits the KDV-dahil amount.
 //
 // Order Sync (PR-A) already wrote grossCommissionAmountNet/VatAmount in
 // the mapper using `lineGrossAmount × commissionRate / 100 / 1.20`. The
@@ -37,10 +38,8 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import {
-  TRENDYOL_COMMISSION_VAT_DIVISOR,
-  type TrendyolFinancialTransaction,
-} from '@pazarsync/marketplace';
+import { commissionVatDivisor, type TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import { resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 export interface HandleSettlementResult {
@@ -80,7 +79,7 @@ export async function handleSale(
   const platformOrderId = row.shipmentPackageId.toString();
   const order = await tx.order.findFirst({
     where: { storeId, platformOrderId },
-    select: { id: true },
+    select: { id: true, orderDate: true },
   });
   if (order === null) {
     syncLog.warn('settlements.sale.order-not-found', { id: row.id, platformOrderId });
@@ -110,10 +109,16 @@ export async function handleSale(
   }
 
   // Commission KDV split — Trendyol's commissionAmount is GROSS (KDV-dahil),
-  // design §5.2 line 1083.
+  // design §5.2 line 1083. Komisyon KDV oranı DB'den (denetim A), order.orderDate'e
+  // göre çözülür; seed eksikse loud throw (PSF/STOPPAGE ile aynı).
+  const commissionVatDef = await resolveFeeDefinition(tx, {
+    platform: 'TRENDYOL',
+    feeType: 'COMMISSION_INVOICE',
+    at: order.orderDate,
+  });
   const commissionGross = new Decimal(row.commissionAmount);
   const grossCommissionAmountNet = commissionGross
-    .div(TRENDYOL_COMMISSION_VAT_DIVISOR)
+    .div(commissionVatDivisor(commissionVatDef.defaultVatRate.toString()))
     .toDecimalPlaces(2);
   const grossCommissionVatAmount = commissionGross.sub(grossCommissionAmountNet);
 

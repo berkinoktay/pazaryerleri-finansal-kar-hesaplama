@@ -6,18 +6,21 @@ import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 /**
- * Trendyol FeeDefinition seed verification (PR-2 + PR-8).
+ * FeeDefinition seed verification (PR-2 + PR-8 + denetim A).
  *
- * Design §3.4 — 4 satır V1 başlangıç + PR-8'in SHIPPING satırı:
- *   - PLATFORM_SERVICE      FIXED 10.99   + KDV %20  (zorunlu)
- *   - PLATFORM_SERVICE_FAST FIXED 6.99    + KDV %20  (opsiyonel — Bugün Kargoda)
- *   - STOPPAGE              RATE  0.0100  + KDV %0   (zorunlu)
- *   - RETURN_SHIPPING       FIXED NULL    + KDV %20  (opsiyonel — cargo-invoice)
- *   - SHIPPING              FIXED NULL    + KDV %20  (opsiyonel — cargo-invoice, PR-8)
+ * FeeScope kapsamıyla (denetim A, 2026-06-14 — pazaryeri-bağımsız ücretler 'ALL'):
+ *   TRENDYOL:
+ *     - PLATFORM_SERVICE      FIXED 10.99   + KDV %20  (zorunlu)
+ *     - PLATFORM_SERVICE_FAST FIXED 6.99    + KDV %20  (opsiyonel — Bugün Kargoda)
+ *     - RETURN_SHIPPING       FIXED NULL    + KDV %20  (opsiyonel — cargo-invoice)
+ *     - SHIPPING              FIXED NULL    + KDV %20  (opsiyonel — cargo-invoice, PR-8)
+ *   ALL (tüm pazaryerlerinde sabit):
+ *     - STOPPAGE              RATE  0.0100  + KDV %0   (zorunlu — e-ticaret stopajı)
+ *     - COMMISSION_INVOICE    FIXED NULL    + KDV %20  (komisyon KDV oranı, denetim A)
  *
- * effectiveFrom = 2026-05-18, effectiveTo = NULL (açık ucu).
+ * effectiveFrom = 2026-05-18, effectiveTo = NULL (açık ucu). 6 satır toplam.
  */
-describe('FeeDefinition seed — Trendyol V1', () => {
+describe('FeeDefinition seed — FeeScope (denetim A)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -27,12 +30,14 @@ describe('FeeDefinition seed — Trendyol V1', () => {
     await ensureFeeDefinitions();
   });
 
-  it('contains exactly 5 Trendyol rows', async () => {
-    const rows = await prisma.feeDefinition.findMany({ where: { platform: 'TRENDYOL' } });
-    expect(rows).toHaveLength(5);
+  it('contains 4 TRENDYOL + 2 ALL rows (6 total)', async () => {
+    const trendyol = await prisma.feeDefinition.findMany({ where: { platform: 'TRENDYOL' } });
+    const all = await prisma.feeDefinition.findMany({ where: { platform: 'ALL' } });
+    expect(trendyol).toHaveLength(4);
+    expect(all).toHaveLength(2);
   });
 
-  it('SHIPPING row exists (amount NULL — runtime from cargo-invoice, PR-8)', async () => {
+  it('SHIPPING row exists (TRENDYOL, amount NULL — runtime from cargo-invoice, PR-8)', async () => {
     const row = await prisma.feeDefinition.findFirst({
       where: { platform: 'TRENDYOL', feeType: 'SHIPPING' },
     });
@@ -42,7 +47,7 @@ describe('FeeDefinition seed — Trendyol V1', () => {
     expect(row?.isRequired).toBe(false);
   });
 
-  it('PLATFORM_SERVICE row has correct values', async () => {
+  it('PLATFORM_SERVICE row has correct values (TRENDYOL)', async () => {
     const row = await prisma.feeDefinition.findFirst({
       where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' },
     });
@@ -54,7 +59,7 @@ describe('FeeDefinition seed — Trendyol V1', () => {
     expect(row?.isRequired).toBe(true);
   });
 
-  it('PLATFORM_SERVICE_FAST row has correct values (Bugün Kargoda)', async () => {
+  it('PLATFORM_SERVICE_FAST row has correct values (TRENDYOL, Bugün Kargoda)', async () => {
     const row = await prisma.feeDefinition.findFirst({
       where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE_FAST' },
     });
@@ -65,20 +70,34 @@ describe('FeeDefinition seed — Trendyol V1', () => {
     expect(row?.isRequired).toBe(false);
   });
 
-  it('STOPPAGE row has correct values (rate %1, KDV %0)', async () => {
-    const row = await prisma.feeDefinition.findFirst({
-      where: { platform: 'TRENDYOL', feeType: 'STOPPAGE' },
-    });
-    expect(row).not.toBeNull();
+  it('STOPPAGE row is ALL-scoped (rate %1, KDV %0) — denetim A', async () => {
+    const row = await prisma.feeDefinition.findFirst({ where: { feeType: 'STOPPAGE' } });
+    expect(row?.platform).toBe('ALL');
     expect(row?.calculationKind).toBe('RATE_OF_SALE');
     expect(row?.fixedAmountNet).toBeNull();
     // Decimal(7, 4) → 0.0100; Decimal.toString() yuvarlama 0.01 ya da 0.0100 olabilir
     expect(new Decimal(row?.rateOfSale ?? '0').equals('0.01')).toBe(true);
     expect(new Decimal(row?.defaultVatRate ?? '999').equals('0')).toBe(true);
     expect(row?.isRequired).toBe(true);
+    // TRENDYOL kapsamında STOPPAGE OLMAMALI (taşındı).
+    const trendyolStoppage = await prisma.feeDefinition.findFirst({
+      where: { platform: 'TRENDYOL', feeType: 'STOPPAGE' },
+    });
+    expect(trendyolStoppage).toBeNull();
   });
 
-  it('RETURN_SHIPPING row exists (amount NULL — runtime from cargo-invoice)', async () => {
+  it('COMMISSION_INVOICE row is ALL-scoped (komisyon KDV oranı %20) — denetim A', async () => {
+    const row = await prisma.feeDefinition.findFirst({ where: { feeType: 'COMMISSION_INVOICE' } });
+    expect(row?.platform).toBe('ALL');
+    expect(row?.calculationKind).toBe('FIXED');
+    // Tutar taşımaz — yalnız KDV oranı (default_vat_rate) okunur.
+    expect(row?.fixedAmountNet).toBeNull();
+    expect(row?.rateOfSale).toBeNull();
+    expect(new Decimal(row?.defaultVatRate ?? '0').toString()).toBe('20');
+    expect(row?.isRequired).toBe(false);
+  });
+
+  it('RETURN_SHIPPING row exists (TRENDYOL, amount NULL — runtime from cargo-invoice)', async () => {
     const row = await prisma.feeDefinition.findFirst({
       where: { platform: 'TRENDYOL', feeType: 'RETURN_SHIPPING' },
     });
@@ -92,12 +111,13 @@ describe('FeeDefinition seed — Trendyol V1', () => {
   it('seed is idempotent — re-running does not duplicate rows', async () => {
     await ensureFeeDefinitions();
     await ensureFeeDefinitions();
-    const rows = await prisma.feeDefinition.findMany({ where: { platform: 'TRENDYOL' } });
-    expect(rows).toHaveLength(5);
+    const all = await prisma.feeDefinition.findMany();
+    expect(all).toHaveLength(6);
   });
 
   it('effectiveFrom is set to 2026-05-18 for all seed rows', async () => {
-    const rows = await prisma.feeDefinition.findMany({ where: { platform: 'TRENDYOL' } });
+    const rows = await prisma.feeDefinition.findMany();
+    expect(rows).toHaveLength(6);
     for (const row of rows) {
       expect(row.effectiveFrom.toISOString().startsWith('2026-05-18')).toBe(true);
       expect(row.effectiveTo).toBeNull();

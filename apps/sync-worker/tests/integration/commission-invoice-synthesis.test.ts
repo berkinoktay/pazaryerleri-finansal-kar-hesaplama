@@ -23,6 +23,7 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const SERIAL = 'DCF2026001708462';
 const PAYMENT_ORDER_ID = 99_111_222;
@@ -98,7 +99,7 @@ function makeCommissionInvoiceRow(
 ): TrendyolFinancialTransaction {
   return {
     id: SERIAL,
-    transactionDate: 1715800000000,
+    transactionDate: Date.UTC(2026, 5, 1),
     barcode: null,
     transactionType: 'Komisyon Faturası',
     receiptId: null,
@@ -112,7 +113,7 @@ function makeCommissionInvoiceRow(
     sellerRevenue: null,
     orderNumber: null,
     paymentOrderId: PAYMENT_ORDER_ID,
-    paymentDate: 1715800000000,
+    paymentDate: Date.UTC(2026, 5, 1),
     sellerId: 123456,
     storeId: null,
     storeName: null,
@@ -132,6 +133,9 @@ describe('handleCommissionInvoice', () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // handleCommissionInvoice komisyon KDV oranını fee_definitions
+    // ALL/COMMISSION_INVOICE'tan çözer (denetim A) → seed gerekir.
+    await ensureFeeDefinitions();
   });
 
   it('creates CommissionInvoice + backfills OrderItem.commissionInvoiceId (1:N)', async () => {

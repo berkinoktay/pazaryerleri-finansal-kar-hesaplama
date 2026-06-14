@@ -26,6 +26,11 @@ VALUES
   -- E-ticaret Stopajı — saleSubtotalNet × %1 (KDV=0).
   -- PSF üzerine stopaj YAPILMAZ (330 Tebliği Madde 5/2) — applyEstimate matrahı
   -- yalnız satış toplamından alır, PSF tutarını eklemez.
+  -- NOT (denetim A, 2026-06-14): bu satır TRENDYOL kapsamında kalır; geçiş
+  -- migration'ı 20260614020000 bu satırı SİLİP 'ALL' kapsamlı bir satırla
+  -- (id ...007) değiştirir. Eski seed'in dokunulmaması (a) migrate-replay'i geçerli
+  -- tutar ('ALL' Platform enum'una yazılmaz) (b) in-place upgrade'de seed'i idempotent
+  -- bırakır (id ...003 hep TRENDYOL; geçiş migration'ı DELETE+INSERT ile devralır).
   ('11111111-1111-1111-1111-000000000003', 'TRENDYOL', 'STOPPAGE',              'E-ticaret Stopajı',                     'RATE_OF_SALE',  NULL, 0.0100,   0.00, '2026-05-18 00:00:00', NULL, true,  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
   -- İade Kargo Bedeli — tutar cargo-invoice/items endpoint'inden gelir
   -- (FIXED template, fixed_amount_net NULL — runtime'da CARGO_INVOICE source'lu

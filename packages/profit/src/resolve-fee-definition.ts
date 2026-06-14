@@ -2,10 +2,12 @@
  * FeeDefinition lookup helper — pazaryeri × feeType başına aktif tanımı
  * çözer (design §3.4 effectiveFrom/effectiveTo zaman bazlı sürümleme).
  *
- * PR-2 seed Trendyol için 4 satır yazdı (PLATFORM_SERVICE 10.99,
- * PLATFORM_SERVICE_FAST 6.99, STOPPAGE %1, RETURN_SHIPPING). Trendyol oranı
- * değişirse yeni effectiveFrom row eklenir (eski'nin effectiveTo set'lenir);
- * bu fonksiyon `at` tarihine göre doğru sürümü seçer.
+ * Seed satırları (FeeScope kapsamıyla): TRENDYOL → PLATFORM_SERVICE 10.99,
+ * PLATFORM_SERVICE_FAST 6.99, RETURN_SHIPPING, SHIPPING; ALL → STOPPAGE %1,
+ * COMMISSION_INVOICE (komisyon KDV oranı %20, denetim A). Pazaryeri-bağımsız
+ * ücretler 'ALL' kapsamında; oran değişirse yeni effectiveFrom row eklenir
+ * (eski'nin effectiveTo set'lenir); bu fonksiyon `at` tarihine göre doğru
+ * sürümü seçer.
  *
  * `applyEstimateOnOrderCreate` çağırır: PSF + Stopaj için `at = order.orderDate`.
  */
@@ -30,17 +32,25 @@ interface ResolveArgs {
 }
 
 export async function resolveFeeDefinition(tx: Prisma.TransactionClient, args: ResolveArgs) {
+  // Kapsam: spesifik pazaryeri (args.platform) VEYA pazaryeri-bağımsız 'ALL'
+  // (denetim A — stopaj + komisyon KDV gibi tüm pazaryerlerinde sabit ücretler
+  // FeeScope.ALL satırında yaşar). Bir feeType ya spesifik ya ALL'dır (ikisi
+  // birden değil) → `in` tek satır döndürür. args.platform tipi `Platform`
+  // ('TRENDYOL'|'HEPSIBURADA') olup `FeeScope`'a atanabilir; 'ALL' da FeeScope.
+  //
   // effectiveFrom <= at AND (effectiveTo IS NULL OR at < effectiveTo).
-  // En son effectiveFrom kazanır (Trendyol oran değişiminde overlap yok beklenir,
-  // ama defansif olarak `orderBy` DESC ile en güncel sürüm seçilir).
+  // Sıralama: en güncel effectiveFrom kazanır; eşitlikte `platform: 'asc'` ile
+  // spesifik pazaryeri (enum tanım sırasında ALL'dan önce) ALL'ı geçer — ileride
+  // bir feeType hem spesifik hem ALL satır taşırsa spesifik tercih edilsin diye
+  // defansif tiebreak.
   const def = await tx.feeDefinition.findFirst({
     where: {
-      platform: args.platform,
+      platform: { in: [args.platform, 'ALL'] },
       feeType: args.feeType,
       effectiveFrom: { lte: args.at },
       OR: [{ effectiveTo: null }, { effectiveTo: { gt: args.at } }],
     },
-    orderBy: { effectiveFrom: 'desc' },
+    orderBy: [{ effectiveFrom: 'desc' }, { platform: 'asc' }],
   });
 
   if (def === null) {

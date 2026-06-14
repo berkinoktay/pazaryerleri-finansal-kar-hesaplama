@@ -3,19 +3,24 @@
 import { Decimal } from 'decimal.js';
 
 /**
- * Trendyol commission VAT is 20% by convention (design §12.2 #1). V1
- * assumption — once `fatura-entegrasyonu/` docs are read this becomes
- * empirically verifiable; until then the invoice surface has been
- * consistent (research §3.1).
+ * Trendyol commission VAT default rate (%20).
  *
- * Consumers: the order-sync mapper (orders.ts) and the settlement
- * handlers (sale / discount / return in apps/sync-worker) all split the
- * KDV-dahil commission with this convention. Rate and divisor are two
- * views of the same constant — never redeclare locally.
+ * Denetim A (2026-06-14): the AUTHORITATIVE rate now lives in the DB as a
+ * `fee_definitions` row (scope `ALL`, feeType `COMMISSION_INVOICE`,
+ * `default_vat_rate`) so it changes without a deploy. Consumers (order mapper,
+ * settlement handlers) resolve it via `resolveFeeDefinition` and pass it in.
+ * This constant remains the FALLBACK default for callers that don't resolve
+ * (webhook/test estimate paths) — the order intake estimate is reconciled by
+ * settlement anyway. Rate and divisor: see `commissionVatDivisor`.
  */
 export const TRENDYOL_COMMISSION_VAT_RATE = 20;
 
-/** Divide a KDV-dahil commission amount by this to get NET (= 1.20). */
-export const TRENDYOL_COMMISSION_VAT_DIVISOR = new Decimal(TRENDYOL_COMMISSION_VAT_RATE)
-  .div(100)
-  .add(1);
+/**
+ * KDV-dahil bir komisyon tutarını NET'e indirgemek için bölen: `1 + rate/100`.
+ * Oran DB'den (resolveFeeDefinition().defaultVatRate) ya da
+ * `TRENDYOL_COMMISSION_VAT_RATE` fallback'inden gelir — tek nokta, asla yerelde
+ * `1 + rate/100` tekrarı yazma.
+ */
+export function commissionVatDivisor(rate: Decimal.Value): Decimal {
+  return new Decimal(1).add(new Decimal(rate).div(100));
+}
