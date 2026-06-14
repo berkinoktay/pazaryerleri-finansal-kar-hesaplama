@@ -4,8 +4,15 @@
  * (PR-7 commit 5) once the PaymentOrder cycle marks an Order's
  * ESTIMATE OrderFees as confirmed.
  *
+ * INVARIANT (2026-06-14 karar — Hakediş Kontrolü temeli): settledNetProfit =
+ * satıcının HAK ETTİĞİ kâr. Satış tabanı = Order.saleSubtotalNet (effectiveSale,
+ * hak edilen) — Trendyol'un GERÇEKTE kredilediği OrderItem.settledSaleAmount
+ * DEĞİL. Underpaid bir actual-payout'a ASLA sessizce çekilmez. Beklenen (bu
+ * fonksiyon) vs gerçek-yatan farkı = gelecek "Hakediş Kontrolü" epiği (itiraz/
+ * telafi). Bir gün "settled'ı gerçeğe çekeyim" deme — bu kasıtlı.
+ *
  * Reads:
- *   - Order.saleSubtotalNet + saleVatTotal  (line aggregate, immutable since arrival)
+ *   - Order.saleSubtotalNet + saleVatTotal  (effectiveSale aggregate = HAK EDİLEN, immutable since arrival)
  *   - OrderItem rows (cost snapshot + commission split + seller discount)
  *   - OrderFee rows where source ∈ {SETTLEMENT, CARGO_INVOICE}
  *     OR  source = ESTIMATE AND confirmedAt IS NOT NULL

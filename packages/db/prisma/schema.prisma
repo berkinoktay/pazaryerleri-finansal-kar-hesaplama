@@ -538,6 +538,15 @@ model Order {
   // İki aşamalı kar (design §4.1):
   // - estimatedNetProfit: T+0 applyEstimateOnOrderCreate yazar, write-once (PR-9 trigger).
   // - settledNetProfit:   T+~5+ recomputeSettledProfit yazar, mutable (iade güncellemeleri).
+  //
+  // INVARIANT (2026-06-14 karar — Hakediş Kontrolü temeli): İKİSİ DE satıcının
+  // HAK ETTİĞİ net kârdır (effectiveSale + Trendyol'un yetkili komisyon/kargosu,
+  // doğru oranlarla). Trendyol'un GERÇEKTE ÖDEDİĞİ tutar DEĞİLDİR. Bu kolonlar
+  // ASLA underpaid bir actual-payout'a sessizce ÇEKİLMEZ. Beklenen (bu kolonlar)
+  // vs gerçek-yatan (Trendyol payout) farkı = gelecek "Hakediş Kontrolü" epiği;
+  // farkı itiraz-edilebilir kalem olarak gösterir, satıcı İtiraz/Göz ardı seçer.
+  // "Çek" kararı satıcınındır, sistemin değil. (OrderItem.settledSaleAmount =
+  // mutabakatın actual-satış çıpası.)
   estimatedNetProfit   Decimal?             @map("estimated_net_profit") @db.Decimal(12, 2)
   settledNetProfit     Decimal?             @map("settled_net_profit") @db.Decimal(12, 2)
 
@@ -653,6 +662,14 @@ model OrderItem {
   // Satıcı kaynaklı indirim (gerçek gelir azaltıcı, Discount transaction'tan).
   sellerDiscountNet       Decimal @default(0) @map("seller_discount_net") @db.Decimal(12, 2)
   sellerDiscountVatAmount Decimal @default(0) @map("seller_discount_vat_amount") @db.Decimal(12, 2)
+
+  // Settlement ACTUAL çıpası — Trendyol'un Sale settlement'ta kredilediği GERÇEK
+  // satış tutarı (KDV-dahil ham `credit`; handleSale yazar, T+~5). KÂRA GİRMEZ:
+  // estimated/settled kâr HAK EDİLEN'den (effectiveSale) hesaplanır, bu kolondan
+  // DEĞİL. Yalnız gelecek "Hakediş Kontrolü" mutabakatının çıpası — beklenen
+  // (effectiveSale) vs gerçek (bu kolon) karşılaştırıp "eksik satış bedeli"
+  // tespit edecek. Null: settlement gelmeden önce (2026-06-14 temel atımı).
+  settledSaleAmount Decimal? @map("settled_sale_amount") @db.Decimal(12, 2)
 
   // Maliyet anlık kopyası — KDV ayrıştırma (mevcut unitCostSnapshot KDV-dahil).
   // Tümü nullable: maliyet snapshot eksik durumda kar hesabı null kalır (§12.2 #7).

@@ -127,6 +127,11 @@ export async function handleSale(
     data: {
       grossCommissionAmountNet,
       grossCommissionVatAmount,
+      // Hakediş Kontrolü TEMELİ (2026-06-14): Trendyol'un kredilediği GERÇEK satışı
+      // (ham `credit`, KDV-dahil) çıpa olarak yakala. KÂRA GİRMEZ — settled kâr
+      // HAK EDİLEN'den (effectiveSale) hesaplanır; bu yalnız gelecek beklenen-vs-
+      // gerçek mutabakatı için. Defansif `!= null`: sparse satır capture'ı bozmasın.
+      ...(row.credit != null ? { settledSaleAmount: new Decimal(row.credit) } : {}),
       // commissionInvoiceSerialNumber may be null on stage / older rows;
       // only write when present so we don't blank a previously-set value.
       ...(row.commissionInvoiceSerialNumber !== null
