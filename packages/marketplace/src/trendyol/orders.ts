@@ -259,10 +259,10 @@ function mapLine(
   const unitPriceNet = effectiveSaleUnitGross.div(vatMultiplier).toDecimalPlaces(4);
   const unitVatAmount = effectiveSaleUnitGross.sub(unitPriceNet).toDecimalPlaces(4);
 
-  // Gross commission — Trendyol formülü: lineGrossAmount × commission / 100,
+  // Gross commission — SALE-side, liste üzerinden: lineGrossAmount × commission / 100,
   // sonra komisyon KDV split (oran caller'dan = commissionDivisor; DB'den çözülür,
-  // denetim A). (Discount commission iadesi T+0'da YOK — Settlement worker PR-7
-  // doldurur; bu mapper sadece T+0 estimate input'u verir.)
+  // denetim A). Trendyol settlement'ta önce listeden keser (handleSale), bu yüzden
+  // gross taban LİSTE kalır — settlement ile tutarlı.
   const commissionRate =
     line.commission !== undefined && line.commission !== null
       ? new Decimal(line.commission)
@@ -271,6 +271,20 @@ function mapLine(
   const grossCommissionAmountNet = grossCommissionGross.div(commissionDivisor).toDecimalPlaces(2);
   const grossCommissionVatAmount = grossCommissionGross
     .sub(grossCommissionAmountNet)
+    .toDecimalPlaces(2);
+
+  // Refunded commission (T+0 TAHMİN) — Trendyol satıcı-indirim payının komisyonunu
+  // İADE eder (research §7.3): refunded = lineSellerDiscount × commission / 100.
+  // → effective komisyon = gross − refunded = (effectiveSale × oran) / 1.2, yani
+  // komisyon NET SATIŞ üzerinden (satıcının talebi, 2026-06-14). Settlement'ta
+  // handleDiscount gerçek Discount satırıyla bu alanların üzerine yazar (aynı değer).
+  // tyDiscount'a iade YOK (zaten effectiveSale'e dahil değil). sellerDiscount 0 → refund 0.
+  const refundedCommissionGross = new Decimal(safeSellerDiscount).mul(commissionRate).div(100);
+  const refundedCommissionAmountNet = refundedCommissionGross
+    .div(commissionDivisor)
+    .toDecimalPlaces(2);
+  const refundedCommissionVatAmount = refundedCommissionGross
+    .sub(refundedCommissionAmountNet)
     .toDecimalPlaces(2);
 
   // Seller discount KDV split (her line kendi vatRate'iyle) — yalnız breakdown
@@ -288,6 +302,8 @@ function mapLine(
     unitVatAmount: unitVatAmount.toString(),
     grossCommissionAmountNet: grossCommissionAmountNet.toString(),
     grossCommissionVatAmount: grossCommissionVatAmount.toString(),
+    refundedCommissionAmountNet: refundedCommissionAmountNet.toString(),
+    refundedCommissionVatAmount: refundedCommissionVatAmount.toString(),
     sellerDiscountNet: sellerDiscountNet.toString(),
     sellerDiscountVatAmount: sellerDiscountVatAmount.toString(),
     commissionRate: commissionRate.toString(),

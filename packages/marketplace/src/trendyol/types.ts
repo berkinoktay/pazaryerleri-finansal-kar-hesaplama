@@ -324,8 +324,12 @@ export interface TrendyolOrdersStreamResponse {
 //   effectiveSaleLineGross = lineGrossAmount − lineSellerDiscount   (tyDiscount HARİÇ — geri ödenir, kâra etkisi yok)
 //   unitPriceNet           = (effectiveSaleLineGross / qty) / (1 + vatRate/100)
 //   unitVatAmount          = (effectiveSaleLineGross / qty) − unitPriceNet
-//   grossCommissionGross   = lineGrossAmount × commission / 100
-//   grossCommissionNet     = grossCommissionGross / 1.20  (%20 sabit, design §12.2 #1)
+//   grossCommissionGross   = lineGrossAmount × commission / 100   (SALE-side, liste; settlement handleSale ile tutarlı)
+//   grossCommissionNet     = grossCommissionGross / (1 + commVat/100)  (komisyon KDV oranı DB'den — denetim A)
+//   refundedCommissionGross = lineSellerDiscount × commission / 100  (T+0 TAHMİN: Trendyol satıcı-indirim payının
+//                            komisyonunu İADE eder, research §7.3 — settlement handleDiscount gerçek değerle üzerine yazar)
+//   refundedCommissionNet  = refundedCommissionGross / (1 + commVat/100)
+//     → effective komisyon = grossCommissionNet − refundedCommissionNet = effectiveSale × oran / 1.2  (kâra DÜŞEN net komisyon)
 //   sellerDiscountNet      = lineSellerDiscount / (1 + vatRate/100)   (YALNIZ breakdown gösterimi; kâra DÜŞÜLMEZ)
 //
 // Package aggregates per-line VAT-aware (multi-rate orders correct):
@@ -343,6 +347,14 @@ export interface MappedOrderLine {
   unitVatAmount: string;
   grossCommissionAmountNet: string;
   grossCommissionVatAmount: string;
+  /**
+   * T+0 estimate of the commission Trendyol refunds on the seller-discount
+   * portion (research §7.3). effective komisyon = gross − refunded =
+   * effectiveSale tabanlı. Settlement (handleDiscount) gerçek Discount satırıyla
+   * üzerine yazar. sellerDiscount yoksa 0.
+   */
+  refundedCommissionAmountNet: string;
+  refundedCommissionVatAmount: string;
   sellerDiscountNet: string;
   sellerDiscountVatAmount: string;
   /** Trendyol commission rate %, set even if commission gross 0. */

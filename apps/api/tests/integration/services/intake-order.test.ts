@@ -27,6 +27,8 @@ function buildMapped(over: {
     unitVatAmount: '15.25',
     grossCommissionAmountNet: '12.71',
     grossCommissionVatAmount: '2.29',
+    refundedCommissionAmountNet: '0',
+    refundedCommissionVatAmount: '0',
     sellerDiscountNet: '0',
     sellerDiscountVatAmount: '0',
     commissionRate: '15',
