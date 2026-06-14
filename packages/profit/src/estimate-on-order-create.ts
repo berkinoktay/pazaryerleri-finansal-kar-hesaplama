@@ -27,6 +27,7 @@ import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
 
+import { inferShippedSameDay } from './infer-shipped-same-day';
 import { computeProfit, type ProfitInputFee, type ProfitInputItem } from './profit-formula';
 import { isPsfExempt, resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
@@ -61,12 +62,11 @@ export async function applyEstimateOnOrderCreate(
   // Kâr-dışı sipariş: ne fee ne estimate — kalıcı donuk (spec 2026-06-12).
   if (order.profitExcludedAt !== null) return;
 
-  // Re-entry fee guard: cost_missing siparişlerde T+0 çağrısı PSF/Stopaj'ı
-  // YAZAR ama estimate'i null bırakır (allHaveCostSnapshot, aşağıda). Maliyet
-  // sonradan gelince (Slice C manuel giriş, variant-resolution tick) fonksiyon
-  // yeniden çağrılır — fee'ler tekrar yazılırsa computeProfit 2x PSF + 2x
-  // Stopaj toplar ve YANLIŞ kâr write-once kilitlenir. ESTIMATE fee'ler T+0
-  // deterministik olduğundan feeType-başına skip-if-exists yeterli.
+  // Re-entry fee guard: fonksiyon her sync'te yeniden çağrılır (maliyet backfill,
+  // variant-resolution tick, sevk re-sync). Çift-fee'yi önlemek için: Stopaj
+  // DETERMİNİSTİK → feeType-başına skip-if-exists (bu set). PSF ise REFINABLE
+  // (SameDayShipping rate'i sevkte 6.99↔10.99 değişir) → upsert (aşağıda, SHIPPING
+  // gibi). Kargo da upsert. Hepsi tek satır → computeProfit hiçbirini 2× saymaz.
   const existingEstimateFeeTypes = new Set(
     (
       await tx.orderFee.findMany({
@@ -76,39 +76,61 @@ export async function applyEstimateOnOrderCreate(
     ).map((fee) => fee.feeType),
   );
 
-  // ─── 1. PSF (Platform Hizmet Bedeli) — deterministic per-order ─────────
+  // ─── 1. PSF (Platform Hizmet Bedeli) — refinable, SameDayShipping-aware ─
   // Muafiyetler: RETURNED, micro=true, all-digital → PSF=0 (OrderFee yazılmaz).
-  const psfApplicable = !isPsfExempt(order) && !existingEstimateFeeTypes.has('PLATFORM_SERVICE');
-  if (psfApplicable) {
-    // T+0'da deliveredOnTime null → conservative standart ₺10.99 kullanılır.
-    // T+~5 sale settlement'tan sonra fastDelivery + deliveredOnTime=true doğrulanırsa
-    // correction OrderFee CREDIT yazılır (design §4.2 — PR-7'de implement).
+  //
+  // SameDayShipping ("Bugün Kargoda") indirimi (6.99 vs 10.99) — resmi Trendyol
+  // kuralı (2026-06-14): YALNIZ fastDeliveryType==='SameDayShipping' + aynı-gün
+  // SEVK (taşıma durumuna geçiş = actualShipDate). FastDelivery/TodayDelivery
+  // indirimi ALMAZ → standart 10.99. Cutoff Trendyol'un sipariş-uygunluk kapısı
+  // (etiketi o veriyor) → biz tekrar bakmayız.
+  //
+  // REFINABLE (SHIPPING gibi upsert): T+0'da actualShipDate null → OPTİMİSTİK 6.99;
+  // sevk re-sync'inde aynı-gün-sevk DEĞİLSE 10.99'a refine olur (hakediş GELMEDEN).
+  // inferShippedSameDay: null=henüz sevk yok (optimistik), true=aynı gün, false=geç.
+  if (!isPsfExempt(order)) {
+    const earnsSameDayPsf =
+      order.fastDeliveryType === 'SameDayShipping' && inferShippedSameDay(order) !== false;
     const psfDef = await resolveFeeDefinition(tx, {
       platform: order.store.platform,
-      feeType: 'PLATFORM_SERVICE',
+      feeType: earnsSameDayPsf ? 'PLATFORM_SERVICE_FAST' : 'PLATFORM_SERVICE',
       at: order.orderDate,
     });
     if (psfDef.fixedAmountNet === null) {
-      throw new Error(`PLATFORM_SERVICE FeeDefinition ${psfDef.id} missing fixedAmountNet`);
+      throw new Error(`${psfDef.feeType} FeeDefinition ${psfDef.id} missing fixedAmountNet`);
     }
     const psfNet = new Decimal(psfDef.fixedAmountNet);
     const psfVatRate = new Decimal(psfDef.defaultVatRate);
     const psfVat = psfNet.mul(psfVatRate).div(100).toDecimalPlaces(2);
 
-    await tx.orderFee.create({
-      data: {
-        orderId,
-        organizationId: order.organizationId,
-        feeDefinitionId: psfDef.id,
-        feeType: 'PLATFORM_SERVICE',
-        source: 'ESTIMATE',
-        direction: 'DEBIT',
-        amountNet: psfNet,
-        vatRate: psfVatRate,
-        vatAmount: psfVat,
-        displayName: psfDef.displayName,
-      },
+    // Tek PLATFORM_SERVICE ESTIMATE satırı (confirmation + recompute bunu key'ler);
+    // FAST rate'te feeDefinitionId FAST satırına + displayName "Bugün Kargoda".
+    // Refinable: sevk re-sync'inde rate (6.99↔10.99) güncellenir; çift-PSF yok.
+    const psfData = {
+      feeDefinitionId: psfDef.id,
+      amountNet: psfNet,
+      vatRate: psfVatRate,
+      vatAmount: psfVat,
+      displayName: psfDef.displayName,
+    };
+    const existingPsf = await tx.orderFee.findFirst({
+      where: { orderId, feeType: 'PLATFORM_SERVICE', source: 'ESTIMATE' },
+      select: { id: true },
     });
+    if (existingPsf !== null) {
+      await tx.orderFee.update({ where: { id: existingPsf.id }, data: psfData });
+    } else {
+      await tx.orderFee.create({
+        data: {
+          orderId,
+          organizationId: order.organizationId,
+          feeType: 'PLATFORM_SERVICE',
+          source: 'ESTIMATE',
+          direction: 'DEBIT',
+          ...psfData,
+        },
+      });
+    }
   }
 
   // ─── 2. Stopaj (E-ticaret Stopajı) — deterministic per-order ───────────
