@@ -213,7 +213,7 @@ describe('settlement handlers', () => {
   // ─── handleSale ──────────────────────────────────────────────────────
 
   describe('handleSale', () => {
-    it('updates OrderItem grossCommission* + commissionInvoiceSerialNumber', async () => {
+    it('updates OrderItem grossCommission* + commissionInvoiceSerialNumber + settledSaleAmount', async () => {
       const { storeId, itemId } = await buildOrderWithItem();
       const row = makeSettlementRow({ commissionAmount: 12 });
 
@@ -229,6 +229,9 @@ describe('settlement handlers', () => {
       expect(updated.commissionInvoiceSerialNumber).toBe('DCF2026001708462');
       // FK stays null — commit 6 (CommissionInvoice synthesis) will backfill.
       expect(updated.commissionInvoiceId).toBeNull();
+      // Hakediş Kontrolü temeli: Trendyol'un kredilediği gerçek satış (credit 120)
+      // çıpa olarak yakalandı — kâra GİRMEZ, yalnız gelecek mutabakat için.
+      expect(updated.settledSaleAmount?.toFixed(2)).toBe('120.00');
     });
 
     it('skips with sparse_field when shipmentPackageId is null', async () => {
