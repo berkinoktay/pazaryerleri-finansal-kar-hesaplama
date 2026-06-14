@@ -380,8 +380,14 @@ export async function upsertOrderWithSnapshot(
           unitVatAmount: new Decimal(line.unitVatAmount),
           grossCommissionAmountNet: new Decimal(line.grossCommissionAmountNet),
           grossCommissionVatAmount: new Decimal(line.grossCommissionVatAmount),
-          // refundedCommission* PR-5c default 0 — Settlement worker Discount
-          // transaction'larından doldurur (PR-7 V1 resume).
+          // refundedCommission* — T+0 TAHMİN (mapper, satıcı-indirim payının komisyon
+          // iadesi, research §7.3 — 2026-06-14). effective komisyon = gross − refunded
+          // = net-satış tabanlı. Settlement worker Discount transaction'ı gerçek
+          // değerle üzerine yazar (aynı değer). sellerDiscount yoksa 0.
+          // `?? '0'`: buffer JSONB'sinden gelen ESKİ girişler (bu alan eklenmeden önce
+          // yazılanlar) alanı taşımaz — promote crash etmesin (buffer guard deseni, ↑).
+          refundedCommissionAmountNet: new Decimal(line.refundedCommissionAmountNet ?? '0'),
+          refundedCommissionVatAmount: new Decimal(line.refundedCommissionVatAmount ?? '0'),
           sellerDiscountNet: new Decimal(line.sellerDiscountNet),
           sellerDiscountVatAmount: new Decimal(line.sellerDiscountVatAmount),
         },

@@ -14,6 +14,7 @@
 // derivation from packageHistories. Together they fence the boundaries
 // the live data path depends on.
 
+import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 import { getBusinessDate, getBusinessHour } from '@pazarsync/utils';
 
@@ -256,6 +257,48 @@ describe('mapTrendyolShipmentPackage — per-line KDV split', () => {
 
     expect(mapped.lines[0]?.sellerDiscountNet).toBe('10');
     expect(mapped.lines[0]?.sellerDiscountVatAmount).toBe('2');
+  });
+
+  it('estimates refunded commission on the seller-discount portion (komisyon net satış üzerinden)', () => {
+    // lineGrossAmount 1000, lineSellerDiscount 100, commission %10 → effectiveSale 900.
+    // gross commission gross = 1000×%10 = 100 → net 100/1.2 = 83.33
+    // refunded commission gross = 100×%10 = 10 → net 10/1.2 = 8.33
+    // effective net = 83.33 − 8.33 = 75.00 = (900×%10)/1.2 = net-satış tabanlı (2026-06-14).
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        lines: [
+          buildLine({
+            lineUnitPrice: 900,
+            lineGrossAmount: 1000,
+            lineSellerDiscount: 100,
+            vatRate: 20,
+            commission: 10,
+          }),
+        ],
+      }),
+    );
+
+    const line = mapped.lines[0];
+    expect(line?.grossCommissionAmountNet).toBe('83.33'); // SALE-side (liste) — değişmedi
+    expect(line?.refundedCommissionAmountNet).toBe('8.33'); // satıcı-indirim payı iadesi
+    expect(line?.refundedCommissionVatAmount).toBe('1.67');
+    // effective = gross − refunded = net-satış tabanlı komisyon
+    const effectiveNet = new Decimal(line?.grossCommissionAmountNet ?? '0').sub(
+      new Decimal(line?.refundedCommissionAmountNet ?? '0'),
+    );
+    expect(effectiveNet.toString()).toBe('75');
+  });
+
+  it('refunded commission is 0 when there is no seller discount', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        lines: [
+          buildLine({ lineUnitPrice: 100, lineGrossAmount: 100, commission: 10, vatRate: 20 }),
+        ],
+      }),
+    );
+    expect(mapped.lines[0]?.refundedCommissionAmountNet).toBe('0');
+    expect(mapped.lines[0]?.refundedCommissionVatAmount).toBe('0');
   });
 
   it('defaults commissionRate to "0" when Trendyol omits the field', () => {
