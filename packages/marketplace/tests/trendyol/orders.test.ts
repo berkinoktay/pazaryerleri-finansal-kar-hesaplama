@@ -404,19 +404,56 @@ describe('mapTrendyolShipmentPackage — per-line KDV split', () => {
 
 describe('mapTrendyolShipmentPackage — saleSubtotalNet aggregate', () => {
   it('sums net subtotal across multiple lines at the same VAT rate', () => {
+    // lineGrossAmount BİRİM başınadır (Trendyol doc) — 120/unit × 2 adet, 60/unit × 3 adet.
     const mapped = mapTrendyolShipmentPackage(
       buildPackage({
         lines: [
           // 2 × (120 → 100 net) = 200
-          buildLine({ quantity: 2, lineUnitPrice: 120, lineGrossAmount: 240, vatRate: 20 }),
+          buildLine({ quantity: 2, lineUnitPrice: 120, lineGrossAmount: 120, vatRate: 20 }),
           // 3 × (60 → 50 net) = 150
-          buildLine({ quantity: 3, lineUnitPrice: 60, lineGrossAmount: 180, vatRate: 20 }),
+          buildLine({ quantity: 3, lineUnitPrice: 60, lineGrossAmount: 60, vatRate: 20 }),
         ],
       }),
     );
 
     expect(mapped.saleSubtotalNet).toBe('350.00');
     expect(mapped.saleVatTotal).toBe('70.00');
+  });
+
+  // ─── quantity > 1: lineGrossAmount/lineSellerDiscount BİRİM başına ───────
+  // Regression guard for the live-validated bug (#455451555, 2026-06-14): a qty=2
+  // discounted line was undercounted by ÷quantity. Trendyol sends per-unit amounts
+  // (doc: "Ürünün birim brüt fiyatı" / "Birim satıcı indirimi"); the line/order total
+  // is quantity × per-unit. Panel ground truth: Satış ₺4240, Faturalanacak ₺3816.
+  it('scales sale, commission and seller-discount by quantity for a qty>1 discounted line', () => {
+    // 2 adet × (birim brüt 2120 − birim satıcı indirim 212) = 2 × 1908 = 3816 brüt.
+    // effectiveSale net = 3816 / 1.2 = 3180. unit net = 1908 / 1.2 = 1590.
+    // grossComm = 2120 × 2 × %20 = 848 brüt → net 706.67. refunded = 212 × 2 × %20 = 84.8 → 70.67.
+    // effComm = 706.67 − 70.67 = 636 = effectiveSale(3180) × %20 (komisyon net satış üzerinden).
+    // sellerDiscount line-toplamı = 212 × 2 / 1.2 = 353.33.
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        lines: [
+          buildLine({
+            quantity: 2,
+            lineGrossAmount: 2120,
+            lineSellerDiscount: 212,
+            lineUnitPrice: 1908,
+            commission: 20,
+            vatRate: 20,
+          }),
+        ],
+      }),
+      20,
+    );
+
+    expect(mapped.saleSubtotalNet).toBe('3180.00');
+    expect(mapped.saleVatTotal).toBe('636.00');
+    const line = mapped.lines[0];
+    expect(line?.unitPriceNet).toBe('1590');
+    expect(line?.grossCommissionAmountNet).toBe('706.67');
+    expect(line?.refundedCommissionAmountNet).toBe('70.67');
+    expect(line?.sellerDiscountNet).toBe('353.33');
   });
 
   it('aggregates correctly across mixed VAT rates (regression guard)', () => {
@@ -506,7 +543,8 @@ describe('mapTrendyolShipmentPackage — saleSubtotalNet aggregate', () => {
             lineUnitPrice: 780,
             vatRate: 20,
           }),
-          // Satır 2: liste 720, satıcı 120, ty 100, qty 2 → effectiveSale 600 → birim net 250 (@%20)
+          // Satır 2: BİRİM liste 720, birim satıcı 120, birim ty 100, qty 2 →
+          // effectiveSale birim 600 → birim net 500 (@%20). lineUnitPrice = 720−120−100 = 500.
           buildLine({
             lineId: 2,
             barcode: 'B-CF-2',
@@ -514,7 +552,7 @@ describe('mapTrendyolShipmentPackage — saleSubtotalNet aggregate', () => {
             lineGrossAmount: 720,
             lineSellerDiscount: 120,
             lineTyDiscount: 100,
-            lineUnitPrice: 250,
+            lineUnitPrice: 500,
             vatRate: 20,
           }),
         ],
@@ -523,10 +561,10 @@ describe('mapTrendyolShipmentPackage — saleSubtotalNet aggregate', () => {
 
     // Per-line effectiveSale birim-net (müşteri-ödediği lineUnitPrice DEĞİL).
     expect(mapped.lines[0]?.unitPriceNet).toBe('900'); // 1080 / 1.2
-    expect(mapped.lines[1]?.unitPriceNet).toBe('250'); // (600 / 2) / 1.2
-    // Σ(qty × unitPriceNet) = 1×900 + 2×250 = 1400 (tyDiscount toplam 400 HARİÇ).
-    expect(mapped.saleSubtotalNet).toBe('1400.00');
-    expect(mapped.saleVatTotal).toBe('280.00');
+    expect(mapped.lines[1]?.unitPriceNet).toBe('500'); // (720 − 120) / 1.2 — BİRİM, ÷qty YOK
+    // Σ(qty × unitPriceNet) = 1×900 + 2×500 = 1900 (tyDiscount HARİÇ).
+    expect(mapped.saleSubtotalNet).toBe('1900.00');
+    expect(mapped.saleVatTotal).toBe('380.00');
   });
 });
 

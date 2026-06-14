@@ -266,24 +266,34 @@ function mapLine(
   // geri öder, "kâra etkisi YOK" (research satır 336). lineUnitPrice Trendyol indirimini
   // de düştüğü için satıcı geliri değildir; ondan kâr/ciro hesaplamak co-funded siparişte
   // indirimi çift düşürür (denetim #1, 2026-06-13). unitPriceNet artık satıcı-birim-geliri.
-  const effectiveSaleLineGross = Decimal.max(
+  //
+  // QUANTITY: lineGrossAmount ve lineSellerDiscount Trendyol'da BİRİM başınadır
+  // ("Ürünün birim brüt fiyatı" / "Birim satıcı indirimi" — getShipmentPackagesStream
+  // dokümanı). Bu yüzden effectiveSaleUnitGross DOĞRUDAN birim farkıdır (÷quantity YOK);
+  // line/order toplamı saleSubtotalNet = unitPriceNet × quantity'de oluşur. Önceki kod
+  // bunları line-toplamı sanıp ÷quantity yapıyordu → qty>1 siparişte satış quantity katı
+  // eksik çıkıyordu (canlı doğrulama #455451555, 2026-06-14: 2 adet × ₺2120, panel
+  // Satış ₺4240 / Faturalanacak ₺3816; eski kod net ₺1590 = ÷2 yanlış).
+  const effectiveSaleUnitGross = Decimal.max(
     new Decimal(safeGrossAmount).sub(safeSellerDiscount),
     new Decimal(0),
   );
-  const effectiveSaleUnitGross =
-    safeQuantity > 0 ? effectiveSaleLineGross.div(safeQuantity) : new Decimal(0);
   const unitPriceNet = effectiveSaleUnitGross.div(vatMultiplier).toDecimalPlaces(4);
   const unitVatAmount = effectiveSaleUnitGross.sub(unitPriceNet).toDecimalPlaces(4);
 
-  // Gross commission — SALE-side, liste üzerinden: lineGrossAmount × commission / 100,
-  // sonra komisyon KDV split (oran caller'dan = commissionDivisor; DB'den çözülür,
-  // denetim A). Trendyol settlement'ta önce listeden keser (handleSale), bu yüzden
-  // gross taban LİSTE kalır — settlement ile tutarlı.
+  // Gross commission — SALE-side, liste üzerinden: lineGrossAmount × quantity × commission
+  // / 100, sonra komisyon KDV split (oran caller'dan = commissionDivisor; DB'den çözülür,
+  // denetim A). Trendyol settlement'ta önce listeden keser (handleSale), bu yüzden gross
+  // taban LİSTE kalır — settlement ile tutarlı. lineGrossAmount birim olduğundan komisyon
+  // alanları LINE-TOPLAMIDIR (× quantity); profit-formula bunları ×qty YAPMADAN ekler.
   const commissionRate =
     line.commission !== undefined && line.commission !== null
       ? new Decimal(line.commission)
       : new Decimal(0);
-  const grossCommissionGross = new Decimal(safeGrossAmount).mul(commissionRate).div(100);
+  const grossCommissionGross = new Decimal(safeGrossAmount)
+    .mul(safeQuantity)
+    .mul(commissionRate)
+    .div(100);
   const grossCommissionAmountNet = grossCommissionGross.div(commissionDivisor).toDecimalPlaces(2);
   const grossCommissionVatAmount = grossCommissionGross
     .sub(grossCommissionAmountNet)
@@ -295,7 +305,11 @@ function mapLine(
   // komisyon NET SATIŞ üzerinden (satıcının talebi, 2026-06-14). Settlement'ta
   // handleDiscount gerçek Discount satırıyla bu alanların üzerine yazar (aynı değer).
   // tyDiscount'a iade YOK (zaten effectiveSale'e dahil değil). sellerDiscount 0 → refund 0.
-  const refundedCommissionGross = new Decimal(safeSellerDiscount).mul(commissionRate).div(100);
+  // lineSellerDiscount birim olduğundan × quantity ile line-toplamına çıkarılır.
+  const refundedCommissionGross = new Decimal(safeSellerDiscount)
+    .mul(safeQuantity)
+    .mul(commissionRate)
+    .div(100);
   const refundedCommissionAmountNet = refundedCommissionGross
     .div(commissionDivisor)
     .toDecimalPlaces(2);
@@ -305,7 +319,8 @@ function mapLine(
 
   // Seller discount KDV split (her line kendi vatRate'iyle) — yalnız breakdown
   // gösterimi için taşınır; saleSubtotalNet'e zaten effectiveSale olarak gömülü (yukarıda).
-  const sellerDiscountGross = new Decimal(safeSellerDiscount);
+  // lineSellerDiscount birim olduğundan × quantity ile line-toplamı gösterilir.
+  const sellerDiscountGross = new Decimal(safeSellerDiscount).mul(safeQuantity);
   const sellerDiscountNet = sellerDiscountGross.div(vatMultiplier).toDecimalPlaces(2);
   const sellerDiscountVatAmount = sellerDiscountGross.sub(sellerDiscountNet).toDecimalPlaces(2);
 

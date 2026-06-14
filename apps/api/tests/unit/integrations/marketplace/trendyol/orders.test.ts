@@ -198,17 +198,20 @@ describe('mapTrendyolShipmentPackage — KDV split arithmetic', () => {
             lineId: 1,
             barcode: 'B-1',
             quantity: 3,
+            // lineUnitPrice / lineGrossAmount Trendyol'da BİRİM başınadır; toplam ×quantity.
             lineUnitPrice: 120,
-            lineGrossAmount: 360, // 3 × 120
+            lineGrossAmount: 120,
             vatRate: 20,
             commission: 10,
           },
         ],
       }),
     );
-    // saleSubtotalNet = 3 × 100 = 300
+    // saleSubtotalNet = 3 × (120 / 1.2) = 3 × 100 = 300
     expect(new Decimal(mapped.saleSubtotalNet).toString()).toBe('300');
     expect(new Decimal(mapped.saleVatTotal).toString()).toBe('60'); // 3 × 20
+    // grossCommission line-toplamı = 120 × 3 × %10 = 36 brüt → net 30 (×quantity).
+    expect(new Decimal(mapped.lines[0]!.grossCommissionAmountNet).toString()).toBe('30');
   });
 
   it('multi-line different VAT rates aggregate correctly', () => {
