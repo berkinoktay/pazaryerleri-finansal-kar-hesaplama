@@ -36,9 +36,12 @@ interface PackageOverrides {
   orderDate?: number;
   lastModifiedDate?: number;
   agreedDeliveryDate?: number | undefined;
+  estimatedDeliveryStartDate?: number | undefined;
+  estimatedDeliveryEndDate?: number | undefined;
   lines?: TrendyolOrderLine[];
   packageHistories?: TrendyolPackageHistory[] | undefined;
   fastDelivery?: boolean;
+  fastDeliveryType?: string | undefined;
   micro?: boolean;
 }
 
@@ -63,8 +66,11 @@ function buildPackage(overrides: PackageOverrides = {}): TrendyolShipmentPackage
     orderDate: overrides.orderDate ?? Date.UTC(2026, 5, 8, 14, 0, 0),
     lastModifiedDate: overrides.lastModifiedDate ?? Date.UTC(2026, 5, 8, 14, 0, 0),
     agreedDeliveryDate: overrides.agreedDeliveryDate,
+    estimatedDeliveryStartDate: overrides.estimatedDeliveryStartDate,
+    estimatedDeliveryEndDate: overrides.estimatedDeliveryEndDate,
     packageGrossAmount: 120,
     fastDelivery: overrides.fastDelivery ?? false,
+    fastDeliveryType: overrides.fastDeliveryType,
     micro: overrides.micro ?? false,
     lines: overrides.lines ?? [buildLine()],
     packageHistories: overrides.packageHistories,
@@ -170,6 +176,46 @@ describe('mapTrendyolShipmentPackage — actualDeliveryDate derivation', () => {
 });
 
 // ─── Per-line KDV split ────────────────────────────────────────────────
+
+describe('mapTrendyolShipmentPackage — fast-delivery type + estimated window capture', () => {
+  it('captures fastDeliveryType verbatim (prod sends "FastDelivery")', () => {
+    const mapped = mapTrendyolShipmentPackage(buildPackage({ fastDeliveryType: 'FastDelivery' }));
+
+    expect(mapped.fastDeliveryType).toBe('FastDelivery');
+  });
+
+  it('normalises empty fastDeliveryType ("" — stage / non-fast) to null', () => {
+    const mapped = mapTrendyolShipmentPackage(buildPackage({ fastDeliveryType: '' }));
+
+    expect(mapped.fastDeliveryType).toBeNull();
+  });
+
+  it('returns null fastDeliveryType when Trendyol omits the field', () => {
+    const mapped = mapTrendyolShipmentPackage(buildPackage({ fastDeliveryType: undefined }));
+
+    expect(mapped.fastDeliveryType).toBeNull();
+  });
+
+  it('captures estimatedDelivery window as raw-epoch Dates (GMT passthrough)', () => {
+    const start = Date.UTC(2026, 5, 12, 15, 57, 28);
+    const end = Date.UTC(2026, 5, 13, 11, 38, 56);
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({ estimatedDeliveryStartDate: start, estimatedDeliveryEndDate: end }),
+    );
+
+    expect(mapped.estimatedDeliveryStartDate?.toISOString()).toBe('2026-06-12T15:57:28.000Z');
+    expect(mapped.estimatedDeliveryEndDate?.toISOString()).toBe('2026-06-13T11:38:56.000Z');
+  });
+
+  it('returns null estimatedDelivery when Trendyol sends 0 (stage)', () => {
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({ estimatedDeliveryStartDate: 0, estimatedDeliveryEndDate: 0 }),
+    );
+
+    expect(mapped.estimatedDeliveryStartDate).toBeNull();
+    expect(mapped.estimatedDeliveryEndDate).toBeNull();
+  });
+});
 
 describe('mapTrendyolShipmentPackage — per-line KDV split', () => {
   it('splits a 20% VAT line correctly: 120 gross → 100 net + 20 VAT', () => {

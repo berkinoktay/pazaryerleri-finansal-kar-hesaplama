@@ -524,9 +524,17 @@ model Order {
   //   Delivered status webhook'unda set'lenir. Order endpoint'te direkt field YOK.
   agreedDeliveryDate DateTime? @map("agreed_delivery_date")
   actualDeliveryDate DateTime? @map("actual_delivery_date")
+  // estimatedDelivery{Start,End}Date: getShipmentPackages tahmini teslim penceresi.
+  //   PROD'da dolu (2026-06-14 gözlem 11314118846); stage test siparişlerinde 0 → null.
+  estimatedDeliveryStartDate DateTime? @map("estimated_delivery_start_date")
+  estimatedDeliveryEndDate   DateTime? @map("estimated_delivery_end_date")
   // fastDelivery: getShipmentPackages direkt boolean (Bugün Kargoda indikatörü).
+  // fastDeliveryType: "TodayDelivery"|"SameDayShipping"|"FastDelivery" — sipariş
+  //   seviyesinde yalnız PROD'da dolar (stage "" → null). Per-tip kriterin kaynağı
+  //   (hibrit tasarım 2026-06-14): "fast mı + tip" siparişten, cutoff üründen.
   // micro: getShipmentPackages direkt boolean (mikro ihracat) — PSF muafiyeti.
   fastDelivery       Boolean   @default(false) @map("fast_delivery")
+  fastDeliveryType   String?   @map("fast_delivery_type")
   micro              Boolean   @default(false) @map("micro")
 
   // ─── PR-5a: Kar V1 state/derived kolonları (design §3.1) ────────────

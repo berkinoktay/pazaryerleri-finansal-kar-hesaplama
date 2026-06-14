@@ -744,7 +744,10 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       agreedDeliveryDate: new Date('2026-05-20T00:00:00Z'),
       actualDeliveryDate: new Date('2026-05-19T18:00:00Z'),
       fastDelivery: true,
+      fastDeliveryType: 'FastDelivery',
       micro: false,
+      estimatedDeliveryStartDate: new Date('2026-05-20T08:00:00Z'),
+      estimatedDeliveryEndDate: new Date('2026-05-20T18:00:00Z'),
       cargoProviderName: 'Trendyol Express Marketplace',
       cargoTrackingNumber: '7330000167510333',
       cargoDeci: '2.00',
@@ -782,6 +785,10 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(order.usesSellerCargoAgreement).toBe(false);
     expect(order.platformCreatedBy).toBe('order-creation');
     expect(order.originShipmentDate?.toISOString()).toBe('2026-05-19T09:00:00.000Z');
+    // Fast-delivery type + estimated window capture (2026-06-14, hibrit tasarım).
+    expect(order.fastDeliveryType).toBe('FastDelivery');
+    expect(order.estimatedDeliveryStartDate?.toISOString()).toBe('2026-05-20T08:00:00.000Z');
+    expect(order.estimatedDeliveryEndDate?.toISOString()).toBe('2026-05-20T18:00:00.000Z');
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
@@ -806,7 +813,10 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       agreedDeliveryDate: null,
       actualDeliveryDate: null,
       fastDelivery: false,
+      fastDeliveryType: null,
       micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
       usesSellerCargoAgreement: false,
       platformCreatedBy: 'order-creation',
       lines: [
