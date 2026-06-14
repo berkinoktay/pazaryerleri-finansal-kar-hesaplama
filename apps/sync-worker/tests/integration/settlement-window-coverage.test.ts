@@ -41,6 +41,7 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const BARCODE = 'EAN13-WINDOW';
@@ -186,6 +187,8 @@ describe('processSettlementsChunk — scan window coverage', () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // Settlement handler'ları komisyon KDV oranını fee_definitions'tan çözer (denetim A).
+    await ensureFeeDefinitions();
   });
 
   it('chunks the 60-day scan into ≤15-day slices and backfills a T-35d Sale row', async () => {

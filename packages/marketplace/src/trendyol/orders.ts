@@ -18,7 +18,7 @@ import type { StoreEnvironment } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
-import { TRENDYOL_COMMISSION_VAT_DIVISOR } from './constants';
+import { TRENDYOL_COMMISSION_VAT_RATE, commissionVatDivisor } from './constants';
 import { fetchOnce, type FetcherDeps } from './fetch-once';
 import { baseUrlFor } from './headers';
 import type {
@@ -41,8 +41,9 @@ import type {
  */
 export const ORDERS_PAGE_SIZE = 200;
 
-// Commission VAT convention (%20) lives in './constants' —
-// TRENDYOL_COMMISSION_VAT_DIVISOR (single source, #300).
+// Commission VAT rate is DB-driven (denetim A) — resolved by the caller and
+// passed in as `commissionVatRate`; defaults to TRENDYOL_COMMISSION_VAT_RATE
+// (the estimate fallback). Divisor via `commissionVatDivisor` ('./constants').
 
 // ─── Request URL building ───────────────────────────────────────────────
 
@@ -132,13 +133,17 @@ function epochMsToDate(ms: number | null | undefined): Date | null {
  * is preserved as-is from Trendyol (typically integer like 20, but the
  * field is declared decimal — defensive parsing).
  */
-export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): MappedOrder {
+export function mapTrendyolShipmentPackage(
+  pkg: TrendyolShipmentPackage,
+  commissionVatRate: number = TRENDYOL_COMMISSION_VAT_RATE,
+): MappedOrder {
   const deliveredEvent = (pkg.packageHistories ?? []).find((h) => h.status === 'Delivered');
   const actualDeliveryDate =
     deliveredEvent !== undefined ? epochMsToDate(deliveredEvent.createdDate) : null;
 
+  const commissionDivisor = commissionVatDivisor(commissionVatRate);
   const mappedLines: MappedOrderLine[] = pkg.lines.map((line) =>
-    mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }),
+    mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }, commissionDivisor),
   );
 
   // Package aggregate, per-line VAT-aware. Multi-vatRate order'larda her
@@ -189,7 +194,11 @@ export function mapTrendyolShipmentPackage(pkg: TrendyolShipmentPackage): Mapped
   };
 }
 
-function mapLine(line: TrendyolOrderLine, ctx: { shipmentPackageId: number }): MappedOrderLine {
+function mapLine(
+  line: TrendyolOrderLine,
+  ctx: { shipmentPackageId: number },
+  commissionDivisor: Decimal,
+): MappedOrderLine {
   // Defensive sparse-field handling — PR-A regression hotfix.
   //
   // Webhook payload Zod schema (apps/api/src/routes/webhooks/trendyol-orders.routes.ts,
@@ -251,16 +260,15 @@ function mapLine(line: TrendyolOrderLine, ctx: { shipmentPackageId: number }): M
   const unitVatAmount = effectiveSaleUnitGross.sub(unitPriceNet).toDecimalPlaces(4);
 
   // Gross commission — Trendyol formülü: lineGrossAmount × commission / 100,
-  // sonra %20 KDV split. (Discount commission iadesi T+0'da YOK — Settlement
-  // worker PR-7 doldurur; bu mapper sadece T+0 estimate input'u verir.)
+  // sonra komisyon KDV split (oran caller'dan = commissionDivisor; DB'den çözülür,
+  // denetim A). (Discount commission iadesi T+0'da YOK — Settlement worker PR-7
+  // doldurur; bu mapper sadece T+0 estimate input'u verir.)
   const commissionRate =
     line.commission !== undefined && line.commission !== null
       ? new Decimal(line.commission)
       : new Decimal(0);
   const grossCommissionGross = new Decimal(safeGrossAmount).mul(commissionRate).div(100);
-  const grossCommissionAmountNet = grossCommissionGross
-    .div(TRENDYOL_COMMISSION_VAT_DIVISOR)
-    .toDecimalPlaces(2);
+  const grossCommissionAmountNet = grossCommissionGross.div(commissionDivisor).toDecimalPlaces(2);
   const grossCommissionVatAmount = grossCommissionGross
     .sub(grossCommissionAmountNet)
     .toDecimalPlaces(2);
@@ -295,7 +303,10 @@ export interface MappedOrdersPage {
  * Map a full /orders page response: wraps each shipmentPackage and
  * preserves page meta for cursor advancement decisions in the caller.
  */
-export function mapTrendyolOrdersResponse(raw: TrendyolOrdersResponse): MappedOrdersPage {
+export function mapTrendyolOrdersResponse(
+  raw: TrendyolOrdersResponse,
+  commissionVatRate: number = TRENDYOL_COMMISSION_VAT_RATE,
+): MappedOrdersPage {
   return {
     pageMeta: {
       totalElements: raw.totalElements,
@@ -303,7 +314,7 @@ export function mapTrendyolOrdersResponse(raw: TrendyolOrdersResponse): MappedOr
       page: raw.page,
       size: raw.size,
     },
-    batch: raw.content.map(mapTrendyolShipmentPackage),
+    batch: raw.content.map((pkg) => mapTrendyolShipmentPackage(pkg, commissionVatRate)),
   };
 }
 
@@ -328,6 +339,13 @@ export interface FetchShipmentPackagesOpts {
    * the decoded cursor so each invocation processes exactly one page.
    */
   initialPage?: number;
+  /**
+   * Commission VAT rate (%) for the KDV split. Resolve from the
+   * `COMMISSION_INVOICE`/`ALL` FeeDefinition (denetim A) and pass in. Omit to
+   * fall back to TRENDYOL_COMMISSION_VAT_RATE (estimate default, reconciled by
+   * settlement).
+   */
+  commissionVatRate?: number;
 }
 
 /**
@@ -371,7 +389,7 @@ export async function* fetchShipmentPackages(
     });
 
     const raw = await fetchOnce<TrendyolOrdersResponse>(url, deps);
-    const mapped = mapTrendyolOrdersResponse(raw);
+    const mapped = mapTrendyolOrdersResponse(raw, opts.commissionVatRate);
 
     if (totalElements === null) totalElements = mapped.pageMeta.totalElements;
 
@@ -448,6 +466,13 @@ export interface FetchShipmentPackagesStreamOpts {
   cursor?: string;
   /** Page size; defaults to ORDERS_PAGE_SIZE (200). */
   size?: number;
+  /**
+   * Commission VAT rate (%) for the KDV split. Resolve from the
+   * `COMMISSION_INVOICE`/`ALL` FeeDefinition (denetim A) and pass in. Omit to
+   * fall back to TRENDYOL_COMMISSION_VAT_RATE (estimate default, reconciled by
+   * settlement).
+   */
+  commissionVatRate?: number;
 }
 
 /** Yield shape per stream page — caller advances via the next cursor + flag. */
@@ -510,7 +535,7 @@ export async function* fetchShipmentPackagesStream(
     });
 
     const raw = await fetchOnce<TrendyolOrdersStreamResponse>(url, deps);
-    const batch = raw.content.map(mapTrendyolShipmentPackage);
+    const batch = raw.content.map((pkg) => mapTrendyolShipmentPackage(pkg, opts.commissionVatRate));
 
     yield { batch, nextCursor: raw.nextCursor, hasMore: raw.hasMore };
 

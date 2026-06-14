@@ -14,8 +14,8 @@
 // So one Return row now writes:
 //   1. REFUND_DEDUCTION  DEBIT   from row.debt          (gross claw-back)
 //   2. COMMISSION_REFUND CREDIT  from row.commissionAmount (KDV-dahil,
-//      split at the fixed 20% commission-VAT convention —
-//      TRENDYOL_COMMISSION_VAT_RATE, shared in @pazarsync/marketplace)
+//      split at the DB-driven commission-VAT rate — fee_definitions
+//      ALL/COMMISSION_INVOICE via resolveFeeDefinition, denetim A)
 //   3. COST_RETURN       CREDIT  from the item's unit cost snapshot
 //      (one UNIT per Return row — research §3.2: per-item like Sale)
 // and then refreshes Order.settledNetProfit so a late return (outside
@@ -46,12 +46,8 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import {
-  TRENDYOL_COMMISSION_VAT_DIVISOR,
-  TRENDYOL_COMMISSION_VAT_RATE,
-  type TrendyolFinancialTransaction,
-} from '@pazarsync/marketplace';
-import { recomputeSettledProfit } from '@pazarsync/profit';
+import { commissionVatDivisor, type TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import { recomputeSettledProfit, resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 import type { HandleSettlementResult } from './sale';
@@ -84,13 +80,17 @@ export async function handleReturn(
   const platformOrderId = row.shipmentPackageId.toString();
   let order = await tx.order.findFirst({
     where: { storeId, platformOrderId },
-    select: { id: true, organizationId: true, settledNetProfit: true },
+    select: { id: true, organizationId: true, settledNetProfit: true, orderDate: true },
   });
 
   if (order === null) {
     const claim = await tx.orderClaim.findFirst({
       where: { storeId, orderShipmentPackageId: platformOrderId },
-      select: { order: { select: { id: true, organizationId: true, settledNetProfit: true } } },
+      select: {
+        order: {
+          select: { id: true, organizationId: true, settledNetProfit: true, orderDate: true },
+        },
+      },
     });
     order = claim?.order ?? null;
   }
@@ -102,7 +102,7 @@ export async function handleReturn(
         platformOrderNumber: row.orderNumber,
         items: { some: { productVariant: { is: { barcode: row.barcode } } } },
       },
-      select: { id: true, organizationId: true, settledNetProfit: true },
+      select: { id: true, organizationId: true, settledNetProfit: true, orderDate: true },
       take: 2,
     });
     if (candidates.length === 1) {
@@ -244,10 +244,19 @@ export async function handleReturn(
     row.commissionAmount !== null &&
     row.commissionAmount !== undefined
   ) {
-    // row.commissionAmount arrives KDV-dahil, same fixed %20 convention as
-    // the sale-side commission this credit reverses (shared constant, #300).
+    // row.commissionAmount arrives KDV-dahil, same DB-driven rate as the
+    // sale-side commission this credit reverses (denetim A — fee_definitions
+    // ALL/COMMISSION_INVOICE, order.orderDate'e göre çözülür).
+    const commissionVatDef = await resolveFeeDefinition(tx, {
+      platform: 'TRENDYOL',
+      feeType: 'COMMISSION_INVOICE',
+      at: order.orderDate,
+    });
+    const commissionVatRate = new Decimal(commissionVatDef.defaultVatRate.toString());
     const commissionGross = new Decimal(row.commissionAmount);
-    const commissionNet = commissionGross.div(TRENDYOL_COMMISSION_VAT_DIVISOR).toDecimalPlaces(2);
+    const commissionNet = commissionGross
+      .div(commissionVatDivisor(commissionVatRate))
+      .toDecimalPlaces(2);
     await tx.orderFee.create({
       data: {
         orderId: order.id,
@@ -256,7 +265,7 @@ export async function handleReturn(
         source: 'SETTLEMENT',
         direction: 'CREDIT',
         amountNet: commissionNet,
-        vatRate: new Decimal(TRENDYOL_COMMISSION_VAT_RATE),
+        vatRate: commissionVatRate,
         vatAmount: commissionGross.sub(commissionNet),
         displayName: 'Komisyon iadesi',
         trendyolTransactionId,

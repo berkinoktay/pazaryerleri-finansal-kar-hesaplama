@@ -211,6 +211,35 @@ describe('mapTrendyolShipmentPackage — per-line KDV split', () => {
     expect(mapped.lines[0]?.commissionRate).toBe('10');
   });
 
+  it('uses the commissionVatRate param for the KDV split (denetim A — DB-driven)', () => {
+    // grossCommissionGross 10; rate %18 → divisor 1.18 → net 10/1.18 = 8.47,
+    // vat 10 - 8.47 = 1.53. Differs from the 20% default (8.33 / 1.67).
+    const mapped = mapTrendyolShipmentPackage(
+      buildPackage({
+        lines: [
+          buildLine({ lineUnitPrice: 100, lineGrossAmount: 100, vatRate: 20, commission: 10 }),
+        ],
+      }),
+      18,
+    );
+
+    expect(mapped.lines[0]?.grossCommissionAmountNet).toBe('8.47');
+    expect(mapped.lines[0]?.grossCommissionVatAmount).toBe('1.53');
+  });
+
+  it('falls back to the 20% default when commissionVatRate is omitted', () => {
+    const lines = [
+      buildLine({ lineUnitPrice: 100, lineGrossAmount: 100, vatRate: 20, commission: 10 }),
+    ];
+    const omitted = mapTrendyolShipmentPackage(buildPackage({ lines }));
+    const explicit20 = mapTrendyolShipmentPackage(buildPackage({ lines }), 20);
+
+    expect(omitted.lines[0]?.grossCommissionAmountNet).toBe('8.33');
+    expect(omitted.lines[0]?.grossCommissionAmountNet).toBe(
+      explicit20.lines[0]?.grossCommissionAmountNet,
+    );
+  });
+
   it('splits sellerDiscount with the per-line vatRate', () => {
     const mapped = mapTrendyolShipmentPackage(
       buildPackage({

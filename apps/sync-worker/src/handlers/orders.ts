@@ -40,6 +40,7 @@ import {
   STREAM_WINDOW_MAX_DAYS,
 } from '@pazarsync/marketplace';
 import { intakeOrder, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { resolveFeeDefinition } from '@pazarsync/profit';
 import { parseOrdersCursor, syncLog, type OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 
 import { readSyncEnv } from '../lib/env';
@@ -224,6 +225,18 @@ export async function processOrdersChunk(input: {
     return advanceChunkOrFinish(log, cursor, log.progressCurrent, chunkCount);
   }
 
+  // Komisyon KDV oranı DB'den (denetim A — fee_definitions ALL/COMMISSION_INVOICE).
+  // Mapper T+0 estimate'i bu oranla KDV-böler. Bir chunk çok siparişli bir pencere
+  // (≤14 gün) — saf mapper tek oran alır, bu yüzden chunk başına GÜNCEL oranla bir kez
+  // çözülür (per-order tarihsel oran mümkün değil). Bu yalnız bir TAHMİN; settlement
+  // handler'ları her siparişi order.orderDate'e göre yeniden çözüp mutabık kılar.
+  // Bulunamazsa (seed eksik = yanlış kurulum) loud throw — PSF/STOPPAGE ile aynı.
+  const commissionVatDef = await resolveFeeDefinition(prisma, {
+    platform: store.platform,
+    feeType: 'COMMISSION_INVOICE',
+    at: new Date(),
+  });
+
   // Generator yields ONE stream page, then we return — dispatcher loops
   // with our advanced cursor (re-creates the generator next tick).
   const generator = fetchShipmentPackagesStream({
@@ -232,6 +245,7 @@ export async function processOrdersChunk(input: {
     lastModifiedStartDate: bounds.startMs,
     lastModifiedEndDate: bounds.endMs,
     cursor: cursor.streamCursor ?? undefined,
+    commissionVatRate: Number(commissionVatDef.defaultVatRate),
   });
   const { value, done } = await generator.next();
 

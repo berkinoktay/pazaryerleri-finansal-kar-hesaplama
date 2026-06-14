@@ -41,7 +41,9 @@ import {
   type TrendyolShipmentPackage,
 } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
+import { resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
+import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { UnauthorizedError, ValidationError } from '../../lib/errors';
 import { createSubApp } from '../../lib/create-hono-app';
@@ -237,9 +239,23 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
   }
 
   // ─── 4. Build MappedOrder + dispatch ───────────────────────────────────
+  // Komisyon KDV oranı DB'den (denetim A — fee_definitions ALL/COMMISSION_INVOICE).
+  // `at` = siparişin tarihi (payload.orderDate, mapper'la aynı normalize): settlement
+  // handler'ları da order.orderDate'e göre çözer → T+0 tahmin ile mutabakat aynı oranı
+  // kullanır (oran bir gün değişse bile tutarlı). Bulunamazsa loud throw (seed eksik=yanlış kurulum).
+  const commissionVatDef = await resolveFeeDefinition(prisma, {
+    platform: store.platform,
+    feeType: 'COMMISSION_INVOICE',
+    at: businessZoneEpochToInstant(payload.orderDate),
+  });
+
   let mapped: MappedOrder;
   try {
-    mapped = mapTrendyolWebhookPayload(payload, mappedStatus);
+    mapped = mapTrendyolWebhookPayload(
+      payload,
+      mappedStatus,
+      Number(commissionVatDef.defaultVatRate),
+    );
   } catch (err) {
     syncLog.error('webhook.payload-map-failed', {
       storeId: store.id,

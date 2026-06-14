@@ -14,8 +14,9 @@
 // (line 1100). Cross-store collisions safe; same serial in a different
 // store creates an independent row.
 //
-// KDV split: commission invoice debt is KDV-dahil; %20 sabit Trendyol
-// convention (design §12.2 #1) → totalNet = debt / 1.20.
+// KDV split: commission invoice debt is KDV-dahil; komisyon KDV oranı DB'den
+// (denetim A — fee_definitions ALL/COMMISSION_INVOICE, faturanın paymentDate'ine
+// göre) → totalNet = debt / (1 + rate/100).
 //
 // Period: schema's periodStart/periodEnd are NOT NULL. V1 pragmatic —
 // use paymentDate for both (weekly invoice represented by a single date).
@@ -29,10 +30,8 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import {
-  TRENDYOL_COMMISSION_VAT_DIVISOR,
-  type TrendyolFinancialTransaction,
-} from '@pazarsync/marketplace';
+import { commissionVatDivisor, type TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import { resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 import type { HandleSettlementResult } from './sale';
@@ -62,8 +61,16 @@ export async function handleCommissionInvoice(
   // per-shipment uses the same serial).
   const trendyolSerialNumber = row.id;
   const paymentDate = new Date(row.paymentDate);
+  // Komisyon KDV oranı DB'den (denetim A), faturanın paymentDate'ine göre çözülür.
+  const commissionVatDef = await resolveFeeDefinition(tx, {
+    platform: 'TRENDYOL',
+    feeType: 'COMMISSION_INVOICE',
+    at: paymentDate,
+  });
   const gross = new Decimal(row.debt);
-  const totalNet = gross.div(TRENDYOL_COMMISSION_VAT_DIVISOR).toDecimalPlaces(2);
+  const totalNet = gross
+    .div(commissionVatDivisor(commissionVatDef.defaultVatRate.toString()))
+    .toDecimalPlaces(2);
   const totalVat = gross.sub(totalNet);
 
   const invoice = await tx.commissionInvoice.upsert({

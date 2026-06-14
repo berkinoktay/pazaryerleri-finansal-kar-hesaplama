@@ -22,10 +22,8 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import {
-  TRENDYOL_COMMISSION_VAT_DIVISOR,
-  type TrendyolFinancialTransaction,
-} from '@pazarsync/marketplace';
+import { commissionVatDivisor, type TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import { resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 import type { HandleSettlementResult } from './sale';
@@ -48,7 +46,7 @@ export async function handleDiscount(
   const platformOrderId = row.shipmentPackageId.toString();
   const order = await tx.order.findFirst({
     where: { storeId, platformOrderId },
-    select: { id: true },
+    select: { id: true, orderDate: true },
   });
   if (order === null) {
     syncLog.warn('settlements.discount.order-not-found', { id: row.id, platformOrderId });
@@ -77,10 +75,16 @@ export async function handleDiscount(
     return { applied: false, skipReason: 'item_not_found' };
   }
 
-  // Refunded commission split — same %20 convention as Sale (design §5.2).
+  // Refunded commission split — same DB-driven rate as Sale (denetim A);
+  // komisyon KDV oranı fee_definitions ALL/COMMISSION_INVOICE'tan order.orderDate'e göre.
+  const commissionVatDef = await resolveFeeDefinition(tx, {
+    platform: 'TRENDYOL',
+    feeType: 'COMMISSION_INVOICE',
+    at: order.orderDate,
+  });
   const refundedGross = new Decimal(row.commissionAmount);
   const refundedCommissionAmountNet = refundedGross
-    .div(TRENDYOL_COMMISSION_VAT_DIVISOR)
+    .div(commissionVatDivisor(commissionVatDef.defaultVatRate.toString()))
     .toDecimalPlaces(2);
   const refundedCommissionVatAmount = refundedGross.sub(refundedCommissionAmountNet);
 

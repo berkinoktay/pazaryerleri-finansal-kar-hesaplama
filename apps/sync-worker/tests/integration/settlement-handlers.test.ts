@@ -19,6 +19,7 @@ import {
   createUserProfile,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
+import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
 const BARCODE = 'EAN13-001';
 const SHIPMENT_PACKAGE_ID = 999_123_456;
@@ -200,6 +201,9 @@ describe('settlement handlers', () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // Settlement handler'ları komisyon KDV oranını fee_definitions
+    // ALL/COMMISSION_INVOICE'tan çözer (denetim A) → seed gerekir.
+    await ensureFeeDefinitions();
   });
 
   afterEach(async () => {
