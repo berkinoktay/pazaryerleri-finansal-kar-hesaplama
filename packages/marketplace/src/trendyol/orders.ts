@@ -146,6 +146,12 @@ export function mapTrendyolShipmentPackage(
   const deliveredEvent = (pkg.packageHistories ?? []).find((h) => h.status === 'Delivered');
   const actualDeliveryDate =
     deliveredEvent !== undefined ? epochMsToDate(deliveredEvent.createdDate) : null;
+  // actualShipDate: paketin "taşıma durumuna geçiş" anı (Shipped event). createdDate
+  // GMT/true-UTC → RAW (normalize edilmez). SameDayShipping PSF kriterinin (aynı-gün
+  // sevk) tabanı — originShipmentDate (hazır-anı ≈ sipariş) gerçek sevk DEĞİL.
+  const shippedEvent = (pkg.packageHistories ?? []).find((h) => h.status === 'Shipped');
+  const actualShipDate =
+    shippedEvent !== undefined ? epochMsToDate(shippedEvent.createdDate) : null;
 
   const commissionDivisor = commissionVatDivisor(commissionVatRate);
   const mappedLines: MappedOrderLine[] = pkg.lines.map((line) =>
@@ -186,6 +192,7 @@ export function mapTrendyolShipmentPackage(
     estimatedDeliveryStartDate: epochMsToDate(pkg.estimatedDeliveryStartDate),
     estimatedDeliveryEndDate: epochMsToDate(pkg.estimatedDeliveryEndDate),
     actualDeliveryDate,
+    actualShipDate,
     fastDelivery: pkg.fastDelivery,
     fastDeliveryType: normalizeFastDeliveryType(pkg.fastDeliveryType),
     micro: pkg.micro,

@@ -524,6 +524,10 @@ model Order {
   //   Delivered status webhook'unda set'lenir. Order endpoint'te direkt field YOK.
   agreedDeliveryDate DateTime? @map("agreed_delivery_date")
   actualDeliveryDate DateTime? @map("actual_delivery_date")
+  // actualShipDate: packageHistories[status='Shipped'].createdDate — "taşıma durumuna
+  //   geçiş" anı (RAW GMT). SameDayShipping PSF kriterinin (aynı-gün sevk, 2026-06-14)
+  //   tabanı. NOT: originShipmentDate = kargoya-hazır anı (≈ sipariş) → gerçek sevk DEĞİL.
+  actualShipDate     DateTime? @map("actual_ship_date")
   // estimatedDelivery{Start,End}Date: getShipmentPackages tahmini teslim penceresi.
   //   PROD'da dolu (2026-06-14 gözlem 11314118846); stage test siparişlerinde 0 → null.
   estimatedDeliveryStartDate DateTime? @map("estimated_delivery_start_date")

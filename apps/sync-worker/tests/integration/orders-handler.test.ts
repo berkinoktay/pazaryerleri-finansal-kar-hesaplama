@@ -743,6 +743,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       saleVatTotal: '20.00',
       agreedDeliveryDate: new Date('2026-05-20T00:00:00Z'),
       actualDeliveryDate: new Date('2026-05-19T18:00:00Z'),
+      actualShipDate: new Date('2026-05-19T12:00:00Z'),
       fastDelivery: true,
       fastDeliveryType: 'FastDelivery',
       micro: false,
@@ -789,6 +790,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(order.fastDeliveryType).toBe('FastDelivery');
     expect(order.estimatedDeliveryStartDate?.toISOString()).toBe('2026-05-20T08:00:00.000Z');
     expect(order.estimatedDeliveryEndDate?.toISOString()).toBe('2026-05-20T18:00:00.000Z');
+    expect(order.actualShipDate?.toISOString()).toBe('2026-05-19T12:00:00.000Z');
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
@@ -812,6 +814,7 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       saleVatTotal: '20.00',
       agreedDeliveryDate: null,
       actualDeliveryDate: null,
+      actualShipDate: null,
       fastDelivery: false,
       fastDeliveryType: null,
       micro: false,
@@ -855,6 +858,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       cargoTrackingNumber: null,
       cargoDeci: '3.50',
       originShipmentDate: null,
+      // Shipped event sonraki sync'te geldi → actualShipDate null→non-null tazelenmeli.
+      actualShipDate: new Date('2026-05-19T13:00:00Z'),
     });
 
     const order = await prisma.order.findFirstOrThrow({
@@ -864,6 +869,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(order.cargoTrackingNumber).toBe(7330000167519999n);
     expect(new Decimal(order.cargoDeci!.toString()).toString()).toBe('3.5');
     expect(order.originShipmentDate?.toISOString()).toBe('2026-05-19T09:00:00.000Z');
+    // actualShipDate ilk sync'te null'dı; ikinci sync'te (Shipped event) yazıldı.
+    expect(order.actualShipDate?.toISOString()).toBe('2026-05-19T13:00:00.000Z');
   });
 });
 

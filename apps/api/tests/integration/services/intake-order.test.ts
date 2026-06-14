@@ -44,6 +44,7 @@ function buildMapped(over: {
     saleVatTotal: '15.25',
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
+    actualShipDate: null,
     fastDelivery: false,
     fastDeliveryType: null,
     micro: false,
