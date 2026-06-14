@@ -14,6 +14,14 @@
 // rate is the line's unitVatRate (Trendyol stores it on each OrderItem
 // from the order arrival mapping).
 //
+// QUANTITY (handleSale ile aynı, EMPİRİK 2026-06-14): Trendyol qty=N için N adet
+// PER-UNIT Discount satırı gönderir (debt = birim satıcı indirimi = "item'ların
+// ortalaması", commissionAmount = birim iade komisyonu). OrderItem refund-side
+// alanları LINE-TOPLAMI olduğundan settlement değerleri × OrderItem.quantity ile
+// çıkarılır. Σ ile ×quantity arasında satır-başı yuvarlamadan ≤0.01×qty fark
+// olabilir; ×quantity estimate (per-unit × qty) ile tutarlıdır ve idempotenttir.
+// Detay: docs/plans/2026-06-14-settlement-qty-per-unit-findings.md.
+//
 // CHECK constraint (PR-3 migration.sql):
 //   refunded_commission_amount_net <= gross_commission_amount_net
 // Handler does not guard against this — the DB rejects on violation.
@@ -64,7 +72,7 @@ export async function handleDiscount(
 
   const item = await tx.orderItem.findFirst({
     where: { orderId: order.id, productVariantId: variant.id },
-    select: { id: true, unitVatRate: true },
+    select: { id: true, unitVatRate: true, quantity: true },
   });
   if (item === null) {
     syncLog.warn('settlements.discount.item-not-found', {
@@ -77,12 +85,14 @@ export async function handleDiscount(
 
   // Refunded commission split — same DB-driven rate as Sale (denetim A);
   // komisyon KDV oranı fee_definitions ALL/COMMISSION_INVOICE'tan order.orderDate'e göre.
+  // × quantity: row.commissionAmount / row.debt BİRİM başınadır (header) → line-toplamı.
+  const quantity = new Decimal(item.quantity);
   const commissionVatDef = await resolveFeeDefinition(tx, {
     platform: 'TRENDYOL',
     feeType: 'COMMISSION_INVOICE',
     at: order.orderDate,
   });
-  const refundedGross = new Decimal(row.commissionAmount);
+  const refundedGross = new Decimal(row.commissionAmount).mul(quantity);
   const refundedCommissionAmountNet = refundedGross
     .div(commissionVatDivisor(commissionVatDef.defaultVatRate.toString()))
     .toDecimalPlaces(2);
@@ -94,7 +104,7 @@ export async function handleDiscount(
   let sellerDiscountNet: Decimal | undefined;
   let sellerDiscountVatAmount: Decimal | undefined;
   if (item.unitVatRate !== null) {
-    const debtGross = new Decimal(row.debt);
+    const debtGross = new Decimal(row.debt).mul(quantity);
     const unitVatRate = new Decimal(item.unitVatRate);
     const divisor = unitVatRate.div(100).add(1);
     sellerDiscountNet = debtGross.div(divisor).toDecimalPlaces(2);
