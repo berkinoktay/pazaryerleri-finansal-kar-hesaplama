@@ -1,11 +1,10 @@
-// `db:reset:clean` — wipe the dev DB to a true blank baseline.
+// `db:reset:clean` — wipe the dev DB to a true blank baseline for GROSS convention.
 //
 // TRUNCATEs every application table (tenant + catalog + account + reference),
 // purges leaked `@test.local` auth users, then re-creates `user_profiles` rows
 // for the auth users that survive — leaving the schema intact but empty.
-// After this, run `pnpm db:seed` for a minimal login and re-sync products (real
-// Trendyol product sync) before testing orders — an order line with no resolvable
-// variant is a hard skip, so a blank catalog cannot ingest orders.
+// After this, re-connect the store from the UI → bootstrap re-sync
+// (products → orders → settlements) rebuilds everything under GROSS convention.
 //
 // The table set is DISCOVERED dynamically from the catalog (every public table
 // except Prisma's migration bookkeeping), so the wipe never drifts as the schema
