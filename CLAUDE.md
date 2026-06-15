@@ -613,9 +613,28 @@ SUPABASE_SECRET_KEY=
 ## Git Conventions
 
 - Branch naming: `feature/xxx`, `fix/xxx`, `refactor/xxx`
-- Commit messages: conventional commits (feat, fix, refactor, docs, chore)
+- Commit messages: conventional commits (feat, fix, refactor, docs, chore) — **kept in English** (machine/tooling convention; the type prefix and scope stay English)
+- PR title: a **conventional commit in English** (`feat`/`fix`/… + scope) — squash-merge uses the PR title verbatim as the main commit message, and CI enforces it (`PR title is conventional`), so it follows the same rule as commit messages. PR description (body): **clear Turkish** so the owner can read it directly. See "Communication & Written Content Language" below
 - PR required for main branch
 - No force push to main
+
+## Communication & Written Content Language
+
+The repo owner reads Turkish, not English. Anything a human reads as prose MUST be written in **clear, complete, meaningful Turkish sentences** — never a dense soup of abbreviations, code identifiers, arrows, and math symbols (`Σ`, `×`, `÷`, `→`) that buries the meaning. State the "what" and the "why" in plain language first; use code identifiers and figures inline only to add precision, not as a substitute for the sentence.
+
+This applies to:
+
+- **Chat replies to the owner** — explanations, summaries, status updates, and questions. Full Turkish sentences, the same care as everything below.
+- **PR descriptions (the body)** — written in Turkish so the owner can read them directly. Lead with a plain-language summary of what changed and why. (The PR _title_ is the exception — it is an English conventional commit, see below.)
+- **Design plans and findings notes meant for a human** (`docs/plans/`, memory topic files) — same rule; readability over shorthand density.
+
+What stays in English:
+
+- **Commit messages and PR titles** — English conventional commits (`feat`/`fix`/`refactor`/`docs`/`chore` + scope). The PR title belongs here because squash-merge turns it into the main commit message and CI gates it (`PR title is conventional`); only the PR _description_ is Turkish.
+- **Code** — identifiers, variable/type names, and code comments.
+- **Backend error `title`/`detail`** — English for logs; the frontend localizes to Turkish from the error `code` via next-intl.
+
+Rule of thumb: if a person reads it as prose, write clear Turkish sentences. If a tool or another developer parses it as structured technical tokens, English is correct.
 
 ## Verification
 

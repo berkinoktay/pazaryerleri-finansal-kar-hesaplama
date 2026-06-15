@@ -396,6 +396,20 @@ export async function upsertOrderWithSnapshot(
           unitVatAmount: new Decimal(line.unitVatAmount),
           grossCommissionAmountNet: new Decimal(line.grossCommissionAmountNet),
           grossCommissionVatAmount: new Decimal(line.grossCommissionVatAmount),
+          // Komisyon TAHMİNİ donuk kopyası (2026-06-15): mapper'ın T+0 değeri. Settlement
+          // Sale/Discount satırı grossCommission*/refundedCommission*'i GERÇEKLE overwrite
+          // edecek; bu estimated kolonlar tahmini KORUR (Hakediş Kontrolü tahmin-vs-gerçek).
+          // YALNIZ gerçekten tahmin olan komisyon değerlerinde tutulur (satıcı indirimi
+          // siparişten okunur=biliniyor, effectiveSale'e gömülü → tutulmaz). Item write-once
+          // olduğundan bir kez yazılır + bir daha dokunulmaz.
+          estimatedGrossCommissionAmountNet: new Decimal(line.grossCommissionAmountNet),
+          estimatedGrossCommissionVatAmount: new Decimal(line.grossCommissionVatAmount),
+          estimatedRefundedCommissionAmountNet: new Decimal(
+            line.refundedCommissionAmountNet ?? '0',
+          ),
+          estimatedRefundedCommissionVatAmount: new Decimal(
+            line.refundedCommissionVatAmount ?? '0',
+          ),
           // refundedCommission* — T+0 TAHMİN (mapper, satıcı-indirim payının komisyon
           // iadesi, research §7.3 — 2026-06-14). effective komisyon = gross − refunded
           // = net-satış tabanlı. Settlement worker Discount transaction'ı gerçek

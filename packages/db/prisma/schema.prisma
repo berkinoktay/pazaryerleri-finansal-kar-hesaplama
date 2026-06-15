@@ -671,6 +671,19 @@ model OrderItem {
   refundedCommissionAmountNet Decimal @default(0) @map("refunded_commission_amount_net") @db.Decimal(12, 2)
   refundedCommissionVatAmount Decimal @default(0) @map("refunded_commission_vat_amount") @db.Decimal(12, 2)
 
+  // Komisyon TAHMİNİ donuk kopyası (2026-06-15). grossCommission*/refundedCommission*
+  // settlement Sale/Discount satırı geldiğinde Trendyol'un GERÇEK değeriyle overwrite
+  // edilir → bu kolonlar mapper'ın T+0 tahminini KORUR (Hakediş Kontrolü ekranı
+  // tahmin-vs-gerçek karşılaştırması yapabilsin; komisyon-oran sapmasını da görünür
+  // kılar — #331 DB-driven KDV). YALNIZ gerçekten tahmin ettiğimiz iki değer tutulur:
+  // satıcı indirimi siparişten OKUNUR (lineSellerDiscount=biliniyor) + effectiveSale'e
+  // (saleSubtotalNet, write-once) gömülü → ayrıca tahmin tutulmaz. Null: bu değişiklik
+  // öncesi satırlar + henüz intake olmamışlar.
+  estimatedGrossCommissionAmountNet    Decimal? @map("estimated_gross_commission_amount_net") @db.Decimal(12, 2)
+  estimatedGrossCommissionVatAmount    Decimal? @map("estimated_gross_commission_vat_amount") @db.Decimal(12, 2)
+  estimatedRefundedCommissionAmountNet Decimal? @map("estimated_refunded_commission_amount_net") @db.Decimal(12, 2)
+  estimatedRefundedCommissionVatAmount Decimal? @map("estimated_refunded_commission_vat_amount") @db.Decimal(12, 2)
+
   // Satıcı kaynaklı indirim (gerçek gelir azaltıcı, Discount transaction'tan).
   sellerDiscountNet       Decimal @default(0) @map("seller_discount_net") @db.Decimal(12, 2)
   sellerDiscountVatAmount Decimal @default(0) @map("seller_discount_vat_amount") @db.Decimal(12, 2)
