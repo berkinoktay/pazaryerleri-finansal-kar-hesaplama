@@ -18,7 +18,7 @@ const BARCODE = 'EAN13-PROMOTE-001';
 /**
  * A MappedOrder-shaped value as stored in buffer.mappedOrder (JSON). Dates are
  * ISO strings (JSON round-trip — upsertOrderWithSnapshot coerces them). With
- * `invalid: true` a line carries a non-numeric unitPriceNet so the upsert's
+ * `invalid: true` a line carries a non-numeric lineSaleGross so the upsert's
  * `new Decimal(...)` throws — a deterministic promote failure for the retry path.
  */
 function buildMappedOrder(over: {
@@ -36,8 +36,12 @@ function buildMappedOrder(over: {
     platformOrderNumber: over.platformOrderNumber ?? `ord-${over.platformOrderId}`,
     orderDate: new Date().toISOString(),
     status: 'PROCESSING',
-    saleSubtotalNet: '84.75',
-    saleVatTotal: '15.25',
+    // GROSS konvansiyon: saleGross (KDV-dahil) = 100; saleVat = 100×18/118 = 15.25.
+    saleGross: '100.00',
+    saleVat: '15.25',
+    listGross: '100.00',
+    sellerDiscountGross: '0.00',
+    promotionDisplays: null,
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
     actualShipDate: over.actualShipDate ?? null,
@@ -50,14 +54,15 @@ function buildMappedOrder(over: {
       {
         barcode: over.barcode ?? BARCODE,
         quantity: 1,
-        unitPriceNet: over.invalid === true ? 'NOT_A_NUMBER' : '84.75',
-        unitVatRate: '18',
-        unitVatAmount: '15.25',
+        // invalid → non-numeric lineSaleGross → upsert new Decimal() throws.
+        lineListGross: '100.00',
+        lineSaleGross: over.invalid === true ? 'NOT_A_NUMBER' : '100.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '18',
         commissionRate: '15',
-        grossCommissionAmountNet: '12.71',
-        grossCommissionVatAmount: '2.29',
-        sellerDiscountNet: '0',
-        sellerDiscountVatAmount: '0',
+        commissionGross: '15.00',
+        refundedCommissionGross: '0.00',
+        commissionVatRate: '20',
       },
     ],
   };
@@ -69,7 +74,7 @@ async function seedCalculableVariant(
   storeId: string,
   barcode: string,
 ): Promise<void> {
-  const profile = await createCostProfile(organizationId, { amount: '40.00' });
+  const profile = await createCostProfile(organizationId, { amountGross: '48.00' });
   const product = await prisma.product.create({
     data: {
       organizationId,
@@ -165,7 +170,7 @@ describe('processBufferPromote', () => {
   it('marks FAILED + increments attempts when the promote throws', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    // Calculable variant: the calc gate passes, then the invalid unitPriceNet
+    // Calculable variant: the calc gate passes, then the invalid lineSaleGross
     // makes the upsert throw — pins the tx-failure retry machinery.
     await seedCalculableVariant(org.id, store.id, BARCODE);
     const entry = await createBufferEntry(org.id, store.id, {

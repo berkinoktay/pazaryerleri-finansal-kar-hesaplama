@@ -392,20 +392,19 @@ export async function createWebhookEvent(
 
 export async function createCostProfile(
   organizationId: string,
-  overrides: { name?: string; type?: CostProfileType; amount?: string } = {},
+  overrides: { name?: string; type?: CostProfileType; amountGross?: string } = {},
 ) {
-  // amount is NET (KDV hariç). vatRate + vatAmount are set so a cost snapshot
-  // captured from this profile is fully specified (net + vat), which is what
-  // the estimate path needs to compute a non-null estimatedNetProfit.
+  // GROSS konvansiyon (2026-06-16): amountGross is GROSS (KDV-dahil) + vatRate.
+  // A cost snapshot captured from this profile is fully specified (gross + rate),
+  // which is what the estimate path needs to compute a non-null estimatedNetProfit.
   return prisma.costProfile.create({
     data: {
       organizationId,
       name: overrides.name ?? `COGS-${randomUUID().slice(0, 8)}`,
       type: overrides.type ?? 'COGS',
-      amount: overrides.amount ?? '50.00',
+      amountGross: overrides.amountGross ?? '60.00',
       currency: 'TRY',
       vatRate: 20,
-      vatAmount: '10.00',
     },
   });
 }
