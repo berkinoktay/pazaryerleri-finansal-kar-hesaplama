@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto';
+
 import { describe, it, expect } from 'vitest';
+import { Decimal } from 'decimal.js';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { PrismaClient } from '../generated/prisma/client.js';
@@ -8,6 +11,39 @@ const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env['DATABASE_URL'] });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+/** Creates the minimal org+store+order structure required to INSERT an OrderItem. */
+async function seedOrderForSnapshotTest(
+  db: PrismaClient,
+): Promise<{ orderId: string; orgId: string }> {
+  const orgId = randomUUID();
+  await db.organization.create({
+    data: { id: orgId, name: 'Snapshot Test Org', slug: `snapshot-test-${orgId.slice(0, 8)}` },
+  });
+
+  const store = await db.store.create({
+    data: {
+      organizationId: orgId,
+      name: 'Snapshot Test Store',
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId: randomUUID(),
+      credentials: 'test-blob',
+    },
+  });
+
+  const order = await db.order.create({
+    data: {
+      organizationId: orgId,
+      storeId: store.id,
+      platformOrderId: `snap-test-${randomUUID().slice(0, 8)}`,
+      orderDate: new Date(),
+      status: 'DELIVERED',
+    },
+  });
+
+  return { orderId: order.id, orgId };
+}
 
 describe('OrderItem GROSS convention columns', () => {
   it('has gross + vatRate columns, no net columns', async () => {
@@ -76,5 +112,69 @@ describe('Maliyet tables GROSS convention', () => {
         WHERE table_name = ${table} AND column_name IN ('amount_gross', 'vat_rate')`;
       expect(cols).toHaveLength(2);
     }
+  });
+});
+
+describe('OrderItem snapshot immutability (GROSS)', () => {
+  it('rejects update to unit_cost_snapshot_gross after initial write', async () => {
+    const { orderId, orgId } = await seedOrderForSnapshotTest(prisma);
+
+    const item = await prisma.orderItem.create({
+      data: {
+        orderId,
+        organizationId: orgId,
+        quantity: 1,
+        barcode: 'SNAP-TEST-001',
+        platformLineId: BigInt(1),
+        lineListGross: new Decimal('100'),
+        lineSaleGross: new Decimal('100'),
+        lineSellerDiscountGross: new Decimal('0'),
+        saleVatRate: new Decimal('20'),
+        commissionRate: new Decimal('10'),
+        commissionGross: new Decimal('10'),
+        refundedCommissionGross: new Decimal('0'),
+        commissionVatRate: new Decimal('20'),
+        unitCostSnapshotGross: new Decimal('50'),
+        unitCostSnapshotVatRate: new Decimal('20'),
+      },
+    });
+
+    await expect(
+      prisma.orderItem.update({
+        where: { id: item.id },
+        data: { unitCostSnapshotGross: new Decimal('60') },
+      }),
+    ).rejects.toThrow(/write-once/);
+  });
+
+  it('rejects update to unit_cost_snapshot_vat_rate after initial write', async () => {
+    const { orderId, orgId } = await seedOrderForSnapshotTest(prisma);
+
+    const item = await prisma.orderItem.create({
+      data: {
+        orderId,
+        organizationId: orgId,
+        quantity: 1,
+        barcode: 'SNAP-TEST-002',
+        platformLineId: BigInt(2),
+        lineListGross: new Decimal('100'),
+        lineSaleGross: new Decimal('100'),
+        lineSellerDiscountGross: new Decimal('0'),
+        saleVatRate: new Decimal('10'),
+        commissionRate: new Decimal('10'),
+        commissionGross: new Decimal('10'),
+        refundedCommissionGross: new Decimal('0'),
+        commissionVatRate: new Decimal('20'),
+        unitCostSnapshotGross: new Decimal('50'),
+        unitCostSnapshotVatRate: new Decimal('20'),
+      },
+    });
+
+    await expect(
+      prisma.orderItem.update({
+        where: { id: item.id },
+        data: { unitCostSnapshotVatRate: new Decimal('10') },
+      }),
+    ).rejects.toThrow(/write-once/);
   });
 });
