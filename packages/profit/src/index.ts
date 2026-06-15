@@ -2,10 +2,9 @@ export { applyEstimateOnOrderCreate } from './estimate-on-order-create';
 export { computeProfit } from './profit-formula';
 export type {
   ProfitBreakdown,
+  ProfitInput,
   ProfitInputFee,
-  ProfitInputItem,
-  ProfitInputs,
-  ProfitResult,
+  ProfitMoneyPair,
 } from './profit-formula';
 export { inferShippedSameDay, type OrderForShipTiming } from './infer-shipped-same-day';
 export {
