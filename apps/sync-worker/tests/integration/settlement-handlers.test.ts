@@ -60,6 +60,12 @@ async function buildOrderWithItem(opts?: {
   withCostAndSale?: boolean;
   /** Line quantity — sale/commission/cost aggregates scale with it (default 1). */
   quantity?: number;
+  /**
+   * Seed a NON-zero frozen refunded-commission estimate (default '0'). Used by
+   * the handleDiscount freeze test so the settled-vs-estimate assertion is
+   * discriminating — the working column is overwritten to a DIFFERENT value.
+   */
+  estimatedRefundedNet?: string;
 }): Promise<{
   storeId: string;
   orderId: string;
@@ -142,7 +148,7 @@ async function buildOrderWithItem(opts?: {
       // grossCommission*/refundedCommission*'i overwrite eder ama bunlara DOKUNMAZ.
       estimatedGrossCommissionAmountNet: new Decimal('10.00').mul(quantity),
       estimatedGrossCommissionVatAmount: new Decimal('2.00').mul(quantity),
-      estimatedRefundedCommissionAmountNet: new Decimal('0'),
+      estimatedRefundedCommissionAmountNet: new Decimal(opts?.estimatedRefundedNet ?? '0'),
       estimatedRefundedCommissionVatAmount: new Decimal('0'),
       ...(opts?.withCostAndSale === true
         ? {
@@ -256,29 +262,34 @@ describe('settlement handlers', () => {
       expect(updated.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('10.00');
     });
 
-    it('qty>1: scales commission + settledSaleAmount by quantity (N özdeş per-unit Sale satırı → line-toplamı); idempotent', async () => {
+    it('qty>1: scales commission + settledSaleAmount by quantity (N özdeş per-unit Sale satırı → line-toplamı); estimate frozen; idempotent', async () => {
       // EMPİRİK (2026-06-14): Trendyol qty=3 için 3 ÖZDEŞ per-unit Sale satırı
-      // gönderir (her credit=120 birim liste, commission=12 birim). Handler her
-      // satırı × quantity ile line-toplamına çıkarır → overwrite idempotent.
+      // gönderir (her credit=120 birim liste). Handler her satırı × quantity ile
+      // line-toplamına çıkarır → overwrite idempotent. commissionAmount 18 SEÇİLDİ
+      // ki settled çalışan değer (45) donuk tahminden (10×3=30) FARKLI olsun →
+      // tahminin DONDURULDUĞU (ve yeniden ÖLÇEKLENMEDİĞİ) ayırt edici kanıtlanır.
       const { storeId, itemId } = await buildOrderWithItem({ quantity: 3 });
-      const row = makeSettlementRow({ commissionAmount: 12, credit: 120 });
+      const row = makeSettlementRow({ commissionAmount: 18, credit: 120 });
 
       await prisma.$transaction(async (tx) => {
         expect((await handleSale(storeId, row, tx)).applied).toBe(true);
       });
       let updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      // 12 × 3 / 1.20 = 30; vat 36 − 30 = 6; credit 120 × 3 = 360
-      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('30.00');
-      expect(updated.grossCommissionVatAmount.toFixed(2)).toBe('6.00');
+      // 18 × 3 / 1.20 = 45; vat 54 − 45 = 9; credit 120 × 3 = 360
+      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('45.00');
+      expect(updated.grossCommissionVatAmount.toFixed(2)).toBe('9.00');
       expect(updated.settledSaleAmount?.toFixed(2)).toBe('360.00');
+      // Tahmin DONUK: line-toplamı 10×3=30; settled 45'e RE-SCALE EDİLMEDİ.
+      expect(updated.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('30.00');
 
       // Idempotent: aynı (veya kardeş özdeş) satırı tekrar uygulamak line-toplamını korur.
       await prisma.$transaction(async (tx) => {
         expect((await handleSale(storeId, row, tx)).applied).toBe(true);
       });
       updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('30.00');
+      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('45.00');
       expect(updated.settledSaleAmount?.toFixed(2)).toBe('360.00');
+      expect(updated.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('30.00');
     });
 
     it('skips with sparse_field when shipmentPackageId is null', async () => {
@@ -338,6 +349,29 @@ describe('settlement handlers', () => {
       // 24 / 1.20 = 20 (item's unitVatRate %20)
       expect(updated.sellerDiscountNet.toFixed(2)).toBe('20.00');
       expect(updated.sellerDiscountVatAmount.toFixed(2)).toBe('4.00');
+    });
+
+    it('preserves the refunded-commission ESTIMATE when settlement overwrites the actual (different value)', async () => {
+      // Simetrik yarı (handleSale dondurma testinin aynası): Discount handler çalışan
+      // refundedCommissionAmountNet'i GERÇEKLE ezerken donuk estimatedRefunded* tahminine
+      // DOKUNMAMALI. Tahmin SIFIR-OLMAYAN (3) ekilir → settled değerden (5) ayırt edici.
+      const { storeId, itemId } = await buildOrderWithItem({ estimatedRefundedNet: '3.00' });
+      const row = makeSettlementRow({
+        transactionType: 'İndirim',
+        debt: 24,
+        credit: 0,
+        commissionAmount: 6, // refunded commission KDV-dahil 6 → net 5 (≠ tahmin 3)
+      });
+
+      await prisma.$transaction(async (tx) => {
+        expect((await handleDiscount(storeId, row, tx)).applied).toBe(true);
+      });
+
+      const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
+      // ACTUAL overwritten to the settled value...
+      expect(updated.refundedCommissionAmountNet.toFixed(2)).toBe('5.00'); // 6 / 1.20
+      // ...but the ESTIMATE is FROZEN at T+0 (3) — Hakediş Kontrolü tahmin-vs-gerçek.
+      expect(updated.estimatedRefundedCommissionAmountNet?.toFixed(2)).toBe('3.00');
     });
 
     it('qty>1: scales refundedCommission + sellerDiscount by quantity (line-toplamı)', async () => {

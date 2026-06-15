@@ -598,6 +598,52 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(await prisma.orderItem.count()).toBe(1);
   });
 
+  it('re-sync does NOT clobber a settled working value nor re-stamp the frozen estimate (write-once)', async () => {
+    // En kritik veri-kaybı senaryosu — feature'ın var olma sebebi:
+    //   (1) intake estimate=10 + working grossCommissionAmountNet=10 yazar,
+    //   (2) settlement working'i FARKLI bir gerçeğe (15) ezer,
+    //   (3) rutin re-sync aynı sipariş sayfasını tekrar getirir.
+    // upsert-order'ın write-once `continue` dalı regrese ederse re-sync working'i
+    // mapper'ın 10'una geri ezer VE/VEYA tahmini yeniden damgalar. Bu test ikisini de
+    // kilitler: working 15 KALIR, estimate 10 DONUK kalır, satır SAYISI 1 (yeni satır yok).
+    const { store, log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        makeStreamResponse({ hasMore: false, nextCursor: null, content: [makeShipmentPackage()] }),
+      ),
+    );
+    await processOrdersChunk({ syncLog: log, cursor: null });
+    vi.restoreAllMocks();
+
+    const item = await prisma.orderItem.findFirstOrThrow({
+      where: { order: { storeId: store.id } },
+    });
+    expect(item.grossCommissionAmountNet.toFixed(2)).toBe('10.00');
+    expect(item.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('10.00');
+
+    // Settlement gerçeği working kolonu FARKLI bir değere ezer (tahmine dokunmaz).
+    await prisma.orderItem.update({
+      where: { id: item.id },
+      data: { grossCommissionAmountNet: new Decimal('15.00') },
+    });
+
+    // Rutin re-sync — AYNI sayfa, AYNI veri → mevcut-kalem (write-once) dalına girmeli.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse(
+        makeStreamResponse({ hasMore: false, nextCursor: null, content: [makeShipmentPackage()] }),
+      ),
+    );
+    await processOrdersChunk({ syncLog: log, cursor: null });
+
+    expect(await prisma.orderItem.count()).toBe(1); // yeni satır yaratılmadı
+    const after = await prisma.orderItem.findUniqueOrThrow({ where: { id: item.id } });
+    // Settled çalışan değer KORUNDU — re-sync mapper'ın 10'una geri ezmedi.
+    expect(after.grossCommissionAmountNet.toFixed(2)).toBe('15.00');
+    // Donuk tahmin yeniden damgalanmadı.
+    expect(after.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('10.00');
+  });
+
   it('cursor advance within chunk: hasMore + nextCursor → streamCursor updated, chunkIndex unchanged', async () => {
     const { log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
 

@@ -20,6 +20,20 @@ ALTER TABLE order_items DROP CONSTRAINT IF EXISTS order_items_refunded_commissio
 ALTER TABLE order_items ADD CONSTRAINT order_items_refunded_commission_check
   CHECK (refunded_commission_amount_net <= gross_commission_amount_net);
 
+-- ─── 2026-06-15 estimate preservation: refunded ≤ gross on the frozen pair ──
+-- The estimated_* commission columns (mapper T+0 snapshot, write-once at intake)
+-- carry the same semantics as the working pair. Today intake writes them
+-- byte-identical to the working columns (which already satisfy the check above),
+-- so no violation is reachable; the only writers are upsert-order intake and the
+-- settlement handlers never touch estimated_*. This mirror keeps the invariant in
+-- the DB so a FUTURE separate write path (reconcile/backfill) cannot open a gap.
+-- Nullable-safe via IS NULL escapes. Mirror: prisma/migrations/20260615120000.
+ALTER TABLE order_items DROP CONSTRAINT IF EXISTS order_items_estimated_refunded_commission_check;
+ALTER TABLE order_items ADD CONSTRAINT order_items_estimated_refunded_commission_check
+  CHECK (estimated_refunded_commission_amount_net IS NULL
+         OR estimated_gross_commission_amount_net IS NULL
+         OR estimated_refunded_commission_amount_net <= estimated_gross_commission_amount_net);
+
 -- ─── PR-4: cost vat_amount nonneg (design §3.5 + §12.1 #10) ────────────
 -- vat_amount = amount × vatRate / 100 (NET convention). Yasal vatRate 0..%30
 -- aralığında — vat_amount negatif olamaz. NULL kabul: yeni satırlar sync
