@@ -77,6 +77,30 @@ function buildPackage(overrides: PackageOverrides = {}): TrendyolShipmentPackage
   };
 }
 
+// ─── TrendyolDiscountDetail type (Task 7) ──────────────────────────────
+
+describe('TrendyolDiscountDetail type', () => {
+  it('parses a line with discountDetails array', () => {
+    const line: TrendyolOrderLine = {
+      lineId: 1,
+      barcode: 'X',
+      quantity: 3,
+      lineUnitPrice: 269.66,
+      lineGrossAmount: 285,
+      lineSellerDiscount: 16,
+      vatRate: 20,
+      commission: 9.6,
+      discountDetails: [
+        { lineItemPrice: 268.99, lineItemSellerDiscount: 16.01 },
+        { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+        { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+      ],
+    };
+    expect(line.discountDetails).toHaveLength(3);
+    expect(line.discountDetails?.[0]?.lineItemPrice).toBe(268.99);
+  });
+});
+
 // ─── orderDate normalisation (the central invariant) ───────────────────
 
 describe('mapTrendyolShipmentPackage — orderDate normalisation', () => {

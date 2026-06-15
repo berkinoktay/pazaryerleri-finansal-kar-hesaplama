@@ -204,6 +204,22 @@ export interface MappedProductsPageMeta {
 // `Trendyol Order Sync` epic design doc §2.2 has the abridged contract;
 // research §7.1-§7.3 has the full per-field arithmetic (esp. KDV split).
 
+/**
+ * Per-UNIT discount breakdown entry inside a Trendyol order line's
+ * `discountDetails[]`. Each element corresponds to one of the `quantity`
+ * units of the line. Trendyol rounds units unevenly (e.g. 16,01 + 16 + 16 =
+ * 48,01 ≠ 16 × 3 = 48,00), so the AUTHORITATIVE per-line totals come from
+ * summing this array — never from `lineSellerDiscount × quantity` (which
+ * drifts by a kuruş). `lineItemPrice` is the effective sale (indirim sonrası,
+ * KDV dahil) for that single unit.
+ */
+export interface TrendyolDiscountDetail {
+  /** Effective sale for a single unit (KDV dahil, satıcı indirimi sonrası). */
+  lineItemPrice: number;
+  /** Seller discount applied to a single unit (KDV dahil). */
+  lineItemSellerDiscount: number;
+}
+
 export interface TrendyolOrderLine {
   lineId: number;
   /** Line-level seller id — webhook payloads (Trendyol stage env) may omit root
@@ -220,11 +236,20 @@ export interface TrendyolOrderLine {
   quantity: number;
   /** Effective per-unit price (KDV dahil, indirim sonrası). */
   lineUnitPrice: number;
-  /** Per-line gross amount = qty × originalUnitPrice (KDV dahil, indirim öncesi). */
+  /** Trendyol per-UNIT gross amount (KDV dahil, indirim öncesi). Line total =
+   * lineGrossAmount × quantity. UNIT-başına, satır-toplamı DEĞİL (#337). */
   lineGrossAmount: number;
   lineSellerDiscount?: number;
   lineTyDiscount?: number;
   lineTotalDiscount?: number;
+  /**
+   * Per-unit discount breakdown (one element per unit). AUTHORITATIVE source
+   * for per-line sale/discount totals — Σ over this array captures Trendyol's
+   * uneven per-unit rounding (16,01 + 16 + 16 = 48,01), which `lineSellerDiscount
+   * × quantity` does not. Single-unit lines carry a 1-element array. Optional:
+   * some legacy/edge payloads omit it → mapper falls back to lineGrossAmount × qty.
+   */
+  discountDetails?: TrendyolDiscountDetail[];
   /** Per-line VAT rate %. */
   vatRate: number;
   /** Commission rate %. Direct in order response (research §7.2). */
