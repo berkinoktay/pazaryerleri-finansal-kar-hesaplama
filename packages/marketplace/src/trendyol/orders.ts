@@ -1,7 +1,7 @@
 // Public API of the Trendyol order-sync integration. Exposes an async
 // generator that pages through /integration/order/sellers/{supplierId}/orders
-// (getShipmentPackages), maps each batch to KDV-split DTOs, and stops when
-// the time window is exhausted. Has no DB or Prisma awareness — the caller
+// (getShipmentPackages), maps each batch to GROSS (KDV-dahil) DTOs, and stops
+// when the time window is exhausted. Has no DB or Prisma awareness — the caller
 // (OrderSyncService) handles upsert + applyEstimateOnOrderCreate.
 //
 // Source-of-truth for endpoint shape:
@@ -18,13 +18,14 @@ import type { StoreEnvironment } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
-import { TRENDYOL_COMMISSION_VAT_RATE, commissionVatDivisor } from './constants';
+import { TRENDYOL_COMMISSION_VAT_RATE } from './constants';
 import { fetchOnce, type FetcherDeps } from './fetch-once';
 import { baseUrlFor } from './headers';
 import type {
   MappedOrder,
   MappedOrderLine,
   MappedOrdersPageMeta,
+  PromotionDisplay,
   TrendyolCredentials,
   TrendyolOrderLine,
   TrendyolOrdersResponse,
@@ -41,9 +42,10 @@ import type {
  */
 export const ORDERS_PAGE_SIZE = 200;
 
-// Commission VAT rate is DB-driven (denetim A) — resolved by the caller and
-// passed in as `commissionVatRate`; defaults to TRENDYOL_COMMISSION_VAT_RATE
-// (the estimate fallback). Divisor via `commissionVatDivisor` ('./constants').
+// Commission VAT rate is DB-driven (denetim A #331) — resolved by the caller
+// and passed in as `commissionVatRate`; defaults to TRENDYOL_COMMISSION_VAT_RATE
+// (the estimate fallback). In the GROSS mapper this rate is carried verbatim on
+// each line (`commissionVatRate`); the net/KDV split is derived downstream.
 
 // ─── Request URL building ───────────────────────────────────────────────
 
@@ -132,12 +134,20 @@ function normalizeFastDeliveryType(value: string | undefined): string | null {
 }
 
 /**
- * Map a single Trendyol shipmentPackage to KDV-split DTO. Pure function,
- * no I/O. Per-line VAT-aware (multi-rate orders aggregate correctly).
+ * Map a single Trendyol shipmentPackage to a GROSS (KDV-dahil) DTO. Pure
+ * function, no I/O. The order header comes from package totals directly
+ * (saleGross = packageTotalPrice, listGross = packageGrossAmount,
+ * sellerDiscountGross = packageSellerDiscount); per-line splitting (for
+ * commission + multi-VAT) uses Σ discountDetails (spec §4). saleVat is derived
+ * per-line so multi-rate orders stay correct. Net/KDV are computed downstream
+ * by the profit engine — never re-split here.
  *
- * Decimal arithmetic uses 2-digit precision for amount fields. VAT rate
- * is preserved as-is from Trendyol (typically integer like 20, but the
- * field is declared decimal — defensive parsing).
+ * Invariant: Σ lineSaleGross must equal packageTotalPrice; a mismatch emits a
+ * `syncLog.warn` rather than drifting silently.
+ *
+ * Decimal arithmetic uses 2-digit precision for amount fields. VAT rate is
+ * preserved as-is from Trendyol (typically integer like 20, but the field is
+ * declared decimal — defensive parsing).
  */
 export function mapTrendyolShipmentPackage(
   pkg: TrendyolShipmentPackage,
@@ -153,19 +163,34 @@ export function mapTrendyolShipmentPackage(
   const actualShipDate =
     shippedEvent !== undefined ? epochMsToDate(shippedEvent.createdDate) : null;
 
-  const commissionDivisor = commissionVatDivisor(commissionVatRate);
   const mappedLines: MappedOrderLine[] = pkg.lines.map((line) =>
-    mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }, commissionDivisor),
+    mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }, commissionVatRate),
   );
 
-  // Package aggregate, per-line VAT-aware. Multi-vatRate order'larda her
-  // line kendi vatRate'iyle hesaplanır, package toplam'ı doğru çıkar.
-  let saleSubtotalNet = new Decimal(0);
-  let saleVatTotal = new Decimal(0);
+  // Sipariş başlığı paket toplamlarından DOĞRUDAN gelir (spec §4) — satır
+  // yeniden-kurma YOK. saleVat per-line türetilir (her satır kendi vatRate'iyle,
+  // çok-KDV doğru): vat = lineSaleGross × rate / (100 + rate).
+  let saleVat = new Decimal(0);
   for (const line of mappedLines) {
-    const qty = new Decimal(line.quantity);
-    saleSubtotalNet = saleSubtotalNet.add(new Decimal(line.unitPriceNet).mul(qty));
-    saleVatTotal = saleVatTotal.add(new Decimal(line.unitVatAmount).mul(qty));
+    const g = new Decimal(line.lineSaleGross);
+    const r = new Decimal(line.saleVatRate);
+    saleVat = saleVat.add(g.mul(r).div(new Decimal(100).add(r)));
+  }
+
+  // Invariant: Σ satır satış = paket toplam. discountDetails'ten kurulan satır
+  // toplamı paket toplamına eşit olmalı; değilse sessiz sapma yerine warn
+  // (satır-içi birim-skaler sapması BEKLENİR, o ayrı; bu yalnız paket düzeyi).
+  let sumLineSale = new Decimal(0);
+  for (const line of mappedLines) {
+    sumLineSale = sumLineSale.add(new Decimal(line.lineSaleGross));
+  }
+  const packageSale = new Decimal(pkg.packageTotalPrice ?? 0);
+  if (!sumLineSale.equals(packageSale)) {
+    syncLog.warn('orders.package-invariant-mismatch', {
+      shipmentPackageId: pkg.shipmentPackageId,
+      sumLineSale: sumLineSale.toString(),
+      packageSale: packageSale.toString(),
+    });
   }
 
   return {
@@ -186,8 +211,12 @@ export function mapTrendyolShipmentPackage(
     // Split artifact: UnPacked = paket bozuldu, içerik çocuk paketlerde.
     // intakeOrder bu bayrakla kaydı (orders + buffer) SİLER (research 2026-06-09).
     dematerialized: pkg.status.toUpperCase() === 'UNPACKED',
-    saleSubtotalNet: saleSubtotalNet.toFixed(2),
-    saleVatTotal: saleVatTotal.toFixed(2),
+    // Sipariş başlığı — paket toplamlarından DOĞRUDAN (spec §4, yeniden-kurma yok).
+    saleGross: packageSale.toFixed(2),
+    saleVat: saleVat.toDecimalPlaces(2).toFixed(2),
+    listGross: new Decimal(pkg.packageGrossAmount ?? 0).toFixed(2),
+    sellerDiscountGross: new Decimal(pkg.packageSellerDiscount ?? 0).toFixed(2),
+    promotionDisplays: extractPromotionDisplays(mappedLines),
     agreedDeliveryDate: epochMsToDate(pkg.agreedDeliveryDate),
     estimatedDeliveryStartDate: epochMsToDate(pkg.estimatedDeliveryStartDate),
     estimatedDeliveryEndDate: epochMsToDate(pkg.estimatedDeliveryEndDate),
@@ -210,10 +239,10 @@ export function mapTrendyolShipmentPackage(
   };
 }
 
-function mapLine(
+export function mapLine(
   line: TrendyolOrderLine,
   ctx: { shipmentPackageId: number },
-  commissionDivisor: Decimal,
+  commissionVatRate: number = TRENDYOL_COMMISSION_VAT_RATE,
 ): MappedOrderLine {
   // Defensive sparse-field handling — PR-A regression hotfix.
   //
@@ -254,91 +283,78 @@ function mapLine(
 
   const safeQuantity = line.quantity ?? 0;
   const safeGrossAmount = line.lineGrossAmount ?? 0;
-  const safeSellerDiscount = line.lineSellerDiscount ?? 0;
   const safeVatRate = line.vatRate ?? 0;
-
-  const vatRate = new Decimal(safeVatRate);
-  const vatMultiplier = new Decimal(1).add(vatRate.div(100));
-
-  // Per-unit KDV split — EFFECTIVE SALE (satıcının gerçek geliri), müşterinin
-  // ödediği (lineUnitPrice) DEĞİL. effectiveSale = lineGrossAmount − lineSellerDiscount
-  // (research §7.3). Trendyol-finanslı indirim (lineTyDiscount) ÇIKARILMAZ — Trendyol
-  // geri öder, "kâra etkisi YOK" (research satır 336). lineUnitPrice Trendyol indirimini
-  // de düştüğü için satıcı geliri değildir; ondan kâr/ciro hesaplamak co-funded siparişte
-  // indirimi çift düşürür (denetim #1, 2026-06-13). unitPriceNet artık satıcı-birim-geliri.
-  //
-  // QUANTITY: lineGrossAmount ve lineSellerDiscount Trendyol'da BİRİM başınadır
-  // ("Ürünün birim brüt fiyatı" / "Birim satıcı indirimi" — getShipmentPackagesStream
-  // dokümanı). Bu yüzden effectiveSaleUnitGross DOĞRUDAN birim farkıdır (÷quantity YOK);
-  // line/order toplamı saleSubtotalNet = unitPriceNet × quantity'de oluşur. Önceki kod
-  // bunları line-toplamı sanıp ÷quantity yapıyordu → qty>1 siparişte satış quantity katı
-  // eksik çıkıyordu (canlı doğrulama #455451555, 2026-06-14: 2 adet × ₺2120, panel
-  // Satış ₺4240 / Faturalanacak ₺3816; eski kod net ₺1590 = ÷2 yanlış).
-  const effectiveSaleUnitGross = Decimal.max(
-    new Decimal(safeGrossAmount).sub(safeSellerDiscount),
-    new Decimal(0),
-  );
-  const unitPriceNet = effectiveSaleUnitGross.div(vatMultiplier).toDecimalPlaces(4);
-  const unitVatAmount = effectiveSaleUnitGross.sub(unitPriceNet).toDecimalPlaces(4);
-
-  // Gross commission — SALE-side, liste üzerinden: lineGrossAmount × quantity × commission
-  // / 100, sonra komisyon KDV split (oran caller'dan = commissionDivisor; DB'den çözülür,
-  // denetim A). Trendyol settlement'ta önce listeden keser (handleSale), bu yüzden gross
-  // taban LİSTE kalır — settlement ile tutarlı. lineGrossAmount birim olduğundan komisyon
-  // alanları LINE-TOPLAMIDIR (× quantity); profit-formula bunları ×qty YAPMADAN ekler.
   const commissionRate =
     line.commission !== undefined && line.commission !== null
       ? new Decimal(line.commission)
       : new Decimal(0);
-  const grossCommissionGross = new Decimal(safeGrossAmount)
-    .mul(safeQuantity)
-    .mul(commissionRate)
-    .div(100);
-  const grossCommissionAmountNet = grossCommissionGross.div(commissionDivisor).toDecimalPlaces(2);
-  const grossCommissionVatAmount = grossCommissionGross
-    .sub(grossCommissionAmountNet)
-    .toDecimalPlaces(2);
 
-  // Refunded commission (T+0 TAHMİN) — Trendyol satıcı-indirim payının komisyonunu
-  // İADE eder (research §7.3): refunded = lineSellerDiscount × commission / 100.
-  // → effective komisyon = gross − refunded = (effectiveSale × oran) / 1.2, yani
-  // komisyon NET SATIŞ üzerinden (satıcının talebi, 2026-06-14). Settlement'ta
-  // handleDiscount gerçek Discount satırıyla bu alanların üzerine yazar (aynı değer).
-  // tyDiscount'a iade YOK (zaten effectiveSale'e dahil değil). sellerDiscount 0 → refund 0.
-  // lineSellerDiscount birim olduğundan × quantity ile line-toplamına çıkarılır.
-  const refundedCommissionGross = new Decimal(safeSellerDiscount)
-    .mul(safeQuantity)
-    .mul(commissionRate)
-    .div(100);
-  const refundedCommissionAmountNet = refundedCommissionGross
-    .div(commissionDivisor)
-    .toDecimalPlaces(2);
-  const refundedCommissionVatAmount = refundedCommissionGross
-    .sub(refundedCommissionAmountNet)
-    .toDecimalPlaces(2);
+  // Line list (indirim öncesi, KDV dahil) — lineGrossAmount BİRİM başınadır
+  // (Trendyol doc: "Ürünün birim brüt fiyatı"), bu yüzden × quantity (#337).
+  const lineListGross = new Decimal(safeGrossAmount).mul(safeQuantity);
 
-  // Seller discount KDV split (her line kendi vatRate'iyle) — yalnız breakdown
-  // gösterimi için taşınır; saleSubtotalNet'e zaten effectiveSale olarak gömülü (yukarıda).
-  // lineSellerDiscount birim olduğundan × quantity ile line-toplamı gösterilir.
-  const sellerDiscountGross = new Decimal(safeSellerDiscount).mul(safeQuantity);
-  const sellerDiscountNet = sellerDiscountGross.div(vatMultiplier).toDecimalPlaces(2);
-  const sellerDiscountVatAmount = sellerDiscountGross.sub(sellerDiscountNet).toDecimalPlaces(2);
+  // Satış + satıcı indirimi — OTORİTER kaynak `discountDetails` (her birim bir eleman).
+  // Σ lineItemPrice = effectiveSale toplamı, Σ lineItemSellerDiscount = indirim toplamı.
+  // Trendyol birimleri uneven yuvarlar (16,01+16+16=48,01 ≠ 16×3=48,00); bu yüzden
+  // birim-skaler × adet KULLANILMAZ. discountDetails yoksa indirimsiz fallback:
+  // lineSaleGross = lineGrossAmount × quantity, indirim 0.
+  let lineSaleGross: Decimal;
+  let lineSellerDiscountGross: Decimal;
+  if (Array.isArray(line.discountDetails) && line.discountDetails.length > 0) {
+    lineSaleGross = new Decimal(0);
+    lineSellerDiscountGross = new Decimal(0);
+    for (const d of line.discountDetails) {
+      lineSaleGross = lineSaleGross.add(new Decimal(d.lineItemPrice));
+      lineSellerDiscountGross = lineSellerDiscountGross.add(new Decimal(d.lineItemSellerDiscount));
+    }
+    // discountDetails OTORİTER — birim skaleri (lineSellerDiscount × qty) ile farkı
+    // BEKLENİR (Trendyol uneven yuvarlar). Bu yüzden satır-içi karşılaştırma uyarısı
+    // YOK (gürültü olur); tek geçerli invariant paket düzeyinde (Σ satır sale =
+    // packageTotalPrice, mapTrendyolShipmentPackage'da).
+  } else {
+    lineSellerDiscountGross = new Decimal(line.lineSellerDiscount ?? 0).mul(safeQuantity);
+    lineSaleGross = lineListGross.sub(lineSellerDiscountGross);
+  }
+  lineSaleGross = Decimal.max(lineSaleGross, new Decimal(0));
+
+  // Komisyon — net-satış tabanı (#332): commissionRate × lineSaleGross. Trendyol
+  // satıcı-indirim payının komisyonunu iade eder (research §7.3); refunded =
+  // commissionRate × lineSellerDiscountGross. effective komisyon = gross − refunded.
+  // commissionGross GROSS taşınır; net/KDV split downstream'de oran (commissionVatRate,
+  // DB-driven #331) ile türetilir — burada bölme yok.
+  const commissionGross = lineSaleGross.mul(commissionRate).div(100).toDecimalPlaces(2);
+  const refundedCommissionGross = lineSellerDiscountGross
+    .mul(commissionRate)
+    .div(100)
+    .toDecimalPlaces(2);
 
   return {
     barcode: line.barcode,
     quantity: safeQuantity,
     platformLineId: line.lineId != null ? String(line.lineId) : null,
-    unitPriceNet: unitPriceNet.toString(),
-    unitVatRate: vatRate.toString(),
-    unitVatAmount: unitVatAmount.toString(),
-    grossCommissionAmountNet: grossCommissionAmountNet.toString(),
-    grossCommissionVatAmount: grossCommissionVatAmount.toString(),
-    refundedCommissionAmountNet: refundedCommissionAmountNet.toString(),
-    refundedCommissionVatAmount: refundedCommissionVatAmount.toString(),
-    sellerDiscountNet: sellerDiscountNet.toString(),
-    sellerDiscountVatAmount: sellerDiscountVatAmount.toString(),
+    lineListGross: lineListGross.toFixed(2),
+    lineSaleGross: lineSaleGross.toFixed(2),
+    lineSellerDiscountGross: lineSellerDiscountGross.toFixed(2),
+    saleVatRate: new Decimal(safeVatRate).toString(),
     commissionRate: commissionRate.toString(),
+    commissionGross: commissionGross.toFixed(2),
+    refundedCommissionGross: refundedCommissionGross.toFixed(2),
+    commissionVatRate: new Decimal(commissionVatRate).toString(),
   };
+}
+
+/**
+ * Derive the promotion display list from mapped lines. Sums seller-discount
+ * gross across all lines; returns a single "Satıcı İndirimi" entry, or null
+ * when there is no discount (ekleme #3).
+ */
+function extractPromotionDisplays(lines: MappedOrderLine[]): PromotionDisplay[] | null {
+  let total = new Decimal(0);
+  for (const line of lines) {
+    total = total.add(new Decimal(line.lineSellerDiscountGross));
+  }
+  if (total.isZero()) return null;
+  return [{ displayName: 'Satıcı İndirimi', amountGross: total.toFixed(2) }];
 }
 
 export interface MappedOrdersPage {
