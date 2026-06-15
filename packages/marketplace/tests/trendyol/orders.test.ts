@@ -24,6 +24,8 @@ import {
   mapTrendyolStatusToEnum,
 } from '../../src/trendyol/orders';
 import type {
+  MappedOrder,
+  PromotionDisplay,
   TrendyolOrderLine,
   TrendyolPackageHistory,
   TrendyolShipmentPackage,
@@ -98,6 +100,23 @@ describe('TrendyolDiscountDetail type', () => {
     };
     expect(line.discountDetails).toHaveLength(3);
     expect(line.discountDetails?.[0]?.lineItemPrice).toBe(268.99);
+  });
+});
+
+// ─── MappedOrder GROSS shape (Task 8 — type-level) ─────────────────────
+
+describe('MappedOrder GROSS shape', () => {
+  it('exposes gross aggregate + promotionDisplays', () => {
+    const sample = {} as MappedOrder;
+    // Tip-seviyesi: aşağıdaki alanlar var olmalı (derleme hatası verirse FAIL).
+    void (sample.saleGross satisfies string);
+    void (sample.saleVat satisfies string);
+    void (sample.listGross satisfies string);
+    void (sample.sellerDiscountGross satisfies string);
+    void (sample.promotionDisplays satisfies PromotionDisplay[] | null);
+    void (sample.lines[0]?.lineSaleGross satisfies string | undefined);
+    void (sample.lines[0]?.commissionGross satisfies string | undefined);
+    expect(true).toBe(true);
   });
 });
 
