@@ -8,10 +8,12 @@ interface InputLine {
 
 /**
  * Resolve order-line variants by barcode within a store and attach each
- * variant's most-recent cost-profile-link net amount. Returns the shape the
+ * variant's most-recent cost-profile-link amount. Returns the shape the
  * calculability gate (`resolveOrderCalculability`) consumes.
  *
- * `CostProfile.amount` is NET (KDV hariç) — that is `unitCostSnapshotNet`.
+ * GROSS konvansiyon (2026-06-16): `CostProfile.amountGross` is GROSS (KDV-dahil).
+ * The calculability gate only checks presence (non-null) — gross vs net is
+ * irrelevant here; it routes full-profit vs cost-missing, never computes profit.
  *
  * Accepts the Prisma client OR an interactive-transaction client. `(storeId,
  * barcode)` is non-unique by design, so a barcode may match multiple
@@ -31,7 +33,7 @@ export async function buildCalcCheckLines(
       costProfileLinks: {
         orderBy: { attachedAt: 'desc' },
         take: 1,
-        select: { profile: { select: { amount: true } } },
+        select: { profile: { select: { amountGross: true } } },
       },
     },
   });
@@ -45,7 +47,7 @@ export async function buildCalcCheckLines(
     return {
       barcode: inputLine.barcode,
       variantId: variant.id,
-      unitCostSnapshotNet: costLink?.profile.amount.toString() ?? null,
+      unitCostSnapshotNet: costLink?.profile.amountGross.toString() ?? null,
     };
   });
 }

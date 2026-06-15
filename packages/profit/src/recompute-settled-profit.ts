@@ -39,7 +39,12 @@ import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
 
-import { computeProfit } from './profit-formula';
+import { computeProfit, type ProfitInputFee } from './profit-formula';
+
+/** gross × rate / (100 + rate) — KDV-dahil tutardan içerideki KDV'yi çıkarır. */
+function grossToVat(gross: Decimal, rate: Decimal): Decimal {
+  return gross.mul(rate).div(new Decimal(100).add(rate));
+}
 
 export interface RecomputeSettledProfitResult {
   /** True when settledNetProfit was written. False when skipped (logged in caller). */
@@ -58,7 +63,7 @@ export async function recomputeSettledProfit(
 ): Promise<RecomputeSettledProfitResult> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { saleSubtotalNet: true, saleVatTotal: true, profitExcludedAt: true },
+    select: { saleGross: true, saleVat: true, profitExcludedAt: true },
   });
   if (order === null) return { recomputed: false, skipReason: 'order_not_found' };
 
@@ -69,7 +74,7 @@ export async function recomputeSettledProfit(
     return { recomputed: false, skipReason: 'profit_excluded' };
   }
 
-  if (order.saleSubtotalNet === null || order.saleVatTotal === null) {
+  if (order.saleGross === null || order.saleVat === null) {
     return { recomputed: false, skipReason: 'missing_sale_aggregate' };
   }
 
@@ -77,63 +82,90 @@ export async function recomputeSettledProfit(
     where: { orderId },
     select: {
       quantity: true,
-      unitCostSnapshotNet: true,
-      unitCostSnapshotVatAmount: true,
-      grossCommissionAmountNet: true,
-      grossCommissionVatAmount: true,
-      refundedCommissionAmountNet: true,
-      refundedCommissionVatAmount: true,
-      sellerDiscountNet: true,
-      sellerDiscountVatAmount: true,
+      unitCostSnapshotGross: true,
+      unitCostSnapshotVatRate: true,
+      commissionVatRate: true,
+      refundedCommissionGross: true,
+      estimatedCommissionGross: true,
+      settledCommissionGross: true,
     },
   });
 
   // If any item lacks a cost snapshot, profit can't be computed accurately.
   // Settle is skipped — UI shows "kar hesaplanmadı" until snapshots fill in.
   const missingCost = items.some(
-    (i) => i.unitCostSnapshotNet === null || i.unitCostSnapshotVatAmount === null,
+    (i) => i.unitCostSnapshotGross === null || i.unitCostSnapshotVatRate === null,
   );
   if (missingCost) return { recomputed: false, skipReason: 'incomplete_cost_snapshots' };
 
-  // Confirmed fees only: SETTLEMENT + CARGO_INVOICE rows, plus ESTIMATE
-  // rows that PaymentOrder cycle marked confirmed.
-  const fees = await tx.orderFee.findMany({
+  // GROSS konvansiyon (2026-06-16): maliyet + komisyon settled gross agregatları.
+  // Komisyon = settledCommissionGross (Trendyol gerçek) ?? estimatedCommissionGross
+  // (T+0 tahmin), eksi refundedCommissionGross (net-satış tabanı #332). KDV item-bazlı.
+  let costGross = new Decimal(0);
+  let costVat = new Decimal(0);
+  let commissionGross = new Decimal(0);
+  let commissionVat = new Decimal(0);
+  for (const item of items) {
+    const qty = new Decimal(item.quantity);
+    const lineCost = new Decimal(item.unitCostSnapshotGross!).mul(qty);
+    costGross = costGross.add(lineCost);
+    costVat = costVat.add(
+      grossToVat(lineCost, new Decimal(item.unitCostSnapshotVatRate!)).toDecimalPlaces(2),
+    );
+    const settledComm = item.settledCommissionGross ?? item.estimatedCommissionGross;
+    const effComm = new Decimal(settledComm ?? 0).sub(new Decimal(item.refundedCommissionGross));
+    commissionGross = commissionGross.add(effComm);
+    commissionVat = commissionVat.add(
+      grossToVat(effComm, new Decimal(item.commissionVatRate)).toDecimalPlaces(2),
+    );
+  }
+
+  // Confirmed fees: SETTLEMENT + CARGO_INVOICE rows, plus ESTIMATE rows the
+  // PaymentOrder cycle marked confirmed. SHIPPING/PLATFORM_SERVICE only (stopaj
+  // ayrı `stoppage` terimi; iade-leg'leri ayrı feeType → motor input'una girmez).
+  const confirmedFees = await tx.orderFee.findMany({
     where: {
       orderId,
+      feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE'] },
       OR: [
         { source: { in: ['SETTLEMENT', 'CARGO_INVOICE'] } },
         { source: 'ESTIMATE', confirmedAt: { not: null } },
       ],
     },
-    select: { amountNet: true, vatAmount: true, direction: true },
+    select: { feeType: true, amountGross: true, vatRate: true, direction: true },
+  });
+  const profitInputFees: ProfitInputFee[] = confirmedFees.map((f) => ({
+    type: f.feeType === 'SHIPPING' ? 'SHIPPING' : 'PLATFORM_SERVICE',
+    gross: new Decimal(f.amountGross),
+    vat: grossToVat(new Decimal(f.amountGross), new Decimal(f.vatRate)).toDecimalPlaces(2),
+    direction: f.direction,
+  }));
+
+  // Stopaj settlement actual (SETTLEMENT STOPPAGE); yoksa 0 (motor `stoppage` terimi).
+  const stoppageFee = await tx.orderFee.findFirst({
+    where: { orderId, feeType: 'STOPPAGE', source: 'SETTLEMENT' },
+    select: { amountGross: true },
   });
 
   const result = computeProfit({
-    saleSubtotalNet: new Decimal(order.saleSubtotalNet),
-    saleVatTotal: new Decimal(order.saleVatTotal),
-    items: items.map((i) => ({
-      quantity: i.quantity,
-      unitCostSnapshotNet: new Decimal(i.unitCostSnapshotNet!),
-      unitCostSnapshotVatAmount: new Decimal(i.unitCostSnapshotVatAmount!),
-      grossCommissionAmountNet: new Decimal(i.grossCommissionAmountNet),
-      grossCommissionVatAmount: new Decimal(i.grossCommissionVatAmount),
-      refundedCommissionAmountNet: new Decimal(i.refundedCommissionAmountNet),
-      refundedCommissionVatAmount: new Decimal(i.refundedCommissionVatAmount),
-      sellerDiscountNet: new Decimal(i.sellerDiscountNet),
-      sellerDiscountVatAmount: new Decimal(i.sellerDiscountVatAmount),
-    })),
-    fees: fees.map((f) => ({
-      amountNet: new Decimal(f.amountNet),
-      vatAmount: new Decimal(f.vatAmount),
-      direction: f.direction,
-    })),
+    sale: { gross: new Decimal(order.saleGross), vat: new Decimal(order.saleVat) },
+    cost: { gross: costGross, vat: costVat },
+    commission: { gross: commissionGross, vat: commissionVat },
+    fees: profitInputFees,
+    stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
   });
 
   const settledNetProfit = result.netProfit.toDecimalPlaces(2);
   const settledNetVat = result.netVat.toDecimalPlaces(2);
   await tx.order.update({
     where: { id: orderId },
-    data: { settledNetProfit, settledNetVat },
+    data: {
+      settledNetProfit,
+      settledNetVat,
+      // Marj %'leri backend-hesaplı + persist (sıralanabilir, spec ekleme #2).
+      settledSaleMarginPct: result.saleMarginPct?.toDecimalPlaces(4) ?? null,
+      settledCostMarkupPct: result.costMarkupPct?.toDecimalPlaces(4) ?? null,
+    },
   });
 
   return { recomputed: true, settledNetProfit };
