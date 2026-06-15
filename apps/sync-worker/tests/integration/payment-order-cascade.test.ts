@@ -347,4 +347,132 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
       expect(result).toEqual({ applied: false, skipReason: 'sparse_field' });
     });
   });
+
+  // ─── Cargo finalize gate (2026-06-15) ──────────────────────────────────
+  // FULLY_SETTLED requires every estimate to have its real value. The only
+  // variable estimate is SHIPPING: Trendyol-cargo orders wait for the real
+  // CARGO_INVOICE; seller-cargo orders confirm the own-tariff estimate.
+  describe('cargo finalize gate', () => {
+    async function seedShippingEstimate(orderId: string, orgId: string): Promise<void> {
+      await prisma.orderFee.create({
+        data: {
+          orderId,
+          organizationId: orgId,
+          feeType: 'SHIPPING',
+          source: 'ESTIMATE',
+          direction: 'DEBIT',
+          amountNet: new Decimal('15.00'),
+          vatRate: new Decimal('20.00'),
+          vatAmount: new Decimal('3.00'),
+        },
+      });
+    }
+
+    it('Trendyol-cargo: PaymentOrder alone does NOT finalize while ESTIMATE SHIPPING lacks a real CARGO_INVOICE', async () => {
+      const built = await buildOrderReadyForCycle();
+      await seedShippingEstimate(built.orderId, built.organizationId);
+
+      await prisma.$transaction((tx) => handleSale(built.storeId, makeSaleRow(), tx));
+      await prisma.$transaction((tx) =>
+        handlePaymentOrderEntry(built.storeId, built.organizationId, makePaymentOrderRow(), tx),
+      );
+
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: built.orderId } });
+      // NOT finalized + no premature settled number.
+      expect(order.reconciliationStatus).not.toBe('FULLY_SETTLED');
+      expect(order.settledNetProfit).toBeNull();
+      // PSF/STOPPAGE confirmed, but SHIPPING estimate left unconfirmed (waits for cargo).
+      const shipping = await prisma.orderFee.findFirstOrThrow({
+        where: { orderId: built.orderId, feeType: 'SHIPPING', source: 'ESTIMATE' },
+      });
+      expect(shipping.confirmedAt).toBeNull();
+    });
+
+    it('Trendyol-cargo: a real CARGO_INVOICE SHIPPING resolves the gate → FULLY_SETTLED', async () => {
+      const built = await buildOrderReadyForCycle();
+      await seedShippingEstimate(built.orderId, built.organizationId);
+      // Real cargo invoice lands (whatever order vs PaymentOrder).
+      await prisma.orderFee.create({
+        data: {
+          orderId: built.orderId,
+          organizationId: built.organizationId,
+          feeType: 'SHIPPING',
+          source: 'CARGO_INVOICE',
+          direction: 'DEBIT',
+          amountNet: new Decimal('18.00'),
+          vatRate: new Decimal('20.00'),
+          vatAmount: new Decimal('3.60'),
+        },
+      });
+
+      await prisma.$transaction((tx) => handleSale(built.storeId, makeSaleRow(), tx));
+      await prisma.$transaction((tx) =>
+        handlePaymentOrderEntry(built.storeId, built.organizationId, makePaymentOrderRow(), tx),
+      );
+
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: built.orderId } });
+      expect(order.reconciliationStatus).toBe('FULLY_SETTLED');
+      expect(order.settledNetProfit).not.toBeNull();
+    });
+
+    it('seller-cargo: PaymentOrder confirms ESTIMATE SHIPPING (own tariff = real) → FULLY_SETTLED without a cargo invoice', async () => {
+      const built = await buildOrderReadyForCycle();
+      await seedShippingEstimate(built.orderId, built.organizationId);
+      await prisma.order.update({
+        where: { id: built.orderId },
+        data: { usesSellerCargoAgreement: true },
+      });
+
+      await prisma.$transaction((tx) => handleSale(built.storeId, makeSaleRow(), tx));
+      await prisma.$transaction((tx) =>
+        handlePaymentOrderEntry(built.storeId, built.organizationId, makePaymentOrderRow(), tx),
+      );
+
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: built.orderId } });
+      expect(order.reconciliationStatus).toBe('FULLY_SETTLED');
+      const shipping = await prisma.orderFee.findFirstOrThrow({
+        where: { orderId: built.orderId, feeType: 'SHIPPING', source: 'ESTIMATE' },
+      });
+      expect(shipping.confirmedAt).not.toBeNull(); // own-tariff estimate confirmed
+    });
+
+    it('seller-cargo + a real CARGO_INVOICE: does NOT confirm the ESTIMATE SHIPPING — no double-count, settled uses real cargo only', async () => {
+      const built = await buildOrderReadyForCycle();
+      await seedShippingEstimate(built.orderId, built.organizationId); // estimate 15
+      await prisma.order.update({
+        where: { id: built.orderId },
+        data: { usesSellerCargoAgreement: true },
+      });
+      // Trendyol billed cargo anyway (rare; cargo handler warns) — real cargo
+      // lands before payment. The real fee must supersede the estimate.
+      await prisma.orderFee.create({
+        data: {
+          orderId: built.orderId,
+          organizationId: built.organizationId,
+          feeType: 'SHIPPING',
+          source: 'CARGO_INVOICE',
+          direction: 'DEBIT',
+          amountNet: new Decimal('20.00'),
+          vatRate: new Decimal('20.00'),
+          vatAmount: new Decimal('4.00'),
+        },
+      });
+
+      await prisma.$transaction((tx) => handleSale(built.storeId, makeSaleRow(), tx));
+      await prisma.$transaction((tx) =>
+        handlePaymentOrderEntry(built.storeId, built.organizationId, makePaymentOrderRow(), tx),
+      );
+
+      const order = await prisma.order.findUniqueOrThrow({ where: { id: built.orderId } });
+      expect(order.reconciliationStatus).toBe('FULLY_SETTLED');
+      // ESTIMATE SHIPPING left UNCONFIRMED → excluded from settled (real cargo wins).
+      const estShipping = await prisma.orderFee.findFirstOrThrow({
+        where: { orderId: built.orderId, feeType: 'SHIPPING', source: 'ESTIMATE' },
+      });
+      expect(estShipping.confirmedAt).toBeNull();
+      // settled = 100 − 40 cost − 10 comm − 10.99 PSF − 1 stoppage − 20 REAL cargo
+      //         = 18.01 (NOT 3.01, which is what a double-counted 15 + 20 would give)
+      expect(order.settledNetProfit!.toFixed(2)).toBe('18.01');
+    });
+  });
 });

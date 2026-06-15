@@ -3,13 +3,16 @@
 // from a single input row — every other handler is per-line.
 //
 // Cascade scope (per Order in the cycle):
-//   1. Confirm ESTIMATE OrderFees (PSF + STOPPAGE) → set confirmedAt +
-//      confirmedBy. Idempotent via `confirmedAt: null`
-//      filter (no PR-9-style trigger; updateMany skips already-confirmed rows).
-//   2. recomputeSettledProfit(orderId) → writes Order.settledNetProfit
-//      using @pazarsync/profit's computeProfit. Skips if cost snapshots
-//      incomplete.
-//   3. Order.reconciliationStatus = FULLY_SETTLED.
+//   1. Confirm deterministic ESTIMATE OrderFees → set confirmedAt + confirmedBy.
+//      PSF + STOPPAGE always; ESTIMATE SHIPPING too for seller-cargo orders
+//      (own-tariff estimate is the real cost — no Trendyol cargo invoice comes).
+//      Idempotent via `confirmedAt: null` filter.
+//   2. tryFinalizeReconciliation(orderId) → writes Order.settledNetProfit +
+//      flips reconciliationStatus to FULLY_SETTLED, but ONLY when every estimate
+//      has its real value. Trendyol-cargo orders without a real CARGO_INVOICE
+//      SHIPPING stay PARTIALLY_SETTLED (settledNetProfit unset) until the cargo
+//      invoice handler re-runs the finalize — no premature "final" with a
+//      missing-cargo number (Berkin 2026-06-15; timeout-free by design).
 //
 // PR-9 invariant (HARD GUARANTEE):
 //   - Order.estimatedNetProfit is NEVER written. The write-once trigger
@@ -23,17 +26,23 @@
 // If no orders found → log + skip (re-poll cron PR-12 will resurface
 // orphan cycles).
 
-import type { Prisma } from '@pazarsync/db';
+import type { OrderFeeType, Prisma } from '@pazarsync/db';
 import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
-import { recomputeSettledProfit } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
+import { tryFinalizeReconciliation } from './finalize-reconciliation';
 import type { HandleSettlementResult } from './sale';
 
 // PSF artık tek refinable PLATFORM_SERVICE satırı (SameDayShipping 6.99/10.99 rate
 // estimate'te belirlenir; feeType hep PLATFORM_SERVICE). PLATFORM_SERVICE_FAST feeType'ı
 // hiçbir kod yazmaz → confirmation listesinden çıkarıldı (2026-06-14).
-const CONFIRMABLE_FEE_TYPES = ['PLATFORM_SERVICE', 'STOPPAGE'] as const;
+const CONFIRMABLE_FEE_TYPES: readonly OrderFeeType[] = ['PLATFORM_SERVICE', 'STOPPAGE'];
+
+// Satıcı kendi kargo anlaşmasını kullanıyorsa (usesSellerCargoAgreement) Trendyol
+// kargo faturası BEKLENMEZ → ESTIMATE SHIPPING zaten gerçek maliyettir (kendi
+// tarifesi) ve burada confirm edilir. Trendyol-kargo siparişlerinde SHIPPING
+// confirm EDİLMEZ — gerçek CARGO_INVOICE'u bekler (finalize-reconciliation gate).
+const SELLER_CARGO_CONFIRMABLE: readonly OrderFeeType[] = [...CONFIRMABLE_FEE_TYPES, 'SHIPPING'];
 
 export interface HandlePaymentOrderEntryResult extends HandleSettlementResult {
   /** Number of orders the cycle touched. Useful for cron telemetry. */
@@ -58,7 +67,7 @@ export async function handlePaymentOrderEntry(
   // match — skip and let the next run handle it.
   const orders = await tx.order.findMany({
     where: { storeId, paymentOrderId },
-    select: { id: true },
+    select: { id: true, usesSellerCargoAgreement: true },
   });
   if (orders.length === 0) {
     syncLog.warn('settlements.payment-order.no-orders-in-cycle', {
@@ -71,32 +80,38 @@ export async function handlePaymentOrderEntry(
   const confirmedBy = `PaymentOrder:${row.paymentOrderId.toString()}`;
 
   for (const order of orders) {
-    // 1. Confirm ESTIMATE PSF + STOPPAGE rows — idempotent via null filter.
+    // 1. Confirm deterministic ESTIMATE fees — idempotent via null filter.
+    //    PSF + STOPPAGE always. ESTIMATE SHIPPING too for seller-cargo orders
+    //    (own-tariff estimate IS the real cost — no Trendyol cargo invoice
+    //    comes) — BUT only when no real CARGO_INVOICE SHIPPING already exists.
+    //    If Trendyol actually billed cargo (rare; cargo handler warns), that
+    //    real fee supersedes; confirming the estimate too would double-count
+    //    shipping in settled profit (estimate-on-order-create.ts invariant).
+    //    Trendyol-cargo orders never confirm SHIPPING here → it stays unresolved
+    //    until the real CARGO_INVOICE lands (finalize gate below).
+    let confirmable = CONFIRMABLE_FEE_TYPES;
+    if (order.usesSellerCargoAgreement) {
+      const realCargoCount = await tx.orderFee.count({
+        where: { orderId: order.id, source: 'CARGO_INVOICE', feeType: 'SHIPPING' },
+      });
+      if (realCargoCount === 0) confirmable = SELLER_CARGO_CONFIRMABLE;
+    }
     await tx.orderFee.updateMany({
       where: {
         orderId: order.id,
         source: 'ESTIMATE',
-        feeType: { in: [...CONFIRMABLE_FEE_TYPES] },
+        feeType: { in: [...confirmable] },
         confirmedAt: null,
       },
       data: { confirmedAt, confirmedBy },
     });
 
-    // 2. Recompute settledNetProfit from confirmed fees + cost snapshots.
-    //    (SameDayShipping PSF refinesi artık estimate'te yapılıyor: sevk
-    //    re-sync'inde 6.99↔10.99; ayrı fast-delivery correction OrderFee'ye
-    //    gerek yok — 2026-06-14.) recomputeSettledProfit only writes when all
-    //    cost snapshots present + saleSubtotalNet/saleVatTotal non-null — skip
-    //    in incomplete state is safe (subsequent cron run picks it up).
-    await recomputeSettledProfit(order.id, tx);
-
-    // 3. Mark order FULLY_SETTLED. Mutable column — set regardless of
-    //    whether settledNetProfit was written (status reflects cycle
-    //    completion; profit value reflects calculation completeness).
-    await tx.order.update({
-      where: { id: order.id },
-      data: { reconciliationStatus: 'FULLY_SETTLED' },
-    });
+    // 2. Try to finalize: writes settledNetProfit + flips to FULLY_SETTLED ONLY
+    //    when every estimate has its real value (Trendyol-cargo waits for the
+    //    real CARGO_INVOICE; the cargo handler re-runs this when it lands). An
+    //    incomplete order stays PARTIALLY_SETTLED with settledNetProfit unset —
+    //    no premature "Mutabakat tamamlandı" with a missing-cargo number.
+    await tryFinalizeReconciliation(order.id, tx);
   }
 
   return { applied: true, orderCount: orders.length };
