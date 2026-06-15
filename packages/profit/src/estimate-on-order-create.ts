@@ -14,7 +14,7 @@
  * ve kargo bedeli rafine olur. Idempotent: PSF/Stopaj skip-if-exists, SHIPPING
  * upsert, maliyet snapshot DB-immutable → aynı (veya kargo-rafine) sonuç.
  *
- * **Maliyet snapshot eksikse**: herhangi bir item'ın `unitCostSnapshotNet`'i null
+ * **Maliyet snapshot eksikse**: herhangi bir item'ın `unitCostSnapshotGross`'u null
  * ise `estimatedNetProfit` null bırakılır (cost sonradan gelince re-entry yazar).
  *
  * **Kâr-dışı sipariş** (`profitExcludedAt !== null`): ne fee ne estimate yazılır.

@@ -1,6 +1,6 @@
 /**
  * Order/OrderItem write-once upsert + cost snapshot capture + applyEstimate
- * dispatch — single transaction, NEW convention (KDV-split native).
+ * dispatch — single transaction, GROSS convention (KDV-dahil native, 2026-06-16).
  *
  * Promoted from `apps/sync-worker/src/handlers/orders.ts` (PR-C3a) so that
  * both consumers share one source of truth:
@@ -22,11 +22,10 @@
  *   - applyEstimateOnOrderCreate inner guard ile write-once
  *     (estimatedNetProfit non-null ise no-op)
  *
- * PR-6 continuation (2026-05-21): captureCostSnapshot now writes the
- * three NET split columns (`unitCostSnapshotNet`, `unitCostSnapshotVatAmount`,
- * `unitCostSnapshotVatRate`). The estimated_net_profit gap that prevented
- * applyEstimateOnOrderCreate from completing the write is now closed.
- * Legacy `unitCostSnapshot` stays NULL; column drop scheduled for PR-8+.
+ * GROSS konvansiyon (2026-06-16): captureCostSnapshot writes the two GROSS cost
+ * columns (`unitCostSnapshotGross` + `unitCostSnapshotVatRate`); components carry
+ * `amountGross`/`vatRate`/`amountInTryGross`. Net/KDV are derived downstream by the
+ * profit engine (computeProfit), never re-split here.
  */
 
 import { Decimal } from 'decimal.js';
@@ -201,15 +200,17 @@ export async function captureCostSnapshot(
 /**
  * Persist a single mapped order + its items in one transaction.
  *
- * NEW convention native (design §5.2 + Order Sync design §5.2):
- *   - Order: saleSubtotalNet + saleVatTotal aggregate'ı MappedOrder'dan.
+ * GROSS convention native (2026-06-16):
+ *   - Order: saleGross/saleVat/listGross/sellerDiscountGross (+ sellerDiscountVat)
+ *     aggregate'ı MappedOrder paket toplamlarından. promotionDisplays UI gösterimi.
  *     agreedDeliveryDate, actualDeliveryDate, fastDelivery, micro direct API.
- *   - OrderItem: unitPriceNet/VatRate/VatAmount + grossCommissionAmountNet/Vat
- *     + sellerDiscountNet/VatAmount. Variant lookup by barcode (storeId scoped).
- *   - Cost snapshot capture: write-once per item (existing service mirror).
+ *   - OrderItem: lineListGross/lineSaleGross/lineSellerDiscountGross/saleVatRate +
+ *     commissionGross/refundedCommissionGross/commissionVatRate +
+ *     estimatedCommissionGross (write-once #340). Variant lookup by barcode (storeId scoped).
+ *   - Cost snapshot capture: write-once per item (unit_cost_snapshot_gross + vat_rate).
  *   - applyEstimateOnOrderCreate (`@pazarsync/profit`): aynı tx içinde son adım
- *     olarak çağrılır — PSF + Stopaj ESTIMATE OrderFee rows + Order.estimatedNetProfit
- *     write-once. Cost snapshot eksikse profit null kalır.
+ *     olarak çağrılır — PSF + Stopaj + Kargo ESTIMATE OrderFee rows + Order.estimated*.
+ *     Cost snapshot eksikse profit null kalır.
  */
 export interface UpsertOrderOpts {
   /**

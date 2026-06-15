@@ -5,34 +5,37 @@
  * ESTIMATE OrderFees as confirmed.
  *
  * INVARIANT (2026-06-14 karar — Hakediş Kontrolü temeli): settledNetProfit =
- * satıcının HAK ETTİĞİ kâr. Satış tabanı = Order.saleSubtotalNet (effectiveSale,
+ * satıcının HAK ETTİĞİ kâr. Satış tabanı = Order.saleGross (effectiveSale, KDV-dahil,
  * hak edilen) — Trendyol'un GERÇEKTE kredilediği OrderItem.settledSaleAmount
  * DEĞİL. Underpaid bir actual-payout'a ASLA sessizce çekilmez. Beklenen (bu
  * fonksiyon) vs gerçek-yatan farkı = gelecek "Hakediş Kontrolü" epiği (itiraz/
  * telafi). Bir gün "settled'ı gerçeğe çekeyim" deme — bu kasıtlı.
  *
+ * GROSS konvansiyon (2026-06-16): tüm para terimleri GROSS+vatRate; net/KDV motorda
+ * türetilir (computeProfit). Settled kâr settled gross kolonlarından kurulur.
+ *
  * Reads:
- *   - Order.saleSubtotalNet + saleVatTotal  (effectiveSale aggregate = HAK EDİLEN, immutable since arrival)
- *   - OrderItem rows (cost snapshot + commission split + seller discount)
- *   - OrderFee rows where source ∈ {SETTLEMENT, CARGO_INVOICE}
- *     OR  source = ESTIMATE AND confirmedAt IS NOT NULL
+ *   - Order.saleGross + saleVat  (effectiveSale aggregate = HAK EDİLEN, immutable since arrival)
+ *   - OrderItem rows (unitCostSnapshotGross + settled/estimatedCommissionGross + refundedCommissionGross)
+ *   - OrderFee rows (amountGross + vatRate) where source ∈ {SETTLEMENT, CARGO_INVOICE}
+ *     OR  source = ESTIMATE AND confirmedAt IS NOT NULL; STOPPAGE(SETTLEMENT) → stoppage term
  *
  * Writes:
- *   - Order.settledNetProfit  (mutable column; PR-9 trigger guards only
- *     Order.estimated_net_profit — settledNetProfit is free-form).
+ *   - Order.settledNetProfit / settledNetVat / settledSaleMarginPct / settledCostMarkupPct
+ *     (mutable columns; PR-9 trigger guards only estimated_* — settled_* is free-form).
  *
  * Idempotent — pure function of (Order + items + confirmed fees) state.
  * Re-running yields the same value unless new SETTLEMENT/CARGO_INVOICE
  * rows landed or ESTIMATE rows got confirmed since the last call.
  *
  * NULL on incomplete data:
- *   - Any OrderItem with unitCostSnapshotNet = NULL → settle skipped,
+ *   - Any OrderItem with unitCostSnapshotGross = NULL → settle skipped,
  *     settledNetProfit stays at whatever it was (previous null or partial value).
- *   - saleSubtotalNet / saleVatTotal NULL (no items inserted yet) → skipped.
+ *   - saleGross / saleVat NULL (no items inserted yet) → skipped.
  *
  * PR-9 invariant — estimatedNetProfit is NEVER touched here. The schema
  * write-once trigger would reject any UPDATE that distinct-from'd it;
- * this function writes only `settledNetProfit`.
+ * this function writes only the settled_* columns.
  */
 
 import { Decimal } from 'decimal.js';

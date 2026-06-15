@@ -6,10 +6,10 @@
  *   - aksi: ürün-ayarı desisinden **adet-ağırlıklı ortalama** = Σ(adet×desi)/Σ(adet)
  *     (`eff_desi = variant.dimensionalWeight ?? variant.syncedDimensionalWeight`, non-null ≥ 0)
  *
- * Barem aralığı: siparişin **effectiveSale brüt** toplamı = `saleSubtotalNet + saleVatTotal`
- * (= liste − satıcı indirimi; denetim #1'den beri saleSubtotalNet effectiveSale'dir). Trendyol
- * Barem kuralı ile birebir: satıcı indirimi tabana DAHİL, Trendyol-finanslı indirim HARİÇ — bu
- * tam olarak effectiveSale'e denk gelir (müşterinin ödediği lineUnitPrice DEĞİL).
+ * Barem aralığı: siparişin **effectiveSale brüt** toplamı = `order.saleGross` (GROSS,
+ * KDV-dahil; = liste − satıcı indirimi = packageTotalPrice). Trendyol Barem kuralı ile
+ * birebir: satıcı indirimi tabana DAHİL, Trendyol-finanslı indirim HARİÇ — bu tam olarak
+ * effectiveSale'e denk gelir (müşterinin ödediği lineUnitPrice DEĞİL).
  *
  * Barem-uygunluk: `order.fastDelivery` (Trendyol paket bayrağı).
  *
