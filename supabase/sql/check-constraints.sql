@@ -11,28 +11,16 @@
 -- Idempotent: DROP CONSTRAINT IF EXISTS before ADD CONSTRAINT;
 -- CREATE UNIQUE INDEX IF NOT EXISTS for partial uniques.
 
--- ─── order_items: refunded ≤ gross commission ──────────────────────────
--- Effective commission = gross − refunded (research §3.2, design §3.2 +
--- §10.1 unit testler). Refunded > gross olursa Trendyol mapping hatası
--- veya Discount Sale'den önce işlenmiş demektir → fırlat ve Sentry'ye
--- alert. Schema'da @default(0) olduğu için boş satırlar tutarlı (0 ≤ 0).
+-- ─── order_items: refunded ≤ gross commission (GROSS convention 2026-06-16) ──
+-- refunded_commission_gross > commission_gross olursa Trendyol mapping hatası
+-- veya Discount Sale'den önce işlenmiş demektir. @default(0) → 0 ≤ 0 tutarlı.
+-- Eski net-bazlı constraint'ler (refunded_commission_amount_net) silindi;
+-- estimated pair constraint da kaldırıldı (tek estimated_commission_gross kaldı).
 ALTER TABLE order_items DROP CONSTRAINT IF EXISTS order_items_refunded_commission_check;
 ALTER TABLE order_items ADD CONSTRAINT order_items_refunded_commission_check
-  CHECK (refunded_commission_amount_net <= gross_commission_amount_net);
+  CHECK (refunded_commission_gross <= commission_gross);
 
--- ─── 2026-06-15 estimate preservation: refunded ≤ gross on the frozen pair ──
--- The estimated_* commission columns (mapper T+0 snapshot, write-once at intake)
--- carry the same semantics as the working pair. Today intake writes them
--- byte-identical to the working columns (which already satisfy the check above),
--- so no violation is reachable; the only writers are upsert-order intake and the
--- settlement handlers never touch estimated_*. This mirror keeps the invariant in
--- the DB so a FUTURE separate write path (reconcile/backfill) cannot open a gap.
--- Nullable-safe via IS NULL escapes. Mirror: prisma/migrations/20260615120000.
 ALTER TABLE order_items DROP CONSTRAINT IF EXISTS order_items_estimated_refunded_commission_check;
-ALTER TABLE order_items ADD CONSTRAINT order_items_estimated_refunded_commission_check
-  CHECK (estimated_refunded_commission_amount_net IS NULL
-         OR estimated_gross_commission_amount_net IS NULL
-         OR estimated_refunded_commission_amount_net <= estimated_gross_commission_amount_net);
 
 -- ─── PR-4: cost vat_amount nonneg (design §3.5 + §12.1 #10) ────────────
 -- vat_amount = amount × vatRate / 100 (NET convention). Yasal vatRate 0..%30

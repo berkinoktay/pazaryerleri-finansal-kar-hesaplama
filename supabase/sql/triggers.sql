@@ -52,10 +52,8 @@ CREATE TRIGGER on_auth_user_created
 -- in the snapshot service can be bypassed by future code, the trigger
 -- catches every path including raw SQL, migrations, and seeds.
 --
--- Guarded columns (PR-6 continuation, 2026-05-21 — KDV-split native):
---   - unit_cost_snapshot          (legacy, scheduled for DROP at PR-8+)
---   - unit_cost_snapshot_net      (NET aggregate in TRY)
---   - unit_cost_snapshot_vat_amount (VAT aggregate in TRY)
+-- Guarded columns (GROSS convention 2026-06-16):
+--   - unit_cost_snapshot_gross    (GROSS maliyet snapshot)
 --   - unit_cost_snapshot_vat_rate (effective denormalized rate)
 --   - snapshot_captured_at        (capture timestamp)
 --
@@ -67,21 +65,9 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  IF OLD.unit_cost_snapshot IS NOT NULL AND
-     NEW.unit_cost_snapshot IS DISTINCT FROM OLD.unit_cost_snapshot THEN
-    RAISE EXCEPTION 'unit_cost_snapshot is write-once'
-      USING ERRCODE = '42501',
-            HINT = 'Past order calculations are immutable by design.';
-  END IF;
-  IF OLD.unit_cost_snapshot_net IS NOT NULL AND
-     NEW.unit_cost_snapshot_net IS DISTINCT FROM OLD.unit_cost_snapshot_net THEN
-    RAISE EXCEPTION 'unit_cost_snapshot_net is write-once'
-      USING ERRCODE = '42501',
-            HINT = 'Past order calculations are immutable by design.';
-  END IF;
-  IF OLD.unit_cost_snapshot_vat_amount IS NOT NULL AND
-     NEW.unit_cost_snapshot_vat_amount IS DISTINCT FROM OLD.unit_cost_snapshot_vat_amount THEN
-    RAISE EXCEPTION 'unit_cost_snapshot_vat_amount is write-once'
+  IF OLD.unit_cost_snapshot_gross IS NOT NULL AND
+     NEW.unit_cost_snapshot_gross IS DISTINCT FROM OLD.unit_cost_snapshot_gross THEN
+    RAISE EXCEPTION 'unit_cost_snapshot_gross is write-once'
       USING ERRCODE = '42501',
             HINT = 'Past order calculations are immutable by design.';
   END IF;

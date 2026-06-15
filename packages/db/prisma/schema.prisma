@@ -638,62 +638,49 @@ model Order {
 }
 
 model OrderItem {
-  id                 String    @id @default(uuid()) @db.Uuid
-  orderId            String    @map("order_id") @db.Uuid
-  productVariantId   String?   @map("product_variant_id") @db.Uuid
-  quantity           Int
+  id               String    @id @default(uuid()) @db.Uuid
+  orderId          String    @map("order_id") @db.Uuid
+  productVariantId String?   @map("product_variant_id") @db.Uuid
+  organizationId   String?   @map("organization_id") @db.Uuid
+  quantity         Int
   // PR-8: Trendyol satır kimliği (lines[].lineId) + ham barkod. platformLineId
   // platform-taraflı satır izi (aynı varianttan 2 ayrı satır ayrımı); barcode
   // variant eşleşmediğinde elde kalan tek ürün izi ("variant bulunamadı" UI'ı).
-  platformLineId     BigInt?   @map("platform_line_id")
-  barcode            String?
+  platformLineId BigInt?   @map("platform_line_id")
+  barcode        String?
   // Variant-resolution kuyruğu (spec 2026-06-11 §5): productVariantId NULL
   // satırlar için deneme sayacı + backoff vadesi. Tick yalnız vadesi gelmiş
   // satırları tarar; bağlanınca alanlar anlamını yitirir (sıfırlanmaz).
   variantResolutionAttempts Int       @default(0) @map("variant_resolution_attempts")
   nextResolutionAt          DateTime? @map("next_resolution_at")
-  // Eski (KDV-dahil) kolonlar — PR-5c'de silinir, PR-5b veri taşıma sonrası.
-  unitPrice          Decimal   @map("unit_price") @db.Decimal(12, 2)
-  commissionRate     Decimal   @map("commission_rate") @db.Decimal(5, 2)
-  commissionAmount   Decimal   @map("commission_amount") @db.Decimal(12, 2)
-  organizationId     String?   @map("organization_id") @db.Uuid
-  unitCostSnapshot   Decimal?  @map("unit_cost_snapshot") @db.Decimal(12, 2)
-  snapshotCapturedAt DateTime? @map("snapshot_captured_at")
 
-  // ─── PR-3: KDV ayrıştırması + commission split (design §3.2) ────────
-  // unitPriceNet = lineUnitPrice / (1 + unitVatRate/100); unitVatAmount = brüt − net.
-  // Nullable çünkü mevcut satırlar PR-5b veri taşıma'sı bunları doldurana kadar boş.
-  unitPriceNet  Decimal? @map("unit_price_net") @db.Decimal(12, 2)
-  unitVatRate   Decimal? @map("unit_vat_rate") @db.Decimal(5, 2)
-  unitVatAmount Decimal? @map("unit_vat_amount") @db.Decimal(12, 2)
+  // ─── GROSS konvansiyon (2026-06-16) ────────────────────────────────────
+  // Tüm para değerleri GROSS (KDV-dahil) olarak tutulur; net = gross × 100/(100+rate).
+  // Trendyol paket toplamları gross olarak gelir → mapper artık bölüp çarpmaz.
 
-  // Komisyon — Trendyol her satır için ayrı oran verdiği için OrderItem-level.
-  // Effective commission = gross − refunded (research §3.2 — Discount transaction'ı
-  // ayrı komisyon iadesi getiriyor). DB-level CHECK constraint:
-  // refunded_commission_amount_net <= gross_commission_amount_net (migration.sql'de
-  // manual ALTER TABLE). default(0) backward-compat için (PR-6 sync worker
-  // settlement Sale satırlarını işlerken doğru değerleri yazar).
-  grossCommissionAmountNet    Decimal @default(0) @map("gross_commission_amount_net") @db.Decimal(12, 2)
-  grossCommissionVatAmount    Decimal @default(0) @map("gross_commission_vat_amount") @db.Decimal(12, 2)
-  refundedCommissionAmountNet Decimal @default(0) @map("refunded_commission_amount_net") @db.Decimal(12, 2)
-  refundedCommissionVatAmount Decimal @default(0) @map("refunded_commission_vat_amount") @db.Decimal(12, 2)
+  // Satış (gross + KDV oranı)
+  // lineListGross: Trendyol lineListPrice × quantity — liste fiyatı toplamı.
+  // lineSaleGross: Trendyol lineGrossAmount — satış toplamı (indirimler sonrası).
+  // lineSellerDiscountGross: Trendyol lineSellerDiscount — satıcı indirimi (gross).
+  // saleVatRate: ürün KDV oranı (varianttan veya kategori lookup'tan).
+  lineListGross           Decimal @default(0) @map("line_list_gross") @db.Decimal(12, 2)
+  lineSaleGross           Decimal @default(0) @map("line_sale_gross") @db.Decimal(12, 2)
+  lineSellerDiscountGross Decimal @default(0) @map("line_seller_discount_gross") @db.Decimal(12, 2)
+  saleVatRate             Decimal @default(0) @map("sale_vat_rate") @db.Decimal(5, 2)
 
-  // Komisyon TAHMİNİ donuk kopyası (2026-06-15). grossCommission*/refundedCommission*
-  // settlement Sale/Discount satırı geldiğinde Trendyol'un GERÇEK değeriyle overwrite
-  // edilir → bu kolonlar mapper'ın T+0 tahminini KORUR (Hakediş Kontrolü ekranı
-  // tahmin-vs-gerçek karşılaştırması yapabilsin; komisyon-oran sapmasını da görünür
-  // kılar — #331 DB-driven KDV). YALNIZ gerçekten tahmin ettiğimiz iki değer tutulur:
-  // satıcı indirimi siparişten OKUNUR (lineSellerDiscount=biliniyor) + effectiveSale'e
-  // (saleSubtotalNet, write-once) gömülü → ayrıca tahmin tutulmaz. Null: bu değişiklik
-  // öncesi satırlar + henüz intake olmamışlar.
-  estimatedGrossCommissionAmountNet    Decimal? @map("estimated_gross_commission_amount_net") @db.Decimal(12, 2)
-  estimatedGrossCommissionVatAmount    Decimal? @map("estimated_gross_commission_vat_amount") @db.Decimal(12, 2)
-  estimatedRefundedCommissionAmountNet Decimal? @map("estimated_refunded_commission_amount_net") @db.Decimal(12, 2)
-  estimatedRefundedCommissionVatAmount Decimal? @map("estimated_refunded_commission_vat_amount") @db.Decimal(12, 2)
-
-  // Satıcı kaynaklı indirim (gerçek gelir azaltıcı, Discount transaction'tan).
-  sellerDiscountNet       Decimal @default(0) @map("seller_discount_net") @db.Decimal(12, 2)
-  sellerDiscountVatAmount Decimal @default(0) @map("seller_discount_vat_amount") @db.Decimal(12, 2)
+  // Komisyon (gross + oran)
+  // commissionRate: Trendyol per-line commission rate (%).
+  // commissionGross: hesaplanan gross komisyon tutarı (effectiveSale × rate).
+  // refundedCommissionGross: iade edilen komisyon (gross). default(0) = iade yok.
+  // commissionVatRate: komisyon KDV oranı (DB-driven, default %20 — denetim A #331).
+  // estimatedCommissionGross (write-once): T+0 tahmin — settlement gelince korunur.
+  // settledCommissionGross (mutable): Trendyol'un Settlement'ta yazdığı gerçek değer.
+  commissionRate           Decimal  @map("commission_rate") @db.Decimal(5, 2)
+  commissionGross          Decimal  @default(0) @map("commission_gross") @db.Decimal(12, 2)
+  refundedCommissionGross  Decimal  @default(0) @map("refunded_commission_gross") @db.Decimal(12, 2)
+  commissionVatRate        Decimal  @default(20) @map("commission_vat_rate") @db.Decimal(5, 2)
+  estimatedCommissionGross Decimal? @map("estimated_commission_gross") @db.Decimal(12, 2)
+  settledCommissionGross   Decimal? @map("settled_commission_gross") @db.Decimal(12, 2)
 
   // Settlement ACTUAL çıpası — Trendyol'un Sale settlement'ta kredilediği GERÇEK
   // satış tutarı (KDV-dahil ham `credit`; handleSale yazar, T+~5). KÂRA GİRMEZ:
@@ -703,11 +690,13 @@ model OrderItem {
   // tespit edecek. Null: settlement gelmeden önce (2026-06-14 temel atımı).
   settledSaleAmount Decimal? @map("settled_sale_amount") @db.Decimal(12, 2)
 
-  // Maliyet anlık kopyası — KDV ayrıştırma (mevcut unitCostSnapshot KDV-dahil).
-  // Tümü nullable: maliyet snapshot eksik durumda kar hesabı null kalır (§12.2 #7).
-  unitCostSnapshotNet       Decimal? @map("unit_cost_snapshot_net") @db.Decimal(12, 2)
-  unitCostSnapshotVatRate   Decimal? @map("unit_cost_snapshot_vat_rate") @db.Decimal(5, 2)
-  unitCostSnapshotVatAmount Decimal? @map("unit_cost_snapshot_vat_amount") @db.Decimal(12, 2)
+  // Maliyet anlık kopyası (gross + KDV oranı).
+  // Tümü nullable: maliyet snapshot eksik durumda kar hesabı null kalır.
+  unitCostSnapshotGross   Decimal? @map("unit_cost_snapshot_gross") @db.Decimal(12, 2)
+  unitCostSnapshotVatRate Decimal? @map("unit_cost_snapshot_vat_rate") @db.Decimal(5, 2)
+
+  // Maliyet snapshot zamanı — write-once, variant bağlanınca set edilir.
+  snapshotCapturedAt DateTime? @map("snapshot_captured_at")
 
   // Komisyon faturası referansı (design §3.8 iki aşamalı populate):
   // - serialNumber: Sale satırı T+~5'te direkt yazar (raw "DCF...").
