@@ -26,6 +26,7 @@ import {
 } from '../../src/trendyol/orders';
 import type { MappedOrder, PromotionDisplay, TrendyolOrderLine } from '../../src/trendyol/types';
 import { buildLine, buildPackage } from '../helpers/order-builders';
+import { PAYLOAD_11313045474, PAYLOAD_11323825496 } from '../fixtures/trendyol-gross-payloads';
 
 // ─── TrendyolDiscountDetail type (Task 7) ──────────────────────────────
 
@@ -497,6 +498,41 @@ describe('mapTrendyolShipmentPackage — package totals + invariant', () => {
       }),
     );
     expect(noDiscount.promotionDisplays).toBeNull();
+  });
+});
+
+// ─── GROSS fixture regression (real prod payloads, Task 10) ───────────
+// Penny-lock: these assert the mapper output against Trendyol's package totals
+// to the kuruş. The fixtures are real prod dumps — if a value below ever fails,
+// the mapper is wrong, not the expected number.
+
+describe('GROSS fixture regression (real prod payloads)', () => {
+  it('11313045474: qty>1 uneven split matches package totals exactly', () => {
+    const m = mapTrendyolShipmentPackage(PAYLOAD_11313045474);
+
+    expect(m.saleGross).toBe('806.99');
+    expect(m.listGross).toBe('855.00');
+    expect(m.sellerDiscountGross).toBe('48.01');
+    expect(m.lines[0]?.lineSaleGross).toBe('806.99');
+    expect(m.lines[0]?.lineSellerDiscountGross).toBe('48.01');
+    expect(m.lines[0]?.commissionGross).toBe('77.47'); // 806.99 × 9.6%
+  });
+
+  it('11323825496: 3-product multi-rate splits correctly (Σ komisyon 70,63)', () => {
+    const m = mapTrendyolShipmentPackage(PAYLOAD_11323825496);
+
+    expect(m.saleGross).toBe('423.70');
+    expect(m.listGross).toBe('446.00');
+    expect(m.sellerDiscountGross).toBe('22.30');
+    expect(m.lines[0]?.commissionGross).toBe('15.47'); // 104.5 × 14.8%
+    expect(m.lines[1]?.commissionGross).toBe('33.21'); // 174.8 × 19%
+    expect(m.lines[2]?.commissionGross).toBe('21.95'); // 144.4 × 15.2%
+
+    const totalCommission = [m.lines[0], m.lines[1], m.lines[2]].reduce(
+      (sum, line) => sum + Number(line?.commissionGross ?? 0),
+      0,
+    );
+    expect(totalCommission.toFixed(2)).toBe('70.63');
   });
 });
 
