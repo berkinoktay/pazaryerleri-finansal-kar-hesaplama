@@ -541,11 +541,32 @@ model Order {
   fastDeliveryType   String?   @map("fast_delivery_type")
   micro              Boolean   @default(false) @map("micro")
 
-  // ─── PR-5a: Kar V1 state/derived kolonları (design §3.1) ────────────
-  // saleSubtotalNet + saleVatTotal: OrderItem'lardan agregat (sync handler PR-6'da
-  // set eder). PR-5b veri taşıma mevcut Order.totalAmount'tan backfill yapacak.
-  saleSubtotalNet Decimal? @map("sale_subtotal_net") @db.Decimal(12, 2)
-  saleVatTotal    Decimal? @map("sale_vat_total") @db.Decimal(12, 2)
+  // ─── GROSS konvansiyon: sipariş-seviyesi agregat alanlar (2026-06-16) ──────
+  // Paket toplamları mapper'dan doğrudan gelir (Trendyol packageGrossAmount/
+  // packageTotalPrice/packageSellerDiscount). saleVat satır-bazlı hesaplanır
+  // (Σ lineSaleGross × saleVatRate / (100+rate)). sellerDiscountVat aynı pattern.
+  // listGross = saleGross + sellerDiscountGross. Eski saleSubtotalNet/saleVatTotal
+  // GROSS refactor kapsamında kaldırıldı (2026-06-16).
+  saleGross              Decimal? @map("sale_gross") @db.Decimal(12, 2)
+  saleVat                Decimal? @map("sale_vat") @db.Decimal(12, 2)
+  listGross              Decimal? @map("list_gross") @db.Decimal(12, 2)
+  sellerDiscountGross    Decimal? @map("seller_discount_gross") @db.Decimal(12, 2)
+  sellerDiscountVat      Decimal? @map("seller_discount_vat") @db.Decimal(12, 2)
+
+  // Marj yüzdeleri — backend hesaplanıp persist edilir (sıralanabilir + kayıtlı).
+  // estimatedSaleMarginPct = estimatedNetProfit / saleGross × 100 (saleGross=0→null).
+  // settledSaleMarginPct   = settledNetProfit  / saleGross × 100.
+  // estimatedCostMarkupPct = estimatedNetProfit / Σ costGross × 100.
+  // settledCostMarkupPct   = settledNetProfit  / Σ costGross × 100.
+  estimatedSaleMarginPct Decimal? @map("estimated_sale_margin_pct") @db.Decimal(8, 4)
+  settledSaleMarginPct   Decimal? @map("settled_sale_margin_pct") @db.Decimal(8, 4)
+  estimatedCostMarkupPct Decimal? @map("estimated_cost_markup_pct") @db.Decimal(8, 4)
+  settledCostMarkupPct   Decimal? @map("settled_cost_markup_pct") @db.Decimal(8, 4)
+
+  // Promosyon gösterimi (YAGNI — spec ekleme #3). Opsiyonel JSON dizisi:
+  // [{ "displayName": "Satıcı İndirimi", "amountGross": "48.01" }, ...].
+  // Mapper null döner indirim yoksa; upsert null'a dokunmaz.
+  promotionDisplays      Json?    @map("promotion_displays")
 
   // İki aşamalı kar (design §4.1):
   // - estimatedNetProfit: T+0 applyEstimateOnOrderCreate yazar, write-once (PR-9 trigger).
