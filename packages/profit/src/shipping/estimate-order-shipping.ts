@@ -60,13 +60,12 @@ export async function estimateShippingCostForOrder(
   }
 
   // ─── Barem aralığı: effectiveSale brüt sepet (liste − satıcı indirimi) ──────────
-  // Satış agregatları bilinmiyorsa Barem'e GİRME (gross=0 en ucuz Barem
-  // kademesini yanlışlıkla eşleştirir) → fastEligible=false ile desi-bazlıya düş.
-  const hasSaleAggregates = order.saleSubtotalNet !== null && order.saleVatTotal !== null;
+  // GROSS konvansiyon (2026-06-16): order.saleGross zaten brüt effectiveSale
+  // (= packageTotalPrice; net+vat birleştirmeye gerek yok). Satış bilinmiyorsa
+  // Barem'e GİRME (gross=0 en ucuz kademeyi yanlış eşleştirir) → desi-bazlıya düş.
+  const hasSaleAggregates = order.saleGross !== null;
   const grossTotalForBarem =
-    order.saleSubtotalNet !== null && order.saleVatTotal !== null
-      ? new Decimal(order.saleSubtotalNet.toString()).add(order.saleVatTotal.toString())
-      : new Decimal(0);
+    order.saleGross !== null ? new Decimal(order.saleGross.toString()) : new Decimal(0);
 
   const carrier = order.store.defaultShippingCarrier;
   return resolveTariffForDesi(tx, {
