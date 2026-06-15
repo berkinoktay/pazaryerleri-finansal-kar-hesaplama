@@ -28,9 +28,14 @@ import type { Prisma } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
 
 import { inferShippedSameDay } from './infer-shipped-same-day';
-import { computeProfit, type ProfitInputFee, type ProfitInputItem } from './profit-formula';
+import { computeProfit, type ProfitInputFee } from './profit-formula';
 import { isPsfExempt, resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
+
+/** gross × rate / (100 + rate) — KDV-dahil tutardan içerideki KDV'yi çıkarır. */
+function grossToVat(gross: Decimal, rate: Decimal): Decimal {
+  return gross.mul(rate).div(new Decimal(100).add(rate));
+}
 
 /**
  * Computes and persists `Order.estimatedNetProfit` (refinable) along with the
@@ -99,18 +104,22 @@ export async function applyEstimateOnOrderCreate(
     if (psfDef.fixedAmountNet === null) {
       throw new Error(`${psfDef.feeType} FeeDefinition ${psfDef.id} missing fixedAmountNet`);
     }
-    const psfNet = new Decimal(psfDef.fixedAmountNet);
+    // GROSS konvansiyon (2026-06-16): FeeDefinition referans verisi NET saklar
+    // (fixedAmountNet + defaultVatRate); fee yazımında GROSS'a çevrilir:
+    // amountGross = fixedAmountNet × (100 + vatRate)/100. Net/KDV downstream türetilir.
     const psfVatRate = new Decimal(psfDef.defaultVatRate);
-    const psfVat = psfNet.mul(psfVatRate).div(100).toDecimalPlaces(2);
+    const psfGross = new Decimal(psfDef.fixedAmountNet)
+      .mul(new Decimal(100).add(psfVatRate))
+      .div(100)
+      .toDecimalPlaces(2);
 
     // Tek PLATFORM_SERVICE ESTIMATE satırı (confirmation + recompute bunu key'ler);
     // FAST rate'te feeDefinitionId FAST satırına + displayName "Bugün Kargoda".
     // Refinable: sevk re-sync'inde rate (6.99↔10.99) güncellenir; çift-PSF yok.
     const psfData = {
       feeDefinitionId: psfDef.id,
-      amountNet: psfNet,
+      amountGross: psfGross,
       vatRate: psfVatRate,
-      vatAmount: psfVat,
       displayName: psfDef.displayName,
     };
     const existingPsf = await tx.orderFee.findFirst({
@@ -134,9 +143,10 @@ export async function applyEstimateOnOrderCreate(
   }
 
   // ─── 2. Stopaj (E-ticaret Stopajı) — deterministic per-order ───────────
-  // Matrah: saleSubtotalNet × %1 (KDV=0). PSF üzerine stopaj YAPILMAZ
-  // (design §3.4 — 330 Tebliği Md 5/2).
-  if (order.saleSubtotalNet !== null && !existingEstimateFeeTypes.has('STOPPAGE')) {
+  // Matrah: saleGross × %1 (KDV=0; stopaj KDV taşımaz). PSF üzerine stopaj
+  // YAPILMAZ (design §3.4 — 330 Tebliği Md 5/2). GROSS konvansiyon: matrah
+  // saleGross (KDV-dahil satış); amountGross = saleGross × rateOfSale, vatRate=0.
+  if (order.saleGross !== null && !existingEstimateFeeTypes.has('STOPPAGE')) {
     const stopajDef = await resolveFeeDefinition(tx, {
       platform: order.store.platform,
       feeType: 'STOPPAGE',
@@ -145,7 +155,7 @@ export async function applyEstimateOnOrderCreate(
     if (stopajDef.rateOfSale === null) {
       throw new Error(`STOPPAGE FeeDefinition ${stopajDef.id} missing rateOfSale`);
     }
-    const stopajNet = new Decimal(order.saleSubtotalNet)
+    const stopajGross = new Decimal(order.saleGross)
       .mul(new Decimal(stopajDef.rateOfSale))
       .toDecimalPlaces(2);
 
@@ -157,9 +167,8 @@ export async function applyEstimateOnOrderCreate(
         feeType: 'STOPPAGE',
         source: 'ESTIMATE',
         direction: 'DEBIT',
-        amountNet: stopajNet,
+        amountGross: stopajGross,
         vatRate: new Decimal(0),
-        vatAmount: new Decimal(0),
         displayName: stopajDef.displayName,
       },
     });
@@ -178,9 +187,13 @@ export async function applyEstimateOnOrderCreate(
       feeType: 'SHIPPING',
       at: order.orderDate,
     });
-    const shipNet = shippingOutcome.estimate.amount;
+    // GROSS konvansiyon: tarife tablosu priceNet saklar (estimate.amount = net);
+    // fee GROSS yazılır: amountGross = priceNet × (100 + vatRate)/100.
     const shipVatRate = new Decimal(shipDef.defaultVatRate);
-    const shipVat = shipNet.mul(shipVatRate).div(100).toDecimalPlaces(2);
+    const shipGross = shippingOutcome.estimate.amount
+      .mul(new Decimal(100).add(shipVatRate))
+      .div(100)
+      .toDecimalPlaces(2);
     const existingShip = await tx.orderFee.findFirst({
       where: { orderId, feeType: 'SHIPPING', source: 'ESTIMATE' },
       select: { id: true },
@@ -188,7 +201,7 @@ export async function applyEstimateOnOrderCreate(
     if (existingShip !== null) {
       await tx.orderFee.update({
         where: { id: existingShip.id },
-        data: { amountNet: shipNet, vatRate: shipVatRate, vatAmount: shipVat },
+        data: { amountGross: shipGross, vatRate: shipVatRate },
       });
     } else {
       await tx.orderFee.create({
@@ -199,9 +212,8 @@ export async function applyEstimateOnOrderCreate(
           feeType: 'SHIPPING',
           source: 'ESTIMATE',
           direction: 'DEBIT',
-          amountNet: shipNet,
+          amountGross: shipGross,
           vatRate: shipVatRate,
-          vatAmount: shipVat,
           displayName: shipDef.displayName,
         },
       });
@@ -213,12 +225,12 @@ export async function applyEstimateOnOrderCreate(
     });
   }
 
-  // ─── 4. computeProfit + Order.estimatedNetProfit yaz ───────────────────
-  // Tüm cost snapshot'lar dolu mu? Eksikse profit null kalır.
+  // ─── 4. ProfitInput (GROSS) kur + computeProfit + Order.estimated* yaz ──
+  // Tüm cost snapshot'lar dolu mu? Eksikse profit null kalır (kâr-dondurma).
   const allHaveCostSnapshot = order.items.every(
-    (item) => item.unitCostSnapshotNet !== null && item.unitCostSnapshotVatAmount !== null,
+    (item) => item.unitCostSnapshotGross !== null && item.unitCostSnapshotVatRate !== null,
   );
-  if (!allHaveCostSnapshot || order.saleSubtotalNet === null || order.saleVatTotal === null) {
+  if (!allHaveCostSnapshot || order.saleGross === null || order.saleVat === null) {
     // Maliyet snapshot eksik veya satış agregat'ı set'lenmemiş → profit null kalır.
     // Cost profile sonradan eklenirse caller bu fonksiyonu tekrar çağırır.
     //
@@ -229,43 +241,63 @@ export async function applyEstimateOnOrderCreate(
     return;
   }
 
-  const fees = await tx.orderFee.findMany({
-    where: { orderId, source: 'ESTIMATE' },
-    select: { amountNet: true, vatAmount: true, direction: true },
+  // Maliyet + komisyon GROSS agregatları (item × adet). Komisyon net-satış tabanı
+  // (#332): effective = commissionGross − refundedCommissionGross. KDV oranları
+  // item-bazlı (maliyet KDV satıştan bağımsız; komisyon KDV DB-driven #331).
+  let costGross = new Decimal(0);
+  let costVat = new Decimal(0);
+  let commissionGross = new Decimal(0);
+  let commissionVat = new Decimal(0);
+  for (const item of order.items) {
+    const qty = new Decimal(item.quantity);
+    const lineCost = new Decimal(item.unitCostSnapshotGross ?? 0).mul(qty);
+    costGross = costGross.add(lineCost);
+    costVat = costVat.add(
+      grossToVat(lineCost, new Decimal(item.unitCostSnapshotVatRate ?? 0)).toDecimalPlaces(2),
+    );
+    const effComm = new Decimal(item.commissionGross).sub(new Decimal(item.refundedCommissionGross));
+    commissionGross = commissionGross.add(effComm);
+    commissionVat = commissionVat.add(
+      grossToVat(effComm, new Decimal(item.commissionVatRate)).toDecimalPlaces(2),
+    );
+  }
+
+  // PSF + Kargo ESTIMATE fee'leri (Stopaj motorda ayrı `stoppage` terimidir —
+  // fee listesine GİRMEZ, çift sayım olmaz).
+  const estimateFees = await tx.orderFee.findMany({
+    where: { orderId, source: 'ESTIMATE', feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE'] } },
+    select: { feeType: true, amountGross: true, vatRate: true, direction: true },
   });
-
-  const profitInputItems: ProfitInputItem[] = order.items.map((item) => ({
-    quantity: item.quantity,
-    unitCostSnapshotNet: new Decimal(item.unitCostSnapshotNet ?? 0),
-    unitCostSnapshotVatAmount: new Decimal(item.unitCostSnapshotVatAmount ?? 0),
-    grossCommissionAmountNet: new Decimal(item.grossCommissionAmountNet),
-    grossCommissionVatAmount: new Decimal(item.grossCommissionVatAmount),
-    refundedCommissionAmountNet: new Decimal(item.refundedCommissionAmountNet),
-    refundedCommissionVatAmount: new Decimal(item.refundedCommissionVatAmount),
-    sellerDiscountNet: new Decimal(item.sellerDiscountNet),
-    sellerDiscountVatAmount: new Decimal(item.sellerDiscountVatAmount),
-  }));
-
-  const profitInputFees: ProfitInputFee[] = fees.map((fee) => ({
-    amountNet: new Decimal(fee.amountNet),
-    vatAmount: new Decimal(fee.vatAmount),
+  const profitInputFees: ProfitInputFee[] = estimateFees.map((fee) => ({
+    type: fee.feeType === 'SHIPPING' ? 'SHIPPING' : 'PLATFORM_SERVICE',
+    gross: new Decimal(fee.amountGross),
+    vat: grossToVat(new Decimal(fee.amountGross), new Decimal(fee.vatRate)).toDecimalPlaces(2),
     direction: fee.direction,
   }));
 
+  // Stopaj = saleGross × %1 (KDV=0) — motor `stoppage` terimi (netVat'a girmez).
+  const stoppageFee = await tx.orderFee.findFirst({
+    where: { orderId, feeType: 'STOPPAGE', source: 'ESTIMATE' },
+    select: { amountGross: true },
+  });
+
   const profit = computeProfit({
-    saleSubtotalNet: new Decimal(order.saleSubtotalNet),
-    saleVatTotal: new Decimal(order.saleVatTotal),
-    items: profitInputItems,
+    sale: { gross: new Decimal(order.saleGross), vat: new Decimal(order.saleVat) },
+    cost: { gross: costGross, vat: costVat },
+    commission: { gross: commissionGross, vat: commissionVat },
     fees: profitInputFees,
+    stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
   });
 
   await tx.order.update({
     where: { id: orderId },
     data: {
-      estimatedNetProfit: profit.netProfit,
+      estimatedNetProfit: profit.netProfit.toDecimalPlaces(2),
       // Net KDV (output − input) — kâr dökümünde backend-hesaplı gösterilir.
-      // estimatedNetProfit ile aynı update → aynı refinable yaşam döngüsü.
       estimatedNetVat: profit.netVat.toDecimalPlaces(2),
+      // Marj %'leri backend-hesaplı + persist (sıralanabilir, spec ekleme #2).
+      estimatedSaleMarginPct: profit.saleMarginPct?.toDecimalPlaces(4) ?? null,
+      estimatedCostMarkupPct: profit.costMarkupPct?.toDecimalPlaces(4) ?? null,
     },
   });
 }
