@@ -32,6 +32,8 @@ import type { CargoInvoiceItem, TrendyolFinancialTransaction } from '@pazarsync/
 import { resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
+import { tryFinalizeReconciliation } from './finalize-reconciliation';
+
 type CargoFeeType = 'SHIPPING' | 'RETURN_SHIPPING';
 
 const PACKAGE_TYPE_TO_FEE: ReadonlyMap<string, CargoFeeType> = new Map([
@@ -180,6 +182,13 @@ export async function handleCargoInvoiceItems(
       },
     });
     result.writtenFees += 1;
+
+    // Real cargo just landed → this may be the last estimate the order was
+    // waiting on. Re-run the finalize gate: if the payment cycle is already
+    // confirmed, the order now flips to FULLY_SETTLED with the real cargo in
+    // settledNetProfit. No-op if payment hasn't arrived yet (PaymentOrder
+    // cascade will finalize then). Cargo can arrive before OR after payment.
+    await tryFinalizeReconciliation(order.id, tx);
   }
 
   syncLog.info('settlements.cargo-invoice.processed', {
