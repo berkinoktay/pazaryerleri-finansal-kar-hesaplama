@@ -138,6 +138,12 @@ async function buildOrderWithItem(opts?: {
       // have written during order arrival. LINE-level (× quantity).
       grossCommissionAmountNet: new Decimal('10.00').mul(quantity),
       grossCommissionVatAmount: new Decimal('2.00').mul(quantity),
+      // Komisyon TAHMİNİ donuk kopyası (mapper T+0). Settlement handler'ları
+      // grossCommission*/refundedCommission*'i overwrite eder ama bunlara DOKUNMAZ.
+      estimatedGrossCommissionAmountNet: new Decimal('10.00').mul(quantity),
+      estimatedGrossCommissionVatAmount: new Decimal('2.00').mul(quantity),
+      estimatedRefundedCommissionAmountNet: new Decimal('0'),
+      estimatedRefundedCommissionVatAmount: new Decimal('0'),
       ...(opts?.withCostAndSale === true
         ? {
             unitCostSnapshotNet: new Decimal('40.00'),
@@ -232,6 +238,22 @@ describe('settlement handlers', () => {
       // Hakediş Kontrolü temeli: Trendyol'un kredilediği gerçek satış (credit 120)
       // çıpa olarak yakalandı — kâra GİRMEZ, yalnız gelecek mutabakat için.
       expect(updated.settledSaleAmount?.toFixed(2)).toBe('120.00');
+    });
+
+    it('preserves the commission ESTIMATE when settlement overwrites the actual (different value)', async () => {
+      const { storeId, itemId } = await buildOrderWithItem(); // qty=1, estimate gross net=10
+      // Settlement commission DIFFERS from the T+0 estimate: commissionAmount 18 → net 15.
+      const row = makeSettlementRow({ commissionAmount: 18 });
+
+      await prisma.$transaction(async (tx) => {
+        expect((await handleSale(storeId, row, tx)).applied).toBe(true);
+      });
+
+      const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
+      // ACTUAL overwritten to the settled value...
+      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('15.00'); // 18 / 1.20
+      // ...but the ESTIMATE is FROZEN at T+0 (10) — Hakediş Kontrolü tahmin-vs-gerçek.
+      expect(updated.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('10.00');
     });
 
     it('qty>1: scales commission + settledSaleAmount by quantity (N özdeş per-unit Sale satırı → line-toplamı); idempotent', async () => {

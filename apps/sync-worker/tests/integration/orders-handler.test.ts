@@ -251,6 +251,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(item.unitVatAmount!).toString()).toBe('20');
     expect(new Decimal(item.grossCommissionAmountNet).toString()).toBe('10');
     expect(new Decimal(item.grossCommissionVatAmount).toString()).toBe('2');
+    // Komisyon TAHMİNİ donuk kopyası yazıldı (= T+0 değer; settlement bunu KORUR).
+    expect(new Decimal(item.estimatedGrossCommissionAmountNet!).toString()).toBe('10');
+    expect(new Decimal(item.estimatedGrossCommissionVatAmount!).toString()).toBe('2');
+    expect(item.estimatedRefundedCommissionAmountNet).not.toBeNull();
   });
 
   it('co-funded order: saleSubtotalNet = effectiveSale (liste − satıcı indirimi), tyDiscount excluded (denetim #1)', async () => {
