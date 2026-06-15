@@ -49,3 +49,17 @@ describe('Order GROSS + marj + promosyon columns', () => {
     expect(removed).toHaveLength(0);
   });
 });
+
+describe('OrderFee GROSS convention', () => {
+  it('has amountGross + vatRate, no amountNet/vatAmount', async () => {
+    const present = await prisma.$queryRaw<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'order_fees' AND column_name IN ('amount_gross', 'vat_rate')`;
+    expect(present).toHaveLength(2);
+
+    const removed = await prisma.$queryRaw<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'order_fees' AND column_name IN ('amount_net', 'vat_amount')`;
+    expect(removed).toHaveLength(0);
+  });
+});

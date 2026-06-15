@@ -1161,9 +1161,11 @@ model OrderFee {
   source    OrderFeeSource
   direction OrderFeeDirection
 
-  amountNet Decimal @map("amount_net") @db.Decimal(12, 2)
-  vatRate   Decimal @map("vat_rate") @db.Decimal(5, 2)
-  vatAmount Decimal @map("vat_amount") @db.Decimal(12, 2)
+  // GROSS konvansiyon (2026-06-16): amountNet + vatAmount → amountGross + vatRate.
+  // net/vat API katmanında türetilir (amountGross × vatRate / (100+vatRate)).
+  // source (ESTIMATE/SETTLEMENT/CARGO_INVOICE) → isEstimate API'de türetilir.
+  amountGross Decimal @default(0) @map("amount_gross") @db.Decimal(12, 2)
+  vatRate     Decimal @default(0) @map("vat_rate") @db.Decimal(5, 2)
 
   displayName String? @map("display_name")
   externalRef Json?   @map("external_ref")
