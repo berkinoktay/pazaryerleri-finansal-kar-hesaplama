@@ -49,14 +49,13 @@ interface SnapshotComponentData {
   profileId: string;
   profileName: string;
   profileType: CostProfileType;
-  amount: Decimal;
+  // GROSS konvansiyon (2026-06-16): maliyet GROSS (KDV-dahil) saklanır.
+  // amountGross = profil GROSS tutarı (native currency); amountInTryGross = ×fxRate.
+  // vatRate maliyet KDV oranı (satıştan bağımsız); net = amountGross × 100/(100+vatRate).
+  amountGross: Decimal;
   currency: Currency;
-  vatRate: number;
-  amountInTry: Decimal;
-  // PR-6 continuation: KDV snapshot in native currency + TRY (mirror of
-  // apps/api/src/services/cost-snapshot.service.ts SnapshotComponentData).
-  vatAmount: Decimal;
-  vatAmountInTry: Decimal;
+  vatRate: Decimal;
+  amountInTryGross: Decimal;
   fxRateMode: FxRateMode;
   fxRateUsed: Decimal;
   fxRateSource: string;
@@ -120,7 +119,7 @@ export async function captureCostSnapshot(
 
   if (
     !item ||
-    item.unitCostSnapshotNet !== null ||
+    item.unitCostSnapshotGross !== null ||
     !item.productVariantId ||
     item.order.profitExcludedAt !== null // kâr-dışı: snapshot da donuk (spec 2026-06-12)
   ) {
@@ -148,15 +147,10 @@ export async function captureCostSnapshot(
       });
       return; // best-effort: abort, leave null
     }
-    // KDV split — mirror of apps/api/src/services/cost-snapshot.service.ts.
-    // `profile.amount = NET` (schema convention); canonical
-    // `vatAmount = amount × vatRate / 100`. Defensive compute when nullable
-    // backfill column is null.
-    const amountNet = new Decimal(profile.amount);
-    const vatAmountNative =
-      profile.vatAmount !== null
-        ? new Decimal(profile.vatAmount)
-        : amountNet.mul(profile.vatRate).div(100);
+    // GROSS konvansiyon (2026-06-16): `profile.amountGross` zaten GROSS (KDV-dahil);
+    // KDV'yi yeniden bölmeyiz, oranı (`profile.vatRate`) taşırız. TRY karşılığı
+    // ×fxRate. Net türetimi (amountGross × 100/(100+vatRate)) downstream kâr motorunda.
+    const amountGrossNative = new Decimal(profile.amountGross);
 
     components.push({
       orderItemId,
@@ -164,37 +158,38 @@ export async function captureCostSnapshot(
       profileId: profile.id,
       profileName: profile.name,
       profileType: profile.type,
-      amount: amountNet,
+      amountGross: amountGrossNative,
       currency: profile.currency,
-      vatRate: profile.vatRate,
-      amountInTry: amountNet.mul(fx.rate),
-      vatAmount: vatAmountNative,
-      vatAmountInTry: vatAmountNative.mul(fx.rate),
+      vatRate: new Decimal(profile.vatRate),
+      amountInTryGross: amountGrossNative.mul(fx.rate),
       fxRateMode: profile.fxRateMode,
       fxRateUsed: fx.rate,
       fxRateSource: fx.source,
     });
   }
 
-  // Aggregate NET + VAT (TRY) across profiles. Effective vatRate denormalized
-  // for downstream consumers — multi-profile case yields a blended rate.
-  const unitCostSnapshotNet = components
-    .reduce((acc, c) => acc.add(c.amountInTry), new Decimal(0))
+  // Aggregate GROSS (TRY) across profiles. Effective vatRate denormalized for
+  // downstream consumers — multi-profile case yields a blended (amount-weighted)
+  // rate so the net split stays exact: net = Σ(grossᵢ × 100/(100+rateᵢ)).
+  const unitCostSnapshotGross = components
+    .reduce((acc, c) => acc.add(c.amountInTryGross), new Decimal(0))
     .toDecimalPlaces(2);
-  const unitCostSnapshotVatAmount = components
-    .reduce((acc, c) => acc.add(c.vatAmountInTry), new Decimal(0))
-    .toDecimalPlaces(2);
-  // NET=0 → rate is undefined (0% is a valid export rate, would alias the
-  // states). Leave denormalized rate NULL. Mirror of cost-snapshot.service.
-  const unitCostSnapshotVatRate = unitCostSnapshotNet.isZero()
-    ? null
-    : unitCostSnapshotVatAmount.div(unitCostSnapshotNet).mul(100).toDecimalPlaces(2);
+  // Blended rate = (Σ grossInTry − Σ netInTry) implied; expressed as the rate
+  // that reproduces the aggregate net. GROSS=0 → rate undefined → NULL.
+  const totalNetInTry = components.reduce((acc, c) => {
+    const r = c.vatRate;
+    const net = c.amountInTryGross.mul(100).div(new Decimal(100).add(r));
+    return acc.add(net);
+  }, new Decimal(0));
+  const unitCostSnapshotVatRate =
+    unitCostSnapshotGross.isZero() || totalNetInTry.isZero()
+      ? null
+      : unitCostSnapshotGross.sub(totalNetInTry).div(totalNetInTry).mul(100).toDecimalPlaces(2);
 
   await tx.orderItem.update({
     where: { id: orderItemId },
     data: {
-      unitCostSnapshotNet,
-      unitCostSnapshotVatAmount,
+      unitCostSnapshotGross,
       unitCostSnapshotVatRate,
       snapshotCapturedAt: new Date(),
     },
@@ -254,8 +249,26 @@ export async function upsertOrderWithSnapshot(
         platformOrderNumber: order.platformOrderNumber,
         orderDate: order.orderDate,
         status: order.status,
-        saleSubtotalNet: order.saleSubtotalNet,
-        saleVatTotal: order.saleVatTotal,
+        // GROSS konvansiyon (2026-06-16): sipariş başlığı paket toplamlarından
+        // DOĞRUDAN (KDV-dahil) — net/KDV downstream kâr motorunda türetilir.
+        // sellerDiscountVat = sellerDiscountGross × 20/120 (satıcı indirimi KDV'si,
+        // standart %20 oranıyla; net split kâr motorunda yapılır). listGross/saleVat
+        // mapper'dan gelir; promotionDisplays UI gösterimi (ekleme #3).
+        saleGross: new Decimal(order.saleGross),
+        saleVat: new Decimal(order.saleVat),
+        listGross: new Decimal(order.listGross),
+        sellerDiscountGross: new Decimal(order.sellerDiscountGross),
+        sellerDiscountVat: new Decimal(order.sellerDiscountGross)
+          .mul(new Decimal(20))
+          .div(new Decimal(120))
+          .toDecimalPlaces(2),
+        promotionDisplays:
+          order.promotionDisplays !== null
+            ? order.promotionDisplays.map((p) => ({
+                displayName: p.displayName,
+                amountGross: p.amountGross,
+              }))
+            : undefined,
         agreedDeliveryDate: order.agreedDeliveryDate,
         actualDeliveryDate: order.actualDeliveryDate,
         // actualShipDate: Shipped event'i (taşıma durumuna geçiş). Buffer JSONB'sinden
@@ -383,43 +396,26 @@ export async function upsertOrderWithSnapshot(
           // undefined'dır — BigInt(undefined) fırlatır.
           platformLineId: line.platformLineId != null ? BigInt(line.platformLineId) : null,
           barcode: line.barcode,
-          // ESKI KDV-dahil kolonları (PR-5c'de silinmediler — backwards compat).
-          // unitPrice = unitPriceNet + unitVatAmount; commissionAmount = gross.
-          unitPrice: new Decimal(line.unitPriceNet).add(new Decimal(line.unitVatAmount)),
+          // GROSS konvansiyon (2026-06-16): satır para değerleri GROSS (KDV-dahil).
+          // Satış: lineListGross (liste×adet) / lineSaleGross (effectiveSale) /
+          // lineSellerDiscountGross (satıcı indirimi) + saleVatRate. Komisyon:
+          // commissionRate × lineSaleGross = commissionGross (net-satış tabanı #332);
+          // refundedCommissionGross satıcı-indirim payının komisyon iadesi (T+0 tahmin).
+          lineListGross: new Decimal(line.lineListGross),
+          lineSaleGross: new Decimal(line.lineSaleGross),
+          lineSellerDiscountGross: new Decimal(line.lineSellerDiscountGross),
+          saleVatRate: new Decimal(line.saleVatRate),
           commissionRate: new Decimal(line.commissionRate),
-          commissionAmount: new Decimal(line.grossCommissionAmountNet).add(
-            new Decimal(line.grossCommissionVatAmount),
-          ),
-          // NEW convention (KDV-split native — design §3.2):
-          unitPriceNet: new Decimal(line.unitPriceNet),
-          unitVatRate: new Decimal(line.unitVatRate),
-          unitVatAmount: new Decimal(line.unitVatAmount),
-          grossCommissionAmountNet: new Decimal(line.grossCommissionAmountNet),
-          grossCommissionVatAmount: new Decimal(line.grossCommissionVatAmount),
-          // Komisyon TAHMİNİ donuk kopyası (2026-06-15): mapper'ın T+0 değeri. Settlement
-          // Sale/Discount satırı grossCommission*/refundedCommission*'i GERÇEKLE overwrite
-          // edecek; bu estimated kolonlar tahmini KORUR (Hakediş Kontrolü tahmin-vs-gerçek).
-          // YALNIZ gerçekten tahmin olan komisyon değerlerinde tutulur (satıcı indirimi
-          // siparişten okunur=biliniyor, effectiveSale'e gömülü → tutulmaz). Item write-once
-          // olduğundan bir kez yazılır + bir daha dokunulmaz.
-          estimatedGrossCommissionAmountNet: new Decimal(line.grossCommissionAmountNet),
-          estimatedGrossCommissionVatAmount: new Decimal(line.grossCommissionVatAmount),
-          estimatedRefundedCommissionAmountNet: new Decimal(
-            line.refundedCommissionAmountNet ?? '0',
-          ),
-          estimatedRefundedCommissionVatAmount: new Decimal(
-            line.refundedCommissionVatAmount ?? '0',
-          ),
-          // refundedCommission* — T+0 TAHMİN (mapper, satıcı-indirim payının komisyon
-          // iadesi, research §7.3 — 2026-06-14). effective komisyon = gross − refunded
-          // = net-satış tabanlı. Settlement worker Discount transaction'ı gerçek
-          // değerle üzerine yazar (aynı değer). sellerDiscount yoksa 0.
-          // `?? '0'`: buffer JSONB'sinden gelen ESKİ girişler (bu alan eklenmeden önce
-          // yazılanlar) alanı taşımaz — promote crash etmesin (buffer guard deseni, ↑).
-          refundedCommissionAmountNet: new Decimal(line.refundedCommissionAmountNet ?? '0'),
-          refundedCommissionVatAmount: new Decimal(line.refundedCommissionVatAmount ?? '0'),
-          sellerDiscountNet: new Decimal(line.sellerDiscountNet),
-          sellerDiscountVatAmount: new Decimal(line.sellerDiscountVatAmount),
+          commissionGross: new Decimal(line.commissionGross),
+          refundedCommissionGross: new Decimal(line.refundedCommissionGross),
+          commissionVatRate: new Decimal(line.commissionVatRate),
+          // Komisyon TAHMİNİ donuk kopyası (write-once #340): mapper'ın T+0 gross değeri.
+          // Settlement Sale satırı settledCommissionGross'u GERÇEKLE yazar; bu kolon
+          // tahmini KORUR (Hakediş Kontrolü tahmin-vs-gerçek). Bir kez yazılır.
+          estimatedCommissionGross: new Decimal(line.commissionGross),
+          // Maliyet snapshot null bırakılır — captureCostSnapshot (aşağıda) doldurur.
+          unitCostSnapshotGross: null,
+          unitCostSnapshotVatRate: null,
         },
       });
 
