@@ -151,6 +151,18 @@ BEGIN
         USING ERRCODE = '42501',
               HINT = 'Excluded orders never enter profit aggregates (decision K1).';
     END IF;
+    -- Net KDV kolonları da kâr kolonlarıyla aynı dondurma sözleşmesine tabi
+    -- (2026-06-15): kâr-dışı siparişte estimated/settled net_vat de donuk kalır.
+    IF NEW.estimated_net_vat IS DISTINCT FROM OLD.estimated_net_vat THEN
+      RAISE EXCEPTION 'profit-excluded order: estimated_net_vat is frozen'
+        USING ERRCODE = '42501',
+              HINT = 'Net VAT follows the profit-freeze contract (display-only, never re-derived).';
+    END IF;
+    IF NEW.settled_net_vat IS DISTINCT FROM OLD.settled_net_vat THEN
+      RAISE EXCEPTION 'profit-excluded order: settled_net_vat is frozen'
+        USING ERRCODE = '42501',
+              HINT = 'Net VAT follows the profit-freeze contract (display-only, never re-derived).';
+    END IF;
     IF NEW.profit_excluded_at IS DISTINCT FROM OLD.profit_excluded_at
        OR NEW.profit_exclusion_reason IS DISTINCT FROM OLD.profit_exclusion_reason THEN
       RAISE EXCEPTION 'profit exclusion is permanent'

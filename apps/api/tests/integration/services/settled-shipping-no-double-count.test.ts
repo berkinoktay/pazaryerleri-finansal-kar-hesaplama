@@ -67,5 +67,7 @@ describe('settled profit: no shipping double-count', () => {
     // (ESTIMATE 30 HARİÇ; dahil olsaydı 20 çıkardı.)
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(new Decimal(updated.settledNetProfit!).toString()).toBe('50');
+    // settledNetVat de recompute tarafından persist edildi (writer'ı pinler).
+    expect(updated.settledNetVat).not.toBeNull();
   });
 });

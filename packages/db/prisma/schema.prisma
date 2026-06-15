@@ -562,6 +562,13 @@ model Order {
   estimatedNetProfit   Decimal?             @map("estimated_net_profit") @db.Decimal(12, 2)
   settledNetProfit     Decimal?             @map("settled_net_profit") @db.Decimal(12, 2)
 
+  // Net KDV (output − input KDV) — computeProfit'in ürettiği netVat. estimatedNetProfit /
+  // settledNetProfit ile AYNI yaşam döngüsü (estimate refinable, settled mutable; ikisi de
+  // profit-excluded'da yazılmaz → null kalır). Frontend kâr dökümünde "Net KDV" satırını
+  // backend-hesaplı gösterir (frontend ASLA türetmez). Net KDV negatif olabilir → CHECK yok.
+  estimatedNetVat      Decimal?             @map("estimated_net_vat") @db.Decimal(12, 2)
+  settledNetVat        Decimal?             @map("settled_net_vat") @db.Decimal(12, 2)
+
   // ─── Kâr dondurma (spec 2026-06-12 cost-deadline-profit-freeze) ──────
   // Maliyet penceresi (sipariş gününün sonu, İstanbul) kaçırıldıysa sipariş
   // KALICI olarak kâr evreninin dışında: estimatedNetProfit sonsuza dek null,

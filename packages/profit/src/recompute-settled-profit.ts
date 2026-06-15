@@ -130,9 +130,10 @@ export async function recomputeSettledProfit(
   });
 
   const settledNetProfit = result.netProfit.toDecimalPlaces(2);
+  const settledNetVat = result.netVat.toDecimalPlaces(2);
   await tx.order.update({
     where: { id: orderId },
-    data: { settledNetProfit },
+    data: { settledNetProfit, settledNetVat },
   });
 
   return { recomputed: true, settledNetProfit };

@@ -205,6 +205,10 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     //       = 100 − 50 − 10 − 10.99 − 1 = 28.01
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(new Decimal(updated.estimatedNetProfit!).toString()).toBe('28.01');
+    // Net KDV persist edildi (writer'ı pinler): saleVat − costVat − commVat − PSFvat
+    //                                          = 20 − 10 − 2 − 2.20 = 5.80
+    expect(updated.estimatedNetVat).not.toBeNull();
+    expect(new Decimal(updated.estimatedNetVat!).toString()).toBe('5.8');
   });
 
   it('PSF muafiyet — status RETURNED → PSF OrderFee yazılmaz', async () => {

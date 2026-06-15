@@ -1553,6 +1553,28 @@
       }
     }
   },
+  "profitBreakdown": {
+    "title": "Kâr dökümü",
+    "unavailable": "Bu sipariş için kâr hesaplanmadı.",
+    "sale": "Satış",
+    "listPrice": "Liste fiyatı",
+    "sellerDiscount": "Satıcı indirimi",
+    "netSale": "Net satış",
+    "cost": "Ürün maliyeti",
+    "commission": "Komisyon",
+    "shipping": "Kargo",
+    "platformService": "Platform hizmet bedeli",
+    "stoppage": "E-ticaret stopajı",
+    "netVat": "Net KDV",
+    "netVatResult": "Net KDV",
+    "saleVat": "Satış KDV",
+    "costVat": "Ürün maliyeti KDV",
+    "commissionVat": "Komisyon KDV",
+    "shippingVat": "Kargo KDV",
+    "platformServiceVat": "Platform hizmet bedeli KDV",
+    "estimatedProfit": "Tahmini kâr",
+    "settledProfit": "Fiili kâr"
+  },
   "orderDetail": {
     "title": {
       "placeholder": "Sipariş detayı"
@@ -1593,20 +1615,6 @@
         "FULLY_SETTLED": "PaymentOrder onayı geldi. Fiili kâr kesinleşti.",
         "FULLY_SETTLED_WITH_DATE": "PaymentOrder {date} tarihinde onaylandı. Fiili kâr kesinleşti."
       }
-    },
-    "vatBreakdown": {
-      "title": "Net & KDV dökümü",
-      "saleSubtotalNet": "Satış (net)",
-      "listePriceNet": "Liste fiyatı (net)",
-      "netSaleNet": "Net satış (net)",
-      "saleVatTotal": "Satış KDV",
-      "grossCommissionNet": "Brüt komisyon (net)",
-      "refundedCommissionNet": "İade edilen komisyon (net)",
-      "effectiveCommissionNet": "Etkin komisyon (net)",
-      "effectiveCommissionHint": "Brüt − iade edilen.",
-      "sellerDiscountNet": "Satıcı indirimi (net)",
-      "costSnapshotNet": "Maliyet anlık kopyası (net)",
-      "costSnapshotMissing": "Bazı kalemlerde maliyet profili eksik — kâr hesabı yaklaşık."
     },
     "fees": {
       "title": "Ücret zaman çizgisi",

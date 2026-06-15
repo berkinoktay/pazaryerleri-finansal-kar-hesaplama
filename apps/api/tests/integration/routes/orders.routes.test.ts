@@ -425,10 +425,112 @@ describe('Order routes', () => {
         profitExcludedAt: string | null;
         profitExclusionReason: string | null;
         estimatedNetProfit: string | null;
+        profitBreakdown: unknown;
       };
       expect(body.profitExcludedAt).not.toBeNull();
       expect(body.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
       expect(body.estimatedNetProfit).toBeNull();
+      // Kâr-dışı → backend-hesaplı kâr dökümü de yok.
+      expect(body.profitBreakdown).toBeNull();
+    });
+
+    it('returns the backend-computed profitBreakdown for a calculable order', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          // Persist edilen skalarlar, eklenen kalem+fee'lerden computeProfit'in
+          // ÜRETECEĞİ değerlerle TUTARLI (drift değil): netProfit = 200−50−20−10.99−2 = 117.01;
+          // netVat = 40−10−4−2.20 = 23.80. Böylece döküm kendi alt-çizgisine toplanır.
+          saleSubtotalNet: new Decimal('200.00'),
+          saleVatTotal: new Decimal('40.00'),
+          estimatedNetProfit: new Decimal('117.01'),
+          estimatedNetVat: new Decimal('23.80'),
+        },
+      });
+      await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: '8680000000002',
+          quantity: 1,
+          unitPrice: '240.00',
+          commissionRate: '10.00',
+          commissionAmount: '24.00',
+          unitCostSnapshotNet: '50.00',
+          unitCostSnapshotVatRate: '20.00',
+          unitCostSnapshotVatAmount: '10.00',
+          grossCommissionAmountNet: '20.00',
+          grossCommissionVatAmount: '4.00',
+          // Satıcı indirimi (display-only; netProfit/netVat'ı ETKİLEMEZ — saleSubtotalNet
+          // zaten effectiveSale). Brüt indirim = 25 + 5 = 30 → listGross = 240 + 30 = 270.
+          sellerDiscountNet: '25.00',
+          sellerDiscountVatAmount: '5.00',
+        },
+      });
+      // ESTIMATE fee'leri (SETTLEMENT/CARGO değil) → tahmini basis dökümüne girer.
+      await createOrderFee(order.id, org.id, {
+        feeType: 'PLATFORM_SERVICE',
+        source: 'ESTIMATE',
+        amountNet: '10.99',
+        vatRate: '20.00',
+        vatAmount: '2.20',
+      });
+      await createOrderFee(order.id, org.id, {
+        feeType: 'STOPPAGE',
+        source: 'ESTIMATE',
+        amountNet: '2.00',
+        vatRate: '0.00',
+        vatAmount: '0.00',
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        profitBreakdown: {
+          listGross: string;
+          sellerDiscountGross: string;
+          saleGross: string;
+          costGross: string;
+          commissionGross: string;
+          shippingGross: string;
+          platformServiceGross: string;
+          stoppageNet: string;
+          netVat: string;
+          netProfit: string;
+        } | null;
+      };
+      const b = body.profitBreakdown;
+      if (b === null) throw new Error('profitBreakdown beklenmedik şekilde null');
+      // Brüt (KDV-dahil) toplamlar backend'de hesaplandı; netVat/netProfit persist'ten.
+      expect(b.saleGross).toBe('240.00'); // 200 + 40
+      expect(b.costGross).toBe('60.00'); // (50 + 10) × 1
+      expect(b.commissionGross).toBe('24.00'); // 20 + 4
+      expect(b.shippingGross).toBe('0.00'); // kargo fee yok
+      expect(b.platformServiceGross).toBe('13.19'); // 10.99 + 2.20
+      expect(b.stoppageNet).toBe('2.00');
+      expect(b.netVat).toBe('23.80'); // persist edilen estimatedNetVat
+      expect(b.netProfit).toBe('117.01'); // persist edilen estimatedNetProfit
+      // Satıcı indirimi şeffaflığı (display-only; netProfit'i ETKİLEMEZ).
+      expect(b.sellerDiscountGross).toBe('30.00'); // 25 + 5
+      expect(b.listGross).toBe('270.00'); // 240 + 30
+      // Çekirdek invariant: döküm kendi alt-çizgisine (netProfit) toplanmalı.
+      const sum = new Decimal(b.saleGross)
+        .sub(b.costGross)
+        .sub(b.commissionGross)
+        .sub(b.shippingGross)
+        .sub(b.platformServiceGross)
+        .sub(b.stoppageNet)
+        .sub(b.netVat);
+      expect(sum.toFixed(2)).toBe(b.netProfit);
     });
   });
 });

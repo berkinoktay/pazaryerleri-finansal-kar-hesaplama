@@ -1,5 +1,7 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
+import { buildProfitBreakdown } from '@pazarsync/profit';
+import { Decimal } from 'decimal.js';
 
 import { NotFoundError } from '../lib/errors';
 import type {
@@ -166,6 +168,47 @@ export async function getOrderById(
     throw new NotFoundError('Order', orderId);
   }
 
+  // Kâr dökümü (tahmini basis) — backend-hesaplı, frontend türetmez.
+  // computeProfit'in persist ettiği netProfit/netVat + ESTIMATE fee'lerden
+  // brüt toplamlar. Estimate hesaplanmadıysa (profit-excluded / maliyet eksik) null.
+  const profitBreakdown =
+    row.estimatedNetProfit !== null &&
+    row.estimatedNetVat !== null &&
+    row.saleSubtotalNet !== null &&
+    row.saleVatTotal !== null
+      ? buildProfitBreakdown({
+          saleSubtotalNet: new Decimal(row.saleSubtotalNet.toString()),
+          saleVatTotal: new Decimal(row.saleVatTotal.toString()),
+          items: row.items.map((item) => ({
+            quantity: item.quantity,
+            unitCostSnapshotNet:
+              item.unitCostSnapshotNet === null
+                ? null
+                : new Decimal(item.unitCostSnapshotNet.toString()),
+            unitCostSnapshotVatAmount:
+              item.unitCostSnapshotVatAmount === null
+                ? null
+                : new Decimal(item.unitCostSnapshotVatAmount.toString()),
+            grossCommissionAmountNet: new Decimal(item.grossCommissionAmountNet.toString()),
+            grossCommissionVatAmount: new Decimal(item.grossCommissionVatAmount.toString()),
+            refundedCommissionAmountNet: new Decimal(item.refundedCommissionAmountNet.toString()),
+            refundedCommissionVatAmount: new Decimal(item.refundedCommissionVatAmount.toString()),
+            sellerDiscountNet: new Decimal(item.sellerDiscountNet.toString()),
+            sellerDiscountVatAmount: new Decimal(item.sellerDiscountVatAmount.toString()),
+          })),
+          fees: row.fees
+            .filter((fee) => fee.source === 'ESTIMATE')
+            .map((fee) => ({
+              feeType: fee.feeType,
+              direction: fee.direction,
+              amountNet: new Decimal(fee.amountNet.toString()),
+              vatAmount: new Decimal(fee.vatAmount.toString()),
+            })),
+          netProfit: new Decimal(row.estimatedNetProfit.toString()),
+          netVat: new Decimal(row.estimatedNetVat.toString()),
+        })
+      : null;
+
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -192,6 +235,7 @@ export async function getOrderById(
     saleVatTotal: row.saleVatTotal?.toString() ?? null,
     estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
     settledNetProfit: row.settledNetProfit?.toString() ?? null,
+    profitBreakdown,
 
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
     profitExclusionReason: row.profitExclusionReason,

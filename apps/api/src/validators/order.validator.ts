@@ -267,6 +267,39 @@ const OrderStoreSummarySchema = z
   })
   .openapi('OrderStoreSummary');
 
+// ─── Kâr dökümü (backend-hesaplı, frontend türetmez) ──────────────────────
+// Berkin'in otoritatif formülü: Satış − Maliyet − Komisyon − Kargo − PSF −
+// Stopaj − Net KDV = Kâr. Brüt (KDV-dahil) terimler + Net KDV; tüm değer Decimal
+// string. netProfit/netVat persist'ten (computeProfit), brüt toplamlar
+// buildProfitBreakdown'dan. profit-excluded / maliyet-eksik siparişte null.
+const ProfitBreakdownSchema = z
+  .object({
+    listGross: z
+      .string()
+      .openapi({ description: 'Liste fiyatı brüt = net satış + satıcı indirimi.' }),
+    sellerDiscountGross: z
+      .string()
+      .openapi({ description: "Satıcı indirimi brüt (≥0). '0.00' → indirim yok." }),
+    saleGross: z
+      .string()
+      .openapi({ description: 'Net satış brüt (effectiveSale = liste − indirim).' }),
+    saleVat: z.string(),
+    costGross: z.string(),
+    costVat: z.string(),
+    commissionGross: z.string(),
+    commissionVat: z.string(),
+    shippingGross: z.string(),
+    shippingVat: z.string(),
+    platformServiceGross: z.string(),
+    platformServiceVat: z.string(),
+    stoppageNet: z.string().openapi({ description: 'E-ticaret stopajı (KDV 0).' }),
+    netVat: z.string().openapi({
+      description: 'Net KDV = Satış KDV − Maliyet KDV − Komisyon KDV − Kargo KDV − PSF KDV.',
+    }),
+    netProfit: z.string(),
+  })
+  .openapi('ProfitBreakdown');
+
 // ─── Detail: top-level ────────────────────────────────────────────────────
 
 export const OrderDetailSchema = z
@@ -292,6 +325,10 @@ export const OrderDetailSchema = z
     saleVatTotal: z.string().nullable(),
     estimatedNetProfit: z.string().nullable(),
     settledNetProfit: z.string().nullable(),
+    // Backend-hesaplı kâr dökümü (tahmini basis). Kârın gösterildiği her yüzeyde
+    // AYNI bileşene servis edilir; frontend hiçbir finansal değeri türetmez.
+    // null: profit-excluded ya da maliyet snapshot eksik (estimate hesaplanmadı).
+    profitBreakdown: ProfitBreakdownSchema.nullable(),
 
     profitExcludedAt: z
       .string()

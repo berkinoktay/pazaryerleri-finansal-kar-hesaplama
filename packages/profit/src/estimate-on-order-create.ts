@@ -261,6 +261,11 @@ export async function applyEstimateOnOrderCreate(
 
   await tx.order.update({
     where: { id: orderId },
-    data: { estimatedNetProfit: profit.netProfit },
+    data: {
+      estimatedNetProfit: profit.netProfit,
+      // Net KDV (output − input) — kâr dökümünde backend-hesaplı gösterilir.
+      // estimatedNetProfit ile aynı update → aynı refinable yaşam döngüsü.
+      estimatedNetVat: profit.netVat.toDecimalPlaces(2),
+    },
   });
 }

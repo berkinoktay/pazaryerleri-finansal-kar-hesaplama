@@ -24,6 +24,13 @@ export {
 } from './resolve-order-calculability';
 export { buildCalcCheckLines } from './build-calc-check-lines';
 export {
+  buildProfitBreakdown,
+  type BuildProfitBreakdownInput,
+  type ProfitBreakdownFeeInput,
+  type ProfitBreakdownItemInput,
+  type ProfitBreakdownView,
+} from './build-profit-breakdown';
+export {
   resolveTariffForDesi,
   type EstimateOutcome,
   type EstimateUnavailableReason,

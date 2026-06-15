@@ -7,6 +7,7 @@ import * as React from 'react';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { PageHeader } from '@/components/patterns/page-header';
+import { ProfitBreakdownCard } from '@/components/patterns/profit-breakdown';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,7 +21,6 @@ import { OrderItemsTable } from './order-items-table';
 import { OrderKpiGrid } from './order-kpi-grid';
 import { OrderStatusBadge } from './order-status-badge';
 import { OrderStatusBanner } from './order-status-banner';
-import { OrderVatBreakdown } from './order-vat-breakdown';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
 interface OrderDetailClientProps {
@@ -155,7 +155,7 @@ export function OrderDetailClient({
       <OrderKpiGrid order={order} />
 
       <div className="gap-lg grid grid-cols-1 lg:grid-cols-2">
-        <OrderVatBreakdown order={order} />
+        <ProfitBreakdownCard breakdown={order.profitBreakdown} />
         <OrderFeeTimeline fees={order.fees} />
       </div>
 
