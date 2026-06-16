@@ -23,6 +23,7 @@ const baseRow = {
   estimatedNetProfit: null,
   settledNetProfit: null,
   saleMarginPct: null,
+  promotionDisplays: null,
   fastDelivery: false,
   micro: false,
   itemCount: 2,

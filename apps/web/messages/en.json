@@ -1513,6 +1513,10 @@
     "estimatedProfit": "Estimated profit",
     "settledProfit": "Actual profit"
   },
+  "promotionIndicator": {
+    "label": "Promotion",
+    "title": "Applied promotions"
+  },
   "orderDetail": {
     "title": {
       "placeholder": "Order detail"

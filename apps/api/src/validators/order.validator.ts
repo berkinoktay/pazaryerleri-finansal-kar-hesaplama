@@ -171,6 +171,23 @@ export const OrderListItemSchema = z
           'Net profit / gross sale × 100. Null until computed or when the gross sale is 0.',
         example: '15.50',
       }),
+    // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
+    // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Liste
+    // satırında indirimli siparişin promosyon adı küçük bir rozet/tooltip ile
+    // gösterilir (frontend türetmez, render eder) — detaydaki kâr dökümüyle aynı veri.
+    promotionDisplays: z
+      .array(
+        z.object({
+          displayName: z.string().openapi({ example: 'Satıcı İndirimi' }),
+          amountGross: z.string().openapi({ example: '48.01' }),
+        }),
+      )
+      .nullable()
+      .openapi({
+        description:
+          'Seller-discount promotion names + gross amounts captured at order intake. ' +
+          'Null when there is no promotion/discount.',
+      }),
     fastDelivery: z.boolean(),
     micro: z.boolean(),
     itemCount: z.number().int().nonnegative().openapi({

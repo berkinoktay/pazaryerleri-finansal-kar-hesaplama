@@ -10,6 +10,7 @@ import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 
 import { type OrderListItem } from '../api/list-orders.api';
 import {
@@ -157,7 +158,14 @@ export function OrdersTable({
         header: t('columns.orderNumber'),
         cell: ({ row }) => {
           const number = row.original.platformOrderNumber ?? row.original.platformOrderId;
-          return <span className="font-medium">{number}</span>;
+          return (
+            <span className="gap-xs flex items-center">
+              <span className="font-medium">{number}</span>
+              {/* İndirimli siparişte promosyon adlarını gösteren gürültüsüz rozet
+                  (spec ekleme #3). Promosyon yoksa hiçbir şey çizilmez. */}
+              <PromotionIndicator promotions={row.original.promotionDisplays} />
+            </span>
+          );
         },
       },
       {

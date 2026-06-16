@@ -19,6 +19,7 @@ const bufferRow: LiveOrderRow = {
   revenue: '200.00',
   profit: null,
   margin: null,
+  promotionDisplays: null,
   orderId: null,
   bufferId: 'buf-1',
 };

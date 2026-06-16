@@ -4,6 +4,7 @@ import { buildProfitBreakdown } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
 import { NotFoundError } from '../lib/errors';
+import { toPromotionDisplays } from '../lib/promotion-displays';
 import type {
   ListOrdersQuery,
   OrderDetailResponse,
@@ -31,34 +32,6 @@ async function ensureStoreInOrg(orgId: string, storeId: string): Promise<void> {
   if (store === null) {
     throw new NotFoundError('Store', storeId);
   }
-}
-
-/** Wire shape for a single promotion display (spec ekleme #3). */
-type PromotionDisplayWire = NonNullable<OrderDetailResponse['promotionDisplays']>[number];
-
-function isPromotionDisplay(value: unknown): value is PromotionDisplayWire {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'displayName' in value &&
-    typeof value.displayName === 'string' &&
-    'amountGross' in value &&
-    typeof value.amountGross === 'string'
-  );
-}
-
-/**
- * Coerce the stored `Order.promotionDisplays` JSON to the wire shape. The column
- * is `Json?` (upsert writes `[{ displayName, amountGross }]` or leaves it null);
- * we runtime-validate each element and drop malformed ones rather than trusting
- * the raw JSON. Empty/absent → null (frontend hides the promotion line).
- */
-function toPromotionDisplays(value: Prisma.JsonValue | null): PromotionDisplayWire[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const displays = value.filter(isPromotionDisplay);
-  return displays.length > 0 ? displays : null;
 }
 
 function buildOrderListWhere(
@@ -165,6 +138,9 @@ export async function listOrders(
     // Consumed marj: hakediş gerçeği varsa onu, yoksa T+0 tahminini servis et.
     // Frontend SADECE render eder (render-time hesap yok).
     saleMarginPct: (row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)?.toString() ?? null,
+    // Promosyon adları (spec ekleme #3): detaydakiyle aynı runtime-doğrulamalı
+    // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
+    promotionDisplays: toPromotionDisplays(row.promotionDisplays),
     fastDelivery: row.fastDelivery,
     micro: row.micro,
     itemCount: row._count.items,

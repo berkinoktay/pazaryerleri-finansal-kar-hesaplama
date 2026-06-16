@@ -169,6 +169,38 @@ describe('Order routes', () => {
       expect(byId.get(settled.id)).toBe('17.25');
     });
 
+    it('serves promotionDisplays on list rows (null when the order has no promotion)', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const withPromo = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-02T10:00:00Z'),
+        promotionDisplays: [{ displayName: 'Sepette İndirim', amountGross: '20.00' }],
+      });
+      const noPromo = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-01T10:00:00Z'),
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          id: string;
+          promotionDisplays: { displayName: string; amountGross: string }[] | null;
+        }[];
+      };
+      const byId = new Map(body.data.map((o) => [o.id, o.promotionDisplays]));
+      expect(byId.get(withPromo.id)).toEqual([
+        { displayName: 'Sepette İndirim', amountGross: '20.00' },
+      ]);
+      // No promotion → null (the frontend hides the indicator).
+      expect(byId.get(noPromo.id)).toBeNull();
+    });
+
     it('sorts by saleMarginPct ascending and descending via sort=marginPct', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();

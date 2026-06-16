@@ -131,6 +131,9 @@ export interface CreateOrderOverrides {
   // Persist edilen marj (estimatedNetProfit / saleGross × 100). Live-performance +
   // order detayı bu kolondan okur (render-time hesap yok). null = henüz hesaplanmadı.
   estimatedSaleMarginPct?: string | null;
+  // Promosyon adları + brüt tutarları (spec ekleme #3). Order upsert'in yazdığı
+  // JSON; liste/detay/canlı-performans bu kolondan servis eder. null = indirimsiz.
+  promotionDisplays?: { displayName: string; amountGross: string }[] | null;
 }
 
 export async function createOrder(
@@ -150,6 +153,9 @@ export async function createOrder(
       saleVat: overrides.saleVat ?? null,
       estimatedNetProfit: overrides.estimatedNetProfit ?? null,
       estimatedSaleMarginPct: overrides.estimatedSaleMarginPct ?? null,
+      // Omit (undefined) → column stays SQL NULL, matching the order upsert's
+      // no-promotion write. A provided array is stored verbatim as JSON.
+      promotionDisplays: overrides.promotionDisplays ?? undefined,
     },
   });
 }

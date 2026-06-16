@@ -1578,6 +1578,10 @@
     "estimatedProfit": "Tahmini kâr",
     "settledProfit": "Fiili kâr"
   },
+  "promotionIndicator": {
+    "label": "Promosyon",
+    "title": "Uygulanan promosyonlar"
+  },
   "orderDetail": {
     "title": {
       "placeholder": "Sipariş detayı"

@@ -8,6 +8,7 @@ import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
+import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 import { Badge } from '@/components/ui/badge';
 
 import type { LiveOrderRow } from '../api/get-live-orders.api';
@@ -47,7 +48,14 @@ export function LiveOrdersTable({
       {
         accessorKey: 'platformOrderNumber',
         header: () => t('columns.orderNumber'),
-        cell: ({ row }) => row.original.platformOrderNumber ?? '—',
+        cell: ({ row }) => (
+          <span className="gap-xs flex items-center">
+            <span>{row.original.platformOrderNumber ?? '—'}</span>
+            {/* İndirimli siparişte promosyon adlarını gösteren gürültüsüz rozet
+                (spec ekleme #3). Buffer satırlarında promosyon yok → çizilmez. */}
+            <PromotionIndicator promotions={row.original.promotionDisplays} />
+          </span>
+        ),
       },
       {
         accessorKey: 'orderDate',

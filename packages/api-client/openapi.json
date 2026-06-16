@@ -777,6 +777,30 @@
             "description": "Sale margin % (decimal string) = settledSaleMarginPct ?? estimatedSaleMarginPct. Net profit / gross sale × 100. Null until computed or when the gross sale is 0.",
             "example": "15.50"
           },
+          "promotionDisplays": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "displayName": {
+                  "type": "string",
+                  "example": "Satıcı İndirimi"
+                },
+                "amountGross": {
+                  "type": "string",
+                  "example": "48.01"
+                }
+              },
+              "required": [
+                "displayName",
+                "amountGross"
+              ]
+            },
+            "description": "Seller-discount promotion names + gross amounts captured at order intake. Null when there is no promotion/discount."
+          },
           "fastDelivery": {
             "type": "boolean"
           },
@@ -803,6 +827,7 @@
           "estimatedNetProfit",
           "settledNetProfit",
           "saleMarginPct",
+          "promotionDisplays",
           "fastDelivery",
           "micro",
           "itemCount"
@@ -2058,6 +2083,30 @@
                     "null"
                   ],
                   "description": "Decimal string, null for buffer rows"
+                },
+                "promotionDisplays": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "displayName": {
+                        "type": "string",
+                        "example": "Satıcı İndirimi"
+                      },
+                      "amountGross": {
+                        "type": "string",
+                        "example": "48.01"
+                      }
+                    },
+                    "required": [
+                      "displayName",
+                      "amountGross"
+                    ]
+                  },
+                  "description": "Seller-discount promotion names + gross amounts. Null when none / buffer rows."
                 }
               },
               "required": [
@@ -2070,7 +2119,8 @@
                 "status",
                 "revenue",
                 "profit",
-                "margin"
+                "margin",
+                "promotionDisplays"
               ]
             }
           },

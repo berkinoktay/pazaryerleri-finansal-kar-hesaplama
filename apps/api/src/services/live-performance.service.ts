@@ -4,6 +4,7 @@ import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pa
 import Decimal from 'decimal.js';
 
 import { NotFoundError } from '../lib/errors';
+import { toPromotionDisplays, type PromotionDisplayWire } from '../lib/promotion-displays';
 
 // All "today"/"yesterday" windows come from the single business-timezone helpers
 // (packages/utils/src/timezone.ts) — never a hard-coded offset. Orders carry a
@@ -566,6 +567,7 @@ export interface LiveOrderRow {
   revenue: string;
   profit: string | null;
   margin: string | null;
+  promotionDisplays: PromotionDisplayWire[] | null;
 }
 
 export interface LiveOrdersResult {
@@ -603,6 +605,8 @@ export async function getLiveOrders(args: {
         estimatedNetProfit: true,
         // Marj kalıcı kolondan okunur — render-time hesap yok (kural: backend servis eder).
         estimatedSaleMarginPct: true,
+        // Promosyon adları (spec ekleme #3) — liste detayıyla aynı JSON kolonu.
+        promotionDisplays: true,
       },
     }),
     prisma.livePerformanceBuffer.findMany({
@@ -639,6 +643,8 @@ export async function getLiveOrders(args: {
       revenue: revenue.toFixed(2),
       profit: profit !== null ? profit.toFixed(2) : null,
       margin,
+      // Promosyon adları liste detayıyla aynı runtime-doğrulamalı dönüşümden geçer.
+      promotionDisplays: toPromotionDisplays(order.promotionDisplays),
     };
   });
 
@@ -658,6 +664,8 @@ export async function getLiveOrders(args: {
       revenue: new Decimal(mapped.saleGross).toFixed(2),
       profit: null,
       margin: null,
+      // Buffer satırı henüz Order'a dönüşmedi → promosyon JSON'u yok.
+      promotionDisplays: null,
     };
   });
 

@@ -24,6 +24,7 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     estimatedNetProfit: '60.00',
     settledNetProfit: null,
     saleMarginPct: '15.5',
+    promotionDisplays: null,
     fastDelivery: false,
     micro: false,
     itemCount: 2,
@@ -99,6 +100,21 @@ describe('OrdersTable — Marj % column', () => {
     const header = screen.getByRole('columnheader', { name: new RegExp(MARGIN_HEADER) });
     expect(header).toHaveAttribute('aria-sort', 'ascending');
     expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it('shows the promotion indicator for a discounted row (served names, no derivation)', () => {
+    renderTable({
+      rows: [
+        makeRow({ promotionDisplays: [{ displayName: 'Sepette İndirim', amountGross: '20.00' }] }),
+      ],
+    });
+    // Badge label renders next to the order number; the names live in the tooltip.
+    expect(screen.getByText(trMessages.promotionIndicator.label)).toBeInTheDocument();
+  });
+
+  it('omits the promotion indicator when the row has no promotions', () => {
+    renderTable();
+    expect(screen.queryByText(trMessages.promotionIndicator.label)).toBeNull();
   });
 
   it('omits the margin column in the profit-excluded segment', () => {
