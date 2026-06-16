@@ -1,8 +1,12 @@
 /**
- * Unit tests for captureCostSnapshot.
+ * Unit tests for captureCostSnapshot — GROSS convention.
  *
  * All external I/O (Prisma tx) is mocked via vi.fn(). No DB required.
  * Per spec §5.2 + §5.8 edge cases.
+ *
+ * GROSS convention (2026-06-16): profile.amountGross (KDV-dahil) →
+ * OrderItem.unitCostSnapshotGross + unitCostSnapshotVatRate.
+ * Cost VAT rate independent of sale (spec §7).
  */
 
 import { Decimal } from 'decimal.js';
@@ -18,13 +22,8 @@ const BASE_ITEM = {
   organizationId: 'org-1',
   productVariantId: 'variant-1',
   quantity: 2,
-  unitPrice: new Decimal('200.00'),
-  commissionRate: new Decimal('10.00'),
-  commissionAmount: new Decimal('20.00'),
-  unitCostSnapshot: null,
-  // PR-6 continuation: write-once guard reads unitCostSnapshotNet.
-  unitCostSnapshotNet: null,
-  unitCostSnapshotVatAmount: null,
+  // GROSS convention: write-once guard reads unitCostSnapshotGross.
+  unitCostSnapshotGross: null,
   unitCostSnapshotVatRate: null,
   snapshotCapturedAt: null,
   productVariant: { id: 'variant-1' },
@@ -35,12 +34,9 @@ const TRY_PROFILE = {
   organizationId: 'org-1',
   name: 'TRY COGS',
   type: 'COGS' as const,
-  amount: new Decimal('50.00'),
+  amountGross: new Decimal('50.00'),
   currency: 'TRY' as const,
-  vatRate: 0,
-  // PR-4: KDV snapshot column. null exercises captureCostSnapshot's
-  // defensive compute (canonical formula). vatRate=0 → vatAmount=0 either way.
-  vatAmount: null,
+  vatRate: new Decimal('0'),
   fxRateMode: 'AUTO' as const,
   manualFxRate: null,
   note: null,
@@ -56,7 +52,7 @@ const USD_PROFILE_AUTO = {
   id: 'profile-usd-auto',
   name: 'USD COGS AUTO',
   currency: 'USD' as const,
-  amount: new Decimal('10.00'),
+  amountGross: new Decimal('10.00'),
 };
 
 const USD_PROFILE_MANUAL = {
@@ -64,7 +60,7 @@ const USD_PROFILE_MANUAL = {
   id: 'profile-usd-manual',
   name: 'USD COGS MANUAL',
   currency: 'USD' as const,
-  amount: new Decimal('10.00'),
+  amountGross: new Decimal('10.00'),
   fxRateMode: 'MANUAL' as const,
   manualFxRate: new Decimal('35.50'),
 };
@@ -101,10 +97,10 @@ function makeTx(overrides: {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe('captureCostSnapshot', () => {
-  it('throws SnapshotAlreadyCapturedError when unitCostSnapshotNet is already set', async () => {
+describe('captureCostSnapshot — GROSS convention', () => {
+  it('throws SnapshotAlreadyCapturedError when unitCostSnapshotGross is already set', async () => {
     const tx = makeTx({
-      item: { ...BASE_ITEM, unitCostSnapshotNet: new Decimal('100.00') },
+      item: { ...BASE_ITEM, unitCostSnapshotGross: new Decimal('100.00') },
     });
 
     await expect(captureCostSnapshot('item-1', tx as never)).rejects.toThrow(
@@ -133,29 +129,30 @@ describe('captureCostSnapshot', () => {
     expect(tx.orderItem.update).not.toHaveBeenCalled();
   });
 
-  it('captures snapshot for all-TRY profiles, rate=1, source=TRY-NATIVE', async () => {
+  it('captures snapshot for all-TRY profiles, rate=1, source=TRY-NATIVE (GROSS)', async () => {
     const tx = makeTx({ links: [{ profile: TRY_PROFILE }] });
 
     await captureCostSnapshot('item-1', tx as never);
 
     expect(tx.orderItem.update).toHaveBeenCalledOnce();
     const updateCall = tx.orderItem.update.mock.calls[0]![0];
-    expect(updateCall.data.unitCostSnapshotNet.toFixed(2)).toBe('50.00');
+    // amountGross=50, TRY-native fx=1 → unitCostSnapshotGross=50.00
+    expect(updateCall.data.unitCostSnapshotGross.toFixed(2)).toBe('50.00');
     expect(updateCall.data.snapshotCapturedAt).toBeInstanceOf(Date);
 
     expect(tx.orderItemCostSnapshotComponent.createMany).toHaveBeenCalledOnce();
     const components: Array<{
       fxRateSource: string;
       fxRateUsed: Decimal;
-      amountInTry: Decimal;
+      amountInTryGross: Decimal;
     }> = tx.orderItemCostSnapshotComponent.createMany.mock.calls[0]![0].data;
     expect(components).toHaveLength(1);
     expect(components[0]!.fxRateSource).toBe('TRY-NATIVE');
     expect(components[0]!.fxRateUsed.toFixed(2)).toBe('1.00');
-    expect(components[0]!.amountInTry.toFixed(2)).toBe('50.00');
+    expect(components[0]!.amountInTryGross.toFixed(2)).toBe('50.00');
   });
 
-  it('captures snapshot for USD AUTO profile when FX rate exists', async () => {
+  it('captures snapshot for USD AUTO profile when FX rate exists (GROSS)', async () => {
     const tx = makeTx({
       links: [{ profile: USD_PROFILE_AUTO }],
       fxRow: {
@@ -168,8 +165,8 @@ describe('captureCostSnapshot', () => {
 
     expect(tx.orderItem.update).toHaveBeenCalledOnce();
     const updateCall = tx.orderItem.update.mock.calls[0]![0];
-    // 10.00 USD × 45.19 = 451.90 TRY
-    expect(updateCall.data.unitCostSnapshotNet.toFixed(2)).toBe('451.90');
+    // 10.00 USD × 45.19 = 451.90 TRY (gross stays gross)
+    expect(updateCall.data.unitCostSnapshotGross.toFixed(2)).toBe('451.90');
 
     const components: Array<{
       fxRateSource: string;
@@ -191,7 +188,7 @@ describe('captureCostSnapshot', () => {
     expect(tx.orderItemCostSnapshotComponent.createMany).not.toHaveBeenCalled();
   });
 
-  it('captures snapshot for USD MANUAL profile, uses profile.manualFxRate', async () => {
+  it('captures snapshot for USD MANUAL profile, uses profile.manualFxRate (GROSS)', async () => {
     const tx = makeTx({
       links: [{ profile: USD_PROFILE_MANUAL }],
     });
@@ -201,7 +198,7 @@ describe('captureCostSnapshot', () => {
     expect(tx.orderItem.update).toHaveBeenCalledOnce();
     const updateCall = tx.orderItem.update.mock.calls[0]![0];
     // 10.00 USD × 35.50 = 355.00 TRY
-    expect(updateCall.data.unitCostSnapshotNet.toFixed(2)).toBe('355.00');
+    expect(updateCall.data.unitCostSnapshotGross.toFixed(2)).toBe('355.00');
 
     const components: Array<{
       fxRateSource: string;
@@ -212,5 +209,29 @@ describe('captureCostSnapshot', () => {
 
     // MANUAL mode must not query the fx_rates table
     expect(tx.fxRate.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('vatRate=0 profile → unitCostSnapshotVatRate null (zero-gross branches to null, not 0%)', async () => {
+    // amountGross=0 with vatRate=18 → gross=0 → vatRate null
+    const zeroGrossProfile = { ...TRY_PROFILE, amountGross: new Decimal('0.00'), vatRate: new Decimal('18') };
+    const tx = makeTx({ links: [{ profile: zeroGrossProfile }] });
+
+    await captureCostSnapshot('item-1', tx as never);
+
+    const updateCall = tx.orderItem.update.mock.calls[0]![0];
+    expect(updateCall.data.unitCostSnapshotGross.toFixed(2)).toBe('0.00');
+    expect(updateCall.data.unitCostSnapshotVatRate).toBeNull();
+  });
+
+  it('single TRY profile with vatRate=20 → unitCostSnapshotVatRate=20 (blended rate)', async () => {
+    const profile20 = { ...TRY_PROFILE, amountGross: new Decimal('50.00'), vatRate: new Decimal('20') };
+    const tx = makeTx({ links: [{ profile: profile20 }] });
+
+    await captureCostSnapshot('item-1', tx as never);
+
+    const updateCall = tx.orderItem.update.mock.calls[0]![0];
+    expect(updateCall.data.unitCostSnapshotGross.toFixed(2)).toBe('50.00');
+    // blended rate = 50×20 / 50 = 20.00
+    expect(updateCall.data.unitCostSnapshotVatRate!.toFixed(2)).toBe('20.00');
   });
 });
