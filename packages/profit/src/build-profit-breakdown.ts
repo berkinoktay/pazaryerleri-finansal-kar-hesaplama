@@ -73,6 +73,10 @@ export interface ProfitBreakdownView {
   shippingVat: string;
   platformServiceGross: string;
   platformServiceVat: string;
+  // Stopaj ayrı bir düşülen terim (komisyon/PSF içine katlanmaz). STOPPAGE fee'leri
+  // (direction-signed) toplanır; vatRate 0 olduğu için Net KDV'ye GİRMEZ — netProfit'ten
+  // doğrudan düşülür (computeProfit ile aynı cebir).
+  stoppage: string;
   netVat: string;
   netProfit: string;
   saleMarginPct: string;
@@ -111,6 +115,8 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
 
   const shipping = feeAgg('SHIPPING');
   const platformService = feeAgg('PLATFORM_SERVICE');
+  // Stopaj: STOPPAGE fee'leri (vatRate 0). feeAgg yön-imzalı toplar; .gross alınır.
+  const stoppage = feeAgg('STOPPAGE');
 
   return {
     listGross: input.listGross.toFixed(2),
@@ -125,6 +131,7 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     shippingVat: shipping.vat.toDecimalPlaces(2).toFixed(2),
     platformServiceGross: platformService.gross.toFixed(2),
     platformServiceVat: platformService.vat.toDecimalPlaces(2).toFixed(2),
+    stoppage: stoppage.gross.toFixed(2),
     netVat: input.netVat.toFixed(2),
     netProfit: input.netProfit.toFixed(2),
     saleMarginPct: input.saleMarginPct === null ? '—' : input.saleMarginPct.toFixed(2),

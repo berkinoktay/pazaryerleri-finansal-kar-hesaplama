@@ -155,7 +155,10 @@ export function OrderDetailClient({
       <OrderKpiGrid order={order} />
 
       <div className="gap-lg grid grid-cols-1 lg:grid-cols-2">
-        <ProfitBreakdownCard breakdown={order.profitBreakdown} />
+        <ProfitBreakdownCard
+          breakdown={order.profitBreakdown}
+          promotionDisplays={order.promotionDisplays}
+        />
         <OrderFeeTimeline fees={order.fees} />
       </div>
 

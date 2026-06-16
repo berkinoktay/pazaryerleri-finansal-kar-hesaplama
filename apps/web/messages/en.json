@@ -1499,6 +1499,8 @@
     "commission": "Commission",
     "shipping": "Shipping",
     "platformService": "Platform service fee",
+    "stoppage": "Withholding tax",
+    "promotions": "Promotions",
     "netVat": "Net VAT",
     "netVatResult": "Net VAT",
     "saleVat": "Sale VAT",

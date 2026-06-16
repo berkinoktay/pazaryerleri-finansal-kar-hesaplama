@@ -23,6 +23,7 @@ function makeBreakdown(saleMarginPct: string | null): OrderDetail['profitBreakdo
     shippingVat: '0.00',
     platformServiceGross: '0.00',
     platformServiceVat: '0.00',
+    stoppage: '0.00',
     netVat: '13.33',
     netProfit: '31.00',
     saleMarginPct,

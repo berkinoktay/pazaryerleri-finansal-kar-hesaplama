@@ -15,17 +15,30 @@ import { cn } from '@/lib/utils';
 // obje tipini al (keyof'un çalışması için); null'ı prop seviyesinde geri ekliyoruz.
 type ProfitBreakdownData = NonNullable<components['schemas']['ProfitBreakdown']>;
 
+/** Sipariş düzeyindeki promosyon gösterimi (spec ekleme #3). */
+type PromotionDisplay = NonNullable<
+  NonNullable<components['schemas']['OrderDetail']>['promotionDisplays']
+>[number];
+
 export interface ProfitBreakdownCardProps {
   /** Backend-hesaplı kâr dökümü; null = profit-excluded / maliyet eksik. */
   breakdown: ProfitBreakdownData | null;
   /** Son kâr satırı etiketi; varsayılan "Tahmini kâr". Settled yüzeyde "Fiili kâr" geçilir. */
   profitLabel?: string;
+  /**
+   * Sipariş düzeyindeki promosyon isimleri + brüt tutarları (spec ekleme #3).
+   * Breakdown'a değil siparişe ait; varsa satıcı-indirimi satırının yanında
+   * promosyon adları gösterilir. null/boş → promosyon satırı çizilmez.
+   */
+  promotionDisplays?: PromotionDisplay[] | null;
   className?: string;
 }
 
-// Düşülen kalemler — config-driven, sıra = Berkin'in otoritatif formülü.
-// (Stopaj kalemi GROSS dökümünde ayrı satır olarak servis edilmiyor — backend
-//  ProfitBreakdown'da stoppage alanı yok; düşülen toplamlar/Net KDV içinde.)
+// Düşülen kalemler — config-driven, sıra = Berkin'in otoritatif formülü:
+// Satış − Maliyet − Komisyon − Kargo − PSF − Stopaj − Net KDV = Kâr.
+// Stopaj ayrı bir düşülen brüt terim (backend `stoppage`; KDV-siz, Net KDV'ye
+// katlanmaz). Çoğu siparişte '0.00' (yalnız teslim sonrası kesilir) → sıfırken
+// satır gizlenir (gürültü yok); değer varken görünür olur ki Σ kâra kapansın.
 const DEDUCTION_ROWS = [
   { key: 'cost', amount: 'costGross' },
   { key: 'commission', amount: 'commissionGross' },
@@ -58,10 +71,12 @@ const VAT_ROWS = [
 export function ProfitBreakdownCard({
   breakdown,
   profitLabel,
+  promotionDisplays,
   className,
 }: ProfitBreakdownCardProps): React.ReactElement {
   const t = useTranslations('profitBreakdown');
   const finalProfitLabel = profitLabel ?? t('estimatedProfit');
+  const promotions = promotionDisplays ?? [];
 
   return (
     <Card className={className}>
@@ -83,6 +98,22 @@ export function ProfitBreakdownCard({
                 <BreakdownRow label={t('sellerDiscount')}>
                   <SignedAmount value={breakdown.sellerDiscountGross} positive={false} />
                 </BreakdownRow>
+                {/* Promosyon adları (spec ekleme #3): backend yakaladıysa indirimin
+                    hangi promosyondan geldiğini satıcı görür. Tutar backend-servisli. */}
+                {promotions.length > 0 ? (
+                  <div className="gap-3xs pl-sm flex flex-col border-l">
+                    <span className="text-muted-foreground text-2xs">{t('promotions')}</span>
+                    {promotions.map((promo, index) => (
+                      <BreakdownRow
+                        key={`${promo.displayName}-${index}`}
+                        label={promo.displayName}
+                        muted
+                      >
+                        <SignedAmount value={promo.amountGross} positive={false} />
+                      </BreakdownRow>
+                    ))}
+                  </div>
+                ) : null}
                 <BreakdownRow label={t('netSale')} emphasis>
                   <Currency value={breakdown.saleGross} />
                 </BreakdownRow>
@@ -98,6 +129,15 @@ export function ProfitBreakdownCard({
                 <SignedAmount value={breakdown[row.amount]} positive={false} />
               </BreakdownRow>
             ))}
+
+            {/* Stopaj: ayrı düşülen brüt terim (KDV-siz). Çoğu siparişte '0.00'
+                (teslim öncesi kesilmez) → sıfırken gizle. String karşılaştırma =
+                aritmetik DEĞİL (no-frontend-financial-calculation). */}
+            {breakdown.stoppage !== '0.00' ? (
+              <BreakdownRow label={t('stoppage')}>
+                <SignedAmount value={breakdown.stoppage} positive={false} />
+              </BreakdownRow>
+            ) : null}
 
             <Collapsible>
               <div className="gap-sm flex items-center justify-between">

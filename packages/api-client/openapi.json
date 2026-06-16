@@ -932,6 +932,30 @@
           "profitBreakdown": {
             "$ref": "#/components/schemas/ProfitBreakdown"
           },
+          "promotionDisplays": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "displayName": {
+                  "type": "string",
+                  "example": "Satıcı İndirimi"
+                },
+                "amountGross": {
+                  "type": "string",
+                  "example": "48.01"
+                }
+              },
+              "required": [
+                "displayName",
+                "amountGross"
+              ]
+            },
+            "description": "Seller-discount promotion names + gross amounts captured at order intake. Null when there is no promotion/discount."
+          },
           "profitExcludedAt": {
             "type": [
               "string",
@@ -1028,6 +1052,7 @@
           "estimatedNetProfit",
           "settledNetProfit",
           "profitBreakdown",
+          "promotionDisplays",
           "profitExcludedAt",
           "profitExclusionReason",
           "reconciliationStatus",
@@ -1111,6 +1136,10 @@
           "platformServiceVat": {
             "type": "string"
           },
+          "stoppage": {
+            "type": "string",
+            "description": "Stopaj (kaynakta kesinti) — ayrı düşülen brüt terim, KDV-siz (vatRate 0). Net KDV içine katlanmaz; kârdan doğrudan düşülür."
+          },
           "netVat": {
             "type": "string",
             "description": "Net KDV = Satış KDV − Maliyet KDV − Komisyon KDV − Kargo KDV − PSF KDV."
@@ -1146,6 +1175,7 @@
           "shippingVat",
           "platformServiceGross",
           "platformServiceVat",
+          "stoppage",
           "netVat",
           "netProfit",
           "saleMarginPct",

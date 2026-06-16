@@ -318,6 +318,11 @@ const ProfitBreakdownSchema = z
     shippingVat: z.string(),
     platformServiceGross: z.string(),
     platformServiceVat: z.string(),
+    stoppage: z.string().openapi({
+      description:
+        'Stopaj (kaynakta kesinti) — ayrı düşülen brüt terim, KDV-siz (vatRate 0). ' +
+        'Net KDV içine katlanmaz; kârdan doğrudan düşülür.',
+    }),
     netVat: z.string().openapi({
       description: 'Net KDV = Satış KDV − Maliyet KDV − Komisyon KDV − Kargo KDV − PSF KDV.',
     }),
@@ -366,6 +371,23 @@ export const OrderDetailSchema = z
     // AYNI bileşene servis edilir; frontend hiçbir finansal değeri türetmez.
     // null: profit-excluded ya da maliyet snapshot eksik (estimate hesaplanmadı).
     profitBreakdown: ProfitBreakdownSchema.nullable(),
+
+    // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
+    // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Frontend
+    // indirim satırının yanında promosyon adını gösterir (türetmez, render eder).
+    promotionDisplays: z
+      .array(
+        z.object({
+          displayName: z.string().openapi({ example: 'Satıcı İndirimi' }),
+          amountGross: z.string().openapi({ example: '48.01' }),
+        }),
+      )
+      .nullable()
+      .openapi({
+        description:
+          'Seller-discount promotion names + gross amounts captured at order intake. ' +
+          'Null when there is no promotion/discount.',
+      }),
 
     profitExcludedAt: z
       .string()

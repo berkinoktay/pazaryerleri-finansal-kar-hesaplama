@@ -1564,6 +1564,8 @@
     "commission": "Komisyon",
     "shipping": "Kargo",
     "platformService": "Platform hizmet bedeli",
+    "stoppage": "Stopaj",
+    "promotions": "Promosyonlar",
     "netVat": "Net KDV",
     "netVatResult": "Net KDV",
     "saleVat": "Satış KDV",

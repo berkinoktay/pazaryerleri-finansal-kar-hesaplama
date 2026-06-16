@@ -32,6 +32,34 @@ async function ensureStoreInOrg(orgId: string, storeId: string): Promise<void> {
   }
 }
 
+/** Wire shape for a single promotion display (spec ekleme #3). */
+type PromotionDisplayWire = NonNullable<OrderDetailResponse['promotionDisplays']>[number];
+
+function isPromotionDisplay(value: unknown): value is PromotionDisplayWire {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'displayName' in value &&
+    typeof value.displayName === 'string' &&
+    'amountGross' in value &&
+    typeof value.amountGross === 'string'
+  );
+}
+
+/**
+ * Coerce the stored `Order.promotionDisplays` JSON to the wire shape. The column
+ * is `Json?` (upsert writes `[{ displayName, amountGross }]` or leaves it null);
+ * we runtime-validate each element and drop malformed ones rather than trusting
+ * the raw JSON. Empty/absent → null (frontend hides the promotion line).
+ */
+function toPromotionDisplays(value: Prisma.JsonValue | null): PromotionDisplayWire[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const displays = value.filter(isPromotionDisplay);
+  return displays.length > 0 ? displays : null;
+}
+
 function buildOrderListWhere(
   orgId: string,
   storeId: string,
@@ -259,6 +287,7 @@ export async function getOrderById(
     estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
     settledNetProfit: row.settledNetProfit?.toString() ?? null,
     profitBreakdown: profitBreakdownWire,
+    promotionDisplays: toPromotionDisplays(row.promotionDisplays),
 
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
     profitExclusionReason: row.profitExclusionReason,

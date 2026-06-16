@@ -40,8 +40,60 @@ describe('buildProfitBreakdown — GROSS view', () => {
     expect(v.saleGross).toBe('200.00');
     expect(v.costGross).toBe('60.00'); // 30 × 2
     expect(v.shippingGross).toBe('10.00');
+    expect(v.stoppage).toBe('0.00'); // STOPPAGE fee yok → '0.00'
     expect(v.netProfit).toBe('56.00');
     expect(v.saleMarginPct).toBe('28.00');
+  });
+
+  it('aggregates STOPPAGE fees as a separate deduction line that reconciles to netProfit', () => {
+    // Stopaj ayrı düşülen terim; komisyon/PSF içine KATLANMAZ (çift-sayım yok).
+    // computeProfit cebri: netProfit = saleGross − costGross − commissionGross
+    //   − shippingGross − platformServiceGross − stoppage − netVat.
+    // Burada: 1000 − 300 − 200 − 50 − 20 − 30 − 100 = 300.
+    const v = buildProfitBreakdown({
+      saleGross: D('1000'),
+      saleVat: D('166.67'),
+      listGross: D('1000'),
+      sellerDiscountGross: D('0'),
+      items: [
+        {
+          quantity: 1,
+          lineListGross: D('1000'),
+          lineSaleGross: D('1000'),
+          lineSellerDiscountGross: D('0'),
+          saleVatRate: 20,
+          commissionGross: D('200'),
+          refundedCommissionGross: D('0'),
+          commissionVatRate: 20,
+          unitCostSnapshotGross: D('300'),
+          unitCostSnapshotVatRate: 20,
+        },
+      ],
+      fees: [
+        { feeType: 'SHIPPING', direction: 'DEBIT', amountGross: D('50'), vatRate: 20 },
+        { feeType: 'PLATFORM_SERVICE', direction: 'DEBIT', amountGross: D('20'), vatRate: 20 },
+        // Stopaj vatRate 0 → Net KDV'ye girmez, ayrı düşülür.
+        { feeType: 'STOPPAGE', direction: 'DEBIT', amountGross: D('30'), vatRate: 0 },
+      ],
+      netProfit: D('300'),
+      netVat: D('100'),
+      saleMarginPct: D('30'),
+      costMarkupPct: D('100'),
+    });
+    expect(v.stoppage).toBe('30.00');
+
+    // Σ düşülen terimler + Net KDV = saleGross − netProfit (stopaj tam olarak BİR kez sayılır).
+    const sumOfDeductions = new Decimal(v.costGross)
+      .add(v.commissionGross)
+      .add(v.shippingGross)
+      .add(v.platformServiceGross)
+      .add(v.stoppage)
+      .add(v.netVat);
+    expect(sumOfDeductions.toFixed(2)).toBe(
+      new Decimal(v.saleGross).sub(v.netProfit).toFixed(2),
+    );
+    // 300 + 200 + 50 + 20 + 30 + 100 = 700 = 1000 − 300.
+    expect(sumOfDeductions.toFixed(2)).toBe('700.00');
   });
 
   it('null margin renders dash', () => {

@@ -19,6 +19,8 @@ const messages = {
     commission: 'Komisyon',
     shipping: 'Kargo',
     platformService: 'Platform hizmet bedeli',
+    stoppage: 'Stopaj',
+    promotions: 'Promosyonlar',
     netVat: 'Net KDV',
     netVatResult: 'Net KDV',
     saleVat: 'Satış KDV',
@@ -46,6 +48,9 @@ const BREAKDOWN = {
   shippingVat: '22.55',
   platformServiceGross: '13.19',
   platformServiceVat: '2.20',
+  // Stopaj ayrı düşülen brüt terim (KDV-siz). 569592424: kâr 876,24 yerine 848,74
+  // → fark tam 27,50 stopaj. Σ düşülen + Net KDV = saleGross − netProfit ile kapanır.
+  stoppage: '27.50',
   netVat: '175.25',
   netProfit: '848.74',
   saleMarginPct: '25.7',
@@ -65,13 +70,14 @@ describe('ProfitBreakdownCard', () => {
     renderCard(BREAKDOWN);
 
     expect(screen.getByText('Kâr dökümü')).toBeInTheDocument();
-    // Düşülen kalem etiketleri + son kâr (stopaj GROSS dökümünde ayrı satır DEĞİL).
+    // Düşülen kalem etiketleri + Stopaj (ayrı düşülen satır) + son kâr.
     for (const label of [
       'Satış',
       'Ürün maliyeti',
       'Komisyon',
       'Kargo',
       'Platform hizmet bedeli',
+      'Stopaj',
       'Tahmini kâr',
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
@@ -79,6 +85,8 @@ describe('ProfitBreakdownCard', () => {
     // Değerler backend'den; bileşen yalnız formatlar.
     expect(screen.getByText(formatCurrency('3300.00'))).toBeInTheDocument();
     expect(screen.getByText(formatCurrency('848.74'))).toBeInTheDocument();
+    // Stopaj satırı backend-servisli tutarı gösterir (şeffaflık değişmezi).
+    expect(screen.getByText(formatCurrency('27.50'))).toBeInTheDocument();
     // Marj backend-servisli (saleMarginPct) — frontend türetmez, render eder.
     expect(screen.getByText('Kâr marjı')).toBeInTheDocument();
     expect(screen.getByText('25.7%')).toBeInTheDocument();
@@ -120,6 +128,32 @@ describe('ProfitBreakdownCard', () => {
     expect(screen.getByText(formatCurrency('12.50'))).toBeInTheDocument();
     // Çift-eksi / Intl'in kendi eksili biçimi DOM'da olmamalı.
     expect(screen.queryByText(formatCurrency('-12.50'))).not.toBeInTheDocument();
+  });
+
+  it('hides the stoppage row when there is no withholding tax (0.00)', () => {
+    // Teslim öncesi siparişte stopaj kesilmez → '0.00' → gürültü yapmamak için
+    // satır gizlenir (sellerDiscount şeffaflık deseniyle aynı koşullu render).
+    renderCard({ ...BREAKDOWN, stoppage: '0.00' });
+    expect(screen.queryByText('Stopaj')).not.toBeInTheDocument();
+  });
+
+  it('shows promotion names near the discount line when promotionDisplays are present', () => {
+    render(
+      <NextIntlClientProvider locale="tr" messages={messages}>
+        <ProfitBreakdownCard
+          breakdown={{ ...BREAKDOWN, listGross: '3500.00', sellerDiscountGross: '200.00' }}
+          promotionDisplays={[{ displayName: 'Sepette %10 İndirim', amountGross: '200.00' }]}
+        />
+      </NextIntlClientProvider>,
+    );
+    // Promosyon grup etiketi + promosyon adı (backend yakaladı, frontend render eder).
+    expect(screen.getByText('Promosyonlar')).toBeInTheDocument();
+    expect(screen.getByText('Sepette %10 İndirim')).toBeInTheDocument();
+  });
+
+  it('does not render the promotion section when promotionDisplays is absent', () => {
+    renderCard({ ...BREAKDOWN, listGross: '3500.00', sellerDiscountGross: '200.00' });
+    expect(screen.queryByText('Promosyonlar')).not.toBeInTheDocument();
   });
 
   it('shows the unavailable message when there is no breakdown', () => {
