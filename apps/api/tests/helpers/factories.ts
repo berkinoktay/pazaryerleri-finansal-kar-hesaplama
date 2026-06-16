@@ -128,6 +128,9 @@ export interface CreateOrderOverrides {
   saleGross?: string | null;
   saleVat?: string | null;
   estimatedNetProfit?: string | null;
+  // Persist edilen marj (estimatedNetProfit / saleGross × 100). Live-performance +
+  // order detayı bu kolondan okur (render-time hesap yok). null = henüz hesaplanmadı.
+  estimatedSaleMarginPct?: string | null;
 }
 
 export async function createOrder(
@@ -146,6 +149,7 @@ export async function createOrder(
       saleGross: overrides.saleGross ?? null,
       saleVat: overrides.saleVat ?? null,
       estimatedNetProfit: overrides.estimatedNetProfit ?? null,
+      estimatedSaleMarginPct: overrides.estimatedSaleMarginPct ?? null,
     },
   });
 }
@@ -226,9 +230,9 @@ export async function createOrderFee(
     feeType?: OrderFeeType;
     source?: OrderFeeSource;
     direction?: OrderFeeDirection;
-    amountNet?: string;
+    // GROSS CONVENTION (2026-06-16): amountGross (KDV-dahil) + vatRate. Net = gross × 100/(100+rate).
+    amountGross?: string;
     vatRate?: string;
-    vatAmount?: string;
     feeDefinitionId?: string | null;
     // SETTLEMENT rows carry the Trendyol row id (#297 idempotency column).
     trendyolTransactionId?: string | null;
@@ -245,9 +249,8 @@ export async function createOrderFee(
       feeType: overrides.feeType ?? 'PLATFORM_SERVICE',
       source: overrides.source ?? 'ESTIMATE',
       direction: overrides.direction ?? 'DEBIT',
-      amountNet: overrides.amountNet ?? '10.99',
+      amountGross: overrides.amountGross ?? '13.19',
       vatRate: overrides.vatRate ?? '20.00',
-      vatAmount: overrides.vatAmount ?? '2.20',
       trendyolTransactionId: overrides.trendyolTransactionId ?? null,
       ...(overrides.capturedAt !== undefined ? { capturedAt: overrides.capturedAt } : {}),
     },

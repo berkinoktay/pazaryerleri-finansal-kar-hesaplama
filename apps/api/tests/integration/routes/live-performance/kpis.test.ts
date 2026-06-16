@@ -64,16 +64,16 @@ describe('GET /v1/.../live-performance/kpis', () => {
     // A costed order today: ₺100 revenue, ₺20 profit, 1 line × qty 2 @ ₺30 cost = ₺60 cost.
     const costed = await createOrder(org.id, store.id, {
       orderDate: todayAt(12),
-      saleSubtotalNet: '100.00',
+      saleGross: '100.00',
       estimatedNetProfit: '20.00',
     });
-    await createOrderItem(costed.id, org.id, { quantity: 2, unitCostSnapshotNet: '30.00' });
+    await createOrderItem(costed.id, org.id, { quantity: 2, unitCostSnapshotGross: '30.00' });
 
     // A cost-missing order in today's buffer: ₺60 revenue, 3 units, no profit yet.
     await createBufferEntry(org.id, store.id, {
       orderDate: getBusinessDateAnchor(),
       mappedOrder: {
-        saleSubtotalNet: '60.00',
+        saleGross: '60.00',
         orderDate: todayAt(10).toISOString(),
         lines: [{ barcode: '8690000000001', quantity: 3 }],
       },
@@ -108,20 +108,20 @@ describe('GET /v1/.../live-performance/kpis', () => {
     // A live costed order: ₺100 revenue, ₺20 profit.
     const live = await createOrder(org.id, store.id, {
       orderDate: todayAt(11),
-      saleSubtotalNet: '100.00',
+      saleGross: '100.00',
       estimatedNetProfit: '20.00',
     });
-    await createOrderItem(live.id, org.id, { quantity: 1, unitCostSnapshotNet: '30.00' });
+    await createOrderItem(live.id, org.id, { quantity: 1, unitCostSnapshotGross: '30.00' });
 
     // A cancelled order the same day — must not move any number. (Both real
     // cancels and leaked UnPacked split-ghosts land on this status.)
     const cancelled = await createOrder(org.id, store.id, {
       orderDate: todayAt(12),
-      saleSubtotalNet: '500.00',
+      saleGross: '500.00',
       estimatedNetProfit: '90.00',
       status: 'CANCELLED',
     });
-    await createOrderItem(cancelled.id, org.id, { quantity: 4, unitCostSnapshotNet: '50.00' });
+    await createOrderItem(cancelled.id, org.id, { quantity: 4, unitCostSnapshotGross: '50.00' });
 
     const res = await app.request(
       `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,
@@ -145,18 +145,18 @@ describe('GET /v1/.../live-performance/kpis', () => {
     // A costed order yesterday: ₺200 revenue, ₺50 profit, 1 line × qty 1 @ ₺80 cost.
     const costed = await createOrder(org.id, store.id, {
       orderDate: yesterdayAt(10),
-      saleSubtotalNet: '200.00',
+      saleGross: '200.00',
       estimatedNetProfit: '50.00',
     });
-    await createOrderItem(costed.id, org.id, { quantity: 1, unitCostSnapshotNet: '80.00' });
+    await createOrderItem(costed.id, org.id, { quantity: 1, unitCostSnapshotGross: '80.00' });
 
     // A persisted null-profit order yesterday (Slice 0): ₺80 revenue, 2 units, no profit.
     const nullProfit = await createOrder(org.id, store.id, {
       orderDate: yesterdayAt(14),
-      saleSubtotalNet: '80.00',
+      saleGross: '80.00',
       estimatedNetProfit: null,
     });
-    await createOrderItem(nullProfit.id, org.id, { quantity: 2, unitCostSnapshotNet: null });
+    await createOrderItem(nullProfit.id, org.id, { quantity: 2, unitCostSnapshotGross: null });
 
     const res = await app.request(
       `/v1/organizations/${org.id}/stores/${store.id}/live-performance/kpis`,

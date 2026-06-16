@@ -48,14 +48,14 @@ describe('GET /v1/.../live-performance/chart', () => {
     // Costed order at hour 9: ₺50 revenue, ₺10 profit.
     await createOrder(org.id, store.id, {
       orderDate: todayAtHour(9),
-      saleSubtotalNet: '50.00',
+      saleGross: '50.00',
       estimatedNetProfit: '10.00',
     });
     // Cost-missing buffer order at hour 10: ₺60 revenue, no profit.
     await createBufferEntry(org.id, store.id, {
       orderDate: getBusinessDateAnchor(),
       mappedOrder: {
-        saleSubtotalNet: '60.00',
+        saleGross: '60.00',
         orderDate: todayAtHour(10).toISOString(),
         lines: [{ barcode: '8690000000001', quantity: 1 }],
       },

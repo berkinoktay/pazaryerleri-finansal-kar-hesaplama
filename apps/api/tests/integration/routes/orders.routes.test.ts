@@ -45,8 +45,9 @@ describe('Order routes', () => {
       data: {
         platformOrderNumber: overrides.platformOrderNumber ?? `ON-${randomUUID().slice(0, 6)}`,
         orderDate: overrides.orderDate ?? base.orderDate,
-        saleSubtotalNet: new Decimal('200.00'),
-        saleVatTotal: new Decimal('40.00'),
+        // GROSS konvansiyon: saleGross = KDV-dahil satış (eski net 200 + KDV 40).
+        saleGross: new Decimal('240.00'),
+        saleVat: new Decimal('40.00'),
         estimatedNetProfit: new Decimal('60.00'),
       },
     });
@@ -337,16 +338,14 @@ describe('Order routes', () => {
       await createOrderFee(order.id, org.id, {
         feeType: 'PLATFORM_SERVICE',
         source: 'ESTIMATE',
-        amountNet: '10.99',
+        amountGross: '13.19', // KDV-dahil (eski net 10.99 + KDV 2.20)
         vatRate: '20.00',
-        vatAmount: '2.20',
       });
       await createOrderFee(order.id, org.id, {
         feeType: 'STOPPAGE',
         source: 'ESTIMATE',
-        amountNet: '2.00',
+        amountGross: '2.00',
         vatRate: '0.00',
-        vatAmount: '0.00',
       });
 
       const claim = await createOrderClaim(org.id, store.id, order.id, { resolved: false });
@@ -368,9 +367,8 @@ describe('Order routes', () => {
           barcode: '8680000000001',
           platformLineId: 9001n,
           quantity: 1,
-          unitPrice: '120.00',
           commissionRate: '10.00',
-          commissionAmount: '12.00',
+          commissionGross: '12.00',
         },
       });
 
@@ -382,16 +380,16 @@ describe('Order routes', () => {
       const body = (await res.json()) as {
         id: string;
         store: { id: string; platform: string };
-        fees: { feeType: string; amountNet: string }[];
+        fees: { feeType: string; amountGross: string }[];
         claims: { trendyolClaimId: string; items: { reasonCode: string }[] }[];
-        saleSubtotalNet: string | null;
+        saleGross: string | null;
         items: { barcode: string | null; variant: unknown }[];
         profitExcludedAt: string | null;
         profitExclusionReason: string | null;
       };
       expect(body.id).toBe(order.id);
       expect(body.store.id).toBe(store.id);
-      expect(body.saleSubtotalNet).toBe('200');
+      expect(body.saleGross).toBe('240');
       expect(body.fees).toHaveLength(2);
       expect(body.fees.map((f) => f.feeType).sort()).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
       expect(body.claims).toHaveLength(1);
@@ -443,12 +441,19 @@ describe('Order routes', () => {
       await prisma.order.update({
         where: { id: order.id },
         data: {
+          // GROSS konvansiyon: saleGross = KDV-dahil (200 net + 40 KDV = 240);
+          // listGross = saleGross + satıcı indirimi brüt (240 + 30 = 270);
+          // sellerDiscountGross = 30 (display-only, netProfit'i etkilemez).
           // Persist edilen skalarlar, eklenen kalem+fee'lerden computeProfit'in
-          // ÜRETECEĞİ değerlerle TUTARLI (drift değil): netProfit = 200−50−20−10.99−2 = 117.01;
-          // netVat = 40−10−4−2.20 = 23.80. Böylece döküm kendi alt-çizgisine toplanır.
-          saleSubtotalNet: new Decimal('200.00'),
-          saleVatTotal: new Decimal('40.00'),
-          estimatedNetProfit: new Decimal('117.01'),
+          // ÜRETECEĞİ değerlerle TUTARLI (drift değil). STOPAJ kâr dökümünde
+          // GÖSTERİLMEZ (ProfitBreakdown wire'da yok) → setup'tan çıkarıldı, böylece
+          // döküm kendi alt-çizgisine (netProfit) toplanır:
+          // netProfit = 240−60−24−0−13.19−23.80 = 119.01; netVat = 40−10−4−2.20 = 23.80.
+          saleGross: new Decimal('240.00'),
+          saleVat: new Decimal('40.00'),
+          listGross: new Decimal('270.00'),
+          sellerDiscountGross: new Decimal('30.00'),
+          estimatedNetProfit: new Decimal('119.01'),
           estimatedNetVat: new Decimal('23.80'),
         },
       });
@@ -459,34 +464,26 @@ describe('Order routes', () => {
           productVariantId: null,
           barcode: '8680000000002',
           quantity: 1,
-          unitPrice: '240.00',
           commissionRate: '10.00',
-          commissionAmount: '24.00',
-          unitCostSnapshotNet: '50.00',
+          // GROSS konvansiyon: komisyon brüt = eski net 20 + KDV 4 = 24.
+          commissionGross: '24.00',
+          // Maliyet snapshot brüt = eski net 50 + KDV 10 = 60 (KDV oranı %20).
+          unitCostSnapshotGross: '60.00',
           unitCostSnapshotVatRate: '20.00',
-          unitCostSnapshotVatAmount: '10.00',
-          grossCommissionAmountNet: '20.00',
-          grossCommissionVatAmount: '4.00',
-          // Satıcı indirimi (display-only; netProfit/netVat'ı ETKİLEMEZ — saleSubtotalNet
-          // zaten effectiveSale). Brüt indirim = 25 + 5 = 30 → listGross = 240 + 30 = 270.
-          sellerDiscountNet: '25.00',
-          sellerDiscountVatAmount: '5.00',
+          // Satıcı indirimi brüt = eski net 25 + KDV 5 = 30 (display-only; netProfit'i
+          // ETKİLEMEZ — saleGross zaten effectiveSale). listGross = 240 + 30 = 270.
+          lineSellerDiscountGross: '30.00',
         },
       });
-      // ESTIMATE fee'leri (SETTLEMENT/CARGO değil) → tahmini basis dökümüne girer.
+      // ESTIMATE fee (SETTLEMENT/CARGO değil) → tahmini basis dökümüne girer.
+      // amountGross = KDV-dahil (eski net 10.99 + KDV 2.20 = 13.19). STOPAJ fee'si
+      // EKLENMEZ: kâr dökümü (ProfitBreakdown) stopajı GÖSTERMEZ (wire'da alan yok),
+      // bu yüzden setup'tan çıkarıldı → döküm kendi alt-çizgisine temiz toplanır.
       await createOrderFee(order.id, org.id, {
         feeType: 'PLATFORM_SERVICE',
         source: 'ESTIMATE',
-        amountNet: '10.99',
+        amountGross: '13.19',
         vatRate: '20.00',
-        vatAmount: '2.20',
-      });
-      await createOrderFee(order.id, org.id, {
-        feeType: 'STOPPAGE',
-        source: 'ESTIMATE',
-        amountNet: '2.00',
-        vatRate: '0.00',
-        vatAmount: '0.00',
       });
 
       const res = await app.request(
@@ -503,7 +500,6 @@ describe('Order routes', () => {
           commissionGross: string;
           shippingGross: string;
           platformServiceGross: string;
-          stoppageNet: string;
           netVat: string;
           netProfit: string;
         } | null;
@@ -511,24 +507,23 @@ describe('Order routes', () => {
       const b = body.profitBreakdown;
       if (b === null) throw new Error('profitBreakdown beklenmedik şekilde null');
       // Brüt (KDV-dahil) toplamlar backend'de hesaplandı; netVat/netProfit persist'ten.
-      expect(b.saleGross).toBe('240.00'); // 200 + 40
+      expect(b.saleGross).toBe('240.00'); // 200 + 40 (KDV-dahil)
       expect(b.costGross).toBe('60.00'); // (50 + 10) × 1
       expect(b.commissionGross).toBe('24.00'); // 20 + 4
       expect(b.shippingGross).toBe('0.00'); // kargo fee yok
       expect(b.platformServiceGross).toBe('13.19'); // 10.99 + 2.20
-      expect(b.stoppageNet).toBe('2.00');
       expect(b.netVat).toBe('23.80'); // persist edilen estimatedNetVat
-      expect(b.netProfit).toBe('117.01'); // persist edilen estimatedNetProfit
+      expect(b.netProfit).toBe('119.01'); // persist edilen estimatedNetProfit (stopajsız)
       // Satıcı indirimi şeffaflığı (display-only; netProfit'i ETKİLEMEZ).
       expect(b.sellerDiscountGross).toBe('30.00'); // 25 + 5
       expect(b.listGross).toBe('270.00'); // 240 + 30
       // Çekirdek invariant: döküm kendi alt-çizgisine (netProfit) toplanmalı.
+      // Stopaj dökümde GÖSTERİLMEZ → setup'tan çıkarıldığı için netProfit stopajsız.
       const sum = new Decimal(b.saleGross)
         .sub(b.costGross)
         .sub(b.commissionGross)
         .sub(b.shippingGross)
         .sub(b.platformServiceGross)
-        .sub(b.stoppageNet)
         .sub(b.netVat);
       expect(sum.toFixed(2)).toBe(b.netProfit);
     });

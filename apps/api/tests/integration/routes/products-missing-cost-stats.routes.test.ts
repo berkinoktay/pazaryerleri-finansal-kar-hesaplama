@@ -51,7 +51,7 @@ async function attachProfile(organizationId: string, variantId: string) {
       organizationId,
       name: `Profile ${randomUUID().slice(0, 6)}`,
       type: 'COGS',
-      amount: new Decimal('10.00'),
+      amountGross: new Decimal('10.00'),
       currency: 'TRY',
       vatRate: 0,
       fxRateMode: 'AUTO',

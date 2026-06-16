@@ -313,7 +313,7 @@ export async function updateCostProfile(
         ...(patch.type !== undefined ? { type: patch.type } : {}),
         ...(patch.amountGross !== undefined ? { amountGross: new Decimal(patch.amountGross) } : {}),
         ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
-        ...(patch.vatRate !== undefined ? { vatRate: patch.vatRate } : {}),
+        ...(patch.vatRate !== undefined ? { vatRate: new Decimal(patch.vatRate) } : {}),
         ...(patch.fxRateMode !== undefined ? { fxRateMode: patch.fxRateMode } : {}),
         ...(patch.manualFxRate !== undefined
           ? { manualFxRate: patch.manualFxRate !== null ? new Decimal(patch.manualFxRate) : null }

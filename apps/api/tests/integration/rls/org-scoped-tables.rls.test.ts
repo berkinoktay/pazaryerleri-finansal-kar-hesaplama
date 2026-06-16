@@ -205,18 +205,18 @@ describe('RLS — org-scoped tables', () => {
         data: {
           orderId: orderA.id,
           quantity: 1,
-          unitPrice: '10',
+          lineSaleGross: '10',
           commissionRate: '10',
-          commissionAmount: '1',
+          commissionGross: '1',
         },
       }),
       prisma.orderItem.create({
         data: {
           orderId: orderB.id,
           quantity: 1,
-          unitPrice: '10',
+          lineSaleGross: '10',
           commissionRate: '10',
-          commissionAmount: '1',
+          commissionGross: '1',
         },
       }),
     ]);

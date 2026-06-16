@@ -44,7 +44,7 @@ describe('GET live-performance/notification-summary', () => {
     const order = await createOrder(org.id, store.id, {
       orderDate: new Date(),
       platformOrderNumber: 'TY-100',
-      saleSubtotalNet: '149.90',
+      saleGross: '149.90',
       estimatedNetProfit: '38.40',
     });
 
@@ -67,7 +67,7 @@ describe('GET live-performance/notification-summary', () => {
     const { user, org, store } = await ownerWithStore();
     const order = await createOrder(org.id, store.id, {
       orderDate: new Date(),
-      saleSubtotalNet: '50.00',
+      saleGross: '50.00',
       estimatedNetProfit: null,
     });
 
@@ -82,7 +82,7 @@ describe('GET live-performance/notification-summary', () => {
     const { user, org, store } = await ownerWithStore();
     const order = await createOrder(org.id, store.id, {
       orderDate: new Date('2020-01-01T08:00:00.000Z'),
-      saleSubtotalNet: '10.00',
+      saleGross: '10.00',
     });
 
     const res = await get(org.id, store.id, 'orders', order.id, user.accessToken);
@@ -95,7 +95,7 @@ describe('GET live-performance/notification-summary', () => {
     const entry = await createBufferEntry(org.id, store.id, {
       orderDate: getBusinessDateAnchor(),
       platformOrderNumber: 'TY-BUF-1',
-      mappedOrder: { saleSubtotalNet: '500.00', lines: [] },
+      mappedOrder: { saleGross: '500.00', lines: [] },
     });
 
     const res = await get(org.id, store.id, 'buffer', entry.id, user.accessToken);
@@ -117,7 +117,7 @@ describe('GET live-performance/notification-summary', () => {
     const { user, org, store } = await ownerWithStore();
     const entry = await createBufferEntry(org.id, store.id, {
       orderDate: new Date('2020-01-01T00:00:00.000Z'),
-      mappedOrder: { saleSubtotalNet: '12.00', lines: [] },
+      mappedOrder: { saleGross: '12.00', lines: [] },
     });
 
     const res = await get(org.id, store.id, 'buffer', entry.id, user.accessToken);

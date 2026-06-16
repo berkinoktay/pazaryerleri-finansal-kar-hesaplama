@@ -61,6 +61,7 @@ describe('cost snapshot immutability trigger', () => {
         organizationId: org.id,
         quantity: 1,
         lineSaleGross: new Decimal('199.99'),
+        commissionRate: new Decimal('12.50'),
         commissionGross: new Decimal('25.00'),
       },
     });

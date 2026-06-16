@@ -4,57 +4,72 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { ensureDbReachable } from '../../helpers/db';
 
 /**
- * PR-5c — Eski Order ücret kolonları silindiği doğrulanır (design §9 PR-5c).
+ * GROSS konvansiyon refactoru (2026-06-16) — eski NET kar kolonlarının silindiği
+ * doğrulanır. Motor NET → GROSS (KDV-dahil) geçti; sipariş/satır/ücret artık
+ * brüt değer + KDV oranı tutar, net API katmanında türetilir.
  *
- * 6 kolon silindi: total_amount, commission_amount, shipping_cost, platform_fee,
- * vat_amount, net_profit. Yeni convention için saleSubtotalNet + saleVatTotal
- * (PR-5a), OrderFee tablosu (PR-1), OrderItem.grossCommission* (PR-3),
- * estimatedNetProfit + settledNetProfit (PR-5a).
+ * Silinen NET kolonlar:
+ *   - orders: sale_subtotal_net, sale_vat_total
+ *   - order_items: unit_price, unit_price_net, unit_vat_rate, unit_vat_amount,
+ *       commission_amount, gross_commission_amount_net,
+ *       refunded_commission_amount_net, seller_discount_net,
+ *       unit_cost_snapshot_net, unit_cost_snapshot_vat_amount
+ *   - order_fees: amount_net, vat_amount
  *
- * PR-5b iptal edildi — production Order verisi yok, sync dormant; bu silme
- * veri kaybı yapmaz.
+ * Yerine gelen GROSS kolonlar (sanity):
+ *   - orders: sale_gross, sale_vat, list_gross, seller_discount_gross
+ *   - order_items: line_sale_gross, line_seller_discount_gross,
+ *       unit_cost_snapshot_gross, unit_cost_snapshot_vat_rate, commission_gross
+ *   - order_fees: amount_gross, vat_rate
  */
-describe('Order legacy columns dropped (PR-5c)', () => {
+
+async function columnExists(tableName: string, columnName: string): Promise<boolean> {
+  const rows = await prisma.$queryRaw<Array<{ column_name: string }>>`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = ${tableName}
+      AND column_name = ${columnName}
+  `;
+  return rows.length > 0;
+}
+
+describe('GROSS refactor — legacy net columns dropped (2026-06-16)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
 
   it.each([
-    'total_amount',
-    'commission_amount',
-    'shipping_cost',
-    'platform_fee',
-    'vat_amount',
-    'net_profit',
-  ])('orders table has NO %s column', async (columnName) => {
-    const rows = await prisma.$queryRaw<Array<{ column_name: string }>>`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = 'orders'
-        AND column_name = ${columnName}
-    `;
-    expect(rows).toHaveLength(0);
+    ['orders', 'sale_subtotal_net'],
+    ['orders', 'sale_vat_total'],
+    ['order_items', 'unit_price'],
+    ['order_items', 'unit_price_net'],
+    ['order_items', 'unit_vat_rate'],
+    ['order_items', 'unit_vat_amount'],
+    ['order_items', 'commission_amount'],
+    ['order_items', 'gross_commission_amount_net'],
+    ['order_items', 'refunded_commission_amount_net'],
+    ['order_items', 'seller_discount_net'],
+    ['order_items', 'unit_cost_snapshot_net'],
+    ['order_items', 'unit_cost_snapshot_vat_amount'],
+    ['order_fees', 'amount_net'],
+    ['order_fees', 'vat_amount'],
+  ])('%s table has NO legacy net column %s', async (tableName, columnName) => {
+    expect(await columnExists(tableName, columnName)).toBe(false);
   });
 
-  it('orders table still has new PR-5a kar/state kolonları', async () => {
-    const expectedNewCols = [
-      'sale_subtotal_net',
-      'sale_vat_total',
-      'estimated_net_profit',
-      'settled_net_profit',
-      'reconciliation_status',
-      'payment_order_id',
-      'payment_date',
-      'delivered_on_time',
-      'platform_order_number',
-    ];
-    const rows = await prisma.$queryRaw<Array<{ column_name: string }>>`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'orders'
-    `;
-    const existing = new Set(rows.map((r) => r.column_name));
-    for (const col of expectedNewCols) {
-      expect(existing.has(col), `column ${col} should exist`).toBe(true);
-    }
+  it.each([
+    ['orders', 'sale_gross'],
+    ['orders', 'sale_vat'],
+    ['orders', 'list_gross'],
+    ['orders', 'seller_discount_gross'],
+    ['order_items', 'line_sale_gross'],
+    ['order_items', 'line_seller_discount_gross'],
+    ['order_items', 'unit_cost_snapshot_gross'],
+    ['order_items', 'unit_cost_snapshot_vat_rate'],
+    ['order_items', 'commission_gross'],
+    ['order_fees', 'amount_gross'],
+    ['order_fees', 'vat_rate'],
+  ])('%s table HAS new gross column %s', async (tableName, columnName) => {
+    expect(await columnExists(tableName, columnName)).toBe(true);
   });
 });

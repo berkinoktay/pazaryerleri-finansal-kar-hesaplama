@@ -299,10 +299,10 @@ async function fetchCostAggregates(
       pv.id                                             AS variant_id,
       COALESCE(SUM(
         CASE
-          WHEN cp.currency = 'TRY'                           THEN cp.amount
-          WHEN cp.fx_rate_mode = 'MANUAL'                    THEN cp.amount * cp.manual_fx_rate
+          WHEN cp.currency = 'TRY'                           THEN cp.amount_gross
+          WHEN cp.fx_rate_mode = 'MANUAL'                    THEN cp.amount_gross * cp.manual_fx_rate
           WHEN cp.fx_rate_mode = 'AUTO' AND fx.rate_to_try IS NOT NULL
-                                                             THEN cp.amount * fx.rate_to_try
+                                                             THEN cp.amount_gross * fx.rate_to_try
           ELSE NULL
         END
       ), 0)::DECIMAL(12,2)                              AS current_cost_try,

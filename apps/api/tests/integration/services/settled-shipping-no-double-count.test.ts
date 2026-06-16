@@ -26,38 +26,37 @@ describe('settled profit: no shipping double-count', () => {
     const org = await createOrganization();
     const store = await createStore(org.id, { platform: 'TRENDYOL' });
     const order = await createOrder(org.id, store.id, {
-      saleSubtotalNet: '100.00',
-      saleVatTotal: '0.00',
+      saleGross: '100.00',
+      saleVat: '0.00',
     });
-    // Cost + commission = 0 (snapshot DOLU → recompute skip etmez).
+    // Cost + commission = 0 (snapshot DOLU → recompute skip etmez). Snapshot'ın
+    // DOLU sayılması için hem gross hem vatRate non-null olmalı (recompute gate).
     await prisma.orderItem.create({
       data: {
         orderId: order.id,
         organizationId: org.id,
         quantity: 1,
-        unitPrice: '100.00',
         commissionRate: '0',
-        commissionAmount: '0',
-        unitCostSnapshotNet: '0',
-        unitCostSnapshotVatAmount: '0',
+        commissionGross: '0',
+        unitCostSnapshotGross: '0',
+        unitCostSnapshotVatRate: '0',
       },
     });
     // Tahmini kargo (settled'a girmemeli) + gerçek fatura kargosu (settled'a girer).
+    // amountGross = KDV-dahil; vatRate 0 → net = gross.
     await createOrderFee(order.id, org.id, {
       feeType: 'SHIPPING',
       source: 'ESTIMATE',
       direction: 'DEBIT',
-      amountNet: '30.00',
+      amountGross: '30.00',
       vatRate: '0',
-      vatAmount: '0',
     });
     await createOrderFee(order.id, org.id, {
       feeType: 'SHIPPING',
       source: 'CARGO_INVOICE',
       direction: 'DEBIT',
-      amountNet: '50.00',
+      amountGross: '50.00',
       vatRate: '0',
-      vatAmount: '0',
     });
 
     const result = await prisma.$transaction((tx) => recomputeSettledProfit(order.id, tx));

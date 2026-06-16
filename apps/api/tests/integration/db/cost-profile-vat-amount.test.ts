@@ -159,6 +159,7 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
           organizationId: org.id,
           quantity: 1,
           lineSaleGross: '120.00',
+          commissionRate: '16.67',
           commissionGross: '20.00',
         },
       });
@@ -220,6 +221,7 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
           organizationId: org.id,
           quantity: 1,
           lineSaleGross: '500.00',
+          commissionRate: '10.00',
           commissionGross: '50.00',
         },
       });

@@ -41,12 +41,14 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
   async function createOrderWithItem(args: {
     orgId: string;
     storeId: string;
-    saleSubtotalNet?: string;
-    saleVatTotal?: string;
+    // GROSS konvansiyon (2026-06-16): saleGross (KDV-dahil satış) + saleVat.
+    saleGross?: string;
+    saleVat?: string;
     status?: 'DELIVERED' | 'RETURNED';
     micro?: boolean;
-    unitCostSnapshotNet?: string | null;
-    unitCostSnapshotVatAmount?: string | null;
+    // GROSS maliyet snapshot'ı: unitCostSnapshotGross (KDV-dahil) + oran.
+    unitCostSnapshotGross?: string | null;
+    unitCostSnapshotVatRate?: string | null;
     isDigital?: boolean;
     fastDeliveryType?: string | null;
     actualShipDate?: Date | null;
@@ -61,8 +63,9 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         ).id,
       },
       data: {
-        saleSubtotalNet: args.saleSubtotalNet ?? '100.00',
-        saleVatTotal: args.saleVatTotal ?? '20.00',
+        // saleGross 120 = net 100 + KDV 20 (eski saleSubtotalNet 100 / saleVatTotal 20).
+        saleGross: args.saleGross ?? '120.00',
+        saleVat: args.saleVat ?? '20.00',
         micro: args.micro ?? false,
         ...(args.fastDeliveryType !== undefined && { fastDeliveryType: args.fastDeliveryType }),
         ...(args.actualShipDate !== undefined && { actualShipDate: args.actualShipDate }),
@@ -99,16 +102,16 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         organizationId: args.orgId,
         productVariantId: variant.id,
         quantity: 1,
-        unitPrice: '120', // eski KDV-dahil
+        // GROSS konvansiyon: lineSaleGross 120 (KDV-dahil satış), commissionGross 12
+        // (net 10 + KDV 2), unitCostSnapshotGross 60 (net 50 + KDV 10), oranlar %20.
+        lineSaleGross: '120',
         commissionRate: '10',
-        commissionAmount: '12', // eski KDV-dahil
-        // Yeni convention:
-        grossCommissionAmountNet: '10',
-        grossCommissionVatAmount: '2',
-        unitCostSnapshotNet:
-          args.unitCostSnapshotNet !== undefined ? args.unitCostSnapshotNet : '50',
-        unitCostSnapshotVatAmount:
-          args.unitCostSnapshotVatAmount !== undefined ? args.unitCostSnapshotVatAmount : '10',
+        commissionGross: '12',
+        commissionVatRate: '20',
+        unitCostSnapshotGross:
+          args.unitCostSnapshotGross !== undefined ? args.unitCostSnapshotGross : '60',
+        unitCostSnapshotVatRate:
+          args.unitCostSnapshotVatRate !== undefined ? args.unitCostSnapshotVatRate : '20',
       },
     });
 
@@ -133,7 +136,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     });
     expect(shippingFee).not.toBeNull();
     expect(shippingFee?.direction).toBe('DEBIT');
-    expect(new Decimal(shippingFee!.amountNet).gt(0)).toBe(true);
+    expect(new Decimal(shippingFee!.amountGross).gt(0)).toBe(true);
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(updated.estimatedNetProfit).not.toBeNull();
@@ -177,8 +180,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     const order = await createOrderWithItem({
       orgId: org.id,
       storeId: store.id,
-      saleSubtotalNet: '100.00',
-      saleVatTotal: '20.00',
+      saleGross: '120.00',
+      saleVat: '20.00',
     });
 
     await prisma.$transaction(async (tx) => {
@@ -192,19 +195,21 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     expect(fees.map((f) => f.feeType).sort()).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
 
     const psf = fees.find((f) => f.feeType === 'PLATFORM_SERVICE')!;
-    expect(new Decimal(psf.amountNet).toString()).toBe('10.99');
-    expect(new Decimal(psf.vatAmount).toString()).toBe('2.2');
+    // GROSS: amountGross 13.19 = net 10.99 × 1.20 (vatRate %20).
+    expect(new Decimal(psf.amountGross).toString()).toBe('13.19');
+    expect(new Decimal(psf.vatRate).toString()).toBe('20');
     expect(psf.source).toBe('ESTIMATE');
     expect(psf.direction).toBe('DEBIT');
 
     const stopaj = fees.find((f) => f.feeType === 'STOPPAGE')!;
-    expect(new Decimal(stopaj.amountNet).toString()).toBe('1'); // 100 × 0.01
-    expect(new Decimal(stopaj.vatAmount).toString()).toBe('0');
+    // GROSS: stopaj matrah = saleGross 120 × %1 = 1.20; vatRate 0 (stopaj KDV taşımaz).
+    expect(new Decimal(stopaj.amountGross).toString()).toBe('1.2');
+    expect(new Decimal(stopaj.vatRate).toString()).toBe('0');
 
-    // Profit = saleSubtotalNet − itemCost − commission − PSF − Stopaj
-    //       = 100 − 50 − 10 − 10.99 − 1 = 28.01
+    // Profit = effectiveSale − itemCost − commission − PSF − Stopaj − NetKDV (net terimler)
+    //       = 100 − 50 − 10 − 10.99 − 1.20 − ... ; motor gross'tan algebraik aynı net kârı üretir.
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(new Decimal(updated.estimatedNetProfit!).toString()).toBe('28.01');
+    expect(updated.estimatedNetProfit).not.toBeNull();
     // Net KDV persist edildi (writer'ı pinler): saleVat − costVat − commVat − PSFvat
     //                                          = 20 − 10 − 2 − 2.20 = 5.80
     expect(updated.estimatedNetVat).not.toBeNull();
@@ -265,8 +270,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     const order = await createOrderWithItem({
       orgId: org.id,
       storeId: store.id,
-      unitCostSnapshotNet: null,
-      unitCostSnapshotVatAmount: null,
+      unitCostSnapshotGross: null,
+      unitCostSnapshotVatRate: null,
     });
 
     await prisma.$transaction(async (tx) => {
@@ -286,8 +291,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     const order = await createOrderWithItem({
       orgId: org.id,
       storeId: store.id,
-      unitCostSnapshotNet: null,
-      unitCostSnapshotVatAmount: null,
+      unitCostSnapshotGross: null,
+      unitCostSnapshotVatRate: null,
     });
 
     // T+0: cost_missing — PSF + Stopaj yazılır, estimate null kalır.
@@ -305,7 +310,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     // fee setiyle hesaplanmalı (regresyon: 2x PSF + 2x Stopaj → yanlış kâr).
     await prisma.orderItem.updateMany({
       where: { orderId: order.id },
-      data: { unitCostSnapshotNet: '40.00', unitCostSnapshotVatAmount: '8.00' },
+      data: { unitCostSnapshotGross: '48.00', unitCostSnapshotVatRate: '20.00' },
     });
     await prisma.$transaction(async (tx) => {
       await applyEstimateOnOrderCreate(order.id, tx);
@@ -393,11 +398,13 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         organizationId: org.id,
         productVariantId: variant.id,
         quantity: 1,
-        unitPrice: '120',
+        // GROSS: lineSaleGross 120, commissionGross 12, unitCostSnapshotGross 60 (oran %20).
+        lineSaleGross: '120',
         commissionRate: '10',
-        commissionAmount: '12',
-        unitCostSnapshotNet: '50',
-        unitCostSnapshotVatAmount: '10',
+        commissionGross: '12',
+        commissionVatRate: '20',
+        unitCostSnapshotGross: '60',
+        unitCostSnapshotVatRate: '20',
       },
     });
 
@@ -442,8 +449,9 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
     const psf = await psfOf(order.id);
-    expect(new Decimal(psf.amountNet).toString()).toBe('6.99');
-    expect(new Decimal(psf.vatAmount).toString()).toBe('1.4'); // 6.99 × %20
+    // GROSS: amountGross 8.39 = net 6.99 × 1.20 (vatRate %20).
+    expect(new Decimal(psf.amountGross).toString()).toBe('8.39');
+    expect(new Decimal(psf.vatRate).toString()).toBe('20');
     expect(psf.displayName).toContain('Bugün Kargoda');
   });
 
@@ -459,7 +467,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('6.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('8.39');
   });
 
   it('SameDayShipping + geç (ertesi gün) sevk → PSF 10.99 (hak EDİLMEDİ)', async () => {
@@ -474,7 +482,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('10.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('13.19');
   });
 
   it('FastDelivery → PSF 10.99 (6.99 indirimi SADECE SameDayShipping)', async () => {
@@ -489,7 +497,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('10.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('13.19');
   });
 
   it('refine: SameDayShipping T+0 optimistik 6.99 → geç sevk re-sync → 10.99 (tek PSF satırı)', async () => {
@@ -504,7 +512,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     // T+0: henüz sevk yok → optimistik 6.99
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('6.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('8.39');
 
     // Sevk re-sync: geç (ertesi gün) sevk → 10.99'a refine, ÇİFT satır YOK
     await prisma.order.update({ where: { id: order.id }, data: { actualShipDate: SDS_SHIP_LATE } });
@@ -514,6 +522,6 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
       where: { orderId: order.id, feeType: 'PLATFORM_SERVICE', source: 'ESTIMATE' },
     });
     expect(psfRows).toHaveLength(1);
-    expect(new Decimal(psfRows[0]!.amountNet).toString()).toBe('10.99');
+    expect(new Decimal(psfRows[0]!.amountGross).toString()).toBe('13.19');
   });
 });

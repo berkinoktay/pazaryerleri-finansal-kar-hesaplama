@@ -11,15 +11,15 @@ import {
 } from '../../helpers/factories';
 
 /**
- * PR-3 — OrderItem zenginleştirme (design §3.2).
+ * OrderItem profit-calc kolonları — GROSS konvansiyon (2026-06-16).
  *
- * KDV ayrıştırması + commission split (gross/refunded) + sellerDiscount +
- * cost snapshot KDV + commissionInvoice referansı. Yeni kolonların DB'de
+ * Gross satış/komisyon/maliyet kolonları + commission split (gross/refunded) +
+ * sellerDiscount (gross) + commissionInvoice referansı. Yeni kolonların DB'de
  * doğru yaşadığını, default'ların 0 olduğunu, CHECK constraint'inin
- * çalıştığını, ve CommissionInvoice ↔ OrderItem two-way relation'ı
- * doğrula.
+ * (refunded_commission_gross <= commission_gross) çalıştığını, ve
+ * CommissionInvoice ↔ OrderItem two-way relation'ı doğrula.
  */
-describe('OrderItem profit-calc split (PR-3)', () => {
+describe('OrderItem profit-calc split (GROSS)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
   });
@@ -41,84 +41,80 @@ describe('OrderItem profit-calc split (PR-3)', () => {
       data: {
         orderId: order.id,
         quantity: 1,
-        unitPrice: '100.00',
         commissionRate: '20.00',
-        commissionAmount: '20.00',
       },
     });
     const fresh = await prisma.orderItem.findUniqueOrThrow({ where: { id: item.id } });
 
-    expect(new Decimal(fresh.grossCommissionAmountNet).toString()).toBe('0');
-    expect(new Decimal(fresh.grossCommissionVatAmount).toString()).toBe('0');
-    expect(new Decimal(fresh.refundedCommissionAmountNet).toString()).toBe('0');
-    expect(new Decimal(fresh.refundedCommissionVatAmount).toString()).toBe('0');
-    expect(new Decimal(fresh.sellerDiscountNet).toString()).toBe('0');
-    expect(new Decimal(fresh.sellerDiscountVatAmount).toString()).toBe('0');
+    // GROSS konvansiyon: gross satış/komisyon/indirim kolonları default(0).
+    expect(new Decimal(fresh.lineListGross).toString()).toBe('0');
+    expect(new Decimal(fresh.lineSaleGross).toString()).toBe('0');
+    expect(new Decimal(fresh.lineSellerDiscountGross).toString()).toBe('0');
+    expect(new Decimal(fresh.saleVatRate).toString()).toBe('0');
+    expect(new Decimal(fresh.commissionGross).toString()).toBe('0');
+    expect(new Decimal(fresh.refundedCommissionGross).toString()).toBe('0');
+    // commissionVatRate default %20 (denetim A #331).
+    expect(new Decimal(fresh.commissionVatRate).toString()).toBe('20');
   });
 
-  it('nullable VAT/cost-snapshot split columns default to null', async () => {
+  it('nullable cost-snapshot + commission columns default to null', async () => {
     const { order } = await setup();
     const item = await prisma.orderItem.create({
       data: {
         orderId: order.id,
         quantity: 1,
-        unitPrice: '100.00',
         commissionRate: '20.00',
-        commissionAmount: '20.00',
       },
     });
     const fresh = await prisma.orderItem.findUniqueOrThrow({ where: { id: item.id } });
 
-    expect(fresh.unitPriceNet).toBeNull();
-    expect(fresh.unitVatRate).toBeNull();
-    expect(fresh.unitVatAmount).toBeNull();
-    expect(fresh.unitCostSnapshotNet).toBeNull();
+    expect(fresh.unitCostSnapshotGross).toBeNull();
     expect(fresh.unitCostSnapshotVatRate).toBeNull();
-    expect(fresh.unitCostSnapshotVatAmount).toBeNull();
+    expect(fresh.estimatedCommissionGross).toBeNull();
+    expect(fresh.settledCommissionGross).toBeNull();
     expect(fresh.commissionInvoiceSerialNumber).toBeNull();
     expect(fresh.commissionInvoiceId).toBeNull();
   });
 
-  it('stores KDV-split values with Decimal precision', async () => {
+  it('stores GROSS values with Decimal precision', async () => {
     const { order } = await setup();
     const item = await prisma.orderItem.create({
       data: {
         orderId: order.id,
         quantity: 1,
-        unitPrice: '120.00',
+        // GROSS: lineSaleGross 120 (KDV-dahil satış), saleVatRate %20.
+        lineSaleGross: '120.00',
+        saleVatRate: '20.00',
+        // Commission: gross 24 (net 20 + KDV 4 @%20).
         commissionRate: '20.00',
-        commissionAmount: '24.00',
-        // KDV ayrıştırma: gross 120 = net 100 + KDV 20 (%20).
-        unitPriceNet: '100.00',
-        unitVatRate: '20.00',
-        unitVatAmount: '20.00',
-        // Commission: gross 24 = 20 (net) + 4 (KDV %20).
-        grossCommissionAmountNet: '20.00',
-        grossCommissionVatAmount: '4.00',
+        commissionGross: '24.00',
+        commissionVatRate: '20.00',
+        // Cost snapshot gross 60 (net 50 + KDV 10 @%20).
+        unitCostSnapshotGross: '60.00',
+        unitCostSnapshotVatRate: '20.00',
       },
     });
     const fresh = await prisma.orderItem.findUniqueOrThrow({ where: { id: item.id } });
 
-    expect(new Decimal(fresh.unitPriceNet!).toString()).toBe('100');
-    expect(new Decimal(fresh.unitVatRate!).toString()).toBe('20');
-    expect(new Decimal(fresh.unitVatAmount!).toString()).toBe('20');
-    expect(new Decimal(fresh.grossCommissionAmountNet).toString()).toBe('20');
-    expect(new Decimal(fresh.grossCommissionVatAmount).toString()).toBe('4');
+    expect(new Decimal(fresh.lineSaleGross).toString()).toBe('120');
+    expect(new Decimal(fresh.saleVatRate).toString()).toBe('20');
+    expect(new Decimal(fresh.commissionGross).toString()).toBe('24');
+    expect(new Decimal(fresh.commissionVatRate).toString()).toBe('20');
+    expect(new Decimal(fresh.unitCostSnapshotGross!).toString()).toBe('60');
+    expect(new Decimal(fresh.unitCostSnapshotVatRate!).toString()).toBe('20');
   });
 
   it('CHECK constraint blocks refunded > gross commission', async () => {
     const { order } = await setup();
-    // refunded > gross → CHECK constraint reddi (23514 check_violation).
+    // refunded_commission_gross > commission_gross → CHECK reddi (23514 check_violation).
     await expect(
       prisma.orderItem.create({
         data: {
           orderId: order.id,
           quantity: 1,
-          unitPrice: '100.00',
           commissionRate: '20.00',
-          commissionAmount: '20.00',
-          grossCommissionAmountNet: '10.00',
-          refundedCommissionAmountNet: '15.00', // > gross
+          commissionGross: '10.00',
+          refundedCommissionGross: '15.00', // > gross
         },
       }),
     ).rejects.toThrow(/check|violat|order_items_refunded_commission_check/i);
@@ -130,11 +126,9 @@ describe('OrderItem profit-calc split (PR-3)', () => {
       data: {
         orderId: order.id,
         quantity: 1,
-        unitPrice: '100.00',
         commissionRate: '20.00',
-        commissionAmount: '20.00',
-        grossCommissionAmountNet: '20.00',
-        refundedCommissionAmountNet: '20.00', // == gross, boundary OK
+        commissionGross: '20.00',
+        refundedCommissionGross: '20.00', // == gross, boundary OK
       },
     });
     expect(item.id).toBeDefined();
@@ -146,17 +140,15 @@ describe('OrderItem profit-calc split (PR-3)', () => {
       data: {
         orderId: order.id,
         quantity: 1,
-        unitPrice: '100.00',
         commissionRate: '20.00',
-        commissionAmount: '20.00',
-        grossCommissionAmountNet: '20.00',
-        refundedCommissionAmountNet: '5.00',
+        commissionGross: '20.00',
+        refundedCommissionGross: '5.00',
       },
     });
     await expect(
       prisma.orderItem.update({
         where: { id: item.id },
-        data: { refundedCommissionAmountNet: '25.00' }, // gross 20'den büyük
+        data: { refundedCommissionGross: '25.00' }, // gross 20'den büyük
       }),
     ).rejects.toThrow(/check|violat/i);
   });
@@ -170,9 +162,8 @@ describe('OrderItem profit-calc split (PR-3)', () => {
       data: {
         orderId: order.id,
         quantity: 1,
-        unitPrice: '100.00',
         commissionRate: '20.00',
-        commissionAmount: '20.00',
+        commissionGross: '20.00',
         commissionInvoiceId: invoice.id,
         commissionInvoiceSerialNumber: 'DCF2026TEST001',
       },
@@ -199,9 +190,8 @@ describe('OrderItem profit-calc split (PR-3)', () => {
       data: {
         orderId: order.id,
         quantity: 1,
-        unitPrice: '100.00',
         commissionRate: '20.00',
-        commissionAmount: '20.00',
+        commissionGross: '20.00',
         commissionInvoiceId: invoice.id,
       },
     });
