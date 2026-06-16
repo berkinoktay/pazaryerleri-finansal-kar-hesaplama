@@ -14,6 +14,7 @@
 // derivation from packageHistories. Together they fence the boundaries
 // the live data path depends on.
 
+import { Decimal } from 'decimal.js';
 import { describe, expect, it, vi } from 'vitest';
 import { getBusinessDate, getBusinessHour } from '@pazarsync/utils';
 import { syncLog } from '@pazarsync/sync-core';
@@ -24,9 +25,29 @@ import {
   mapTrendyolShipmentPackage,
   mapTrendyolStatusToEnum,
 } from '../../src/trendyol/orders';
-import type { MappedOrder, PromotionDisplay, TrendyolOrderLine } from '../../src/trendyol/types';
+import type {
+  MappedOrder,
+  MappedOrderLine,
+  PromotionDisplay,
+  TrendyolOrderLine,
+} from '../../src/trendyol/types';
 import { buildLine, buildPackage } from '../helpers/order-builders';
 import { PAYLOAD_11313045474, PAYLOAD_11323825496 } from '../fixtures/trendyol-gross-payloads';
+
+/**
+ * Efektif komisyon — Trendyol/panel'in GERÇEKTE aldığı tutar. commissionGross
+ * LİSTE üzerinden brüt komisyon (#332); satıcı-indirim payının komisyonu
+ * (refundedCommissionGross) iade edilir. Net = gross − refunded = effectiveSale ×
+ * rate. İş anlamı taşıyan değer budur; testler ham commissionGross yerine BUNU
+ * panele kilitler. İki kolon ayrı 2-ondalığa yuvarlandığından (Decimal(12,2)),
+ * bazı satırlarda fark tek-yuvarlanmış effectiveSale×rate'ten bir kuruş kayabilir
+ * — bu üretimde de saklanan davranıştır, fixture'lar gerçek değeri pinler.
+ */
+function effectiveCommission(line: MappedOrderLine): string {
+  return new Decimal(line.commissionGross)
+    .sub(new Decimal(line.refundedCommissionGross))
+    .toFixed(2);
+}
 
 // ─── TrendyolDiscountDetail type (Task 7) ──────────────────────────────
 
@@ -265,7 +286,11 @@ describe('mapLine — GROSS output', () => {
     expect(m.lineSaleGross).toBe('100.00');
     expect(m.lineSellerDiscountGross).toBe('20.00');
     expect(m.saleVatRate).toBe('20');
-    expect(m.commissionGross).toBe('10.00'); // 100 × 10%
+    // commissionGross LİSTE üzerinden brüt (120 × 10% = 12.00); refunded = 20 × 10% = 2.00.
+    // Panel/Trendyol gerçek değeri EFEKTİF komisyon = gross − refunded = 10.00 (= 100 × 10%).
+    expect(m.commissionGross).toBe('12.00'); // 120 (liste) × 10%
+    expect(m.refundedCommissionGross).toBe('2.00'); // 20 (indirim) × 10%
+    expect(effectiveCommission(m)).toBe('10.00'); // panel = effectiveSale 100 × 10%
     expect(m.commissionVatRate).toBe('20');
   });
 
@@ -276,7 +301,9 @@ describe('mapLine — GROSS output', () => {
     expect(m.lineListGross).toBe('180.00');
     expect(m.lineSaleGross).toBe('180.00'); // no discount → sale == list
     expect(m.lineSellerDiscountGross).toBe('0.00');
-    expect(m.commissionGross).toBe('18.00'); // 180 × 10%
+    // İndirim yok → liste == satış → commissionGross 18.00, refunded 0, efektif 18.00.
+    expect(m.commissionGross).toBe('18.00'); // 180 (liste) × 10%
+    expect(effectiveCommission(m)).toBe('18.00'); // indirim yok → gross == efektif
   });
 
   it('no discountDetails with lineSellerDiscount: scalar × qty fallback', () => {
@@ -292,8 +319,9 @@ describe('mapLine — GROSS output', () => {
     expect(m.lineListGross).toBe('240.00');
     expect(m.lineSellerDiscountGross).toBe('24.00'); // 12 × 2
     expect(m.lineSaleGross).toBe('216.00'); // 240 − 24
-    expect(m.commissionGross).toBe('21.60'); // 216 × 10%
-    expect(m.refundedCommissionGross).toBe('2.40'); // 24 × 10%
+    expect(m.commissionGross).toBe('24.00'); // 240 (liste) × 10%
+    expect(m.refundedCommissionGross).toBe('2.40'); // 24 (indirim) × 10%
+    expect(effectiveCommission(m)).toBe('21.60'); // panel = effectiveSale 216 × 10%
   });
 
   it('qty>1 uneven discount via discountDetails (11313045474)', () => {
@@ -314,7 +342,9 @@ describe('mapLine — GROSS output', () => {
     expect(m.lineSaleGross).toBe('806.99'); // Σ lineItemPrice
     expect(m.lineListGross).toBe('855.00'); // 285 × 3
     expect(m.lineSellerDiscountGross).toBe('48.01'); // Σ lineItemSellerDiscount (≠ 16×3)
-    expect(m.commissionGross).toBe('77.47'); // 806.99 × 9.6%
+    expect(m.commissionGross).toBe('82.08'); // 855 (liste) × 9.6%
+    expect(m.refundedCommissionGross).toBe('4.61'); // 48.01 (indirim) × 9.6%
+    expect(effectiveCommission(m)).toBe('77.47'); // panel = effectiveSale 806.99 × 9.6%
   });
 
   it('uses the commissionVatRate param verbatim on output (denetim A — DB-driven)', () => {
@@ -329,8 +359,9 @@ describe('mapLine — GROSS output', () => {
   });
 
   it('estimates refunded commission on the seller-discount portion', () => {
-    // discountDetails: sale 900, sellerDiscount 100; commission %10.
-    // commissionGross = 900 × 10% = 90; refunded = 100 × 10% = 10.
+    // discountDetails: list 1000, sale 900, sellerDiscount 100; commission %10.
+    // commissionGross = 1000 (liste) × 10% = 100; refunded = 100 × 10% = 10;
+    // efektif = 100 − 10 = 90 (= effectiveSale 900 × 10%, panel değeri).
     const line = buildLine({
       quantity: 1,
       lineGrossAmount: 1000,
@@ -341,8 +372,9 @@ describe('mapLine — GROSS output', () => {
     const m = mapLine(line, { shipmentPackageId: 1 });
 
     expect(m.lineSaleGross).toBe('900.00');
-    expect(m.commissionGross).toBe('90.00');
+    expect(m.commissionGross).toBe('100.00'); // 1000 (liste) × 10%
     expect(m.refundedCommissionGross).toBe('10.00');
+    expect(effectiveCommission(m)).toBe('90.00'); // panel = effectiveSale 900 × 10%
   });
 
   it('refunded commission is 0 when there is no seller discount', () => {
@@ -350,6 +382,33 @@ describe('mapLine — GROSS output', () => {
     const m = mapLine(line, { shipmentPackageId: 1 });
     expect(m.lineSellerDiscountGross).toBe('0.00');
     expect(m.refundedCommissionGross).toBe('0.00');
+  });
+
+  it('does NOT double-subtract the discount from commission (canlı sipariş 11328013993)', () => {
+    // Gerçek sipariş 11328013993: liste 330, effectiveSale 313.50, satıcı indirim 16.50,
+    // komisyon %19. DOĞRU efektif komisyon = effectiveSale 313.50 × 19% = 59.57 (rakip
+    // + Trendyol gerçek; iki kolon yuvarlamasıyla 59.56).
+    //
+    // ESKİ HATA: commissionGross effectiveSale tabanlıydı (313.50 × 19% = 59.57), refunded
+    // de indirimi düşüyordu (16.50 × 19% = 3.14) → efektif = 59.57 − 3.14 = 56.43; indirim
+    // İKİ KEZ düşülüyordu (komisyon ~3 TL eksik). Bu test çift-düşmeyi kalıcı yasaklar:
+    // taban LİSTE olmalı, indirim YALNIZ refunded'da düşülmeli.
+    const line = buildLine({
+      quantity: 1,
+      lineGrossAmount: 330,
+      vatRate: 20,
+      commission: 19,
+      discountDetails: [{ lineItemPrice: 313.5, lineItemSellerDiscount: 16.5 }],
+    });
+    const m = mapLine(line, { shipmentPackageId: 11328013993 });
+
+    expect(m.lineListGross).toBe('330.00');
+    expect(m.lineSaleGross).toBe('313.50');
+    expect(m.commissionGross).toBe('62.70'); // 330 (LİSTE) × 19% — effectiveSale DEĞİL
+    expect(m.refundedCommissionGross).toBe('3.14'); // 16.50 × 19% = 3.135 → 3.14
+    // Efektif komisyon = 62.70 − 3.14 = 59.56 (panel ≈ 59.57); KESİNLİKLE 56.43 DEĞİL.
+    expect(effectiveCommission(m)).toBe('59.56');
+    expect(effectiveCommission(m)).not.toBe('56.43'); // çift-düşme regresyon kapısı
   });
 
   it('defaults commissionRate/commissionGross to 0 when Trendyol omits commission', () => {
@@ -515,24 +574,40 @@ describe('GROSS fixture regression (real prod payloads)', () => {
     expect(m.sellerDiscountGross).toBe('48.01');
     expect(m.lines[0]?.lineSaleGross).toBe('806.99');
     expect(m.lines[0]?.lineSellerDiscountGross).toBe('48.01');
-    expect(m.lines[0]?.commissionGross).toBe('77.47'); // 806.99 × 9.6%
+    // commissionGross LİSTE üzerinden (855 × 9.6% = 82.08); panel/Trendyol gerçek
+    // değeri EFEKTİF komisyon = 82.08 − 4.61 = 77.47 (= effectiveSale 806.99 × 9.6%).
+    expect(m.lines[0]?.commissionGross).toBe('82.08'); // 855 (liste) × 9.6%
+    expect(m.lines[0]?.refundedCommissionGross).toBe('4.61'); // 48.01 × 9.6%
+    expect(effectiveCommission(m.lines[0]!)).toBe('77.47'); // panel
   });
 
-  it('11323825496: 3-product multi-rate splits correctly (Σ komisyon 70,63)', () => {
+  it('11323825496: 3-product multi-rate efektif komisyon panele kilitli', () => {
     const m = mapTrendyolShipmentPackage(PAYLOAD_11323825496);
 
     expect(m.saleGross).toBe('423.70');
     expect(m.listGross).toBe('446.00');
     expect(m.sellerDiscountGross).toBe('22.30');
-    expect(m.lines[0]?.commissionGross).toBe('15.47'); // 104.5 × 14.8%
-    expect(m.lines[1]?.commissionGross).toBe('33.21'); // 174.8 × 19%
-    expect(m.lines[2]?.commissionGross).toBe('21.95'); // 144.4 × 15.2%
 
-    const totalCommission = [m.lines[0], m.lines[1], m.lines[2]].reduce(
-      (sum, line) => sum + Number(line?.commissionGross ?? 0),
-      0,
+    // İş anlamı taşıyan değer EFEKTİF komisyon (gross − refunded); ham commissionGross
+    // artık LİSTE üzerinden brüt. Panel her satır için effectiveSale × rate:
+    //   l0: 104.5 × 14.8% = 15.47   l1: 174.8 × 19% = 33.21   l2: 144.4 × 15.2% = 21.94*
+    // *l2: iki kolon ayrı 2-ondalığa yuvarlandığından (23.10 − 1.16) = 21.94; tek-yuvarlanmış
+    //  144.4×15.2% = 21.9488 → 21.95'ten bir kuruş kayar. Bu üretimde de saklanan davranıştır
+    //  (commission_gross / refunded_commission_gross Decimal(12,2) kolonlar).
+    expect(effectiveCommission(m.lines[0]!)).toBe('15.47');
+    expect(effectiveCommission(m.lines[1]!)).toBe('33.21');
+    expect(effectiveCommission(m.lines[2]!)).toBe('21.94');
+
+    // LİSTE-tabanlı ham commissionGross (downstream net/KDV split için saklanan).
+    expect(m.lines[0]?.commissionGross).toBe('16.28'); // 110 × 14.8%
+    expect(m.lines[1]?.commissionGross).toBe('34.96'); // 184 × 19%
+    expect(m.lines[2]?.commissionGross).toBe('23.10'); // 152 × 15.2%
+
+    const totalEffective = [m.lines[0], m.lines[1], m.lines[2]].reduce(
+      (sum, line) => sum.add(new Decimal(effectiveCommission(line!))),
+      new Decimal(0),
     );
-    expect(totalCommission.toFixed(2)).toBe('70.63');
+    expect(totalEffective.toFixed(2)).toBe('70.62');
   });
 });
 

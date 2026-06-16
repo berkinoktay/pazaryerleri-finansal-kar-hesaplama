@@ -412,8 +412,10 @@ export async function upsertOrderWithSnapshot(
           // GROSS konvansiyon (2026-06-16): satır para değerleri GROSS (KDV-dahil).
           // Satış: lineListGross (liste×adet) / lineSaleGross (effectiveSale) /
           // lineSellerDiscountGross (satıcı indirimi) + saleVatRate. Komisyon:
-          // commissionRate × lineSaleGross = commissionGross (net-satış tabanı #332);
-          // refundedCommissionGross satıcı-indirim payının komisyon iadesi (T+0 tahmin).
+          // commissionRate × lineListGross = commissionGross (LİSTE brüt) + ayrı
+          // refundedCommissionGross (satıcı-indirim payının komisyon iadesi); effective
+          // = gross − refunded = effectiveSale × rate (net-satış tabanı #332, çift-düşme
+          // YOK — taban liste, indirim yalnız refunded'da düşülür).
           lineListGross: new Decimal(line.lineListGross),
           lineSaleGross: new Decimal(line.lineSaleGross),
           lineSellerDiscountGross: new Decimal(line.lineSellerDiscountGross),

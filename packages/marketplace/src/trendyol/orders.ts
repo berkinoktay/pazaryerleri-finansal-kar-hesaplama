@@ -317,12 +317,16 @@ export function mapLine(
   }
   lineSaleGross = Decimal.max(lineSaleGross, new Decimal(0));
 
-  // Komisyon — net-satış tabanı (#332): commissionRate × lineSaleGross. Trendyol
-  // satıcı-indirim payının komisyonunu iade eder (research §7.3); refunded =
-  // commissionRate × lineSellerDiscountGross. effective komisyon = gross − refunded.
-  // commissionGross GROSS taşınır; net/KDV split downstream'de oran (commissionVatRate,
-  // DB-driven #331) ile türetilir — burada bölme yok.
-  const commissionGross = lineSaleGross.mul(commissionRate).div(100).toDecimalPlaces(2);
+  // Komisyon — net-satış tabanı (#332), LİSTE üzerinden brüt + iade ayrı kolon.
+  // Trendyol komisyonu LİSTE fiyatından alır, satıcı-indirim payının komisyonunu
+  // İADE eder (research §7.3): commissionGross = commissionRate × lineListGross;
+  // refunded = commissionRate × lineSellerDiscountGross. effective komisyon =
+  // gross − refunded = (liste − indirim) × rate = effectiveSale × rate (panel/
+  // Trendyol gerçek değeri). DİKKAT: taban lineSaleGross OLAMAZ — o effective satış
+  // (indirim zaten düşülmüş) olduğundan refunded ikinci kez indirim düşerdi → komisyon
+  // bir kuruş eksik (çift-düşme regresyonu). commissionGross GROSS taşınır; net/KDV
+  // split downstream'de oran (commissionVatRate, DB-driven #331) ile türetilir.
+  const commissionGross = lineListGross.mul(commissionRate).div(100).toDecimalPlaces(2);
   const refundedCommissionGross = lineSellerDiscountGross
     .mul(commissionRate)
     .div(100)
