@@ -17,7 +17,7 @@ import { createMembership, createOrganization, createUserProfile } from '../../h
 const BASE_INPUT = {
   name: 'Hammadde COGS',
   type: 'COGS' as const,
-  amount: '25.50',
+  amountGross: '25.50',
   currency: 'TRY' as const,
   vatRate: 18,
   fxRateMode: 'AUTO' as const,
@@ -44,7 +44,7 @@ describe('cost-profile service', () => {
 
       expect(profile.id).toBeDefined();
       expect(profile.name).toBe('Hammadde COGS');
-      expect(profile.amount.toFixed(2)).toBe('25.50');
+      expect(profile.amountGross.toFixed(2)).toBe('25.50');
       expect(profile.organizationId).toBe(org.id);
 
       // Verify version row was created in the same transaction
@@ -57,25 +57,23 @@ describe('cost-profile service', () => {
       expect(versions[0]?.changedBy).toBe(user.id);
     });
 
-    // PR-7 öncesi blocker: cost-profile.service vatAmount backfill.
-    // captureCostSnapshot has a defensive fallback for null vatAmount, but
-    // the source profile should not depend on that — it would create a
-    // silent divergence (snapshot non-null, profile NULL).
-    it('backfills vatAmount via canonical formula (amount × vatRate / 100)', async () => {
+    it('persists amountGross and vatRate correctly, version row matches', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
       const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
 
-      // BASE_INPUT: amount 25.50, vatRate 18 → 25.50 × 18 / 100 = 4.59
-      expect(profile.vatAmount!.toFixed(2)).toBe('4.59');
+      // BASE_INPUT: amountGross 25.50, vatRate 18 (GROSS convention — KDV-dahil)
+      expect(profile.amountGross.toFixed(2)).toBe('25.50');
+      expect(Number(profile.vatRate)).toBe(18);
 
-      // Version row carries the same backfilled value
+      // Version row carries the same gross values
       const versions = await prisma.costProfileVersion.findMany({
         where: { profileId: profile.id },
       });
-      expect(versions[0]?.vatAmount?.toFixed(2)).toBe('4.59');
+      expect(versions[0]?.amountGross?.toFixed(2)).toBe('25.50');
+      expect(Number(versions[0]?.vatRate)).toBe(18);
     });
 
     it('throws CostProfileNameTakenError on duplicate name within the org', async () => {
@@ -114,12 +112,12 @@ describe('cost-profile service', () => {
       const updated = await updateCostProfile(
         org.id,
         profile.id,
-        { name: 'Updated COGS', amount: '30.00' },
+        { name: 'Updated COGS', amountGross: '30.00' },
         user.id,
       );
 
       expect(updated.name).toBe('Updated COGS');
-      expect(updated.amount.toFixed(2)).toBe('30.00');
+      expect(updated.amountGross.toFixed(2)).toBe('30.00');
 
       const versions = await prisma.costProfileVersion.findMany({
         where: { profileId: profile.id },
@@ -128,26 +126,23 @@ describe('cost-profile service', () => {
       expect(versions).toHaveLength(2);
       expect(versions[1]?.version).toBe(2);
       expect(versions[1]?.changedFields).toContain('name');
-      expect(versions[1]?.changedFields).toContain('amount');
+      expect(versions[1]?.changedFields).toContain('amountGross');
       expect(versions[1]?.changedFields).not.toContain('vatRate');
     });
 
-    // PR-7 öncesi blocker: recompute vatAmount on amount OR vatRate change.
-    // amount-only change → vatAmount recomputed; vatRate-only change → same;
-    // neither → vatAmount left alone (no needless writes).
-    it('recomputes vatAmount when amount changes', async () => {
+    it('updates amountGross correctly (GROSS convention, KDV-dahil)', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
       const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
-      const updated = await updateCostProfile(org.id, profile.id, { amount: '100.00' }, user.id);
+      const updated = await updateCostProfile(org.id, profile.id, { amountGross: '100.00' }, user.id);
 
-      // 100.00 × 18 / 100 = 18.00
-      expect(updated.vatAmount!.toFixed(2)).toBe('18.00');
+      // amountGross updated directly — KDV-dahil tutar
+      expect(updated.amountGross.toFixed(2)).toBe('100.00');
     });
 
-    it('recomputes vatAmount when vatRate changes', async () => {
+    it('updates vatRate correctly when changed independently', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -155,8 +150,9 @@ describe('cost-profile service', () => {
       const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
       const updated = await updateCostProfile(org.id, profile.id, { vatRate: 20 }, user.id);
 
-      // 25.50 × 20 / 100 = 5.10
-      expect(updated.vatAmount!.toFixed(2)).toBe('5.10');
+      // vatRate stored as-is; amountGross unchanged
+      expect(Number(updated.vatRate)).toBe(20);
+      expect(updated.amountGross.toFixed(2)).toBe('25.50');
     });
 
     it('throws CostProfileNotFoundError for cross-org access', async () => {

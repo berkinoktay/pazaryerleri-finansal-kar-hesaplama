@@ -28,7 +28,7 @@ async function seedProfile(orgId: string, opts: { archived?: boolean; name?: str
       organizationId: orgId,
       name: opts.name ?? `Profile-${randomUUID().slice(0, 8)}`,
       type: 'COGS',
-      amount: new Decimal('25.50'),
+      amountGross: new Decimal('25.50'),
       currency: 'TRY',
       vatRate: 18,
       fxRateMode: 'AUTO',

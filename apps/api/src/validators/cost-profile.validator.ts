@@ -32,11 +32,11 @@ const costProfileBaseObject = z.object({
     example: 'Hammadde COGS',
   }),
   type: CostProfileTypeSchema,
-  amount: z
+  amountGross: z
     .string()
     .regex(/^\d+(\.\d{1,2})?$/, 'AMOUNT_INVALID_FORMAT')
     .openapi({
-      description: 'Cost amount as a decimal string (max 2 decimal places).',
+      description: 'KDV-dahil tutar. Ondalık string, en fazla 2 basamak.',
       example: '25.50',
     }),
   currency: CurrencySchema.default('TRY'),
@@ -156,9 +156,9 @@ export const CostProfileSchema = z
     organizationId: z.string().uuid().openapi({ example: 'b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b' }),
     name: z.string().openapi({ example: 'Hammadde COGS' }),
     type: CostProfileTypeSchema,
-    amount: z.string().openapi({ description: 'Decimal string', example: '25.50' }),
+    amountGross: z.string().openapi({ description: 'KDV-dahil tutar (decimal string)', example: '25.50' }),
     currency: CurrencySchema,
-    vatRate: z.number().int().openapi({ example: 18 }),
+    vatRate: z.number().openapi({ example: 18 }),
     fxRateMode: FxRateModeSchema,
     manualFxRate: z
       .string()
@@ -192,9 +192,9 @@ export const CostProfileVersionSchema = z
     version: z.number().int(),
     name: z.string(),
     type: CostProfileTypeSchema,
-    amount: z.string().openapi({ description: 'Decimal string' }),
+    amountGross: z.string().openapi({ description: 'KDV-dahil tutar (decimal string)' }),
     currency: CurrencySchema,
-    vatRate: z.number().int(),
+    vatRate: z.number(),
     fxRateMode: FxRateModeSchema,
     manualFxRate: z.string().nullable(),
     note: z.string().nullable(),
