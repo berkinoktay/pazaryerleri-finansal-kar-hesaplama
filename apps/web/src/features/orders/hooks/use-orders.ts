@@ -30,6 +30,7 @@ function argsToFilters(args: ListOrdersArgs): OrderListFilters {
     costStatus: args.costStatus ?? '',
     from: args.from ?? '',
     to: args.to ?? '',
+    sort: args.sort ?? '',
     q: args.q ?? '',
     page: args.page,
     perPage: args.perPage,

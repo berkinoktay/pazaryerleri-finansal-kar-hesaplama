@@ -26,7 +26,8 @@ export function useOrdersFilters(): {
       'reconciliationStatus' in next ||
       'costStatus' in next ||
       'from' in next ||
-      'to' in next;
+      'to' in next ||
+      'sort' in next;
     return setRaw({
       ...next,
       ...(touchesNonPaginationFilter && next.page === undefined ? { page: 1 } : {}),

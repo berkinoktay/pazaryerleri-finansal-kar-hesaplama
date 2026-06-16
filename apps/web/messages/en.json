@@ -828,6 +828,7 @@
         "saleGross": "Sale (incl. VAT)",
         "estimatedNetProfit": "Estimated profit",
         "settledNetProfit": "Settled profit",
+        "saleMarginPct": "Margin %",
         "itemCount": "Items",
         "revenue": "Revenue",
         "costStatus": "Cost status"

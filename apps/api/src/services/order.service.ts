@@ -8,6 +8,7 @@ import type {
   ListOrdersQuery,
   OrderDetailResponse,
   OrderListItemResponse,
+  OrderListSort,
 } from '../validators/order.validator';
 
 interface OrderListResult {
@@ -102,6 +103,27 @@ function buildOrderListWhere(
   return where;
 }
 
+/**
+ * Map the sort key to a Prisma orderBy. Every branch appends a stable `id`
+ * tiebreaker so pagination is deterministic when the lead column ties (e.g.
+ * many orders share the same margin). Margin sorts push null margins to the
+ * end in BOTH directions so unscored orders never crowd the top.
+ */
+function buildOrderListOrderBy(sort: OrderListSort): Prisma.OrderOrderByWithRelationInput[] {
+  switch (sort) {
+    case '-orderDate':
+      return [{ orderDate: 'desc' }, { id: 'desc' }];
+    case 'marginPct':
+      return [{ estimatedSaleMarginPct: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }];
+    case '-marginPct':
+      return [{ estimatedSaleMarginPct: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }];
+    default: {
+      const _exhaustive: never = sort;
+      throw new Error(`Unhandled order sort: ${_exhaustive}`);
+    }
+  }
+}
+
 export async function listOrders(
   orgId: string,
   storeId: string,
@@ -116,7 +138,7 @@ export async function listOrders(
   const [rows, total, calculatedCount, excludedCount] = await Promise.all([
     prisma.order.findMany({
       where,
-      orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
+      orderBy: buildOrderListOrderBy(filters.sort),
       skip,
       take: filters.perPage,
       include: {
@@ -140,6 +162,9 @@ export async function listOrders(
     listGross: row.listGross?.toString() ?? null,
     estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
     settledNetProfit: row.settledNetProfit?.toString() ?? null,
+    // Consumed marj: hakediş gerçeği varsa onu, yoksa T+0 tahminini servis et.
+    // Frontend SADECE render eder (render-time hesap yok).
+    saleMarginPct: (row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)?.toString() ?? null,
     fastDelivery: row.fastDelivery,
     micro: row.micro,
     itemCount: row._count.items,

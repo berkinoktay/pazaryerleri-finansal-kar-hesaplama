@@ -13,6 +13,14 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** — liste satırlarına yeni
+  `saleMarginPct` (`string | null`) alanı: backend-hesaplı satış marjı `settledSaleMarginPct ??
+  estimatedSaleMarginPct` (kâr / satış brüt × 100). Sipariş listesindeki yeni "Marj %" sütununu
+  besler; **frontend yalnızca render eder, türetmez**. Ayrıca `sort` query parametresi eklendi:
+  `-orderDate` (varsayılan, en yeni önce), `marginPct` / `-marginPct` (marj sütunu artan/azalan;
+  `Order.estimatedSaleMarginPct` üzerinden sıralar, null marjlar her iki yönde de sona düşer).
+  (GROSS Faz 2)
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`** — yeni `profitBreakdown`
   alanı (`ProfitBreakdown | null`). Berkin'in otoritatif kâr formülünü (Satış − Maliyet −
   Komisyon − Kargo − PSF − Stopaj − Net KDV = Kâr) ekrana koymak için backend-hesaplı brüt

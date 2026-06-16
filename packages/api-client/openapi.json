@@ -769,6 +769,14 @@
             "description": "Net profit reconciled with settlement data. Mutable as Return/Discount transactions flow in. Null until the first SETTLEMENT row is processed.",
             "example": "75.10"
           },
+          "saleMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sale margin % (decimal string) = settledSaleMarginPct ?? estimatedSaleMarginPct. Net profit / gross sale × 100. Null until computed or when the gross sale is 0.",
+            "example": "15.50"
+          },
           "fastDelivery": {
             "type": "boolean"
           },
@@ -794,6 +802,7 @@
           "listGross",
           "estimatedNetProfit",
           "settledNetProfit",
+          "saleMarginPct",
           "fastDelivery",
           "micro",
           "itemCount"
@@ -5683,7 +5692,7 @@
           "Orders"
         ],
         "summary": "List orders for a store",
-        "description": "Returns paginated orders sorted by orderDate desc, with composable filters: status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) over platformOrderNumber and platformOrderId. Designed for the orders table — page + perPage pagination, not cursor.",
+        "description": "Returns paginated orders sorted by orderDate desc (default), with composable filters: status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) over platformOrderNumber and platformOrderId. The `sort` param also supports marginPct / -marginPct (sale margin column). Designed for the orders table — page + perPage pagination, not cursor.",
         "security": [
           {
             "bearerAuth": []
@@ -5824,6 +5833,23 @@
             "required": false,
             "description": "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — permanent). There is no pending state: orders persist in one of the two. Omit for all.",
             "name": "costStatus",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "-orderDate",
+                "marginPct",
+                "-marginPct"
+              ],
+              "default": "-orderDate",
+              "description": "Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by Order.estimatedSaleMarginPct (the sale-margin column on the table) ascending / descending; null margins sort last in both directions.",
+              "example": "-marginPct"
+            },
+            "required": false,
+            "description": "Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by Order.estimatedSaleMarginPct (the sale-margin column on the table) ascending / descending; null margins sort last in both directions.",
+            "name": "sort",
             "in": "query"
           }
         ],

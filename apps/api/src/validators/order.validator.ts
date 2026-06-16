@@ -52,6 +52,18 @@ const PlatformSchema = z.enum(Platform).openapi({
 // ─── List query ────────────────────────────────────────────────────────────
 
 /**
+ * Sort keys for the orders list. The default (`-orderDate`) preserves the
+ * historical fixed ordering (newest first). `marginPct` / `-marginPct` order by
+ * `Order.estimatedSaleMarginPct` — the only user-sortable column on the table.
+ * Margin is `coalesce(settled, estimated)` on the wire, but sorting by a single
+ * representative column (the write-once estimate) keeps the ORDER BY stable and
+ * index-friendly; the settled value is a small per-order delta, so the estimate
+ * is a faithful ordering proxy.
+ */
+export const ORDER_LIST_SORTS = ['-orderDate', 'marginPct', '-marginPct'] as const;
+export type OrderListSort = (typeof ORDER_LIST_SORTS)[number];
+
+/**
  * Query params for GET .../stores/{storeId}/orders. Table-based pagination
  * (page + perPage) because the orders page is a finite, page-navigable surface,
  * not an infinite-scroll feed. All filters compose via AND.
@@ -84,6 +96,16 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
         "estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — " +
         'permanent). There is no pending state: orders persist in one of the two. Omit for all.',
       example: 'excluded',
+    }),
+  sort: z
+    .enum(ORDER_LIST_SORTS)
+    .default('-orderDate')
+    .openapi({
+      description:
+        'Sort key. Default `-orderDate` (newest first). `marginPct` / `-marginPct` order by ' +
+        'Order.estimatedSaleMarginPct (the sale-margin column on the table) ascending / ' +
+        'descending; null margins sort last in both directions.',
+      example: '-marginPct',
     }),
 }).openapi('ListOrdersQuery');
 
@@ -135,6 +157,19 @@ export const OrderListItemSchema = z
           'Net profit reconciled with settlement data. Mutable as Return/Discount transactions ' +
           'flow in. Null until the first SETTLEMENT row is processed.',
         example: '75.10',
+      }),
+    // Marj backend'de hesaplanıp persist edilir (estimatedSaleMarginPct /
+    // settledSaleMarginPct). Wire'a consumed değer servis edilir: settled ?? estimated
+    // (settled varsa hakediş gerçeği, yoksa T+0 tahmini). Frontend SADECE render eder
+    // (% glyph'i salt gösterim) — türetmez. null: marj henüz hesaplanmadı / payda 0.
+    saleMarginPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Sale margin % (decimal string) = settledSaleMarginPct ?? estimatedSaleMarginPct. ' +
+          'Net profit / gross sale × 100. Null until computed or when the gross sale is 0.',
+        example: '15.50',
       }),
     fastDelivery: z.boolean(),
     micro: z.boolean(),
