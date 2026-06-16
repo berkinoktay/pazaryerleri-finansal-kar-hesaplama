@@ -136,7 +136,12 @@ describe('cost-profile service', () => {
       await createMembership(org.id, user.id);
 
       const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
-      const updated = await updateCostProfile(org.id, profile.id, { amountGross: '100.00' }, user.id);
+      const updated = await updateCostProfile(
+        org.id,
+        profile.id,
+        { amountGross: '100.00' },
+        user.id,
+      );
 
       // amountGross updated directly — KDV-dahil tutar
       expect(updated.amountGross.toFixed(2)).toBe('100.00');

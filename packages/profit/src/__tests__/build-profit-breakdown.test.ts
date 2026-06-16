@@ -89,9 +89,7 @@ describe('buildProfitBreakdown — GROSS view', () => {
       .add(v.platformServiceGross)
       .add(v.stoppage)
       .add(v.netVat);
-    expect(sumOfDeductions.toFixed(2)).toBe(
-      new Decimal(v.saleGross).sub(v.netProfit).toFixed(2),
-    );
+    expect(sumOfDeductions.toFixed(2)).toBe(new Decimal(v.saleGross).sub(v.netProfit).toFixed(2));
     // 300 + 200 + 50 + 20 + 30 + 100 = 700 = 1000 − 300.
     expect(sumOfDeductions.toFixed(2)).toBe('700.00');
   });

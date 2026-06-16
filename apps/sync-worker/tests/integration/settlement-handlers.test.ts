@@ -346,7 +346,9 @@ describe('settlement handlers', () => {
       // GROSS CONVENTION: commissionAmount 6 KDV-dahil × qty(1) = 6
       expect(updated.refundedCommissionGross?.toFixed(2)).toBe('6.00');
       // lineSellerDiscountGross UNTOUCHED — intake discountDetails is authoritative
-      expect(updated.lineSellerDiscountGross.toFixed(2)).toBe(before.lineSellerDiscountGross.toFixed(2));
+      expect(updated.lineSellerDiscountGross.toFixed(2)).toBe(
+        before.lineSellerDiscountGross.toFixed(2),
+      );
     });
 
     it('preserves the refunded-commission ESTIMATE when settlement overwrites the actual (different value)', async () => {
@@ -391,7 +393,9 @@ describe('settlement handlers', () => {
       // GROSS: 6 × 3 = 18 (per-unit gross × quantity)
       expect(updated.refundedCommissionGross?.toFixed(2)).toBe('18.00');
       // lineSellerDiscountGross UNTOUCHED — intake is always authoritative
-      expect(updated.lineSellerDiscountGross.toFixed(2)).toBe(before.lineSellerDiscountGross.toFixed(2));
+      expect(updated.lineSellerDiscountGross.toFixed(2)).toBe(
+        before.lineSellerDiscountGross.toFixed(2),
+      );
     });
 
     // PR-C orphan invariant: a Discount row whose order was hard-skipped

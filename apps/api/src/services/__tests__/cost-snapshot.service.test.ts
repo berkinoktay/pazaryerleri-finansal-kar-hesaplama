@@ -213,7 +213,11 @@ describe('captureCostSnapshot — GROSS convention', () => {
 
   it('vatRate=0 profile → unitCostSnapshotVatRate null (zero-gross branches to null, not 0%)', async () => {
     // amountGross=0 with vatRate=18 → gross=0 → vatRate null
-    const zeroGrossProfile = { ...TRY_PROFILE, amountGross: new Decimal('0.00'), vatRate: new Decimal('18') };
+    const zeroGrossProfile = {
+      ...TRY_PROFILE,
+      amountGross: new Decimal('0.00'),
+      vatRate: new Decimal('18'),
+    };
     const tx = makeTx({ links: [{ profile: zeroGrossProfile }] });
 
     await captureCostSnapshot('item-1', tx as never);
@@ -224,7 +228,11 @@ describe('captureCostSnapshot — GROSS convention', () => {
   });
 
   it('single TRY profile with vatRate=20 → unitCostSnapshotVatRate=20 (blended rate)', async () => {
-    const profile20 = { ...TRY_PROFILE, amountGross: new Decimal('50.00'), vatRate: new Decimal('20') };
+    const profile20 = {
+      ...TRY_PROFILE,
+      amountGross: new Decimal('50.00'),
+      vatRate: new Decimal('20'),
+    };
     const tx = makeTx({ links: [{ profile: profile20 }] });
 
     await captureCostSnapshot('item-1', tx as never);

@@ -107,13 +107,9 @@ export function computeProfit(input: ProfitInput): ProfitBreakdown {
     .sub(input.stoppage.gross)
     .sub(netVat);
 
-  const saleMarginPct = input.sale.gross.isZero()
-    ? null
-    : netProfit.div(input.sale.gross).mul(100);
+  const saleMarginPct = input.sale.gross.isZero() ? null : netProfit.div(input.sale.gross).mul(100);
 
-  const costMarkupPct = input.cost.gross.isZero()
-    ? null
-    : netProfit.div(input.cost.gross).mul(100);
+  const costMarkupPct = input.cost.gross.isZero() ? null : netProfit.div(input.cost.gross).mul(100);
 
   return {
     listGross: input.sale.gross, // adapter override eder (BuildProfitBreakdownInput'tan items üzerinden)

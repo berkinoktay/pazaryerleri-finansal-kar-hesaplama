@@ -37,7 +37,9 @@ export class SnapshotAlreadyCapturedError extends Error {
   readonly code = 'SNAPSHOT_ALREADY_CAPTURED' as const;
 
   constructor(orderItemId: string) {
-    super(`OrderItem ${orderItemId} already has a unit_cost_snapshot_gross — snapshots are write-once`);
+    super(
+      `OrderItem ${orderItemId} already has a unit_cost_snapshot_gross — snapshots are write-once`,
+    );
     this.name = 'SnapshotAlreadyCapturedError';
   }
 }
@@ -159,9 +161,7 @@ export async function captureCostSnapshot(
       (acc, c) => acc.add(c.amountInTryGross.mul(c.vatRate)),
       new Decimal(0),
     );
-    unitCostSnapshotVatRate = weightedVatSum
-      .div(unitCostSnapshotGross)
-      .toDecimalPlaces(2);
+    unitCostSnapshotVatRate = weightedVatSum.div(unitCostSnapshotGross).toDecimalPlaces(2);
   }
 
   // Write snapshot and components atomically (same tx).

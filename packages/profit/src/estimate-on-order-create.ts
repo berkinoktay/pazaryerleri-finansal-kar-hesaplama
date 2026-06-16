@@ -255,7 +255,9 @@ export async function applyEstimateOnOrderCreate(
     costVat = costVat.add(
       grossToVat(lineCost, new Decimal(item.unitCostSnapshotVatRate ?? 0)).toDecimalPlaces(2),
     );
-    const effComm = new Decimal(item.commissionGross).sub(new Decimal(item.refundedCommissionGross));
+    const effComm = new Decimal(item.commissionGross).sub(
+      new Decimal(item.refundedCommissionGross),
+    );
     commissionGross = commissionGross.add(effComm);
     commissionVat = commissionVat.add(
       grossToVat(effComm, new Decimal(item.commissionVatRate)).toDecimalPlaces(2),

@@ -409,7 +409,13 @@ describe('cost-snapshot capture — GROSS convention (spec §5.8)', () => {
     const store = await createStore(org.id);
 
     const { variant } = await buildVariantWithProfiles(org.id, store.id, [
-      { name: 'COGS GROSS', currency: 'TRY', amountGross: '60.00', vatRate: 20, fxRateMode: 'AUTO' },
+      {
+        name: 'COGS GROSS',
+        currency: 'TRY',
+        amountGross: '60.00',
+        vatRate: 20,
+        fxRateMode: 'AUTO',
+      },
     ]);
     const order = await createOrder(org.id, store.id);
     const item = await createOrderItem(org.id, order.id, variant.id);
@@ -439,8 +445,14 @@ describe('cost-snapshot capture — GROSS convention (spec §5.8)', () => {
     const store = await createStore(org.id);
 
     const { variant } = await buildVariantWithProfiles(org.id, store.id, [
-      { name: 'COGS A 20%', currency: 'TRY', amountGross: '100.00', vatRate: 20, fxRateMode: 'AUTO' },
-      { name: 'COGS B 8%',  currency: 'TRY', amountGross: '50.00',  vatRate: 8,  fxRateMode: 'AUTO' },
+      {
+        name: 'COGS A 20%',
+        currency: 'TRY',
+        amountGross: '100.00',
+        vatRate: 20,
+        fxRateMode: 'AUTO',
+      },
+      { name: 'COGS B 8%', currency: 'TRY', amountGross: '50.00', vatRate: 8, fxRateMode: 'AUTO' },
     ]);
     const order = await createOrder(org.id, store.id);
     const item = await createOrderItem(org.id, order.id, variant.id);

@@ -156,7 +156,9 @@ export const CostProfileSchema = z
     organizationId: z.string().uuid().openapi({ example: 'b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b' }),
     name: z.string().openapi({ example: 'Hammadde COGS' }),
     type: CostProfileTypeSchema,
-    amountGross: z.string().openapi({ description: 'KDV-dahil tutar (decimal string)', example: '25.50' }),
+    amountGross: z
+      .string()
+      .openapi({ description: 'KDV-dahil tutar (decimal string)', example: '25.50' }),
     currency: CurrencySchema,
     vatRate: z.number().openapi({ example: 18 }),
     fxRateMode: FxRateModeSchema,

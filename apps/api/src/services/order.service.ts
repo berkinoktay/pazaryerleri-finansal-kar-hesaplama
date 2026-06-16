@@ -255,8 +255,10 @@ export async function getOrderById(
       ? null
       : {
           ...profitBreakdown,
-          saleMarginPct: profitBreakdown.saleMarginPct === '—' ? null : profitBreakdown.saleMarginPct,
-          costMarkupPct: profitBreakdown.costMarkupPct === '—' ? null : profitBreakdown.costMarkupPct,
+          saleMarginPct:
+            profitBreakdown.saleMarginPct === '—' ? null : profitBreakdown.saleMarginPct,
+          costMarkupPct:
+            profitBreakdown.costMarkupPct === '—' ? null : profitBreakdown.costMarkupPct,
         };
 
   return {

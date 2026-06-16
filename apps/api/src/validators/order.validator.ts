@@ -185,14 +185,18 @@ const OrderItemDetailSchema = z
     // GROSS konvansiyon (2026-06-16): tüm para değerleri KDV-dahil; net türetilir
     // (gross × 100/(100+rate)). Satır toplamlarıdır (×quantity), birim değil.
     // Satış (gross + KDV oranı).
-    lineSaleGross: z.string().openapi({ description: 'Line sale total incl. VAT (decimal string).' }),
+    lineSaleGross: z
+      .string()
+      .openapi({ description: 'Line sale total incl. VAT (decimal string).' }),
     saleVatRate: z.string().openapi({ description: 'Sale VAT rate %, decimal string.' }),
     lineSellerDiscountGross: z
       .string()
       .openapi({ description: 'Seller discount incl. VAT (decimal string).' }),
     // Komisyon (gross + oran) — always present (default 0 in schema).
     commissionGross: z.string().openapi({ description: 'Commission incl. VAT (decimal string).' }),
-    commissionVatRate: z.string().openapi({ description: 'Commission VAT rate %, decimal string.' }),
+    commissionVatRate: z
+      .string()
+      .openapi({ description: 'Commission VAT rate %, decimal string.' }),
     refundedCommissionGross: z
       .string()
       .openapi({ description: 'Refunded commission incl. VAT (decimal string).' }),

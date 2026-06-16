@@ -153,10 +153,7 @@ export async function recomputeSettledProfit(
     where: {
       orderId,
       feeType: 'STOPPAGE',
-      OR: [
-        { source: 'SETTLEMENT' },
-        { source: 'ESTIMATE', confirmedAt: { not: null } },
-      ],
+      OR: [{ source: 'SETTLEMENT' }, { source: 'ESTIMATE', confirmedAt: { not: null } }],
     },
     orderBy: { source: 'desc' }, // S > E → SETTLEMENT satırı varsa önce gelir
     select: { amountGross: true },
