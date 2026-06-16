@@ -244,6 +244,11 @@ export async function applyEstimateOnOrderCreate(
   // Maliyet + komisyon GROSS agregatları (item × adet). Komisyon net-satış tabanı
   // (#332): effective = commissionGross − refundedCommissionGross. KDV oranları
   // item-bazlı (maliyet KDV satıştan bağımsız; komisyon KDV DB-driven #331).
+  //
+  // KDV türevi TAM PRECISION'da biriktirilir — per-line `.toDecimalPlaces(2)` YOK.
+  // Tek yuvarlama persist'te (estimatedNetVat/estimatedNetProfit → toDecimalPlaces(2)).
+  // Bu, build-profit-breakdown.ts'in (görünüm yolu) raw-aggregate yöntemiyle BİREBİR
+  // uyuşur; çok-kalemli siparişte per-line yuvarlama bileşik kuruş kaymasına yol açardı.
   let costGross = new Decimal(0);
   let costVat = new Decimal(0);
   let commissionGross = new Decimal(0);
@@ -252,16 +257,12 @@ export async function applyEstimateOnOrderCreate(
     const qty = new Decimal(item.quantity);
     const lineCost = new Decimal(item.unitCostSnapshotGross ?? 0).mul(qty);
     costGross = costGross.add(lineCost);
-    costVat = costVat.add(
-      grossToVat(lineCost, new Decimal(item.unitCostSnapshotVatRate ?? 0)).toDecimalPlaces(2),
-    );
+    costVat = costVat.add(grossToVat(lineCost, new Decimal(item.unitCostSnapshotVatRate ?? 0)));
     const effComm = new Decimal(item.commissionGross).sub(
       new Decimal(item.refundedCommissionGross),
     );
     commissionGross = commissionGross.add(effComm);
-    commissionVat = commissionVat.add(
-      grossToVat(effComm, new Decimal(item.commissionVatRate)).toDecimalPlaces(2),
-    );
+    commissionVat = commissionVat.add(grossToVat(effComm, new Decimal(item.commissionVatRate)));
   }
 
   // PSF + Kargo ESTIMATE fee'leri (Stopaj motorda ayrı `stoppage` terimidir —
@@ -273,7 +274,8 @@ export async function applyEstimateOnOrderCreate(
   const profitInputFees: ProfitInputFee[] = estimateFees.map((fee) => ({
     type: fee.feeType === 'SHIPPING' ? 'SHIPPING' : 'PLATFORM_SERVICE',
     gross: new Decimal(fee.amountGross),
-    vat: grossToVat(new Decimal(fee.amountGross), new Decimal(fee.vatRate)).toDecimalPlaces(2),
+    // KDV tam precision (per-fee yuvarlama YOK); tek yuvarlama persist'te.
+    vat: grossToVat(new Decimal(fee.amountGross), new Decimal(fee.vatRate)),
     direction: fee.direction,
   }));
 

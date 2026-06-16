@@ -2,7 +2,13 @@ import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
+import {
+  applyEstimateOnOrderCreate,
+  buildProfitBreakdown,
+  type ProfitBreakdownFeeInput,
+  type ProfitBreakdownItemInput,
+} from '@pazarsync/profit';
+import type { OrderFeeType } from '@pazarsync/db/enums';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createOrder, createOrganization, createStore } from '../../helpers/factories';
@@ -523,5 +529,184 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     });
     expect(psfRows).toHaveLength(1);
     expect(new Decimal(psfRows[0]!.amountGross).toString()).toBe('13.19');
+  });
+
+  // ─── Multi-item KDV mutabakatı (Bug 1: per-line yuvarlama → bileşik kayma) ──
+  // Çok kalemli siparişte cost/komisyon KDV'si TAM PRECISION'da biriktirilmeli,
+  // persist'te BİR kez yuvarlanmalı. Eski kod her satırı `.toDecimalPlaces(2)`
+  // ile yuvarlayıp topladığından saklanan estimatedNetVat görünüm dökümünden
+  // (build-profit-breakdown raw-aggregate) bir kuruş sapabiliyordu.
+  //
+  // Senaryo: 3 maliyet satırı × birim 10.05 @%20 → per-line VAT 1.675 → yuvarlanırsa
+  // 1.68 ×3 = 5.04; raw 1.675×3 = 5.025 → 5.03. 1 kuruş fark = bu testin yakaladığı.
+  describe('multi-item KDV mutabakatı (estimate ↔ display breakdown)', () => {
+    async function createMultiItemOrder(args: {
+      orgId: string;
+      storeId: string;
+      // [unitCostSnapshotGross, quantity, vatRate]
+      costLines: Array<{ unitCostGross: string; quantity: number; costVatRate: string }>;
+      saleGross: string;
+      saleVat: string;
+      // commission per line
+      commissionGross: string;
+      commissionVatRate: string;
+    }) {
+      const order = await createOrder(args.orgId, args.storeId, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { saleGross: args.saleGross, saleVat: args.saleVat },
+      });
+      const product = await prisma.product.create({
+        data: {
+          organizationId: args.orgId,
+          storeId: args.storeId,
+          platformContentId: BigInt(Date.now() + Math.floor(Math.random() * 100000)),
+          productMainId: `pm-${order.id.slice(0, 8)}`,
+          title: 'Multi Test Product',
+        },
+      });
+      let variantSeq = 0;
+      for (const line of args.costLines) {
+        variantSeq += 1;
+        const variant = await prisma.productVariant.create({
+          data: {
+            organizationId: args.orgId,
+            storeId: args.storeId,
+            productId: product.id,
+            platformVariantId: BigInt(Date.now() + Math.floor(Math.random() * 100000) + variantSeq),
+            barcode: `bc-${order.id.slice(0, 6)}-${variantSeq}`,
+            stockCode: `sk-${order.id.slice(0, 6)}-${variantSeq}`,
+            salePrice: '100',
+            listPrice: '120',
+          },
+        });
+        await prisma.orderItem.create({
+          data: {
+            orderId: order.id,
+            organizationId: args.orgId,
+            productVariantId: variant.id,
+            quantity: line.quantity,
+            lineSaleGross: args.saleGross,
+            commissionRate: '10',
+            commissionGross: args.commissionGross,
+            commissionVatRate: args.commissionVatRate,
+            refundedCommissionGross: '0',
+            unitCostSnapshotGross: line.unitCostGross,
+            unitCostSnapshotVatRate: line.costVatRate,
+          },
+        });
+      }
+      return order;
+    }
+
+    it('saklanan estimatedNetVat = display breakdown raw-aggregate KDV (per-line yuvarlama YOK)', async () => {
+      const { org, store } = await setup();
+      const order = await createMultiItemOrder({
+        orgId: org.id,
+        storeId: store.id,
+        // 3 satır × 10.05 @%20 → tam mutabakat sapma testi.
+        costLines: [
+          { unitCostGross: '10.05', quantity: 1, costVatRate: '20' },
+          { unitCostGross: '10.05', quantity: 1, costVatRate: '20' },
+          { unitCostGross: '10.05', quantity: 1, costVatRate: '20' },
+        ],
+        saleGross: '120.00',
+        saleVat: '20.00',
+        commissionGross: '4.00',
+        commissionVatRate: '20',
+      });
+
+      await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+      const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      expect(updated.estimatedNetProfit).not.toBeNull();
+      expect(updated.estimatedNetVat).not.toBeNull();
+
+      // Aynı kalıcı gross girdilerden display dökümünü kur (raw-aggregate yol).
+      const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
+      const fees = await prisma.orderFee.findMany({
+        where: { orderId: order.id, source: 'ESTIMATE' },
+      });
+      const breakdownItems: ProfitBreakdownItemInput[] = items.map((i) => ({
+        quantity: i.quantity,
+        lineListGross: null,
+        lineSaleGross: i.lineSaleGross === null ? null : new Decimal(i.lineSaleGross),
+        lineSellerDiscountGross: null,
+        saleVatRate: Number(i.saleVatRate ?? 0),
+        commissionGross: new Decimal(i.commissionGross),
+        refundedCommissionGross: new Decimal(i.refundedCommissionGross),
+        commissionVatRate: Number(i.commissionVatRate),
+        unitCostSnapshotGross:
+          i.unitCostSnapshotGross === null ? null : new Decimal(i.unitCostSnapshotGross),
+        unitCostSnapshotVatRate: Number(i.unitCostSnapshotVatRate ?? 0),
+      }));
+      const breakdownFees: ProfitBreakdownFeeInput[] = fees.map((f) => ({
+        feeType: f.feeType as OrderFeeType,
+        direction: f.direction,
+        amountGross: new Decimal(f.amountGross),
+        vatRate: Number(f.vatRate),
+      }));
+
+      const view = buildProfitBreakdown({
+        saleGross: new Decimal(updated.saleGross!),
+        saleVat: new Decimal(updated.saleVat!),
+        listGross: new Decimal(updated.listGross ?? 0),
+        sellerDiscountGross: new Decimal(updated.sellerDiscountGross ?? 0),
+        items: breakdownItems,
+        fees: breakdownFees,
+        netProfit: new Decimal(updated.estimatedNetProfit!),
+        netVat: new Decimal(updated.estimatedNetVat!),
+        saleMarginPct: null,
+        costMarkupPct: null,
+      });
+
+      // RAW-aggregate Net KDV'yi kalıcı gross girdilerden bağımsızca yeniden kur —
+      // build-profit-breakdown'ın iç toplama yöntemiyle AYNI (her KDV bileşeni TAM
+      // precision'da biriktirilir, tek yuvarlama en sonda). Per-line yuvarlama yapan
+      // ESKİ kod bu raw değerden bir kuruş sapardı.
+      const grossToVat = (gross: Decimal, ratePct: number): Decimal =>
+        ratePct === 0 ? new Decimal(0) : gross.mul(ratePct).div(100 + ratePct);
+      let rawCostVat = new Decimal(0);
+      let rawCommVat = new Decimal(0);
+      for (const i of breakdownItems) {
+        const lineCost = (i.unitCostSnapshotGross ?? new Decimal(0)).mul(i.quantity);
+        rawCostVat = rawCostVat.add(grossToVat(lineCost, i.unitCostSnapshotVatRate));
+        const effComm = i.commissionGross.sub(i.refundedCommissionGross);
+        rawCommVat = rawCommVat.add(grossToVat(effComm, i.commissionVatRate));
+      }
+      let rawFeeVat = new Decimal(0);
+      for (const f of breakdownFees) {
+        if (f.feeType === 'SHIPPING' || f.feeType === 'PLATFORM_SERVICE') {
+          const signed = f.direction === 'DEBIT' ? 1 : -1;
+          rawFeeVat = rawFeeVat.add(grossToVat(f.amountGross, f.vatRate).mul(signed));
+        }
+      }
+      const rawDerivedNetVat = new Decimal(updated.saleVat!)
+        .sub(rawCostVat)
+        .sub(rawCommVat)
+        .sub(rawFeeVat)
+        .toDecimalPlaces(2);
+
+      // 1) Saklanan estimatedNetVat == raw-aggregate (round-once) Net KDV. BİREBİR.
+      //    Per-line yuvarlamalı eski kod burada sapardı.
+      expect(new Decimal(updated.estimatedNetVat!).toFixed(2)).toBe(rawDerivedNetVat.toFixed(2));
+
+      // 2) Bileşik kayma yok: display costVat 3×10.05@%20 raw = 5.03
+      //    (per-line yuvarlama 1.68×3 = 5.04 verirdi).
+      expect(view.costVat).toBe('5.03');
+      expect(rawCostVat.toDecimalPlaces(2).toFixed(2)).toBe('5.03');
+
+      // 3) Σ düşülen gross terimler + Net KDV = saleGross − netProfit (mutabakat kapanır;
+      //    netProfit motor tarafından TAM precision raw KDV'den üretildi).
+      const sumOfDeductions = new Decimal(view.costGross)
+        .add(view.commissionGross)
+        .add(view.shippingGross)
+        .add(view.platformServiceGross)
+        .add(view.stoppage)
+        .add(view.netVat);
+      expect(sumOfDeductions.toFixed(2)).toBe(
+        new Decimal(view.saleGross).sub(view.netProfit).toFixed(2),
+      );
+    });
   });
 });
