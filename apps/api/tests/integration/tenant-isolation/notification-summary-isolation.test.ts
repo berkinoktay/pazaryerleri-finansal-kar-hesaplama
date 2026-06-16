@@ -29,7 +29,7 @@ describe('Tenant isolation: notification-summary', () => {
 
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-    const orderB = await createOrder(orgB.id, storeB.id, { saleSubtotalNet: '99.00' });
+    const orderB = await createOrder(orgB.id, storeB.id, { saleGross: '99.00' });
 
     const res = await app.request(
       `/v1/organizations/${orgB.id}/stores/${storeB.id}/live-performance/notification-summary?source=orders&id=${orderB.id}`,
@@ -46,7 +46,7 @@ describe('Tenant isolation: notification-summary', () => {
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
     const entryB = await createBufferEntry(orgB.id, storeB.id, {
-      mappedOrder: { saleSubtotalNet: '10.00', lines: [] },
+      mappedOrder: { saleGross: '10.00', lines: [] },
     });
 
     const res = await app.request(

@@ -122,7 +122,9 @@ describe('Tenant isolation — cost-profile routes', () => {
     const res = await app.request(`/v1/organizations/${orgA.id}/cost-profiles/${profileB.id}`, {
       method: 'PATCH',
       headers: { Authorization: bearer(userA.accessToken), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Hijacked' }),
+      // GROSS konvansiyon: çapraz-org PATCH gross para alanını dener; yine 404
+      // (route org filtresinde reddeder, gövde işlenmeden önce — sızıntı yok).
+      body: JSON.stringify({ name: 'Hijacked', amountGross: '999.00' }),
     });
     expect(res.status).toBe(404);
   });

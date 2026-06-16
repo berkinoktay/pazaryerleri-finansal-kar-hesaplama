@@ -195,6 +195,7 @@ describe('cost-profile tables: RLS isolation', () => {
         organizationId: orgB.id,
         quantity: 1,
         lineSaleGross: '100.00',
+        commissionRate: '20.00',
         commissionGross: '20.00',
         unitCostSnapshotGross: '15.00',
         snapshotCapturedAt: new Date(),

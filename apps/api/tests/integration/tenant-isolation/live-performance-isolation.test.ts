@@ -39,7 +39,7 @@ describe('Tenant isolation: live-performance endpoints', () => {
       // Org B has real data that must never leak to org A.
       await createOrder(orgB.id, storeB.id, {
         orderDate: new Date(),
-        saleSubtotalNet: '1000.00',
+        saleGross: '1000.00',
         estimatedNetProfit: '300.00',
       });
 

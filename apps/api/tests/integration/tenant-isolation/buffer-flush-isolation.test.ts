@@ -15,13 +15,18 @@ import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 function mappedFor(platformOrderId: string, barcode: string): Prisma.InputJsonValue {
+  // GROSS konvansiyon (2026-06-16): buffer mappedOrder JSON brüt (KDV-dahil)
+  // alanlar taşır — eski net 84.75 + KDV 15.25 = brüt 100.00.
   return {
     platformOrderId,
     platformOrderNumber: `ord-${platformOrderId}`,
     orderDate: new Date(Date.now() - ONE_DAY_MS).toISOString(),
     status: 'PROCESSING',
-    saleSubtotalNet: '84.75',
-    saleVatTotal: '15.25',
+    saleGross: '100.00',
+    saleVat: '15.25',
+    listGross: '100.00',
+    sellerDiscountGross: '0',
+    promotionDisplays: null,
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
     fastDelivery: false,
@@ -30,14 +35,15 @@ function mappedFor(platformOrderId: string, barcode: string): Prisma.InputJsonVa
       {
         barcode,
         quantity: 1,
-        unitPriceNet: '84.75',
-        unitVatRate: '18',
-        unitVatAmount: '15.25',
-        grossCommissionAmountNet: '12.71',
-        grossCommissionVatAmount: '2.29',
-        sellerDiscountNet: '0',
-        sellerDiscountVatAmount: '0',
+        platformLineId: null,
+        lineListGross: '100.00',
+        lineSaleGross: '100.00',
+        lineSellerDiscountGross: '0',
+        saleVatRate: '18',
         commissionRate: '15',
+        commissionGross: '15.00',
+        refundedCommissionGross: '0',
+        commissionVatRate: '20',
       },
     ],
   } as unknown as Prisma.InputJsonValue;
