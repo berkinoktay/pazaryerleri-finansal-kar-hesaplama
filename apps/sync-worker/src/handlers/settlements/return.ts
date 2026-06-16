@@ -21,10 +21,10 @@
 // and then refreshes Order.settledNetProfit so a late return (outside
 // the PaymentOrder re-poll window) is never an orphan fee.
 //
-// Schema invariant: OrderFee.amountNet is NET (schema convention). The
-// Trendyol Return.debt is KDV-dahil. KDV split uses the matching
-// OrderItem's unitVatRate (per-line VAT, not fixed) — research §3.2
-// proved Return is per-OrderItem just like Sale/Discount.
+// GROSS CONVENTION (2026-06-16, Bölüm E Task 19): OrderFee.amountGross
+// kullanılır. Trendyol Return.debt zaten KDV-dahil (gross) → doğrudan yazılır.
+// vatRate satır saleVatRate'ten; net türetilir (amountGross × 100/(100+rate)).
+// Net-split kaldırıldı.
 //
 // Idempotency (#297): handler checks `(orderId, source=SETTLEMENT,
 // trendyolTransactionId = row.id)` BEFORE insert — indexed column
@@ -46,7 +46,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import { commissionVatDivisor, type TrendyolFinancialTransaction } from '@pazarsync/marketplace';
+import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { recomputeSettledProfit, resolveFeeDefinition } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
@@ -132,10 +132,9 @@ export async function handleReturn(
     where: { orderId: order.id, productVariantId: variant.id },
     select: {
       id: true,
-      unitVatRate: true,
-      unitCostSnapshotNet: true,
+      saleVatRate: true,
+      unitCostSnapshotGross: true,
       unitCostSnapshotVatRate: true,
-      unitCostSnapshotVatAmount: true,
     },
   });
   if (item === null) {
@@ -188,24 +187,11 @@ export async function handleReturn(
         });
   const orderClaimItemId = inheritedClaimItemId ?? selectedClaimItem?.id ?? null;
 
-  // KDV split via item's unitVatRate. Null fallback writes the gross
-  // amount as NET with vatRate=0 — reconciliation tolerates this
-  // (1-line edge) and audit log surfaces the gap.
+  // GROSS CONVENTION (2026-06-16, Bölüm E Task 19): Trendyol debt zaten
+  // gross (KDV-dahil). Net-split kaldırıldı; amountGross doğrudan yazılır.
+  // vatRate satır KDV oranından (saleVatRate); null → 0 fallback.
   const debtGross = new Decimal(row.debt);
-  let amountNet: Decimal;
-  let vatRate: Decimal;
-  let vatAmount: Decimal;
-  if (item.unitVatRate !== null) {
-    vatRate = new Decimal(item.unitVatRate);
-    const divisor = vatRate.div(100).add(1);
-    amountNet = debtGross.div(divisor).toDecimalPlaces(2);
-    vatAmount = debtGross.sub(amountNet);
-  } else {
-    syncLog.warn('settlements.return.unit-vat-rate-null', { id: row.id, itemId: item.id });
-    amountNet = debtGross;
-    vatRate = new Decimal(0);
-    vatAmount = new Decimal(0);
-  }
+  const refundVatRate = item.saleVatRate !== null ? new Decimal(item.saleVatRate) : new Decimal(0);
 
   // Audit-only blob — idempotency reads NEVER touch this (column below).
   const externalRef = {
@@ -224,9 +210,8 @@ export async function handleReturn(
         feeType: 'REFUND_DEDUCTION',
         source: 'SETTLEMENT',
         direction: 'DEBIT',
-        amountNet,
-        vatRate,
-        vatAmount,
+        amountGross: debtGross,
+        vatRate: refundVatRate,
         displayName: 'İade',
         trendyolTransactionId,
         orderClaimItemId,
@@ -244,9 +229,8 @@ export async function handleReturn(
     row.commissionAmount !== null &&
     row.commissionAmount !== undefined
   ) {
-    // row.commissionAmount arrives KDV-dahil, same DB-driven rate as the
-    // sale-side commission this credit reverses (denetim A — fee_definitions
-    // ALL/COMMISSION_INVOICE, order.orderDate'e göre çözülür).
+    // GROSS CONVENTION: row.commissionAmount KDV-dahil (gross). KDV oranı
+    // fee-definition'dan (#331 — denetim A). Net-split kaldırıldı.
     const commissionVatDef = await resolveFeeDefinition(tx, {
       platform: 'TRENDYOL',
       feeType: 'COMMISSION_INVOICE',
@@ -254,9 +238,6 @@ export async function handleReturn(
     });
     const commissionVatRate = new Decimal(commissionVatDef.defaultVatRate.toString());
     const commissionGross = new Decimal(row.commissionAmount);
-    const commissionNet = commissionGross
-      .div(commissionVatDivisor(commissionVatRate))
-      .toDecimalPlaces(2);
     await tx.orderFee.create({
       data: {
         orderId: order.id,
@@ -264,9 +245,8 @@ export async function handleReturn(
         feeType: 'COMMISSION_REFUND',
         source: 'SETTLEMENT',
         direction: 'CREDIT',
-        amountNet: commissionNet,
+        amountGross: commissionGross,
         vatRate: commissionVatRate,
-        vatAmount: commissionGross.sub(commissionNet),
         displayName: 'Komisyon iadesi',
         trendyolTransactionId,
         orderClaimItemId,
@@ -282,11 +262,8 @@ export async function handleReturn(
   // snapshot never materialized (product decision 2026-06-10). One Return
   // row = one unit (research §3.2). Skips loudly when the snapshot is
   // still missing; the order's profit is incomputable then anyway.
-  if (
-    !hasLeg.has('COST_RETURN') &&
-    item.unitCostSnapshotNet !== null &&
-    item.unitCostSnapshotVatAmount !== null
-  ) {
+  // GROSS CONVENTION: unitCostSnapshotGross zaten gross; net-split kaldırıldı.
+  if (!hasLeg.has('COST_RETURN') && item.unitCostSnapshotGross !== null) {
     await tx.orderFee.create({
       data: {
         orderId: order.id,
@@ -294,9 +271,8 @@ export async function handleReturn(
         feeType: 'COST_RETURN',
         source: 'SETTLEMENT',
         direction: 'CREDIT',
-        amountNet: item.unitCostSnapshotNet,
+        amountGross: item.unitCostSnapshotGross,
         vatRate: item.unitCostSnapshotVatRate ?? new Decimal(0),
-        vatAmount: item.unitCostSnapshotVatAmount,
         displayName: 'Maliyet iadesi',
         trendyolTransactionId,
         orderClaimItemId,
