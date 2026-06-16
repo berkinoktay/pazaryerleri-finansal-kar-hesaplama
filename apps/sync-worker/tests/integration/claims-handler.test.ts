@@ -64,8 +64,9 @@ async function buildScenario(): Promise<BuiltCtx> {
       platformOrderNumber: ORDER_NUMBER,
       orderDate: new Date(),
       status: 'DELIVERED',
-      saleSubtotalNet: new Decimal('100.00'),
-      saleVatTotal: new Decimal('20.00'),
+      // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): saleGross/saleVat.
+      saleGross: new Decimal('120.00'),
+      saleVat: new Decimal('20.00'),
     },
   });
 
@@ -74,14 +75,13 @@ async function buildScenario(): Promise<BuiltCtx> {
       orderId: order.id,
       organizationId: org.id,
       quantity: 3,
-      unitPrice: new Decimal('120.00'),
+      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross replaces
+      // grossCommissionAmountNet (12.00 gross = 10.00 net × 1.20). saleVatRate replaces unitVatRate.
+      lineListGross: new Decimal('120.00'),
+      lineSaleGross: new Decimal('120.00'),
+      saleVatRate: new Decimal('20.00'),
       commissionRate: new Decimal('10.00'),
-      commissionAmount: new Decimal('12.00'),
-      unitPriceNet: new Decimal('100.00'),
-      unitVatRate: new Decimal('20.00'),
-      unitVatAmount: new Decimal('20.00'),
-      grossCommissionAmountNet: new Decimal('10.00'),
-      grossCommissionVatAmount: new Decimal('2.00'),
+      commissionGross: new Decimal('12.00'),
       platformLineId: PLATFORM_LINE_ID,
     },
   });
@@ -310,8 +310,8 @@ describe('processClaimsChunk', () => {
         platformOrderNumber: ORDER_NUMBER,
         orderDate: new Date(),
         status: 'DELIVERED',
-        saleSubtotalNet: new Decimal('100.00'),
-        saleVatTotal: new Decimal('20.00'),
+        saleGross: new Decimal('120.00'),
+        saleVat: new Decimal('20.00'),
       },
     });
 
@@ -366,8 +366,8 @@ describe('processClaimsChunk', () => {
         platformOrderNumber: ORDER_NUMBER,
         orderDate: new Date(),
         status: 'DELIVERED',
-        saleSubtotalNet: new Decimal('50.00'),
-        saleVatTotal: new Decimal('10.00'),
+        saleGross: new Decimal('60.00'),
+        saleVat: new Decimal('10.00'),
       },
     });
 
@@ -402,8 +402,8 @@ describe('processClaimsChunk', () => {
         platformOrderNumber: 'SIBLING-ONLY',
         orderDate: new Date(),
         status: 'DELIVERED',
-        saleSubtotalNet: new Decimal('100.00'),
-        saleVatTotal: new Decimal('20.00'),
+        saleGross: new Decimal('120.00'),
+        saleVat: new Decimal('20.00'),
       },
     });
 
@@ -434,8 +434,8 @@ describe('processClaimsChunk', () => {
         platformOrderNumber: ORDER_NUMBER,
         orderDate: new Date(),
         status: 'DELIVERED',
-        saleSubtotalNet: new Decimal('50.00'),
-        saleVatTotal: new Decimal('10.00'),
+        saleGross: new Decimal('60.00'),
+        saleVat: new Decimal('10.00'),
       },
     });
 

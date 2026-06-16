@@ -79,8 +79,9 @@ async function buildOrderReadyForCycle(): Promise<BuiltOrder> {
       platformOrderId: SHIPMENT_PACKAGE_ID.toString(),
       orderDate: new Date(),
       status: 'DELIVERED',
-      saleSubtotalNet: new Decimal('100.00'),
-      saleVatTotal: new Decimal('20.00'),
+      // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): saleGross/saleVat.
+      saleGross: new Decimal('120.00'),
+      saleVat: new Decimal('20.00'),
       estimatedNetProfit,
       reconciliationStatus: 'NOT_SETTLED',
     },
@@ -92,22 +93,22 @@ async function buildOrderReadyForCycle(): Promise<BuiltOrder> {
       organizationId: org.id,
       productVariantId: variant.id,
       quantity: 1,
-      unitPrice: new Decimal('120.00'),
+      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross replaces
+      // grossCommissionAmountNet (12.00 gross). Cost snapshot: 40 net + 8 VAT = 48 gross.
+      lineListGross: new Decimal('120.00'),
+      lineSaleGross: new Decimal('120.00'),
+      saleVatRate: new Decimal('20.00'),
       commissionRate: new Decimal('10.00'),
-      commissionAmount: new Decimal('12.00'),
-      unitPriceNet: new Decimal('100.00'),
-      unitVatRate: new Decimal('20.00'),
-      unitVatAmount: new Decimal('20.00'),
-      grossCommissionAmountNet: new Decimal('10.00'),
-      grossCommissionVatAmount: new Decimal('2.00'),
-      // Cost snapshot present so recomputeSettledProfit can complete.
-      unitCostSnapshotNet: new Decimal('40.00'),
+      commissionGross: new Decimal('12.00'),
+      commissionVatRate: new Decimal('20.00'),
+      unitCostSnapshotGross: new Decimal('48.00'),
       unitCostSnapshotVatRate: new Decimal('20.00'),
-      unitCostSnapshotVatAmount: new Decimal('8.00'),
     },
   });
 
   // Seed an ESTIMATE PSF OrderFee (what applyEstimateOnOrderCreate would write).
+  // GROSS CONVENTION (2026-06-16): amountGross + vatRate (amountNet/vatAmount removed).
+  // PSF: 10.99 net × 1.20 = 13.19 gross at vatRate=20.
   await prisma.orderFee.create({
     data: {
       orderId: order.id,
@@ -115,11 +116,11 @@ async function buildOrderReadyForCycle(): Promise<BuiltOrder> {
       feeType: 'PLATFORM_SERVICE',
       source: 'ESTIMATE',
       direction: 'DEBIT',
-      amountNet: new Decimal('10.99'),
+      amountGross: new Decimal('13.19'),
       vatRate: new Decimal('20.00'),
-      vatAmount: new Decimal('2.20'),
     },
   });
+  // Stoppage: 1.00 gross at vatRate=0 (KDV yok).
   await prisma.orderFee.create({
     data: {
       orderId: order.id,
@@ -127,9 +128,8 @@ async function buildOrderReadyForCycle(): Promise<BuiltOrder> {
       feeType: 'STOPPAGE',
       source: 'ESTIMATE',
       direction: 'DEBIT',
-      amountNet: new Decimal('1.00'),
+      amountGross: new Decimal('1.00'),
       vatRate: new Decimal('0'),
-      vatAmount: new Decimal('0'),
     },
   });
 
@@ -354,6 +354,7 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
   // CARGO_INVOICE; seller-cargo orders confirm the own-tariff estimate.
   describe('cargo finalize gate', () => {
     async function seedShippingEstimate(orderId: string, orgId: string): Promise<void> {
+      // GROSS CONVENTION (2026-06-16): amountGross + vatRate. 15.00 net × 1.20 = 18.00 gross.
       await prisma.orderFee.create({
         data: {
           orderId,
@@ -361,9 +362,8 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
           feeType: 'SHIPPING',
           source: 'ESTIMATE',
           direction: 'DEBIT',
-          amountNet: new Decimal('15.00'),
+          amountGross: new Decimal('18.00'),
           vatRate: new Decimal('20.00'),
-          vatAmount: new Decimal('3.00'),
         },
       });
     }
@@ -392,6 +392,7 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
       const built = await buildOrderReadyForCycle();
       await seedShippingEstimate(built.orderId, built.organizationId);
       // Real cargo invoice lands (whatever order vs PaymentOrder).
+      // GROSS CONVENTION (2026-06-16): 18.00 net × 1.20 = 21.60 gross at vatRate=20.
       await prisma.orderFee.create({
         data: {
           orderId: built.orderId,
@@ -399,9 +400,8 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
           feeType: 'SHIPPING',
           source: 'CARGO_INVOICE',
           direction: 'DEBIT',
-          amountNet: new Decimal('18.00'),
+          amountGross: new Decimal('21.60'),
           vatRate: new Decimal('20.00'),
-          vatAmount: new Decimal('3.60'),
         },
       });
 
@@ -445,6 +445,7 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
       });
       // Trendyol billed cargo anyway (rare; cargo handler warns) — real cargo
       // lands before payment. The real fee must supersede the estimate.
+      // GROSS CONVENTION (2026-06-16): 20.00 net × 1.20 = 24.00 gross at vatRate=20.
       await prisma.orderFee.create({
         data: {
           orderId: built.orderId,
@@ -452,9 +453,8 @@ describe('handlePaymentOrderEntry — confirmation cascade', () => {
           feeType: 'SHIPPING',
           source: 'CARGO_INVOICE',
           direction: 'DEBIT',
-          amountNet: new Decimal('20.00'),
+          amountGross: new Decimal('24.00'),
           vatRate: new Decimal('20.00'),
-          vatAmount: new Decimal('4.00'),
         },
       });
 

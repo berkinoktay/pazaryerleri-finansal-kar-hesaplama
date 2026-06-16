@@ -12,7 +12,8 @@
 // without overwriting the ESTIMATE.
 //
 // KDV: PSF is invoiced GROSS at %20 (sabit Trendyol convention,
-// design §12.2 #1). Split: net = debt / 1.20.
+// design §12.2 #1). GROSS CONVENTION (2026-06-16, Bölüm E Task 20):
+// debt doğrudan amountGross; net-split kaldırıldı (API türetir).
 
 import { Decimal } from 'decimal.js';
 
@@ -22,7 +23,6 @@ import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { insertOrgPeriodFee } from './org-period-fee';
 import type { HandleSettlementResult } from './sale';
 
-const PSF_VAT_DIVISOR = new Decimal('1.20');
 const PSF_VAT_RATE = new Decimal('20');
 
 export async function handlePsf(
@@ -31,16 +31,12 @@ export async function handlePsf(
   row: TrendyolFinancialTransaction,
   tx: Prisma.TransactionClient,
 ): Promise<HandleSettlementResult> {
-  const gross = new Decimal(row.debt);
-  const amountNet = gross.div(PSF_VAT_DIVISOR).toDecimalPlaces(2);
-  const vatAmount = gross.sub(amountNet);
-
   return insertOrgPeriodFee({
     storeId,
     organizationId,
     feeType: 'PLATFORM_SERVICE',
     row,
-    amounts: { amountNet, vatRate: PSF_VAT_RATE, vatAmount },
+    amounts: { amountGross: new Decimal(row.debt), vatRate: PSF_VAT_RATE },
     tx,
     logScope: 'settlements.psf',
   });

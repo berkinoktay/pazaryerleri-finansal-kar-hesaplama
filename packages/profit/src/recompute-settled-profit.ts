@@ -18,7 +18,8 @@
  *   - Order.saleGross + saleVat  (effectiveSale aggregate = HAK EDİLEN, immutable since arrival)
  *   - OrderItem rows (unitCostSnapshotGross + settled/estimatedCommissionGross + refundedCommissionGross)
  *   - OrderFee rows (amountGross + vatRate) where source ∈ {SETTLEMENT, CARGO_INVOICE}
- *     OR  source = ESTIMATE AND confirmedAt IS NOT NULL; STOPPAGE(SETTLEMENT) → stoppage term
+ *     OR  source = ESTIMATE AND confirmedAt IS NOT NULL; STOPPAGE: SETTLEMENT önce, yoksa
+ *     onaylanmış ESTIMATE STOPPAGE (stopaj sipariş-bazlı ayrı SETTLEMENT satırı almaz).
  *
  * Writes:
  *   - Order.settledNetProfit / settledNetVat / settledSaleMarginPct / settledCostMarkupPct
@@ -144,9 +145,20 @@ export async function recomputeSettledProfit(
     direction: f.direction,
   }));
 
-  // Stopaj settlement actual (SETTLEMENT STOPPAGE); yoksa 0 (motor `stoppage` terimi).
+  // Stopaj terimi: SETTLEMENT STOPPAGE (gerçek yatan) varsa o; yoksa onaylanmış ESTIMATE
+  // STOPPAGE. Stopaj sipariş-bazlı ayrı bir SETTLEMENT satırı almaz (ödeme-periyodu-bazlı,
+  // aggregate-only) → PaymentOrder onayı ESTIMATE'ı gerçek kabul etmeye yeterli.
+  // SETTLEMENT önce: 'SETTLEMENT' > 'ESTIMATE' alfabetik → desc sıralaması ile SETTLEMENT'ı alır.
   const stoppageFee = await tx.orderFee.findFirst({
-    where: { orderId, feeType: 'STOPPAGE', source: 'SETTLEMENT' },
+    where: {
+      orderId,
+      feeType: 'STOPPAGE',
+      OR: [
+        { source: 'SETTLEMENT' },
+        { source: 'ESTIMATE', confirmedAt: { not: null } },
+      ],
+    },
+    orderBy: { source: 'desc' }, // S > E → SETTLEMENT satırı varsa önce gelir
     select: { amountGross: true },
   });
 

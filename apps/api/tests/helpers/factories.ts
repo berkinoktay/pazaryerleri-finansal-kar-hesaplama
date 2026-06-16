@@ -117,16 +117,16 @@ export async function createMemberStoreAccess(
 
 export interface CreateOrderOverrides {
   status?: OrderStatus;
-  // PR-5c (2026-05-19): eski Order ücret kolonları (totalAmount, commissionAmount,
-  // shippingCost) silindi. Yeni convention (saleSubtotalNet / saleVatTotal /
-  // estimatedNetProfit) PR-E (Live Performance) ile override edilebilir hale geldi —
+  // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): saleGross + saleVat (KDV-dahil).
+  // Eski saleSubtotalNet / saleVatTotal kolonları kaldırıldı; saleGross/saleVat yazılır.
+  // Net türetilir downstream: saleGross × 100/(100+vatRate).
   // KPI/chart/orders aggregate'leri bu kolonlardan okuyor. Decimal kolonları string
   // alır (Prisma coerce eder); null = "henüz hesaplanmadı".
   orderDate?: Date;
   platformOrderId?: string;
   platformOrderNumber?: string | null;
-  saleSubtotalNet?: string | null;
-  saleVatTotal?: string | null;
+  saleGross?: string | null;
+  saleVat?: string | null;
   estimatedNetProfit?: string | null;
 }
 
@@ -143,8 +143,8 @@ export async function createOrder(
       platformOrderNumber: overrides.platformOrderNumber ?? null,
       orderDate: overrides.orderDate ?? new Date(),
       status: overrides.status ?? 'DELIVERED',
-      saleSubtotalNet: overrides.saleSubtotalNet ?? null,
-      saleVatTotal: overrides.saleVatTotal ?? null,
+      saleGross: overrides.saleGross ?? null,
+      saleVat: overrides.saleVat ?? null,
       estimatedNetProfit: overrides.estimatedNetProfit ?? null,
     },
   });
@@ -152,20 +152,20 @@ export async function createOrder(
 
 export interface CreateOrderItemOverrides {
   quantity?: number;
-  unitPrice?: string;
+  // GROSS CONVENTION (2026-06-16): lineSaleGross replaces unitPrice; commissionGross
+  // replaces commissionAmount. unitCostSnapshotGross (KDV-dahil) replaces unitCostSnapshotNet.
+  lineSaleGross?: string;
   commissionRate?: string;
-  commissionAmount?: string;
-  // NET cost snapshot — drives the costed-cost aggregate (Σ unitCostSnapshotNet ×
-  // quantity over costed orders). null = cost-missing line.
-  unitCostSnapshotNet?: string | null;
+  commissionGross?: string;
+  // GROSS cost snapshot — drives the costed-cost aggregate. null = cost-missing line.
+  unitCostSnapshotGross?: string | null;
   productVariantId?: string | null;
 }
 
 /**
- * One order line. `quantity` feeds "units sold"; `unitCostSnapshotNet` feeds the
- * costed-cost denominator of the Kâr/Maliyet ratio. The three required money
- * columns (unitPrice / commissionRate / commissionAmount) default to zero — tests
- * that only exercise the live-performance aggregates don't depend on them.
+ * One order line. `quantity` feeds "units sold"; `unitCostSnapshotGross` (KDV-dahil)
+ * feeds the costed-cost denominator of the Kâr/Maliyet ratio. Money columns default
+ * to zero — tests that only exercise aggregates don't depend on them.
  */
 export async function createOrderItem(
   orderId: string,
@@ -177,10 +177,10 @@ export async function createOrderItem(
       orderId,
       organizationId,
       quantity: overrides.quantity ?? 1,
-      unitPrice: overrides.unitPrice ?? '0.00',
+      lineSaleGross: overrides.lineSaleGross ?? '0.00',
       commissionRate: overrides.commissionRate ?? '0.00',
-      commissionAmount: overrides.commissionAmount ?? '0.00',
-      unitCostSnapshotNet: overrides.unitCostSnapshotNet ?? null,
+      commissionGross: overrides.commissionGross ?? '0.00',
+      unitCostSnapshotGross: overrides.unitCostSnapshotGross ?? null,
       productVariantId: overrides.productVariantId ?? null,
     },
   });
@@ -313,9 +313,10 @@ export async function createOrgPeriodFee(
     paymentDate?: Date;
     feeType?: OrderFeeType;
     source?: OrderFeeSource;
-    amountNet?: string;
+    // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross + vatRate.
+    // Default: 60.00 gross (50.00 net × 1.20) at vatRate=20.
+    amountGross?: string;
     vatRate?: string;
-    vatAmount?: string;
   } = {},
 ) {
   return prisma.orgPeriodFee.create({
@@ -326,9 +327,8 @@ export async function createOrgPeriodFee(
       paymentDate: overrides.paymentDate ?? new Date(),
       feeType: overrides.feeType ?? 'ADVERTISING',
       source: overrides.source ?? 'SETTLEMENT',
-      amountNet: overrides.amountNet ?? '50.00',
+      amountGross: overrides.amountGross ?? '60.00',
       vatRate: overrides.vatRate ?? '20.00',
-      vatAmount: overrides.vatAmount ?? '10.00',
     },
   });
 }

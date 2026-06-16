@@ -1285,9 +1285,10 @@ model OrgPeriodFee {
   feeType OrderFeeType   @map("fee_type")
   source  OrderFeeSource
 
-  amountNet Decimal @map("amount_net") @db.Decimal(12, 2)
-  vatRate   Decimal @map("vat_rate") @db.Decimal(5, 2)
-  vatAmount Decimal @map("vat_amount") @db.Decimal(12, 2)
+  // GROSS konvansiyon (2026-06-16, Bölüm E Task 20): amountNet + vatAmount → amountGross + vatRate.
+  // Net türetilir: amountGross × 100 / (100 + vatRate). PSF vatRate=20; Stoppage vatRate=0.
+  amountGross Decimal @map("amount_gross") @db.Decimal(12, 2)
+  vatRate     Decimal @map("vat_rate") @db.Decimal(5, 2)
 
   invoiceSerialNumber String? @map("invoice_serial_number")
   description         String?

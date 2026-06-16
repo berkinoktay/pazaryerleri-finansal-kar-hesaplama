@@ -10,9 +10,9 @@
 //   §3.3 "manual entry V1" satırı eski; resmi karar API kullanımı.
 //
 // KDV: Trendyol invoice KDV-dahil/hariç convention'ı research §4.4'te
-// "TODO" işaretli. V1 pragmatic — amountNet = debt direkt (flat-zero).
-// Stage E2E validation (commit 9) bu varsayımı doğrular; gerekirse
-// commit 4 follow-up'ı KDV split eklenir.
+// "TODO" işaretli. V1 pragmatic — debt doğrudan gross (flat-zero KDV).
+// GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross = debt; vatRate = 0.
+// Stage E2E validation bu varsayımı doğrular; gerekirse follow-up'ı KDV split eklenir.
 //
 // Order-level attribution YOK — Reklam org düzeyinde, hangi siparişe ait
 // olduğu Trendyol tarafından söylenmiyor. UI'da raporlama org-level toplam.
@@ -33,14 +33,12 @@ export async function handleAdvertising(
   row: TrendyolFinancialTransaction,
   tx: Prisma.TransactionClient,
 ): Promise<HandleSettlementResult> {
-  const amountNet = new Decimal(row.debt);
-
   return insertOrgPeriodFee({
     storeId,
     organizationId,
     feeType: 'ADVERTISING',
     row,
-    amounts: { amountNet, vatRate: ZERO, vatAmount: ZERO },
+    amounts: { amountGross: new Decimal(row.debt), vatRate: ZERO },
     tx,
     logScope: 'settlements.advertising',
   });

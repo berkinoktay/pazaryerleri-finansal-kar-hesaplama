@@ -63,7 +63,7 @@ async function createCargoOrder(
       platformOrderNumber: over.platformOrderNumber ?? null,
       orderDate: new Date(),
       status: 'DELIVERED',
-      saleSubtotalNet: new Decimal('100.00'),
+      saleGross: new Decimal('120.00'), // GROSS CONVENTION (saleSubtotalNet kaldırıldı)
       reconciliationStatus: 'NOT_SETTLED',
       cargoTrackingNumber: over.cargoTrackingNumber ?? null,
       usesSellerCargoAgreement: over.usesSellerCargoAgreement ?? false,
@@ -146,9 +146,9 @@ describe('handleCargoInvoiceItems (PR-8)', () => {
     expect(fee.feeType).toBe('SHIPPING');
     expect(fee.source).toBe('CARGO_INVOICE');
     expect(fee.direction).toBe('DEBIT');
-    // 93.05 VAT-inclusive @ 20% → 77.54 net + 15.51 VAT (rate from the table).
-    expect(new Decimal(fee.amountNet.toString()).toString()).toBe('77.54');
-    expect(new Decimal(fee.vatAmount.toString()).toString()).toBe('15.51');
+    // GROSS CONVENTION: item.amount=93.05 KDV-dahil → amountGross=93.05; vatRate=20 (DB-driven).
+    // Net türetilir downstream (93.05 × 100/120 = 77.54). Net-split kaldırıldı.
+    expect(new Decimal(fee.amountGross.toString()).toString()).toBe('93.05');
     expect(new Decimal(fee.vatRate.toString()).toString()).toBe('20');
     expect(fee.feeDefinitionId).not.toBeNull();
     // #297: identity columns stamped — without them the partial unique
