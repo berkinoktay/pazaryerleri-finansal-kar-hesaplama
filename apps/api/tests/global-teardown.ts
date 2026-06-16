@@ -8,6 +8,27 @@ import { ensureShippingReferenceData } from './helpers/seed-shipping-reference';
 const execFilePromise = promisify(execFile);
 
 /**
+ * Re-hydrate the reference/parameter catalog by invoking the canonical
+ * `pnpm db:seed-reference` script (single source of truth). Idempotent:
+ * each loader does delete+insert per (platform, ruleKind) bucket and skips
+ * any snapshot file that isn't present, so it's safe to run on every local
+ * teardown. Throws are caught by the teardown's try/catch — a failed
+ * restore must not mask test results, but the warning tells the developer
+ * to run `pnpm db:seed-reference` by hand.
+ */
+async function restoreReferenceData(): Promise<void> {
+  const repoRoot = process.cwd().replace(/\/apps\/api$/, '');
+  const { stdout, stderr } = await execFilePromise(
+    'pnpm',
+    ['--filter', '@pazarsync/db', 'seed:reference'],
+    { cwd: repoRoot },
+  );
+  const lastLines = stdout.trim().split('\n').slice(-4).join('\n');
+  console.log(`\n✓ Reference data restored:\n${lastLines}`);
+  if (stderr.trim() !== '') console.warn('[teardown] seed:reference stderr:', stderr);
+}
+
+/**
  * vitest `globalSetup` contract: the default export runs once before
  * the entire test run and may return a teardown function to be invoked
  * once after.
@@ -30,6 +51,22 @@ const execFilePromise = promisify(execFile);
  *   via PAZARSYNC_RESEED_AFTER_TESTS=1; by default the DB is left clean.
  *   Skipped entirely in CI (no dev UI) and on unit-only runs (`pnpm test:unit`
  *   sets PAZARSYNC_SKIP_RESEED=1 — no DB was touched).
+ *
+ *   REFERENCE DATA RESTORE (always, locally):
+ *     `truncateAll` wipes `fee_definitions` and `marketplace_commission_rate`
+ *     on purpose — RLS/list tests assert exact reference-row counts and need
+ *     an empty slate per test (see fee-definitions.rls.test.ts, which creates
+ *     2 rows and expects to read back exactly 2). But those tables are NOT
+ *     tenant data: the same rows service every seller, and the live dev app
+ *     reads them on every ORDERS sync. After a test run wiped them, the dev
+ *     app's sync broke with `No active FeeDefinition for TRENDYOL/
+ *     COMMISSION_INVOICE` until someone re-ran `pnpm db:seed-reference` by
+ *     hand. So we restore the reference catalog here, unconditionally, by
+ *     shelling out to the canonical seed-reference script (single source of
+ *     truth — same buckets as `pnpm db:seed-reference`). This is independent
+ *     of the opt-in dev-UI reseed: reference data is parameter data the live
+ *     app always needs, not tenant residue. Skipped in CI (ephemeral DB) and
+ *     on unit-only runs (no DB touched).
  */
 export default async function globalSetup(): Promise<() => Promise<void>> {
   // Setup: shipping reference data. Skipped for unit-only runs (DB may
@@ -85,6 +122,16 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         `DELETE FROM auth.users WHERE email LIKE '%@test.local'`,
       );
       if (purged > 0) console.log(`Purged ${purged} test auth user(s)`);
+
+      // Restore the reference/parameter catalog (fee_definitions +
+      // marketplace_commission_rate) that `truncateAll` wiped during the run.
+      // These are NOT tenant data — the live dev app reads them on every
+      // ORDERS sync, and a wiped table breaks sync with `No active
+      // FeeDefinition for TRENDYOL/COMMISSION_INVOICE`. Always restore
+      // (independent of the opt-in dev-UI reseed below). Single source of
+      // truth: the same script `pnpm db:seed-reference` runs, which is
+      // idempotent (delete+insert per bucket) and skips missing snapshots.
+      await restoreReferenceData();
 
       // Clean-by-default: the post-test re-seed (demo orgs / stores / products)
       // is residue most runs do not want. Opt in with

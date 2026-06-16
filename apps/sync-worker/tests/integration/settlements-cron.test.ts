@@ -91,6 +91,7 @@ async function buildScenario(): Promise<BuiltCtx> {
 
   // Order arrives via order sync (ESTIMATE state — applyEstimateOnOrderCreate
   // already ran). Status NOT_SETTLED.
+  // GROSS CONVENTION: saleGross/saleVat (not saleSubtotalNet/saleVatTotal).
   const order = await prisma.order.create({
     data: {
       organizationId: org.id,
@@ -98,34 +99,36 @@ async function buildScenario(): Promise<BuiltCtx> {
       platformOrderId: SHIPMENT_PACKAGE_ID.toString(),
       orderDate: new Date(),
       status: 'DELIVERED',
-      saleSubtotalNet: new Decimal('100.00'),
-      saleVatTotal: new Decimal('20.00'),
+      saleGross: new Decimal('120.00'),
+      saleVat: new Decimal('20.00'),
       estimatedNetProfit: new Decimal('45.00'),
       reconciliationStatus: 'NOT_SETTLED',
     },
   });
 
+  // GROSS CONVENTION: all item columns use gross+vatRate (no net columns).
   await prisma.orderItem.create({
     data: {
       orderId: order.id,
       organizationId: org.id,
       productVariantId: variant.id,
       quantity: 1,
-      unitPrice: new Decimal('120.00'),
+      lineListGross: new Decimal('120.00'),
+      lineSaleGross: new Decimal('120.00'),
+      lineSellerDiscountGross: new Decimal('0'),
+      saleVatRate: new Decimal('20.00'),
       commissionRate: new Decimal('10.00'),
-      commissionAmount: new Decimal('12.00'),
-      unitPriceNet: new Decimal('100.00'),
-      unitVatRate: new Decimal('20.00'),
-      unitVatAmount: new Decimal('20.00'),
-      grossCommissionAmountNet: new Decimal('10.00'),
-      grossCommissionVatAmount: new Decimal('2.00'),
-      unitCostSnapshotNet: new Decimal('40.00'),
+      commissionGross: new Decimal('12.00'),
+      refundedCommissionGross: new Decimal('0'),
+      commissionVatRate: new Decimal('20.00'),
+      estimatedCommissionGross: new Decimal('12.00'),
+      unitCostSnapshotGross: new Decimal('48.00'), // 40 net + 8 VAT = 48 gross
       unitCostSnapshotVatRate: new Decimal('20.00'),
-      unitCostSnapshotVatAmount: new Decimal('8.00'),
     },
   });
 
   // Seed ESTIMATE PSF + Stoppage OrderFees (applyEstimateOnOrderCreate parity)
+  // GROSS CONVENTION: amountGross+vatRate (not amountNet+vatAmount).
   await prisma.orderFee.create({
     data: {
       orderId: order.id,
@@ -133,9 +136,8 @@ async function buildScenario(): Promise<BuiltCtx> {
       feeType: 'PLATFORM_SERVICE',
       source: 'ESTIMATE',
       direction: 'DEBIT',
-      amountNet: new Decimal('10.99'),
+      amountGross: new Decimal('13.19'), // 10.99 net × 1.20 = 13.19 gross
       vatRate: new Decimal('20.00'),
-      vatAmount: new Decimal('2.20'),
     },
   });
   await prisma.orderFee.create({
@@ -145,9 +147,8 @@ async function buildScenario(): Promise<BuiltCtx> {
       feeType: 'STOPPAGE',
       source: 'ESTIMATE',
       direction: 'DEBIT',
-      amountNet: new Decimal('1.00'),
+      amountGross: new Decimal('1.00'),
       vatRate: new Decimal('0'),
-      vatAmount: new Decimal('0'),
     },
   });
 
@@ -409,11 +410,12 @@ describe('processSettlementsChunk — state machine mega-test', () => {
     });
     expect(fees.every((f) => f.confirmedAt !== null)).toBe(true);
 
-    // PSF audit row in OrgPeriodFee
+    // PSF audit row in OrgPeriodFee — GROSS CONVENTION: amountGross (debt KDV-dahil)
     const psfAudit = await prisma.orgPeriodFee.findFirst({
       where: { storeId, feeType: 'PLATFORM_SERVICE' },
     });
-    expect(psfAudit?.amountNet.toFixed(2)).toBe('10.99');
+    // makePsfRow uses debt: 13.19 (KDV-dahil gross) → amountGross=13.19
+    expect(psfAudit?.amountGross.toFixed(2)).toBe('13.19');
 
     // ─── Tick 3: Idempotent re-poll — same rows, no state change ───────
     const settledNetBefore = orderAfter2.settledNetProfit?.toFixed(2);
@@ -474,12 +476,13 @@ describe('processSettlementsChunk — state machine mega-test', () => {
       'COST_RETURN',
       'REFUND_DEDUCTION',
     ]);
-    // Amounts prove the dispatcher routed into the real handler (VAT
-    // splits applied), not a stub: 120/1.2, 12/1.2, one unit's cost.
+    // Amounts prove the dispatcher routed into the real handler.
+    // GROSS CONVENTION: amountGross (KDV-dahil, net-split kaldırıldı).
+    // debt=120→amountGross=120; commissionAmount=12→amountGross=12; cost=48→amountGross=48.
     const byType = new Map(fees.map((f) => [f.feeType, f]));
-    expect(byType.get('REFUND_DEDUCTION')?.amountNet.toFixed(2)).toBe('100.00');
-    expect(byType.get('COMMISSION_REFUND')?.amountNet.toFixed(2)).toBe('10.00');
-    expect(byType.get('COST_RETURN')?.amountNet.toFixed(2)).toBe('40.00');
+    expect(byType.get('REFUND_DEDUCTION')?.amountGross.toFixed(2)).toBe('120.00');
+    expect(byType.get('COMMISSION_REFUND')?.amountGross.toFixed(2)).toBe('12.00');
+    expect(byType.get('COST_RETURN')?.amountGross.toFixed(2)).toBe('48.00');
     // #297 idempotency anchor stamped on every leg by the cron path too.
     expect(fees.every((f) => f.trendyolTransactionId === 'return-cron-1')).toBe(true);
 

@@ -52,15 +52,17 @@ describe('cost snapshot immutability trigger', () => {
 
     const order = await createOrder(org.id, store.id);
 
+    // GROSS convention (2026-06-16): lineSaleGross replaces unitPrice;
+    // commissionGross replaces commissionAmount; unitCostSnapshotGross replaces unitCostSnapshotNet.
     const item = await prisma.orderItem.create({
       data: {
         orderId: order.id,
         productVariantId: variant.id,
         organizationId: org.id,
         quantity: 1,
-        unitPrice: new Decimal('199.99'),
+        lineSaleGross: new Decimal('199.99'),
         commissionRate: new Decimal('12.50'),
-        commissionAmount: new Decimal('25.00'),
+        commissionGross: new Decimal('25.00'),
       },
     });
 
@@ -74,7 +76,7 @@ describe('cost snapshot immutability trigger', () => {
     await prisma.orderItem.update({
       where: { id: item.id },
       data: {
-        unitCostSnapshotNet: new Decimal('100.00'),
+        unitCostSnapshotGross: new Decimal('100.00'),
         snapshotCapturedAt: new Date(),
       },
     });
@@ -83,7 +85,7 @@ describe('cost snapshot immutability trigger', () => {
     await expect(
       prisma.orderItem.update({
         where: { id: item.id },
-        data: { unitCostSnapshotNet: new Decimal('110.00') },
+        data: { unitCostSnapshotGross: new Decimal('110.00') },
       }),
     ).rejects.toThrow(/write-once/);
   });
@@ -94,7 +96,7 @@ describe('cost snapshot immutability trigger', () => {
     await prisma.orderItem.update({
       where: { id: item.id },
       data: {
-        unitCostSnapshotNet: new Decimal('100.00'),
+        unitCostSnapshotGross: new Decimal('100.00'),
         snapshotCapturedAt: new Date('2026-01-01T00:00:00Z'),
       },
     });
@@ -107,19 +109,18 @@ describe('cost snapshot immutability trigger', () => {
     ).rejects.toThrow(/write-once/);
   });
 
-  // Edge case coverage (PR-9 first half retroactive — boundary alignment with
-  // Order trigger test matrix, 2026-05-21). IS DISTINCT FROM semantics:
+  // Edge case coverage — IS DISTINCT FROM semantics:
   //   value → null  : rejected (write-once means no unset)
   //   0 → value     : rejected (zero is a value, not unset)
   //   value → same  : allowed (no-op UPDATE, IS DISTINCT FROM = false)
 
-  it('rejects UPDATE that unsets unit_cost_snapshot_net (value → null)', async () => {
+  it('rejects UPDATE that unsets unit_cost_snapshot_gross (value → null)', async () => {
     const { item } = await buildOrderItem();
 
     await prisma.orderItem.update({
       where: { id: item.id },
       data: {
-        unitCostSnapshotNet: new Decimal('100.00'),
+        unitCostSnapshotGross: new Decimal('100.00'),
         snapshotCapturedAt: new Date(),
       },
     });
@@ -127,18 +128,18 @@ describe('cost snapshot immutability trigger', () => {
     await expect(
       prisma.orderItem.update({
         where: { id: item.id },
-        data: { unitCostSnapshotNet: null },
+        data: { unitCostSnapshotGross: null },
       }),
     ).rejects.toThrow(/write-once/);
   });
 
-  it('rejects UPDATE on a zero unit_cost_snapshot_net (0 → 100)', async () => {
+  it('rejects UPDATE on a zero unit_cost_snapshot_gross (0 → 100)', async () => {
     const { item } = await buildOrderItem();
 
     await prisma.orderItem.update({
       where: { id: item.id },
       data: {
-        unitCostSnapshotNet: new Decimal('0.00'),
+        unitCostSnapshotGross: new Decimal('0.00'),
         snapshotCapturedAt: new Date(),
       },
     });
@@ -146,7 +147,7 @@ describe('cost snapshot immutability trigger', () => {
     await expect(
       prisma.orderItem.update({
         where: { id: item.id },
-        data: { unitCostSnapshotNet: new Decimal('100.00') },
+        data: { unitCostSnapshotGross: new Decimal('100.00') },
       }),
     ).rejects.toThrow(/write-once/);
   });
@@ -157,7 +158,7 @@ describe('cost snapshot immutability trigger', () => {
     await prisma.orderItem.update({
       where: { id: item.id },
       data: {
-        unitCostSnapshotNet: new Decimal('100.00'),
+        unitCostSnapshotGross: new Decimal('100.00'),
         snapshotCapturedAt: new Date(),
       },
     });
@@ -166,7 +167,7 @@ describe('cost snapshot immutability trigger', () => {
     await expect(
       prisma.orderItem.update({
         where: { id: item.id },
-        data: { unitCostSnapshotNet: new Decimal('100.00') },
+        data: { unitCostSnapshotGross: new Decimal('100.00') },
       }),
     ).resolves.toBeDefined();
   });
@@ -177,7 +178,7 @@ describe('cost snapshot immutability trigger', () => {
     await prisma.orderItem.update({
       where: { id: item.id },
       data: {
-        unitCostSnapshotNet: new Decimal('100.00'),
+        unitCostSnapshotGross: new Decimal('100.00'),
         snapshotCapturedAt: new Date(),
       },
     });

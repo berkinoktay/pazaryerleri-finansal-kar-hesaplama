@@ -16,30 +16,17 @@
 // `refunded > gross` ihlali doğmaz). Tüm N Sale satırı tek hakediş döngüsünde
 // birlikte gelir (iadeler AYRI Return satırı) → kısmi-settlement sapması yok.
 //
-// Bu handler:
-//   1. Yerel Order'ı (storeId, platformOrderId = shipmentPackageId.toString()) ile bulur.
-//   2. OrderItem'ı (orderId, productVariant.barcode) ile bulur.
-//   3. Trendyol-otoriter komisyon değerlerini yazar (× quantity, line-toplamı):
-//        - grossCommissionAmountNet = commissionAmount × quantity / 1.20
-//        - grossCommissionVatAmount = commissionAmount × quantity − net
-//        - commissionInvoiceSerialNumber = raw DCFxxx string
-//
-// Commission VAT rate is DB-driven (denetim A) — resolved per order via
-// resolveFeeDefinition(fee_definitions ALL/COMMISSION_INVOICE) at order.orderDate,
-// then commissionVatDivisor(rate) splits the KDV-dahil amount.
-//
-// Order Sync (PR-A + #337) already wrote grossCommissionAmountNet/VatAmount in
-// the mapper as a LINE TOTAL (`lineGrossAmount × quantity × commissionRate /
-// 100 / 1.20`). The settlement value is mathematically identical when the
-// commission rate hasn't changed between order arrival and settlement, but
-// Trendyol's invoice is the canonical source — we overwrite either way to
-// absorb any commission-rate change Trendyol applied in the interim.
+// GROSS CONVENTION (2026-06-16, Bölüm E Task 18):
+// Trendyol commissionAmount zaten KDV-dahil (gross). Net-split KALDIRILDI;
+// KDV adapter downstream türetir (commissionVatRate DB-kolonundan).
+// Handler yazar: settledCommissionGross = commissionAmount × quantity.
+// commissionVatDivisor / resolveFeeDefinition artık çağrılmıyor.
 //
 // PR-9 write-once triggers (estimated_net_profit + unit_cost_snapshot_*)
 // are NOT touched here — handler writes only to OrderItem fields that
-// settlements is the authority for (commission + sellerDiscount + raw
-// invoice serial). The commissionInvoiceId FK stays NULL — PR-7 commit 6
-// (CommissionInvoice synthesis) backfills it from this serial.
+// settlements is the authority for (commission + invoice serial).
+// The commissionInvoiceId FK stays NULL — CommissionInvoice synthesis
+// backfills it from this serial.
 //
 // Sparse field tolerance (research §3.1 + BUG #2 lesson):
 //   - shipmentPackageId may be null on a malformed row → skip + log
@@ -51,8 +38,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import { commissionVatDivisor, type TrendyolFinancialTransaction } from '@pazarsync/marketplace';
-import { resolveFeeDefinition } from '@pazarsync/profit';
+import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { syncLog } from '@pazarsync/sync-core';
 
 export interface HandleSettlementResult {
@@ -121,27 +107,16 @@ export async function handleSale(
     return { applied: false, skipReason: 'item_not_found' };
   }
 
-  // Commission KDV split — Trendyol's commissionAmount is GROSS (KDV-dahil),
-  // design §5.2 line 1083. Komisyon KDV oranı DB'den (denetim A), order.orderDate'e
-  // göre çözülür; seed eksikse loud throw (PSF/STOPPAGE ile aynı).
-  // × quantity: row.commissionAmount BİRİM başınadır (header) → line-toplamına çıkar.
+  // GROSS CONVENTION: Trendyol commissionAmount KDV-dahil (gross), per-unit.
+  // × quantity ile line-toplamına çıkar (#338). Net-split KALDIRILIYOR;
+  // KDV adapter downstream commissionVatRate kolonundan türetir.
   const quantity = new Decimal(item.quantity);
-  const commissionVatDef = await resolveFeeDefinition(tx, {
-    platform: 'TRENDYOL',
-    feeType: 'COMMISSION_INVOICE',
-    at: order.orderDate,
-  });
-  const commissionGross = new Decimal(row.commissionAmount).mul(quantity);
-  const grossCommissionAmountNet = commissionGross
-    .div(commissionVatDivisor(commissionVatDef.defaultVatRate.toString()))
-    .toDecimalPlaces(2);
-  const grossCommissionVatAmount = commissionGross.sub(grossCommissionAmountNet);
+  const settledCommissionGross = new Decimal(row.commissionAmount).mul(quantity);
 
   await tx.orderItem.update({
     where: { id: item.id },
     data: {
-      grossCommissionAmountNet,
-      grossCommissionVatAmount,
+      settledCommissionGross,
       // Hakediş Kontrolü TEMELİ (2026-06-14): Trendyol'un kredilediği GERÇEK satışı
       // (ham `credit`, KDV-dahil) çıpa olarak yakala. KÂRA GİRMEZ — settled kâr
       // HAK EDİLEN'den (effectiveSale) hesaplanır; bu yalnız gelecek beklenen-vs-

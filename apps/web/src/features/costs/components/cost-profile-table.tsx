@@ -101,12 +101,12 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
         cell: ({ row }) => {
           const profile = row.original;
           if (profile.currency === 'TRY') {
-            return <Currency value={profile.amount} />;
+            return <Currency value={profile.amountGross} />;
           }
           // Non-TRY: show native + "(currency)" label
           return (
             <span className="tabular-nums">
-              {formatter.number(Number.parseFloat(profile.amount), {
+              {formatter.number(Number.parseFloat(profile.amountGross), {
                 maximumFractionDigits: 2,
                 minimumFractionDigits: 2,
               })}

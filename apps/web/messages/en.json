@@ -825,7 +825,7 @@
         "orderNumber": "Order #",
         "status": "Status",
         "reconciliationStatus": "Reconciliation",
-        "saleSubtotalNet": "Sale (net)",
+        "saleGross": "Sale (incl. VAT)",
         "estimatedNetProfit": "Estimated profit",
         "settledNetProfit": "Settled profit",
         "itemCount": "Items",
@@ -1488,6 +1488,30 @@
       }
     }
   },
+  "profitBreakdown": {
+    "title": "Profit breakdown",
+    "unavailable": "Profit not calculated for this order.",
+    "sale": "Sale",
+    "listPrice": "List price",
+    "sellerDiscount": "Seller discount",
+    "netSale": "Net sale",
+    "cost": "Product cost",
+    "commission": "Commission",
+    "shipping": "Shipping",
+    "platformService": "Platform service fee",
+    "stoppage": "Withholding tax",
+    "promotions": "Promotions",
+    "netVat": "Net VAT",
+    "netVatResult": "Net VAT",
+    "saleVat": "Sale VAT",
+    "costVat": "Product cost VAT",
+    "commissionVat": "Commission VAT",
+    "shippingVat": "Shipping VAT",
+    "platformServiceVat": "Platform service fee VAT",
+    "margin": "Profit margin",
+    "estimatedProfit": "Estimated profit",
+    "settledProfit": "Actual profit"
+  },
   "orderDetail": {
     "title": {
       "placeholder": "Order detail"
@@ -1495,8 +1519,8 @@
     "intent": "Order from {date} — profit breakdown, fee timeline, and return status.",
     "backToList": "Back to list",
     "kpis": {
-      "saleSubtotalNet": {
-        "label": "Sale (net)"
+      "saleGross": {
+        "label": "Sale (incl. VAT)"
       },
       "estimatedNetProfit": {
         "label": "Estimated profit",
@@ -1508,9 +1532,9 @@
         "pending": "No settlement row processed yet."
       },
       "margin": {
-        "label": "Net margin",
-        "basisSettled": "Share of net sale (based on settled profit).",
-        "basisEstimated": "Share of net sale (based on estimated profit)."
+        "label": "Profit margin",
+        "basisSettled": "Share of sale (incl. VAT, based on settled profit).",
+        "basisEstimated": "Share of sale (incl. VAT, based on estimated profit)."
       },
       "common": {
         "notAvailable": "No data yet."
@@ -1529,20 +1553,6 @@
         "FULLY_SETTLED_WITH_DATE": "PaymentOrder confirmed on {date}. Settled profit is final."
       }
     },
-    "vatBreakdown": {
-      "title": "Net & VAT breakdown",
-      "saleSubtotalNet": "Sale (net)",
-      "listePriceNet": "List price (net)",
-      "netSaleNet": "Net sale (net)",
-      "saleVatTotal": "Sale VAT",
-      "grossCommissionNet": "Gross commission (net)",
-      "refundedCommissionNet": "Refunded commission (net)",
-      "effectiveCommissionNet": "Effective commission (net)",
-      "effectiveCommissionHint": "Gross minus refunded.",
-      "sellerDiscountNet": "Seller discount (net)",
-      "costSnapshotNet": "Cost snapshot (net)",
-      "costSnapshotMissing": "Some line items lack a cost profile — profit is approximate."
-    },
     "fees": {
       "title": "Fee timeline",
       "empty": {
@@ -1551,6 +1561,8 @@
       },
       "vatLabel": "VAT %{rate}",
       "confirmedAt": "Confirmed: {date}",
+      "estimateBadge": "Estimate",
+      "settledBadge": "Actual invoice",
       "types": {
         "SHIPPING": "Shipping",
         "PLATFORM_SERVICE": "Platform Service Fee",
@@ -1591,10 +1603,10 @@
       "columns": {
         "variant": "Variant",
         "quantity": "Qty",
-        "unitPriceNet": "Unit (net)",
-        "grossCommissionNet": "Commission (net)",
-        "refundedCommissionNet": "Refunded com.",
-        "unitCostSnapshotNet": "Cost (net)"
+        "lineSaleGross": "Line total (incl. VAT)",
+        "commissionGross": "Commission (incl. VAT)",
+        "refundedCommissionGross": "Refunded com. (incl. VAT)",
+        "unitCostSnapshotGross": "Cost (incl. VAT)"
       },
       "unknownVariant": "Variant not linked",
       "costMissing": "Cost missing",
@@ -1702,7 +1714,7 @@
         "columns": {
           "product": "Product",
           "quantity": "Qty",
-          "unitPriceNet": "Unit price (excl. VAT)"
+          "lineSaleGross": "Line total (incl. VAT)"
         },
         "addCost": "Add cost",
         "loadError": "Could not load the order detail."

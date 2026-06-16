@@ -64,8 +64,8 @@ describe('GET live-performance/buffer/{bufferId}', () => {
       mappedOrder: {
         orderDate: '2026-06-05T08:00:00.000Z',
         status: 'PENDING',
-        saleSubtotalNet: '200.00',
-        lines: [{ barcode: 'BC-1', quantity: 2, unitPriceNet: '100.00' }],
+        saleGross: '200.00',
+        lines: [{ barcode: 'BC-1', quantity: 2, lineSaleGross: '200.00' }],
       },
     });
 
@@ -76,13 +76,13 @@ describe('GET live-performance/buffer/{bufferId}', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.platformOrderNumber).toBe('TY-123');
-    expect(body.saleSubtotalNet).toBe('200.00');
+    expect(body.saleGross).toBe('200.00');
     expect(body.lines).toHaveLength(1);
     expect(body.lines[0]).toMatchObject({
       barcode: 'BC-1',
       productName: 'Cotton Tee',
       quantity: 2,
-      unitPriceNet: '100.00',
+      lineSaleGross: '200.00',
       variantId,
       stockCode: 'SC-1',
     });
@@ -97,8 +97,8 @@ describe('GET live-performance/buffer/{bufferId}', () => {
       mappedOrder: {
         orderDate: '2026-06-05T08:00:00.000Z',
         status: 'PENDING',
-        saleSubtotalNet: '50.00',
-        lines: [{ barcode: 'BC-NONE', quantity: 1, unitPriceNet: '50.00' }],
+        saleGross: '50.00',
+        lines: [{ barcode: 'BC-NONE', quantity: 1, lineSaleGross: '50.00' }],
       },
     });
     const res = await app.request(

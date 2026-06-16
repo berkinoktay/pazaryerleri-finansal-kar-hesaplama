@@ -117,17 +117,20 @@ export async function createMemberStoreAccess(
 
 export interface CreateOrderOverrides {
   status?: OrderStatus;
-  // PR-5c (2026-05-19): eski Order ücret kolonları (totalAmount, commissionAmount,
-  // shippingCost) silindi. Yeni convention (saleSubtotalNet / saleVatTotal /
-  // estimatedNetProfit) PR-E (Live Performance) ile override edilebilir hale geldi —
+  // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): saleGross + saleVat (KDV-dahil).
+  // Eski saleSubtotalNet / saleVatTotal kolonları kaldırıldı; saleGross/saleVat yazılır.
+  // Net türetilir downstream: saleGross × 100/(100+vatRate).
   // KPI/chart/orders aggregate'leri bu kolonlardan okuyor. Decimal kolonları string
   // alır (Prisma coerce eder); null = "henüz hesaplanmadı".
   orderDate?: Date;
   platformOrderId?: string;
   platformOrderNumber?: string | null;
-  saleSubtotalNet?: string | null;
-  saleVatTotal?: string | null;
+  saleGross?: string | null;
+  saleVat?: string | null;
   estimatedNetProfit?: string | null;
+  // Persist edilen marj (estimatedNetProfit / saleGross × 100). Live-performance +
+  // order detayı bu kolondan okur (render-time hesap yok). null = henüz hesaplanmadı.
+  estimatedSaleMarginPct?: string | null;
 }
 
 export async function createOrder(
@@ -143,29 +146,30 @@ export async function createOrder(
       platformOrderNumber: overrides.platformOrderNumber ?? null,
       orderDate: overrides.orderDate ?? new Date(),
       status: overrides.status ?? 'DELIVERED',
-      saleSubtotalNet: overrides.saleSubtotalNet ?? null,
-      saleVatTotal: overrides.saleVatTotal ?? null,
+      saleGross: overrides.saleGross ?? null,
+      saleVat: overrides.saleVat ?? null,
       estimatedNetProfit: overrides.estimatedNetProfit ?? null,
+      estimatedSaleMarginPct: overrides.estimatedSaleMarginPct ?? null,
     },
   });
 }
 
 export interface CreateOrderItemOverrides {
   quantity?: number;
-  unitPrice?: string;
+  // GROSS CONVENTION (2026-06-16): lineSaleGross replaces unitPrice; commissionGross
+  // replaces commissionAmount. unitCostSnapshotGross (KDV-dahil) replaces unitCostSnapshotNet.
+  lineSaleGross?: string;
   commissionRate?: string;
-  commissionAmount?: string;
-  // NET cost snapshot — drives the costed-cost aggregate (Σ unitCostSnapshotNet ×
-  // quantity over costed orders). null = cost-missing line.
-  unitCostSnapshotNet?: string | null;
+  commissionGross?: string;
+  // GROSS cost snapshot — drives the costed-cost aggregate. null = cost-missing line.
+  unitCostSnapshotGross?: string | null;
   productVariantId?: string | null;
 }
 
 /**
- * One order line. `quantity` feeds "units sold"; `unitCostSnapshotNet` feeds the
- * costed-cost denominator of the Kâr/Maliyet ratio. The three required money
- * columns (unitPrice / commissionRate / commissionAmount) default to zero — tests
- * that only exercise the live-performance aggregates don't depend on them.
+ * One order line. `quantity` feeds "units sold"; `unitCostSnapshotGross` (KDV-dahil)
+ * feeds the costed-cost denominator of the Kâr/Maliyet ratio. Money columns default
+ * to zero — tests that only exercise aggregates don't depend on them.
  */
 export async function createOrderItem(
   orderId: string,
@@ -177,10 +181,10 @@ export async function createOrderItem(
       orderId,
       organizationId,
       quantity: overrides.quantity ?? 1,
-      unitPrice: overrides.unitPrice ?? '0.00',
+      lineSaleGross: overrides.lineSaleGross ?? '0.00',
       commissionRate: overrides.commissionRate ?? '0.00',
-      commissionAmount: overrides.commissionAmount ?? '0.00',
-      unitCostSnapshotNet: overrides.unitCostSnapshotNet ?? null,
+      commissionGross: overrides.commissionGross ?? '0.00',
+      unitCostSnapshotGross: overrides.unitCostSnapshotGross ?? null,
       productVariantId: overrides.productVariantId ?? null,
     },
   });
@@ -226,9 +230,9 @@ export async function createOrderFee(
     feeType?: OrderFeeType;
     source?: OrderFeeSource;
     direction?: OrderFeeDirection;
-    amountNet?: string;
+    // GROSS CONVENTION (2026-06-16): amountGross (KDV-dahil) + vatRate. Net = gross × 100/(100+rate).
+    amountGross?: string;
     vatRate?: string;
-    vatAmount?: string;
     feeDefinitionId?: string | null;
     // SETTLEMENT rows carry the Trendyol row id (#297 idempotency column).
     trendyolTransactionId?: string | null;
@@ -245,9 +249,8 @@ export async function createOrderFee(
       feeType: overrides.feeType ?? 'PLATFORM_SERVICE',
       source: overrides.source ?? 'ESTIMATE',
       direction: overrides.direction ?? 'DEBIT',
-      amountNet: overrides.amountNet ?? '10.99',
+      amountGross: overrides.amountGross ?? '13.19',
       vatRate: overrides.vatRate ?? '20.00',
-      vatAmount: overrides.vatAmount ?? '2.20',
       trendyolTransactionId: overrides.trendyolTransactionId ?? null,
       ...(overrides.capturedAt !== undefined ? { capturedAt: overrides.capturedAt } : {}),
     },
@@ -313,9 +316,10 @@ export async function createOrgPeriodFee(
     paymentDate?: Date;
     feeType?: OrderFeeType;
     source?: OrderFeeSource;
-    amountNet?: string;
+    // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross + vatRate.
+    // Default: 60.00 gross (50.00 net × 1.20) at vatRate=20.
+    amountGross?: string;
     vatRate?: string;
-    vatAmount?: string;
   } = {},
 ) {
   return prisma.orgPeriodFee.create({
@@ -326,9 +330,8 @@ export async function createOrgPeriodFee(
       paymentDate: overrides.paymentDate ?? new Date(),
       feeType: overrides.feeType ?? 'ADVERTISING',
       source: overrides.source ?? 'SETTLEMENT',
-      amountNet: overrides.amountNet ?? '50.00',
+      amountGross: overrides.amountGross ?? '60.00',
       vatRate: overrides.vatRate ?? '20.00',
-      vatAmount: overrides.vatAmount ?? '10.00',
     },
   });
 }
@@ -392,20 +395,19 @@ export async function createWebhookEvent(
 
 export async function createCostProfile(
   organizationId: string,
-  overrides: { name?: string; type?: CostProfileType; amount?: string } = {},
+  overrides: { name?: string; type?: CostProfileType; amountGross?: string } = {},
 ) {
-  // amount is NET (KDV hariç). vatRate + vatAmount are set so a cost snapshot
-  // captured from this profile is fully specified (net + vat), which is what
-  // the estimate path needs to compute a non-null estimatedNetProfit.
+  // GROSS konvansiyon (2026-06-16): amountGross is GROSS (KDV-dahil) + vatRate.
+  // A cost snapshot captured from this profile is fully specified (gross + rate),
+  // which is what the estimate path needs to compute a non-null estimatedNetProfit.
   return prisma.costProfile.create({
     data: {
       organizationId,
       name: overrides.name ?? `COGS-${randomUUID().slice(0, 8)}`,
       type: overrides.type ?? 'COGS',
-      amount: overrides.amount ?? '50.00',
+      amountGross: overrides.amountGross ?? '60.00',
       currency: 'TRY',
       vatRate: 20,
-      vatAmount: '10.00',
     },
   });
 }

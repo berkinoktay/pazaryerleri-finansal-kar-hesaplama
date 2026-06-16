@@ -91,9 +91,10 @@ describe('settlement period-level handlers', () => {
       expect(fees).toHaveLength(1);
       expect(fees[0]!.feeType).toBe('PLATFORM_SERVICE');
       expect(fees[0]!.source).toBe('SETTLEMENT');
-      expect(fees[0]!.amountNet.toFixed(2)).toBe('10.99');
+      // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): debt=13.19 KDV-dahil → amountGross=13.19.
+      // Net türetilir downstream: 13.19 × 100/120 = 10.99.
+      expect(fees[0]!.amountGross.toFixed(2)).toBe('13.19');
       expect(fees[0]!.vatRate.toFixed(2)).toBe('20.00');
-      expect(fees[0]!.vatAmount.toFixed(2)).toBe('2.20');
       expect(fees[0]!.paymentOrderId).toBe(BigInt(PAYMENT_ORDER_ID));
       expect(fees[0]!.invoiceSerialNumber).toBe('DDF2026009472156');
       // #297: identity column stamped — without it the org_period_fees
@@ -147,9 +148,9 @@ describe('settlement period-level handlers', () => {
       const fees = await prisma.orgPeriodFee.findMany({ where: { organizationId } });
       expect(fees).toHaveLength(1);
       expect(fees[0]!.feeType).toBe('STOPPAGE');
-      expect(fees[0]!.amountNet.toFixed(2)).toBe('25.50');
+      // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): debt=25.50, vatRate=0 → amountGross=25.50.
+      expect(fees[0]!.amountGross.toFixed(2)).toBe('25.50');
       expect(fees[0]!.vatRate.toFixed(2)).toBe('0.00');
-      expect(fees[0]!.vatAmount.toFixed(2)).toBe('0.00');
     });
 
     it('inserts two rows for two paymentDate values under the same cycle', async () => {
@@ -178,8 +179,9 @@ describe('settlement period-level handlers', () => {
         orderBy: { paymentDate: 'asc' },
       });
       expect(fees).toHaveLength(2);
-      expect(fees[0]!.amountNet.toFixed(2)).toBe('15.00');
-      expect(fees[1]!.amountNet.toFixed(2)).toBe('20.00');
+      // GROSS CONVENTION (2026-06-16): debt=15/20, vatRate=0 → amountGross passes through directly.
+      expect(fees[0]!.amountGross.toFixed(2)).toBe('15.00');
+      expect(fees[1]!.amountGross.toFixed(2)).toBe('20.00');
     });
   });
 
@@ -202,10 +204,10 @@ describe('settlement period-level handlers', () => {
       const fees = await prisma.orgPeriodFee.findMany({ where: { organizationId } });
       expect(fees).toHaveLength(1);
       expect(fees[0]!.feeType).toBe('ADVERTISING');
-      // V1 pragmatic — KDV split deferred to commit 9 stage validation.
-      expect(fees[0]!.amountNet.toFixed(2)).toBe('100.00');
+      // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): debt=100, vatRate=0 → amountGross=100.
+      // V1 pragmatic — KDV split deferred (see advertising.ts header comment).
+      expect(fees[0]!.amountGross.toFixed(2)).toBe('100.00');
       expect(fees[0]!.vatRate.toFixed(2)).toBe('0.00');
-      expect(fees[0]!.vatAmount.toFixed(2)).toBe('0.00');
     });
   });
 });

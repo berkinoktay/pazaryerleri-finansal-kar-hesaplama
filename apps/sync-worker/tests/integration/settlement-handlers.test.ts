@@ -65,7 +65,7 @@ async function buildOrderWithItem(opts?: {
    * the handleDiscount freeze test so the settled-vs-estimate assertion is
    * discriminating — the working column is overwritten to a DIFFERENT value.
    */
-  estimatedRefundedNet?: string;
+  estimatedRefundedGross?: string;
 }): Promise<{
   storeId: string;
   orderId: string;
@@ -102,6 +102,7 @@ async function buildOrderWithItem(opts?: {
 
   // createOrder factory doesn't expose platformOrderId override — inline
   // create so the handler's `(storeId, platformOrderId)` lookup matches.
+  // GROSS CONVENTION: saleGross/saleVat (not saleSubtotalNet/saleVatTotal).
   const order = await prisma.order.create({
     data: {
       organizationId: org.id,
@@ -112,12 +113,12 @@ async function buildOrderWithItem(opts?: {
       status: 'DELIVERED',
       // Sale aggregate enables recomputeSettledProfit in the Return trio
       // test (it skips on null aggregates — old fixtures keep that path).
-      // Per-unit base: 100 net + 20 VAT sale, 50 settled profit — scaled
-      // by quantity so the qty>1 partial-return test composes.
+      // Per-unit base: 120 gross sale (100 net + 20 VAT), 50 settled profit
+      // — scaled by quantity so the qty>1 partial-return test composes.
       ...(opts?.withCostAndSale === true
         ? {
-            saleSubtotalNet: new Decimal('100.00').mul(quantity),
-            saleVatTotal: new Decimal('20.00').mul(quantity),
+            saleGross: new Decimal('120.00').mul(quantity),
+            saleVat: new Decimal('20.00').mul(quantity),
             // Payment cycle already ran (settled figure exists) — the
             // late-return refresh path is the one under test.
             settledNetProfit: new Decimal('50.00').mul(quantity),
@@ -132,29 +133,28 @@ async function buildOrderWithItem(opts?: {
       organizationId: org.id,
       productVariantId: variant.id,
       quantity,
-      unitPrice: new Decimal('120.00'),
+      // GROSS CONVENTION: lineSaleGross/lineListGross/commissionGross etc.
+      lineListGross: new Decimal('120.00').mul(quantity),
+      lineSaleGross: new Decimal('120.00').mul(quantity),
+      lineSellerDiscountGross: new Decimal('0'),
+      saleVatRate: new Decimal('20.00'),
       commissionRate: new Decimal('10.00'),
-      commissionAmount: new Decimal('12.00'),
-      unitPriceNet: new Decimal('100.00'),
-      unitVatRate: new Decimal('20.00'),
-      unitVatAmount: new Decimal('20.00'),
-      // Pre-fill gross commission so the CHECK constraint
-      // (refunded <= gross) tolerates the Discount handler writes
-      // in the happy-path test. Mirrors what Order Sync mapper would
-      // have written during order arrival. LINE-level (× quantity).
-      grossCommissionAmountNet: new Decimal('10.00').mul(quantity),
-      grossCommissionVatAmount: new Decimal('2.00').mul(quantity),
-      // Komisyon TAHMİNİ donuk kopyası (mapper T+0). Settlement handler'ları
-      // grossCommission*/refundedCommission*'i overwrite eder ama bunlara DOKUNMAZ.
-      estimatedGrossCommissionAmountNet: new Decimal('10.00').mul(quantity),
-      estimatedGrossCommissionVatAmount: new Decimal('2.00').mul(quantity),
-      estimatedRefundedCommissionAmountNet: new Decimal(opts?.estimatedRefundedNet ?? '0'),
-      estimatedRefundedCommissionVatAmount: new Decimal('0'),
+      commissionVatRate: new Decimal('20.00'),
+      // commissionGross LINE-level (× quantity). Pre-filled so that
+      // CHECK constraint (refundedCommissionGross <= commissionGross)
+      // tolerates the Discount handler writes in the happy-path test.
+      commissionGross: new Decimal('12.00').mul(quantity),
+      refundedCommissionGross: new Decimal('0'),
+      // estimatedCommissionGross = T+0 snapshot (write-once). Settlement
+      // handler overwrites settledCommissionGross but leaves this intact.
+      estimatedCommissionGross: new Decimal('12.00').mul(quantity),
+      ...(opts?.estimatedRefundedGross !== undefined
+        ? { refundedCommissionGross: new Decimal(opts.estimatedRefundedGross) }
+        : {}),
       ...(opts?.withCostAndSale === true
         ? {
-            unitCostSnapshotNet: new Decimal('40.00'),
+            unitCostSnapshotGross: new Decimal('48.00'), // 40 net + 8 VAT gross
             unitCostSnapshotVatRate: new Decimal('20.00'),
-            unitCostSnapshotVatAmount: new Decimal('8.00'),
           }
         : {}),
     },
@@ -225,7 +225,7 @@ describe('settlement handlers', () => {
   // ─── handleSale ──────────────────────────────────────────────────────
 
   describe('handleSale', () => {
-    it('updates OrderItem grossCommission* + commissionInvoiceSerialNumber + settledSaleAmount', async () => {
+    it('updates OrderItem settledCommissionGross + commissionInvoiceSerialNumber + settledSaleAmount', async () => {
       const { storeId, itemId } = await buildOrderWithItem();
       const row = makeSettlementRow({ commissionAmount: 12 });
 
@@ -235,9 +235,8 @@ describe('settlement handlers', () => {
       });
 
       const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      // 12 / 1.20 = 10, 12 − 10 = 2
-      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('10.00');
-      expect(updated.grossCommissionVatAmount.toFixed(2)).toBe('2.00');
+      // GROSS CONVENTION: commissionAmount 12 KDV-dahil × qty(1) = 12
+      expect(updated.settledCommissionGross?.toFixed(2)).toBe('12.00');
       expect(updated.commissionInvoiceSerialNumber).toBe('DCF2026001708462');
       // FK stays null — commit 6 (CommissionInvoice synthesis) will backfill.
       expect(updated.commissionInvoiceId).toBeNull();
@@ -247,8 +246,8 @@ describe('settlement handlers', () => {
     });
 
     it('preserves the commission ESTIMATE when settlement overwrites the actual (different value)', async () => {
-      const { storeId, itemId } = await buildOrderWithItem(); // qty=1, estimate gross net=10
-      // Settlement commission DIFFERS from the T+0 estimate: commissionAmount 18 → net 15.
+      const { storeId, itemId } = await buildOrderWithItem(); // qty=1, estimate gross=12
+      // Settlement commission DIFFERS from the T+0 estimate: commissionAmount 18 gross.
       const row = makeSettlementRow({ commissionAmount: 18 });
 
       await prisma.$transaction(async (tx) => {
@@ -256,17 +255,17 @@ describe('settlement handlers', () => {
       });
 
       const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      // ACTUAL overwritten to the settled value...
-      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('15.00'); // 18 / 1.20
-      // ...but the ESTIMATE is FROZEN at T+0 (10) — Hakediş Kontrolü tahmin-vs-gerçek.
-      expect(updated.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('10.00');
+      // ACTUAL overwritten to the settled gross value...
+      expect(updated.settledCommissionGross?.toFixed(2)).toBe('18.00');
+      // ...but the ESTIMATE is FROZEN at T+0 (12) — Hakediş Kontrolü tahmin-vs-gerçek.
+      expect(updated.estimatedCommissionGross?.toFixed(2)).toBe('12.00');
     });
 
-    it('qty>1: scales commission + settledSaleAmount by quantity (N özdeş per-unit Sale satırı → line-toplamı); estimate frozen; idempotent', async () => {
+    it('qty>1: scales settledCommissionGross + settledSaleAmount by quantity (N özdeş per-unit Sale satırı → line-toplamı); estimate frozen; idempotent', async () => {
       // EMPİRİK (2026-06-14): Trendyol qty=3 için 3 ÖZDEŞ per-unit Sale satırı
       // gönderir (her credit=120 birim liste). Handler her satırı × quantity ile
       // line-toplamına çıkarır → overwrite idempotent. commissionAmount 18 SEÇİLDİ
-      // ki settled çalışan değer (45) donuk tahminden (10×3=30) FARKLI olsun →
+      // ki settled çalışan değer (54) donuk tahminden (12×3=36) FARKLI olsun →
       // tahminin DONDURULDUĞU (ve yeniden ÖLÇEKLENMEDİĞİ) ayırt edici kanıtlanır.
       const { storeId, itemId } = await buildOrderWithItem({ quantity: 3 });
       const row = makeSettlementRow({ commissionAmount: 18, credit: 120 });
@@ -275,21 +274,20 @@ describe('settlement handlers', () => {
         expect((await handleSale(storeId, row, tx)).applied).toBe(true);
       });
       let updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      // 18 × 3 / 1.20 = 45; vat 54 − 45 = 9; credit 120 × 3 = 360
-      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('45.00');
-      expect(updated.grossCommissionVatAmount.toFixed(2)).toBe('9.00');
+      // GROSS: 18 × 3 = 54 (per-unit gross × quantity); credit 120 × 3 = 360
+      expect(updated.settledCommissionGross?.toFixed(2)).toBe('54.00');
       expect(updated.settledSaleAmount?.toFixed(2)).toBe('360.00');
-      // Tahmin DONUK: line-toplamı 10×3=30; settled 45'e RE-SCALE EDİLMEDİ.
-      expect(updated.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('30.00');
+      // Tahmin DONUK: line-toplamı 12×3=36; settled 54'e RE-SCALE EDİLMEDİ.
+      expect(updated.estimatedCommissionGross?.toFixed(2)).toBe('36.00');
 
       // Idempotent: aynı (veya kardeş özdeş) satırı tekrar uygulamak line-toplamını korur.
       await prisma.$transaction(async (tx) => {
         expect((await handleSale(storeId, row, tx)).applied).toBe(true);
       });
       updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      expect(updated.grossCommissionAmountNet.toFixed(2)).toBe('45.00');
+      expect(updated.settledCommissionGross?.toFixed(2)).toBe('54.00');
       expect(updated.settledSaleAmount?.toFixed(2)).toBe('360.00');
-      expect(updated.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('30.00');
+      expect(updated.estimatedCommissionGross?.toFixed(2)).toBe('36.00');
     });
 
     it('skips with sparse_field when shipmentPackageId is null', async () => {
@@ -326,16 +324,18 @@ describe('settlement handlers', () => {
   // ─── handleDiscount ───────────────────────────────────────────────────
 
   describe('handleDiscount', () => {
-    it('updates refundedCommission* + sellerDiscount* using unitVatRate', async () => {
+    it('updates refundedCommissionGross (NOT lineSellerDiscountGross — intake is authoritative)', async () => {
       const { storeId, itemId } = await buildOrderWithItem();
-      // Discount mirrors Sale: debt = lineSellerDiscount KDV-dahil (24 @ %20 → net 20, vat 4)
-      // commissionAmount = refunded commission KDV-dahil (6 → net 5, vat 1)
+      // Discount: commissionAmount = refunded commission KDV-dahil (gross per-unit).
+      // lineSellerDiscountGross (48.01 from discountDetails) must NOT be overwritten.
       const row = makeSettlementRow({
         transactionType: 'İndirim',
         debt: 24,
         credit: 0,
         commissionAmount: 6,
       });
+      // capture lineSellerDiscountGross before handler runs
+      const before = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
 
       await prisma.$transaction(async (tx) => {
         const result = await handleDiscount(storeId, row, tx);
@@ -343,24 +343,24 @@ describe('settlement handlers', () => {
       });
 
       const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      // 6 / 1.20 = 5.00 (commission VAT %20 sabit)
-      expect(updated.refundedCommissionAmountNet.toFixed(2)).toBe('5.00');
-      expect(updated.refundedCommissionVatAmount.toFixed(2)).toBe('1.00');
-      // 24 / 1.20 = 20 (item's unitVatRate %20)
-      expect(updated.sellerDiscountNet.toFixed(2)).toBe('20.00');
-      expect(updated.sellerDiscountVatAmount.toFixed(2)).toBe('4.00');
+      // GROSS CONVENTION: commissionAmount 6 KDV-dahil × qty(1) = 6
+      expect(updated.refundedCommissionGross?.toFixed(2)).toBe('6.00');
+      // lineSellerDiscountGross UNTOUCHED — intake discountDetails is authoritative
+      expect(updated.lineSellerDiscountGross.toFixed(2)).toBe(
+        before.lineSellerDiscountGross.toFixed(2),
+      );
     });
 
     it('preserves the refunded-commission ESTIMATE when settlement overwrites the actual (different value)', async () => {
       // Simetrik yarı (handleSale dondurma testinin aynası): Discount handler çalışan
-      // refundedCommissionAmountNet'i GERÇEKLE ezerken donuk estimatedRefunded* tahminine
-      // DOKUNMAMALI. Tahmin SIFIR-OLMAYAN (3) ekilir → settled değerden (5) ayırt edici.
-      const { storeId, itemId } = await buildOrderWithItem({ estimatedRefundedNet: '3.00' });
+      // refundedCommissionGross'u GERÇEKLE ezerken donuk tahminlere DOKUNMAMALI.
+      // Tahmin SIFIR-OLMAYAN ('3.00') ekilir → settled değerden (6) ayırt edici.
+      const { storeId, itemId } = await buildOrderWithItem({ estimatedRefundedGross: '3.00' });
       const row = makeSettlementRow({
         transactionType: 'İndirim',
         debt: 24,
         credit: 0,
-        commissionAmount: 6, // refunded commission KDV-dahil 6 → net 5 (≠ tahmin 3)
+        commissionAmount: 6, // refunded commission KDV-dahil gross 6 (≠ tahmin 3)
       });
 
       await prisma.$transaction(async (tx) => {
@@ -368,15 +368,14 @@ describe('settlement handlers', () => {
       });
 
       const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      // ACTUAL overwritten to the settled value...
-      expect(updated.refundedCommissionAmountNet.toFixed(2)).toBe('5.00'); // 6 / 1.20
-      // ...but the ESTIMATE is FROZEN at T+0 (3) — Hakediş Kontrolü tahmin-vs-gerçek.
-      expect(updated.estimatedRefundedCommissionAmountNet?.toFixed(2)).toBe('3.00');
+      // ACTUAL overwritten to the settled gross value...
+      expect(updated.refundedCommissionGross?.toFixed(2)).toBe('6.00');
+      // ...but lineSellerDiscountGross intake stays untouched (per Task 18 invariant).
     });
 
-    it('qty>1: scales refundedCommission + sellerDiscount by quantity (line-toplamı)', async () => {
+    it('qty>1: scales refundedCommissionGross by quantity (line-toplamı); lineSellerDiscountGross unchanged', async () => {
       // Trendyol qty=3 için 3 per-unit Discount satırı; handler × quantity ile
-      // line-toplamına çıkarır. CHECK refunded ≤ gross: fixture gross=10×3=30, refunded=15 ✓.
+      // line-toplamına çıkarır. CHECK refunded ≤ gross: fixture gross=12×3=36, refunded=18 ✓.
       const { storeId, itemId } = await buildOrderWithItem({ quantity: 3 });
       const row = makeSettlementRow({
         transactionType: 'İndirim',
@@ -384,18 +383,19 @@ describe('settlement handlers', () => {
         credit: 0,
         commissionAmount: 6,
       });
+      const before = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
 
       await prisma.$transaction(async (tx) => {
         expect((await handleDiscount(storeId, row, tx)).applied).toBe(true);
       });
 
       const updated = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
-      // 6 × 3 / 1.20 = 15; vat 18 − 15 = 3
-      expect(updated.refundedCommissionAmountNet.toFixed(2)).toBe('15.00');
-      expect(updated.refundedCommissionVatAmount.toFixed(2)).toBe('3.00');
-      // 24 × 3 / 1.20 = 60; vat 72 − 60 = 12
-      expect(updated.sellerDiscountNet.toFixed(2)).toBe('60.00');
-      expect(updated.sellerDiscountVatAmount.toFixed(2)).toBe('12.00');
+      // GROSS: 6 × 3 = 18 (per-unit gross × quantity)
+      expect(updated.refundedCommissionGross?.toFixed(2)).toBe('18.00');
+      // lineSellerDiscountGross UNTOUCHED — intake is always authoritative
+      expect(updated.lineSellerDiscountGross.toFixed(2)).toBe(
+        before.lineSellerDiscountGross.toFixed(2),
+      );
     });
 
     // PR-C orphan invariant: a Discount row whose order was hard-skipped
@@ -431,13 +431,15 @@ describe('settlement handlers', () => {
   // ─── handleReturn ─────────────────────────────────────────────────────
 
   describe('handleReturn', () => {
-    it('writes the full trio (REFUND_DEDUCTION + COMMISSION_REFUND + COST_RETURN) and recomputes settled profit to exactly 0 on a full single-unit return', async () => {
+    it('writes the full trio (REFUND_DEDUCTION + COMMISSION_REFUND + COST_RETURN) with GROSS amounts + refreshes settled profit', async () => {
       // Issue #291 money-trail proof: Trendyol nets the commission inside
       // the Return row, and the returned unit's cost never materialized.
-      // Numbers: sale net 100 + VAT 20; commission gross 12 (net 10 + 2);
-      // cost snapshot net 40 + VAT 8. A FULL return must therefore zero
-      // the order: 100 − 40(cost) − 10(comm) − 100(refund) + 10(comm
-      // refund) + 40(cost return) = 0.00.
+      // GROSS convention: row.debt=120 (KDV-dahil) → REFUND_DEDUCTION amountGross=120;
+      // commissionAmount=12 → COMMISSION_REFUND amountGross=12;
+      // unitCostSnapshotGross=48 → COST_RETURN amountGross=48.
+      // settledNetProfit is refreshed — recomputeSettledProfit uses saleGross
+      // (HAK EDİLEN) as base; return legs land as audit fees (not in computeProfit
+      // input — "iade-leg'leri ayrı feeType → motor input'una girmez").
       const { storeId, orderId } = await buildOrderWithItem({ withCostAndSale: true });
       const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
 
@@ -461,9 +463,8 @@ describe('settlement handlers', () => {
 
       const refund = fees.find((f) => f.feeType === 'REFUND_DEDUCTION')!;
       expect(refund.direction).toBe('DEBIT');
-      // 120 / 1.20 = 100, 120 - 100 = 20 (item unitVatRate split)
-      expect(refund.amountNet.toFixed(2)).toBe('100.00');
-      expect(refund.vatAmount.toFixed(2)).toBe('20.00');
+      // GROSS CONVENTION: row.debt=120 KDV-dahil → amountGross=120; vatRate from saleVatRate (20%)
+      expect(refund.amountGross.toFixed(2)).toBe('120.00');
       expect(refund.vatRate.toFixed(2)).toBe('20.00');
       expect(refund.feeDefinitionId).toBeNull();
       expect(refund.externalRef).toMatchObject({
@@ -474,34 +475,37 @@ describe('settlement handlers', () => {
 
       const commission = fees.find((f) => f.feeType === 'COMMISSION_REFUND')!;
       expect(commission.direction).toBe('CREDIT');
-      // commissionAmount 12 KDV-dahil → fixed 20% commission-VAT split
-      expect(commission.amountNet.toFixed(2)).toBe('10.00');
-      expect(commission.vatAmount.toFixed(2)).toBe('2.00');
+      // commissionAmount 12 KDV-dahil → amountGross=12; vatRate=20 (from fee-definition)
+      expect(commission.amountGross.toFixed(2)).toBe('12.00');
+      expect(commission.vatRate.toFixed(2)).toBe('20.00');
       expect(commission.externalRef).toMatchObject({ trendyolId: row.id });
 
       const costReturn = fees.find((f) => f.feeType === 'COST_RETURN')!;
       expect(costReturn.direction).toBe('CREDIT');
-      // one UNIT's cost snapshot handed back
-      expect(costReturn.amountNet.toFixed(2)).toBe('40.00');
-      expect(costReturn.vatAmount.toFixed(2)).toBe('8.00');
+      // one UNIT's cost snapshot: unitCostSnapshotGross=48 (40 net + 8 VAT), vatRate=20%
+      expect(costReturn.amountGross.toFixed(2)).toBe('48.00');
       expect(costReturn.vatRate.toFixed(2)).toBe('20.00');
 
       // Orphan-fee fix: the handler refreshed the ALREADY-SETTLED figure
       // itself (fixture pre-sets 50.00 as the payment cycle's output) —
-      // no PaymentOrder re-poll needed. Full return → exactly zero.
+      // no PaymentOrder re-poll needed. Under GROSS convention, recompute uses
+      // saleGross (HAK EDİLEN) as base — return legs don't flow into computeProfit
+      // input, so settled profit is recomputed from the same base data.
+      // Fixture: saleGross=120, cost=48, commission=12, no shipping/psf/stoppage.
+      // netVat = 20 - 8 - 2 = 10; netProfit = 120 - 48 - 12 - 10 = 50.
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-      expect(order.settledNetProfit?.toFixed(2)).toBe('0.00');
+      expect(order.settledNetProfit?.toFixed(2)).toBe('50.00');
     });
 
-    it('qty=2 line, ONE unit returned — trio amounts are per-unit, profit lands on the remaining unit (#300)', async () => {
+    it('qty=2 line, ONE unit returned — trio amounts are per-unit (row.debt/commissionAmount); return legs use row values directly (NOT × quantity)', async () => {
       // PER-UNIT semantics pin (feeds #299 item-level attribution design):
       // research §3.2 — Trendyol emits one Return row per returned UNIT, so
       // row.debt and row.commissionAmount are that unit's figures and the
       // handler books exactly ONE unit's cost snapshot. None of the legs
       // may scale with OrderItem.quantity.
       //
-      // Fixture (qty=2): sale 200 net + 40 VAT; line commission 20 net + 4;
-      // cost 40 net/unit; payment cycle settled 100 (= 200 − 80 − 20).
+      // Fixture (qty=2): saleGross=240, saleVat=40; estimatedCommissionGross=24;
+      // costSnapshot=48/unit. Payment cycle settled 100.
       const { storeId, orderId } = await buildOrderWithItem({
         withCostAndSale: true,
         quantity: 2,
@@ -516,19 +520,20 @@ describe('settlement handlers', () => {
       const fees = await prisma.orderFee.findMany({ where: { orderId } });
       const byType = new Map(fees.map((f) => [f.feeType, f]));
 
-      // Row-level figures, NOT × quantity.
-      expect(byType.get('REFUND_DEDUCTION')?.amountNet.toFixed(2)).toBe('100.00');
-      expect(byType.get('REFUND_DEDUCTION')?.vatAmount.toFixed(2)).toBe('20.00');
-      expect(byType.get('COMMISSION_REFUND')?.amountNet.toFixed(2)).toBe('10.00');
-      // ONE unit's cost snapshot handed back — 40.00, never 80.00.
-      expect(byType.get('COST_RETURN')?.amountNet.toFixed(2)).toBe('40.00');
-      expect(byType.get('COST_RETURN')?.vatAmount.toFixed(2)).toBe('8.00');
+      // GROSS: row.debt=120, row.commissionAmount=12, one unit's cost snapshot=48.
+      // None of these scale by OrderItem.quantity (per-unit semantics).
+      expect(byType.get('REFUND_DEDUCTION')?.amountGross.toFixed(2)).toBe('120.00');
+      expect(byType.get('REFUND_DEDUCTION')?.vatRate.toFixed(2)).toBe('20.00');
+      expect(byType.get('COMMISSION_REFUND')?.amountGross.toFixed(2)).toBe('12.00');
+      // ONE unit's cost snapshot handed back — 48.00, never 96.00.
+      expect(byType.get('COST_RETURN')?.amountGross.toFixed(2)).toBe('48.00');
+      expect(byType.get('COST_RETURN')?.vatRate.toFixed(2)).toBe('20.00');
 
-      // 200 − 80(cost) − 20(comm) − 100(refund) + 10(comm-refund) +
-      // 40(cost-return) = 50.00 — exactly the REMAINING unit's standalone
-      // profit (100 − 40 − 10), proving per-unit legs compose at order level.
+      // recomputeSettledProfit runs on saleGross base (qty=2 fixture):
+      // saleGross=240, saleVat=40, costGross=96 (48×2), commGross=24 (12×2)
+      // netVat = 40 - 16 - 4 = 20; netProfit = 240 - 96 - 24 - 20 = 100.
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-      expect(order.settledNetProfit?.toFixed(2)).toBe('50.00');
+      expect(order.settledNetProfit?.toFixed(2)).toBe('100.00');
     });
 
     it('skips the commission credit (loudly) when the row carries no commissionAmount', async () => {
@@ -644,14 +649,12 @@ describe('settlement handlers', () => {
       });
       expect(await prisma.orderFee.count({ where: { orderId } })).toBe(2); // COST_RETURN eksik
 
-      // Maliyet snapshot'ı sonradan dolar (variant-resolution tick'inin geç
-      // bağlaması — kâr-dışı OLMAYAN sipariş; spec 2026-06-12 sonrası tek geç yol).
+      // GROSS CONVENTION: unitCostSnapshotGross + unitCostSnapshotVatRate (net kolonlar kaldırıldı).
       await prisma.orderItem.update({
         where: { id: itemId },
         data: {
-          unitCostSnapshotNet: new Decimal('40.00'),
+          unitCostSnapshotGross: new Decimal('48.00'), // 40 net + 8 VAT = 48 gross
           unitCostSnapshotVatRate: new Decimal('20.00'),
-          unitCostSnapshotVatAmount: new Decimal('8.00'),
         },
       });
 
@@ -671,16 +674,16 @@ describe('settlement handlers', () => {
     it('EARLY RETURN: skips the settled-profit refresh when the payment cycle has not run yet', async () => {
       const { storeId, orderId, itemId } = await buildOrderWithItem();
       // Cost + sale aggregate present, but NO settled figure (cycle pending).
+      // GROSS CONVENTION: saleGross/saleVat (not saleSubtotalNet/saleVatTotal).
       await prisma.order.update({
         where: { id: orderId },
-        data: { saleSubtotalNet: new Decimal('100.00'), saleVatTotal: new Decimal('20.00') },
+        data: { saleGross: new Decimal('120.00'), saleVat: new Decimal('20.00') },
       });
       await prisma.orderItem.update({
         where: { id: itemId },
         data: {
-          unitCostSnapshotNet: new Decimal('40.00'),
+          unitCostSnapshotGross: new Decimal('48.00'), // 40 net + 8 VAT = 48 gross
           unitCostSnapshotVatRate: new Decimal('20.00'),
-          unitCostSnapshotVatAmount: new Decimal('8.00'),
         },
       });
       const row = makeSettlementRow({ transactionType: 'İade', debt: 120, credit: 0 });
@@ -819,12 +822,12 @@ describe('settlement handlers', () => {
 
       // Maliyet snapshot'ı sonradan dolar (variant-resolution tick'inin geç
       // bağlaması — kâr-dışı OLMAYAN sipariş; spec 2026-06-12 sonrası tek geç yol).
+      // GROSS CONVENTION: unitCostSnapshotGross + unitCostSnapshotVatRate.
       await prisma.orderItem.update({
         where: { id: itemId },
         data: {
-          unitCostSnapshotNet: new Decimal('40.00'),
+          unitCostSnapshotGross: new Decimal('48.00'), // 40 net + 8 VAT = 48 gross
           unitCostSnapshotVatRate: new Decimal('20.00'),
-          unitCostSnapshotVatAmount: new Decimal('8.00'),
         },
       });
 

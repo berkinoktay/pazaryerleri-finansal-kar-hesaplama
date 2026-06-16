@@ -17,7 +17,7 @@ const newProfile = {
   organizationId: ORG_ID,
   name: 'Yeni Maliyet',
   type: 'COGS',
-  amount: '30.00',
+  amountGross: '30.00',
   currency: 'TRY',
   vatRate: 18,
   fxRateMode: 'AUTO',

@@ -40,8 +40,8 @@ describe('Order state columns (PR-5a)', () => {
     it('all nullable kar/state kolonları null defaults', async () => {
       const { org, store } = await setup();
       const order = await createOrder(org.id, store.id);
-      expect(order.saleSubtotalNet).toBeNull();
-      expect(order.saleVatTotal).toBeNull();
+      expect(order.saleGross).toBeNull();
+      expect(order.saleVat).toBeNull();
       expect(order.estimatedNetProfit).toBeNull();
       expect(order.settledNetProfit).toBeNull();
       expect(order.paymentOrderId).toBeNull();
@@ -100,15 +100,15 @@ describe('Order state columns (PR-5a)', () => {
   });
 
   describe('Sale/profit Decimal precision', () => {
-    it('saleSubtotalNet + saleVatTotal store with 2 decimal precision', async () => {
+    it('saleGross + saleVat store with 2 decimal precision', async () => {
       const { org, store } = await setup();
       const order = await createOrder(org.id, store.id);
       const updated = await prisma.order.update({
         where: { id: order.id },
-        data: { saleSubtotalNet: '83.33', saleVatTotal: '16.67' },
+        data: { saleGross: '83.33', saleVat: '16.67' },
       });
-      expect(new Decimal(updated.saleSubtotalNet!).toString()).toBe('83.33');
-      expect(new Decimal(updated.saleVatTotal!).toString()).toBe('16.67');
+      expect(new Decimal(updated.saleGross!).toString()).toBe('83.33');
+      expect(new Decimal(updated.saleVat!).toString()).toBe('16.67');
     });
 
     it('estimatedNetProfit + settledNetProfit store independently', async () => {

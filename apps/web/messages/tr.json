@@ -825,7 +825,7 @@
         "orderNumber": "Sipariş No",
         "status": "Durum",
         "reconciliationStatus": "Mutabakat",
-        "saleSubtotalNet": "Satış (net)",
+        "saleGross": "Satış (KDV dahil)",
         "estimatedNetProfit": "Tahmini kâr",
         "settledNetProfit": "Fiili kâr",
         "itemCount": "Kalem",
@@ -1553,6 +1553,30 @@
       }
     }
   },
+  "profitBreakdown": {
+    "title": "Kâr dökümü",
+    "unavailable": "Bu sipariş için kâr hesaplanmadı.",
+    "sale": "Satış",
+    "listPrice": "Liste fiyatı",
+    "sellerDiscount": "Satıcı indirimi",
+    "netSale": "Net satış",
+    "cost": "Ürün maliyeti",
+    "commission": "Komisyon",
+    "shipping": "Kargo",
+    "platformService": "Platform hizmet bedeli",
+    "stoppage": "Stopaj",
+    "promotions": "Promosyonlar",
+    "netVat": "Net KDV",
+    "netVatResult": "Net KDV",
+    "saleVat": "Satış KDV",
+    "costVat": "Ürün maliyeti KDV",
+    "commissionVat": "Komisyon KDV",
+    "shippingVat": "Kargo KDV",
+    "platformServiceVat": "Platform hizmet bedeli KDV",
+    "margin": "Kâr marjı",
+    "estimatedProfit": "Tahmini kâr",
+    "settledProfit": "Fiili kâr"
+  },
   "orderDetail": {
     "title": {
       "placeholder": "Sipariş detayı"
@@ -1560,8 +1584,8 @@
     "intent": "{date} tarihli sipariş — kâr dökümü, fatura zaman çizgisi ve iade durumu.",
     "backToList": "Listeye dön",
     "kpis": {
-      "saleSubtotalNet": {
-        "label": "Satış (net)"
+      "saleGross": {
+        "label": "Satış (KDV dahil)"
       },
       "estimatedNetProfit": {
         "label": "Tahmini kâr",
@@ -1573,9 +1597,9 @@
         "pending": "Henüz mutabakat satırı işlenmedi."
       },
       "margin": {
-        "label": "Net marj",
-        "basisSettled": "Satış netine oran (fiili kâr esas).",
-        "basisEstimated": "Satış netine oran (tahmini kâr esas)."
+        "label": "Kâr marjı",
+        "basisSettled": "Satışa oran (KDV dahil, fiili kâr esas).",
+        "basisEstimated": "Satışa oran (KDV dahil, tahmini kâr esas)."
       },
       "common": {
         "notAvailable": "Henüz veri yok."
@@ -1594,20 +1618,6 @@
         "FULLY_SETTLED_WITH_DATE": "PaymentOrder {date} tarihinde onaylandı. Fiili kâr kesinleşti."
       }
     },
-    "vatBreakdown": {
-      "title": "Net & KDV dökümü",
-      "saleSubtotalNet": "Satış (net)",
-      "listePriceNet": "Liste fiyatı (net)",
-      "netSaleNet": "Net satış (net)",
-      "saleVatTotal": "Satış KDV",
-      "grossCommissionNet": "Brüt komisyon (net)",
-      "refundedCommissionNet": "İade edilen komisyon (net)",
-      "effectiveCommissionNet": "Etkin komisyon (net)",
-      "effectiveCommissionHint": "Brüt − iade edilen.",
-      "sellerDiscountNet": "Satıcı indirimi (net)",
-      "costSnapshotNet": "Maliyet anlık kopyası (net)",
-      "costSnapshotMissing": "Bazı kalemlerde maliyet profili eksik — kâr hesabı yaklaşık."
-    },
     "fees": {
       "title": "Ücret zaman çizgisi",
       "empty": {
@@ -1616,6 +1626,8 @@
       },
       "vatLabel": "KDV %{rate}",
       "confirmedAt": "Mutabakat: {date}",
+      "estimateBadge": "Tahmini",
+      "settledBadge": "Gerçek fatura",
       "types": {
         "SHIPPING": "Kargo",
         "PLATFORM_SERVICE": "Hizmet Bedeli (PSF)",
@@ -1656,10 +1668,10 @@
       "columns": {
         "variant": "Varyant",
         "quantity": "Adet",
-        "unitPriceNet": "Birim (net)",
-        "grossCommissionNet": "Komisyon (net)",
-        "refundedCommissionNet": "İade kom.",
-        "unitCostSnapshotNet": "Maliyet (net)"
+        "lineSaleGross": "Satır tutarı (KDV dahil)",
+        "commissionGross": "Komisyon (KDV dahil)",
+        "refundedCommissionGross": "İade kom. (KDV dahil)",
+        "unitCostSnapshotGross": "Maliyet (KDV dahil)"
       },
       "unknownVariant": "Varyant bağlı değil",
       "costMissing": "Maliyet eksik",
@@ -1767,7 +1779,7 @@
         "columns": {
           "product": "Ürün",
           "quantity": "Adet",
-          "unitPriceNet": "Birim fiyat (KDV hariç)"
+          "lineSaleGross": "Satır tutarı (KDV dahil)"
         },
         "addCost": "Maliyet ekle",
         "loadError": "Sipariş ayrıntısı yüklenemedi."

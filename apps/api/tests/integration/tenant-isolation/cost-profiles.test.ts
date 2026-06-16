@@ -39,7 +39,7 @@ describe('Tenant isolation — cost-profile routes', () => {
         organizationId: orgB.id,
         name: 'Org B COGS',
         type: 'COGS',
-        amount: new Decimal('15.00'),
+        amountGross: new Decimal('15.00'),
         currency: 'TRY',
         vatRate: 0,
         fxRateMode: 'AUTO',
@@ -52,7 +52,7 @@ describe('Tenant isolation — cost-profile routes', () => {
         version: 1,
         name: profile.name,
         type: profile.type,
-        amount: profile.amount,
+        amountGross: profile.amountGross,
         currency: profile.currency,
         vatRate: profile.vatRate,
         fxRateMode: profile.fxRateMode,
@@ -81,7 +81,7 @@ describe('Tenant isolation — cost-profile routes', () => {
         organizationId: orgA.id,
         name: 'Org A COGS',
         type: 'COGS',
-        amount: new Decimal('10.00'),
+        amountGross: new Decimal('10.00'),
         currency: 'TRY',
         vatRate: 0,
         fxRateMode: 'AUTO',
@@ -122,7 +122,9 @@ describe('Tenant isolation — cost-profile routes', () => {
     const res = await app.request(`/v1/organizations/${orgA.id}/cost-profiles/${profileB.id}`, {
       method: 'PATCH',
       headers: { Authorization: bearer(userA.accessToken), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Hijacked' }),
+      // GROSS konvansiyon: çapraz-org PATCH gross para alanını dener; yine 404
+      // (route org filtresinde reddeder, gövde işlenmeden önce — sızıntı yok).
+      body: JSON.stringify({ name: 'Hijacked', amountGross: '999.00' }),
     });
     expect(res.status).toBe(404);
   });

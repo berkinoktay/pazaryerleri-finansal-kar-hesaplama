@@ -106,8 +106,9 @@ async function buildScenario(): Promise<BuiltCtx> {
       platformOrderId: SHIPMENT_PACKAGE_ID.toString(),
       orderDate: new Date(),
       status: 'DELIVERED',
-      saleSubtotalNet: new Decimal('100.00'),
-      saleVatTotal: new Decimal('20.00'),
+      // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): saleGross/saleVat.
+      saleGross: new Decimal('120.00'),
+      saleVat: new Decimal('20.00'),
       reconciliationStatus: 'NOT_SETTLED',
     },
   });
@@ -118,14 +119,13 @@ async function buildScenario(): Promise<BuiltCtx> {
       organizationId: org.id,
       productVariantId: variant.id,
       quantity: 1,
-      unitPrice: new Decimal('120.00'),
+      // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross replaces
+      // grossCommissionAmountNet (12.00 gross). saleVatRate replaces unitVatRate.
+      lineListGross: new Decimal('120.00'),
+      lineSaleGross: new Decimal('120.00'),
+      saleVatRate: new Decimal('20.00'),
       commissionRate: new Decimal('10.00'),
-      commissionAmount: new Decimal('12.00'),
-      unitPriceNet: new Decimal('100.00'),
-      unitVatRate: new Decimal('20.00'),
-      unitVatAmount: new Decimal('20.00'),
-      grossCommissionAmountNet: new Decimal('10.00'),
-      grossCommissionVatAmount: new Decimal('2.00'),
+      commissionGross: new Decimal('12.00'),
     },
   });
 

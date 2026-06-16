@@ -1,5 +1,6 @@
 import { estimateShippingCostForOrder } from '@pazarsync/profit';
 import { randomUUID } from 'node:crypto';
+import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
@@ -9,7 +10,7 @@ import { ensureDbReachable, truncateAll } from '../helpers/db';
 // ─── Fixture ───────────────────────────────────────────────────────────────
 // org → store(SENDEOMP, TRENDYOL_CONTRACT) → product → variants → order + items.
 // Order estimator: desi = cargoDeci ?? adet-ağırlıklı ortalama(ürün desisi),
-// Barem aralığı = saleSubtotalNet + saleVatTotal (indirimli brüt).
+// Barem aralığı = saleGross (indirimli brüt — GROSS konvansiyon 2026-06-16).
 
 async function getSendeomp() {
   const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
@@ -61,8 +62,9 @@ async function createOrderFixture(opts: OrderFixtureOptions): Promise<{ orderId:
       platformOrderId: `po-${stamp}`,
       orderDate: new Date('2026-06-13T08:00:00Z'),
       status: 'PROCESSING',
-      saleSubtotalNet: opts.grossSubtotalNet,
-      saleVatTotal: opts.grossVatTotal,
+      // GROSS konvansiyon: Barem aralığı tek brüt kolon (saleGross = eski net + vat).
+      saleGross: new Decimal(opts.grossSubtotalNet).add(opts.grossVatTotal).toFixed(2),
+      saleVat: opts.grossVatTotal,
       cargoDeci: opts.cargoDeci,
       fastDelivery: opts.fastDelivery,
     },
@@ -90,9 +92,9 @@ async function createOrderFixture(opts: OrderFixtureOptions): Promise<{ orderId:
         productVariantId: variant.id,
         barcode: variant.barcode,
         quantity: it.qty,
-        unitPrice: '100.00',
+        lineSaleGross: new Decimal('100.00').mul(it.qty).toFixed(2),
         commissionRate: '0',
-        commissionAmount: '0',
+        commissionGross: '0',
       },
     });
   }

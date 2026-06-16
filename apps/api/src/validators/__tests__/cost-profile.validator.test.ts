@@ -8,7 +8,7 @@ describe('createCostProfileSchema', () => {
   const base = {
     name: 'Hammadde COGS',
     type: 'COGS' as const,
-    amount: '25.50',
+    amountGross: '25.50',
     currency: 'TRY' as const,
     vatRate: 18,
     fxRateMode: 'AUTO' as const,
@@ -70,8 +70,8 @@ describe('createCostProfileSchema', () => {
     }
   });
 
-  it('rejects amount with more than 2 decimal places', () => {
-    const result = createCostProfileSchema.safeParse({ ...base, amount: '25.123' });
+  it('rejects amountGross with more than 2 decimal places', () => {
+    const result = createCostProfileSchema.safeParse({ ...base, amountGross: '25.123' });
     expect(result.success).toBe(false);
   });
 
@@ -81,7 +81,7 @@ describe('createCostProfileSchema', () => {
   });
 
   it('applies defaults: currency TRY, vatRate 0, fxRateMode AUTO', () => {
-    const minimal = { name: 'Minimal', type: 'PACKAGING' as const, amount: '10.00' };
+    const minimal = { name: 'Minimal', type: 'PACKAGING' as const, amountGross: '10.00' };
     const result = createCostProfileSchema.safeParse(minimal);
     expect(result.success).toBe(true);
     if (result.success) {

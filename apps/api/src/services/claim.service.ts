@@ -195,15 +195,14 @@ export async function getClaimsSummary(
         capturedAt: { gte: from, lte: to },
         order: { storeId },
       },
-      _sum: { amountNet: true, vatAmount: true },
+      // GROSS konvansiyon (2026-06-16): amountGross zaten KDV-dahil — net+vat toplamına gerek yok.
+      _sum: { amountGross: true },
     }),
   ]);
 
   const grossOf = (feeType: (typeof RETURN_TRIO_FEE_TYPES)[number]): Decimal => {
     const group = feeGroups.find((g) => g.feeType === feeType);
-    const net = new Decimal(group?._sum.amountNet?.toString() ?? '0');
-    const vat = new Decimal(group?._sum.vatAmount?.toString() ?? '0');
-    return net.add(vat);
+    return new Decimal(group?._sum.amountGross?.toString() ?? '0');
   };
 
   const refundDeduction = grossOf('REFUND_DEDUCTION');

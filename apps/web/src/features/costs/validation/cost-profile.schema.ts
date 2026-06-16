@@ -29,7 +29,7 @@ export const costProfileFormSchema = z
       CostProfileType.OTHER,
     ]),
     currency: z.enum([Currency.TRY, Currency.USD, Currency.EUR]),
-    amount: z
+    amountGross: z
       .string()
       .min(1, { message: 'amountRequired' })
       .refine(

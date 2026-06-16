@@ -10,9 +10,9 @@
 // no tracking match) or zero match → log + skip; the row is retried on the
 // next settlement scan once the order sync has backfilled tracking numbers.
 //
-// VAT: item.amount is VAT-INCLUSIVE ("KDV tevkifat uygulanmamistir"). The
-// rate comes from fee_definitions.default_vat_rate via resolveFeeDefinition
-// (at = order.orderDate) — data-driven, never a code constant.
+// GROSS CONVENTION: item.amount KDV-dahil (gross). amountGross doğrudan
+// yazılır; vatRate fee_definitions.default_vat_rate'ten (data-driven).
+// Net türetilir (amountGross × 100/(100+vatRate)) — API katmanında.
 //
 // Idempotency (#297): the invoice line identity lives in the indexed
 // invoiceSerialNumber + parcelUniqueId columns; an existing CARGO_INVOICE
@@ -158,10 +158,10 @@ export async function handleCargoInvoiceItems(
       at: order.orderDate,
     });
 
-    const gross = new Decimal(item.amount);
+    // GROSS CONVENTION (2026-06-16, Bölüm E): item.amount KDV-dahil (gross).
+    // Net-split kaldırıldı; amountGross doğrudan yazılır, vatRate fee-definition'dan.
+    const amountGross = new Decimal(item.amount);
     const vatRate = new Decimal(definition.defaultVatRate.toString());
-    const amountNet = gross.div(vatRate.div(100).add(1)).toDecimalPlaces(2);
-    const vatAmount = gross.sub(amountNet);
 
     await tx.orderFee.create({
       data: {
@@ -171,9 +171,8 @@ export async function handleCargoInvoiceItems(
         feeType,
         source: 'CARGO_INVOICE',
         direction: 'DEBIT',
-        amountNet,
+        amountGross,
         vatRate,
-        vatAmount,
         displayName: item.shipmentPackageType,
         invoiceSerialNumber,
         parcelUniqueId,

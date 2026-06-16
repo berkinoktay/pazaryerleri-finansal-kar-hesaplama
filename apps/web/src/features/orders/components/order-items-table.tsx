@@ -31,8 +31,9 @@ export interface OrderItemsTableProps {
 
 /**
  * Per-line OrderItem grid. Each row exposes the variant identity (barcode +
- * marketplace code) plus the net+VAT split and the cost snapshot. The table
- * uses the ui/ primitives directly — DataTable is overkill here (no
+ * marketplace code) plus the GROSS (KDV-dahil) sale/commission split and the
+ * cost snapshot — NO per-item profit/margin (kâr sipariş-seviyesinde, dökümde).
+ * The table uses the ui/ primitives directly — DataTable is overkill here (no
  * sorting, no pagination, no row-click navigation; the order detail is
  * already the deepest level).
  */
@@ -57,10 +58,10 @@ export function OrderItemsTable({
               <TableRow>
                 <TableHead>{t('columns.variant')}</TableHead>
                 <TableHead className="text-right">{t('columns.quantity')}</TableHead>
-                <TableHead className="text-right">{t('columns.unitPriceNet')}</TableHead>
-                <TableHead className="text-right">{t('columns.grossCommissionNet')}</TableHead>
-                <TableHead className="text-right">{t('columns.refundedCommissionNet')}</TableHead>
-                <TableHead className="text-right">{t('columns.unitCostSnapshotNet')}</TableHead>
+                <TableHead className="text-right">{t('columns.lineSaleGross')}</TableHead>
+                <TableHead className="text-right">{t('columns.commissionGross')}</TableHead>
+                <TableHead className="text-right">{t('columns.refundedCommissionGross')}</TableHead>
+                <TableHead className="text-right">{t('columns.unitCostSnapshotGross')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -87,21 +88,17 @@ export function OrderItemsTable({
                       {formatter.number(item.quantity, 'integer')}
                     </TableCell>
                     <TableCell className="text-right">
-                      {item.unitPriceNet === null ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : (
-                        <Currency value={item.unitPriceNet} />
-                      )}
+                      <Currency value={item.lineSaleGross} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Currency value={item.grossCommissionAmountNet} />
+                      <Currency value={item.commissionGross} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Currency value={item.refundedCommissionAmountNet} dimWhenZero />
+                      <Currency value={item.refundedCommissionGross} dimWhenZero />
                     </TableCell>
                     <TableCell className="text-right">
-                      {item.unitCostSnapshotNet !== null ? (
-                        <Currency value={item.unitCostSnapshotNet} />
+                      {item.unitCostSnapshotGross !== null ? (
+                        <Currency value={item.unitCostSnapshotGross} />
                       ) : profitExcluded ? (
                         <span className="text-muted-foreground">{t('costFrozen')}</span>
                       ) : (

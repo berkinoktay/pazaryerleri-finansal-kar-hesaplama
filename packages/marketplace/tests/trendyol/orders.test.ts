@@ -15,67 +15,80 @@
 // the live data path depends on.
 
 import { Decimal } from 'decimal.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getBusinessDate, getBusinessHour } from '@pazarsync/utils';
+import { syncLog } from '@pazarsync/sync-core';
 
 import {
+  mapLine,
   mapTrendyolOrdersResponse,
   mapTrendyolShipmentPackage,
   mapTrendyolStatusToEnum,
 } from '../../src/trendyol/orders';
 import type {
+  MappedOrder,
+  MappedOrderLine,
+  PromotionDisplay,
   TrendyolOrderLine,
-  TrendyolPackageHistory,
-  TrendyolShipmentPackage,
 } from '../../src/trendyol/types';
+import { buildLine, buildPackage } from '../helpers/order-builders';
+import { PAYLOAD_11313045474, PAYLOAD_11323825496 } from '../fixtures/trendyol-gross-payloads';
 
-// ─── Fixture builders ──────────────────────────────────────────────────
-
-interface PackageOverrides {
-  status?: string;
-  orderDate?: number;
-  lastModifiedDate?: number;
-  agreedDeliveryDate?: number | undefined;
-  estimatedDeliveryStartDate?: number | undefined;
-  estimatedDeliveryEndDate?: number | undefined;
-  lines?: TrendyolOrderLine[];
-  packageHistories?: TrendyolPackageHistory[] | undefined;
-  fastDelivery?: boolean;
-  fastDeliveryType?: string | undefined;
-  micro?: boolean;
+/**
+ * Efektif komisyon — Trendyol/panel'in GERÇEKTE aldığı tutar. commissionGross
+ * LİSTE üzerinden brüt komisyon (#332); satıcı-indirim payının komisyonu
+ * (refundedCommissionGross) iade edilir. Net = gross − refunded = effectiveSale ×
+ * rate. İş anlamı taşıyan değer budur; testler ham commissionGross yerine BUNU
+ * panele kilitler. İki kolon ayrı 2-ondalığa yuvarlandığından (Decimal(12,2)),
+ * bazı satırlarda fark tek-yuvarlanmış effectiveSale×rate'ten bir kuruş kayabilir
+ * — bu üretimde de saklanan davranıştır, fixture'lar gerçek değeri pinler.
+ */
+function effectiveCommission(line: MappedOrderLine): string {
+  return new Decimal(line.commissionGross)
+    .sub(new Decimal(line.refundedCommissionGross))
+    .toFixed(2);
 }
 
-function buildLine(overrides: Partial<TrendyolOrderLine> = {}): TrendyolOrderLine {
-  return {
-    lineId: 1,
-    barcode: 'BARCODE-1',
-    quantity: 1,
-    lineUnitPrice: 120,
-    lineGrossAmount: 120,
-    vatRate: 20,
-    commission: 10,
-    ...overrides,
-  };
-}
+// ─── TrendyolDiscountDetail type (Task 7) ──────────────────────────────
 
-function buildPackage(overrides: PackageOverrides = {}): TrendyolShipmentPackage {
-  return {
-    orderNumber: 'ORDER-NUMBER-1',
-    shipmentPackageId: 1234567,
-    status: overrides.status ?? 'Created',
-    orderDate: overrides.orderDate ?? Date.UTC(2026, 5, 8, 14, 0, 0),
-    lastModifiedDate: overrides.lastModifiedDate ?? Date.UTC(2026, 5, 8, 14, 0, 0),
-    agreedDeliveryDate: overrides.agreedDeliveryDate,
-    estimatedDeliveryStartDate: overrides.estimatedDeliveryStartDate,
-    estimatedDeliveryEndDate: overrides.estimatedDeliveryEndDate,
-    packageGrossAmount: 120,
-    fastDelivery: overrides.fastDelivery ?? false,
-    fastDeliveryType: overrides.fastDeliveryType,
-    micro: overrides.micro ?? false,
-    lines: overrides.lines ?? [buildLine()],
-    packageHistories: overrides.packageHistories,
-  };
-}
+describe('TrendyolDiscountDetail type', () => {
+  it('parses a line with discountDetails array', () => {
+    const line: TrendyolOrderLine = {
+      lineId: 1,
+      barcode: 'X',
+      quantity: 3,
+      lineUnitPrice: 269.66,
+      lineGrossAmount: 285,
+      lineSellerDiscount: 16,
+      vatRate: 20,
+      commission: 9.6,
+      discountDetails: [
+        { lineItemPrice: 268.99, lineItemSellerDiscount: 16.01 },
+        { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+        { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+      ],
+    };
+    expect(line.discountDetails).toHaveLength(3);
+    expect(line.discountDetails?.[0]?.lineItemPrice).toBe(268.99);
+  });
+});
+
+// ─── MappedOrder GROSS shape (Task 8 — type-level) ─────────────────────
+
+describe('MappedOrder GROSS shape', () => {
+  it('exposes gross aggregate + promotionDisplays', () => {
+    const sample = {} as MappedOrder;
+    // Tip-seviyesi: aşağıdaki alanlar var olmalı (derleme hatası verirse FAIL).
+    void (sample.saleGross satisfies string);
+    void (sample.saleVat satisfies string);
+    void (sample.listGross satisfies string);
+    void (sample.sellerDiscountGross satisfies string);
+    void (sample.promotionDisplays satisfies PromotionDisplay[] | null);
+    void (sample.lines?.[0]?.lineSaleGross satisfies string | undefined);
+    void (sample.lines?.[0]?.commissionGross satisfies string | undefined);
+    expect(true).toBe(true);
+  });
+});
 
 // ─── orderDate normalisation (the central invariant) ───────────────────
 
@@ -257,314 +270,344 @@ describe('mapTrendyolShipmentPackage — fast-delivery type + estimated window c
   });
 });
 
-describe('mapTrendyolShipmentPackage — per-line KDV split', () => {
-  it('splits a 20% VAT line correctly: 120 gross → 100 net + 20 VAT', () => {
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [buildLine({ lineUnitPrice: 120, lineGrossAmount: 120, vatRate: 20 })],
-      }),
-    );
+describe('mapLine — GROSS output', () => {
+  it('single discounted line: list/sale/sellerDiscount/saleVatRate/commission', () => {
+    const line = buildLine({
+      quantity: 1,
+      lineGrossAmount: 120,
+      lineSellerDiscount: 20,
+      vatRate: 20,
+      commission: 10,
+      discountDetails: [{ lineItemPrice: 100, lineItemSellerDiscount: 20 }],
+    });
+    const m = mapLine(line, { shipmentPackageId: 1 });
 
-    expect(mapped.lines[0]?.unitPriceNet).toBe('100');
-    expect(mapped.lines[0]?.unitVatAmount).toBe('20');
-    expect(mapped.lines[0]?.unitVatRate).toBe('20');
+    expect(m.lineListGross).toBe('120.00');
+    expect(m.lineSaleGross).toBe('100.00');
+    expect(m.lineSellerDiscountGross).toBe('20.00');
+    expect(m.saleVatRate).toBe('20');
+    // commissionGross LİSTE üzerinden brüt (120 × 10% = 12.00); refunded = 20 × 10% = 2.00.
+    // Panel/Trendyol gerçek değeri EFEKTİF komisyon = gross − refunded = 10.00 (= 100 × 10%).
+    expect(m.commissionGross).toBe('12.00'); // 120 (liste) × 10%
+    expect(m.refundedCommissionGross).toBe('2.00'); // 20 (indirim) × 10%
+    expect(effectiveCommission(m)).toBe('10.00'); // panel = effectiveSale 100 × 10%
+    expect(m.commissionVatRate).toBe('20');
   });
 
-  it('splits a 10% VAT line correctly: 110 gross → 100 net + 10 VAT', () => {
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [buildLine({ lineUnitPrice: 110, lineGrossAmount: 110, vatRate: 10 })],
-      }),
-    );
+  it('no discountDetails: falls back to lineGrossAmount × qty, discount 0', () => {
+    const line = buildLine({ quantity: 3, lineGrossAmount: 60, vatRate: 20, commission: 10 });
+    const m = mapLine(line, { shipmentPackageId: 1 });
 
-    expect(mapped.lines[0]?.unitPriceNet).toBe('100');
-    expect(mapped.lines[0]?.unitVatAmount).toBe('10');
+    expect(m.lineListGross).toBe('180.00');
+    expect(m.lineSaleGross).toBe('180.00'); // no discount → sale == list
+    expect(m.lineSellerDiscountGross).toBe('0.00');
+    // İndirim yok → liste == satış → commissionGross 18.00, refunded 0, efektif 18.00.
+    expect(m.commissionGross).toBe('18.00'); // 180 (liste) × 10%
+    expect(effectiveCommission(m)).toBe('18.00'); // indirim yok → gross == efektif
   });
 
-  it('computes gross commission with the 20% commission-VAT split', () => {
-    // lineGrossAmount 100, commission 10% → grossCommissionGross 10
-    // grossCommissionAmountNet = 10 / 1.20 = 8.33 (toDecimalPlaces 2)
-    // grossCommissionVatAmount = 10 - 8.33 = 1.67
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          buildLine({ lineUnitPrice: 100, lineGrossAmount: 100, vatRate: 20, commission: 10 }),
-        ],
-      }),
-    );
+  it('no discountDetails with lineSellerDiscount: scalar × qty fallback', () => {
+    const line = buildLine({
+      quantity: 2,
+      lineGrossAmount: 120,
+      lineSellerDiscount: 12,
+      vatRate: 20,
+      commission: 10,
+    });
+    const m = mapLine(line, { shipmentPackageId: 1 });
 
-    expect(mapped.lines[0]?.grossCommissionAmountNet).toBe('8.33');
-    expect(mapped.lines[0]?.grossCommissionVatAmount).toBe('1.67');
-    expect(mapped.lines[0]?.commissionRate).toBe('10');
+    expect(m.lineListGross).toBe('240.00');
+    expect(m.lineSellerDiscountGross).toBe('24.00'); // 12 × 2
+    expect(m.lineSaleGross).toBe('216.00'); // 240 − 24
+    expect(m.commissionGross).toBe('24.00'); // 240 (liste) × 10%
+    expect(m.refundedCommissionGross).toBe('2.40'); // 24 (indirim) × 10%
+    expect(effectiveCommission(m)).toBe('21.60'); // panel = effectiveSale 216 × 10%
   });
 
-  it('uses the commissionVatRate param for the KDV split (denetim A — DB-driven)', () => {
-    // grossCommissionGross 10; rate %18 → divisor 1.18 → net 10/1.18 = 8.47,
-    // vat 10 - 8.47 = 1.53. Differs from the 20% default (8.33 / 1.67).
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          buildLine({ lineUnitPrice: 100, lineGrossAmount: 100, vatRate: 20, commission: 10 }),
-        ],
-      }),
-      18,
-    );
+  it('qty>1 uneven discount via discountDetails (11313045474)', () => {
+    const line = buildLine({
+      quantity: 3,
+      lineGrossAmount: 285,
+      lineSellerDiscount: 16,
+      vatRate: 20,
+      commission: 9.6,
+      discountDetails: [
+        { lineItemPrice: 268.99, lineItemSellerDiscount: 16.01 },
+        { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+        { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+      ],
+    });
+    const m = mapLine(line, { shipmentPackageId: 11313045474 });
 
-    expect(mapped.lines[0]?.grossCommissionAmountNet).toBe('8.47');
-    expect(mapped.lines[0]?.grossCommissionVatAmount).toBe('1.53');
+    expect(m.lineSaleGross).toBe('806.99'); // Σ lineItemPrice
+    expect(m.lineListGross).toBe('855.00'); // 285 × 3
+    expect(m.lineSellerDiscountGross).toBe('48.01'); // Σ lineItemSellerDiscount (≠ 16×3)
+    expect(m.commissionGross).toBe('82.08'); // 855 (liste) × 9.6%
+    expect(m.refundedCommissionGross).toBe('4.61'); // 48.01 (indirim) × 9.6%
+    expect(effectiveCommission(m)).toBe('77.47'); // panel = effectiveSale 806.99 × 9.6%
   });
 
-  it('falls back to the 20% default when commissionVatRate is omitted', () => {
-    const lines = [
-      buildLine({ lineUnitPrice: 100, lineGrossAmount: 100, vatRate: 20, commission: 10 }),
-    ];
-    const omitted = mapTrendyolShipmentPackage(buildPackage({ lines }));
-    const explicit20 = mapTrendyolShipmentPackage(buildPackage({ lines }), 20);
-
-    expect(omitted.lines[0]?.grossCommissionAmountNet).toBe('8.33');
-    expect(omitted.lines[0]?.grossCommissionAmountNet).toBe(
-      explicit20.lines[0]?.grossCommissionAmountNet,
-    );
+  it('uses the commissionVatRate param verbatim on output (denetim A — DB-driven)', () => {
+    const line = buildLine({ lineGrossAmount: 100, vatRate: 20, commission: 10 });
+    const m = mapLine(line, { shipmentPackageId: 1 }, 18);
+    expect(m.commissionVatRate).toBe('18');
   });
 
-  it('splits sellerDiscount with the per-line vatRate', () => {
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          buildLine({
-            lineUnitPrice: 120,
-            lineGrossAmount: 120,
-            vatRate: 20,
-            lineSellerDiscount: 12,
-          }),
-        ],
-      }),
-    );
-
-    expect(mapped.lines[0]?.sellerDiscountNet).toBe('10');
-    expect(mapped.lines[0]?.sellerDiscountVatAmount).toBe('2');
+  it('falls back to the 20% default commissionVatRate when omitted', () => {
+    const line = buildLine({ lineGrossAmount: 100, vatRate: 20, commission: 10 });
+    expect(mapLine(line, { shipmentPackageId: 1 }).commissionVatRate).toBe('20');
   });
 
-  it('estimates refunded commission on the seller-discount portion (komisyon net satış üzerinden)', () => {
-    // lineGrossAmount 1000, lineSellerDiscount 100, commission %10 → effectiveSale 900.
-    // gross commission gross = 1000×%10 = 100 → net 100/1.2 = 83.33
-    // refunded commission gross = 100×%10 = 10 → net 10/1.2 = 8.33
-    // effective net = 83.33 − 8.33 = 75.00 = (900×%10)/1.2 = net-satış tabanlı (2026-06-14).
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          buildLine({
-            lineUnitPrice: 900,
-            lineGrossAmount: 1000,
-            lineSellerDiscount: 100,
-            vatRate: 20,
-            commission: 10,
-          }),
-        ],
-      }),
-    );
+  it('estimates refunded commission on the seller-discount portion', () => {
+    // discountDetails: list 1000, sale 900, sellerDiscount 100; commission %10.
+    // commissionGross = 1000 (liste) × 10% = 100; refunded = 100 × 10% = 10;
+    // efektif = 100 − 10 = 90 (= effectiveSale 900 × 10%, panel değeri).
+    const line = buildLine({
+      quantity: 1,
+      lineGrossAmount: 1000,
+      vatRate: 20,
+      commission: 10,
+      discountDetails: [{ lineItemPrice: 900, lineItemSellerDiscount: 100 }],
+    });
+    const m = mapLine(line, { shipmentPackageId: 1 });
 
-    const line = mapped.lines[0];
-    expect(line?.grossCommissionAmountNet).toBe('83.33'); // SALE-side (liste) — değişmedi
-    expect(line?.refundedCommissionAmountNet).toBe('8.33'); // satıcı-indirim payı iadesi
-    expect(line?.refundedCommissionVatAmount).toBe('1.67');
-    // effective = gross − refunded = net-satış tabanlı komisyon
-    const effectiveNet = new Decimal(line?.grossCommissionAmountNet ?? '0').sub(
-      new Decimal(line?.refundedCommissionAmountNet ?? '0'),
-    );
-    expect(effectiveNet.toString()).toBe('75');
+    expect(m.lineSaleGross).toBe('900.00');
+    expect(m.commissionGross).toBe('100.00'); // 1000 (liste) × 10%
+    expect(m.refundedCommissionGross).toBe('10.00');
+    expect(effectiveCommission(m)).toBe('90.00'); // panel = effectiveSale 900 × 10%
   });
 
   it('refunded commission is 0 when there is no seller discount', () => {
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          buildLine({ lineUnitPrice: 100, lineGrossAmount: 100, commission: 10, vatRate: 20 }),
-        ],
-      }),
-    );
-    expect(mapped.lines[0]?.refundedCommissionAmountNet).toBe('0');
-    expect(mapped.lines[0]?.refundedCommissionVatAmount).toBe('0');
+    const line = buildLine({ lineGrossAmount: 100, commission: 10, vatRate: 20 });
+    const m = mapLine(line, { shipmentPackageId: 1 });
+    expect(m.lineSellerDiscountGross).toBe('0.00');
+    expect(m.refundedCommissionGross).toBe('0.00');
   });
 
-  it('defaults commissionRate to "0" when Trendyol omits the field', () => {
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [buildLine({ commission: undefined })],
-      }),
-    );
+  it('does NOT double-subtract the discount from commission (canlı sipariş 11328013993)', () => {
+    // Gerçek sipariş 11328013993: liste 330, effectiveSale 313.50, satıcı indirim 16.50,
+    // komisyon %19. DOĞRU efektif komisyon = effectiveSale 313.50 × 19% = 59.57 (rakip
+    // + Trendyol gerçek; iki kolon yuvarlamasıyla 59.56).
+    //
+    // ESKİ HATA: commissionGross effectiveSale tabanlıydı (313.50 × 19% = 59.57), refunded
+    // de indirimi düşüyordu (16.50 × 19% = 3.14) → efektif = 59.57 − 3.14 = 56.43; indirim
+    // İKİ KEZ düşülüyordu (komisyon ~3 TL eksik). Bu test çift-düşmeyi kalıcı yasaklar:
+    // taban LİSTE olmalı, indirim YALNIZ refunded'da düşülmeli.
+    const line = buildLine({
+      quantity: 1,
+      lineGrossAmount: 330,
+      vatRate: 20,
+      commission: 19,
+      discountDetails: [{ lineItemPrice: 313.5, lineItemSellerDiscount: 16.5 }],
+    });
+    const m = mapLine(line, { shipmentPackageId: 11328013993 });
 
-    expect(mapped.lines[0]?.commissionRate).toBe('0');
-    expect(mapped.lines[0]?.grossCommissionAmountNet).toBe('0');
-    expect(mapped.lines[0]?.grossCommissionVatAmount).toBe('0');
+    expect(m.lineListGross).toBe('330.00');
+    expect(m.lineSaleGross).toBe('313.50');
+    expect(m.commissionGross).toBe('62.70'); // 330 (LİSTE) × 19% — effectiveSale DEĞİL
+    expect(m.refundedCommissionGross).toBe('3.14'); // 16.50 × 19% = 3.135 → 3.14
+    // Efektif komisyon = 62.70 − 3.14 = 59.56 (panel ≈ 59.57); KESİNLİKLE 56.43 DEĞİL.
+    expect(effectiveCommission(m)).toBe('59.56');
+    expect(effectiveCommission(m)).not.toBe('56.43'); // çift-düşme regresyon kapısı
+  });
+
+  it('defaults commissionRate/commissionGross to 0 when Trendyol omits commission', () => {
+    const line = buildLine({ commission: undefined });
+    const m = mapLine(line, { shipmentPackageId: 1 });
+    expect(m.commissionRate).toBe('0');
+    expect(m.commissionGross).toBe('0.00');
   });
 });
 
-// ─── Package aggregate (multi-VAT-aware) ──────────────────────────────
+// ─── Package header from totals + saleVat + invariant ─────────────────
 
-describe('mapTrendyolShipmentPackage — saleSubtotalNet aggregate', () => {
-  it('sums net subtotal across multiple lines at the same VAT rate', () => {
-    // lineGrossAmount BİRİM başınadır (Trendyol doc) — 120/unit × 2 adet, 60/unit × 3 adet.
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          // 2 × (120 → 100 net) = 200
-          buildLine({ quantity: 2, lineUnitPrice: 120, lineGrossAmount: 120, vatRate: 20 }),
-          // 3 × (60 → 50 net) = 150
-          buildLine({ quantity: 3, lineUnitPrice: 60, lineGrossAmount: 60, vatRate: 20 }),
-        ],
-      }),
-    );
+describe('mapTrendyolShipmentPackage — package totals + invariant', () => {
+  it('order header from package totals directly', () => {
+    const pkg = buildPackage({
+      packageGrossAmount: 855,
+      packageSellerDiscount: 48.01,
+      packageTotalPrice: 806.99,
+      lines: [
+        buildLine({
+          quantity: 3,
+          lineGrossAmount: 285,
+          vatRate: 20,
+          commission: 9.6,
+          discountDetails: [
+            { lineItemPrice: 268.99, lineItemSellerDiscount: 16.01 },
+            { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+            { lineItemPrice: 269, lineItemSellerDiscount: 16 },
+          ],
+        }),
+      ],
+    });
+    const m = mapTrendyolShipmentPackage(pkg);
 
-    expect(mapped.saleSubtotalNet).toBe('350.00');
-    expect(mapped.saleVatTotal).toBe('70.00');
+    expect(m.saleGross).toBe('806.99'); // = packageTotalPrice (no recompute)
+    expect(m.listGross).toBe('855.00'); // = packageGrossAmount
+    expect(m.sellerDiscountGross).toBe('48.01'); // = packageSellerDiscount
   });
 
-  // ─── quantity > 1: lineGrossAmount/lineSellerDiscount BİRİM başına ───────
-  // Regression guard for the live-validated bug (#455451555, 2026-06-14): a qty=2
-  // discounted line was undercounted by ÷quantity. Trendyol sends per-unit amounts
-  // (doc: "Ürünün birim brüt fiyatı" / "Birim satıcı indirimi"); the line/order total
-  // is quantity × per-unit. Panel ground truth: Satış ₺4240, Faturalanacak ₺3816.
-  it('scales sale, commission and seller-discount by quantity for a qty>1 discounted line', () => {
-    // 2 adet × (birim brüt 2120 − birim satıcı indirim 212) = 2 × 1908 = 3816 brüt.
-    // effectiveSale net = 3816 / 1.2 = 3180. unit net = 1908 / 1.2 = 1590.
-    // grossComm = 2120 × 2 × %20 = 848 brüt → net 706.67. refunded = 212 × 2 × %20 = 84.8 → 70.67.
-    // effComm = 706.67 − 70.67 = 636 = effectiveSale(3180) × %20 (komisyon net satış üzerinden).
-    // sellerDiscount line-toplamı = 212 × 2 / 1.2 = 353.33.
-    const mapped = mapTrendyolShipmentPackage(
+  it('saleVat derived per-line from each lineSaleGross + its own rate (multi-VAT)', () => {
+    // Line 1: sale 120 @ 20% → vat 20. Line 2: sale 110 @ 10% → vat 10. Σ = 30.
+    const pkg = buildPackage({
+      packageGrossAmount: 230,
+      packageSellerDiscount: 0,
+      packageTotalPrice: 230,
+      lines: [
+        buildLine({
+          quantity: 1,
+          lineGrossAmount: 120,
+          vatRate: 20,
+          discountDetails: [{ lineItemPrice: 120, lineItemSellerDiscount: 0 }],
+        }),
+        buildLine({
+          quantity: 1,
+          lineGrossAmount: 110,
+          vatRate: 10,
+          discountDetails: [{ lineItemPrice: 110, lineItemSellerDiscount: 0 }],
+        }),
+      ],
+    });
+    const m = mapTrendyolShipmentPackage(pkg);
+
+    expect(m.saleGross).toBe('230.00');
+    expect(m.saleVat).toBe('30.00');
+  });
+
+  it('warns when Σ line sale != package total (no silent drift)', () => {
+    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+    const pkg = buildPackage({
+      packageTotalPrice: 450,
+      packageGrossAmount: 500,
+      packageSellerDiscount: 50,
+      lines: [
+        buildLine({
+          quantity: 1,
+          lineGrossAmount: 100,
+          vatRate: 20,
+          discountDetails: [{ lineItemPrice: 89, lineItemSellerDiscount: 11 }],
+        }),
+      ],
+    });
+    mapTrendyolShipmentPackage(pkg);
+
+    expect(warn).toHaveBeenCalledWith(
+      'orders.package-invariant-mismatch',
+      expect.objectContaining({ shipmentPackageId: pkg.shipmentPackageId }),
+    );
+    warn.mockRestore();
+  });
+
+  it('does NOT warn when Σ line sale == package total', () => {
+    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+    const pkg = buildPackage({
+      packageTotalPrice: 89,
+      packageGrossAmount: 100,
+      packageSellerDiscount: 11,
+      lines: [
+        buildLine({
+          quantity: 1,
+          lineGrossAmount: 100,
+          vatRate: 20,
+          discountDetails: [{ lineItemPrice: 89, lineItemSellerDiscount: 11 }],
+        }),
+      ],
+    });
+    mapTrendyolShipmentPackage(pkg);
+
+    const invariantCalls = warn.mock.calls.filter(
+      ([event]) => event === 'orders.package-invariant-mismatch',
+    );
+    expect(invariantCalls).toHaveLength(0);
+    warn.mockRestore();
+  });
+
+  it('extracts promotionDisplays from the seller-discount total, null when none', () => {
+    const withDiscount = mapTrendyolShipmentPackage(
       buildPackage({
+        packageGrossAmount: 100,
+        packageSellerDiscount: 11,
+        packageTotalPrice: 89,
         lines: [
           buildLine({
-            quantity: 2,
-            lineGrossAmount: 2120,
-            lineSellerDiscount: 212,
-            lineUnitPrice: 1908,
-            commission: 20,
+            lineGrossAmount: 100,
             vatRate: 20,
-          }),
-        ],
-      }),
-      20,
-    );
-
-    expect(mapped.saleSubtotalNet).toBe('3180.00');
-    expect(mapped.saleVatTotal).toBe('636.00');
-    const line = mapped.lines[0];
-    expect(line?.unitPriceNet).toBe('1590');
-    expect(line?.grossCommissionAmountNet).toBe('706.67');
-    expect(line?.refundedCommissionAmountNet).toBe('70.67');
-    expect(line?.sellerDiscountNet).toBe('353.33');
-  });
-
-  it('aggregates correctly across mixed VAT rates (regression guard)', () => {
-    // Multi-rate orders must NOT mix rates: each line's own VAT rate
-    // drives its own split, then the aggregate sums the nets.
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          // 1 × (120 → 100 net @ 20%) = 100
-          buildLine({ quantity: 1, lineUnitPrice: 120, lineGrossAmount: 120, vatRate: 20 }),
-          // 1 × (110 → 100 net @ 10%) = 100
-          buildLine({ quantity: 1, lineUnitPrice: 110, lineGrossAmount: 110, vatRate: 10 }),
-        ],
-      }),
-    );
-
-    expect(mapped.saleSubtotalNet).toBe('200.00');
-    expect(mapped.saleVatTotal).toBe('30.00');
-  });
-
-  // ─── effectiveSale = liste − satıcı indirimi (denetim #1) ───────────
-  it('builds saleSubtotalNet from effectiveSale (liste − satıcı indirimi), ignoring Trendyol discount', () => {
-    // Stage co-funded sipariş #1359065292: liste 1690, satıcı indirim 845,
-    // Trendyol indirim 507, müşteri öder (lineUnitPrice) 338, vatRate %10.
-    // effectiveSale = 1690 − 845 = 845 → net 768.18 (845 / 1.10). Trendyol indirimi
-    // (507) DÜŞÜLMEZ (geri ödeniyor, kâra etkisi YOK). Eski buggy mapper lineUnitPrice'tan
-    // 338 / 1.10 = 307.27 kurardı — bu testin ayırt edici noktası tam burası.
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          buildLine({
-            quantity: 1,
-            lineGrossAmount: 1690,
-            lineSellerDiscount: 845,
-            lineTyDiscount: 507,
-            lineUnitPrice: 338,
-            vatRate: 10,
+            discountDetails: [{ lineItemPrice: 89, lineItemSellerDiscount: 11 }],
           }),
         ],
       }),
     );
+    expect(withDiscount.promotionDisplays).toEqual([
+      { displayName: 'Satıcı İndirimi', amountGross: '11.00' },
+    ]);
 
-    expect(mapped.saleSubtotalNet).toBe('768.18'); // 845 / 1.10 — NOT 338 / 1.10
-    expect(mapped.saleVatTotal).toBe('76.82');
-    // Satıcı indirimi yine de breakdown için ayrıştırılır (845 / 1.10).
-    expect(mapped.lines[0]?.sellerDiscountNet).toBe('768.18');
-    expect(mapped.lines[0]?.sellerDiscountVatAmount).toBe('76.82');
-  });
-
-  it('with no Trendyol discount, effectiveSale equals customer-paid (production parity)', () => {
-    // Production sipariş #11319381127: liste 1340, satıcı indirim 24, ty 0.
-    // effectiveSale = 1316 = müşteri öder (ty=0 olduğu için çakışır). net 1196.36.
-    const mapped = mapTrendyolShipmentPackage(
+    const noDiscount = mapTrendyolShipmentPackage(
       buildPackage({
+        packageGrossAmount: 100,
+        packageSellerDiscount: 0,
+        packageTotalPrice: 100,
         lines: [
           buildLine({
-            quantity: 1,
-            lineGrossAmount: 1340,
-            lineSellerDiscount: 24,
-            lineTyDiscount: 0,
-            lineUnitPrice: 1316,
-            vatRate: 10,
-          }),
-        ],
-      }),
-    );
-
-    expect(mapped.saleSubtotalNet).toBe('1196.36'); // 1316 / 1.10
-    expect(mapped.saleVatTotal).toBe('119.64');
-  });
-
-  it('multi-line co-funded: her satır kendi effectiveSale + vatRate; aggregate tyDiscount hariç', () => {
-    // İki indirimli satır, ikisinde de Trendyol payı. Her satır kendi effectiveSale'i
-    // (liste − satıcı indirimi) ve vatRate'iyle; tyDiscount HİÇ düşülmez.
-    // Σ(qty × unitPriceNet) == saleSubtotalNet invariant'ı (review gap'i) doğrulanır.
-    const mapped = mapTrendyolShipmentPackage(
-      buildPackage({
-        lines: [
-          // Satır 1: liste 1200, satıcı 120, ty 300 → effectiveSale 1080 → net 900 (@%20)
-          buildLine({
-            lineId: 1,
-            barcode: 'B-CF-1',
-            quantity: 1,
-            lineGrossAmount: 1200,
-            lineSellerDiscount: 120,
-            lineTyDiscount: 300,
-            lineUnitPrice: 780,
+            lineGrossAmount: 100,
             vatRate: 20,
-          }),
-          // Satır 2: BİRİM liste 720, birim satıcı 120, birim ty 100, qty 2 →
-          // effectiveSale birim 600 → birim net 500 (@%20). lineUnitPrice = 720−120−100 = 500.
-          buildLine({
-            lineId: 2,
-            barcode: 'B-CF-2',
-            quantity: 2,
-            lineGrossAmount: 720,
-            lineSellerDiscount: 120,
-            lineTyDiscount: 100,
-            lineUnitPrice: 500,
-            vatRate: 20,
+            discountDetails: [{ lineItemPrice: 100, lineItemSellerDiscount: 0 }],
           }),
         ],
       }),
     );
+    expect(noDiscount.promotionDisplays).toBeNull();
+  });
+});
 
-    // Per-line effectiveSale birim-net (müşteri-ödediği lineUnitPrice DEĞİL).
-    expect(mapped.lines[0]?.unitPriceNet).toBe('900'); // 1080 / 1.2
-    expect(mapped.lines[1]?.unitPriceNet).toBe('500'); // (720 − 120) / 1.2 — BİRİM, ÷qty YOK
-    // Σ(qty × unitPriceNet) = 1×900 + 2×500 = 1900 (tyDiscount HARİÇ).
-    expect(mapped.saleSubtotalNet).toBe('1900.00');
-    expect(mapped.saleVatTotal).toBe('380.00');
+// ─── GROSS fixture regression (real prod payloads, Task 10) ───────────
+// Penny-lock: these assert the mapper output against Trendyol's package totals
+// to the kuruş. The fixtures are real prod dumps — if a value below ever fails,
+// the mapper is wrong, not the expected number.
+
+describe('GROSS fixture regression (real prod payloads)', () => {
+  it('11313045474: qty>1 uneven split matches package totals exactly', () => {
+    const m = mapTrendyolShipmentPackage(PAYLOAD_11313045474);
+
+    expect(m.saleGross).toBe('806.99');
+    expect(m.listGross).toBe('855.00');
+    expect(m.sellerDiscountGross).toBe('48.01');
+    expect(m.lines[0]?.lineSaleGross).toBe('806.99');
+    expect(m.lines[0]?.lineSellerDiscountGross).toBe('48.01');
+    // commissionGross LİSTE üzerinden (855 × 9.6% = 82.08); panel/Trendyol gerçek
+    // değeri EFEKTİF komisyon = 82.08 − 4.61 = 77.47 (= effectiveSale 806.99 × 9.6%).
+    expect(m.lines[0]?.commissionGross).toBe('82.08'); // 855 (liste) × 9.6%
+    expect(m.lines[0]?.refundedCommissionGross).toBe('4.61'); // 48.01 × 9.6%
+    expect(effectiveCommission(m.lines[0]!)).toBe('77.47'); // panel
+  });
+
+  it('11323825496: 3-product multi-rate efektif komisyon panele kilitli', () => {
+    const m = mapTrendyolShipmentPackage(PAYLOAD_11323825496);
+
+    expect(m.saleGross).toBe('423.70');
+    expect(m.listGross).toBe('446.00');
+    expect(m.sellerDiscountGross).toBe('22.30');
+
+    // İş anlamı taşıyan değer EFEKTİF komisyon (gross − refunded); ham commissionGross
+    // artık LİSTE üzerinden brüt. Panel her satır için effectiveSale × rate:
+    //   l0: 104.5 × 14.8% = 15.47   l1: 174.8 × 19% = 33.21   l2: 144.4 × 15.2% = 21.94*
+    // *l2: iki kolon ayrı 2-ondalığa yuvarlandığından (23.10 − 1.16) = 21.94; tek-yuvarlanmış
+    //  144.4×15.2% = 21.9488 → 21.95'ten bir kuruş kayar. Bu üretimde de saklanan davranıştır
+    //  (commission_gross / refunded_commission_gross Decimal(12,2) kolonlar).
+    expect(effectiveCommission(m.lines[0]!)).toBe('15.47');
+    expect(effectiveCommission(m.lines[1]!)).toBe('33.21');
+    expect(effectiveCommission(m.lines[2]!)).toBe('21.94');
+
+    // LİSTE-tabanlı ham commissionGross (downstream net/KDV split için saklanan).
+    expect(m.lines[0]?.commissionGross).toBe('16.28'); // 110 × 14.8%
+    expect(m.lines[1]?.commissionGross).toBe('34.96'); // 184 × 19%
+    expect(m.lines[2]?.commissionGross).toBe('23.10'); // 152 × 15.2%
+
+    const totalEffective = [m.lines[0], m.lines[1], m.lines[2]].reduce(
+      (sum, line) => sum.add(new Decimal(effectiveCommission(line!))),
+      new Decimal(0),
+    );
+    expect(totalEffective.toFixed(2)).toBe('70.62');
   });
 });
 
@@ -594,6 +637,10 @@ describe('mapTrendyolShipmentPackage — sparse-line resilience', () => {
   it('falls back to zero values for a sparse line so the batch still maps', () => {
     const mapped = mapTrendyolShipmentPackage(
       buildPackage({
+        // Sparse line carries no pricing → realistic package total is 0.
+        packageGrossAmount: 0,
+        packageSellerDiscount: 0,
+        packageTotalPrice: 0,
         lines: [
           {
             lineId: 99,
@@ -608,9 +655,10 @@ describe('mapTrendyolShipmentPackage — sparse-line resilience', () => {
     );
 
     expect(mapped.lines[0]?.quantity).toBe(0);
-    expect(mapped.lines[0]?.unitPriceNet).toBe('0');
-    expect(mapped.lines[0]?.unitVatAmount).toBe('0');
-    expect(mapped.saleSubtotalNet).toBe('0.00');
+    expect(mapped.lines[0]?.lineSaleGross).toBe('0.00');
+    expect(mapped.lines[0]?.lineListGross).toBe('0.00');
+    expect(mapped.lines[0]?.commissionGross).toBe('0.00');
+    expect(mapped.saleGross).toBe('0.00');
   });
 });
 

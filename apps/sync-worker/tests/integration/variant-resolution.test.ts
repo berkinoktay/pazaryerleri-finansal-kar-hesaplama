@@ -79,8 +79,11 @@ async function buildUnresolvedOrder(
       platformOrderNumber: `ord-${randomUUID().slice(0, 8)}`,
       orderDate: new Date(),
       status: 'PROCESSING',
-      saleSubtotalNet: new Decimal('100.00'),
-      saleVatTotal: new Decimal('20.00'),
+      // GROSS konvansiyon: saleGross (KDV-dahil) + saleVat (= 120×20/120).
+      saleGross: new Decimal('120.00'),
+      saleVat: new Decimal('20.00'),
+      listGross: new Decimal('120.00'),
+      sellerDiscountGross: new Decimal('0.00'),
     },
   });
 
@@ -94,12 +97,15 @@ async function buildUnresolvedOrder(
         barcode,
         platformLineId: BigInt(Math.floor(Math.random() * 1_000_000)),
         quantity: 1,
-        unitPrice: new Decimal('120.00'),
         commissionRate: new Decimal('10.00'),
-        commissionAmount: new Decimal('12.00'),
-        unitPriceNet: new Decimal('100.00'),
-        unitVatRate: new Decimal('20.00'),
-        unitVatAmount: new Decimal('20.00'),
+        lineListGross: new Decimal('120.00'),
+        lineSaleGross: new Decimal('120.00'),
+        lineSellerDiscountGross: new Decimal('0.00'),
+        saleVatRate: new Decimal('20.00'),
+        commissionGross: new Decimal('12.00'),
+        refundedCommissionGross: new Decimal('0.00'),
+        commissionVatRate: new Decimal('20.00'),
+        estimatedCommissionGross: new Decimal('12.00'),
       },
     });
     itemIds.push(item.id);
@@ -129,8 +135,12 @@ function buildMappedOrder(args: {
     lastModifiedDate: args.orderDate,
     status: 'PROCESSING',
     dematerialized: false,
-    saleSubtotalNet: '84.75',
-    saleVatTotal: '15.25',
+    // GROSS konvansiyon: saleGross = packageTotalPrice (100); saleVat = 100 × 18/118.
+    saleGross: '100.00',
+    saleVat: '15.25',
+    listGross: '100.00',
+    sellerDiscountGross: '0.00',
+    promotionDisplays: null,
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
     actualShipDate: null,
@@ -150,16 +160,14 @@ function buildMappedOrder(args: {
         barcode: args.barcode,
         quantity: 1,
         platformLineId: '6001',
-        unitPriceNet: '84.75',
-        unitVatRate: '18',
-        unitVatAmount: '15.25',
-        grossCommissionAmountNet: '12.71',
-        grossCommissionVatAmount: '2.29',
-        refundedCommissionAmountNet: '0',
-        refundedCommissionVatAmount: '0',
-        sellerDiscountNet: '0',
-        sellerDiscountVatAmount: '0',
+        lineListGross: '100.00',
+        lineSaleGross: '100.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '18',
         commissionRate: '15',
+        commissionGross: '15.00',
+        refundedCommissionGross: '0.00',
+        commissionVatRate: '20',
       },
     ],
   };
@@ -186,7 +194,7 @@ async function seedCatalogVariant(
         costProfileLinks: {
           create: {
             organizationId: orgId,
-            profileId: (await createCostProfile(orgId, { amount: '40.00' })).id,
+            profileId: (await createCostProfile(orgId, { amountGross: '48.00' })).id,
           },
         },
       }
@@ -239,7 +247,7 @@ describe('processVariantResolution', () => {
     const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
     expect(item.productVariantId).not.toBeNull();
     // Cost re-entry: the linked variant carries an active cost profile.
-    expect(item.unitCostSnapshotNet).not.toBeNull();
+    expect(item.unitCostSnapshotGross).not.toBeNull();
   });
 
   it('fetches a missing barcode from the vendor, upserts the catalog row, and links', async () => {
@@ -351,7 +359,7 @@ describe('processVariantResolution', () => {
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
     expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
-    expect(item.unitCostSnapshotNet).toBeNull(); // para donuk
+    expect(item.unitCostSnapshotGross).toBeNull(); // para donuk
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(after.estimatedNetProfit).toBeNull();
     expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
@@ -419,7 +427,7 @@ describe('processVariantResolution', () => {
 
     const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemIds[0]! } });
     expect(item.productVariantId).not.toBeNull(); // kimlik bağlandı (görünürlük)
-    expect(item.unitCostSnapshotNet).toBeNull(); // para donuk
+    expect(item.unitCostSnapshotGross).toBeNull(); // para donuk
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.estimatedNetProfit).toBeNull();
     expect(await prisma.orderFee.count({ where: { orderId } })).toBe(0);
@@ -444,7 +452,7 @@ describe('processVariantResolution', () => {
       itemIds.map((id) => prisma.orderItem.findUniqueOrThrow({ where: { id } })),
     );
     expect(itemA!.productVariantId).not.toBeNull();
-    expect(itemA!.unitCostSnapshotNet).not.toBeNull();
+    expect(itemA!.unitCostSnapshotGross).not.toBeNull();
     expect(itemB!.productVariantId).toBeNull();
     expect(itemB!.variantResolutionAttempts).toBe(1);
     // The money invariant: a half-costed order NEVER gets a profit number.

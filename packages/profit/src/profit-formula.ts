@@ -1,187 +1,133 @@
 /**
- * Profit hesabının canonical (tek doğruluk) fonksiyonu.
+ * Kâr hesabının canonical (tek doğruluk) saf motoru — GROSS konvansiyonu.
  *
- * design §2 — Kar formülü:
- *   Kâr tutarı = Satış fiyatı − Ürün Maliyeti − Komisyon Tutarı − Kargo Ücreti
- *              − Platform Hizmet Bedeli − Net KDV
- *   Net KDV   = Satış KDV − Ürün Maliyeti KDV − Komisyon KDV − Kargo Ücreti KDV
- *              − Platform Hizmet Bedeli KDV
+ * spec §2 — Kar formülü (GROSS):
+ *   netVat    = saleVat − (costVat + commissionVat + Σ feeVat)  [stopaj HARİÇ]
+ *   netProfit = saleGross − costGross − commissionGross − Σ feeGross − stoppage − netVat
+ *   DEBIT fees düşülür, CREDIT fees geri eklenir.
+ *   saleMarginPct  = netProfit / saleGross × 100  (saleGross=0 → null)
+ *   costMarkupPct  = netProfit / costGross × 100  (costGross=0 → null)
  *
- * design §2.2 matematiksel kanıt: `brüt − Net KDV ≡ net − net`. Bu modül
- * **net konvansiyonu** üzerinde çalışır (`saleSubtotalNet − Σ(costNet) − Σ(feeNet)`),
- * ancak `breakdown` çıktısında brüt değerleri de döner ki UI hem net hem
- * brüt görselleştirebilsin (design §7 sipariş detay timeline).
- *
- * Effective commission (design §3.2):
- *   gross − refunded = effective
- * Discount transaction'ı (Trendyol) ayrı bir komisyon iadesi getiriyor → iki ayrı
- * çift saklıyoruz (grossCommission* + refundedCommission*), bu fonksiyon farkı
- * runtime'da hesaplar.
- *
- * **Fonksiyon hangi modda çağrıldığını bilmez** — caller (applyEstimateOnOrderCreate
- * / recomputeSettledProfit / estimateProductProfit) `items` ve `fees` listesini
- * doldurur. design §4.1: tek formül, 3 mod.
+ * **Bu modül entity/db import etmez.** Sadece decimal.js. Caller (estimate-on-order-create /
+ * recompute-settled-profit) gross+vat çiftlerini doldurur → tek formül, 3 mod (spec §4.1).
  */
 
 import { Decimal } from 'decimal.js';
 
 const ZERO = new Decimal(0);
 
-export interface ProfitInputItem {
-  quantity: number;
-  unitCostSnapshotNet: Decimal;
-  unitCostSnapshotVatAmount: Decimal;
-  // Effective commission = gross − refunded (design §3.2 — Discount handling).
-  grossCommissionAmountNet: Decimal;
-  grossCommissionVatAmount: Decimal;
-  refundedCommissionAmountNet: Decimal;
-  refundedCommissionVatAmount: Decimal;
-  // Satıcı kaynaklı indirim — YALNIZCA breakdown gösterimi için (denetim #1).
-  // netProfit'ten DÜŞÜLMEZ: saleSubtotalNet zaten effectiveSale (indirim düşülmüş).
-  sellerDiscountNet: Decimal;
-  sellerDiscountVatAmount: Decimal;
+export interface ProfitMoneyPair {
+  gross: Decimal;
+  vat: Decimal;
 }
 
 export interface ProfitInputFee {
-  amountNet: Decimal;
-  vatAmount: Decimal;
+  type: 'SHIPPING' | 'PLATFORM_SERVICE';
+  gross: Decimal;
+  vat: Decimal;
   direction: 'DEBIT' | 'CREDIT';
 }
 
-export interface ProfitInputs {
-  saleSubtotalNet: Decimal;
-  saleVatTotal: Decimal;
-  items: ProfitInputItem[];
+export interface ProfitInput {
+  sale: ProfitMoneyPair;
+  cost: ProfitMoneyPair;
+  commission: ProfitMoneyPair;
   fees: ProfitInputFee[];
+  stoppage: { gross: Decimal };
 }
 
 export interface ProfitBreakdown {
-  saleGross: Decimal;
+  listGross: Decimal;
   sellerDiscountGross: Decimal;
-  itemCostGross: Decimal;
+  saleGross: Decimal;
+  saleVat: Decimal;
+  costGross: Decimal;
+  costVat: Decimal;
   commissionGross: Decimal;
-  debitFeesGross: Decimal;
-  creditFeesGross: Decimal;
+  commissionVat: Decimal;
+  shippingGross: Decimal;
+  shippingVat: Decimal;
+  platformServiceGross: Decimal;
+  platformServiceVat: Decimal;
+  stoppage: Decimal;
   netVat: Decimal;
-}
-
-export interface ProfitResult {
   netProfit: Decimal;
-  netVat: Decimal;
-  breakdown: ProfitBreakdown;
+  saleMarginPct: Decimal | null;
+  costMarkupPct: Decimal | null;
 }
 
 /**
  * Computes profit. Pure function — no I/O, no DB. Unit-testable in isolation.
  *
- * Implementation uses **net convention** (design §2.2 matematiksel kanıt):
- *
- *   netProfit = saleSubtotalNet
- *             − Σ(items: unitCostSnapshotNet × quantity)
- *             − Σ(items: effectiveCommissionNet)
- *             − Σ(fees: DEBIT amountNet) + Σ(fees: CREDIT amountNet)
- *
- * **Satıcı indirimi TEKRAR DÜŞÜLMEZ (denetim #1, 2026-06-13):** `saleSubtotalNet`
- * artık `effectiveSale = lineGrossAmount − lineSellerDiscount` (mapper'da düşülmüş,
- * research §7.3). Eskiden formül indirimi bir daha çıkarıyordu → çift-düşme bug'ı
- * (Trendyol-finanslı siparişte gelir negatife düşebiliyordu). `sellerDiscount*`
- * artık yalnızca `breakdown.sellerDiscountGross` için akümüle edilir (UI liste'yi
- * `net satış + satıcı indirimi` ile geri kurar). Trendyol-finanslı indirim
- * (tyDiscount) formüle hiç girmez — Trendyol geri ödüyor, "kâra etkisi YOK".
- *
- * netVat aynı yapıda (KDV'lerin algebraic toplamı; satıcı indirim KDV'si de
- * saleVatTotal'a gömülü, tekrar düşülmez).
+ * Formula (spec §2, GROSS convention):
+ *   netVat    = saleVat − costVat − commissionVat − Σ(DEBIT feeVat) + Σ(CREDIT feeVat)
+ *               [stopaj HARİÇ netVat'tan — direkt netProfit'ten düşülür]
+ *   netProfit = saleGross − costGross − commissionGross
+ *               − Σ(DEBIT feeGross) + Σ(CREDIT feeGross) − stoppage − netVat
  */
-export function computeProfit(input: ProfitInputs): ProfitResult {
-  const saleSubtotalNet = new Decimal(input.saleSubtotalNet);
-  const saleVatTotal = new Decimal(input.saleVatTotal);
-
-  // ─── Items aggregate ────────────────────────────────────────────────
-  let itemCostNet = ZERO;
-  let itemCostVat = ZERO;
-  let commissionNet = ZERO;
-  let commissionVat = ZERO;
-  let sellerDiscountNet = ZERO;
-  let sellerDiscountVat = ZERO;
-
-  for (const item of input.items) {
-    const qty = new Decimal(item.quantity);
-    itemCostNet = itemCostNet.add(new Decimal(item.unitCostSnapshotNet).mul(qty));
-    itemCostVat = itemCostVat.add(new Decimal(item.unitCostSnapshotVatAmount).mul(qty));
-
-    // effective commission = gross − refunded
-    const effCommNet = new Decimal(item.grossCommissionAmountNet).sub(
-      new Decimal(item.refundedCommissionAmountNet),
-    );
-    const effCommVat = new Decimal(item.grossCommissionVatAmount).sub(
-      new Decimal(item.refundedCommissionVatAmount),
-    );
-    commissionNet = commissionNet.add(effCommNet);
-    commissionVat = commissionVat.add(effCommVat);
-
-    sellerDiscountNet = sellerDiscountNet.add(new Decimal(item.sellerDiscountNet));
-    sellerDiscountVat = sellerDiscountVat.add(new Decimal(item.sellerDiscountVatAmount));
-  }
-
-  // ─── Fees aggregate (direction-aware) ────────────────────────────────
-  let debitFeesNet = ZERO;
-  let debitFeesVat = ZERO;
-  let creditFeesNet = ZERO;
-  let creditFeesVat = ZERO;
+export function computeProfit(input: ProfitInput): ProfitBreakdown {
+  let shippingGross = ZERO;
+  let shippingVat = ZERO;
+  let platformServiceGross = ZERO;
+  let platformServiceVat = ZERO;
+  let debitVat = ZERO;
+  let creditVat = ZERO;
+  let debitGross = ZERO;
+  let creditGross = ZERO;
 
   for (const fee of input.fees) {
-    if (fee.direction === 'DEBIT') {
-      debitFeesNet = debitFeesNet.add(new Decimal(fee.amountNet));
-      debitFeesVat = debitFeesVat.add(new Decimal(fee.vatAmount));
+    if (fee.type === 'SHIPPING') {
+      shippingGross = shippingGross.add(fee.gross);
+      shippingVat = shippingVat.add(fee.vat);
     } else {
-      creditFeesNet = creditFeesNet.add(new Decimal(fee.amountNet));
-      creditFeesVat = creditFeesVat.add(new Decimal(fee.vatAmount));
+      platformServiceGross = platformServiceGross.add(fee.gross);
+      platformServiceVat = platformServiceVat.add(fee.vat);
+    }
+    if (fee.direction === 'DEBIT') {
+      debitGross = debitGross.add(fee.gross);
+      debitVat = debitVat.add(fee.vat);
+    } else {
+      creditGross = creditGross.add(fee.gross);
+      creditVat = creditVat.add(fee.vat);
     }
   }
 
-  // ─── Net profit ─────────────────────────────────────────────────────
-  // saleSubtotalNet ZATEN effectiveSale = liste − satıcı indirimi (mapper'da
-  // düşülmüş, research §7.3). Satıcı indirimi burada TEKRAR DÜŞÜLMEZ — eski
-  // çift-düşme bug'ıydı (denetim #1). sellerDiscount* yalnız breakdown gösterimi
-  // (UI: liste = net satış + indirim) için akümüle edilir. Trendyol-finanslı
-  // indirim (tyDiscount) hiç gelmez (kâra etkisi YOK, geri ödeniyor).
-  //   Income (net)  = saleSubtotalNet + creditFeesNet
-  //   Expense (net) = itemCostNet + commissionNet + debitFeesNet
-  const netProfit = saleSubtotalNet
-    .add(creditFeesNet)
-    .sub(itemCostNet)
-    .sub(commissionNet)
-    .sub(debitFeesNet);
+  // Net KDV (spec §2): stopaj HARİÇ. CREDIT feeVat geri eklenir.
+  const netVat = input.sale.vat
+    .sub(input.cost.vat)
+    .sub(input.commission.vat)
+    .sub(debitVat)
+    .add(creditVat);
 
-  // ─── Net VAT (algebraic sum of all VAT components) ──────────────────
-  // Pass-through tax; tracked separately for UI display + reconciliation.
-  // Sale VAT seller collects; cost/commission/fee VAT seller pays. saleVatTotal
-  // de effectiveSale tabanından gelir → satıcı indirimi KDV'si TEKRAR düşülmez.
-  const netVat = saleVatTotal
-    .add(creditFeesVat)
-    .sub(itemCostVat)
-    .sub(commissionVat)
-    .sub(debitFeesVat);
+  const netProfit = input.sale.gross
+    .sub(input.cost.gross)
+    .sub(input.commission.gross)
+    .sub(debitGross)
+    .add(creditGross)
+    .sub(input.stoppage.gross)
+    .sub(netVat);
 
-  // ─── Breakdown (gross display for UI) ────────────────────────────────
-  const saleGross = saleSubtotalNet.add(saleVatTotal);
-  const sellerDiscountGross = sellerDiscountNet.add(sellerDiscountVat);
-  const itemCostGross = itemCostNet.add(itemCostVat);
-  const commissionGross = commissionNet.add(commissionVat);
-  const debitFeesGross = debitFeesNet.add(debitFeesVat);
-  const creditFeesGross = creditFeesNet.add(creditFeesVat);
+  const saleMarginPct = input.sale.gross.isZero() ? null : netProfit.div(input.sale.gross).mul(100);
+
+  const costMarkupPct = input.cost.gross.isZero() ? null : netProfit.div(input.cost.gross).mul(100);
 
   return {
-    netProfit,
+    listGross: input.sale.gross, // adapter override eder (BuildProfitBreakdownInput'tan items üzerinden)
+    sellerDiscountGross: ZERO, // adapter override eder
+    saleGross: input.sale.gross,
+    saleVat: input.sale.vat,
+    costGross: input.cost.gross,
+    costVat: input.cost.vat,
+    commissionGross: input.commission.gross,
+    commissionVat: input.commission.vat,
+    shippingGross,
+    shippingVat,
+    platformServiceGross,
+    platformServiceVat,
+    stoppage: input.stoppage.gross,
     netVat,
-    breakdown: {
-      saleGross,
-      sellerDiscountGross,
-      itemCostGross,
-      commissionGross,
-      debitFeesGross,
-      creditFeesGross,
-      netVat,
-    },
+    netProfit,
+    saleMarginPct,
+    costMarkupPct,
   };
 }

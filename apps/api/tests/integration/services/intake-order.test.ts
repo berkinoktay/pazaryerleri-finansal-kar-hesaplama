@@ -20,18 +20,18 @@ function buildMapped(over: {
   /** Multi-line orders: each entry clones the single-line template below. */
   lines?: Array<{ barcode: string; platformLineId: string }>;
 }): MappedOrder {
+  // GROSS konvansiyon (2026-06-16): MappedOrderLine gross alanlar.
+  // lineSaleGross 100 = net 84.75 + KDV 15.25 (%18). commissionGross 15 (gross).
   const lineTemplate = {
     quantity: 1,
-    unitPriceNet: '84.75',
-    unitVatRate: '18',
-    unitVatAmount: '15.25',
-    grossCommissionAmountNet: '12.71',
-    grossCommissionVatAmount: '2.29',
-    refundedCommissionAmountNet: '0',
-    refundedCommissionVatAmount: '0',
-    sellerDiscountNet: '0',
-    sellerDiscountVatAmount: '0',
+    lineListGross: '100',
+    lineSaleGross: '100',
+    lineSellerDiscountGross: '0',
+    saleVatRate: '18',
     commissionRate: '15',
+    commissionGross: '15',
+    refundedCommissionGross: '0',
+    commissionVatRate: '20',
   };
   return {
     platformOrderId: over.platformOrderId,
@@ -40,8 +40,12 @@ function buildMapped(over: {
     lastModifiedDate: over.orderDate,
     status: over.status ?? 'PROCESSING',
     dematerialized: over.dematerialized ?? false,
-    saleSubtotalNet: '84.75',
-    saleVatTotal: '15.25',
+    // GROSS konvansiyon: saleGross 100 = net 84.75 + KDV 15.25.
+    saleGross: '100',
+    saleVat: '15.25',
+    listGross: '100',
+    sellerDiscountGross: '0',
+    promotionDisplays: null,
     agreedDeliveryDate: null,
     actualDeliveryDate: null,
     actualShipDate: null,
@@ -94,7 +98,7 @@ async function seedVariant(
         costProfileLinks: {
           create: {
             organizationId: orgId,
-            profileId: (await createCostProfile(orgId, { amount: '40.00' })).id,
+            profileId: (await createCostProfile(orgId, { amountGross: '40.00' })).id,
           },
         },
       }
@@ -314,10 +318,10 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(matched!.barcode).toBe('EAN13-MIX-OK');
     expect(matched!.productVariantId).not.toBeNull();
     // Excluded order carries NO money snapshot — even on the costed line.
-    expect(matched!.unitCostSnapshotNet).toBeNull();
+    expect(matched!.unitCostSnapshotGross).toBeNull();
     expect(unmatched!.barcode).toBe('UNKNOWN-MIX');
     expect(unmatched!.productVariantId).toBeNull();
-    expect(unmatched!.unitCostSnapshotNet).toBeNull();
+    expect(unmatched!.unitCostSnapshotGross).toBeNull();
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: store.id, platformOrderId: 'mixed-1' },
     });

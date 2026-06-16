@@ -29,7 +29,7 @@ describe('GET /v1/organizations/:orgId/variants/:variantId/cost-profiles', () =>
         organizationId: orgId,
         name: name ?? `Profile-${randomUUID().slice(0, 8)}`,
         type: 'COGS',
-        amount: new Decimal('25.50'),
+        amountGross: new Decimal('25.50'),
         currency: 'TRY',
         vatRate: 18,
         fxRateMode: 'AUTO',

@@ -45,7 +45,10 @@ function makeWebhookPayload(overrides: WebhookPayloadOverrides = {}) {
     agreedDeliveryDate: Date.UTC(2026, 4, 21),
     fastDelivery: false,
     micro: false,
+    // GROSS konvansiyon (2026-06-16): saleGross = packageTotalPrice (satış toplamı,
+    // KDV-dahil); listGross = packageGrossAmount. İndirim yok → ikisi de 120.
     packageGrossAmount: 120,
+    packageTotalPrice: 120,
     supplierId: overrides.supplierId ?? Number.parseInt(SUPPLIER_ID, 10),
     lines: overrides.lines ?? [
       {
@@ -269,7 +272,9 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       expect(order.platformOrderId).toBe('3734026895');
       expect(order.status).toBe('DELIVERED');
       expect(order.actualDeliveryDate?.getTime()).toBe(DELIVERED_AT_MS);
-      expect(new Decimal(order.saleSubtotalNet!).toString()).toBe('100');
+      // GROSS konvansiyon (2026-06-16): saleGross = paket satış toplamı (KDV-dahil).
+      // lineGrossAmount 120 × qty 1, indirim 0 → saleGross 120 (eski net 100 = 120/1.20).
+      expect(new Decimal(order.saleGross!).toString()).toBe('120');
 
       const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
       expect(event.platformOrderId).toBe('3734026895');

@@ -79,9 +79,12 @@ async function buildOrderWithItemsCarryingSerial(itemCount: number): Promise<Bui
         organizationId: org.id,
         productVariantId: variant.id,
         quantity: 1,
-        unitPrice: new Decimal('120.00'),
+        // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross=12.
+        // unitPrice/commissionAmount removed from schema.
+        lineListGross: new Decimal('120.00'),
+        lineSaleGross: new Decimal('120.00'),
         commissionRate: new Decimal('10.00'),
-        commissionAmount: new Decimal('12.00'),
+        commissionGross: new Decimal('12.00'),
         // commit 3 (handleSale) writes this; we pre-fill here to simulate
         // the post-Sale state.
         commissionInvoiceSerialNumber: SERIAL,

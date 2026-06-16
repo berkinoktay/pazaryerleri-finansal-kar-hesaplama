@@ -156,7 +156,8 @@ const BufferDetailLineSchema = z.object({
     .openapi({ description: 'ProductVariant.id when the barcode resolves; null otherwise' }),
   stockCode: z.string().nullable(),
   quantity: z.number().int().nonnegative(),
-  unitPriceNet: z.string().openapi({ description: 'Decimal string' }),
+  // GROSS konvansiyon (2026-06-16): lineSaleGross satır toplamı (KDV-dahil, × quantity).
+  lineSaleGross: z.string().openapi({ description: 'Line sale total incl. VAT (decimal string)' }),
 });
 
 export const BufferDetailSchema = z
@@ -164,7 +165,7 @@ export const BufferDetailSchema = z
     platformOrderNumber: z.string().nullable(),
     orderDate: z.string().datetime(),
     status: z.string(),
-    saleSubtotalNet: z.string().openapi({ description: 'Decimal string' }),
+    saleGross: z.string().openapi({ description: 'Sale total incl. VAT (decimal string)' }),
     lines: z.array(BufferDetailLineSchema),
   })
   .openapi('BufferDetail');

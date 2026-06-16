@@ -31,7 +31,7 @@ const ARCHIVED_PROFILE = {
   organizationId: ORG_ID,
   name: 'Test COGS',
   type: 'COGS' as const,
-  amount: '10.00',
+  amountGross: '10.00',
   currency: 'TRY' as const,
   vatRate: 18,
   fxRateMode: 'AUTO' as const,

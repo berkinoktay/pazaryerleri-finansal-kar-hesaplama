@@ -2,10 +2,9 @@ export { applyEstimateOnOrderCreate } from './estimate-on-order-create';
 export { computeProfit } from './profit-formula';
 export type {
   ProfitBreakdown,
+  ProfitInput,
   ProfitInputFee,
-  ProfitInputItem,
-  ProfitInputs,
-  ProfitResult,
+  ProfitMoneyPair,
 } from './profit-formula';
 export { inferShippedSameDay, type OrderForShipTiming } from './infer-shipped-same-day';
 export {
@@ -23,6 +22,13 @@ export {
   type OrderLineForCalcCheck,
 } from './resolve-order-calculability';
 export { buildCalcCheckLines } from './build-calc-check-lines';
+export {
+  buildProfitBreakdown,
+  type BuildProfitBreakdownInput,
+  type ProfitBreakdownFeeInput,
+  type ProfitBreakdownItemInput,
+  type ProfitBreakdownView,
+} from './build-profit-breakdown';
 export {
   resolveTariffForDesi,
   type EstimateOutcome,

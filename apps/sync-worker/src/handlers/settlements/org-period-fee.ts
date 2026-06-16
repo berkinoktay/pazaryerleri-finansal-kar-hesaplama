@@ -27,8 +27,10 @@ export interface InsertOrgPeriodFeeOpts {
   organizationId: string;
   feeType: OrderFeeType;
   row: TrendyolFinancialTransaction;
-  /** Pre-computed KDV split — each handler resolves its own VAT convention. */
-  amounts: { amountNet: Decimal; vatRate: Decimal; vatAmount: Decimal };
+  // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross + vatRate.
+  // PSF: debt KDV-dahil, vatRate=20. Stoppage: debt KDV-yok, vatRate=0.
+  // Net türetilir downstream (amountGross × 100 / (100+vatRate)).
+  amounts: { amountGross: Decimal; vatRate: Decimal };
   tx: Prisma.TransactionClient;
   /** Telemetry label for the log path (e.g. 'settlements.psf'). */
   logScope: string;
@@ -68,9 +70,8 @@ export async function insertOrgPeriodFee(
       paymentDate: new Date(row.paymentDate),
       feeType,
       source: 'SETTLEMENT',
-      amountNet: amounts.amountNet,
+      amountGross: amounts.amountGross,
       vatRate: amounts.vatRate,
-      vatAmount: amounts.vatAmount,
       ...(row.commissionInvoiceSerialNumber !== null
         ? { invoiceSerialNumber: row.commissionInvoiceSerialNumber }
         : {}),

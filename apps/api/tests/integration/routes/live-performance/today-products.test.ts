@@ -69,13 +69,15 @@ async function sellInOrders(
   orgId: string,
   storeId: string,
   variantId: string,
-  opts: { count: number; unitPriceNet: string; unitCostSnapshotNet?: string },
+  // GROSS konvansiyon: lineSaleGross = LINE total (× quantity). quantity 1 olduğu
+  // için per-unit değerle aynı; unitCostSnapshotGross per-unit kalır.
+  opts: { count: number; lineSaleGross: string; unitCostSnapshotGross?: string },
 ): Promise<void> {
   for (let i = 0; i < opts.count; i += 1) {
     const order = await createOrder(orgId, storeId, {
       orderDate: todayAt(10),
-      saleSubtotalNet: opts.unitPriceNet,
-      estimatedNetProfit: opts.unitCostSnapshotNet !== undefined ? '5.00' : null,
+      saleGross: opts.lineSaleGross,
+      estimatedNetProfit: opts.unitCostSnapshotGross !== undefined ? '5.00' : null,
     });
     await prisma.orderItem.create({
       data: {
@@ -83,11 +85,10 @@ async function sellInOrders(
         organizationId: orgId,
         productVariantId: variantId,
         quantity: 1,
-        unitPrice: '120.00',
         commissionRate: '10.00',
-        commissionAmount: '12.00',
-        unitPriceNet: opts.unitPriceNet,
-        unitCostSnapshotNet: opts.unitCostSnapshotNet ?? null,
+        commissionGross: '12.00',
+        lineSaleGross: opts.lineSaleGross,
+        unitCostSnapshotGross: opts.unitCostSnapshotGross ?? null,
       },
     });
   }
@@ -117,13 +118,14 @@ describe('GET /v1/.../live-performance/today-products', () => {
     });
 
     // Two orders today (2 units, ₺80 revenue) + one buffer entry (3 units, ₺150).
-    await sellInOrders(org.id, store.id, variantId, { count: 2, unitPriceNet: '40.00' });
+    await sellInOrders(org.id, store.id, variantId, { count: 2, lineSaleGross: '40.00' });
     await createBufferEntry(org.id, store.id, {
       orderDate: getBusinessDateAnchor(),
       mappedOrder: {
-        saleSubtotalNet: '150.00',
+        saleGross: '150.00',
         orderDate: todayAt(11).toISOString(),
-        lines: [{ barcode: 'BC-MERGE', quantity: 3, unitPriceNet: '50.00' }],
+        // lineSaleGross = LINE total: 3 × ₺50 = ₺150.
+        lines: [{ barcode: 'BC-MERGE', quantity: 3, lineSaleGross: '150.00' }],
       },
     });
 
@@ -161,9 +163,10 @@ describe('GET /v1/.../live-performance/today-products', () => {
       platformOrderId: 'tp-unresolved-1',
       orderDate: getBusinessDateAnchor(),
       mappedOrder: {
-        saleSubtotalNet: '90.00',
+        saleGross: '90.00',
         orderDate: todayAt(11).toISOString(),
-        lines: [{ barcode: 'GHOST-BARCODE-1', quantity: 2, unitPriceNet: '45.00' }],
+        // lineSaleGross = LINE total: 2 × ₺45 = ₺90.
+        lines: [{ barcode: 'GHOST-BARCODE-1', quantity: 2, lineSaleGross: '90.00' }],
       },
     });
 
@@ -210,8 +213,8 @@ describe('GET /v1/.../live-performance/today-products', () => {
     });
     await sellInOrders(org.id, store.id, costedId, {
       count: 1,
-      unitPriceNet: '60.00',
-      unitCostSnapshotNet: '30.00',
+      lineSaleGross: '60.00',
+      unitCostSnapshotGross: '30.00',
     });
 
     // Cost-missing variant: buffer only, no profile.
@@ -223,9 +226,10 @@ describe('GET /v1/.../live-performance/today-products', () => {
     await createBufferEntry(org.id, store.id, {
       orderDate: getBusinessDateAnchor(),
       mappedOrder: {
-        saleSubtotalNet: '90.00',
+        saleGross: '90.00',
         orderDate: todayAt(12).toISOString(),
-        lines: [{ barcode: 'BC-MISSING', quantity: 1, unitPriceNet: '90.00' }],
+        // lineSaleGross = LINE total: 1 × ₺90 = ₺90.
+        lines: [{ barcode: 'BC-MISSING', quantity: 1, lineSaleGross: '90.00' }],
       },
     });
 
@@ -253,8 +257,8 @@ describe('GET /v1/.../live-performance/today-products', () => {
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Active cost profile attached, but today's order-item has no net snapshot
-    // (omitting unitCostSnapshotNet stores null). Cost status is authoritative
+    // Active cost profile attached, but today's order-item has no cost snapshot
+    // (omitting unitCostSnapshotGross stores null). Cost status is authoritative
     // from the profile; the displayed unit cost stays null.
     const costedId = await createVariant(org.id, store.id, {
       title: 'Costed No-Snapshot Variant',
@@ -270,7 +274,7 @@ describe('GET /v1/.../live-performance/today-products', () => {
         attachedBy: user.id,
       },
     });
-    await sellInOrders(org.id, store.id, costedId, { count: 1, unitPriceNet: '50.00' });
+    await sellInOrders(org.id, store.id, costedId, { count: 1, lineSaleGross: '50.00' });
 
     const res = await app.request(
       `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,

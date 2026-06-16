@@ -2,10 +2,11 @@
 //
 // Drives the chunk loop with a mocked Trendyol `getShipmentPackagesStream`
 // response and verifies:
-//   1. Order rows created (NEW convention: saleSubtotalNet, saleVatTotal,
-//      agreedDeliveryDate, fastDelivery, micro, platformOrderNumber)
-//   2. OrderItem rows created with KDV-split (unitPriceNet/VatRate/VatAmount,
-//      grossCommissionAmountNet/VatAmount, sellerDiscountNet/VatAmount)
+//   1. Order rows created (GROSS convention: saleGross, saleVat, listGross,
+//      sellerDiscountGross, agreedDeliveryDate, fastDelivery, micro, platformOrderNumber)
+//   2. OrderItem rows created with gross columns (lineListGross/lineSaleGross/
+//      lineSellerDiscountGross/saleVatRate, commissionGross/refundedCommissionGross/
+//      commissionVatRate, estimatedCommissionGross write-once)
 //   3. Variant lookup by barcode (or null for unmatched)
 //   4. Idempotency (re-sync same page → no duplicates)
 //   5. applyEstimateOnOrderCreate plug-in — PSF + Stopaj ESTIMATE OrderFee
@@ -81,7 +82,11 @@ function makeShipmentPackage(
     agreedDeliveryDate: AGREED_DATE_MS,
     fastDelivery: false,
     micro: false,
+    // GROSS konvansiyon: paket toplamları doğrudan saleGross/listGross/
+    // sellerDiscountGross'a yazılır. İndirimsiz: packageTotalPrice = packageGrossAmount.
     packageGrossAmount: 120,
+    packageSellerDiscount: 0,
+    packageTotalPrice: 120,
     lines: [
       {
         lineId: 1,
@@ -228,8 +233,11 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(order.platformOrderId).toBe('3734026895');
     expect(order.platformOrderNumber).toBe('11101228439');
     expect(order.status).toBe('DELIVERED');
-    expect(new Decimal(order.saleSubtotalNet!).toString()).toBe('100');
-    expect(new Decimal(order.saleVatTotal!).toString()).toBe('20');
+    // GROSS: saleGross = packageTotalPrice (120); saleVat = 120 × 20/120 = 20.
+    expect(new Decimal(order.saleGross!).toString()).toBe('120');
+    expect(new Decimal(order.saleVat!).toString()).toBe('20');
+    expect(new Decimal(order.listGross!).toString()).toBe('120');
+    expect(new Decimal(order.sellerDiscountGross!).toString()).toBe('0');
     expect(order.agreedDeliveryDate?.getTime()).toBe(AGREED_DATE_MS);
     expect(order.actualDeliveryDate?.getTime()).toBe(DELIVERED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
@@ -247,22 +255,23 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
     expect(items).toHaveLength(1);
     const item = items[0]!;
-    expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
-    expect(new Decimal(item.unitVatAmount!).toString()).toBe('20');
-    expect(new Decimal(item.grossCommissionAmountNet).toString()).toBe('10');
-    expect(new Decimal(item.grossCommissionVatAmount).toString()).toBe('2');
-    // Komisyon TAHMİNİ donuk kopyası yazıldı (= T+0 değer; settlement bunu KORUR).
-    expect(new Decimal(item.estimatedGrossCommissionAmountNet!).toString()).toBe('10');
-    expect(new Decimal(item.estimatedGrossCommissionVatAmount!).toString()).toBe('2');
-    expect(item.estimatedRefundedCommissionAmountNet).not.toBeNull();
+    // GROSS: lineSaleGross = lineGrossAmount × qty (120); commissionGross =
+    // lineSaleGross × commissionRate (120 × 10% = 12).
+    expect(new Decimal(item.lineSaleGross).toString()).toBe('120');
+    expect(new Decimal(item.lineListGross).toString()).toBe('120');
+    expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('0');
+    expect(new Decimal(item.commissionGross).toString()).toBe('12');
+    expect(new Decimal(item.commissionRate).toString()).toBe('10');
+    // Komisyon TAHMİNİ donuk kopyası yazıldı (= T+0 gross değer; settlement bunu KORUR).
+    expect(new Decimal(item.estimatedCommissionGross!).toString()).toBe('12');
+    expect(new Decimal(item.refundedCommissionGross).toString()).toBe('0');
   });
 
-  it('co-funded order: saleSubtotalNet = effectiveSale (liste − satıcı indirimi), tyDiscount excluded (denetim #1)', async () => {
+  it('co-funded order: saleGross = effectiveSale (liste − satıcı indirimi), tyDiscount excluded (denetim #1)', async () => {
     // Stage-tipi Trendyol-finanslı sipariş — bu boşluğun (denetim #1) kör noktası:
-    // hiçbir eski test tyDiscount>0 kapsamıyordu. Eski bug'da saleSubtotalNet lineUnitPrice'tan
-    // (120 → net 100) kurulup formül satıcı indirimini BİR DAHA düşerdi → kâr eksik (hatta negatif).
-    // Doğru: saleSubtotalNet = effectiveSale = (200 − 50) → net 125; Trendyol indirimi (30) HARİÇ
-    // (geri ödeniyor, kâra etkisi YOK). Ayırt edici nokta: '125' ≠ eski '100'.
+    // hiçbir eski test tyDiscount>0 kapsamıyordu. GROSS konvansiyon: saleGross =
+    // packageTotalPrice = effectiveSale = liste − satıcı indirimi = 200 − 50 = 150.
+    // Trendyol indirimi (30) packageTotalPrice'a DAHİL DEĞİL (geri ödeniyor, kâra etkisi YOK).
     const { store, log } = await setupStoreAndSyncLog(['EAN13-COFUND']);
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -272,7 +281,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
           nextCursor: null,
           content: [
             makeShipmentPackage({
+              // GROSS paket toplamları: liste 200, satıcı indirimi 50 → effectiveSale 150.
               packageGrossAmount: 200,
+              packageSellerDiscount: 50,
+              packageTotalPrice: 150,
               lines: [
                 {
                   lineId: 1,
@@ -295,17 +307,28 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     await processOrdersChunk({ syncLog: log, cursor: null });
 
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
-    // effectiveSale = 200 − 50 = 150 → net 125 (KDV 25). NOT 120/1.2=100, tyDiscount(30) hariç.
-    expect(new Decimal(order.saleSubtotalNet!).toString()).toBe('125');
-    expect(new Decimal(order.saleVatTotal!).toString()).toBe('25');
+    // effectiveSale (GROSS) = 200 − 50 = 150; saleVat = 150 × 20/120 = 25.
+    // tyDiscount(30) HARİÇ — packageTotalPrice'a girmez.
+    expect(new Decimal(order.saleGross!).toString()).toBe('150');
+    expect(new Decimal(order.saleVat!).toString()).toBe('25');
+    expect(new Decimal(order.listGross!).toString()).toBe('200');
+    expect(new Decimal(order.sellerDiscountGross!).toString()).toBe('50');
     // Pipeline çalıştı (variant + cost seeded → calculable); kâr indirimi çift düşmeden hesaplandı.
     expect(order.estimatedNetProfit).not.toBeNull();
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(new Decimal(item.unitPriceNet!).toString()).toBe('125'); // effective birim-net
-    // Satıcı indirimi yalnız breakdown gösterimi için ayrıştırılır (50 / 1.2).
-    expect(new Decimal(item.sellerDiscountNet).toString()).toBe('41.67');
-    expect(new Decimal(item.sellerDiscountVatAmount).toString()).toBe('8.33');
+    // GROSS satır: lineSaleGross = 200 − 50 = 150; satıcı indirimi 50 ayrı kolonda.
+    expect(new Decimal(item.lineSaleGross).toString()).toBe('150');
+    expect(new Decimal(item.lineListGross).toString()).toBe('200');
+    expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('50');
+    // commissionGross = lineListGross × commissionRate = 200 × 10% = 20 (LİSTE tabanı; Bug-1 fix).
+    // refundedCommissionGross = lineSellerDiscountGross × rate = 50 × 10% = 5.
+    // Efektif komisyon = gross − refunded = 20 − 5 = 15 (net-satış tabanı #332).
+    expect(new Decimal(item.commissionGross).toString()).toBe('20');
+    expect(new Decimal(item.refundedCommissionGross).toString()).toBe('5');
+    expect(
+      new Decimal(item.commissionGross).sub(new Decimal(item.refundedCommissionGross)).toString(),
+    ).toBe('15');
   });
 
   it('variant barcode match: OrderItem.productVariantId set when barcode exists', async () => {
@@ -599,13 +622,13 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
   });
 
   it('re-sync does NOT clobber a settled working value nor re-stamp the frozen estimate (write-once)', async () => {
-    // En kritik veri-kaybı senaryosu — feature'ın var olma sebebi:
-    //   (1) intake estimate=10 + working grossCommissionAmountNet=10 yazar,
-    //   (2) settlement working'i FARKLI bir gerçeğe (15) ezer,
+    // En kritik veri-kaybı senaryosu — feature'ın var olma sebebi (GROSS):
+    //   (1) intake estimatedCommissionGross=12 (write-once) + commissionGross=12 yazar,
+    //   (2) settlement settledCommissionGross'u FARKLI bir gerçeğe (15) yazar,
     //   (3) rutin re-sync aynı sipariş sayfasını tekrar getirir.
-    // upsert-order'ın write-once `continue` dalı regrese ederse re-sync working'i
-    // mapper'ın 10'una geri ezer VE/VEYA tahmini yeniden damgalar. Bu test ikisini de
-    // kilitler: working 15 KALIR, estimate 10 DONUK kalır, satır SAYISI 1 (yeni satır yok).
+    // upsert-order'ın write-once `continue` dalı regrese ederse re-sync satırı yeniden
+    // yazar. Bu test kilitler: settledCommissionGross 15 KALIR, estimatedCommissionGross 12
+    // DONUK kalır, satır SAYISI 1 (yeni satır yok).
     const { store, log } = await setupStoreAndSyncLog(['EAN13-ORD-001']);
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -619,13 +642,14 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     const item = await prisma.orderItem.findFirstOrThrow({
       where: { order: { storeId: store.id } },
     });
-    expect(item.grossCommissionAmountNet.toFixed(2)).toBe('10.00');
-    expect(item.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('10.00');
+    // commissionGross = lineSaleGross × rate = 120 × 10% = 12; estimate donuk kopya.
+    expect(item.commissionGross.toFixed(2)).toBe('12.00');
+    expect(item.estimatedCommissionGross?.toFixed(2)).toBe('12.00');
 
-    // Settlement gerçeği working kolonu FARKLI bir değere ezer (tahmine dokunmaz).
+    // Settlement gerçeği settledCommissionGross'a FARKLI bir değer yazar (tahmine dokunmaz).
     await prisma.orderItem.update({
       where: { id: item.id },
-      data: { grossCommissionAmountNet: new Decimal('15.00') },
+      data: { settledCommissionGross: new Decimal('15.00') },
     });
 
     // Rutin re-sync — AYNI sayfa, AYNI veri → mevcut-kalem (write-once) dalına girmeli.
@@ -638,10 +662,10 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
 
     expect(await prisma.orderItem.count()).toBe(1); // yeni satır yaratılmadı
     const after = await prisma.orderItem.findUniqueOrThrow({ where: { id: item.id } });
-    // Settled çalışan değer KORUNDU — re-sync mapper'ın 10'una geri ezmedi.
-    expect(after.grossCommissionAmountNet.toFixed(2)).toBe('15.00');
+    // Settled çalışan değer KORUNDU — re-sync mapper'ın 12'sine geri ezmedi.
+    expect(after.settledCommissionGross?.toFixed(2)).toBe('15.00');
     // Donuk tahmin yeniden damgalanmadı.
-    expect(after.estimatedGrossCommissionAmountNet?.toFixed(2)).toBe('10.00');
+    expect(after.estimatedCommissionGross?.toFixed(2)).toBe('12.00');
   });
 
   it('cursor advance within chunk: hasMore + nextCursor → streamCursor updated, chunkIndex unchanged', async () => {
@@ -778,10 +802,10 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     await ensureFeeDefinitions();
   });
 
-  it('writes Order with NEW convention + OrderItem KDV-split', async () => {
+  it('writes Order with GROSS convention + OrderItem gross columns', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-DIRECT']);
 
-    // mapTrendyolShipmentPackage output mock'u — pure DB write doğrulaması.
+    // mapTrendyolShipmentPackage output mock'u (GROSS) — pure DB write doğrulaması.
     const mappedOrder = {
       platformOrderId: '99999',
       platformOrderNumber: 'TY-99',
@@ -789,8 +813,11 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'DELIVERED' as const,
       dematerialized: false,
-      saleSubtotalNet: '100.00',
-      saleVatTotal: '20.00',
+      saleGross: '120.00',
+      saleVat: '20.00',
+      listGross: '120.00',
+      sellerDiscountGross: '0.00',
+      promotionDisplays: null,
       agreedDeliveryDate: new Date('2026-05-20T00:00:00Z'),
       actualDeliveryDate: new Date('2026-05-19T18:00:00Z'),
       actualShipDate: new Date('2026-05-19T12:00:00Z'),
@@ -810,16 +837,14 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           barcode: 'EAN13-DIRECT',
           quantity: 1,
           platformLineId: '10328256',
-          unitPriceNet: '100',
-          unitVatRate: '20',
-          unitVatAmount: '20',
-          grossCommissionAmountNet: '10',
-          grossCommissionVatAmount: '2',
-          refundedCommissionAmountNet: '0',
-          refundedCommissionVatAmount: '0',
-          sellerDiscountNet: '0',
-          sellerDiscountVatAmount: '0',
+          lineListGross: '120.00',
+          lineSaleGross: '120.00',
+          lineSellerDiscountGross: '0.00',
+          saleVatRate: '20',
           commissionRate: '10',
+          commissionGross: '12.00',
+          refundedCommissionGross: '0.00',
+          commissionVatRate: '20',
         },
       ],
     };
@@ -829,6 +854,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('99999');
     expect(order.fastDelivery).toBe(true);
+    expect(new Decimal(order.saleGross!).toString()).toBe('120');
+    expect(new Decimal(order.saleVat!).toString()).toBe('20');
     // PR-8 cargo enrichment lands on CREATE.
     expect(order.cargoProviderName).toBe('Trendyol Express Marketplace');
     expect(order.cargoTrackingNumber).toBe(7330000167510333n);
@@ -843,11 +870,146 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(order.actualShipDate?.toISOString()).toBe('2026-05-19T12:00:00.000Z');
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(new Decimal(item.unitPriceNet!).toString()).toBe('100');
+    expect(new Decimal(item.lineSaleGross).toString()).toBe('120');
+    expect(new Decimal(item.commissionGross).toString()).toBe('12');
+    // estimatedCommissionGross = T+0 gross snapshot (write-once #340).
+    expect(new Decimal(item.estimatedCommissionGross!).toString()).toBe('12');
     expect(item.productVariantId).not.toBeNull();
     // PR-8 line trail.
     expect(item.platformLineId).toBe(10328256n);
     expect(item.barcode).toBe('EAN13-DIRECT');
+  });
+
+  it('sellerDiscountVat per-line GERÇEK saleVatRate ten türetilir — %10 satışta 1.00 (hardcoded %20 DEĞİL)', async () => {
+    // Bug 2: sellerDiscountVat eskiden sellerDiscountGross × 20/120 ile sabit %20
+    // varsayıyordu. %10 KDV oranlı ürünlerde (Türk bayrağı, kitap) bu yanlış değer
+    // saklıyordu. Doğru: per-line lineSellerDiscountGross × saleVatRate/(100+saleVatRate).
+    // %10 satır, indirim 11 → 11 × 10/110 = 1.00 (eski hatalı: 11 × 20/120 = 1.83).
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-VAT10']);
+
+    const mappedOrder = {
+      platformOrderId: '70010',
+      platformOrderNumber: 'TY-VAT10',
+      orderDate: new Date('2026-05-19T10:00:00Z'),
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      status: 'DELIVERED' as const,
+      dematerialized: false,
+      // Satış 99 (KDV-dahil) = net 90 + %10 KDV 9; liste 110, indirim 11.
+      saleGross: '99.00',
+      saleVat: '9.00',
+      listGross: '110.00',
+      sellerDiscountGross: '11.00',
+      promotionDisplays: null,
+      agreedDeliveryDate: null,
+      actualDeliveryDate: null,
+      actualShipDate: null,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: null,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      originShipmentDate: null,
+      lines: [
+        {
+          barcode: 'EAN13-VAT10',
+          quantity: 1,
+          platformLineId: '70010001',
+          lineListGross: '110.00',
+          lineSaleGross: '99.00',
+          lineSellerDiscountGross: '11.00',
+          // %10 satış KDV oranı — Bug 2'nin can alıcı noktası.
+          saleVatRate: '10',
+          commissionRate: '10',
+          commissionGross: '9.90',
+          refundedCommissionGross: '1.10',
+          commissionVatRate: '20',
+        },
+      ],
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mappedOrder);
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: '70010' },
+    });
+    // 11 × 10/(100+10) = 1.00 (NOT 11 × 20/120 = 1.83).
+    expect(new Decimal(order.sellerDiscountVat!).toString()).toBe('1');
+    expect(new Decimal(order.sellerDiscountGross!).toString()).toBe('11');
+  });
+
+  it('sellerDiscountVat çok-satırlı: per-line oranlar karışık (%10 + %20) raw-aggregate', async () => {
+    // İki satır: %10 oranlı indirim 11 → 1.00; %20 oranlı indirim 12 → 2.00. Toplam 3.00.
+    // Karışık oran sabit %20 ile 11+12=23 × 20/120 = 3.83 verirdi (yanlış).
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-MIX-A', 'EAN13-MIX-B']);
+
+    const mappedOrder = {
+      platformOrderId: '70020',
+      platformOrderNumber: 'TY-MIX',
+      orderDate: new Date('2026-05-19T10:00:00Z'),
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      status: 'DELIVERED' as const,
+      dematerialized: false,
+      saleGross: '209.00',
+      saleVat: '21.00',
+      listGross: '232.00',
+      sellerDiscountGross: '23.00',
+      promotionDisplays: null,
+      agreedDeliveryDate: null,
+      actualDeliveryDate: null,
+      actualShipDate: null,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: null,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      originShipmentDate: null,
+      lines: [
+        {
+          barcode: 'EAN13-MIX-A',
+          quantity: 1,
+          platformLineId: '70020001',
+          lineListGross: '110.00',
+          lineSaleGross: '99.00',
+          lineSellerDiscountGross: '11.00',
+          saleVatRate: '10', // %10 → 11 × 10/110 = 1.00
+          commissionRate: '10',
+          commissionGross: '9.90',
+          refundedCommissionGross: '1.10',
+          commissionVatRate: '20',
+        },
+        {
+          barcode: 'EAN13-MIX-B',
+          quantity: 1,
+          platformLineId: '70020002',
+          lineListGross: '122.00',
+          lineSaleGross: '110.00',
+          lineSellerDiscountGross: '12.00',
+          saleVatRate: '20', // %20 → 12 × 20/120 = 2.00
+          commissionRate: '10',
+          commissionGross: '11.00',
+          refundedCommissionGross: '1.20',
+          commissionVatRate: '20',
+        },
+      ],
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mappedOrder);
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: '70020' },
+    });
+    // 1.00 + 2.00 = 3.00 (sabit %20 yanlış değeri 3.83 verirdi).
+    expect(new Decimal(order.sellerDiscountVat!).toString()).toBe('3');
   });
 
   it('UPDATE refreshes cargo fields but never erases them with incoming nulls (PR-8)', async () => {
@@ -860,8 +1022,11 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       status: 'PROCESSING' as const,
       dematerialized: false,
-      saleSubtotalNet: '100.00',
-      saleVatTotal: '20.00',
+      saleGross: '120.00',
+      saleVat: '20.00',
+      listGross: '120.00',
+      sellerDiscountGross: '0.00',
+      promotionDisplays: null,
       agreedDeliveryDate: null,
       actualDeliveryDate: null,
       actualShipDate: null,
@@ -877,16 +1042,14 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           barcode: 'EAN13-DIRECT',
           quantity: 1,
           platformLineId: '10328999',
-          unitPriceNet: '100',
-          unitVatRate: '20',
-          unitVatAmount: '20',
-          grossCommissionAmountNet: '10',
-          grossCommissionVatAmount: '2',
-          refundedCommissionAmountNet: '0',
-          refundedCommissionVatAmount: '0',
-          sellerDiscountNet: '0',
-          sellerDiscountVatAmount: '0',
+          lineListGross: '120.00',
+          lineSaleGross: '120.00',
+          lineSellerDiscountGross: '0.00',
+          saleVatRate: '20',
           commissionRate: '10',
+          commissionGross: '12.00',
+          refundedCommissionGross: '0.00',
+          commissionVatRate: '20',
         },
       ],
     };

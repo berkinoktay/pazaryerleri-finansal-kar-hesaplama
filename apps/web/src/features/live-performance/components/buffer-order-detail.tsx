@@ -67,7 +67,7 @@ export function BufferOrderDetail({
             <TableRow>
               <TableHead>{t('columns.product')}</TableHead>
               <TableHead className="text-right">{t('columns.quantity')}</TableHead>
-              <TableHead className="text-right">{t('columns.unitPriceNet')}</TableHead>
+              <TableHead className="text-right">{t('columns.lineSaleGross')}</TableHead>
               <TableHead className="text-right" aria-label={t('addCost')} />
             </TableRow>
           </TableHeader>
@@ -85,7 +85,7 @@ export function BufferOrderDetail({
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{line.quantity}</TableCell>
                 <TableCell className="text-right">
-                  <Currency value={line.unitPriceNet} />
+                  <Currency value={line.lineSaleGross} />
                 </TableCell>
                 <TableCell className="text-right">
                   {line.variantId !== null ? (

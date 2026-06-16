@@ -77,7 +77,7 @@ async function seedProfile(
       organizationId,
       name: opts.name ?? `Profile ${randomUUID().slice(0, 6)}`,
       type: 'COGS',
-      amount: new Decimal(opts.amount),
+      amountGross: new Decimal(opts.amount),
       currency: opts.currency ?? 'TRY',
       vatRate: 0,
       fxRateMode: opts.fxRateMode ?? 'AUTO',

@@ -47,8 +47,10 @@ async function seed(): Promise<{
   const order = await createOrder(org.id, store.id, {
     orderDate: todayAt(10),
     platformOrderId: 'ORD-1',
-    saleSubtotalNet: '100.00',
+    saleGross: '100.00',
     estimatedNetProfit: '20.00',
+    // Marj kalıcı kolondan servis edilir (20 / 100 × 100 = %20) — render-time hesap yok.
+    estimatedSaleMarginPct: '20.00',
   });
   const bufferEntry = await createBufferEntry(org.id, store.id, {
     orderDate: getBusinessDateAnchor(),
@@ -56,7 +58,7 @@ async function seed(): Promise<{
     mappedOrder: {
       status: 'PENDING',
       orderDate: todayAt(10).toISOString(),
-      saleSubtotalNet: '50.00',
+      saleGross: '50.00',
       lines: [],
     },
   });

@@ -64,7 +64,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     const org = await createOrganization();
     const store = await createStore(org.id);
     const variant = await seedVariant(org.id, store.id, 'BC-1');
-    const profile = await createCostProfile(org.id, { amount: '50.00' });
+    const profile = await createCostProfile(org.id, { amountGross: '50.00' });
 
     for (const platformOrderId of ['pkg-1', 'pkg-2', 'pkg-3']) {
       await createBufferEntry(org.id, store.id, {
@@ -86,7 +86,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     const store = await createStore(org.id);
     const vA = await seedVariant(org.id, store.id, 'BC-A');
     const vB = await seedVariant(org.id, store.id, 'BC-B');
-    const profile = await createCostProfile(org.id, { amount: '50.00' });
+    const profile = await createCostProfile(org.id, { amountGross: '50.00' });
 
     // One PENDING entry whose order has BOTH lines (A + B), both cost-missing.
     await createBufferEntry(org.id, store.id, {
@@ -116,7 +116,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     const org = await createOrganization();
     const store = await createStore(org.id);
     const variant = await seedVariant(org.id, store.id, 'BC-1');
-    const profile = await createCostProfile(org.id, { amount: '50.00' });
+    const profile = await createCostProfile(org.id, { amountGross: '50.00' });
 
     await createBufferEntry(org.id, store.id, {
       platformOrderId: 'pkg-other',
@@ -140,7 +140,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     const vA = await seedVariant(org.id, storeA.id, 'BC-1');
     await seedVariant(org.id, storeB.id, 'BC-1'); // same barcode, different store
 
-    const profile = await createCostProfile(org.id, { amount: '50.00' });
+    const profile = await createCostProfile(org.id, { amountGross: '50.00' });
 
     await createBufferEntry(org.id, storeB.id, {
       platformOrderId: 'pkg-storeB',
@@ -161,7 +161,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     const org = await createOrganization();
     const store = await createStore(org.id);
     const variant = await seedVariant(org.id, store.id, 'BC-R');
-    const profile = await createCostProfile(org.id, { amount: '50.00' });
+    const profile = await createCostProfile(org.id, { amountGross: '50.00' });
 
     await createBufferEntry(org.id, store.id, {
       platformOrderId: 'pkg-r',

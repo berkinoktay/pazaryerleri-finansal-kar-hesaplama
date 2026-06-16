@@ -21,6 +21,8 @@
     "seed": "tsx prisma/seed.ts",
     "seed:reference": "tsx scripts/seed-reference.ts",
     "studio": "prisma studio",
+    "test": "vitest run",
+    "test:integration": "vitest run tests --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "clean": "rm -rf .turbo"
@@ -31,14 +33,16 @@
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@pazarsync/crypto-core": "workspace:*",
+    "@pazarsync/eslint-config": "workspace:*",
     "@prisma/client": "^7.8.0",
     "@types/pg": "^8.11.0",
+    "decimal.js": "catalog:",
     "dotenv": "catalog:",
+    "eslint": "catalog:",
     "prisma": "^7.8.0",
     "tsx": "catalog:",
     "typescript": "catalog:",
-    "@pazarsync/crypto-core": "workspace:*",
-    "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "catalog:"
+    "vitest": "catalog:"
   }
 }

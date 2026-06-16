@@ -31,7 +31,7 @@ export interface CostProfileHistoryListProps {
 const DIFF_FIELDS = [
   'name',
   'type',
-  'amount',
+  'amountGross',
   'currency',
   'vatRate',
   'fxRateMode',
@@ -45,7 +45,7 @@ type DiffField = (typeof DIFF_FIELDS)[number];
 const FIELD_LABEL: Record<DiffField, string> = {
   name: 'Ad',
   type: 'Tür',
-  amount: 'Tutar',
+  amountGross: 'Tutar',
   currency: 'Para birimi',
   vatRate: 'KDV oranı',
   fxRateMode: 'Kur modu',

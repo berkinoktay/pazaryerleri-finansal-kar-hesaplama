@@ -1,37 +1,27 @@
-// Discount settlement row → OrderItem refund-commission + seller-discount
-// reconciliation handler.
+// Discount settlement row → OrderItem refund-commission reconciliation handler.
 //
 // Same lookup pattern as handleSale (barcode + shipmentPackageId → OrderItem)
-// but writes the refund-side columns:
-//   - refundedCommissionAmountNet = Discount.commissionAmount / 1.20
-//   - refundedCommissionVatAmount = Discount.commissionAmount − net
-//   - sellerDiscountNet           = Discount.debt / (1 + unitVatRate/100)
-//   - sellerDiscountVatAmount     = Discount.debt − sellerDiscountNet
+// but writes the refund-side column:
+//   - refundedCommissionGross = Discount.commissionAmount × quantity
 //
-// Research §3.2: Discount row mirrors Sale schema with debt/credit swap.
-// commissionAmount on a Discount row = REFUNDED commission for that line.
-// debt on a Discount row = lineSellerDiscount (KDV-dahil), where the VAT
-// rate is the line's unitVatRate (Trendyol stores it on each OrderItem
-// from the order arrival mapping).
+// GROSS CONVENTION (2026-06-16, Bölüm E Task 18):
+// Net-split (commissionVatDivisor / resolveFeeDefinition) KALDIRILDI.
+// KDV adapter downstream commissionVatRate kolonundan türetir.
+//
+// ⚠️ lineSellerDiscountGross EZILMEZ: intake mapper discountDetails'ten
+// kuruş-kesin kurdu (48,01). Hakediş Discount per-unit × quantity ×
+// birim sapması ekleyebilir (48,00). Bu yüzden bu handler sadece
+// refundedCommissionGross yazar; lineSellerDiscountGross intake'ten otoriter.
 //
 // QUANTITY (handleSale ile aynı, EMPİRİK 2026-06-14): Trendyol qty=N için N adet
-// PER-UNIT Discount satırı gönderir (debt = birim satıcı indirimi = "item'ların
-// ortalaması", commissionAmount = birim iade komisyonu). OrderItem refund-side
-// alanları LINE-TOPLAMI olduğundan settlement değerleri × OrderItem.quantity ile
-// çıkarılır. Σ ile ×quantity arasında satır-başı yuvarlamadan ≤0.01×qty fark
-// olabilir; ×quantity estimate (per-unit × qty) ile tutarlıdır ve idempotenttir.
+// PER-UNIT Discount satırı gönderir. × OrderItem.quantity ile line-toplamına
+// çıkarılır; idempotent (özdeş satırlar aynı toplamı yazar).
 // Detay: docs/plans/2026-06-14-settlement-qty-per-unit-findings.md.
-//
-// CHECK constraint (PR-3 migration.sql):
-//   refunded_commission_amount_net <= gross_commission_amount_net
-// Handler does not guard against this — the DB rejects on violation.
-// Caller logs + skips if Prisma surfaces a P-code error.
 
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
-import { commissionVatDivisor, type TrendyolFinancialTransaction } from '@pazarsync/marketplace';
-import { resolveFeeDefinition } from '@pazarsync/profit';
+import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { syncLog } from '@pazarsync/sync-core';
 
 import type { HandleSettlementResult } from './sale';
@@ -72,7 +62,7 @@ export async function handleDiscount(
 
   const item = await tx.orderItem.findFirst({
     where: { orderId: order.id, productVariantId: variant.id },
-    select: { id: true, unitVatRate: true, quantity: true },
+    select: { id: true, quantity: true },
   });
   if (item === null) {
     syncLog.warn('settlements.discount.item-not-found', {
@@ -83,44 +73,16 @@ export async function handleDiscount(
     return { applied: false, skipReason: 'item_not_found' };
   }
 
-  // Refunded commission split — same DB-driven rate as Sale (denetim A);
-  // komisyon KDV oranı fee_definitions ALL/COMMISSION_INVOICE'tan order.orderDate'e göre.
-  // × quantity: row.commissionAmount / row.debt BİRİM başınadır (header) → line-toplamı.
+  // GROSS CONVENTION: commissionAmount KDV-dahil (gross), per-unit.
+  // × quantity ile line-toplamına çıkar (#338). Net-split kaldırıldı.
+  // lineSellerDiscountGross EZILMEZ — intake mapper otoriter (#338 DİKKAT).
   const quantity = new Decimal(item.quantity);
-  const commissionVatDef = await resolveFeeDefinition(tx, {
-    platform: 'TRENDYOL',
-    feeType: 'COMMISSION_INVOICE',
-    at: order.orderDate,
-  });
-  const refundedGross = new Decimal(row.commissionAmount).mul(quantity);
-  const refundedCommissionAmountNet = refundedGross
-    .div(commissionVatDivisor(commissionVatDef.defaultVatRate.toString()))
-    .toDecimalPlaces(2);
-  const refundedCommissionVatAmount = refundedGross.sub(refundedCommissionAmountNet);
-
-  // Seller discount split — uses the line's own unitVatRate (varies per
-  // line; commission VAT is fixed but discount VAT mirrors the product).
-  // unitVatRate may be null on legacy items; fallback skips the split.
-  let sellerDiscountNet: Decimal | undefined;
-  let sellerDiscountVatAmount: Decimal | undefined;
-  if (item.unitVatRate !== null) {
-    const debtGross = new Decimal(row.debt).mul(quantity);
-    const unitVatRate = new Decimal(item.unitVatRate);
-    const divisor = unitVatRate.div(100).add(1);
-    sellerDiscountNet = debtGross.div(divisor).toDecimalPlaces(2);
-    sellerDiscountVatAmount = debtGross.sub(sellerDiscountNet);
-  } else {
-    syncLog.warn('settlements.discount.unit-vat-rate-null', { id: row.id, itemId: item.id });
-  }
+  const refundedCommissionGross = new Decimal(row.commissionAmount).mul(quantity);
 
   await tx.orderItem.update({
     where: { id: item.id },
     data: {
-      refundedCommissionAmountNet,
-      refundedCommissionVatAmount,
-      ...(sellerDiscountNet !== undefined && sellerDiscountVatAmount !== undefined
-        ? { sellerDiscountNet, sellerDiscountVatAmount }
-        : {}),
+      refundedCommissionGross,
     },
   });
 

@@ -204,6 +204,22 @@ export interface MappedProductsPageMeta {
 // `Trendyol Order Sync` epic design doc §2.2 has the abridged contract;
 // research §7.1-§7.3 has the full per-field arithmetic (esp. KDV split).
 
+/**
+ * Per-UNIT discount breakdown entry inside a Trendyol order line's
+ * `discountDetails[]`. Each element corresponds to one of the `quantity`
+ * units of the line. Trendyol rounds units unevenly (e.g. 16,01 + 16 + 16 =
+ * 48,01 ≠ 16 × 3 = 48,00), so the AUTHORITATIVE per-line totals come from
+ * summing this array — never from `lineSellerDiscount × quantity` (which
+ * drifts by a kuruş). `lineItemPrice` is the effective sale (indirim sonrası,
+ * KDV dahil) for that single unit.
+ */
+export interface TrendyolDiscountDetail {
+  /** Effective sale for a single unit (KDV dahil, satıcı indirimi sonrası). */
+  lineItemPrice: number;
+  /** Seller discount applied to a single unit (KDV dahil). */
+  lineItemSellerDiscount: number;
+}
+
 export interface TrendyolOrderLine {
   lineId: number;
   /** Line-level seller id — webhook payloads (Trendyol stage env) may omit root
@@ -220,11 +236,20 @@ export interface TrendyolOrderLine {
   quantity: number;
   /** Effective per-unit price (KDV dahil, indirim sonrası). */
   lineUnitPrice: number;
-  /** Per-line gross amount = qty × originalUnitPrice (KDV dahil, indirim öncesi). */
+  /** Trendyol per-UNIT gross amount (KDV dahil, indirim öncesi). Line total =
+   * lineGrossAmount × quantity. UNIT-başına, satır-toplamı DEĞİL (#337). */
   lineGrossAmount: number;
   lineSellerDiscount?: number;
   lineTyDiscount?: number;
   lineTotalDiscount?: number;
+  /**
+   * Per-unit discount breakdown (one element per unit). AUTHORITATIVE source
+   * for per-line sale/discount totals — Σ over this array captures Trendyol's
+   * uneven per-unit rounding (16,01 + 16 + 16 = 48,01), which `lineSellerDiscount
+   * × quantity` does not. Single-unit lines carry a 1-element array. Optional:
+   * some legacy/edge payloads omit it → mapper falls back to lineGrossAmount × qty.
+   */
+  discountDetails?: TrendyolDiscountDetail[];
   /** Per-line VAT rate %. */
   vatRate: number;
   /** Commission rate %. Direct in order response (research §7.2). */
@@ -321,24 +346,35 @@ export interface TrendyolOrdersStreamResponse {
   content: TrendyolShipmentPackage[];
 }
 
-// ─── Mapped Order DTO — KDV-split, ready for Order/OrderItem upsert ─────
-// design §2.3 + research §7.3 — per-line KDV ayrıştırma. unitPriceNet artık
-// EFFECTIVE SALE (satıcının gerçek geliri) bazlıdır; müşteri-ödediği lineUnitPrice
-// DEĞİL (denetim #1, 2026-06-13 — satıcı indirimi çift-düşme düzeltmesi):
-//   effectiveSaleLineGross = lineGrossAmount − lineSellerDiscount   (tyDiscount HARİÇ — geri ödenir, kâra etkisi yok)
-//   unitPriceNet           = (effectiveSaleLineGross / qty) / (1 + vatRate/100)
-//   unitVatAmount          = (effectiveSaleLineGross / qty) − unitPriceNet
-//   grossCommissionGross   = lineGrossAmount × commission / 100   (SALE-side, liste; settlement handleSale ile tutarlı)
-//   grossCommissionNet     = grossCommissionGross / (1 + commVat/100)  (komisyon KDV oranı DB'den — denetim A)
-//   refundedCommissionGross = lineSellerDiscount × commission / 100  (T+0 TAHMİN: Trendyol satıcı-indirim payının
-//                            komisyonunu İADE eder, research §7.3 — settlement handleDiscount gerçek değerle üzerine yazar)
-//   refundedCommissionNet  = refundedCommissionGross / (1 + commVat/100)
-//     → effective komisyon = grossCommissionNet − refundedCommissionNet = effectiveSale × oran / 1.2  (kâra DÜŞEN net komisyon)
-//   sellerDiscountNet      = lineSellerDiscount / (1 + vatRate/100)   (YALNIZ breakdown gösterimi; kâra DÜŞÜLMEZ)
+// ─── Mapped Order DTO — GROSS (KDV-dahil), ready for Order/OrderItem upsert ─
+// GROSS convention refactor (spec §4, 2026-06-16). Every money term is GROSS
+// (KDV dahil) + a vatRate; net/KDV are derived downstream by the profit engine,
+// never re-split here. Root cause for going gross: Trendyol gives no per-LINE
+// total — only a per-unit scalar (drifts: 16 × 3 = 48,00) + a per-unit
+// breakdown array `discountDetails` (16,01 + 16 + 16 = 48,01) + package totals.
 //
-// Package aggregates per-line VAT-aware (multi-rate orders correct):
-//   saleSubtotalNet = Σ (qty × unitPriceNet)   → effectiveSale toplamı (kâr/ciro/stopaj/Barem'in tek tabanı)
-//   saleVatTotal    = Σ (qty × unitVatAmount)
+// Order header (sale/discount/list) = package totals DIRECTLY (no recompute):
+//   saleGross           = packageTotalPrice
+//   listGross           = packageGrossAmount
+//   sellerDiscountGross = packageSellerDiscount
+//   saleVat             = Σ per-line (lineSaleGross × vatRate / (100 + vatRate))
+//
+// Per-line split (for commission + multi-VAT/multi-product) = Σ discountDetails:
+//   lineSaleGross           = Σ discountDetails.lineItemPrice
+//                             (fallback: lineGrossAmount × quantity when absent)
+//   lineSellerDiscountGross = Σ discountDetails.lineItemSellerDiscount
+//   lineListGross           = lineGrossAmount × quantity
+//   commissionGross         = commissionRate × lineSaleGross   (net-sale base #332)
+//   refundedCommissionGross = commissionRate × lineSellerDiscountGross  (T+0 estimate)
+//
+// Invariant: Σ lineSaleGross = packageTotalPrice → syncLog.warn on mismatch
+// (no silent drift). Intra-line scalar-vs-details drift is EXPECTED (no warn).
+// promotionDisplays surfaces the seller-discount total for the UI (ekleme #3).
+
+export interface PromotionDisplay {
+  displayName: string;
+  amountGross: string;
+}
 
 export interface MappedOrderLine {
   barcode: string;
@@ -346,23 +382,20 @@ export interface MappedOrderLine {
   /** Trendyol lines[].lineId — platform satır kimliği (string'e çevrilmiş). */
   platformLineId: string | null;
   /** Decimal strings (boundary kontratı — caller Prisma Decimal'a çevirir). */
-  unitPriceNet: string;
-  unitVatRate: string;
-  unitVatAmount: string;
-  grossCommissionAmountNet: string;
-  grossCommissionVatAmount: string;
+  lineListGross: string;
+  lineSaleGross: string;
+  lineSellerDiscountGross: string;
+  saleVatRate: string;
+  commissionRate: string;
+  commissionGross: string;
   /**
    * T+0 estimate of the commission Trendyol refunds on the seller-discount
-   * portion (research §7.3). effective komisyon = gross − refunded =
-   * effectiveSale tabanlı. Settlement (handleDiscount) gerçek Discount satırıyla
-   * üzerine yazar. sellerDiscount yoksa 0.
+   * portion (research §7.3): commissionRate × lineSellerDiscountGross. Settlement
+   * (handleDiscount) overwrites with the real Discount line. 0 when no discount.
    */
-  refundedCommissionAmountNet: string;
-  refundedCommissionVatAmount: string;
-  sellerDiscountNet: string;
-  sellerDiscountVatAmount: string;
-  /** Trendyol commission rate %, set even if commission gross 0. */
-  commissionRate: string;
+  refundedCommissionGross: string;
+  /** Commission VAT rate %, DB-driven default (#331); net split derived downstream. */
+  commissionVatRate: string;
 }
 
 export interface MappedOrder {
@@ -384,9 +417,13 @@ export interface MappedOrder {
    * branches on this flag before any other routing.
    */
   dematerialized: boolean;
-  /** Sipariş paket-toplamı agregat'ı (per-line VAT-aware). */
-  saleSubtotalNet: string;
-  saleVatTotal: string;
+  /** Sipariş başlığı — paket toplamlarından DOĞRUDAN (KDV dahil, spec §4). */
+  saleGross: string;
+  saleVat: string;
+  listGross: string;
+  sellerDiscountGross: string;
+  /** Promosyon gösterimi (satıcı indirimi toplamı); indirim yoksa null (ekleme #3). */
+  promotionDisplays: PromotionDisplay[] | null;
   agreedDeliveryDate: Date | null;
   /** packageHistories[status='Delivered'].createdAt'tan türetilir; teslim olmadıysa null. */
   actualDeliveryDate: Date | null;

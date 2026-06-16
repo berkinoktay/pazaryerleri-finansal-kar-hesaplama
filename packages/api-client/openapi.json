@@ -729,21 +729,29 @@
             "description": "Settlement progression. NOT_SETTLED = only ESTIMATE fees written. PARTIALLY_SETTLED = at least one SETTLEMENT/CARGO_INVOICE fee. FULLY_SETTLED = PaymentOrder confirmed + settledNetProfit written.",
             "example": "PARTIALLY_SETTLED"
           },
-          "saleSubtotalNet": {
+          "saleGross": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Net sale total (decimal string) — null until OrderItems are synced.",
-            "example": "249.50"
+            "description": "Sale total incl. VAT (decimal string) — null until OrderItems are synced.",
+            "example": "299.40"
           },
-          "saleVatTotal": {
+          "saleVat": {
             "type": [
               "string",
               "null"
             ],
-            "description": "KDV total over the sale (decimal string).",
+            "description": "KDV contained in the gross sale (decimal string).",
             "example": "49.90"
+          },
+          "listGross": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "List price incl. VAT (decimal string) = saleGross + sellerDiscountGross.",
+            "example": "349.40"
           },
           "estimatedNetProfit": {
             "type": [
@@ -781,8 +789,9 @@
           "orderDate",
           "status",
           "reconciliationStatus",
-          "saleSubtotalNet",
-          "saleVatTotal",
+          "saleGross",
+          "saleVat",
+          "listGross",
           "estimatedNetProfit",
           "settledNetProfit",
           "fastDelivery",
@@ -890,13 +899,19 @@
           "micro": {
             "type": "boolean"
           },
-          "saleSubtotalNet": {
+          "saleGross": {
             "type": [
               "string",
               "null"
             ]
           },
-          "saleVatTotal": {
+          "saleVat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "listGross": {
             "type": [
               "string",
               "null"
@@ -913,6 +928,33 @@
               "string",
               "null"
             ]
+          },
+          "profitBreakdown": {
+            "$ref": "#/components/schemas/ProfitBreakdown"
+          },
+          "promotionDisplays": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "displayName": {
+                  "type": "string",
+                  "example": "Satıcı İndirimi"
+                },
+                "amountGross": {
+                  "type": "string",
+                  "example": "48.01"
+                }
+              },
+              "required": [
+                "displayName",
+                "amountGross"
+              ]
+            },
+            "description": "Seller-discount promotion names + gross amounts captured at order intake. Null when there is no promotion/discount."
           },
           "profitExcludedAt": {
             "type": [
@@ -1004,10 +1046,13 @@
           "deliveredOnTime",
           "fastDelivery",
           "micro",
-          "saleSubtotalNet",
-          "saleVatTotal",
+          "saleGross",
+          "saleVat",
+          "listGross",
           "estimatedNetProfit",
           "settledNetProfit",
+          "profitBreakdown",
+          "promotionDisplays",
           "profitExcludedAt",
           "profitExclusionReason",
           "reconciliationStatus",
@@ -1046,6 +1091,97 @@
           "platform"
         ]
       },
+      "ProfitBreakdown": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "listGross": {
+            "type": "string",
+            "description": "Liste fiyatı brüt = satış brüt + satıcı indirimi brüt."
+          },
+          "sellerDiscountGross": {
+            "type": "string",
+            "description": "Satıcı indirimi brüt (≥0). '0.00' → indirim yok."
+          },
+          "saleGross": {
+            "type": "string",
+            "description": "Satış brüt (effectiveSale = liste − indirim, KDV-dahil)."
+          },
+          "saleVat": {
+            "type": "string"
+          },
+          "costGross": {
+            "type": "string"
+          },
+          "costVat": {
+            "type": "string"
+          },
+          "commissionGross": {
+            "type": "string"
+          },
+          "commissionVat": {
+            "type": "string"
+          },
+          "shippingGross": {
+            "type": "string"
+          },
+          "shippingVat": {
+            "type": "string"
+          },
+          "platformServiceGross": {
+            "type": "string"
+          },
+          "platformServiceVat": {
+            "type": "string"
+          },
+          "stoppage": {
+            "type": "string",
+            "description": "Stopaj (kaynakta kesinti) — ayrı düşülen brüt terim, KDV-siz (vatRate 0). Net KDV içine katlanmaz; kârdan doğrudan düşülür."
+          },
+          "netVat": {
+            "type": "string",
+            "description": "Net KDV = Satış KDV − Maliyet KDV − Komisyon KDV − Kargo KDV − PSF KDV."
+          },
+          "netProfit": {
+            "type": "string"
+          },
+          "saleMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kâr / satış brüt × 100. null: satış brüt 0."
+          },
+          "costMarkupPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kâr / Σ maliyet brüt × 100. null: maliyet brüt 0."
+          }
+        },
+        "required": [
+          "listGross",
+          "sellerDiscountGross",
+          "saleGross",
+          "saleVat",
+          "costGross",
+          "costVat",
+          "commissionGross",
+          "commissionVat",
+          "shippingGross",
+          "shippingVat",
+          "platformServiceGross",
+          "platformServiceVat",
+          "stoppage",
+          "netVat",
+          "netProfit",
+          "saleMarginPct",
+          "costMarkupPct"
+        ]
+      },
       "OrderItemDetail": {
         "type": "object",
         "properties": {
@@ -1057,65 +1193,52 @@
             "type": "integer",
             "exclusiveMinimum": 0
           },
-          "unitPriceNet": {
+          "lineSaleGross": {
+            "type": "string",
+            "description": "Line sale total incl. VAT (decimal string)."
+          },
+          "saleVatRate": {
+            "type": "string",
+            "description": "Sale VAT rate %, decimal string."
+          },
+          "lineSellerDiscountGross": {
+            "type": "string",
+            "description": "Seller discount incl. VAT (decimal string)."
+          },
+          "commissionGross": {
+            "type": "string",
+            "description": "Commission incl. VAT (decimal string)."
+          },
+          "commissionVatRate": {
+            "type": "string",
+            "description": "Commission VAT rate %, decimal string."
+          },
+          "refundedCommissionGross": {
+            "type": "string",
+            "description": "Refunded commission incl. VAT (decimal string)."
+          },
+          "estimatedCommissionGross": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Decimal string."
+            "description": "T+0 commission estimate (write-once); null pre-estimate."
           },
-          "unitVatRate": {
+          "settledCommissionGross": {
             "type": [
               "string",
               "null"
             ],
-            "description": "VAT rate %, decimal string."
+            "description": "Settlement commission (mutable); null pre-settlement."
           },
-          "unitVatAmount": {
+          "unitCostSnapshotGross": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Decimal string."
-          },
-          "grossCommissionAmountNet": {
-            "type": "string",
-            "description": "Decimal string."
-          },
-          "grossCommissionVatAmount": {
-            "type": "string",
-            "description": "Decimal string."
-          },
-          "refundedCommissionAmountNet": {
-            "type": "string",
-            "description": "Decimal string."
-          },
-          "refundedCommissionVatAmount": {
-            "type": "string",
-            "description": "Decimal string."
-          },
-          "sellerDiscountNet": {
-            "type": "string",
-            "description": "Decimal string."
-          },
-          "sellerDiscountVatAmount": {
-            "type": "string",
-            "description": "Decimal string."
-          },
-          "unitCostSnapshotNet": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Decimal string."
+            "description": "Unit cost snapshot incl. VAT (decimal string)."
           },
           "unitCostSnapshotVatRate": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "unitCostSnapshotVatAmount": {
             "type": [
               "string",
               "null"
@@ -1143,18 +1266,16 @@
         "required": [
           "id",
           "quantity",
-          "unitPriceNet",
-          "unitVatRate",
-          "unitVatAmount",
-          "grossCommissionAmountNet",
-          "grossCommissionVatAmount",
-          "refundedCommissionAmountNet",
-          "refundedCommissionVatAmount",
-          "sellerDiscountNet",
-          "sellerDiscountVatAmount",
-          "unitCostSnapshotNet",
+          "lineSaleGross",
+          "saleVatRate",
+          "lineSellerDiscountGross",
+          "commissionGross",
+          "commissionVatRate",
+          "refundedCommissionGross",
+          "estimatedCommissionGross",
+          "settledCommissionGross",
+          "unitCostSnapshotGross",
           "unitCostSnapshotVatRate",
-          "unitCostSnapshotVatAmount",
           "commissionInvoiceSerialNumber",
           "barcode",
           "variant"
@@ -1262,17 +1383,17 @@
             "description": "DEBIT reduces seller revenue; CREDIT refunds/positive adjustments.",
             "example": "DEBIT"
           },
-          "amountNet": {
+          "amountGross": {
             "type": "string",
-            "description": "Decimal string."
+            "description": "Fee amount incl. VAT (decimal string)."
           },
           "vatRate": {
             "type": "string",
-            "description": "Decimal string %."
+            "description": "VAT rate %, decimal string."
           },
-          "vatAmount": {
-            "type": "string",
-            "description": "Decimal string."
+          "isEstimate": {
+            "type": "boolean",
+            "description": "True when the row is a deterministic T+0 ESTIMATE (not yet confirmed by a vendor settlement/invoice). Drives the \"Tahmini\" vs \"Gerçek fatura\" badge."
           },
           "displayName": {
             "type": [
@@ -1299,9 +1420,9 @@
           "feeType",
           "source",
           "direction",
-          "amountNet",
+          "amountGross",
           "vatRate",
-          "vatAmount",
+          "isEstimate",
           "displayName",
           "capturedAt",
           "confirmedAt"
@@ -1993,9 +2114,9 @@
           "status": {
             "type": "string"
           },
-          "saleSubtotalNet": {
+          "saleGross": {
             "type": "string",
-            "description": "Decimal string"
+            "description": "Sale total incl. VAT (decimal string)"
           },
           "lines": {
             "type": "array",
@@ -2035,9 +2156,9 @@
                   "type": "integer",
                   "minimum": 0
                 },
-                "unitPriceNet": {
+                "lineSaleGross": {
                   "type": "string",
-                  "description": "Decimal string"
+                  "description": "Line sale total incl. VAT (decimal string)"
                 }
               },
               "required": [
@@ -2047,7 +2168,7 @@
                 "variantId",
                 "stockCode",
                 "quantity",
-                "unitPriceNet"
+                "lineSaleGross"
               ]
             }
           }
@@ -2056,7 +2177,7 @@
           "platformOrderNumber",
           "orderDate",
           "status",
-          "saleSubtotalNet",
+          "saleGross",
           "lines"
         ]
       },
@@ -3015,9 +3136,9 @@
             "description": "Category of the cost. Used for profitability breakdown by type.",
             "example": "COGS"
           },
-          "amount": {
+          "amountGross": {
             "type": "string",
-            "description": "Decimal string",
+            "description": "KDV-dahil tutar (decimal string)",
             "example": "25.50"
           },
           "currency": {
@@ -3031,7 +3152,7 @@
             "example": "TRY"
           },
           "vatRate": {
-            "type": "integer",
+            "type": "number",
             "example": 18
           },
           "fxRateMode": {
@@ -3098,7 +3219,7 @@
           "organizationId",
           "name",
           "type",
-          "amount",
+          "amountGross",
           "currency",
           "vatRate",
           "fxRateMode",
@@ -3158,10 +3279,10 @@
             "description": "Category of the cost. Used for profitability breakdown by type.",
             "example": "COGS"
           },
-          "amount": {
+          "amountGross": {
             "type": "string",
             "pattern": "^\\d+(\\.\\d{1,2})?$",
-            "description": "Cost amount as a decimal string (max 2 decimal places).",
+            "description": "KDV-dahil tutar. Ondalık string, en fazla 2 basamak.",
             "example": "25.50"
           },
           "currency": {
@@ -3209,7 +3330,7 @@
         "required": [
           "name",
           "type",
-          "amount"
+          "amountGross"
         ]
       },
       "UpdateCostProfileInput": {
@@ -3235,10 +3356,10 @@
             "description": "Category of the cost. Used for profitability breakdown by type.",
             "example": "COGS"
           },
-          "amount": {
+          "amountGross": {
             "type": "string",
             "pattern": "^\\d+(\\.\\d{1,2})?$",
-            "description": "Cost amount as a decimal string (max 2 decimal places).",
+            "description": "KDV-dahil tutar. Ondalık string, en fazla 2 basamak.",
             "example": "25.50"
           },
           "currency": {
@@ -3336,9 +3457,9 @@
             "description": "Category of the cost. Used for profitability breakdown by type.",
             "example": "COGS"
           },
-          "amount": {
+          "amountGross": {
             "type": "string",
-            "description": "Decimal string"
+            "description": "KDV-dahil tutar (decimal string)"
           },
           "currency": {
             "type": "string",
@@ -3351,7 +3472,7 @@
             "example": "TRY"
           },
           "vatRate": {
-            "type": "integer"
+            "type": "number"
           },
           "fxRateMode": {
             "type": "string",
@@ -3412,7 +3533,7 @@
           "version",
           "name",
           "type",
-          "amount",
+          "amountGross",
           "currency",
           "vatRate",
           "fxRateMode",

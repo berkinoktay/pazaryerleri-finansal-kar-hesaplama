@@ -1,242 +1,125 @@
 /**
  * Unit tests for `computeProfit()` — pure function, no DB required.
- * Verifies design §2 formula + edge cases.
+ * GROSS convention (spec §2). Task 11 = happy path; Task 12 = edge cases.
  */
 
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { computeProfit, type ProfitInputs } from '../profit-formula';
+import { computeProfit, type ProfitInput } from '../profit-formula';
 
-const D = (v: string | number) => new Decimal(v);
+const D = (v: string) => new Decimal(v);
 
-function emptyInput(overrides: Partial<ProfitInputs> = {}): ProfitInputs {
-  return {
-    saleSubtotalNet: D(0),
-    saleVatTotal: D(0),
-    items: [],
-    fees: [],
-    ...overrides,
-  };
-}
-
-function defaultItem(overrides: Partial<ProfitInputs['items'][number]> = {}) {
-  return {
-    quantity: 1,
-    unitCostSnapshotNet: D(0),
-    unitCostSnapshotVatAmount: D(0),
-    grossCommissionAmountNet: D(0),
-    grossCommissionVatAmount: D(0),
-    refundedCommissionAmountNet: D(0),
-    refundedCommissionVatAmount: D(0),
-    sellerDiscountNet: D(0),
-    sellerDiscountVatAmount: D(0),
-    ...overrides,
-  };
-}
-
-describe('computeProfit() — design §2 formula', () => {
-  it('empty input → zero profit', () => {
-    const r = computeProfit(emptyInput());
-    expect(r.netProfit.toString()).toBe('0');
-    expect(r.netVat.toString()).toBe('0');
+describe('computeProfit — GROSS convention', () => {
+  it('happy path: 120 sale / 60 cost / 12 commission / 6 shipping / 1 stoppage', () => {
+    const input: ProfitInput = {
+      sale: { gross: D('120'), vat: D('20') },
+      cost: { gross: D('60'), vat: D('10') },
+      commission: { gross: D('12'), vat: D('2') },
+      fees: [{ type: 'SHIPPING', gross: D('6'), vat: D('1'), direction: 'DEBIT' }],
+      stoppage: { gross: D('1') },
+    };
+    const r = computeProfit(input);
+    // netVat = 20 − (10+2+1) = 7
+    // netProfit = 120 − 60 − 12 − 6 − 1 − 7 = 34
+    expect(r.netVat.toString()).toBe('7');
+    expect(r.netProfit.toString()).toBe('34');
+    expect(r.saleMarginPct?.toFixed(2)).toBe('28.33'); // 34/120×100
+    expect(r.costMarkupPct?.toFixed(2)).toBe('56.67'); // 34/60×100
   });
 
-  it('sale only (no costs, no fees) → profit equals saleSubtotalNet', () => {
-    const r = computeProfit(emptyInput({ saleSubtotalNet: D('100'), saleVatTotal: D('20') }));
-    expect(r.netProfit.toString()).toBe('100');
-    expect(r.netVat.toString()).toBe('20');
-  });
+  // ── Task 12: edge cases ──────────────────────────────────────────────────
 
-  it('happy path %20 VAT — design §2.2 example (100 net sale, 50 net cost, 10 net commission)', () => {
-    // Satış: 100 net + 20 KDV = 120 brüt
-    // Maliyet: 50 net + 10 KDV = 60 brüt (vatRate %20)
-    // Komisyon: 10 net + 2 KDV = 12 brüt (vatRate %20)
-    // Net profit = 100 − 50 − 10 = 40
-    // Net VAT   = 20 − 10 − 2 = 8 (pass-through)
+  it('negative Net VAT when input VAT > sale VAT', () => {
     const r = computeProfit({
-      saleSubtotalNet: D('100'),
-      saleVatTotal: D('20'),
-      items: [
-        defaultItem({
-          unitCostSnapshotNet: D('50'),
-          unitCostSnapshotVatAmount: D('10'),
-          grossCommissionAmountNet: D('10'),
-          grossCommissionVatAmount: D('2'),
-        }),
-      ],
+      sale: { gross: D('100'), vat: D('5') },
+      cost: { gross: D('50'), vat: D('10') },
+      commission: { gross: D('10'), vat: D('2') },
       fees: [],
+      stoppage: { gross: D('0') },
     });
-    expect(r.netProfit.toString()).toBe('40');
-    expect(r.netVat.toString()).toBe('8');
+    // netVat = 5 − 10 − 2 = −7
+    // netProfit = 100 − 50 − 10 − 0 − (−7) = 47
+    expect(r.netVat.toString()).toBe('-7');
+    expect(r.netProfit.toString()).toBe('47');
   });
 
-  it('effective commission = gross − refunded (design §3.2 Discount handling)', () => {
-    // Gross commission 20, refunded 5 → effective 15. Cost 0, sale 100.
-    // Net profit = 100 − 15 = 85
+  it('zero sale → saleMarginPct null', () => {
     const r = computeProfit({
-      saleSubtotalNet: D('100'),
-      saleVatTotal: D('20'),
-      items: [
-        defaultItem({
-          grossCommissionAmountNet: D('20'),
-          grossCommissionVatAmount: D('4'),
-          refundedCommissionAmountNet: D('5'),
-          refundedCommissionVatAmount: D('1'),
-        }),
-      ],
+      sale: { gross: D('0'), vat: D('0') },
+      cost: { gross: D('50'), vat: D('10') },
+      commission: { gross: D('0'), vat: D('0') },
       fees: [],
+      stoppage: { gross: D('0') },
     });
-    expect(r.netProfit.toString()).toBe('85');
-    expect(r.netVat.toString()).toBe('17'); // 20 − (4 − 1) = 17
+    expect(r.saleMarginPct).toBeNull();
+    // netVat = 0 − 10 = −10; netProfit = 0 − 50 − 0 − 0 − (−10) = −40
+    // costMarkupPct = −40/50×100 = −80
+    expect(r.costMarkupPct?.toString()).toBe('-80');
   });
 
-  it('seller discount is NOT re-subtracted — saleSubtotalNet is already effectiveSale', () => {
-    // Yeni model (research §7.3): saleSubtotalNet = effectiveSale = liste − satıcı indirimi,
-    // yani satıcı indirimi mapper'da ZATEN düşülmüş. Formül onu TEKRAR düşmez (eski çift-düşme
-    // bug'ı). sellerDiscountNet alanı yalnız breakdown gösterimi (liste'yi geri kurma) için taşınır.
+  it('zero cost → costMarkupPct null', () => {
     const r = computeProfit({
-      saleSubtotalNet: D('90'), // effectiveSale = liste(100) − satıcı indirim(10)
-      saleVatTotal: D('18'),
-      items: [
-        defaultItem({
-          sellerDiscountNet: D('10'),
-          sellerDiscountVatAmount: D('2'),
-        }),
-      ],
+      sale: { gross: D('100'), vat: D('20') },
+      cost: { gross: D('0'), vat: D('0') },
+      commission: { gross: D('0'), vat: D('0') },
       fees: [],
+      stoppage: { gross: D('0') },
     });
-    expect(r.netProfit.toString()).toBe('90'); // 90 — indirim TEKRAR düşülmez
-    expect(r.netVat.toString()).toBe('18'); // 18 — TEKRAR düşülmez
-    // Breakdown indirim'i bilgi olarak taşır (UI: liste = net satış + indirim).
-    expect(r.breakdown.sellerDiscountGross.toString()).toBe('12'); // 10 + 2
+    expect(r.costMarkupPct).toBeNull();
   });
 
-  it('DEBIT fees subtract from profit (PSF / Stopaj / Shipping)', () => {
+  it('multi VAT-rate aggregation', () => {
     const r = computeProfit({
-      saleSubtotalNet: D('100'),
-      saleVatTotal: D('20'),
-      items: [defaultItem()],
+      sale: { gross: D('300'), vat: D('50') },
+      cost: { gross: D('100'), vat: D('20') },
+      commission: { gross: D('30'), vat: D('2.73') },
+      fees: [{ type: 'SHIPPING', gross: D('10'), vat: D('0.10'), direction: 'DEBIT' }],
+      stoppage: { gross: D('0') },
+    });
+    // netVat = 50 − 20 − 2.73 − 0.10 = 27.17
+    expect(r.netVat.toString()).toBe('27.17');
+  });
+
+  it('stoppage reduces profit, NOT in netVat', () => {
+    const r = computeProfit({
+      sale: { gross: D('100'), vat: D('20') },
+      cost: { gross: D('40'), vat: D('8') },
+      commission: { gross: D('10'), vat: D('2') },
+      fees: [],
+      stoppage: { gross: D('0.83') },
+    });
+    // netVat = 20 − 8 − 2 = 10 (stopaj yok)
+    expect(r.netVat.toString()).toBe('10');
+    // netProfit = 100 − 40 − 10 − 0.83 − 10 = 39.17
+    expect(r.netProfit.toString()).toBe('39.17');
+  });
+
+  it('CREDIT fee adds back to netVat and profit', () => {
+    const r = computeProfit({
+      sale: { gross: D('100'), vat: D('20') },
+      cost: { gross: D('40'), vat: D('8') },
+      commission: { gross: D('0'), vat: D('0') },
       fees: [
-        { amountNet: D('10.99'), vatAmount: D('2.20'), direction: 'DEBIT' }, // PSF
-        { amountNet: D('1.00'), vatAmount: D('0.00'), direction: 'DEBIT' }, // Stopaj %1
-        { amountNet: D('25.00'), vatAmount: D('5.00'), direction: 'DEBIT' }, // Shipping
+        { type: 'SHIPPING', gross: D('10'), vat: D('2'), direction: 'DEBIT' },
+        { type: 'PLATFORM_SERVICE', gross: D('5'), vat: D('1'), direction: 'CREDIT' },
       ],
+      stoppage: { gross: D('0') },
     });
-    // 100 − (10.99 + 1 + 25) = 63.01
-    expect(r.netProfit.toString()).toBe('63.01');
-    // 20 − (2.20 + 0 + 5) = 12.80
-    expect(r.netVat.toString()).toBe('12.8');
+    // netVat = 20 − 8 − 2 + 1 = 11
+    expect(r.netVat.toString()).toBe('11');
   });
 
-  it('CREDIT fees add to profit (komisyon iadesi / SellerRevenuePositive)', () => {
-    const r = computeProfit({
-      saleSubtotalNet: D('100'),
-      saleVatTotal: D('20'),
-      items: [defaultItem()],
-      fees: [
-        { amountNet: D('30'), vatAmount: D('6'), direction: 'DEBIT' },
-        { amountNet: D('5'), vatAmount: D('1'), direction: 'CREDIT' }, // komisyon iadesi
-      ],
-    });
-    expect(r.netProfit.toString()).toBe('75'); // 100 − 30 + 5
-    expect(r.netVat.toString()).toBe('15'); // 20 − 6 + 1
-  });
-
-  it('quantity > 1 — item cost multiplied', () => {
-    const r = computeProfit({
-      saleSubtotalNet: D('200'), // 2 × 100
-      saleVatTotal: D('40'),
-      items: [
-        defaultItem({
-          quantity: 2,
-          unitCostSnapshotNet: D('40'),
-          unitCostSnapshotVatAmount: D('8'),
-        }),
-      ],
-      fees: [],
-    });
-    // Cost = 40 × 2 = 80; Profit = 200 − 80 = 120
-    expect(r.netProfit.toString()).toBe('120');
-    expect(r.netVat.toString()).toBe('24'); // 40 − 16
-  });
-
-  it('multi-item — different VAT rates aggregate correctly', () => {
-    // Item 1: cost 50 net + 10 KDV %20 (qty 1)
-    // Item 2: cost 100 net + 1 KDV %1 (qty 1)
-    const r = computeProfit({
-      saleSubtotalNet: D('300'),
-      saleVatTotal: D('30'),
-      items: [
-        defaultItem({
-          unitCostSnapshotNet: D('50'),
-          unitCostSnapshotVatAmount: D('10'),
-        }),
-        defaultItem({
-          unitCostSnapshotNet: D('100'),
-          unitCostSnapshotVatAmount: D('1'),
-        }),
-      ],
-      fees: [],
-    });
-    expect(r.netProfit.toString()).toBe('150'); // 300 − 150
-    expect(r.netVat.toString()).toBe('19'); // 30 − 11
-  });
-
-  it('iade senaryosu — REFUND_DEDUCTION DEBIT + COMMISSION_REFUND CREDIT', () => {
-    // Sale 100, commission 20 gross. İade gelirse:
-    //   - REFUND_DEDUCTION DEBIT 100 (sale geri alımı)
-    //   - COMMISSION_REFUND CREDIT 20 (komisyon iadesi)
-    // Net etki: profit = 100 − 20 (orig commission) − 100 (refund) + 20 (refund commission) = 0
-    const r = computeProfit({
-      saleSubtotalNet: D('100'),
-      saleVatTotal: D('20'),
-      items: [
-        defaultItem({
-          grossCommissionAmountNet: D('20'),
-          grossCommissionVatAmount: D('4'),
-        }),
-      ],
-      fees: [
-        { amountNet: D('100'), vatAmount: D('20'), direction: 'DEBIT' }, // REFUND_DEDUCTION
-        { amountNet: D('20'), vatAmount: D('4'), direction: 'CREDIT' }, // COMMISSION_REFUND
-      ],
-    });
-    expect(r.netProfit.toString()).toBe('0');
-    expect(r.netVat.toString()).toBe('0');
-  });
-
-  it('Decimal precision — %1 VAT edge case (Stopaj scenario)', () => {
-    // saleSubtotalNet = 99.87 → stopaj = 0.9987 → ROUND(0.9987, 2) = 1.00
-    // (Bu computeProfit içinde değil, çağıran applyEstimate'te yapılır;
-    //  burada sadece feeAmount kullanılır)
-    const r = computeProfit({
-      saleSubtotalNet: D('99.87'),
-      saleVatTotal: D('19.97'),
-      items: [defaultItem()],
-      fees: [{ amountNet: D('1.00'), vatAmount: D('0'), direction: 'DEBIT' }],
-    });
-    expect(r.netProfit.toString()).toBe('98.87');
-  });
-
-  it('breakdown — gross display values correct', () => {
-    const r = computeProfit({
-      saleSubtotalNet: D('100'),
-      saleVatTotal: D('20'),
-      items: [
-        defaultItem({
-          unitCostSnapshotNet: D('50'),
-          unitCostSnapshotVatAmount: D('10'),
-          grossCommissionAmountNet: D('10'),
-          grossCommissionVatAmount: D('2'),
-        }),
-      ],
-      fees: [{ amountNet: D('5'), vatAmount: D('1'), direction: 'DEBIT' }],
-    });
-    expect(r.breakdown.saleGross.toString()).toBe('120');
-    expect(r.breakdown.itemCostGross.toString()).toBe('60');
-    expect(r.breakdown.commissionGross.toString()).toBe('12');
-    expect(r.breakdown.debitFeesGross.toString()).toBe('6');
-    expect(r.breakdown.creditFeesGross.toString()).toBe('0');
+  it('algebraic equivalence: gross − netVat ≡ net-convention profit', () => {
+    const input: ProfitInput = {
+      sale: { gross: D('120'), vat: D('20') },
+      cost: { gross: D('60'), vat: D('10') },
+      commission: { gross: D('12'), vat: D('2') },
+      fees: [{ type: 'SHIPPING', gross: D('6'), vat: D('1'), direction: 'DEBIT' }],
+      stoppage: { gross: D('1') },
+    };
+    const r = computeProfit(input);
+    // net convention: (120−20) − (60−10) − (12−2) − (6−1) − 1 = 100−50−10−5−1 = 34
+    expect(r.netProfit.toString()).toBe('34');
   });
 });

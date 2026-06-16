@@ -27,7 +27,7 @@ describe('Cost profile routes', () => {
         organizationId: orgId,
         name,
         type: 'COGS',
-        amount: new Decimal('25.50'),
+        amountGross: new Decimal('25.50'),
         currency: 'TRY',
         vatRate: 18,
         fxRateMode: 'AUTO',
@@ -106,16 +106,16 @@ describe('Cost profile routes', () => {
         body: JSON.stringify({
           name: 'Hammadde COGS',
           type: 'COGS',
-          amount: '25.50',
+          amountGross: '25.50',
           currency: 'TRY',
           vatRate: 18,
           fxRateMode: 'AUTO',
         }),
       });
       expect(res.status).toBe(201);
-      const body = (await res.json()) as { id: string; name: string; amount: string };
+      const body = (await res.json()) as { id: string; name: string; amountGross: string };
       expect(body.name).toBe('Hammadde COGS');
-      expect(body.amount).toBe('25.5');
+      expect(body.amountGross).toBe('25.5');
 
       // Verify version was seeded
       const versions = await prisma.costProfileVersion.findMany({
@@ -134,7 +134,7 @@ describe('Cost profile routes', () => {
       const createBody = JSON.stringify({
         name: 'Duplicate',
         type: 'PACKAGING',
-        amount: '10.00',
+        amountGross: '10.00',
       });
 
       const first = await app.request(`/v1/organizations/${org.id}/cost-profiles`, {
@@ -165,7 +165,7 @@ describe('Cost profile routes', () => {
         body: JSON.stringify({
           name: 'X',
           type: 'COGS',
-          amount: '10.00',
+          amountGross: '10.00',
           currency: 'USD',
           fxRateMode: 'MANUAL',
         }),
@@ -288,7 +288,7 @@ describe('Cost profile routes', () => {
           version: 1,
           name: profile.name,
           type: profile.type,
-          amount: profile.amount,
+          amountGross: profile.amountGross,
           currency: profile.currency,
           vatRate: profile.vatRate,
           fxRateMode: profile.fxRateMode,

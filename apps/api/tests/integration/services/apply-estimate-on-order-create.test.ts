@@ -2,7 +2,13 @@ import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
+import {
+  applyEstimateOnOrderCreate,
+  buildProfitBreakdown,
+  type ProfitBreakdownFeeInput,
+  type ProfitBreakdownItemInput,
+} from '@pazarsync/profit';
+import type { OrderFeeType } from '@pazarsync/db/enums';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createOrder, createOrganization, createStore } from '../../helpers/factories';
@@ -41,12 +47,14 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
   async function createOrderWithItem(args: {
     orgId: string;
     storeId: string;
-    saleSubtotalNet?: string;
-    saleVatTotal?: string;
+    // GROSS konvansiyon (2026-06-16): saleGross (KDV-dahil satış) + saleVat.
+    saleGross?: string;
+    saleVat?: string;
     status?: 'DELIVERED' | 'RETURNED';
     micro?: boolean;
-    unitCostSnapshotNet?: string | null;
-    unitCostSnapshotVatAmount?: string | null;
+    // GROSS maliyet snapshot'ı: unitCostSnapshotGross (KDV-dahil) + oran.
+    unitCostSnapshotGross?: string | null;
+    unitCostSnapshotVatRate?: string | null;
     isDigital?: boolean;
     fastDeliveryType?: string | null;
     actualShipDate?: Date | null;
@@ -61,8 +69,9 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         ).id,
       },
       data: {
-        saleSubtotalNet: args.saleSubtotalNet ?? '100.00',
-        saleVatTotal: args.saleVatTotal ?? '20.00',
+        // saleGross 120 = net 100 + KDV 20 (eski saleSubtotalNet 100 / saleVatTotal 20).
+        saleGross: args.saleGross ?? '120.00',
+        saleVat: args.saleVat ?? '20.00',
         micro: args.micro ?? false,
         ...(args.fastDeliveryType !== undefined && { fastDeliveryType: args.fastDeliveryType }),
         ...(args.actualShipDate !== undefined && { actualShipDate: args.actualShipDate }),
@@ -99,16 +108,16 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         organizationId: args.orgId,
         productVariantId: variant.id,
         quantity: 1,
-        unitPrice: '120', // eski KDV-dahil
+        // GROSS konvansiyon: lineSaleGross 120 (KDV-dahil satış), commissionGross 12
+        // (net 10 + KDV 2), unitCostSnapshotGross 60 (net 50 + KDV 10), oranlar %20.
+        lineSaleGross: '120',
         commissionRate: '10',
-        commissionAmount: '12', // eski KDV-dahil
-        // Yeni convention:
-        grossCommissionAmountNet: '10',
-        grossCommissionVatAmount: '2',
-        unitCostSnapshotNet:
-          args.unitCostSnapshotNet !== undefined ? args.unitCostSnapshotNet : '50',
-        unitCostSnapshotVatAmount:
-          args.unitCostSnapshotVatAmount !== undefined ? args.unitCostSnapshotVatAmount : '10',
+        commissionGross: '12',
+        commissionVatRate: '20',
+        unitCostSnapshotGross:
+          args.unitCostSnapshotGross !== undefined ? args.unitCostSnapshotGross : '60',
+        unitCostSnapshotVatRate:
+          args.unitCostSnapshotVatRate !== undefined ? args.unitCostSnapshotVatRate : '20',
       },
     });
 
@@ -133,7 +142,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     });
     expect(shippingFee).not.toBeNull();
     expect(shippingFee?.direction).toBe('DEBIT');
-    expect(new Decimal(shippingFee!.amountNet).gt(0)).toBe(true);
+    expect(new Decimal(shippingFee!.amountGross).gt(0)).toBe(true);
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(updated.estimatedNetProfit).not.toBeNull();
@@ -177,8 +186,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     const order = await createOrderWithItem({
       orgId: org.id,
       storeId: store.id,
-      saleSubtotalNet: '100.00',
-      saleVatTotal: '20.00',
+      saleGross: '120.00',
+      saleVat: '20.00',
     });
 
     await prisma.$transaction(async (tx) => {
@@ -192,19 +201,50 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     expect(fees.map((f) => f.feeType).sort()).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
 
     const psf = fees.find((f) => f.feeType === 'PLATFORM_SERVICE')!;
-    expect(new Decimal(psf.amountNet).toString()).toBe('10.99');
-    expect(new Decimal(psf.vatAmount).toString()).toBe('2.2');
+    // GROSS: amountGross 13.19 = net 10.99 × 1.20 (vatRate %20).
+    expect(new Decimal(psf.amountGross).toString()).toBe('13.19');
+    expect(new Decimal(psf.vatRate).toString()).toBe('20');
     expect(psf.source).toBe('ESTIMATE');
     expect(psf.direction).toBe('DEBIT');
 
     const stopaj = fees.find((f) => f.feeType === 'STOPPAGE')!;
-    expect(new Decimal(stopaj.amountNet).toString()).toBe('1'); // 100 × 0.01
-    expect(new Decimal(stopaj.vatAmount).toString()).toBe('0');
+    // Stopaj matrahı NET satış (KDV-hariç): (saleGross 120 − saleVat 20) × %1 = 1.00;
+    // vatRate 0 (stopaj KDV taşımaz). Eski hata: gross 120 × %1 = 1.20 (KDV de matraha
+    // giriyordu); rakip/Trendyol gerçek değeri net üzerinden.
+    expect(new Decimal(stopaj.amountGross).toString()).toBe('1');
+    expect(new Decimal(stopaj.vatRate).toString()).toBe('0');
 
-    // Profit = saleSubtotalNet − itemCost − commission − PSF − Stopaj
-    //       = 100 − 50 − 10 − 10.99 − 1 = 28.01
+    // Profit = effectiveSale − itemCost − commission − PSF − Stopaj − NetKDV (net terimler)
+    //       = 100 − 50 − 10 − 10.99 − 1.20 − ... ; motor gross'tan algebraik aynı net kârı üretir.
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    expect(new Decimal(updated.estimatedNetProfit!).toString()).toBe('28.01');
+    expect(updated.estimatedNetProfit).not.toBeNull();
+    // Net KDV persist edildi (writer'ı pinler): saleVat − costVat − commVat − PSFvat
+    //                                          = 20 − 10 − 2 − 2.20 = 5.80
+    expect(updated.estimatedNetVat).not.toBeNull();
+    expect(new Decimal(updated.estimatedNetVat!).toString()).toBe('5.8');
+  });
+
+  it('stopaj NET satış üzerinden hesaplanır (gross DEĞİL) — sipariş 11328013993', async () => {
+    // Canlı sipariş 11328013993: saleGross 313.50, saleVat 28.50 → net 285.00.
+    // DOĞRU stopaj = net 285.00 × %1 = 2.85 (rakip + Trendyol gerçek).
+    // ESKİ HATA: gross 313.50 × %1 = 3.14 (KDV de matraha giriyordu) → kâr 0.29 eksik.
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      saleGross: '313.50',
+      saleVat: '28.50',
+    });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const stopaj = await prisma.orderFee.findFirstOrThrow({
+      where: { orderId: order.id, feeType: 'STOPPAGE', source: 'ESTIMATE' },
+    });
+    // NET 285.00 × %1 = 2.85; KESİNLİKLE gross 313.50 × %1 = 3.14 DEĞİL.
+    expect(new Decimal(stopaj.amountGross).toString()).toBe('2.85');
+    expect(new Decimal(stopaj.amountGross).toString()).not.toBe('3.14');
+    expect(new Decimal(stopaj.vatRate).toString()).toBe('0');
   });
 
   it('PSF muafiyet — status RETURNED → PSF OrderFee yazılmaz', async () => {
@@ -261,8 +301,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     const order = await createOrderWithItem({
       orgId: org.id,
       storeId: store.id,
-      unitCostSnapshotNet: null,
-      unitCostSnapshotVatAmount: null,
+      unitCostSnapshotGross: null,
+      unitCostSnapshotVatRate: null,
     });
 
     await prisma.$transaction(async (tx) => {
@@ -282,8 +322,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     const order = await createOrderWithItem({
       orgId: org.id,
       storeId: store.id,
-      unitCostSnapshotNet: null,
-      unitCostSnapshotVatAmount: null,
+      unitCostSnapshotGross: null,
+      unitCostSnapshotVatRate: null,
     });
 
     // T+0: cost_missing — PSF + Stopaj yazılır, estimate null kalır.
@@ -301,7 +341,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     // fee setiyle hesaplanmalı (regresyon: 2x PSF + 2x Stopaj → yanlış kâr).
     await prisma.orderItem.updateMany({
       where: { orderId: order.id },
-      data: { unitCostSnapshotNet: '40.00', unitCostSnapshotVatAmount: '8.00' },
+      data: { unitCostSnapshotGross: '48.00', unitCostSnapshotVatRate: '20.00' },
     });
     await prisma.$transaction(async (tx) => {
       await applyEstimateOnOrderCreate(order.id, tx);
@@ -389,11 +429,13 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         organizationId: org.id,
         productVariantId: variant.id,
         quantity: 1,
-        unitPrice: '120',
+        // GROSS: lineSaleGross 120, commissionGross 12, unitCostSnapshotGross 60 (oran %20).
+        lineSaleGross: '120',
         commissionRate: '10',
-        commissionAmount: '12',
-        unitCostSnapshotNet: '50',
-        unitCostSnapshotVatAmount: '10',
+        commissionGross: '12',
+        commissionVatRate: '20',
+        unitCostSnapshotGross: '60',
+        unitCostSnapshotVatRate: '20',
       },
     });
 
@@ -438,8 +480,9 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
     const psf = await psfOf(order.id);
-    expect(new Decimal(psf.amountNet).toString()).toBe('6.99');
-    expect(new Decimal(psf.vatAmount).toString()).toBe('1.4'); // 6.99 × %20
+    // GROSS: amountGross 8.39 = net 6.99 × 1.20 (vatRate %20).
+    expect(new Decimal(psf.amountGross).toString()).toBe('8.39');
+    expect(new Decimal(psf.vatRate).toString()).toBe('20');
     expect(psf.displayName).toContain('Bugün Kargoda');
   });
 
@@ -455,7 +498,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('6.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('8.39');
   });
 
   it('SameDayShipping + geç (ertesi gün) sevk → PSF 10.99 (hak EDİLMEDİ)', async () => {
@@ -470,7 +513,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('10.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('13.19');
   });
 
   it('FastDelivery → PSF 10.99 (6.99 indirimi SADECE SameDayShipping)', async () => {
@@ -485,7 +528,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
 
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('10.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('13.19');
   });
 
   it('refine: SameDayShipping T+0 optimistik 6.99 → geç sevk re-sync → 10.99 (tek PSF satırı)', async () => {
@@ -500,7 +543,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     // T+0: henüz sevk yok → optimistik 6.99
     await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
-    expect(new Decimal((await psfOf(order.id)).amountNet).toString()).toBe('6.99');
+    expect(new Decimal((await psfOf(order.id)).amountGross).toString()).toBe('8.39');
 
     // Sevk re-sync: geç (ertesi gün) sevk → 10.99'a refine, ÇİFT satır YOK
     await prisma.order.update({ where: { id: order.id }, data: { actualShipDate: SDS_SHIP_LATE } });
@@ -510,6 +553,185 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
       where: { orderId: order.id, feeType: 'PLATFORM_SERVICE', source: 'ESTIMATE' },
     });
     expect(psfRows).toHaveLength(1);
-    expect(new Decimal(psfRows[0]!.amountNet).toString()).toBe('10.99');
+    expect(new Decimal(psfRows[0]!.amountGross).toString()).toBe('13.19');
+  });
+
+  // ─── Multi-item KDV mutabakatı (Bug 1: per-line yuvarlama → bileşik kayma) ──
+  // Çok kalemli siparişte cost/komisyon KDV'si TAM PRECISION'da biriktirilmeli,
+  // persist'te BİR kez yuvarlanmalı. Eski kod her satırı `.toDecimalPlaces(2)`
+  // ile yuvarlayıp topladığından saklanan estimatedNetVat görünüm dökümünden
+  // (build-profit-breakdown raw-aggregate) bir kuruş sapabiliyordu.
+  //
+  // Senaryo: 3 maliyet satırı × birim 10.05 @%20 → per-line VAT 1.675 → yuvarlanırsa
+  // 1.68 ×3 = 5.04; raw 1.675×3 = 5.025 → 5.03. 1 kuruş fark = bu testin yakaladığı.
+  describe('multi-item KDV mutabakatı (estimate ↔ display breakdown)', () => {
+    async function createMultiItemOrder(args: {
+      orgId: string;
+      storeId: string;
+      // [unitCostSnapshotGross, quantity, vatRate]
+      costLines: Array<{ unitCostGross: string; quantity: number; costVatRate: string }>;
+      saleGross: string;
+      saleVat: string;
+      // commission per line
+      commissionGross: string;
+      commissionVatRate: string;
+    }) {
+      const order = await createOrder(args.orgId, args.storeId, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { saleGross: args.saleGross, saleVat: args.saleVat },
+      });
+      const product = await prisma.product.create({
+        data: {
+          organizationId: args.orgId,
+          storeId: args.storeId,
+          platformContentId: BigInt(Date.now() + Math.floor(Math.random() * 100000)),
+          productMainId: `pm-${order.id.slice(0, 8)}`,
+          title: 'Multi Test Product',
+        },
+      });
+      let variantSeq = 0;
+      for (const line of args.costLines) {
+        variantSeq += 1;
+        const variant = await prisma.productVariant.create({
+          data: {
+            organizationId: args.orgId,
+            storeId: args.storeId,
+            productId: product.id,
+            platformVariantId: BigInt(Date.now() + Math.floor(Math.random() * 100000) + variantSeq),
+            barcode: `bc-${order.id.slice(0, 6)}-${variantSeq}`,
+            stockCode: `sk-${order.id.slice(0, 6)}-${variantSeq}`,
+            salePrice: '100',
+            listPrice: '120',
+          },
+        });
+        await prisma.orderItem.create({
+          data: {
+            orderId: order.id,
+            organizationId: args.orgId,
+            productVariantId: variant.id,
+            quantity: line.quantity,
+            lineSaleGross: args.saleGross,
+            commissionRate: '10',
+            commissionGross: args.commissionGross,
+            commissionVatRate: args.commissionVatRate,
+            refundedCommissionGross: '0',
+            unitCostSnapshotGross: line.unitCostGross,
+            unitCostSnapshotVatRate: line.costVatRate,
+          },
+        });
+      }
+      return order;
+    }
+
+    it('saklanan estimatedNetVat = display breakdown raw-aggregate KDV (per-line yuvarlama YOK)', async () => {
+      const { org, store } = await setup();
+      const order = await createMultiItemOrder({
+        orgId: org.id,
+        storeId: store.id,
+        // 3 satır × 10.05 @%20 → tam mutabakat sapma testi.
+        costLines: [
+          { unitCostGross: '10.05', quantity: 1, costVatRate: '20' },
+          { unitCostGross: '10.05', quantity: 1, costVatRate: '20' },
+          { unitCostGross: '10.05', quantity: 1, costVatRate: '20' },
+        ],
+        saleGross: '120.00',
+        saleVat: '20.00',
+        commissionGross: '4.00',
+        commissionVatRate: '20',
+      });
+
+      await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+      const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      expect(updated.estimatedNetProfit).not.toBeNull();
+      expect(updated.estimatedNetVat).not.toBeNull();
+
+      // Aynı kalıcı gross girdilerden display dökümünü kur (raw-aggregate yol).
+      const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
+      const fees = await prisma.orderFee.findMany({
+        where: { orderId: order.id, source: 'ESTIMATE' },
+      });
+      const breakdownItems: ProfitBreakdownItemInput[] = items.map((i) => ({
+        quantity: i.quantity,
+        lineListGross: null,
+        lineSaleGross: i.lineSaleGross === null ? null : new Decimal(i.lineSaleGross),
+        lineSellerDiscountGross: null,
+        saleVatRate: Number(i.saleVatRate ?? 0),
+        commissionGross: new Decimal(i.commissionGross),
+        refundedCommissionGross: new Decimal(i.refundedCommissionGross),
+        commissionVatRate: Number(i.commissionVatRate),
+        unitCostSnapshotGross:
+          i.unitCostSnapshotGross === null ? null : new Decimal(i.unitCostSnapshotGross),
+        unitCostSnapshotVatRate: Number(i.unitCostSnapshotVatRate ?? 0),
+      }));
+      const breakdownFees: ProfitBreakdownFeeInput[] = fees.map((f) => ({
+        feeType: f.feeType as OrderFeeType,
+        direction: f.direction,
+        amountGross: new Decimal(f.amountGross),
+        vatRate: Number(f.vatRate),
+      }));
+
+      const view = buildProfitBreakdown({
+        saleGross: new Decimal(updated.saleGross!),
+        saleVat: new Decimal(updated.saleVat!),
+        listGross: new Decimal(updated.listGross ?? 0),
+        sellerDiscountGross: new Decimal(updated.sellerDiscountGross ?? 0),
+        items: breakdownItems,
+        fees: breakdownFees,
+        netProfit: new Decimal(updated.estimatedNetProfit!),
+        netVat: new Decimal(updated.estimatedNetVat!),
+        saleMarginPct: null,
+        costMarkupPct: null,
+      });
+
+      // RAW-aggregate Net KDV'yi kalıcı gross girdilerden bağımsızca yeniden kur —
+      // build-profit-breakdown'ın iç toplama yöntemiyle AYNI (her KDV bileşeni TAM
+      // precision'da biriktirilir, tek yuvarlama en sonda). Per-line yuvarlama yapan
+      // ESKİ kod bu raw değerden bir kuruş sapardı.
+      const grossToVat = (gross: Decimal, ratePct: number): Decimal =>
+        ratePct === 0 ? new Decimal(0) : gross.mul(ratePct).div(100 + ratePct);
+      let rawCostVat = new Decimal(0);
+      let rawCommVat = new Decimal(0);
+      for (const i of breakdownItems) {
+        const lineCost = (i.unitCostSnapshotGross ?? new Decimal(0)).mul(i.quantity);
+        rawCostVat = rawCostVat.add(grossToVat(lineCost, i.unitCostSnapshotVatRate));
+        const effComm = i.commissionGross.sub(i.refundedCommissionGross);
+        rawCommVat = rawCommVat.add(grossToVat(effComm, i.commissionVatRate));
+      }
+      let rawFeeVat = new Decimal(0);
+      for (const f of breakdownFees) {
+        if (f.feeType === 'SHIPPING' || f.feeType === 'PLATFORM_SERVICE') {
+          const signed = f.direction === 'DEBIT' ? 1 : -1;
+          rawFeeVat = rawFeeVat.add(grossToVat(f.amountGross, f.vatRate).mul(signed));
+        }
+      }
+      const rawDerivedNetVat = new Decimal(updated.saleVat!)
+        .sub(rawCostVat)
+        .sub(rawCommVat)
+        .sub(rawFeeVat)
+        .toDecimalPlaces(2);
+
+      // 1) Saklanan estimatedNetVat == raw-aggregate (round-once) Net KDV. BİREBİR.
+      //    Per-line yuvarlamalı eski kod burada sapardı.
+      expect(new Decimal(updated.estimatedNetVat!).toFixed(2)).toBe(rawDerivedNetVat.toFixed(2));
+
+      // 2) Bileşik kayma yok: display costVat 3×10.05@%20 raw = 5.03
+      //    (per-line yuvarlama 1.68×3 = 5.04 verirdi).
+      expect(view.costVat).toBe('5.03');
+      expect(rawCostVat.toDecimalPlaces(2).toFixed(2)).toBe('5.03');
+
+      // 3) Σ düşülen gross terimler + Net KDV = saleGross − netProfit (mutabakat kapanır;
+      //    netProfit motor tarafından TAM precision raw KDV'den üretildi).
+      const sumOfDeductions = new Decimal(view.costGross)
+        .add(view.commissionGross)
+        .add(view.shippingGross)
+        .add(view.platformServiceGross)
+        .add(view.stoppage)
+        .add(view.netVat);
+      expect(sumOfDeductions.toFixed(2)).toBe(
+        new Decimal(view.saleGross).sub(view.netProfit).toFixed(2),
+      );
+    });
   });
 });

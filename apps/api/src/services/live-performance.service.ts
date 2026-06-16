@@ -20,9 +20,14 @@ interface DayRange {
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-function computeMargin(profit: Decimal, revenue: Decimal): string {
-  if (revenue.isZero()) return '0.00';
-  return profit.div(revenue).mul(100).toFixed(2);
+// Aggregate KPI ratio (net profit ÷ denominator × 100), computed and SERVED by
+// the backend over the costed subset. This is NOT a render-time per-order margin
+// derivation (the rule-violation target removed in Bölüm H is the frontend
+// computeMargin in order-kpi-grid); the per-order margin in getLiveOrders is read
+// straight from the persisted estimatedSaleMarginPct column, never recomputed.
+function aggregateRatio(profit: Decimal, denominator: Decimal): string {
+  if (denominator.isZero()) return '0.00';
+  return profit.div(denominator).mul(100).toFixed(2);
 }
 
 // ─── KPIs ───────────────────────────────────────────────────────────────────
@@ -83,9 +88,9 @@ async function aggregateOrders(
       status: { not: 'CANCELLED' },
     },
     select: {
-      saleSubtotalNet: true,
+      saleGross: true,
       estimatedNetProfit: true,
-      items: { select: { quantity: true, unitCostSnapshotNet: true } },
+      items: { select: { quantity: true, unitCostSnapshotGross: true } },
     },
   });
 
@@ -97,18 +102,17 @@ async function aggregateOrders(
   let costedCount = 0;
 
   for (const order of orders) {
-    if (order.saleSubtotalNet !== null) revenue = revenue.add(order.saleSubtotalNet.toString());
+    if (order.saleGross !== null) revenue = revenue.add(order.saleGross.toString());
     for (const item of order.items) unitsSold += item.quantity;
 
     if (order.estimatedNetProfit === null) continue;
     netProfit = netProfit.add(order.estimatedNetProfit.toString());
     costedCount += 1;
-    if (order.saleSubtotalNet !== null)
-      costedRevenue = costedRevenue.add(order.saleSubtotalNet.toString());
+    if (order.saleGross !== null) costedRevenue = costedRevenue.add(order.saleGross.toString());
     for (const item of order.items) {
-      if (item.unitCostSnapshotNet !== null)
+      if (item.unitCostSnapshotGross !== null)
         costedCost = costedCost.add(
-          new Decimal(item.unitCostSnapshotNet.toString()).mul(item.quantity),
+          new Decimal(item.unitCostSnapshotGross.toString()).mul(item.quantity),
         );
     }
   }
@@ -143,7 +147,7 @@ async function aggregateBuffer(
   let unitsSold = 0;
   for (const entry of rows) {
     const mapped = entry.mappedOrder as unknown as MappedOrder;
-    revenue = revenue.add(mapped.saleSubtotalNet);
+    revenue = revenue.add(mapped.saleGross);
     for (const line of mapped.lines) unitsSold += line.quantity;
   }
   return { revenue, orderCount: rows.length, unitsSold };
@@ -175,10 +179,10 @@ export async function getKpis(args: { orgId: string; storeId: string }): Promise
     unitsSoldYesterday: yesterdayOrders.unitsSold,
     netProfitToday: todayOrders.netProfit.toFixed(2),
     netProfitYesterday: yesterdayOrders.netProfit.toFixed(2),
-    marginToday: computeMargin(todayOrders.netProfit, todayOrders.costedRevenue),
-    marginYesterday: computeMargin(yesterdayOrders.netProfit, yesterdayOrders.costedRevenue),
-    profitCostRatioToday: computeMargin(todayOrders.netProfit, todayOrders.costedCost),
-    profitCostRatioYesterday: computeMargin(yesterdayOrders.netProfit, yesterdayOrders.costedCost),
+    marginToday: aggregateRatio(todayOrders.netProfit, todayOrders.costedRevenue),
+    marginYesterday: aggregateRatio(yesterdayOrders.netProfit, yesterdayOrders.costedRevenue),
+    profitCostRatioToday: aggregateRatio(todayOrders.netProfit, todayOrders.costedCost),
+    profitCostRatioYesterday: aggregateRatio(yesterdayOrders.netProfit, yesterdayOrders.costedCost),
     pendingRevenueToday: todayRevenue.sub(todayOrders.costedRevenue).toFixed(2),
     pendingOrderCountToday: todayCount - todayOrders.costedCount,
   };
@@ -219,7 +223,7 @@ async function hourlyCumulative(
       // Mirrors aggregateOrders — cancelled orders carry no payout.
       status: { not: 'CANCELLED' },
     },
-    select: { orderDate: true, saleSubtotalNet: true, estimatedNetProfit: true },
+    select: { orderDate: true, saleGross: true, estimatedNetProfit: true },
   });
 
   const revenueBuckets = Array.from({ length: HOURS_IN_DAY }, () => new Decimal(0));
@@ -227,9 +231,9 @@ async function hourlyCumulative(
 
   for (const order of orders) {
     const hour = getBusinessHour(order.orderDate);
-    if (order.saleSubtotalNet !== null)
+    if (order.saleGross !== null)
       revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(
-        order.saleSubtotalNet.toString(),
+        order.saleGross.toString(),
       );
     if (order.estimatedNetProfit !== null)
       profitBuckets[hour] = (profitBuckets[hour] ?? new Decimal(0)).add(
@@ -245,7 +249,7 @@ async function hourlyCumulative(
     for (const entry of bufferRows) {
       const mapped = entry.mappedOrder as unknown as MappedOrder;
       const hour = getBusinessHour(new Date(mapped.orderDate));
-      revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(mapped.saleSubtotalNet);
+      revenueBuckets[hour] = (revenueBuckets[hour] ?? new Decimal(0)).add(mapped.saleGross);
     }
   }
 
@@ -304,7 +308,7 @@ interface ProductAccumulator {
   bufferEntryCount: number; // distinct buffer entries containing this barcode
   unitsSold: number;
   revenue: Decimal;
-  snapshotUnitCost: Decimal | null; // net unit cost actually applied (costed rows)
+  snapshotUnitCost: Decimal | null; // gross unit cost actually applied (costed rows)
   unresolved: boolean;
 }
 
@@ -352,8 +356,8 @@ export async function getTodayProducts(args: {
       select: {
         orderId: true,
         quantity: true,
-        unitPriceNet: true,
-        unitCostSnapshotNet: true,
+        lineSaleGross: true,
+        unitCostSnapshotGross: true,
         productVariant: {
           select: {
             id: true,
@@ -414,14 +418,14 @@ export async function getTodayProducts(args: {
     });
     acc.orderIds.add(item.orderId);
     acc.unitsSold += item.quantity;
-    if (item.unitPriceNet !== null) {
-      acc.revenue = acc.revenue.add(new Decimal(item.unitPriceNet.toString()).mul(item.quantity));
-    }
+    // lineSaleGross is the LINE total (KDV-dahil, already × quantity) — add directly.
+    acc.revenue = acc.revenue.add(item.lineSaleGross.toString());
     // First non-null snapshot wins. If the variant was costed at differing
     // snapshots intraday, this shows a representative applied cost (the cell is
-    // a quiet reference, not a reconciled figure).
-    if (acc.snapshotUnitCost === null && item.unitCostSnapshotNet !== null) {
-      acc.snapshotUnitCost = new Decimal(item.unitCostSnapshotNet.toString());
+    // a quiet reference, not a reconciled figure). unitCostSnapshotGross is the
+    // per-unit cost (KDV-dahil).
+    if (acc.snapshotUnitCost === null && item.unitCostSnapshotGross !== null) {
+      acc.snapshotUnitCost = new Decimal(item.unitCostSnapshotGross.toString());
     }
   }
 
@@ -442,7 +446,8 @@ export async function getTodayProducts(args: {
         entryIds: new Set<string>(),
       };
       agg.units += line.quantity;
-      agg.revenue = agg.revenue.add(new Decimal(line.unitPriceNet).mul(line.quantity));
+      // lineSaleGross is the LINE total (KDV-dahil, already × quantity) — add directly.
+      agg.revenue = agg.revenue.add(line.lineSaleGross);
       agg.entryIds.add(entry.id);
       bufferByBarcode.set(line.barcode, agg);
     }
@@ -594,8 +599,10 @@ export async function getLiveOrders(args: {
         platformOrderNumber: true,
         orderDate: true,
         status: true,
-        saleSubtotalNet: true,
+        saleGross: true,
         estimatedNetProfit: true,
+        // Marj kalıcı kolondan okunur — render-time hesap yok (kural: backend servis eder).
+        estimatedSaleMarginPct: true,
       },
     }),
     prisma.livePerformanceBuffer.findMany({
@@ -613,12 +620,14 @@ export async function getLiveOrders(args: {
 
   const calculatedRows: LiveOrderRow[] = ordersToday.map((order) => {
     const revenue =
-      order.saleSubtotalNet !== null
-        ? new Decimal(order.saleSubtotalNet.toString())
-        : new Decimal(0);
+      order.saleGross !== null ? new Decimal(order.saleGross.toString()) : new Decimal(0);
     const profit =
       order.estimatedNetProfit !== null ? new Decimal(order.estimatedNetProfit.toString()) : null;
-    const margin = profit !== null ? computeMargin(profit, revenue) : null;
+    // Marj kalıcı estimatedSaleMarginPct kolonundan — render-time recompute YOK.
+    const margin =
+      order.estimatedSaleMarginPct !== null
+        ? new Decimal(order.estimatedSaleMarginPct.toString()).toFixed(2)
+        : null;
     return {
       source: 'orders',
       platformOrderId: order.platformOrderId,
@@ -646,7 +655,7 @@ export async function getLiveOrders(args: {
       // render every pending row at the same wrong "03:00".
       orderDate: new Date(mapped.orderDate).toISOString(),
       status: mapped.status,
-      revenue: new Decimal(mapped.saleSubtotalNet).toFixed(2),
+      revenue: new Decimal(mapped.saleGross).toFixed(2),
       profit: null,
       margin: null,
     };
@@ -690,14 +699,15 @@ export interface BufferDetailLine {
   variantId: string | null;
   stockCode: string | null;
   quantity: number;
-  unitPriceNet: string;
+  // GROSS konvansiyon (2026-06-16): lineSaleGross satır toplamı (KDV-dahil, × quantity).
+  lineSaleGross: string;
 }
 
 export interface BufferDetail {
   platformOrderNumber: string | null;
   orderDate: string; // ISO
   status: string;
-  saleSubtotalNet: string;
+  saleGross: string;
   lines: BufferDetailLine[];
 }
 
@@ -749,7 +759,7 @@ export async function getBufferDetail(args: {
       variantId: variant?.id ?? null,
       stockCode: variant?.stockCode ?? null,
       quantity: line.quantity,
-      unitPriceNet: new Decimal(line.unitPriceNet).toFixed(2),
+      lineSaleGross: new Decimal(line.lineSaleGross).toFixed(2),
     };
   });
 
@@ -757,7 +767,7 @@ export async function getBufferDetail(args: {
     platformOrderNumber: entry.platformOrderNumber,
     orderDate: new Date(mapped.orderDate).toISOString(),
     status: mapped.status,
-    saleSubtotalNet: new Decimal(mapped.saleSubtotalNet).toFixed(2),
+    saleGross: new Decimal(mapped.saleGross).toFixed(2),
     lines,
   };
 }
@@ -780,7 +790,7 @@ export async function getNewOrderNotificationSummary(args: {
       select: {
         id: true,
         platformOrderNumber: true,
-        saleSubtotalNet: true,
+        saleGross: true,
         estimatedNetProfit: true,
         orderDate: true,
       },
@@ -796,7 +806,7 @@ export async function getNewOrderNotificationSummary(args: {
       orderId: order.id,
       bufferId: null,
       platformOrderNumber: order.platformOrderNumber,
-      revenue: new Decimal(order.saleSubtotalNet ?? 0).toFixed(2),
+      revenue: new Decimal(order.saleGross ?? 0).toFixed(2),
       profit,
       costStatus: profit !== null ? 'costed' : 'pending',
       isToday: order.orderDate >= start && order.orderDate < end,
@@ -816,7 +826,7 @@ export async function getNewOrderNotificationSummary(args: {
     orderId: null,
     bufferId: entry.id,
     platformOrderNumber: entry.platformOrderNumber,
-    revenue: new Decimal(mapped.saleSubtotalNet).toFixed(2),
+    revenue: new Decimal(mapped.saleGross).toFixed(2),
     profit: null,
     costStatus: 'pending',
     isToday: entry.orderDate.getTime() === getBusinessDateAnchor().getTime(),

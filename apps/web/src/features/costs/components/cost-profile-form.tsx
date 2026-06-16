@@ -110,7 +110,7 @@ export function CostProfileForm({
       name: initialValues?.name ?? '',
       type: initialValues?.type ?? CostProfileType.COGS,
       currency: initialValues?.currency ?? Currency.TRY,
-      amount: initialValues?.amount ?? '',
+      amountGross: initialValues?.amountGross ?? '',
       vatRate: initialValues?.vatRate ?? 18,
       fxRateMode: initialValues?.fxRateMode ?? FxRateMode.AUTO,
       manualFxRate: initialValues?.manualFxRate ?? null,
@@ -120,7 +120,7 @@ export function CostProfileForm({
 
   const watchedCurrency = form.watch('currency');
   const watchedFxRateMode = form.watch('fxRateMode');
-  const watchedAmount = form.watch('amount');
+  const watchedAmount = form.watch('amountGross');
   const watchedManualFxRate = form.watch('manualFxRate');
 
   // When currency changes to TRY, force AUTO mode (TRY profiles can't use MANUAL)
@@ -229,7 +229,7 @@ export function CostProfileForm({
 
           <FormField
             control={form.control}
-            name="amount"
+            name="amountGross"
             render={({ field }) => (
               <FormItem>
                 <FormLabel>{t('fields.amount')}</FormLabel>
@@ -378,7 +378,7 @@ export function profileToFormValues(profile: CostProfile): CostProfileFormValues
     name: profile.name,
     type: profile.type as CostProfileType,
     currency: profile.currency as Currency,
-    amount: profile.amount,
+    amountGross: profile.amountGross,
     vatRate: profile.vatRate,
     fxRateMode: profile.fxRateMode as FxRateMode,
     manualFxRate: profile.manualFxRate,

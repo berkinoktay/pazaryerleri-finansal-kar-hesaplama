@@ -31,7 +31,7 @@ const PROFILE_RESPONSE = {
   organizationId: ORG_ID,
   name: 'Test COGS',
   type: 'COGS' as const,
-  amount: '10.00',
+  amountGross: '10.00',
   currency: 'TRY' as const,
   vatRate: 18,
   fxRateMode: 'AUTO' as const,
@@ -65,7 +65,7 @@ describe('useCreateCostProfile', () => {
       body: {
         name: 'Test COGS',
         type: 'COGS',
-        amount: '10.00',
+        amountGross: '10.00',
         currency: 'TRY',
         vatRate: 18,
         fxRateMode: 'AUTO',

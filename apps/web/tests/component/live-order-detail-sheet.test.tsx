@@ -33,7 +33,7 @@ describe('LiveOrderDetailSheet', () => {
             platformOrderNumber: 'TY-1',
             orderDate: '2026-06-05T08:00:00.000Z',
             status: 'PENDING',
-            saleSubtotalNet: '200.00',
+            saleGross: '240.00',
             lines: [
               {
                 barcode: 'BC-1',
@@ -42,7 +42,7 @@ describe('LiveOrderDetailSheet', () => {
                 variantId: null,
                 stockCode: null,
                 quantity: 2,
-                unitPriceNet: '100.00',
+                lineSaleGross: '240.00',
               },
             ],
           }),

@@ -4,14 +4,15 @@
 // Trendyol filter:
 //   transactionType=Stoppage  (otherfinancials)
 //
-// Design §5.2 line 1098: Stopaj %1 of saleSubtotalNet, KDV YOK. The per-order
+// Design §5.2 line 1098: Stopaj %1 of saleGross, KDV YOK. The per-order
 // ESTIMATE was deterministically computed at T+0; this row audits the
 // aggregate Trendyol invoice. Research §4.3: bir PaymentOrder cycle birden
 // fazla paymentDate içerebilir → 2+ Stoppage rows possible. Each row is
 // inserted independently (no aggregation) because Trendyol's `id` is unique
 // per row.
 //
-// KDV: zero. amountNet = debt direkt; vatRate / vatAmount = 0.
+// KDV: zero. GROSS CONVENTION (2026-06-16, Bölüm E Task 20): debt doğrudan
+// amountGross; vatRate=0. Net-split kaldırıldı (KDV = 0 zaten).
 
 import { Decimal } from 'decimal.js';
 
@@ -29,14 +30,12 @@ export async function handleStoppage(
   row: TrendyolFinancialTransaction,
   tx: Prisma.TransactionClient,
 ): Promise<HandleSettlementResult> {
-  const amountNet = new Decimal(row.debt);
-
   return insertOrgPeriodFee({
     storeId,
     organizationId,
     feeType: 'STOPPAGE',
     row,
-    amounts: { amountNet, vatRate: ZERO, vatAmount: ZERO },
+    amounts: { amountGross: new Decimal(row.debt), vatRate: ZERO },
     tx,
     logScope: 'settlements.stoppage',
   });

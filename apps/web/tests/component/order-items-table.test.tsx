@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { formatCurrency } from '@pazarsync/utils';
+
 import type { OrderItemDetail } from '@/features/orders/api/get-order.api';
 import { OrderItemsTable } from '@/features/orders/components/order-items-table';
 
@@ -9,18 +11,16 @@ function makeItem(overrides: Partial<OrderItemDetail> = {}): OrderItemDetail {
   return {
     id: 'i1',
     quantity: 1,
-    unitPriceNet: '100.00',
-    unitVatRate: '20.00',
-    unitVatAmount: '20.00',
-    grossCommissionAmountNet: '10.00',
-    grossCommissionVatAmount: '2.00',
-    refundedCommissionAmountNet: '0.00',
-    refundedCommissionVatAmount: '0.00',
-    sellerDiscountNet: '0.00',
-    sellerDiscountVatAmount: '0.00',
-    unitCostSnapshotNet: null,
+    lineSaleGross: '120.00',
+    saleVatRate: '20.00',
+    lineSellerDiscountGross: '0.00',
+    commissionGross: '12.00',
+    commissionVatRate: '20.00',
+    refundedCommissionGross: '0.00',
+    estimatedCommissionGross: '12.00',
+    settledCommissionGross: null,
+    unitCostSnapshotGross: null,
     unitCostSnapshotVatRate: null,
-    unitCostSnapshotVatAmount: null,
     commissionInvoiceSerialNumber: null,
     barcode: null,
     variant: {
@@ -35,6 +35,17 @@ function makeItem(overrides: Partial<OrderItemDetail> = {}): OrderItemDetail {
 }
 
 describe('OrderItemsTable', () => {
+  it('renders GROSS column headers ("KDV dahil") and the served gross values, no per-item profit', () => {
+    render(<OrderItemsTable items={[makeItem()]} />);
+    // Kolon başlıkları KDV-dahil; "net" GEÇMEZ.
+    const grossHeaders = screen.getAllByText(/KDV dahil/);
+    expect(grossHeaders.length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText(/\(net\)/)).not.toBeInTheDocument();
+    // Backend-servisli gross değerler render edilir (kâr/marj satırda YOK).
+    expect(screen.getByText(formatCurrency('120.00'))).toBeInTheDocument();
+    expect(screen.getByText(formatCurrency('12.00'))).toBeInTheDocument();
+  });
+
   it('shows the unmatched badge and the line barcode when the item has no variant', () => {
     render(<OrderItemsTable items={[makeItem({ variant: null, barcode: '8680000000001' })]} />);
     expect(screen.getByText('Eşleşme bekliyor')).toBeInTheDocument();

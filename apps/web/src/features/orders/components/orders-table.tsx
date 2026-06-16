@@ -93,10 +93,10 @@ export function OrdersTable({
           cell: ({ row }) => <OrderStatusBadge status={row.original.status} />,
         },
         {
-          id: 'saleSubtotalNet',
+          id: 'saleGross',
           header: t('columns.revenue'),
           cell: ({ row }) => {
-            const value = row.original.saleSubtotalNet;
+            const value = row.original.saleGross;
             return value === null ? (
               <span className="text-muted-foreground">—</span>
             ) : (
@@ -158,10 +158,10 @@ export function OrdersTable({
         cell: ({ row }) => <ReconciliationStatusBadge status={row.original.reconciliationStatus} />,
       },
       {
-        id: 'saleSubtotalNet',
-        header: t('columns.saleSubtotalNet'),
+        id: 'saleGross',
+        header: t('columns.saleGross'),
         cell: ({ row }) => {
-          const value = row.original.saleSubtotalNet;
+          const value = row.original.saleGross;
           return value === null ? (
             <span className="text-muted-foreground">—</span>
           ) : (

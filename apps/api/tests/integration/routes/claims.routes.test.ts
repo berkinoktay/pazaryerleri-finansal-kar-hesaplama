@@ -296,19 +296,19 @@ describe('Claims routes', () => {
     });
 
     // Return trio on the resolved claim's order — captured now (in period).
+    // amountGross = KDV-dahil (eski amountNet + vatAmount): 100+20, 10+2, 40+8.
     const trio = [
-      { feeType: 'REFUND_DEDUCTION', direction: 'DEBIT', amountNet: '100.00', vatAmount: '20.00' },
-      { feeType: 'COMMISSION_REFUND', direction: 'CREDIT', amountNet: '10.00', vatAmount: '2.00' },
-      { feeType: 'COST_RETURN', direction: 'CREDIT', amountNet: '40.00', vatAmount: '8.00' },
+      { feeType: 'REFUND_DEDUCTION', direction: 'DEBIT', amountGross: '120.00' },
+      { feeType: 'COMMISSION_REFUND', direction: 'CREDIT', amountGross: '12.00' },
+      { feeType: 'COST_RETURN', direction: 'CREDIT', amountGross: '48.00' },
     ] as const;
     for (const leg of trio) {
       await createOrderFee(orderId, org.id, {
         feeType: leg.feeType,
         source: 'SETTLEMENT',
         direction: leg.direction,
-        amountNet: leg.amountNet,
+        amountGross: leg.amountGross,
         vatRate: '20.00',
-        vatAmount: leg.vatAmount,
         trendyolTransactionId: '725041340',
       });
     }
@@ -347,9 +347,8 @@ describe('Claims routes', () => {
       feeType: 'REFUND_DEDUCTION',
       source: 'SETTLEMENT',
       direction: 'DEBIT',
-      amountNet: '100.00',
+      amountGross: '120.00', // KDV-dahil (eski amountNet 100 + vatAmount 20)
       vatRate: '20.00',
-      vatAmount: '20.00',
       trendyolTransactionId: '725041399',
       capturedAt: new Date('2026-01-02T00:00:00Z'), // pencere DIŞI
     });

@@ -5,14 +5,13 @@
  * OrderItem INSERT. Runs inside the same transaction as the INSERT so the
  * snapshot and its components are written atomically.
  *
- * KDV-split convention (PR-6 continuation, 2026-05-21): writes the three
- * NET split columns (`unitCostSnapshotNet`, `unitCostSnapshotVatAmount`,
- * `unitCostSnapshotVatRate`). The legacy single-column `unitCostSnapshot`
- * (KDV-dahil) stays NULL — profit-formula reads NET, no consumer remains
- * on the legacy column. Drop is scheduled for PR-8+ (PR-5c pattern).
+ * GROSS convention (2026-06-16): reads CostProfile.amountGross + vatRate
+ * (KDV-dahil), writes OrderItem.unitCostSnapshotGross + unitCostSnapshotVatRate.
+ * Components carry amountGross + vatRate + amountInTryGross (FX path).
+ * Cost VAT rate is independent of sale VAT rate (spec §7).
  *
  * Key invariants (spec §5.7):
- *   1. App layer: throws SnapshotAlreadyCapturedError if unitCostSnapshotNet != null.
+ *   1. App layer: throws SnapshotAlreadyCapturedError if unitCostSnapshotGross != null.
  *   2. DB layer: the `order_items_snapshot_immutable` trigger rejects any
  *      UPDATE that changes the snapshot columns once they are non-null.
  *
@@ -31,14 +30,16 @@ import { resolveFxRateForSnapshot } from './fx-rates.service';
 
 /**
  * Thrown when captureCostSnapshot is called on an OrderItem that already
- * has a non-null unitCostSnapshotNet. Signals a coding error in the caller
+ * has a non-null unitCostSnapshotGross. Signals a coding error in the caller
  * (should only call after a fresh INSERT, never on existing items).
  */
 export class SnapshotAlreadyCapturedError extends Error {
   readonly code = 'SNAPSHOT_ALREADY_CAPTURED' as const;
 
   constructor(orderItemId: string) {
-    super(`OrderItem ${orderItemId} already has a unit_cost_snapshot — snapshots are write-once`);
+    super(
+      `OrderItem ${orderItemId} already has a unit_cost_snapshot_gross — snapshots are write-once`,
+    );
     this.name = 'SnapshotAlreadyCapturedError';
   }
 }
@@ -51,14 +52,10 @@ interface SnapshotComponentData {
   profileId: string;
   profileName: string;
   profileType: CostProfileType;
-  amount: Decimal;
+  amountGross: Decimal;
   currency: Currency;
   vatRate: number;
-  amountInTry: Decimal;
-  // PR-6 continuation: KDV snapshot in native currency + TRY.
-  // `amount = NET` convention; canonical formula `vatAmount = amount × vatRate / 100`.
-  vatAmount: Decimal;
-  vatAmountInTry: Decimal;
+  amountInTryGross: Decimal;
   fxRateMode: FxRateMode;
   fxRateUsed: Decimal;
   fxRateSource: string;
@@ -88,8 +85,8 @@ export async function captureCostSnapshot(
     return;
   }
 
-  // App-layer write-once guard (spec §5.7 layer 1)
-  if (item.unitCostSnapshotNet !== null) {
+  // App-layer write-once guard (spec §5.7 layer 1) — GROSS convention
+  if (item.unitCostSnapshotGross !== null) {
     throw new SnapshotAlreadyCapturedError(orderItemId);
   }
 
@@ -126,15 +123,11 @@ export async function captureCostSnapshot(
       return;
     }
 
-    // KDV split — `profile.amount` is NET (schema convention, PR-4 backfill formula).
-    // `profile.vatAmount` is nullable when cost-profile.service does not
-    // backfill on create/update (TODO: see master guide §Current Status).
-    // Defensive compute via canonical formula when null.
-    const amountNet = new Decimal(profile.amount);
-    const vatAmountNative =
-      profile.vatAmount !== null
-        ? new Decimal(profile.vatAmount)
-        : amountNet.mul(profile.vatRate).div(100);
+    // GROSS convention: profile.amountGross is KDV-dahil.
+    // amountInTryGross = amountGross × fxRate (gross stays gross across currencies).
+    // Cost VAT rate is independent of sale VAT rate (spec §7).
+    const amountGross = new Decimal(profile.amountGross);
+    const vatRate = Number(profile.vatRate);
 
     components.push({
       orderItemId,
@@ -142,42 +135,40 @@ export async function captureCostSnapshot(
       profileId: profile.id,
       profileName: profile.name,
       profileType: profile.type,
-      amount: amountNet,
+      amountGross,
       currency: profile.currency,
-      vatRate: profile.vatRate,
-      amountInTry: amountNet.mul(fx.rate),
-      vatAmount: vatAmountNative,
-      vatAmountInTry: vatAmountNative.mul(fx.rate),
+      vatRate,
+      amountInTryGross: amountGross.mul(fx.rate).toDecimalPlaces(2),
       fxRateMode: profile.fxRateMode,
       fxRateUsed: fx.rate,
       fxRateSource: fx.source,
     });
   }
 
-  // Aggregate NET + VAT (in TRY) across all profiles. Effective vatRate is
-  // denormalized for downstream consumers — multi-profile case with mixed
-  // rates surfaces a blended rate; single-profile case lands the original rate.
-  const unitCostSnapshotNet = components
-    .reduce((acc, c) => acc.add(c.amountInTry), new Decimal(0))
+  // Aggregate gross (in TRY) across all profiles.
+  // unitCostSnapshotGross = Σ amountInTryGross (KDV-dahil toplam, TRY).
+  // vatRate: the effective blended rate (single-profile → exact; multi-profile → blended).
+  // For zero-gross case: vatRate stays null (undefined, not 0% which is a valid export rate).
+  const unitCostSnapshotGross = components
+    .reduce((acc, c) => acc.add(c.amountInTryGross), new Decimal(0))
     .toDecimalPlaces(2);
-  const unitCostSnapshotVatAmount = components
-    .reduce((acc, c) => acc.add(c.vatAmountInTry), new Decimal(0))
-    .toDecimalPlaces(2);
-  // NET=0 means no priced cost — rate is undefined, not 0% (0% is a valid
-  // rate for export/exempt goods, so writing `0` here would alias the two
-  // states for downstream consumers). Leave the denormalized rate NULL.
-  const unitCostSnapshotVatRate = unitCostSnapshotNet.isZero()
-    ? null
-    : unitCostSnapshotVatAmount.div(unitCostSnapshotNet).mul(100).toDecimalPlaces(2);
 
-  // Write snapshot and components atomically (same tx). Legacy
-  // `unitCostSnapshot` stays NULL — profit-formula reads NET, no consumer
-  // remains on the legacy column. Drop scheduled for PR-8+ (PR-5c pattern).
+  // Blended effective vatRate = Σ(amountInTryGross × vatRate) / Σ(amountInTryGross)
+  // Only meaningful when gross > 0 (zero-gross → null to distinguish from 0% exempt rate).
+  let unitCostSnapshotVatRate: Decimal | null = null;
+  if (!unitCostSnapshotGross.isZero()) {
+    const weightedVatSum = components.reduce(
+      (acc, c) => acc.add(c.amountInTryGross.mul(c.vatRate)),
+      new Decimal(0),
+    );
+    unitCostSnapshotVatRate = weightedVatSum.div(unitCostSnapshotGross).toDecimalPlaces(2);
+  }
+
+  // Write snapshot and components atomically (same tx).
   await tx.orderItem.update({
     where: { id: orderItemId },
     data: {
-      unitCostSnapshotNet,
-      unitCostSnapshotVatAmount,
+      unitCostSnapshotGross,
       unitCostSnapshotVatRate,
       snapshotCapturedAt: new Date(),
     },

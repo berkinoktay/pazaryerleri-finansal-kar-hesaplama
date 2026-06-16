@@ -39,7 +39,9 @@ async function buildOrder(): Promise<{ orderId: string; organizationId: string; 
   return { orderId: order.id, organizationId: org.id, storeId: store.id };
 }
 
-const MONEY = { amountNet: '10.00', vatRate: '20.00', vatAmount: '2.00' };
+// GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross + vatRate.
+// 10.00 net × 1.20 = 12.00 gross at vatRate=20.
+const MONEY = { amountGross: '12.00', vatRate: '20.00' };
 
 describe('order fee unique guards (#297)', () => {
   beforeAll(async () => {

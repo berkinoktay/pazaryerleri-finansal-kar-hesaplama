@@ -11,6 +11,15 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Added
+
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`** — yeni `profitBreakdown`
+  alanı (`ProfitBreakdown | null`). Berkin'in otoritatif kâr formülünü (Satış − Maliyet −
+  Komisyon − Kargo − PSF − Stopaj − Net KDV = Kâr) ekrana koymak için backend-hesaplı brüt
+  (KDV-dahil) toplamlar + Net KDV kırılımı. Değerler `buildProfitBreakdown` (packages/profit) +
+  persist edilen `Order.estimatedNetVat`. profit-excluded / maliyet-eksik siparişte `null`.
+  **Frontend hiçbir finansal değeri türetmez** — backend hesaplar+kaydeder+servis eder.
+
 ### Removed
 
 - **`PATCH /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}/items/{itemId}/cost`** —

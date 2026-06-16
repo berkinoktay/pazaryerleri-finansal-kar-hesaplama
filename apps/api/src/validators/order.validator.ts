@@ -103,13 +103,20 @@ export const OrderListItemSchema = z
     orderDate: z.string().datetime().openapi({ example: '2026-04-15T14:30:00.000Z' }),
     status: OrderStatusSchema,
     reconciliationStatus: ReconciliationStatusSchema,
-    saleSubtotalNet: z.string().nullable().openapi({
-      description: 'Net sale total (decimal string) — null until OrderItems are synced.',
-      example: '249.50',
+    // GROSS konvansiyon (2026-06-16): saleSubtotalNet/saleVatTotal → saleGross/saleVat.
+    // saleGross = satış toplamı (KDV-dahil), saleVat = içindeki KDV, listGross =
+    // liste fiyatı (KDV-dahil). null: OrderItem'lar henüz senkronlanmadı.
+    saleGross: z.string().nullable().openapi({
+      description: 'Sale total incl. VAT (decimal string) — null until OrderItems are synced.',
+      example: '299.40',
     }),
-    saleVatTotal: z.string().nullable().openapi({
-      description: 'KDV total over the sale (decimal string).',
+    saleVat: z.string().nullable().openapi({
+      description: 'KDV contained in the gross sale (decimal string).',
       example: '49.90',
+    }),
+    listGross: z.string().nullable().openapi({
+      description: 'List price incl. VAT (decimal string) = saleGross + sellerDiscountGross.',
+      example: '349.40',
     }),
     estimatedNetProfit: z
       .string()
@@ -175,22 +182,38 @@ const OrderItemDetailSchema = z
   .object({
     id: z.string().uuid(),
     quantity: z.number().int().positive(),
-    // Net+VAT split. Nullable on legacy rows that pre-date PR-3 KDV migration.
-    unitPriceNet: z.string().nullable().openapi({ description: 'Decimal string.' }),
-    unitVatRate: z.string().nullable().openapi({ description: 'VAT rate %, decimal string.' }),
-    unitVatAmount: z.string().nullable().openapi({ description: 'Decimal string.' }),
-    // Commission split — always present (default 0 in schema).
-    grossCommissionAmountNet: z.string().openapi({ description: 'Decimal string.' }),
-    grossCommissionVatAmount: z.string().openapi({ description: 'Decimal string.' }),
-    refundedCommissionAmountNet: z.string().openapi({ description: 'Decimal string.' }),
-    refundedCommissionVatAmount: z.string().openapi({ description: 'Decimal string.' }),
-    // Seller-side discount.
-    sellerDiscountNet: z.string().openapi({ description: 'Decimal string.' }),
-    sellerDiscountVatAmount: z.string().openapi({ description: 'Decimal string.' }),
-    // Cost snapshot — null when the variant has no cost profile attached.
-    unitCostSnapshotNet: z.string().nullable().openapi({ description: 'Decimal string.' }),
+    // GROSS konvansiyon (2026-06-16): tüm para değerleri KDV-dahil; net türetilir
+    // (gross × 100/(100+rate)). Satır toplamlarıdır (×quantity), birim değil.
+    // Satış (gross + KDV oranı).
+    lineSaleGross: z
+      .string()
+      .openapi({ description: 'Line sale total incl. VAT (decimal string).' }),
+    saleVatRate: z.string().openapi({ description: 'Sale VAT rate %, decimal string.' }),
+    lineSellerDiscountGross: z
+      .string()
+      .openapi({ description: 'Seller discount incl. VAT (decimal string).' }),
+    // Komisyon (gross + oran) — always present (default 0 in schema).
+    commissionGross: z.string().openapi({ description: 'Commission incl. VAT (decimal string).' }),
+    commissionVatRate: z
+      .string()
+      .openapi({ description: 'Commission VAT rate %, decimal string.' }),
+    refundedCommissionGross: z
+      .string()
+      .openapi({ description: 'Refunded commission incl. VAT (decimal string).' }),
+    estimatedCommissionGross: z
+      .string()
+      .nullable()
+      .openapi({ description: 'T+0 commission estimate (write-once); null pre-estimate.' }),
+    settledCommissionGross: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Settlement commission (mutable); null pre-settlement.' }),
+    // Cost snapshot (gross + VAT rate) — null when the variant has no cost profile attached.
+    unitCostSnapshotGross: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Unit cost snapshot incl. VAT (decimal string).' }),
     unitCostSnapshotVatRate: z.string().nullable(),
-    unitCostSnapshotVatAmount: z.string().nullable(),
     // Komisyon Faturası anchor (Sale satırı yazdığında set'lenir).
     commissionInvoiceSerialNumber: z.string().nullable().openapi({ example: 'DCF2024000123' }),
     barcode: z.string().nullable().openapi({
@@ -211,9 +234,16 @@ const OrderFeeDetailSchema = z
     feeType: OrderFeeTypeSchema,
     source: OrderFeeSourceSchema,
     direction: OrderFeeDirectionSchema,
-    amountNet: z.string().openapi({ description: 'Decimal string.' }),
-    vatRate: z.string().openapi({ description: 'Decimal string %.' }),
-    vatAmount: z.string().openapi({ description: 'Decimal string.' }),
+    // GROSS konvansiyon (2026-06-16): amountNet+vatAmount → amountGross+vatRate.
+    // net türetilir (amountGross × 100/(100+vatRate)). isEstimate = source==='ESTIMATE'
+    // → tahmin/gerçek-fatura rozetini frontend bu boolean'dan çizer (türetmez).
+    amountGross: z.string().openapi({ description: 'Fee amount incl. VAT (decimal string).' }),
+    vatRate: z.string().openapi({ description: 'VAT rate %, decimal string.' }),
+    isEstimate: z.boolean().openapi({
+      description:
+        'True when the row is a deterministic T+0 ESTIMATE (not yet confirmed by a vendor ' +
+        'settlement/invoice). Drives the "Tahmini" vs "Gerçek fatura" badge.',
+    }),
     displayName: z.string().nullable().openapi({ example: 'Hizmet Bedeli (PSF)' }),
     capturedAt: z.string().datetime(),
     confirmedAt: z
@@ -267,6 +297,53 @@ const OrderStoreSummarySchema = z
   })
   .openapi('OrderStoreSummary');
 
+// ─── Kâr dökümü (backend-hesaplı, frontend türetmez) ──────────────────────
+// Berkin'in otoritatif formülü: Satış − Maliyet − Komisyon − Kargo − PSF −
+// Stopaj − Net KDV = Kâr. Brüt (KDV-dahil) terimler + Net KDV; tüm değer Decimal
+// string. netProfit/netVat persist'ten (computeProfit), brüt toplamlar
+// buildProfitBreakdown'dan. profit-excluded / maliyet-eksik siparişte null.
+const ProfitBreakdownSchema = z
+  .object({
+    listGross: z
+      .string()
+      .openapi({ description: 'Liste fiyatı brüt = satış brüt + satıcı indirimi brüt.' }),
+    sellerDiscountGross: z
+      .string()
+      .openapi({ description: "Satıcı indirimi brüt (≥0). '0.00' → indirim yok." }),
+    saleGross: z
+      .string()
+      .openapi({ description: 'Satış brüt (effectiveSale = liste − indirim, KDV-dahil).' }),
+    saleVat: z.string(),
+    costGross: z.string(),
+    costVat: z.string(),
+    commissionGross: z.string(),
+    commissionVat: z.string(),
+    shippingGross: z.string(),
+    shippingVat: z.string(),
+    platformServiceGross: z.string(),
+    platformServiceVat: z.string(),
+    stoppage: z.string().openapi({
+      description:
+        'Stopaj (kaynakta kesinti) — ayrı düşülen brüt terim, KDV-siz (vatRate 0). ' +
+        'Net KDV içine katlanmaz; kârdan doğrudan düşülür.',
+    }),
+    netVat: z.string().openapi({
+      description: 'Net KDV = Satış KDV − Maliyet KDV − Komisyon KDV − Kargo KDV − PSF KDV.',
+    }),
+    netProfit: z.string(),
+    // Marjlar persist'ten okunur (estimatedSaleMarginPct/estimatedCostMarkupPct);
+    // null: payda 0 (saleGross=0 ya da Σ costGross=0). Frontend türetmez, render eder.
+    saleMarginPct: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Kâr / satış brüt × 100. null: satış brüt 0.' }),
+    costMarkupPct: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Kâr / Σ maliyet brüt × 100. null: maliyet brüt 0.' }),
+  })
+  .openapi('ProfitBreakdown');
+
 // ─── Detail: top-level ────────────────────────────────────────────────────
 
 export const OrderDetailSchema = z
@@ -288,10 +365,33 @@ export const OrderDetailSchema = z
     fastDelivery: z.boolean(),
     micro: z.boolean(),
 
-    saleSubtotalNet: z.string().nullable(),
-    saleVatTotal: z.string().nullable(),
+    // GROSS konvansiyon (2026-06-16): saleSubtotalNet/saleVatTotal → saleGross/saleVat/listGross.
+    saleGross: z.string().nullable(),
+    saleVat: z.string().nullable(),
+    listGross: z.string().nullable(),
     estimatedNetProfit: z.string().nullable(),
     settledNetProfit: z.string().nullable(),
+    // Backend-hesaplı kâr dökümü (tahmini basis). Kârın gösterildiği her yüzeyde
+    // AYNI bileşene servis edilir; frontend hiçbir finansal değeri türetmez.
+    // null: profit-excluded ya da maliyet snapshot eksik (estimate hesaplanmadı).
+    profitBreakdown: ProfitBreakdownSchema.nullable(),
+
+    // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
+    // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Frontend
+    // indirim satırının yanında promosyon adını gösterir (türetmez, render eder).
+    promotionDisplays: z
+      .array(
+        z.object({
+          displayName: z.string().openapi({ example: 'Satıcı İndirimi' }),
+          amountGross: z.string().openapi({ example: '48.01' }),
+        }),
+      )
+      .nullable()
+      .openapi({
+        description:
+          'Seller-discount promotion names + gross amounts captured at order intake. ' +
+          'Null when there is no promotion/discount.',
+      }),
 
     profitExcludedAt: z
       .string()
