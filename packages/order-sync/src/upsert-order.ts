@@ -236,6 +236,21 @@ export async function upsertOrderWithSnapshot(
   // promoted order is never left half-written with its buffer placeholder still
   // present (which would double-count it on the Live Performance page).
   const run = async (tx: Prisma.TransactionClient): Promise<void> => {
+    // sellerDiscountVat: satıcı indirimi KDV'si — per-line GERÇEK satış KDV oranından
+    // türetilir (hardcoded %20 DEĞİL). %10 satışlarda (Türk bayrağı, kitap) %20
+    // varsayımı yanlış değer saklardı. Her satırın lineSellerDiscountGross'u kendi
+    // saleVatRate'i ile KDV'ye çevrilir; TAM PRECISION'da biriktirilir, persist'te
+    // BİR kez yuvarlanır (Bug 1 ile aynı precision disiplini). Türev gösterim kolonu
+    // (kâr formülünde değil) ama doğru değer olmalı.
+    const sellerDiscountVat = order.lines
+      .reduce((acc, line) => {
+        const discountGross = new Decimal(line.lineSellerDiscountGross);
+        const rate = new Decimal(line.saleVatRate);
+        if (rate.isZero()) return acc;
+        return acc.add(discountGross.mul(rate).div(new Decimal(100).add(rate)));
+      }, new Decimal(0))
+      .toDecimalPlaces(2);
+
     // 1. UPSERT Order — NEW convention native.
     //    Sale/discount agregat'ı + flagler MappedOrder'dan direkt.
     //    Mutable update: status + actualDeliveryDate + lastModifiedDate-driven values.
@@ -252,17 +267,14 @@ export async function upsertOrderWithSnapshot(
         status: order.status,
         // GROSS konvansiyon (2026-06-16): sipariş başlığı paket toplamlarından
         // DOĞRUDAN (KDV-dahil) — net/KDV downstream kâr motorunda türetilir.
-        // sellerDiscountVat = sellerDiscountGross × 20/120 (satıcı indirimi KDV'si,
-        // standart %20 oranıyla; net split kâr motorunda yapılır). listGross/saleVat
-        // mapper'dan gelir; promotionDisplays UI gösterimi (ekleme #3).
+        // sellerDiscountVat per-line gerçek saleVatRate'ten türetilir (yukarıda),
+        // hardcoded %20 DEĞİL — karışık/standart-dışı KDV oranlı satışlarda doğru.
+        // listGross/saleVat mapper'dan gelir; promotionDisplays UI gösterimi (ekleme #3).
         saleGross: new Decimal(order.saleGross),
         saleVat: new Decimal(order.saleVat),
         listGross: new Decimal(order.listGross),
         sellerDiscountGross: new Decimal(order.sellerDiscountGross),
-        sellerDiscountVat: new Decimal(order.sellerDiscountGross)
-          .mul(new Decimal(20))
-          .div(new Decimal(120))
-          .toDecimalPlaces(2),
+        sellerDiscountVat,
         promotionDisplays:
           order.promotionDisplays !== null
             ? order.promotionDisplays.map((p) => ({

@@ -874,6 +874,138 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(item.barcode).toBe('EAN13-DIRECT');
   });
 
+  it('sellerDiscountVat per-line GERÇEK saleVatRate ten türetilir — %10 satışta 1.00 (hardcoded %20 DEĞİL)', async () => {
+    // Bug 2: sellerDiscountVat eskiden sellerDiscountGross × 20/120 ile sabit %20
+    // varsayıyordu. %10 KDV oranlı ürünlerde (Türk bayrağı, kitap) bu yanlış değer
+    // saklıyordu. Doğru: per-line lineSellerDiscountGross × saleVatRate/(100+saleVatRate).
+    // %10 satır, indirim 11 → 11 × 10/110 = 1.00 (eski hatalı: 11 × 20/120 = 1.83).
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-VAT10']);
+
+    const mappedOrder = {
+      platformOrderId: '70010',
+      platformOrderNumber: 'TY-VAT10',
+      orderDate: new Date('2026-05-19T10:00:00Z'),
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      status: 'DELIVERED' as const,
+      dematerialized: false,
+      // Satış 99 (KDV-dahil) = net 90 + %10 KDV 9; liste 110, indirim 11.
+      saleGross: '99.00',
+      saleVat: '9.00',
+      listGross: '110.00',
+      sellerDiscountGross: '11.00',
+      promotionDisplays: null,
+      agreedDeliveryDate: null,
+      actualDeliveryDate: null,
+      actualShipDate: null,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: null,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      originShipmentDate: null,
+      lines: [
+        {
+          barcode: 'EAN13-VAT10',
+          quantity: 1,
+          platformLineId: '70010001',
+          lineListGross: '110.00',
+          lineSaleGross: '99.00',
+          lineSellerDiscountGross: '11.00',
+          // %10 satış KDV oranı — Bug 2'nin can alıcı noktası.
+          saleVatRate: '10',
+          commissionRate: '10',
+          commissionGross: '9.90',
+          refundedCommissionGross: '1.10',
+          commissionVatRate: '20',
+        },
+      ],
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mappedOrder);
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: '70010' },
+    });
+    // 11 × 10/(100+10) = 1.00 (NOT 11 × 20/120 = 1.83).
+    expect(new Decimal(order.sellerDiscountVat!).toString()).toBe('1');
+    expect(new Decimal(order.sellerDiscountGross!).toString()).toBe('11');
+  });
+
+  it('sellerDiscountVat çok-satırlı: per-line oranlar karışık (%10 + %20) raw-aggregate', async () => {
+    // İki satır: %10 oranlı indirim 11 → 1.00; %20 oranlı indirim 12 → 2.00. Toplam 3.00.
+    // Karışık oran sabit %20 ile 11+12=23 × 20/120 = 3.83 verirdi (yanlış).
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-MIX-A', 'EAN13-MIX-B']);
+
+    const mappedOrder = {
+      platformOrderId: '70020',
+      platformOrderNumber: 'TY-MIX',
+      orderDate: new Date('2026-05-19T10:00:00Z'),
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      status: 'DELIVERED' as const,
+      dematerialized: false,
+      saleGross: '209.00',
+      saleVat: '21.00',
+      listGross: '232.00',
+      sellerDiscountGross: '23.00',
+      promotionDisplays: null,
+      agreedDeliveryDate: null,
+      actualDeliveryDate: null,
+      actualShipDate: null,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: null,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      originShipmentDate: null,
+      lines: [
+        {
+          barcode: 'EAN13-MIX-A',
+          quantity: 1,
+          platformLineId: '70020001',
+          lineListGross: '110.00',
+          lineSaleGross: '99.00',
+          lineSellerDiscountGross: '11.00',
+          saleVatRate: '10', // %10 → 11 × 10/110 = 1.00
+          commissionRate: '10',
+          commissionGross: '9.90',
+          refundedCommissionGross: '1.10',
+          commissionVatRate: '20',
+        },
+        {
+          barcode: 'EAN13-MIX-B',
+          quantity: 1,
+          platformLineId: '70020002',
+          lineListGross: '122.00',
+          lineSaleGross: '110.00',
+          lineSellerDiscountGross: '12.00',
+          saleVatRate: '20', // %20 → 12 × 20/120 = 2.00
+          commissionRate: '10',
+          commissionGross: '11.00',
+          refundedCommissionGross: '1.20',
+          commissionVatRate: '20',
+        },
+      ],
+    };
+
+    await upsertOrderWithSnapshot(store.id, org.id, mappedOrder);
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: '70020' },
+    });
+    // 1.00 + 2.00 = 3.00 (sabit %20 yanlış değeri 3.83 verirdi).
+    expect(new Decimal(order.sellerDiscountVat!).toString()).toBe('3');
+  });
+
   it('UPDATE refreshes cargo fields but never erases them with incoming nulls (PR-8)', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-DIRECT']);
 
