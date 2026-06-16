@@ -29,9 +29,9 @@ export interface OrderFeeTimelineProps {
 /**
  * Chronological OrderFee timeline. Each row carries the fee type, source
  * provenance (ESTIMATE / SETTLEMENT / CARGO_INVOICE / USER_OVERRIDE /
- * MANUAL_ENTRY), direction icon (DEBIT down, CREDIT up), net + VAT
- * amount, and a confirmed-at footnote when the ESTIMATE has been pair-
- * confirmed by a PaymentOrder entry. The list is rendered as-is — the
+ * MANUAL_ENTRY), direction icon (DEBIT down, CREDIT up), gross (KDV-dahil)
+ * amount + VAT rate, and a confirmed-at footnote when the ESTIMATE has been
+ * pair-confirmed by a PaymentOrder entry. The list is rendered as-is — the
  * backend orders by capturedAt asc.
  */
 export function OrderFeeTimeline({ fees }: OrderFeeTimelineProps): React.ReactElement {
@@ -64,6 +64,11 @@ export function OrderFeeTimeline({ fees }: OrderFeeTimelineProps): React.ReactEl
                     <Badge tone={SOURCE_TONES[fee.source]} size="sm">
                       {t(`sources.${fee.source}`)}
                     </Badge>
+                    {/* Tahmini (T+0 deterministik) mi, vendor faturasıyla doğrulanmış
+                        gerçek değer mi — backend-servisli isEstimate sürer. */}
+                    <Badge tone={fee.isEstimate ? 'info' : 'success'} size="sm">
+                      {fee.isEstimate ? t('estimateBadge') : t('settledBadge')}
+                    </Badge>
                   </div>
                   <span className="text-2xs text-muted-foreground tabular-nums">
                     {formatter.dateTime(new Date(fee.capturedAt), 'short')}
@@ -85,14 +90,12 @@ export function OrderFeeTimeline({ fees }: OrderFeeTimelineProps): React.ReactEl
                     )}
                   >
                     <span aria-hidden>{fee.direction === 'DEBIT' ? '−' : '+'}</span>
-                    <Currency value={fee.amountNet} />
+                    <Currency value={fee.amountGross} />
                   </div>
                   <span className="text-2xs text-muted-foreground tabular-nums">
                     {t('vatLabel', {
                       rate: formatter.number(Number(fee.vatRate), 'integer'),
                     })}
-                    {' · '}
-                    <Currency value={fee.vatAmount} className="inline" />
                   </span>
                 </div>
               </li>

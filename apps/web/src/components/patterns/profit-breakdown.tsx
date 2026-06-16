@@ -24,12 +24,13 @@ export interface ProfitBreakdownCardProps {
 }
 
 // Düşülen kalemler — config-driven, sıra = Berkin'in otoritatif formülü.
+// (Stopaj kalemi GROSS dökümünde ayrı satır olarak servis edilmiyor — backend
+//  ProfitBreakdown'da stoppage alanı yok; düşülen toplamlar/Net KDV içinde.)
 const DEDUCTION_ROWS = [
   { key: 'cost', amount: 'costGross' },
   { key: 'commission', amount: 'commissionGross' },
   { key: 'shipping', amount: 'shippingGross' },
   { key: 'platformService', amount: 'platformServiceGross' },
-  { key: 'stoppage', amount: 'stoppageNet' },
 ] as const satisfies ReadonlyArray<{ key: string; amount: keyof ProfitBreakdownData }>;
 
 // Net KDV kırılımı: Satış KDV (+) − diğer KDV'ler (−) = Net KDV.
@@ -118,9 +119,16 @@ export function ProfitBreakdownCard({
               </CollapsibleContent>
             </Collapsible>
 
-            <div className="pt-xs mt-3xs border-t">
+            <div className="pt-xs mt-3xs gap-2xs flex flex-col border-t">
               <BreakdownRow label={finalProfitLabel} emphasis>
                 <Currency value={breakdown.netProfit} emphasis />
+              </BreakdownRow>
+              {/* Marj backend-hesaplı (saleMarginPct); '—' payda 0 (satış brüt 0).
+                  String'i biz formatlamıyoruz — yüzde glyph'i salt gösterim. */}
+              <BreakdownRow label={t('margin')} muted>
+                <span className="tabular-nums">
+                  {breakdown.saleMarginPct === null ? '—' : `${breakdown.saleMarginPct}%`}
+                </span>
               </BreakdownRow>
             </div>
           </dl>

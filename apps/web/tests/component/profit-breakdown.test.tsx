@@ -19,7 +19,6 @@ const messages = {
     commission: 'Komisyon',
     shipping: 'Kargo',
     platformService: 'Platform hizmet bedeli',
-    stoppage: 'E-ticaret stopajı',
     netVat: 'Net KDV',
     netVatResult: 'Net KDV',
     saleVat: 'Satış KDV',
@@ -27,6 +26,7 @@ const messages = {
     commissionVat: 'Komisyon KDV',
     shippingVat: 'Kargo KDV',
     platformServiceVat: 'Platform hizmet bedeli KDV',
+    margin: 'Kâr marjı',
     estimatedProfit: 'Tahmini kâr',
     settledProfit: 'Fiili kâr',
   },
@@ -46,9 +46,10 @@ const BREAKDOWN = {
   shippingVat: '22.55',
   platformServiceGross: '13.19',
   platformServiceVat: '2.20',
-  stoppageNet: '27.50',
   netVat: '175.25',
   netProfit: '848.74',
+  saleMarginPct: '25.7',
+  costMarkupPct: '58.9',
 };
 
 function renderCard(breakdown: typeof BREAKDOWN | null): void {
@@ -64,14 +65,13 @@ describe('ProfitBreakdownCard', () => {
     renderCard(BREAKDOWN);
 
     expect(screen.getByText('Kâr dökümü')).toBeInTheDocument();
-    // Düşülen kalem etiketleri + son kâr.
+    // Düşülen kalem etiketleri + son kâr (stopaj GROSS dökümünde ayrı satır DEĞİL).
     for (const label of [
       'Satış',
       'Ürün maliyeti',
       'Komisyon',
       'Kargo',
       'Platform hizmet bedeli',
-      'E-ticaret stopajı',
       'Tahmini kâr',
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
@@ -79,6 +79,9 @@ describe('ProfitBreakdownCard', () => {
     // Değerler backend'den; bileşen yalnız formatlar.
     expect(screen.getByText(formatCurrency('3300.00'))).toBeInTheDocument();
     expect(screen.getByText(formatCurrency('848.74'))).toBeInTheDocument();
+    // Marj backend-servisli (saleMarginPct) — frontend türetmez, render eder.
+    expect(screen.getByText('Kâr marjı')).toBeInTheDocument();
+    expect(screen.getByText('25.7%')).toBeInTheDocument();
     // İndirimsiz → tek "Satış" satırı; Liste/İndirim alt-kırılımı YOK.
     expect(screen.queryByText('Liste fiyatı')).not.toBeInTheDocument();
   });
