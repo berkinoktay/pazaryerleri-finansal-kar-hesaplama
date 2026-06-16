@@ -321,8 +321,14 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(item.lineSaleGross).toString()).toBe('150');
     expect(new Decimal(item.lineListGross).toString()).toBe('200');
     expect(new Decimal(item.lineSellerDiscountGross).toString()).toBe('50');
-    // commissionGross = lineSaleGross × commissionRate = 150 × 10% = 15 (net-satış tabanı #332).
-    expect(new Decimal(item.commissionGross).toString()).toBe('15');
+    // commissionGross = lineListGross × commissionRate = 200 × 10% = 20 (LİSTE tabanı; Bug-1 fix).
+    // refundedCommissionGross = lineSellerDiscountGross × rate = 50 × 10% = 5.
+    // Efektif komisyon = gross − refunded = 20 − 5 = 15 (net-satış tabanı #332).
+    expect(new Decimal(item.commissionGross).toString()).toBe('20');
+    expect(new Decimal(item.refundedCommissionGross).toString()).toBe('5');
+    expect(
+      new Decimal(item.commissionGross).sub(new Decimal(item.refundedCommissionGross)).toString(),
+    ).toBe('15');
   });
 
   it('variant barcode match: OrderItem.productVariantId set when barcode exists', async () => {
