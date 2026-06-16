@@ -101,7 +101,7 @@ export function ProductsBulkCostActionBar({
     return all.map((p) => ({
       value: p.id,
       label: p.name,
-      description: `${p.currency} ${p.amount}`,
+      description: `${p.currency} ${p.amountGross}`,
       icon: <CostProfileTypeBadge type={p.type as CostProfileType} iconOnly />,
     }));
   }, [profilesQuery.data]);

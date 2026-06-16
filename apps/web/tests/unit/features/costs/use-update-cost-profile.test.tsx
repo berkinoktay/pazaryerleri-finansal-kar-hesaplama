@@ -32,7 +32,7 @@ const BASE_PROFILE = {
   organizationId: ORG_ID,
   name: 'COGS v1',
   type: 'COGS' as const,
-  amount: '10.00',
+  amountGross: '10.00',
   currency: 'TRY' as const,
   vatRate: 18,
   fxRateMode: 'AUTO' as const,
@@ -47,7 +47,7 @@ const BASE_PROFILE = {
 
 describe('useUpdateCostProfile', () => {
   it('runs the mutation and invalidates profile, versions, profiles list, and products', async () => {
-    const UPDATED_PROFILE = { ...BASE_PROFILE, name: 'COGS v2', amount: '15.00' };
+    const UPDATED_PROFILE = { ...BASE_PROFILE, name: 'COGS v2', amountGross: '15.00' };
 
     server.use(
       http.patch(
@@ -70,7 +70,13 @@ describe('useUpdateCostProfile', () => {
     result.current.mutate({
       orgId: ORG_ID,
       profileId: PROFILE_ID,
-      body: { name: 'COGS v2', amount: '15.00', currency: 'TRY', vatRate: 18, fxRateMode: 'AUTO' },
+      body: {
+        name: 'COGS v2',
+        amountGross: '15.00',
+        currency: 'TRY',
+        vatRate: 18,
+        fxRateMode: 'AUTO',
+      },
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

@@ -114,7 +114,7 @@ export function CostProfileDetail({
         name: values.name,
         type: values.type,
         currency: values.currency,
-        amount: values.amount,
+        amountGross: values.amountGross,
         vatRate: values.vatRate,
         fxRateMode: values.fxRateMode,
         manualFxRate: values.manualFxRate ?? undefined,

@@ -162,7 +162,7 @@ export function CostCellPopover({
                   {availableProfiles.map((profile) => (
                     <CommandItem
                       key={profile.id}
-                      value={`${profile.name} ${profile.currency} ${profile.amount}`}
+                      value={`${profile.name} ${profile.currency} ${profile.amountGross}`}
                       onSelect={() => handleAttach(profile.id)}
                       className="gap-sm flex items-center"
                       disabled={attachMutation.isPending}
@@ -172,7 +172,7 @@ export function CostCellPopover({
                         {profile.name}
                       </span>
                       <ProfileAmount
-                        amount={profile.amount}
+                        amount={profile.amountGross}
                         currency={profile.currency}
                         className="text-muted-foreground shrink-0 text-xs"
                       />
@@ -236,7 +236,7 @@ function AttachedProfileRow({
       <CostProfileTypeIconSquare type={profile.type as CostProfileType} />
       <span className="text-foreground min-w-0 flex-1 truncate text-sm">{profile.name}</span>
       <ProfileAmount
-        amount={profile.amount}
+        amount={profile.amountGross}
         currency={profile.currency}
         className="text-foreground shrink-0 text-xs"
       />

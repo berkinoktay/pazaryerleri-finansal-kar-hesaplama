@@ -31,7 +31,7 @@ const RESTORED_PROFILE = {
   organizationId: ORG_ID,
   name: 'Ambalaj Maliyeti',
   type: 'PACKAGING' as const,
-  amount: '5.00',
+  amountGross: '5.00',
   currency: 'TRY' as const,
   vatRate: 20,
   fxRateMode: 'AUTO' as const,

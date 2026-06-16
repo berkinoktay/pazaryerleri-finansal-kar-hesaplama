@@ -1,7 +1,6 @@
 'use client';
 
-import Decimal from 'decimal.js';
-import { useFormatter, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
@@ -10,33 +9,36 @@ import { StatCard } from '@/components/patterns/stat-card';
 import { type OrderDetail } from '../api/get-order.api';
 
 export interface OrderKpiGridProps {
-  order: Pick<OrderDetail, 'saleSubtotalNet' | 'estimatedNetProfit' | 'settledNetProfit'>;
+  order: Pick<
+    OrderDetail,
+    'saleGross' | 'estimatedNetProfit' | 'settledNetProfit' | 'profitBreakdown'
+  >;
 }
 
 /**
- * 4-tile KPI strip at the top of the order detail: net sale subtotal, estimated
- * and settled net profit, and the derived margin. All four are plain `StatCard`s
- * — the margin renders a percentage directly now that StatCard's `value` is a
- * node (no feature-local primitive fork as the old KpiTile's currency/count
- * value-kind needed).
+ * 4-tile KPI strip at the top of the order detail: gross sale total, estimated
+ * and settled net profit, and the margin. All four are plain `StatCard`s.
+ *
+ * **Hiçbir finansal değer frontend'de hesaplanmaz** (feedback_no_frontend_financial_calculation):
+ * marj backend'de `buildProfitBreakdown` ile hesaplanıp `profitBreakdown.saleMarginPct`
+ * olarak servis edilir — burada SADECE render edilir. (Order'da ayrı bir
+ * estimated/settledSaleMarginPct alanı servis EDİLMEZ; tek servisli marj kaynağı
+ * kâr dökümünün içindeki `saleMarginPct`'tir.)
  */
 export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
   const t = useTranslations('orderDetail.kpis');
-  const formatter = useFormatter();
 
-  const saleNet = order.saleSubtotalNet;
+  const saleGross = order.saleGross;
   const estimatedProfit = order.estimatedNetProfit;
   const settledProfit = order.settledNetProfit;
-  const effectiveProfit = settledProfit ?? estimatedProfit;
-
-  const marginPercent = computeMarginPercent(saleNet, effectiveProfit);
+  const marginPct = order.profitBreakdown?.saleMarginPct ?? null;
 
   return (
     <div className="gap-md grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
-        label={t('saleSubtotalNet.label')}
-        value={<Currency value={saleNet ?? '0'} />}
-        context={saleNet === null ? t('common.notAvailable') : undefined}
+        label={t('saleGross.label')}
+        value={<Currency value={saleGross ?? '0'} />}
+        context={saleGross === null ? t('common.notAvailable') : undefined}
       />
       <StatCard
         label={t('estimatedNetProfit.label')}
@@ -52,11 +54,9 @@ export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
       />
       <StatCard
         label={t('margin.label')}
-        value={
-          marginPercent === null ? '—' : `${formatter.number(marginPercent.toNumber(), 'decimal')}%`
-        }
+        value={marginPct === null ? '—' : `${marginPct}%`}
         context={
-          marginPercent === null
+          marginPct === null
             ? t('common.notAvailable')
             : settledProfit !== null
               ? t('margin.basisSettled')
@@ -65,11 +65,4 @@ export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
       />
     </div>
   );
-}
-
-function computeMarginPercent(saleNet: string | null, profit: string | null): Decimal | null {
-  if (saleNet === null || profit === null) return null;
-  const sale = new Decimal(saleNet);
-  if (sale.isZero()) return null;
-  return new Decimal(profit).div(sale).mul(100).toDecimalPlaces(1);
 }
