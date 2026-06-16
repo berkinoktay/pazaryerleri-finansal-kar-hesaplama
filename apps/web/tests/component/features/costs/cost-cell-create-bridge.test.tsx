@@ -100,7 +100,7 @@ describe('CostCellCreateBridge', () => {
     await user.clear(nameInput);
     await user.type(nameInput, 'Yeni Maliyet');
 
-    const amountInput = screen.getByLabelText('Tutar');
+    const amountInput = screen.getByLabelText('Maliyet (KDV dahil)');
     await user.clear(amountInput);
     await user.type(amountInput, '30.00');
 

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -232,7 +233,9 @@ export function CostProfileForm({
             name="amountGross"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t('fields.amount')}</FormLabel>
+                {/* GROSS konvansiyon (2026-06-16): maliyet KDV-dahil girilir. Etiket
+                    + yardım metni satıcıyı tedarikçi faturasındaki KDV-dahil tutara yönlendirir. */}
+                <FormLabel>{t('fields.amountGross')}</FormLabel>
                 <FormControl>
                   <Input
                     type="text"
@@ -241,6 +244,7 @@ export function CostProfileForm({
                     {...field}
                   />
                 </FormControl>
+                <FormDescription>{t('fields.amountGrossHelp')}</FormDescription>
                 {/* FX preview lives directly under the amount field */}
                 <CostProfileFxPreview
                   amount={watchedAmount}
