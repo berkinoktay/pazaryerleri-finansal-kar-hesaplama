@@ -143,10 +143,16 @@ export async function applyEstimateOnOrderCreate(
   }
 
   // ─── 2. Stopaj (E-ticaret Stopajı) — deterministic per-order ───────────
-  // Matrah: saleGross × %1 (KDV=0; stopaj KDV taşımaz). PSF üzerine stopaj
-  // YAPILMAZ (design §3.4 — 330 Tebliği Md 5/2). GROSS konvansiyon: matrah
-  // saleGross (KDV-dahil satış); amountGross = saleGross × rateOfSale, vatRate=0.
-  if (order.saleGross !== null && !existingEstimateFeeTypes.has('STOPPAGE')) {
+  // Matrah: NET satış (KDV-hariç) × %1 (KDV=0; stopaj KDV taşımaz). Stopaj KDV-dahil
+  // tutardan DEĞİL, KDV'siz satıştan hesaplanır (design Bölüm 1: "Stopaj =
+  // (satışGross − satışKDV) × %1"; rakip/Trendyol gerçek değeri de net üzerinden).
+  // PSF üzerine stopaj YAPILMAZ (design §3.4 — 330 Tebliği Md 5/2). GROSS konvansiyon:
+  // amountGross = (saleGross − saleVat) × rateOfSale, vatRate=0.
+  if (
+    order.saleGross !== null &&
+    order.saleVat !== null &&
+    !existingEstimateFeeTypes.has('STOPPAGE')
+  ) {
     const stopajDef = await resolveFeeDefinition(tx, {
       platform: order.store.platform,
       feeType: 'STOPPAGE',
@@ -155,9 +161,8 @@ export async function applyEstimateOnOrderCreate(
     if (stopajDef.rateOfSale === null) {
       throw new Error(`STOPPAGE FeeDefinition ${stopajDef.id} missing rateOfSale`);
     }
-    const stopajGross = new Decimal(order.saleGross)
-      .mul(new Decimal(stopajDef.rateOfSale))
-      .toDecimalPlaces(2);
+    const saleNet = new Decimal(order.saleGross).sub(new Decimal(order.saleVat));
+    const stopajGross = saleNet.mul(new Decimal(stopajDef.rateOfSale)).toDecimalPlaces(2);
 
     await tx.orderFee.create({
       data: {
@@ -279,7 +284,8 @@ export async function applyEstimateOnOrderCreate(
     direction: fee.direction,
   }));
 
-  // Stopaj = saleGross × %1 (KDV=0) — motor `stoppage` terimi (netVat'a girmez).
+  // Stopaj = (saleGross − saleVat) × %1 (net satış, KDV=0) — motor `stoppage` terimi
+  // (netVat'a girmez, doğrudan netProfit'ten düşülür).
   const stoppageFee = await tx.orderFee.findFirst({
     where: { orderId, feeType: 'STOPPAGE', source: 'ESTIMATE' },
     select: { amountGross: true },

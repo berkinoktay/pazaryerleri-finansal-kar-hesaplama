@@ -208,8 +208,10 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     expect(psf.direction).toBe('DEBIT');
 
     const stopaj = fees.find((f) => f.feeType === 'STOPPAGE')!;
-    // GROSS: stopaj matrah = saleGross 120 × %1 = 1.20; vatRate 0 (stopaj KDV taşımaz).
-    expect(new Decimal(stopaj.amountGross).toString()).toBe('1.2');
+    // Stopaj matrahı NET satış (KDV-hariç): (saleGross 120 − saleVat 20) × %1 = 1.00;
+    // vatRate 0 (stopaj KDV taşımaz). Eski hata: gross 120 × %1 = 1.20 (KDV de matraha
+    // giriyordu); rakip/Trendyol gerçek değeri net üzerinden.
+    expect(new Decimal(stopaj.amountGross).toString()).toBe('1');
     expect(new Decimal(stopaj.vatRate).toString()).toBe('0');
 
     // Profit = effectiveSale − itemCost − commission − PSF − Stopaj − NetKDV (net terimler)
@@ -220,6 +222,29 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     //                                          = 20 − 10 − 2 − 2.20 = 5.80
     expect(updated.estimatedNetVat).not.toBeNull();
     expect(new Decimal(updated.estimatedNetVat!).toString()).toBe('5.8');
+  });
+
+  it('stopaj NET satış üzerinden hesaplanır (gross DEĞİL) — sipariş 11328013993', async () => {
+    // Canlı sipariş 11328013993: saleGross 313.50, saleVat 28.50 → net 285.00.
+    // DOĞRU stopaj = net 285.00 × %1 = 2.85 (rakip + Trendyol gerçek).
+    // ESKİ HATA: gross 313.50 × %1 = 3.14 (KDV de matraha giriyordu) → kâr 0.29 eksik.
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      saleGross: '313.50',
+      saleVat: '28.50',
+    });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const stopaj = await prisma.orderFee.findFirstOrThrow({
+      where: { orderId: order.id, feeType: 'STOPPAGE', source: 'ESTIMATE' },
+    });
+    // NET 285.00 × %1 = 2.85; KESİNLİKLE gross 313.50 × %1 = 3.14 DEĞİL.
+    expect(new Decimal(stopaj.amountGross).toString()).toBe('2.85');
+    expect(new Decimal(stopaj.amountGross).toString()).not.toBe('3.14');
+    expect(new Decimal(stopaj.vatRate).toString()).toBe('0');
   });
 
   it('PSF muafiyet — status RETURNED → PSF OrderFee yazılmaz', async () => {
