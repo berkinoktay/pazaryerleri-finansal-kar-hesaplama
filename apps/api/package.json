@@ -33,7 +33,7 @@
     "@scalar/hono-api-reference": "^0.10.14",
     "@supabase/supabase-js": "catalog:",
     "decimal.js": "catalog:",
-    "hono": "^4.12.18",
+    "hono": "^4.12.25",
     "zod": "catalog:"
   },
   "devDependencies": {
