@@ -119,6 +119,20 @@ const LiveOrderRowSchema = z.object({
   revenue: z.string().openapi({ description: 'Decimal string' }),
   profit: z.string().nullable().openapi({ description: 'Decimal string, null for buffer rows' }),
   margin: z.string().nullable().openapi({ description: 'Decimal string, null for buffer rows' }),
+  // Promosyon gösterimi (spec ekleme #3): indirimli siparişin promosyon adları +
+  // brüt tutarları. İndirim/promosyon yoksa null. Buffer satırlarında her zaman null
+  // (mapped payload promosyon taşımaz). Frontend rozet/tooltip ile render eder.
+  promotionDisplays: z
+    .array(
+      z.object({
+        displayName: z.string().openapi({ example: 'Satıcı İndirimi' }),
+        amountGross: z.string().openapi({ example: '48.01' }),
+      }),
+    )
+    .nullable()
+    .openapi({
+      description: 'Seller-discount promotion names + gross amounts. Null when none / buffer rows.',
+    }),
 });
 
 export const liveOrdersQuerySchema = z.object({

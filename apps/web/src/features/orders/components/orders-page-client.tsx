@@ -67,6 +67,7 @@ export function OrdersPageClient({
           costStatus: filters.costStatus,
           from: filters.from.length > 0 ? filters.from : undefined,
           to: filters.to.length > 0 ? filters.to : undefined,
+          sort: filters.sort,
           page: filters.page,
           perPage: filters.perPage,
         },
@@ -171,9 +172,11 @@ export function OrdersPageClient({
             to: filters.to,
           }}
           costStatus={filters.costStatus}
+          sort={filters.sort}
           counts={counts}
           tabsLoading={ordersQuery.isLoading}
           onCostStatusChange={(next) => setFilters({ costStatus: next })}
+          onSortChange={(next) => setFilters({ sort: next })}
           onFiltersChange={(next) =>
             setFilters({
               ...(next.q !== undefined ? { q: next.q } : {}),

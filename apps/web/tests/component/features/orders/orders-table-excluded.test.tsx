@@ -22,6 +22,8 @@ const baseRow = {
   listGross: '240.00',
   estimatedNetProfit: null,
   settledNetProfit: null,
+  saleMarginPct: null,
+  promotionDisplays: null,
   fastDelivery: false,
   micro: false,
   itemCount: 2,
@@ -40,10 +42,12 @@ function renderTable(costStatus: 'calculated' | 'excluded'): void {
         pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
         filters={{ q: '', status: null, reconciliationStatus: null, from: '', to: '' }}
         costStatus={costStatus}
+        sort="-orderDate"
         counts={{ calculated: 1, excluded: 1 }}
         onCostStatusChange={vi.fn()}
         onFiltersChange={vi.fn()}
         onPaginationChange={vi.fn()}
+        onSortChange={vi.fn()}
       />
     </NextIntlClientProvider>,
   );

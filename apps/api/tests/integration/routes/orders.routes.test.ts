@@ -37,6 +37,8 @@ describe('Order routes', () => {
       status?: 'DELIVERED' | 'PROCESSING' | 'CANCELLED' | 'RETURNED' | 'SHIPPED' | 'PENDING';
       platformOrderNumber?: string;
       orderDate?: Date;
+      estimatedSaleMarginPct?: string;
+      settledSaleMarginPct?: string;
     } = {},
   ) {
     const base = await createOrder(orgId, storeId, { status: overrides.status ?? 'DELIVERED' });
@@ -49,6 +51,15 @@ describe('Order routes', () => {
         saleGross: new Decimal('240.00'),
         saleVat: new Decimal('40.00'),
         estimatedNetProfit: new Decimal('60.00'),
+        // Persist edilen marj (backend hesaplar; liste consumed = settled ?? estimated).
+        estimatedSaleMarginPct:
+          overrides.estimatedSaleMarginPct !== undefined
+            ? new Decimal(overrides.estimatedSaleMarginPct)
+            : new Decimal('25.00'),
+        settledSaleMarginPct:
+          overrides.settledSaleMarginPct !== undefined
+            ? new Decimal(overrides.settledSaleMarginPct)
+            : null,
       },
     });
   }
@@ -127,6 +138,92 @@ describe('Order routes', () => {
       };
       expect(body.data.map((o) => o.id)).toEqual([newer.id, older.id]);
       expect(body.data[0]?.itemCount).toBe(0);
+    });
+
+    it('exposes saleMarginPct = settled ?? estimated on list rows', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // estimate-only order → consumed margin is the estimate.
+      const estimateOnly = await seedSimpleOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-02T10:00:00Z'),
+        estimatedSaleMarginPct: '18.50',
+      });
+      // settled order → consumed margin is the settled value (overrides estimate).
+      const settled = await seedSimpleOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-01T10:00:00Z'),
+        estimatedSaleMarginPct: '20.00',
+        settledSaleMarginPct: '17.25',
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string; saleMarginPct: string | null }[] };
+      const byId = new Map(body.data.map((o) => [o.id, o.saleMarginPct]));
+      expect(byId.get(estimateOnly.id)).toBe('18.5');
+      // settled wins over estimated.
+      expect(byId.get(settled.id)).toBe('17.25');
+    });
+
+    it('serves promotionDisplays on list rows (null when the order has no promotion)', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const withPromo = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-02T10:00:00Z'),
+        promotionDisplays: [{ displayName: 'Sepette İndirim', amountGross: '20.00' }],
+      });
+      const noPromo = await createOrder(org.id, store.id, {
+        orderDate: new Date('2026-04-01T10:00:00Z'),
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          id: string;
+          promotionDisplays: { displayName: string; amountGross: string }[] | null;
+        }[];
+      };
+      const byId = new Map(body.data.map((o) => [o.id, o.promotionDisplays]));
+      expect(byId.get(withPromo.id)).toEqual([
+        { displayName: 'Sepette İndirim', amountGross: '20.00' },
+      ]);
+      // No promotion → null (the frontend hides the indicator).
+      expect(byId.get(noPromo.id)).toBeNull();
+    });
+
+    it('sorts by saleMarginPct ascending and descending via sort=marginPct', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      const low = await seedSimpleOrder(org.id, store.id, { estimatedSaleMarginPct: '5.00' });
+      const mid = await seedSimpleOrder(org.id, store.id, { estimatedSaleMarginPct: '15.00' });
+      const high = await seedSimpleOrder(org.id, store.id, { estimatedSaleMarginPct: '40.00' });
+
+      const asc = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?sort=marginPct`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const ascBody = (await asc.json()) as { data: { id: string }[] };
+      expect(ascBody.data.map((o) => o.id)).toEqual([low.id, mid.id, high.id]);
+
+      const desc = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?sort=-marginPct`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      const descBody = (await desc.json()) as { data: { id: string }[] };
+      expect(descBody.data.map((o) => o.id)).toEqual([high.id, mid.id, low.id]);
     });
 
     it('filters by status', async () => {

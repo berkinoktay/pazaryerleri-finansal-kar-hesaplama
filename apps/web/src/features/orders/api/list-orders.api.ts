@@ -3,7 +3,7 @@ import type { components } from '@pazarsync/api-client';
 import { apiClient } from '@/lib/api-client/browser';
 import { throwApiError } from '@/lib/api-error';
 
-import type { CostStatusValue } from '../lib/orders-filter-parsers';
+import type { CostStatusValue, OrderSortValue } from '../lib/orders-filter-parsers';
 
 export type OrderListItem = components['schemas']['OrderListItem'];
 export type ListOrdersResponse = components['schemas']['ListOrdersResponse'];
@@ -17,6 +17,7 @@ export interface ListOrdersArgs {
   costStatus?: CostStatusValue;
   from?: string;
   to?: string;
+  sort?: OrderSortValue;
   page: number;
   perPage: number;
 }
@@ -37,6 +38,7 @@ export async function listOrders(args: ListOrdersArgs): Promise<ListOrdersRespon
           ...(query.costStatus !== undefined ? { costStatus: query.costStatus } : {}),
           ...(query.from !== undefined && query.from.length > 0 ? { from: query.from } : {}),
           ...(query.to !== undefined && query.to.length > 0 ? { to: query.to } : {}),
+          ...(query.sort !== undefined ? { sort: query.sort } : {}),
           page: query.page,
           perPage: query.perPage,
         },

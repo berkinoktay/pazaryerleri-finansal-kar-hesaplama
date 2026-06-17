@@ -1,6 +1,6 @@
 'use client';
 
-import { type ColumnDef, type PaginationState } from '@tanstack/react-table';
+import { type ColumnDef, type PaginationState, type SortingState } from '@tanstack/react-table';
 import { Alert02Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
@@ -10,9 +10,17 @@ import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 
 import { type OrderListItem } from '../api/list-orders.api';
-import { type CostStatusValue, ORDER_PER_PAGE_OPTIONS } from '../lib/orders-filter-parsers';
+import {
+  type CostStatusValue,
+  type OrderSortValue,
+  MARGIN_COLUMN_ID,
+  ORDER_PER_PAGE_OPTIONS,
+  orderSortToTanstack,
+  tanstackToOrderSort,
+} from '../lib/orders-filter-parsers';
 
 import { OrderStatusBadge } from './order-status-badge';
 import { OrdersCostStatusTabs } from './orders-cost-status-tabs';
@@ -38,11 +46,15 @@ export interface OrdersTableProps {
     to: string;
   };
   costStatus: CostStatusValue;
+  /** Active server-side sort key (URL state). Drives the margin header arrow. */
+  sort: OrderSortValue;
   counts: { calculated: number; excluded: number };
   tabsLoading?: boolean;
   onCostStatusChange: (next: CostStatusValue) => void;
   onFiltersChange: OrdersToolbarProps['onChange'];
   onPaginationChange: (next: { page?: number; perPage?: number }) => void;
+  /** Commits a new server-side sort key when the user toggles the margin header. */
+  onSortChange: (next: OrderSortValue) => void;
 }
 
 /**
@@ -56,11 +68,13 @@ export function OrdersTable({
   pagination,
   filters,
   costStatus,
+  sort,
   counts,
   tabsLoading = false,
   onCostStatusChange,
   onFiltersChange,
   onPaginationChange,
+  onSortChange,
 }: OrdersTableProps): React.ReactElement {
   const t = useTranslations('ordersPage.table');
   const tPage = useTranslations('ordersPage');
@@ -144,7 +158,14 @@ export function OrdersTable({
         header: t('columns.orderNumber'),
         cell: ({ row }) => {
           const number = row.original.platformOrderNumber ?? row.original.platformOrderId;
-          return <span className="font-medium">{number}</span>;
+          return (
+            <span className="gap-xs flex items-center">
+              <span className="font-medium">{number}</span>
+              {/* İndirimli siparişte promosyon adlarını gösteren gürültüsüz rozet
+                  (spec ekleme #3). Promosyon yoksa hiçbir şey çizilmez. */}
+              <PromotionIndicator promotions={row.original.promotionDisplays} />
+            </span>
+          );
         },
       },
       {
@@ -194,6 +215,25 @@ export function OrdersTable({
         },
       },
       {
+        // Marj % — backend'de hesaplanıp persist edilen değer (settled ?? estimated).
+        // accessorFn manualSorting altında getCanSort()'u açar (değer asla client-side
+        // sıralama için OKUNMAZ — sıralama server-side); header buton olur. Render:
+        // null → '—', aksi halde `${value}%` (% glyph'i salt gösterim, türetme yok).
+        id: MARGIN_COLUMN_ID,
+        accessorFn: (row) => row.saleMarginPct,
+        header: t('columns.saleMarginPct'),
+        enableSorting: true,
+        meta: { numeric: true, label: t('columns.saleMarginPct') },
+        cell: ({ row }) => {
+          const value = row.original.saleMarginPct;
+          return value === null ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <span className="tabular-nums">{value}%</span>
+          );
+        },
+      },
+      {
         id: 'itemCount',
         header: t('columns.itemCount'),
         cell: ({ row }) => (
@@ -211,6 +251,18 @@ export function OrdersTable({
   const paginationState: PaginationState = {
     pageIndex: pagination.page - 1,
     pageSize: pagination.perPage,
+  };
+
+  // Server-driven sort: the URL `sort` value drives the margin header arrow,
+  // and a header toggle commits the next key back up to the page client (which
+  // mutates URL state → refetch). Passing sorting + onSortingChange flips the
+  // DataTable into manualSorting, so the data prop is already server-ordered.
+  const sortingState: SortingState = orderSortToTanstack(sort);
+  const handleSortingChange = (
+    updater: SortingState | ((prev: SortingState) => SortingState),
+  ): void => {
+    const next = typeof updater === 'function' ? updater(sortingState) : updater;
+    onSortChange(tanstackToOrderSort(next));
   };
 
   // Server-filtered: filters live in props (not TanStack columnFilters), so the
@@ -247,6 +299,8 @@ export function OrdersTable({
       data={rows}
       loading={loading}
       onRowClick={(row) => router.push(`/orders/${row.id}`)}
+      sorting={sortingState}
+      onSortingChange={handleSortingChange}
       paginationState={paginationState}
       onPaginationChange={handlePaginationChange}
       pageCount={pagination.totalPages}

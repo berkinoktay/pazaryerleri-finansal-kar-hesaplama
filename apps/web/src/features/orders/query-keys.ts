@@ -7,6 +7,7 @@ export interface OrderListFilters {
   costStatus: string;
   from: string;
   to: string;
+  sort: string;
   q: string;
   page: number;
   perPage: number;

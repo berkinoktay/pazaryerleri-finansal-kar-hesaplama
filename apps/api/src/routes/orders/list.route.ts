@@ -25,10 +25,11 @@ const listOrdersRoute = createRoute({
   tags: ['Orders'],
   summary: 'List orders for a store',
   description:
-    'Returns paginated orders sorted by orderDate desc, with composable filters: status, ' +
-    'reconciliationStatus, date range (from/to on orderDate), and a substring search (q) ' +
-    'over platformOrderNumber and platformOrderId. Designed for the orders table — page + ' +
-    'perPage pagination, not cursor.',
+    'Returns paginated orders sorted by orderDate desc (default), with composable filters: ' +
+    'status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) ' +
+    'over platformOrderNumber and platformOrderId. The `sort` param also supports marginPct / ' +
+    '-marginPct (sale margin column). Designed for the orders table — page + perPage ' +
+    'pagination, not cursor.',
   security: [{ bearerAuth: [] }],
   request: {
     params: storeScopeParams,
