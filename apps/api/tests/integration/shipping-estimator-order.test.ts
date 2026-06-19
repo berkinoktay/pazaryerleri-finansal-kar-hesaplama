@@ -178,4 +178,29 @@ describe('estimateShippingCostForOrder', () => {
     const out = await prisma.$transaction((tx) => estimateShippingCostForOrder(orderId, tx));
     expect(out).toEqual({ ok: false, reason: 'NO_CARRIER' });
   });
+
+  it('applyBarem:false skips Barem even for a Barem-eligible order', async () => {
+    // Order qualifies for Barem: fastDelivery=true, saleGross<350, desi<=10.
+    // With default (applyBarem implicitly true): tariffApplied = 'BAREM'.
+    // With applyBarem:false: tariffApplied != 'BAREM', amount >= barem amount.
+    const { orderId } = await createOrderFixture({
+      items: [{ desi: '2', qty: 1 }],
+      grossSubtotalNet: '150.00',
+      grossVatTotal: '0.00',
+      cargoDeci: null,
+      fastDelivery: true,
+    });
+    const [defaultOut, noBarem] = await prisma.$transaction((tx) =>
+      Promise.all([
+        estimateShippingCostForOrder(orderId, tx),
+        estimateShippingCostForOrder(orderId, tx, { applyBarem: false }),
+      ]),
+    );
+    expect(defaultOut.ok).toBe(true);
+    expect(noBarem.ok).toBe(true);
+    if (!defaultOut.ok || !noBarem.ok) expect.fail('both calls must succeed');
+    expect(defaultOut.estimate.tariffApplied).toBe('BAREM');
+    expect(noBarem.estimate.tariffApplied).not.toBe('BAREM');
+    expect(noBarem.estimate.amount.gte(defaultOut.estimate.amount)).toBe(true);
+  });
 });
