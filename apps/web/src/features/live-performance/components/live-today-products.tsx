@@ -137,7 +137,12 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
                   {product.productName ?? product.barcode}
                 </span>
                 <div className="gap-sm flex items-center">
-                  {product.unresolved ? <UnmatchedVariantBadge className="w-fit" /> : null}
+                  {product.unresolved ? (
+                    <UnmatchedVariantBadge
+                      className="w-fit"
+                      vendorMissing={product.vendorMissing}
+                    />
+                  ) : null}
                   {product.stockCode !== null ? (
                     <CopyableValue value={product.stockCode} label={t('stockCodeLabel')}>
                       <span className="text-muted-foreground font-mono text-xs">
