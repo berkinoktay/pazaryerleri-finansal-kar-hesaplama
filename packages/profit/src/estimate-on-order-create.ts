@@ -28,6 +28,7 @@ import type { Prisma } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
 
 import { inferShippedSameDay } from './infer-shipped-same-day';
+import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
 import { computeProfit, type ProfitInputFee } from './profit-formula';
 import { isPsfExempt, resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
@@ -291,13 +292,46 @@ export async function applyEstimateOnOrderCreate(
     select: { amountGross: true },
   });
 
-  const profit = computeProfit({
-    sale: { gross: new Decimal(order.saleGross), vat: new Decimal(order.saleVat) },
-    cost: { gross: costGross, vat: costVat },
-    commission: { gross: commissionGross, vat: commissionVat },
-    fees: profitInputFees,
-    stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
+  // İade bacakları (ESTIMATE yolu): tüm 4 iade feeType'ı, source/confirmedAt filtresi YOK.
+  // Settled yolunun aksine (yalnız gerçek + onaylı ESTIMATE), tahmin yolunda UNCONFIRMED
+  // ESTIMATE iade satırları da katlanır — satıcıya T+0'da iade etkisini gösterir.
+  // resolveReturnLegs gerçek-varsa-gerçek (SETTLEMENT/CARGO_INVOICE) öncelik verir;
+  // bu sorgu hem gerçeği hem tahmini çektiğinden resolver kararı doğal.
+  const returnFeeRows = await tx.orderFee.findMany({
+    where: {
+      orderId,
+      feeType: { in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'] },
+    },
+    select: { feeType: true, source: true, amountGross: true, vatRate: true },
   });
+
+  // DB enums (OrderFeeType / OrderFeeSource) are supersets of the helper's
+  // string-literal unions. The `as` casts are safe: the `where` filter above
+  // guarantees only the four return feeTypes, and their sources are always
+  // ESTIMATE/SETTLEMENT/CARGO_INVOICE (the full ReturnFeeRow['source'] union).
+  const returnLegs = resolveReturnLegs(
+    returnFeeRows.map(
+      (f): ReturnFeeRow => ({
+        feeType: f.feeType as ReturnFeeRow['feeType'],
+        source: f.source as ReturnFeeRow['source'],
+        amountGross: new Decimal(f.amountGross),
+        vatRate: new Decimal(f.vatRate),
+      }),
+    ),
+  );
+
+  const profit = computeProfit(
+    foldReturnLegs(
+      {
+        sale: { gross: new Decimal(order.saleGross), vat: new Decimal(order.saleVat) },
+        cost: { gross: costGross, vat: costVat },
+        commission: { gross: commissionGross, vat: commissionVat },
+        fees: profitInputFees,
+        stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
+      },
+      returnLegs,
+    ),
+  );
 
   await tx.order.update({
     where: { id: orderId },
