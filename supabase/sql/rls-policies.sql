@@ -505,3 +505,18 @@ DROP POLICY IF EXISTS live_performance_buffer_org_member_read ON live_performanc
 CREATE POLICY live_performance_buffer_org_member_read ON live_performance_buffer
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
+
+-- ─── catalog_barcode_miss — store-scoped read (catalog-gap tracking) ────────
+-- Onaylı katalog-boşluğu barkodları (sipariş geldi, barkod katalogda yok). store_id
+-- taşır → store access ile gate'lenir (orders / sync_logs / live_performance_buffer
+-- ile aynı pattern, #218). OWNER/ADMIN org'daki tüm mağazaları görür; MEMBER/VIEWER
+-- yalnız grant'li mağazaları → erişimi olmayan üye o mağazanın eksik barkodlarını
+-- görmez. INSERT/UPDATE/DELETE yalnız service role (sync-worker + catalog-sync
+-- postgres role kullanır, RLS bypass); authenticated mutation policy YOK →
+-- default-deny. Gate düz can_access_store(store_id) (SECURITY DEFINER helper) —
+-- inline EXISTS subquery DEĞİL (42P17 recursion + Realtime evaluator kırılması).
+ALTER TABLE catalog_barcode_miss ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS catalog_barcode_miss_org_member_read ON catalog_barcode_miss;
+CREATE POLICY catalog_barcode_miss_org_member_read ON catalog_barcode_miss
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
