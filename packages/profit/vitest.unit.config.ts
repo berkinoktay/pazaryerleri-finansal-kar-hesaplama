@@ -9,6 +9,7 @@ export default defineConfig({
       '**/node_modules/**',
       'src/**/__tests__/recompute-settled-profit-returns.test.ts',
       'src/**/__tests__/estimate-on-order-create-returns.test.ts',
+      'src/**/__tests__/estimate-return-on-claim.test.ts',
     ],
   },
 });
