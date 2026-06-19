@@ -623,6 +623,9 @@ importers:
       '@pazarsync/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
+      dotenv:
+        specifier: 'catalog:'
+        version: 16.6.1
       eslint:
         specifier: 'catalog:'
         version: 9.39.4(jiti@2.6.1)

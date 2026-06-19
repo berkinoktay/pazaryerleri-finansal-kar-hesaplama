@@ -23,7 +23,9 @@
  *
  * Writes:
  *   - Order.settledNetProfit / settledNetVat / settledSaleMarginPct / settledCostMarkupPct
- *     (mutable columns; PR-9 trigger guards only estimated_* — settled_* is free-form).
+ *     (kâr-DIŞI olmayan siparişte serbestçe güncellenir; kâr-dışı siparişte
+ *     reject_profit_freeze_breach hem estimated_* hem settled_* kolonlarını dondurur,
+ *     bu yüzden recompute kâr-dışı siparişi erken atlar).
  *
  * Idempotent — pure function of (Order + items + confirmed fees) state.
  * Re-running yields the same value unless new SETTLEMENT/CARGO_INVOICE
@@ -34,9 +36,10 @@
  *     settledNetProfit stays at whatever it was (previous null or partial value).
  *   - saleGross / saleVat NULL (no items inserted yet) → skipped.
  *
- * PR-9 invariant — estimatedNetProfit is NEVER touched here. The schema
- * write-once trigger would reject any UPDATE that distinct-from'd it;
- * this function writes only the settled_* columns.
+ * estimatedNetProfit is NEVER touched here. This function writes only the
+ * settled_* columns; the estimated_* columns are not modified (the write-once
+ * trigger that used to guard them was removed 2026-06-13, but the separation
+ * of concerns remains: estimate = T+0 snapshot, settled = settlement-confirmed).
  */
 
 import { Decimal } from 'decimal.js';
@@ -44,6 +47,7 @@ import { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
 
 import { computeProfit, type ProfitInputFee } from './profit-formula';
+import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
 
 /** gross × rate / (100 + rate) — KDV-dahil tutardan içerideki KDV'yi çıkarır. */
 function grossToVat(gross: Decimal, rate: Decimal): Decimal {
@@ -161,13 +165,47 @@ export async function recomputeSettledProfit(
     select: { amountGross: true },
   });
 
-  const result = computeProfit({
-    sale: { gross: new Decimal(order.saleGross), vat: new Decimal(order.saleVat) },
-    cost: { gross: costGross, vat: costVat },
-    commission: { gross: commissionGross, vat: commissionVat },
-    fees: profitInputFees,
-    stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
+  // İade bacakları: 4 iade feeType'ı, per-leg gerçek (SETTLEMENT/CARGO_INVOICE) varsa
+  // gerçek, yoksa onaylanmış ESTIMATE. Forward SHIPPING/PSF ayrı (confirmedFees) — çift-sayım yok.
+  const returnFeeRows = await tx.orderFee.findMany({
+    where: {
+      orderId,
+      feeType: { in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'] },
+      OR: [
+        { source: { in: ['SETTLEMENT', 'CARGO_INVOICE'] } },
+        { source: 'ESTIMATE', confirmedAt: { not: null } },
+      ],
+    },
+    select: { feeType: true, source: true, amountGross: true, vatRate: true },
   });
+
+  // DB enums (OrderFeeType / OrderFeeSource) are supersets of the helper's
+  // string-literal unions. The `as` casts are safe: the `where` filter above
+  // guarantees only the four return feeTypes and three real/confirmed sources
+  // are returned, matching ReturnFeeRow exactly.
+  const returnLegs = resolveReturnLegs(
+    returnFeeRows.map(
+      (f): ReturnFeeRow => ({
+        feeType: f.feeType as ReturnFeeRow['feeType'],
+        source: f.source as ReturnFeeRow['source'],
+        amountGross: new Decimal(f.amountGross),
+        vatRate: new Decimal(f.vatRate),
+      }),
+    ),
+  );
+
+  const result = computeProfit(
+    foldReturnLegs(
+      {
+        sale: { gross: new Decimal(order.saleGross), vat: new Decimal(order.saleVat) },
+        cost: { gross: costGross, vat: costVat },
+        commission: { gross: commissionGross, vat: commissionVat },
+        fees: profitInputFees,
+        stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
+      },
+      returnLegs,
+    ),
+  );
 
   const settledNetProfit = result.netProfit.toDecimalPlaces(2);
   const settledNetVat = result.netVat.toDecimalPlaces(2);
