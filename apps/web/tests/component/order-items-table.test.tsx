@@ -23,6 +23,7 @@ function makeItem(overrides: Partial<OrderItemDetail> = {}): OrderItemDetail {
     unitCostSnapshotVatRate: null,
     commissionInvoiceSerialNumber: null,
     barcode: null,
+    vendorMissing: false,
     variant: {
       id: 'v1',
       barcode: '8690000000000',

@@ -273,6 +273,14 @@ const OrderItemDetailSchema = z
         'Vendor barcode on the order line — the only product trace while productVariantId is null (unmatched line).',
       example: '8680000000001',
     }),
+    vendorMissing: z.boolean().openapi({
+      description:
+        'Unmatched line whose barcode is confirmed absent from the Trendyol approved catalog ' +
+        '(CatalogBarcodeMiss.vendorMissing). Drives the "Trendyol kataloğunda yok" badge instead ' +
+        'of "eşleşme bekliyor". Only meaningful for unmatched lines (variant null); always false ' +
+        'for matched lines.',
+      example: false,
+    }),
     variant: OrderItemVariantSchema.nullable().openapi({
       description:
         'Joined product variant data. Null while the line is unmatched (variant-resolution links it).',

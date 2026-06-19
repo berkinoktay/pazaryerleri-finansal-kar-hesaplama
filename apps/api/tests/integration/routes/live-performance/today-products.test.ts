@@ -32,6 +32,7 @@ interface TodayProductsBody {
     costStatus: 'costed' | 'missing';
     unitCost: string | null;
     unresolved: boolean;
+    vendorMissing: boolean;
   }[];
 }
 
@@ -188,6 +189,101 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.revenue).toBe('90.00');
     expect(row?.costStatus).toBe('missing');
     expect(row?.unitCost).toBeNull();
+  });
+
+  it('derives vendorMissing on unresolved buffer rows from CatalogBarcodeMiss', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // Unresolved buffer line A: barcode is a CONFIRMED catalog gap.
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'tp-vm-confirmed',
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '45.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'GAP-CONFIRMED', quantity: 1, lineSaleGross: '45.00' }],
+      },
+    });
+    // Unresolved buffer line B: no miss row → vendorMissing false ("eşleşme bekliyor").
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'tp-vm-awaiting',
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '55.00',
+        orderDate: todayAt(12).toISOString(),
+        lines: [{ barcode: 'AWAITING-MATCH', quantity: 1, lineSaleGross: '55.00' }],
+      },
+    });
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        barcode: 'GAP-CONFIRMED',
+        vendorMissing: true,
+      },
+    });
+    // Transient miss (vendorMissing=false) must NOT flip the badge.
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        barcode: 'AWAITING-MATCH',
+        vendorMissing: false,
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    const confirmed = body.data.find((r) => r.barcode === 'GAP-CONFIRMED');
+    expect(confirmed?.unresolved).toBe(true);
+    expect(confirmed?.vendorMissing).toBe(true);
+
+    const awaiting = body.data.find((r) => r.barcode === 'AWAITING-MATCH');
+    expect(awaiting?.unresolved).toBe(true);
+    expect(awaiting?.vendorMissing).toBe(false);
+  });
+
+  it('reports vendorMissing=false on a resolved row even if its barcode has a vendor-missing row', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // Resolved variant sold today; a stale miss row exists for the same barcode.
+    // vendorMissing is meaningless for resolved rows and must be false.
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Eşleşmiş Ürün',
+      barcode: 'RESOLVED-BC',
+      seq: 7,
+    });
+    await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '60.00' });
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        barcode: 'RESOLVED-BC',
+        vendorMissing: true,
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    const row = body.data.find((r) => r.variantId === variantId);
+    expect(row?.unresolved).toBe(false);
+    expect(row?.vendorMissing).toBe(false);
   });
 
   it('marks variants with an active cost profile as costed and surfaces the snapshot unit cost', async () => {

@@ -3,6 +3,7 @@ import { prisma } from '@pazarsync/db';
 import { buildProfitBreakdown } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
+import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
 import { toPromotionDisplays } from '../lib/promotion-displays';
 import type {
@@ -198,6 +199,19 @@ export async function getOrderById(
     throw new NotFoundError('Order', orderId);
   }
 
+  // vendorMissing: unmatched lines (productVariantId null) whose barcode is a
+  // confirmed catalog gap — the seller should see "Trendyol kataloğunda yok"
+  // rather than "eşleşme bekliyor". Backend derives it (the frontend never
+  // computes it); meaningful only for unmatched lines, false for matched ones.
+  // One batched query over the distinct unmatched barcodes — no N+1.
+  const vendorMissingBarcodes = await resolveVendorMissingBarcodes(
+    orgId,
+    storeId,
+    row.items.flatMap((item) =>
+      item.productVariant === null && item.barcode !== null ? [item.barcode] : [],
+    ),
+  );
+
   // Kâr dökümü (tahmini basis) — backend-hesaplı, frontend türetmez. GROSS
   // konvansiyon: computeProfit'in persist ettiği netProfit/netVat + kalıcı gross
   // marjlar + ESTIMATE fee'lerden brüt toplamlar. Estimate hesaplanmadıysa
@@ -317,6 +331,12 @@ export async function getOrderById(
       unitCostSnapshotVatRate: item.unitCostSnapshotVatRate?.toString() ?? null,
       commissionInvoiceSerialNumber: item.commissionInvoiceSerialNumber,
       barcode: item.barcode,
+      // Only an unmatched line (no variant) with a confirmed catalog gap is true;
+      // matched lines are always false.
+      vendorMissing:
+        item.productVariant === null &&
+        item.barcode !== null &&
+        vendorMissingBarcodes.has(item.barcode),
       variant:
         item.productVariant === null
           ? null

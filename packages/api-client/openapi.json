@@ -1293,6 +1293,11 @@
             "description": "Vendor barcode on the order line — the only product trace while productVariantId is null (unmatched line).",
             "example": "8680000000001"
           },
+          "vendorMissing": {
+            "type": "boolean",
+            "description": "Unmatched line whose barcode is confirmed absent from the Trendyol approved catalog (CatalogBarcodeMiss.vendorMissing). Drives the \"Trendyol kataloğunda yok\" badge instead of \"eşleşme bekliyor\". Only meaningful for unmatched lines (variant null); always false for matched lines.",
+            "example": false
+          },
           "variant": {
             "$ref": "#/components/schemas/OrderItemVariant"
           }
@@ -1312,6 +1317,7 @@
           "unitCostSnapshotVatRate",
           "commissionInvoiceSerialNumber",
           "barcode",
+          "vendorMissing",
           "variant"
         ]
       },
@@ -1996,6 +2002,11 @@
                   "type": "boolean",
                   "description": "Barcode resolves to no catalog variant — identity falls back to the raw barcode; rare after eager repair (spec 2026-06-12 §7).",
                   "example": false
+                },
+                "vendorMissing": {
+                  "type": "boolean",
+                  "description": "Unresolved barcode confirmed absent from the Trendyol approved catalog (CatalogBarcodeMiss.vendorMissing). Drives the \"Trendyol kataloğunda yok\" badge instead of \"eşleşme bekliyor\". Only meaningful when unresolved; always false otherwise.",
+                  "example": false
                 }
               },
               "required": [
@@ -2009,7 +2020,8 @@
                 "revenue",
                 "costStatus",
                 "unitCost",
-                "unresolved"
+                "unresolved",
+                "vendorMissing"
               ]
             }
           }

@@ -500,6 +500,135 @@ describe('Order routes', () => {
       expect(body.profitExclusionReason).toBeNull();
     });
 
+    it('derives vendorMissing on unmatched lines from CatalogBarcodeMiss (true only for a confirmed gap)', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const order = await seedSimpleOrder(org.id, store.id);
+
+      // Unmatched line A: barcode is a CONFIRMED catalog gap (vendorMissing=true).
+      await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'GAP-CONFIRMED',
+          platformLineId: 9101n,
+          quantity: 1,
+          commissionRate: '10.00',
+          commissionGross: '12.00',
+        },
+      });
+      // Unmatched line B: barcode has NO miss row → vendorMissing=false.
+      await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'AWAITING-MATCH',
+          platformLineId: 9102n,
+          quantity: 1,
+          commissionRate: '10.00',
+          commissionGross: '12.00',
+        },
+      });
+      await prisma.catalogBarcodeMiss.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          barcode: 'GAP-CONFIRMED',
+          vendorMissing: true,
+        },
+      });
+      // A transient-miss row (vendorMissing=false) must NOT flip the badge.
+      await prisma.catalogBarcodeMiss.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          barcode: 'AWAITING-MATCH',
+          vendorMissing: false,
+        },
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { barcode: string | null; variant: unknown; vendorMissing: boolean }[];
+      };
+      const byBarcode = new Map(body.items.map((i) => [i.barcode, i.vendorMissing]));
+      expect(byBarcode.get('GAP-CONFIRMED')).toBe(true);
+      // No miss row OR a transient miss → false.
+      expect(byBarcode.get('AWAITING-MATCH')).toBe(false);
+    });
+
+    it('reports vendorMissing=false on a matched line even if its barcode has a vendor-missing row', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const order = await seedSimpleOrder(org.id, store.id);
+
+      // A matched line (variant resolved) — vendorMissing is meaningless here and
+      // must be false, even though a stale miss row exists for the same barcode.
+      const product = await prisma.product.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          platformContentId: 970001n,
+          productMainId: 'PM-VM',
+          title: 'Eşleşmiş Ürün',
+        },
+      });
+      const variant = await prisma.productVariant.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          productId: product.id,
+          platformVariantId: 870001n,
+          barcode: 'MATCHED-BC',
+          stockCode: 'SC-VM',
+          salePrice: '100.00',
+          listPrice: '120.00',
+        },
+      });
+      await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: variant.id,
+          barcode: 'MATCHED-BC',
+          platformLineId: 9201n,
+          quantity: 1,
+          commissionRate: '10.00',
+          commissionGross: '12.00',
+        },
+      });
+      await prisma.catalogBarcodeMiss.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          barcode: 'MATCHED-BC',
+          vendorMissing: true,
+        },
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { variant: unknown; vendorMissing: boolean }[];
+      };
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0]?.variant).not.toBeNull();
+      expect(body.items[0]?.vendorMissing).toBe(false);
+    });
+
     it('returns the exclusion fields for a profit-excluded order', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
