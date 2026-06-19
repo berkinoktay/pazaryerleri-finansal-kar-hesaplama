@@ -3,8 +3,10 @@
 // Yerel sondadan geçemeyen barkodlar tekil vendor sorgusuyla (variant-recovery
 // PR-2 fetchProductsByBarcode) çekilir ve TAM katalog hattından (upsertCatalogBatch)
 // yazılır — gerçek platformVariantId/fiyat/desi, duplike riski sıfır. HATA YUTAR:
-// intake'i asla bloke etmez (K6) — başarısız barkod `missing`te döner, çağıran
-// eşleşmemiş satırla devam eder, kurtarma tick'i sonra dener.
+// intake'i asla bloke etmez (K6) — çözülemeyen barkod `vendorMissing` (vendor'da
+// gerçekten yok) ya da `retriable` (sorgu attı / cap-dışı denenmedi / credential
+// bozuk) ayrımıyla döner, çağıran eşleşmemiş satırla devam eder, kurtarma tick'i
+// sonra ilgili backoff'la yeniden dener.
 
 import { prisma } from '@pazarsync/db';
 import type { Store } from '@pazarsync/db';
@@ -19,8 +21,18 @@ const DEFAULT_MAX_VENDOR_CALLS = 5;
 export interface EnsureBarcodesResult {
   /** Çağrı sonunda yerel katalogda karşılığı OLAN barkodlar. */
   resolved: string[];
-  /** Vendor'da bulunamayan ya da sorgusu başarısız olan barkodlar. */
-  missing: string[];
+  /**
+   * Tekil sorgu BAŞARILI ama boş batch döndü (404 ya da 200-boş) — vendor'da
+   * gerçekten onaylı ürün yok. Seyrek (24 saat) yeniden denenmeli + satıcıya
+   * "Trendyol'da yok" olarak gösterilmeli.
+   */
+  vendorMissing: string[];
+  /**
+   * Sorgu ATTI (503/network/429), VEYA barkod cap'i aştı (hiç denenmedi),
+   * VEYA credential çözümü başarısız. Geçici/bilinmeyen → mevcut üstel backoff
+   * korunur.
+   */
+  retriable: string[];
 }
 
 export async function ensureBarcodesInCatalog(
@@ -29,7 +41,7 @@ export async function ensureBarcodesInCatalog(
   opts?: { maxVendorCalls?: number },
 ): Promise<EnsureBarcodesResult> {
   const distinct = [...new Set(barcodes.filter((b) => b.length > 0))];
-  if (distinct.length === 0) return { resolved: [], missing: [] };
+  if (distinct.length === 0) return { resolved: [], vendorMissing: [], retriable: [] };
 
   const localProbe = async (): Promise<Set<string>> =>
     new Set(
@@ -43,7 +55,7 @@ export async function ensureBarcodesInCatalog(
 
   let known = await localProbe();
   const unknown = distinct.filter((b) => !known.has(b));
-  if (unknown.length === 0) return { resolved: distinct, missing: [] };
+  if (unknown.length === 0) return { resolved: distinct, vendorMissing: [], retriable: [] };
 
   const cap = opts?.maxVendorCalls ?? DEFAULT_MAX_VENDOR_CALLS;
   const toFetch = unknown.slice(0, cap);
@@ -56,7 +68,8 @@ export async function ensureBarcodesInCatalog(
   }
 
   // K6 sözü fonksiyonun TAMAMI için geçerli: bozuk credential da intake'i
-  // bloke edemez — vendor'a hiç çıkamayız, bilinmeyenler missing döner.
+  // bloke edemez — vendor'a hiç çıkamayız, bilinmeyenler `retriable` döner
+  // (decryption geçici sayılır, vendor'da-yok kanıtı YOK).
   let credentials: ReturnType<typeof decryptStoreCredentials>;
   try {
     credentials = decryptStoreCredentials(store);
@@ -65,8 +78,20 @@ export async function ensureBarcodesInCatalog(
       storeId: store.id,
       errorMessage: err instanceof Error ? err.message : String(err),
     });
-    return { resolved: distinct.filter((b) => known.has(b)), missing: unknown };
+    return {
+      resolved: distinct.filter((b) => known.has(b)),
+      vendorMissing: [],
+      retriable: unknown,
+    };
   }
+
+  // Sorgu sonucunu sebebe göre sınıflandır. Yalnız `vendorMissSet`'i AÇIKÇA
+  // toplarız (boş batch = vendor'da gerçekten yok); atan sorgu yine yerelde-yok
+  // kalır ve aşağıdaki `else` dalında `retriable`'a düşer — boş-batch'ten ayrı
+  // tek koşul "vendor'da-yok" kanıtıdır. Cap'i aşıp HİÇ denenmeyenler de hiçbir
+  // sete girmez → aynı `else` ile `retriable` olurlar (denenmedikleri için
+  // cezalandırılmaz).
+  const vendorMissSet = new Set<string>();
   for (const barcode of toFetch) {
     try {
       const page = await fetchProductsByBarcode({
@@ -78,10 +103,12 @@ export async function ensureBarcodesInCatalog(
         await upsertCatalogBatch(store, page.batch, null);
         syncLog.info('catalog.eager-resolved', { storeId: store.id, barcode });
       } else {
+        vendorMissSet.add(barcode);
         syncLog.info('catalog.eager-vendor-miss', { storeId: store.id, barcode });
       }
     } catch (err) {
       // K6: tek barkodun hatası ne diğer barkodları ne intake'i durdurur.
+      // Atan barkod hiçbir sete eklenmez → aşağıda `retriable` olur.
       syncLog.warn('catalog.eager-failed', {
         storeId: store.id,
         barcode,
@@ -91,8 +118,22 @@ export async function ensureBarcodesInCatalog(
   }
 
   known = await localProbe();
-  return {
-    resolved: distinct.filter((b) => known.has(b)),
-    missing: distinct.filter((b) => !known.has(b)),
-  };
+  const resolved: string[] = [];
+  const vendorMissing: string[] = [];
+  const retriable: string[] = [];
+  for (const barcode of distinct) {
+    if (known.has(barcode)) {
+      // Yerelde var → çözüldü.
+      resolved.push(barcode);
+    } else if (vendorMissSet.has(barcode)) {
+      // Tekil sorgu başarılı ama boş döndü → vendor'da gerçekten yok.
+      vendorMissing.push(barcode);
+    } else {
+      // Geri kalan her şey geçici: sorgu attı (catch dalı, sete eklenmedi),
+      // cap-dışı kaldı (hiç denenmedi) ya da upsert sonrası beklenmedik şekilde
+      // hâlâ yerelde yok — mevcut üstel backoff'la yeniden denenir.
+      retriable.push(barcode);
+    }
+  }
+  return { resolved, vendorMissing, retriable };
 }
