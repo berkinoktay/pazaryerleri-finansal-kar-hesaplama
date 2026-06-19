@@ -92,6 +92,13 @@ const TodayProductRowSchema = z.object({
       'rare after eager repair (spec 2026-06-12 §7).',
     example: false,
   }),
+  vendorMissing: z.boolean().openapi({
+    description:
+      'Unresolved barcode confirmed absent from the Trendyol approved catalog ' +
+      '(CatalogBarcodeMiss.vendorMissing). Drives the "Trendyol kataloğunda yok" badge ' +
+      'instead of "eşleşme bekliyor". Only meaningful when unresolved; always false otherwise.',
+    example: false,
+  }),
 });
 
 export const LivePerformanceTodayProductsSchema = z

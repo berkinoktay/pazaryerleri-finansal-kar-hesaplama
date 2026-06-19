@@ -188,7 +188,9 @@
       "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found.",
       "generic": "Something went wrong. Please try again."
     },
-    "unmatchedBadge": "Awaiting match"
+    "unmatchedBadge": "Awaiting match",
+    "vendorMissingBadge": "Not in Trendyol catalog",
+    "vendorMissingTooltip": "This barcode was not found in the Trendyol approved catalog"
   },
   "stores": {
     "platforms": {

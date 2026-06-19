@@ -33,6 +33,7 @@ export { prisma };
 export async function truncateAll(): Promise<void> {
   await prisma.$executeRawUnsafe(
     `TRUNCATE TABLE
+       catalog_barcode_miss,
        live_performance_buffer,
        webhook_events,
        sync_logs,

@@ -17,6 +17,7 @@ const MAX_BARCODES_PER_STORE_PER_TICK = 25;
 const DUE_ITEMS_PER_TICK = 500;
 const BACKOFF_BASE_MS = 5 * 60_000; // 5 dk
 const BACKOFF_CAP_MS = 24 * 60 * 60_000; // 24 saat
+const VENDOR_MISSING_BACKOFF_MS = 24 * 60 * 60_000; // confirmed-absent barcodes: flat ~24h, NOT exponential, never terminal (a later-approved product is picked up next day)
 
 interface DueItem {
   id: string;
@@ -28,6 +29,11 @@ interface DueItem {
 function nextBackoff(attempts: number): Date {
   const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempts, BACKOFF_CAP_MS);
   return new Date(Date.now() + delay);
+}
+
+/** Flat 24h deadline for confirmed vendor-absent barcodes (never exponential). */
+function nextVendorMissingRetry(): Date {
+  return new Date(Date.now() + VENDOR_MISSING_BACKOFF_MS);
 }
 
 // Aynı-proses çakışma guard'ı: boot koşumu + 60s interval (veya vendor
@@ -97,7 +103,8 @@ async function resolveDueOrderItems(): Promise<void> {
         storeId,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
-      await applyBackoff(storeId, items).catch((backoffErr: unknown) => {
+      // Mağaza-hatası geçicidir (5xx/credential): üstel eğriyle pencereden çek.
+      await applyBackoff(storeId, items, 'retriable').catch((backoffErr: unknown) => {
         syncLog.error('resolution.store-backoff-failed', {
           storeId,
           errorMessage: backoffErr instanceof Error ? backoffErr.message : String(backoffErr),
@@ -108,11 +115,44 @@ async function resolveDueOrderItems(): Promise<void> {
 }
 
 // Buffer-gap onarımının vendor nezaketi: buffer satırında attempts/backoff
-// kolonu YOK (satır gece yarısı flush'la ölür), bu yüzden vade İN-MEMORY
-// tutulur — vendor'da da olmayan barkod her 60s tick'inde yeniden sorgulanmaz
-// (üstel: 5 dk → 24 saat cap; item-backoff'la aynı eğri). Süreç yeniden
-// başlarsa harita sıfırlanır — kabul: en kötü ihtimalle bir tur erken dener.
-const bufferGapNextTryAt = new Map<string, { attempts: number; nextTryAt: number }>();
+// kolonu YOK (satır gece yarısı flush'la ölür), bu yüzden vade CatalogBarcodeMiss
+// TABLOSUNDA tutulur (süreç yeniden başlasa da kalıcı). İki eğri ayrışır:
+// `vendorMissing` (vendor'da gerçekten yok) DÜZ ~24 saat (asla üstel, asla
+// terminal — sonradan onaylanan ürün ertesi gün yakalanır); `retriable`
+// (sorgu attı / cap-dışı / credential bozuk) MEVCUT üstel eğri. Tablo aynı
+// zamanda "Trendyol'da yok" UI rozetini besler.
+
+/**
+ * (storeId, barcode) için CatalogBarcodeMiss satırını idempotent upsert eder.
+ * `attempts` parametresi tablodaki MEVCUT deneme sayısıdır (default 0); üstel
+ * `retriable` vadesi bunun üzerinden hesaplanır, increment'le birlikte yazılır.
+ */
+async function upsertBarcodeMiss(
+  storeId: string,
+  organizationId: string,
+  barcode: string,
+  vendorMissing: boolean,
+  attempts: number,
+): Promise<void> {
+  const nextRetryAt = vendorMissing ? nextVendorMissingRetry() : nextBackoff(attempts);
+  await prisma.catalogBarcodeMiss.upsert({
+    where: { storeId_barcode: { storeId, barcode } },
+    create: {
+      organizationId,
+      storeId,
+      barcode,
+      vendorMissing,
+      attempts: 1,
+      nextRetryAt,
+    },
+    update: {
+      vendorMissing,
+      attempts: { increment: 1 },
+      lastCheckedAt: new Date(),
+      nextRetryAt,
+    },
+  });
+}
 
 /**
  * 2. kaynak: PENDING buffer satırlarının çözülmemiş barkodları (spec
@@ -133,42 +173,61 @@ async function repairBufferCatalogGaps(): Promise<void> {
       )
     LIMIT 200
   `;
-  if (bufferGaps.length === 0) {
-    // Açık kalmış vade kayıtları birikmesin (gap kapandı ya da flush'landı).
-    bufferGapNextTryAt.clear();
-    return;
-  }
+  if (bufferGaps.length === 0) return;
 
-  const now = Date.now();
   const gapsByStore = new Map<string, string[]>();
   for (const row of bufferGaps) {
-    const due = bufferGapNextTryAt.get(`${row.store_id}:${row.barcode}`);
-    if (due !== undefined && due.nextTryAt > now) continue;
     const list = gapsByStore.get(row.store_id) ?? [];
     list.push(row.barcode);
     gapsByStore.set(row.store_id, list);
   }
 
+  const now = new Date();
   for (const [storeId, allBarcodes] of gapsByStore) {
     try {
       const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-      // Dilim ÇAĞRIDAN önce: ensure'un `missing`'i cap-dışı (denenmemiş)
+      // Vade kontrolü tablodan: satırı OLMAYAN barkod (hiç denenmemiş) ya da
+      // nextRetryAt NULL/geçmiş olan vadesi gelmiştir; geleceğe bakan
+      // nextRetryAt'li barkod bu tick'te atlanır (vendor sorgusu YOK).
+      const existing = await prisma.catalogBarcodeMiss.findMany({
+        where: { storeId, barcode: { in: allBarcodes } },
+        select: { barcode: true, attempts: true, nextRetryAt: true },
+      });
+      const missByBarcode = new Map(existing.map((m) => [m.barcode, m]));
+      const dueBarcodes = allBarcodes.filter((barcode) => {
+        const miss = missByBarcode.get(barcode);
+        return miss === undefined || miss.nextRetryAt === null || miss.nextRetryAt <= now;
+      });
+      if (dueBarcodes.length === 0) continue;
+
+      // Dilim ÇAĞRIDAN önce: ensure'un retriable'ı cap-dışı (denenmemiş)
       // barkodları da içerir — denenmeyene backoff yazılmaz, sıradaki tick alır.
-      const barcodes = allBarcodes.slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
+      const barcodes = dueBarcodes.slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
       const result = await ensureBarcodesInCatalog(store, barcodes, {
         maxVendorCalls: MAX_BARCODES_PER_STORE_PER_TICK,
       });
-      for (const barcode of result.resolved) {
-        bufferGapNextTryAt.delete(`${storeId}:${barcode}`);
-      }
-      for (const barcode of result.missing) {
-        const key = `${storeId}:${barcode}`;
-        const prev = bufferGapNextTryAt.get(key);
-        const attempts = (prev?.attempts ?? 0) + 1;
-        bufferGapNextTryAt.set(key, {
-          attempts,
-          nextTryAt: nextBackoff(attempts - 1).getTime(),
+      if (result.resolved.length > 0) {
+        await prisma.catalogBarcodeMiss.deleteMany({
+          where: { storeId, barcode: { in: result.resolved } },
         });
+      }
+      for (const barcode of result.vendorMissing) {
+        await upsertBarcodeMiss(
+          storeId,
+          store.organizationId,
+          barcode,
+          true,
+          missByBarcode.get(barcode)?.attempts ?? 0,
+        );
+      }
+      for (const barcode of result.retriable) {
+        await upsertBarcodeMiss(
+          storeId,
+          store.organizationId,
+          barcode,
+          false,
+          missByBarcode.get(barcode)?.attempts ?? 0,
+        );
       }
     } catch (err) {
       syncLog.error('resolution.buffer-repair-failed', {
@@ -179,14 +238,26 @@ async function repairBufferCatalogGaps(): Promise<void> {
   }
 }
 
-/** attempts++ + üstel vade — hem barkod-bulunamadı hem mağaza-hatası yolu. */
-async function applyBackoff(storeId: string, items: DueItem[]): Promise<void> {
+type BackoffKind = 'retriable' | 'vendorMissing';
+
+/**
+ * attempts++ + vade yazar. Eğri `kind`'a göre ayrışır: `retriable` (geçici
+ * hata / mağaza-hatası) MEVCUT üstel eğri; `vendorMissing` (vendor'da gerçekten
+ * yok) DÜZ ~24 saat. `nextResolutionAt` order-item'ın KENDİ geçici-retry'sini
+ * sahiplenir; tablo yalnız vendorMissing UI rozeti + buffer-gap için yazılır
+ * (bu yolda tabloya yazma yok — yanı sıra çağıran üstlenir).
+ */
+async function applyBackoff(storeId: string, items: DueItem[], kind: BackoffKind): Promise<void> {
   for (const item of items) {
+    const nextResolutionAt =
+      kind === 'vendorMissing'
+        ? nextVendorMissingRetry()
+        : nextBackoff(item.variantResolutionAttempts);
     await prisma.orderItem.update({
       where: { id: item.id },
       data: {
         variantResolutionAttempts: item.variantResolutionAttempts + 1,
-        nextResolutionAt: nextBackoff(item.variantResolutionAttempts),
+        nextResolutionAt,
       },
     });
     syncLog.info('resolution.deferred', {
@@ -194,6 +265,7 @@ async function applyBackoff(storeId: string, items: DueItem[]): Promise<void> {
       orderItemId: item.id,
       barcode: item.barcode,
       attempts: item.variantResolutionAttempts + 1,
+      kind,
     });
   }
 }
@@ -201,7 +273,12 @@ async function applyBackoff(storeId: string, items: DueItem[]): Promise<void> {
 async function resolveForStore(storeId: string, items: DueItem[]): Promise<void> {
   // 1) Yerel first-match (ucuz yol — vendor'a gitmeden bağla).
   let remaining = await linkAgainstLocalCatalog(storeId, items);
-  if (remaining.length === 0) return;
+  if (remaining.length === 0) {
+    // İlk geçişte hepsi yerelden bağlandıysa: bunların açık bir
+    // CatalogBarcodeMiss rozeti varsa kapat (gap kapandı).
+    await clearMissForLinked(storeId, items, remaining);
+    return;
+  }
 
   // 2) Hedefli vendor sorgusu — ensureBarcodesInCatalog'a delege (spec
   // 2026-06-12 PR-2): tekil barkod fetch + tam katalog hattı + hata yutma
@@ -214,15 +291,63 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
     ...new Set(remaining.flatMap((i) => (i.barcode === null ? [] : [i.barcode]))),
   ].slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
 
-  await ensureBarcodesInCatalog(store, distinctBarcodes, {
+  const result = await ensureBarcodesInCatalog(store, distinctBarcodes, {
     maxVendorCalls: MAX_BARCODES_PER_STORE_PER_TICK,
   });
 
-  // 3) Tekrar eşle; (4) sorgulanıp hâlâ çözülemeyenlere backoff.
+  // 3) Tekrar eşle.
+  const beforeRelink = remaining;
   remaining = await linkAgainstLocalCatalog(storeId, remaining);
+
+  // Bağlanan satırların barkodları için açık CatalogBarcodeMiss rozetini kapat.
+  await clearMissForLinked(storeId, beforeRelink, remaining);
+
+  // 4) Sorgulanıp hâlâ çözülemeyenleri eğriye göre ayır:
+  //    - vendorMissing → DÜZ 24 saat + tabloya rozet (UI "Trendyol'da yok").
+  //    - retriable/diğer → mevcut üstel; tablo YAZILMAZ (item kendi vadesini
+  //      sahiplenir, tablo geçici-retry için kullanılmaz).
   const queried = new Set(distinctBarcodes);
-  const attempted = remaining.filter((i) => i.barcode !== null && queried.has(i.barcode));
-  await applyBackoff(storeId, attempted);
+  const vendorMissingBarcodes = new Set(result.vendorMissing);
+  // `attempted` yalnız bu tick'te GERÇEKTEN sorgulanan (cap'e sığan) satırlar —
+  // barcode burada non-null GARANTİ (filtre öyle kuruyor).
+  const attempted = remaining.filter(
+    (i): i is DueItem & { barcode: string } => i.barcode !== null && queried.has(i.barcode),
+  );
+  const vendorMissingItems = attempted.filter((i) => vendorMissingBarcodes.has(i.barcode));
+  const retriableItems = attempted.filter((i) => !vendorMissingBarcodes.has(i.barcode));
+
+  await applyBackoff(storeId, vendorMissingItems, 'vendorMissing');
+  for (const item of vendorMissingItems) {
+    await upsertBarcodeMiss(storeId, item.order.organizationId, item.barcode, true, 0);
+  }
+  // retriable yolu tabloya KASITLI yazmaz → varsa önceki vendorMissing=true
+  // satırı OLDUĞU GİBİ kalır (rozet "Trendyol'da yok" durur). İyi-huylu bayatlık:
+  // dün gerçekten yok olan barkod bugünkü geçici hataya rağmen muhtemelen hâlâ
+  // yok; bir sonraki vendorMissing teyidi ya da resolved silmesi düzeltir. Bunu
+  // false'a çekmek tablo<->item iki yazar arasında çatışma doğurur — yapma.
+  await applyBackoff(storeId, retriableItems, 'retriable');
+}
+
+/**
+ * Bu tick'te bağlanan satırların barkodları için açık CatalogBarcodeMiss
+ * rozetini siler (gap kapandı). `before` bağlanmadan önceki listedir, `after`
+ * hâlâ çözülemeyenler — ikisinin farkı bu tick'te bağlananlardır.
+ */
+async function clearMissForLinked(
+  storeId: string,
+  before: DueItem[],
+  after: DueItem[],
+): Promise<void> {
+  const stillUnresolved = new Set(after.map((i) => i.id));
+  const linkedBarcodes = [
+    ...new Set(
+      before.flatMap((i) => (i.barcode !== null && !stillUnresolved.has(i.id) ? [i.barcode] : [])),
+    ),
+  ];
+  if (linkedBarcodes.length === 0) return;
+  await prisma.catalogBarcodeMiss.deleteMany({
+    where: { storeId, barcode: { in: linkedBarcodes } },
+  });
 }
 
 /** Bağlananları listeden düşürür; bağlama + snapshot + estimate tek tx/order. */

@@ -116,6 +116,14 @@ CREATE INDEX order_items_resolution_due_idx
   ON order_items (next_resolution_at)
   WHERE product_variant_id IS NULL AND barcode IS NOT NULL;
 
+-- catalog_barcode_miss — mirror: prisma/migrations/20260619120000_catalog_barcode_miss
+-- (storeId, barcode) tekilliği: bir mağazada bir barkod en fazla bir eksik-kaydı.
+-- (storeId, nextRetryAt) due-index: yeniden-deneme tick'i vadesi gelmiş satırları tarar.
+CREATE UNIQUE INDEX IF NOT EXISTS catalog_barcode_miss_store_barcode_uniq
+  ON catalog_barcode_miss (store_id, barcode);
+CREATE INDEX IF NOT EXISTS catalog_barcode_miss_store_retry_idx
+  ON catalog_barcode_miss (store_id, next_retry_at);
+
 -- ─── 2026-06-12 profit-freeze: calculated-or-excluded ──────────────────
 -- Orders'a giren her sipariş iki nihai durumdan birindedir: HESAPLANMIŞ
 -- (estimated_net_profit NOT NULL) ya da KÂR-DIŞI (profit_excluded_at NOT

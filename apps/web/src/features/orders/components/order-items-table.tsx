@@ -76,7 +76,12 @@ export function OrderItemsTable({
                         <span className="font-medium">
                           {item.variant?.productName ?? t('unknownVariant')}
                         </span>
-                        {item.variant === null ? <UnmatchedVariantBadge className="w-fit" /> : null}
+                        {item.variant === null ? (
+                          <UnmatchedVariantBadge
+                            className="w-fit"
+                            vendorMissing={item.vendorMissing}
+                          />
+                        ) : null}
                         {displayBarcode !== null ? (
                           <span className="text-2xs text-muted-foreground tabular-nums">
                             {displayBarcode}

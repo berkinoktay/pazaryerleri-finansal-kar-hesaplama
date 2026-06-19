@@ -36,6 +36,8 @@ const TENANT_TABLES = [
   'member_store_access',
   // Live Performance buffer (Spec 2 PR-A)
   'live_performance_buffer',
+  // Catalog barcode gap tracking (catalog-barcode-vendor-miss)
+  'catalog_barcode_miss',
 ] as const;
 
 describe('RLS — coverage', () => {

@@ -188,7 +188,9 @@
       "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı.",
       "generic": "Bir şeyler ters gitti. Lütfen tekrar dene."
     },
-    "unmatchedBadge": "Eşleşme bekliyor"
+    "unmatchedBadge": "Eşleşme bekliyor",
+    "vendorMissingBadge": "Trendyol kataloğunda yok",
+    "vendorMissingTooltip": "Bu barkod Trendyol onaylı kataloğunda bulunamadı"
   },
   "stores": {
     "platforms": {

@@ -3,6 +3,7 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
 
+import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
 import { toPromotionDisplays, type PromotionDisplayWire } from '../lib/promotion-displays';
 
@@ -297,6 +298,11 @@ export interface TodayProductRow {
   /** Barcode resolves to no catalog variant — identity falls back to the raw
    *  barcode; rare after eager repair (spec 2026-06-12 §7). */
   unresolved: boolean;
+  /** Unresolved barcode is a CONFIRMED catalog gap (CatalogBarcodeMiss with
+   *  vendorMissing=true) — the seller sees "Trendyol kataloğunda yok" rather
+   *  than "eşleşme bekliyor". Only meaningful for unresolved rows; always false
+   *  for resolved ones. Backend-derived; the frontend never computes it. */
+  vendorMissing: boolean;
 }
 
 interface ProductAccumulator {
@@ -530,6 +536,16 @@ export async function getTodayProducts(args: {
     ).map((link) => link.productVariantId),
   );
 
+  // vendorMissing: an unresolved barcode that is a confirmed catalog gap
+  // (CatalogBarcodeMiss with vendorMissing=true) drives the "Trendyol
+  // kataloğunda yok" badge. Backend-derived; one batched query over the
+  // distinct unresolved barcodes — no N+1. Resolved rows are always false.
+  const vendorMissingBarcodes = await resolveVendorMissingBarcodes(
+    args.orgId,
+    args.storeId,
+    [...byVariant.values()].flatMap((acc) => (acc.variantId === null ? [acc.barcode] : [])),
+  );
+
   return [...byVariant.values()]
     .map((acc) => {
       const costed = acc.variantId !== null && costedVariantIds.has(acc.variantId);
@@ -545,6 +561,7 @@ export async function getTodayProducts(args: {
         costStatus: costed ? 'costed' : 'missing',
         unitCost: costed && acc.snapshotUnitCost !== null ? acc.snapshotUnitCost.toFixed(2) : null,
         unresolved: acc.unresolved,
+        vendorMissing: acc.variantId === null && vendorMissingBarcodes.has(acc.barcode),
       };
       // Retain the Decimal revenue for the tiebreaker so the sort compares
       // numerically, not lexicographically over the `.toFixed(2)` string.

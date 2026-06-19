@@ -214,6 +214,30 @@ async function seedCatalogVariant(
   });
 }
 
+/** PENDING buffer satırı (tek satır, verilen barkod), karşılığı katalogda YOK. */
+async function seedBufferGap(
+  ctx: { organizationId: string; storeId: string },
+  platformOrderId: string,
+  barcode: string,
+): Promise<void> {
+  await prisma.livePerformanceBuffer.create({
+    data: {
+      organizationId: ctx.organizationId,
+      storeId: ctx.storeId,
+      orderDate: new Date(),
+      platformOrderId,
+      platformOrderNumber: platformOrderId,
+      rawPayload: {},
+      mappedOrder: buildMappedOrder({
+        platformOrderId,
+        orderDate: new Date(),
+        barcode,
+      }) as unknown as Prisma.InputJsonValue,
+      status: 'PENDING',
+    },
+  });
+}
+
 // approvedProductsResponse + jsonResponse: apps/api/tests/helpers/trendyol-fixtures
 // (PR-2 terfisi — webhook eager-repair testleriyle paylaşılıyor).
 
@@ -284,13 +308,52 @@ describe('processVariantResolution', () => {
     expect(after.productVariantId).toBe(item.productVariantId);
   });
 
-  it('advances attempts + exponential backoff when the vendor knows no such barcode', async () => {
+  it('vendor-missing (empty batch): order-item gets a FLAT ~24h deadline + a CatalogBarcodeMiss row', async () => {
+    // Boş batch = vendor'da gerçekten yok (vendorMissing): order-item üstel
+    // DEĞİL DÜZ ~24 saat backoff alır + "Trendyol'da yok" UI rozeti (tablo).
     const ctx = await buildUnresolvedScenario('BC-GONE-3');
 
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
       if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-GONE-3')) {
         return Promise.resolve(jsonResponse(approvedProductsResponse('BC-GONE-3', 0)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    const beforeTick = Date.now();
+    await processVariantResolution();
+
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.productVariantId).toBeNull();
+    expect(item.variantResolutionAttempts).toBe(1);
+    // FLAT 24h, NOT exponential 5 min — the defining vendorMissing behavior.
+    const delay = item.nextResolutionAt!.getTime() - beforeTick;
+    expect(delay).toBeGreaterThanOrEqual(23 * 60 * 60_000);
+    expect(delay).toBeLessThanOrEqual(25 * 60 * 60_000);
+
+    // The order-line's "not on Trendyol" badge: a CatalogBarcodeMiss row exists.
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-GONE-3' } },
+    });
+    expect(miss.vendorMissing).toBe(true);
+    expect(miss.organizationId).toBe(ctx.organizationId);
+    const missDelay = miss.nextRetryAt!.getTime() - beforeTick;
+    expect(missDelay).toBeGreaterThanOrEqual(23 * 60 * 60_000);
+    expect(missDelay).toBeLessThanOrEqual(25 * 60 * 60_000);
+  });
+
+  it('retriable (vendor throws): order-item gets the EXPONENTIAL curve and NO CatalogBarcodeMiss row', async () => {
+    // Sorgu ATTI (geçici) = retriable: mevcut üstel eğri korunur ve tablo
+    // YAZILMAZ — order-item kendi geçici-retry vadesini sahiplenir.
+    const ctx = await buildUnresolvedScenario('BC-THROW-3');
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-THROW-3')) {
+        // 401 → MarketplaceAuthError throw, fail-FAST (no 5xx retry/sleep loop);
+        // ensure'un per-barkod catch'i bunu `retriable`'a sınıflar.
+        return Promise.resolve(new Response('bad credentials', { status: 401 }));
       }
       throw new Error(`unexpected fetch in test: ${url}`);
     });
@@ -305,6 +368,12 @@ describe('processVariantResolution', () => {
     const firstDelay = item.nextResolutionAt!.getTime() - beforeFirstTick;
     expect(firstDelay).toBeGreaterThanOrEqual(4.5 * 60_000);
     expect(firstDelay).toBeLessThanOrEqual(5.5 * 60_000);
+    // Retriable path never writes the table (transient retry lives on the item).
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-THROW-3' },
+      }),
+    ).toBe(0);
 
     // A second tick BEFORE the backoff deadline must not touch the row again.
     await processVariantResolution();
@@ -409,6 +478,127 @@ describe('processVariantResolution', () => {
       where: { platformOrderId: 'buf-repair-1' },
     });
     expect(entry.status).toBe('PENDING'); // maliyet YOK → hâlâ bekliyor (doğru)
+  });
+
+  it('buffer-gap vendor-missing: writes a CatalogBarcodeMiss row (vendorMissing=true, ~24h nextRetryAt)', async () => {
+    const ctx = await buildStore();
+    await seedBufferGap(ctx, 'buf-vm-1', 'BC-BUF-VM');
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-VM')) {
+        // Boş batch → vendorMissing.
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-VM', 0)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    const beforeTick = Date.now();
+    await processVariantResolution();
+
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-BUF-VM' } },
+    });
+    expect(miss.vendorMissing).toBe(true);
+    expect(miss.attempts).toBe(1);
+    expect(miss.organizationId).toBe(ctx.organizationId);
+    const delay = miss.nextRetryAt!.getTime() - beforeTick;
+    expect(delay).toBeGreaterThanOrEqual(23 * 60 * 60_000);
+    expect(delay).toBeLessThanOrEqual(25 * 60 * 60_000);
+  });
+
+  it('buffer-gap retriable: writes a CatalogBarcodeMiss row (vendorMissing=false, exponential nextRetryAt)', async () => {
+    const ctx = await buildStore();
+    await seedBufferGap(ctx, 'buf-rt-1', 'BC-BUF-RT');
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-RT')) {
+        // 401 → throw (retriable), fail-FAST (no 5xx sleep loop).
+        return Promise.resolve(new Response('bad credentials', { status: 401 }));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    const beforeTick = Date.now();
+    await processVariantResolution();
+
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-BUF-RT' } },
+    });
+    expect(miss.vendorMissing).toBe(false);
+    expect(miss.attempts).toBe(1);
+    // attempts=0 (yeni satır) → 5 dk taban üstel — DÜZ 24h DEĞİL.
+    const delay = miss.nextRetryAt!.getTime() - beforeTick;
+    expect(delay).toBeGreaterThanOrEqual(4.5 * 60_000);
+    expect(delay).toBeLessThanOrEqual(5.5 * 60_000);
+  });
+
+  it('buffer-gap resolved: an existing CatalogBarcodeMiss row is deleted once the catalog catches up', async () => {
+    const ctx = await buildStore();
+    await seedBufferGap(ctx, 'buf-res-1', 'BC-BUF-RES');
+    // Önceki tick'ten kalmış açık rozet (vadesi geçmiş → bu tick'te denenebilir).
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-BUF-RES',
+        vendorMissing: true,
+        attempts: 3,
+        nextRetryAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && url.includes('barcode=BC-BUF-RES')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-RES', 1)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    // Gap kapandı → rozet silindi; katalogda variant var.
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-BUF-RES' },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.productVariant.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-BUF-RES' },
+      }),
+    ).toBe(1);
+  });
+
+  it('buffer-gap due-gating: a barcode whose CatalogBarcodeMiss nextRetryAt is in the future is skipped (no vendor call)', async () => {
+    const ctx = await buildStore();
+    await seedBufferGap(ctx, 'buf-future-1', 'BC-BUF-FUTURE');
+    // Vadesi GELECEKTE bir rozet → bu tick atlamalı, vendor'a hiç çıkmamalı.
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-BUF-FUTURE',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor must NOT be called — barcode is not due yet');
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // Rozet dokunulmadan kaldı (attempts artmadı, vade aynı).
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-BUF-FUTURE' } },
+    });
+    expect(miss.attempts).toBe(1);
   });
 
   it('kâr-dışı siparişin kalemi KİMLİK için bağlanır ama para alanları donuk kalır', async () => {

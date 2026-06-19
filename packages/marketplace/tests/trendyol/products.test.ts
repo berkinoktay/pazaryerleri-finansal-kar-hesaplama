@@ -109,4 +109,20 @@ describe('fetchProductsByBarcode', () => {
 
     expect(page.batch).toHaveLength(0);
   });
+
+  it('treats a 404 (no approved product for barcode) as an empty page, not an error', async () => {
+    // Trendyol's stage /products/approved?barcode=X returns a bodyless 404
+    // when no approved product matches. For a single-barcode lookup that is
+    // "no such product" — a clean empty page, not a thrown error.
+    fetchSpy.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
+
+    const page = await fetchProductsByBarcode({
+      baseUrl: BASE_URL,
+      credentials: CREDENTIALS,
+      barcode: 'NEVER-APPROVED',
+    });
+
+    expect(page.batch).toHaveLength(0);
+    expect(page.pageMeta.totalElements).toBe(0);
+  });
 });

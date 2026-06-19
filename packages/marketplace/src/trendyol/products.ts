@@ -8,6 +8,7 @@
 //     urun-entegrasyonlari-v2.md
 
 import type { StoreEnvironment } from '@pazarsync/db';
+import { MarketplaceUnreachable } from '@pazarsync/sync-core';
 
 import { fetchOnce, type FetcherDeps } from './fetch-once';
 import { baseUrlFor } from './headers';
@@ -85,8 +86,29 @@ export async function fetchProductsByBarcode(
   url.searchParams.set('barcode', opts.barcode);
   url.searchParams.set('size', PRODUCTS_PAGE_SIZE.toString());
 
-  const raw = await fetchOnce<TrendyolApprovedProductsResponse>(url.toString(), deps);
-  return mapTrendyolApprovedResponse(raw);
+  try {
+    const raw = await fetchOnce<TrendyolApprovedProductsResponse>(url.toString(), deps);
+    return mapTrendyolApprovedResponse(raw);
+  } catch (err) {
+    // Tek-barkod sorgusunda 404, "böyle onaylı ürün yok" demektir — boş
+    // sonuç, hata değil. (Toplu sayfalama senkronunda 404 KASITLI olarak
+    // MarketplaceUnreachable'a maplenir; orada "son sayfanın ötesi → 4xx
+    // → retry" anlamı taşır. O global mapleme fetch-once.ts'te DURUR; biz
+    // 404'ü yalnızca BURADA, tekil barkod yolunda boş sayfaya çeviririz.)
+    if (err instanceof MarketplaceUnreachable && err.meta.httpStatus === 404) {
+      return {
+        batch: [],
+        pageMeta: {
+          totalElements: 0,
+          totalPages: 0,
+          page: 0,
+          size: PRODUCTS_PAGE_SIZE,
+          nextPageToken: null,
+        },
+      };
+    }
+    throw err;
+  }
 }
 
 export interface FetchApprovedProductsOpts {

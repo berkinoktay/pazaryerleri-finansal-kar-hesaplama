@@ -23,6 +23,7 @@ function makeItem(overrides: Partial<OrderItemDetail> = {}): OrderItemDetail {
     unitCostSnapshotVatRate: null,
     commissionInvoiceSerialNumber: null,
     barcode: null,
+    vendorMissing: false,
     variant: {
       id: 'v1',
       barcode: '8690000000000',
@@ -49,7 +50,18 @@ describe('OrderItemsTable', () => {
   it('shows the unmatched badge and the line barcode when the item has no variant', () => {
     render(<OrderItemsTable items={[makeItem({ variant: null, barcode: '8680000000001' })]} />);
     expect(screen.getByText('Eşleşme bekliyor')).toBeInTheDocument();
+    expect(screen.queryByText('Trendyol kataloğunda yok')).not.toBeInTheDocument();
     expect(screen.getByText('8680000000001')).toBeInTheDocument();
+  });
+
+  it('shows the "Trendyol kataloğunda yok" badge when the unmatched line is vendor-missing', () => {
+    render(
+      <OrderItemsTable
+        items={[makeItem({ variant: null, barcode: '8680000000001', vendorMissing: true })]}
+      />,
+    );
+    expect(screen.getByText('Trendyol kataloğunda yok')).toBeInTheDocument();
+    expect(screen.queryByText('Eşleşme bekliyor')).not.toBeInTheDocument();
   });
 
   it('shows neither badge nor fallback barcode for a matched item (variant barcode wins)', () => {
