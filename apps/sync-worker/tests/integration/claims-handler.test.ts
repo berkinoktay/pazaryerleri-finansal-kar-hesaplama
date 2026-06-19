@@ -38,10 +38,63 @@ interface BuiltCtx {
   syncLogId: string;
 }
 
+/**
+ * Seeds FeeDefinition rows needed by estimateReturnOnClaim + applyEstimateOnOrderCreate
+ * (called via the backstop trigger added in Task 7). Without these, any claim scan
+ * that transitions items to Accepted throws FeeDefinitionNotFoundError inside the
+ * transaction and counts as `failed` rather than `written`.
+ */
+async function seedFeeDefinitions(): Promise<void> {
+  await prisma.feeDefinition.createMany({
+    data: [
+      {
+        platform: 'TRENDYOL',
+        feeType: 'PLATFORM_SERVICE',
+        displayName: 'Platform Hizmet Bedeli',
+        calculationKind: 'FIXED',
+        fixedAmountNet: new Decimal('9.16'),
+        defaultVatRate: new Decimal('20.00'),
+        effectiveFrom: new Date('2024-01-01'),
+      },
+      {
+        platform: 'TRENDYOL',
+        feeType: 'STOPPAGE',
+        displayName: 'E-ticaret Stopaji',
+        calculationKind: 'RATE_OF_SALE',
+        rateOfSale: new Decimal('0.01'),
+        defaultVatRate: new Decimal('0.00'),
+        effectiveFrom: new Date('2024-01-01'),
+      },
+      {
+        platform: 'TRENDYOL',
+        feeType: 'SHIPPING',
+        displayName: 'Kargo Bedeli',
+        calculationKind: 'FORMULA',
+        defaultVatRate: new Decimal('20.00'),
+        effectiveFrom: new Date('2024-01-01'),
+      },
+      {
+        platform: 'TRENDYOL',
+        feeType: 'RETURN_SHIPPING',
+        displayName: 'Iade Kargo Bedeli',
+        calculationKind: 'FORMULA',
+        defaultVatRate: new Decimal('20.00'),
+        effectiveFrom: new Date('2024-01-01'),
+      },
+    ],
+  });
+}
+
 async function buildScenario(): Promise<BuiltCtx> {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
+
+  // FeeDefinitions required by the Task-7 backstop trigger: when a scan transitions
+  // items to Accepted, estimateReturnOnClaim (and applyEstimateOnOrderCreate) resolve
+  // fee definitions. Without these, the upsert transaction throws and the claim is
+  // counted as `failed` rather than `written`.
+  await seedFeeDefinitions();
 
   const credentials = encryptCredentials({ supplierId: '2738', apiKey: 'k', apiSecret: 's' });
   const store = await prisma.store.create({
