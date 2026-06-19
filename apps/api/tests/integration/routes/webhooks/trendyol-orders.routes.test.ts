@@ -503,6 +503,92 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
     });
   });
 
+  describe('RETURNED webhook enqueues CLAIMS sync (Task 8)', () => {
+    it('Test A: RETURNED webhook enqueues exactly one CLAIMS SyncLog for the store', async () => {
+      const { storeId } = await setupStore();
+      const res = await postWebhook(
+        storeId,
+        makeWebhookPayload({
+          status: 'Returned',
+          shipmentPackageId: 9900000001,
+          orderNumber: 'RETURNED-A-001',
+          lastModifiedDate: LAST_MODIFIED_MS + 5000,
+        }),
+        basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+      );
+      expect(res.status).toBe(200);
+
+      const claimsSyncLogs = await prisma.syncLog.findMany({
+        where: {
+          storeId,
+          syncType: 'CLAIMS',
+          status: { in: ['PENDING', 'RUNNING', 'FAILED_RETRYABLE'] },
+        },
+      });
+      expect(claimsSyncLogs).toHaveLength(1);
+    });
+
+    it('Test B: second RETURNED webhook when a CLAIMS sync already pending → still exactly one (dedup)', async () => {
+      const { storeId } = await setupStore();
+      const auth = basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS);
+
+      // İlk RETURNED webhook — CLAIMS SyncLog enqueue edilir
+      const first = await postWebhook(
+        storeId,
+        makeWebhookPayload({
+          status: 'Returned',
+          shipmentPackageId: 9900000002,
+          orderNumber: 'RETURNED-B-001',
+          lastModifiedDate: LAST_MODIFIED_MS + 6000,
+        }),
+        auth,
+      );
+      expect(first.status).toBe(200);
+
+      // İkinci RETURNED webhook (farklı sipariş, farklı lastModifiedDate) —
+      // mevcut CLAIMS SyncLog zaten aktif, dedup çalışmalı, yeni satır açılmamalı.
+      const second = await postWebhook(
+        storeId,
+        makeWebhookPayload({
+          status: 'Returned',
+          shipmentPackageId: 9900000003,
+          orderNumber: 'RETURNED-B-002',
+          lastModifiedDate: LAST_MODIFIED_MS + 7000,
+        }),
+        auth,
+      );
+      expect(second.status).toBe(200);
+
+      // Dedup: hâlâ tek aktif CLAIMS SyncLog satırı
+      const claimsSyncLogs = await prisma.syncLog.findMany({
+        where: {
+          storeId,
+          syncType: 'CLAIMS',
+          status: { in: ['PENDING', 'RUNNING', 'FAILED_RETRYABLE'] },
+        },
+      });
+      expect(claimsSyncLogs).toHaveLength(1);
+
+      // Her iki sipariş de yazılmış olmalı
+      expect(await prisma.order.count({ where: { storeId } })).toBe(2);
+    });
+
+    it('Test C: non-RETURNED webhook (Delivered) does NOT enqueue a CLAIMS sync', async () => {
+      const { storeId } = await setupStore();
+      const res = await postWebhook(
+        storeId,
+        makeWebhookPayload({ status: 'Delivered' }),
+        basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+      );
+      expect(res.status).toBe(200);
+
+      const claimsSyncLogs = await prisma.syncLog.findMany({
+        where: { storeId, syncType: 'CLAIMS' },
+      });
+      expect(claimsSyncLogs).toHaveLength(0);
+    });
+  });
+
   describe('PRODUCTION-only intake gate (defense-in-depth)', () => {
     afterEach(() => {
       vi.unstubAllEnvs();
