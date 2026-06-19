@@ -144,6 +144,12 @@ export async function estimateReturnOnClaim(
     },
     select: { orderItemId: true },
   });
+  // Hiç kabul edilmiş birim yok → yazacak/temizlenecek bir şey yok, çık.
+  // DEĞİŞMEZ (Trendyol + Berkin 2026-06-20): 'Accepted' TERMİNAL statüdür — satıcı iadeyi
+  // onayladıktan sonra geri dönülmez. Tahmini de YALNIZ 'Accepted'da yazıyoruz (müşterinin
+  // açtığı ama onaylanmamış Created/WaitingInAction talebinde DEĞİL — o iptal edilebilir).
+  // Bu iki gerçek birlikte, daha önce yazılmış bir ESTIMATE iade kaleminin "geri alınması"
+  // (rollback) gereğini ortadan kaldırır; bayat/hayalet kalem oluşamaz.
   if (acceptedItems.length === 0) return;
 
   // orderItemId başına kabul edilen birim SAYISI (her OrderClaimItem = 1 birim).
