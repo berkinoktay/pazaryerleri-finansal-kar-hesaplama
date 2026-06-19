@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -282,6 +282,14 @@ describe('estimateReturnOnClaim — tenant isolation', () => {
 
   beforeEach(async () => {
     await truncateAll();
+  });
+
+  // CI paylaşılan DB: bıraktığımız custom carrier/seed satırları sonraki suite'e (api list-carriers) sızmasın diye suite sonunda temizle.
+  afterAll(async () => {
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM shipping_desi_tariffs WHERE carrier_id IN (SELECT id FROM shipping_carriers WHERE code LIKE 'TEST-%')`,
+    );
+    await prisma.$executeRawUnsafe(`DELETE FROM shipping_carriers WHERE code LIKE 'TEST-%'`);
   });
 
   /**
