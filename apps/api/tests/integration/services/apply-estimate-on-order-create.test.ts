@@ -670,6 +670,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         direction: f.direction,
         amountGross: new Decimal(f.amountGross),
         vatRate: Number(f.vatRate),
+        source: f.source,
       }));
 
       const view = buildProfitBreakdown({
