@@ -320,6 +320,11 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   for (const item of vendorMissingItems) {
     await upsertBarcodeMiss(storeId, item.order.organizationId, item.barcode, true, 0);
   }
+  // retriable yolu tabloya KASITLI yazmaz → varsa önceki vendorMissing=true
+  // satırı OLDUĞU GİBİ kalır (rozet "Trendyol'da yok" durur). İyi-huylu bayatlık:
+  // dün gerçekten yok olan barkod bugünkü geçici hataya rağmen muhtemelen hâlâ
+  // yok; bir sonraki vendorMissing teyidi ya da resolved silmesi düzeltir. Bunu
+  // false'a çekmek tablo<->item iki yazar arasında çatışma doğurur — yapma.
   await applyBackoff(storeId, retriableItems, 'retriable');
 }
 
