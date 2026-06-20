@@ -11,7 +11,11 @@ import { type OrderDetail } from '../api/get-order.api';
 export interface OrderKpiGridProps {
   order: Pick<
     OrderDetail,
-    'saleGross' | 'estimatedNetProfit' | 'settledNetProfit' | 'profitBreakdown'
+    | 'saleGross'
+    | 'estimatedNetProfit'
+    | 'settledNetProfit'
+    | 'profitBreakdown'
+    | 'reconciliationStatus'
   >;
 }
 
@@ -28,17 +32,30 @@ export interface OrderKpiGridProps {
 export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
   const t = useTranslations('orderDetail.kpis');
 
-  const saleGross = order.saleGross;
+  // Satış KPI = NET satış (iade düşülmüş) → kâr dökümüyle tutarlı (Berkin kararı
+  // 2026-06-20). Backend-hesaplı `profitBreakdown.saleGross` zaten netted; breakdown
+  // yoksa (profit-excluded) ham order.saleGross'a düşülür. Frontend türetme YOK.
+  const netSaleGross = order.profitBreakdown?.saleGross ?? order.saleGross;
   const estimatedProfit = order.estimatedNetProfit;
   const settledProfit = order.settledNetProfit;
   const marginPct = order.profitBreakdown?.saleMarginPct ?? null;
+
+  // Fiili kâr alt-metni: settled yazıldıysa açıkla; yazılmadıysa mutabakat
+  // DURUMUNU yansıt — PARTIALLY_SETTLED'da "hiç işlenmedi" YANLIŞ (hakediş satırı geldi,
+  // tam mutabakat bekleniyor). reconciliationStatus backend-servisli.
+  const settledContext =
+    settledProfit !== null
+      ? t('settledNetProfit.hint')
+      : order.reconciliationStatus === 'PARTIALLY_SETTLED'
+        ? t('settledNetProfit.partial')
+        : t('settledNetProfit.pending');
 
   return (
     <div className="gap-md grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
         label={t('saleGross.label')}
-        value={<Currency value={saleGross ?? '0'} />}
-        context={saleGross === null ? t('common.notAvailable') : undefined}
+        value={<Currency value={netSaleGross ?? '0'} />}
+        context={netSaleGross === null ? t('common.notAvailable') : undefined}
       />
       <StatCard
         label={t('estimatedNetProfit.label')}
@@ -48,9 +65,7 @@ export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
       <StatCard
         label={t('settledNetProfit.label')}
         value={<Currency value={settledProfit ?? '0'} />}
-        context={
-          settledProfit === null ? t('settledNetProfit.pending') : t('settledNetProfit.hint')
-        }
+        context={settledContext}
       />
       <StatCard
         label={t('margin.label')}

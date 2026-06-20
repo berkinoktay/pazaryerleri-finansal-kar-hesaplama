@@ -1537,7 +1537,8 @@
       "settledNetProfit": {
         "label": "Settled profit",
         "hint": "Updated as settlement rows land from Trendyol and reconciliation completes.",
-        "pending": "No settlement row processed yet."
+        "pending": "No settlement row processed yet.",
+        "partial": "Partial settlement processed; settled profit finalizes at full reconciliation."
       },
       "margin": {
         "label": "Profit margin",
@@ -1569,8 +1570,6 @@
       },
       "vatLabel": "VAT %{rate}",
       "confirmedAt": "Confirmed: {date}",
-      "estimateBadge": "Estimate",
-      "settledBadge": "Actual invoice",
       "types": {
         "SHIPPING": "Shipping",
         "PLATFORM_SERVICE": "Platform Service Fee",
@@ -1580,6 +1579,7 @@
         "REFUND_DEDUCTION": "Refund deduction",
         "COMMISSION_REFUND": "Commission refund",
         "COST_RETURN": "Cost reversal (returned unit)",
+        "STOPPAGE_REFUND": "Stoppage refund",
         "PROVISION_ADJUSTMENT": "Provision adjustment",
         "MANUAL_REFUND": "Manual refund",
         "REVENUE_ADJUSTMENT": "Revenue adjustment",
@@ -1595,7 +1595,7 @@
         "COMMISSION_INVOICE": "Commission invoice"
       },
       "sources": {
-        "ESTIMATE": "Estimate",
+        "ESTIMATE": "Not finalized",
         "SETTLEMENT": "Settlement",
         "CARGO_INVOICE": "Cargo Invoice",
         "USER_OVERRIDE": "User override",

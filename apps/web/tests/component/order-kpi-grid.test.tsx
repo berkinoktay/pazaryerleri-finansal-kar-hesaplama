@@ -36,6 +36,7 @@ function makeOrder(overrides: Partial<KpiOrder> = {}): KpiOrder {
     saleGross: '200.00',
     estimatedNetProfit: '31.00',
     settledNetProfit: null,
+    reconciliationStatus: 'NOT_SETTLED',
     profitBreakdown: makeBreakdown('15.5'),
     ...overrides,
   };
