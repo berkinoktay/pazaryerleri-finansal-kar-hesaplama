@@ -19,6 +19,9 @@ export default defineConfig({
     fileParallelism: false,
     globals: false,
     environment: 'node',
+    // Seed the shipping reference fixture once (carriers + tariffs) so tests can
+    // look up the seeded SENDEOMP carrier. Read-only fixture, never truncated.
+    globalSetup: [path.resolve(here, './src/__tests__/global-setup.ts')],
     // Only integration tests — unit tests run via `test:unit` which uses
     // default vitest config (no DB needed, no dotenv required).
     include: [

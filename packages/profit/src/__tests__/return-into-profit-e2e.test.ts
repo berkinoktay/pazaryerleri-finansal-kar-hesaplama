@@ -21,7 +21,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -60,9 +60,6 @@ async function truncateAll(): Promise<void> {
        fx_rates,
        expenses,
        own_shipping_tariffs,
-       shipping_desi_tariffs,
-       shipping_barem_tariffs,
-       shipping_carriers,
        member_store_access,
        stores,
        organization_members,
@@ -82,25 +79,14 @@ async function truncateAll(): Promise<void> {
 }
 
 /**
- * Seeds a carrier + a desi tariff at desi=5 (cargoDeci=5 -> ceil=5 -> 50.00 net).
- * Returns the carrier id so the store can reference it as defaultShippingCarrier.
+ * Returns the seeded SENDEOMP carrier id so the store can reference it as
+ * defaultShippingCarrier. Shipping reference data is a READ-ONLY fixture seeded
+ * once by globalSetup (@pazarsync/db/test-support) — tests never create or
+ * truncate it. cargoDeci=5 -> ceil(5)=5 -> SENDEOMP desi tariff at desi=5 net
+ * 121.99.
  */
-async function seedCarrierWithDesiTariff(): Promise<string> {
-  const carrier = await prisma.shippingCarrier.create({
-    data: {
-      platform: 'TRENDYOL',
-      externalId: Math.floor(Math.random() * 1_000_000),
-      code: `TEST-CARRIER-${randomUUID().slice(0, 6)}`,
-      displayName: 'Test Kargo',
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
-    },
-  });
-
-  await prisma.shippingDesiTariff.create({
-    data: { carrierId: carrier.id, desi: 5, priceNet: new Decimal('50.00') },
-  });
-
+async function getSeededCarrierId(): Promise<string> {
+  const carrier = await prisma.shippingCarrier.findFirstOrThrow({ where: { code: 'SENDEOMP' } });
   return carrier.id;
 }
 
@@ -120,7 +106,7 @@ async function createSeedContext(): Promise<{ orgId: string; storeId: string }> 
     data: { organizationId: org.id, userId, role: 'OWNER' },
   });
 
-  const carrierId = await seedCarrierWithDesiTariff();
+  const carrierId = await getSeededCarrierId();
 
   const store = await prisma.store.create({
     data: {
@@ -317,14 +303,6 @@ describe('return-into-profit e2e lifecycle', () => {
     await truncateAll();
   });
 
-  // CI paylaşılan DB: bıraktığımız custom carrier/seed satırları sonraki suite'e (api list-carriers) sızmasın diye suite sonunda temizle.
-  afterAll(async () => {
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM shipping_desi_tariffs WHERE carrier_id IN (SELECT id FROM shipping_carriers WHERE code LIKE 'TEST-%')`,
-    );
-    await prisma.$executeRawUnsafe(`DELETE FROM shipping_carriers WHERE code LIKE 'TEST-%'`);
-  });
-
   /**
    * Full lifecycle test mirroring order 11307800224.
    *
@@ -340,7 +318,7 @@ describe('return-into-profit e2e lifecycle', () => {
    *   REFUND_DEDUCTION (SETTLEMENT): 2300.00 @ 10%  [estimate was 2361.71]
    *   COMMISSION_REFUND (SETTLEMENT): 230.00 @ 20%  [estimate was 236.17]
    *   COST_RETURN (SETTLEMENT):       1000.00 @ 10% [same as estimate]
-   *   RETURN_SHIPPING (CARGO_INVOICE): 165.00 @ 20% [estimate was 60.00]
+   *   RETURN_SHIPPING (CARGO_INVOICE): 165.00 @ 20% [estimate was 146.39]
    *
    * Expected settledNetProfit after reconcile (using ACTUAL amounts):
    *   After foldReturnLegs with ACTUAL:
@@ -369,11 +347,11 @@ describe('return-into-profit e2e lifecycle', () => {
    *             = -225.69...
    *
    * If estimate amounts were used instead (REFUND=2361.71, COMMISSION_REFUND=236.17,
-   * RETURN_SHIPPING=60.00), the settled value would be different:
+   * RETURN_SHIPPING=146.39), the settled value would be different:
    *   sale.gross after fold = 2361.71 - 2361.71 = 0
    *   commission.gross after fold = 236.17 - 236.17 = 0
-   *   feeGross DEBIT = 155.99 + 10.99 + 60.00 = 226.98
-   *   netProfit (estimate-amounts) would be around ~-174.79 (very different from -225.69)
+   *   feeGross DEBIT = 155.99 + 10.99 + 146.39 = 313.37
+   *   netProfit (estimate-amounts) would land in a different range from -225.69
    * => the assertion on the concrete settled value proves ACTUAL was used.
    */
   it('e2e: estimate phase negative + reconcile uses ACTUAL (not ESTIMATE) amounts', async () => {
@@ -399,8 +377,8 @@ describe('return-into-profit e2e lifecycle', () => {
     expect(byTypeEstimate.get('REFUND_DEDUCTION')?.amountGross.toFixed(2)).toBe('2361.71');
     expect(byTypeEstimate.get('COMMISSION_REFUND')?.amountGross.toFixed(2)).toBe('236.17');
     expect(byTypeEstimate.get('COST_RETURN')?.amountGross.toFixed(2)).toBe('1000.00');
-    // RETURN_SHIPPING estimate: net 50.00 * 1.2 = 60.00
-    expect(byTypeEstimate.get('RETURN_SHIPPING')?.amountGross.toFixed(2)).toBe('60.00');
+    // RETURN_SHIPPING estimate: SENDEOMP desi=5 net 121.99 * 1.2 = 146.39
+    expect(byTypeEstimate.get('RETURN_SHIPPING')?.amountGross.toFixed(2)).toBe('146.39');
 
     // estimatedNetProfit must be negative (return ate the revenue)
     const orderAfterEstimate = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
@@ -486,11 +464,9 @@ describe('return-into-profit e2e lifecycle', () => {
     //
     // With ESTIMATE amounts (counterfactual, should NOT appear):
     //   fold: sale.gross=0, commission.gross=0, cost.gross=0
-    //   fees (DEBIT): fwd-shipping 155.99@20 + PSF 10.99@20 + ret-shipping 60.00@20
-    //     feeGross = 226.98
-    //     feeVat   = 25.9983... + 2.1983... + 10 = 38.1966...
-    //   netVat = ~214.70 - ~90.90... - ~39.36... - 38.1966... (complex; roughly -176.xx)
-    //   netProfit would be in a completely different range
+    //   fees (DEBIT): fwd-shipping 155.99@20 + PSF 10.99@20 + ret-shipping 146.39@20
+    //     feeGross = 313.37 (vs 331.98 with the ACTUAL 165.00 leg)
+    //   netProfit would land in a completely different range from -225.69
     //
     // The concrete value proves ACTUAL was used.
     expect(orderAfterReconcile.settledNetProfit!.toFixed(2)).toBe('-225.69');

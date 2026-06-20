@@ -25,8 +25,8 @@
     "test:component": "turbo run test:component",
     "test:integration": "turbo run test:integration",
     "test:watch": "turbo run test:watch --parallel",
-    "check:all": "turbo run typecheck lint test:unit test:component && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors && pnpm audit:lint && pnpm audit:money && pnpm audit:no-barrel",
-    "check:full": "turbo run typecheck lint test:unit test:component && turbo run test:integration --concurrency=1 && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors && pnpm audit:lint && pnpm audit:money && pnpm audit:no-barrel",
+    "check:all": "turbo run typecheck lint test:unit test:component && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors && pnpm audit:lint && pnpm audit:money && pnpm audit:no-barrel && pnpm audit:test-hygiene",
+    "check:full": "turbo run typecheck lint test:unit test:component && turbo run test:integration --concurrency=1 && pnpm format:check && pnpm audit:boundaries && pnpm audit:errors && pnpm audit:lint && pnpm audit:money && pnpm audit:no-barrel && pnpm audit:test-hygiene",
     "clean": "turbo run clean",
     "api:openapi": "pnpm --filter @pazarsync/api openapi:dump",
     "api:codegen": "pnpm --filter @pazarsync/api-client codegen",
@@ -37,6 +37,7 @@
     "audit:lint": "tsx scripts/audit-lint-coverage.ts",
     "audit:money": "tsx scripts/audit-money.ts",
     "audit:no-barrel": "tsx scripts/audit-barrels.ts",
+    "audit:test-hygiene": "tsx scripts/audit-test-reference-hygiene.ts",
     "emit:components-manifest": "tsx scripts/emit-component-manifest.ts",
     "postinstall": "pnpm --filter @pazarsync/db generate",
     "prepare": "husky"

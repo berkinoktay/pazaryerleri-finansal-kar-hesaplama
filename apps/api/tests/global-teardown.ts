@@ -2,8 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { prisma } from '@pazarsync/db';
-
-import { ensureShippingReferenceData } from './helpers/seed-shipping-reference';
+import { ensureShippingReferenceData } from '@pazarsync/db/test-support';
 
 const execFilePromise = promisify(execFile);
 
