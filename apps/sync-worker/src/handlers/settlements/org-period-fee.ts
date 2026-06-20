@@ -14,7 +14,7 @@
 // can span multiple paymentDate values (research §4.3 — 2 weeks merging),
 // so we insert one row per Trendyol transaction id.
 
-import type { Decimal } from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 import type { OrderFeeType, Prisma } from '@pazarsync/db';
 import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
@@ -28,9 +28,10 @@ export interface InsertOrgPeriodFeeOpts {
   feeType: OrderFeeType;
   row: TrendyolFinancialTransaction;
   // GROSS CONVENTION (2026-06-16, Bölüm E Task 20): amountGross + vatRate.
-  // PSF: debt KDV-dahil, vatRate=20. Stoppage: debt KDV-yok, vatRate=0.
-  // Net türetilir downstream (amountGross × 100 / (100+vatRate)).
-  amounts: { amountGross: Decimal; vatRate: Decimal };
+  // PSF: debt KDV-dahil, vatRate=20. Net türetilir downstream
+  // (amountGross × 100 / (100+vatRate)). Stopaj YAPISAL olarak KDV taşımaz
+  // (vergi tevkifatı, KDV'lenebilir ücret değil) → vatRate verilmez; helper 0 yazar.
+  amounts: { amountGross: Decimal; vatRate?: Decimal };
   tx: Prisma.TransactionClient;
   /** Telemetry label for the log path (e.g. 'settlements.psf'). */
   logScope: string;
@@ -71,7 +72,8 @@ export async function insertOrgPeriodFee(
       feeType,
       source: 'SETTLEMENT',
       amountGross: amounts.amountGross,
-      vatRate: amounts.vatRate,
+      // Stopaj gibi KDV'siz kalemler vatRate vermez → 0 (kolon NOT NULL, default yok).
+      vatRate: amounts.vatRate ?? new Decimal(0),
       ...(row.commissionInvoiceSerialNumber !== null
         ? { invoiceSerialNumber: row.commissionInvoiceSerialNumber }
         : {}),

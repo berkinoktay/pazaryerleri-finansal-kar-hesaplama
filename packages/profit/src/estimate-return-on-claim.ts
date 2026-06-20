@@ -34,8 +34,6 @@ import { applyEstimateOnOrderCreate } from './estimate-on-order-create';
 import type { ReturnFeeType } from './fold-return-legs';
 import { resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
-
-const ZERO = new Decimal(0);
 const ACCEPTED_STATUS = 'Accepted';
 
 /**
@@ -70,7 +68,11 @@ interface UpsertReturnEstimateFeeArgs {
   feeType: ReturnFeeType;
   direction: OrderFeeDirection;
   amountGross: Decimal;
-  vatRate: Decimal;
+  /**
+   * KDV oranı. KDV taşıyan bacaklar (satış/komisyon/maliyet/kargo iadesi) geçer;
+   * stopaj iadesi YAPISAL olarak KDV taşımaz → verilmez, OrderFee.vat_rate @default(0).
+   */
+  vatRate?: Decimal;
   displayName: string;
   feeDefinitionId?: string;
 }
@@ -114,10 +116,11 @@ async function upsertReturnEstimateFee(
   });
 }
 
-/** Bacak tipi başına biriktirilen gross + (tek) KDV oranı. */
+/** Bacak tipi başına biriktirilen gross + (tek) KDV oranı. Stopaj iadesi gibi
+ *  KDV'siz bacaklarda vatRate verilmez (OrderFee.vat_rate @default(0)). */
 interface LegAccumulator {
   gross: Decimal;
-  vatRate: Decimal;
+  vatRate?: Decimal;
 }
 
 /**
@@ -180,9 +183,9 @@ export async function estimateReturnOnClaim(
   // gerçek hakediş/kargo faturası per-leg mutabık kılar). Çoğu sipariş tek-item.
   const itemsById = new Map(order.items.map((item) => [item.id, item]));
 
-  const refund: LegAccumulator = { gross: ZERO, vatRate: ZERO };
-  const commission: LegAccumulator = { gross: ZERO, vatRate: ZERO };
-  const cost: LegAccumulator = { gross: ZERO, vatRate: ZERO };
+  const refund: LegAccumulator = { gross: new Decimal(0), vatRate: new Decimal(0) };
+  const commission: LegAccumulator = { gross: new Decimal(0), vatRate: new Decimal(0) };
+  const cost: LegAccumulator = { gross: new Decimal(0), vatRate: new Decimal(0) };
 
   for (const [orderItemId, acceptedQty] of acceptedQtyByItem) {
     const item = itemsById.get(orderItemId);
@@ -190,7 +193,9 @@ export async function estimateReturnOnClaim(
 
     const quantity = new Decimal(item.quantity);
     // quantity 0 ise per-unit oran tanımsız → bu item'ı atla (veri anomalisi).
-    const acceptedRatio = quantity.isZero() ? ZERO : new Decimal(acceptedQty).div(quantity);
+    const acceptedRatio = quantity.isZero()
+      ? new Decimal(0)
+      : new Decimal(acceptedQty).div(quantity);
 
     if (item.lineSaleGross !== null) {
       refund.gross = refund.gross.add(new Decimal(item.lineSaleGross).mul(acceptedRatio));
@@ -215,8 +220,9 @@ export async function estimateReturnOnClaim(
   // Stopaj satıştan kesilen %1 vergidir; iade edilen satış için vergiden mahsupla geri
   // döner → satıcı gideri DEĞİL (Berkin kararı 2026-06-20). İade edilen NET satış ×
   // stopaj oranı kadar CREDIT yazılır (fold-return-legs base.stoppage'tan düşer; tam
-  // iade → tam geri, kısmi → orantılı). vatRate 0. Diğer bacaklar gibi açık satır →
-  // hem kâr matematiğinde netlenir hem ücret zaman çizgisinde "Stopaj iadesi" görünür.
+  // iade → tam geri, kısmi → orantılı). Stopaj YAPISAL olarak KDV taşımaz → vatRate
+  // verilmez. Diğer bacaklar gibi açık satır → hem kâr matematiğinde netlenir hem
+  // ücret zaman çizgisinde "Stopaj iadesi" görünür.
   if (refund.gross.gt(0)) {
     const stopajDef = await resolveFeeDefinition(tx, {
       platform: order.store.platform,
@@ -224,12 +230,12 @@ export async function estimateReturnOnClaim(
       at: order.orderDate,
     });
     const stopajRate = new Decimal(stopajDef.rateOfSale ?? 0);
-    const refundSaleNet = refund.vatRate.isZero()
+    const refundVatRate = refund.vatRate ?? new Decimal(0);
+    const refundSaleNet = refundVatRate.isZero()
       ? refund.gross
-      : refund.gross.mul(100).div(new Decimal(100).add(refund.vatRate));
+      : refund.gross.mul(100).div(new Decimal(100).add(refundVatRate));
     await writeLegIfPositive(tx, order.id, order.organizationId, 'STOPPAGE_REFUND', {
       gross: refundSaleNet.mul(stopajRate),
-      vatRate: ZERO,
     });
   }
 

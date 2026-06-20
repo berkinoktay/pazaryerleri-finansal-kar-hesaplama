@@ -18,8 +18,8 @@
  *   - Order.saleGross + saleVat  (effectiveSale aggregate = HAK EDİLEN, immutable since arrival)
  *   - OrderItem rows (unitCostSnapshotGross + settled/estimatedCommissionGross + refundedCommissionGross)
  *   - OrderFee rows (amountGross + vatRate) where source ∈ {SETTLEMENT, CARGO_INVOICE}
- *     OR  source = ESTIMATE AND confirmedAt IS NOT NULL; STOPPAGE: SETTLEMENT önce, yoksa
- *     onaylanmış ESTIMATE STOPPAGE (stopaj sipariş-bazlı ayrı SETTLEMENT satırı almaz).
+ *     OR  source = ESTIMATE AND confirmedAt IS NOT NULL; STOPPAGE yalnız onaylanmış
+ *     ESTIMATE (stopaj sipariş-bazlı SETTLEMENT OrderFee satırı almaz — bkz. aşağı).
  *
  * Writes:
  *   - Order.settledNetProfit / settledNetVat / settledSaleMarginPct / settledCostMarkupPct
@@ -151,17 +151,18 @@ export async function recomputeSettledProfit(
     direction: f.direction,
   }));
 
-  // Stopaj terimi: SETTLEMENT STOPPAGE (gerçek yatan) varsa o; yoksa onaylanmış ESTIMATE
-  // STOPPAGE. Stopaj sipariş-bazlı ayrı bir SETTLEMENT satırı almaz (ödeme-periyodu-bazlı,
-  // aggregate-only) → PaymentOrder onayı ESTIMATE'ı gerçek kabul etmeye yeterli.
-  // SETTLEMENT önce: 'SETTLEMENT' > 'ESTIMATE' alfabetik → desc sıralaması ile SETTLEMENT'ı alır.
+  // Stopaj terimi: onaylanmış ESTIMATE STOPPAGE. Stopaj sipariş-bazlı ayrı bir
+  // SETTLEMENT OrderFee satırı ALMAZ — settlement'ta ödeme-periyodu-bazlı OrgPeriodFee
+  // olarak (aggregate, audit-only) yazılır. Bu yüzden PaymentOrder onayının ESTIMATE
+  // STOPPAGE'ı confirmedAt ile işaretlemesi gerçek-değer için yeterlidir; eski
+  // `source:'SETTLEMENT'` kolu yapısal olarak hiç eşleşmediği için kaldırıldı.
   const stoppageFee = await tx.orderFee.findFirst({
     where: {
       orderId,
       feeType: 'STOPPAGE',
-      OR: [{ source: 'SETTLEMENT' }, { source: 'ESTIMATE', confirmedAt: { not: null } }],
+      source: 'ESTIMATE',
+      confirmedAt: { not: null },
     },
-    orderBy: { source: 'desc' }, // S > E → SETTLEMENT satırı varsa önce gelir
     select: { amountGross: true },
   });
 

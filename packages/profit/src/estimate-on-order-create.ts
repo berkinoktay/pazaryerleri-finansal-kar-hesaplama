@@ -148,7 +148,8 @@ export async function applyEstimateOnOrderCreate(
   // tutardan DEĞİL, KDV'siz satıştan hesaplanır (design Bölüm 1: "Stopaj =
   // (satışGross − satışKDV) × %1"; rakip/Trendyol gerçek değeri de net üzerinden).
   // PSF üzerine stopaj YAPILMAZ (design §3.4 — 330 Tebliği Md 5/2). GROSS konvansiyon:
-  // amountGross = (saleGross − saleVat) × rateOfSale, vatRate=0.
+  // amountGross = (saleGross − saleVat) × rateOfSale. Stopaj YAPISAL olarak KDV
+  // taşımaz (vergi tevkifatı) → vatRate verilmez; OrderFee.vat_rate kolonu @default(0).
   if (
     order.saleGross !== null &&
     order.saleVat !== null &&
@@ -174,7 +175,6 @@ export async function applyEstimateOnOrderCreate(
         source: 'ESTIMATE',
         direction: 'DEBIT',
         amountGross: stopajGross,
-        vatRate: new Decimal(0),
         displayName: stopajDef.displayName,
       },
     });
