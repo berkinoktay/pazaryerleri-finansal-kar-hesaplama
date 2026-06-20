@@ -129,6 +129,7 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     'COMMISSION_REFUND',
     'COST_RETURN',
     'RETURN_SHIPPING',
+    'STOPPAGE_REFUND',
   ] as const);
   const returnLegs = resolveReturnLegs(
     input.fees
@@ -157,6 +158,12 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
   const dispShippingGross = shipping.gross.add(returnLegs.RETURN_SHIPPING.gross);
   const dispShippingVat = shipping.vat.add(returnLegs.RETURN_SHIPPING.vat);
 
+  // Stopaj gösterimi: orijinal STOPPAGE − STOPPAGE_REFUND (fold-return-legs ile AYNI
+  // cebir) → tam iade 0, kısmi orantılı. Açık STOPPAGE_REFUND bacağı sayesinde ekran
+  // (Kâr dökümü) netProfit ile toplanır; ayrıca STOPPAGE_REFUND ücret zaman çizgisinde
+  // "Stopaj iadesi" olarak görünür. Alt sınır 0 (over-refund negatif stopaj üretmesin).
+  const dispStoppage = Decimal.max(0, stoppage.gross.sub(returnLegs.STOPPAGE_REFUND.gross));
+
   return {
     listGross: input.listGross.toFixed(2),
     sellerDiscountGross: input.sellerDiscountGross.toFixed(2),
@@ -170,7 +177,7 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     shippingVat: dispShippingVat.toDecimalPlaces(2).toFixed(2),
     platformServiceGross: platformService.gross.toFixed(2),
     platformServiceVat: platformService.vat.toDecimalPlaces(2).toFixed(2),
-    stoppage: stoppage.gross.toFixed(2),
+    stoppage: dispStoppage.toFixed(2),
     netVat: input.netVat.toFixed(2),
     netProfit: input.netProfit.toFixed(2),
     saleMarginPct: input.saleMarginPct === null ? '—' : input.saleMarginPct.toFixed(2),

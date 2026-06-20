@@ -190,7 +190,7 @@ async function seedFeeDefinitions(): Promise<void> {
  *
  * saleGross=2361.71 (KDV 10%): saleVat = 2361.71 * 10/110 = 214.70
  * item: unitCostSnapshotGross=1000.00 (VAT 10%), commissionGross=236.17 (VAT 20%)
- * forward fees: SHIPPING CARGO_INVOICE 155.99 @ 20%, PSF ESTIMATE confirmed 13.19 @ 20%
+ * forward fees: SHIPPING CARGO_INVOICE 155.99 @ 20%, PSF ESTIMATE confirmed 10.99 @ 20%
  * settledNetProfit pre-set non-null so recomputeSettledProfit writes over it.
  */
 async function buildE2EOrder(
@@ -244,7 +244,10 @@ async function buildE2EOrder(
     },
   });
 
-  // Forward PSF (ESTIMATE, confirmed) — enters settled path via confirmedAt
+  // Forward PSF (ESTIMATE, confirmed) — enters settled path via confirmedAt.
+  // Tutar FeeDefinition ile aynı (net 9.16 → gross 10.99): RETURNED artık PSF-muaf
+  // OLMADIĞINDAN (isPsfExempt fix 2026-06-20) estimate yolu PSF'yi bu değere yazar/refine eder
+  // → pre-set'i de 10.99 tutuyoruz ki üzerine yazım no-op olsun, test self-consistent kalsın.
   await prisma.orderFee.create({
     data: {
       orderId: order.id,
@@ -252,7 +255,7 @@ async function buildE2EOrder(
       feeType: 'PLATFORM_SERVICE',
       source: 'ESTIMATE',
       direction: 'DEBIT',
-      amountGross: new Decimal('13.19'),
+      amountGross: new Decimal('10.99'),
       vatRate: new Decimal('20.00'),
       confirmedAt: new Date(),
       confirmedBy: 'test-setup',
@@ -351,25 +354,26 @@ describe('return-into-profit e2e lifecycle', () => {
    *                        net commission.vat = 39.3616... - 38.3333... = 1.0283...
    *     cost.gross = 1000.00 - 1000.00 = 0
    *     cost.vat   = 1000*10/110 - 1000*10/110 = 0
-   *     Forward fees (DEBIT): SHIPPING 155.99@20 + PSF 13.19@20 + RETURN_SHIPPING 165.00@20
-   *       feeGross DEBIT = 155.99 + 13.19 + 165.00 = 334.18
-   *       feeVat DEBIT   = 155.99*20/120 + 13.19*20/120 + 165.00*20/120
-   *                      = 25.9983... + 2.1983... + 27.5 = 55.6966...
+   *     Forward fees (DEBIT): SHIPPING 155.99@20 + PSF 10.99@20 + RETURN_SHIPPING 165.00@20
+   *       (PSF 10.99 = FeeDefinition net 9.16 → gross; RETURNED artık PSF-muaf DEĞİL —
+   *        isPsfExempt fix 2026-06-20 → applyEstimateOnOrderCreate PSF'yi bu değere yazar)
+   *       feeGross DEBIT = 155.99 + 10.99 + 165.00 = 331.98
+   *       feeVat DEBIT   = 25.9983... + 1.8317... + 27.5 = 55.3300...
    *
    *   netVat = sale.vat - cost.vat - commission.vat - debitVat + creditVat
-   *          = 5.6090... - 0 - 1.0283... - 55.6966... + 0
-   *          = -51.1159...
+   *          = 5.6090... - 0 - 1.0283... - 55.3300... + 0
+   *          = -50.7493...
    *
-   *   netProfit = 61.71 - 0 - 6.17 - 334.18 - 0(stoppage) - (-51.1159...)
-   *             = 61.71 - 0 - 6.17 - 334.18 + 51.1159...
-   *             = -227.524...
+   *   netProfit = 61.71 - 0 - 6.17 - 331.98 - 0(stoppage) - (-50.7493...)
+   *             = 61.71 - 0 - 6.17 - 331.98 + 50.7493...
+   *             = -225.69...
    *
    * If estimate amounts were used instead (REFUND=2361.71, COMMISSION_REFUND=236.17,
    * RETURN_SHIPPING=60.00), the settled value would be different:
    *   sale.gross after fold = 2361.71 - 2361.71 = 0
    *   commission.gross after fold = 236.17 - 236.17 = 0
-   *   feeGross DEBIT = 155.99 + 13.19 + 60.00 = 229.18
-   *   netProfit (estimate-amounts) would be around ~-176.99 (very different from -227.52)
+   *   feeGross DEBIT = 155.99 + 10.99 + 60.00 = 226.98
+   *   netProfit (estimate-amounts) would be around ~-174.79 (very different from -225.69)
    * => the assertion on the concrete settled value proves ACTUAL was used.
    */
   it('e2e: estimate phase negative + reconcile uses ACTUAL (not ESTIMATE) amounts', async () => {
@@ -473,22 +477,22 @@ describe('return-into-profit e2e lifecycle', () => {
     //   sale.vat = 214.70 - (2300 * 10/110) = 214.70 - 209.0909... = 5.6090...
     //   commission.vat = (236.17 * 20/120) - (230 * 20/120) = 39.3616... - 38.3333... = 1.0283...
     //   cost.vat = 0
-    //   fees (DEBIT): fwd-shipping 155.99@20 + PSF 13.19@20 + ret-shipping 165.00@20
-    //     feeGross = 334.18
-    //     feeVat   = 25.9983... + 2.1983... + 27.5 = 55.6966...
-    //   netVat = 5.6090... - 0 - 1.0283... - 55.6966... = -51.1159...
-    //   netProfit = 61.71 - 0 - 6.17 - 334.18 - 0 - (-51.1159...) = -227.524...
-    //   Rounded: -227.52
+    //   fees (DEBIT): fwd-shipping 155.99@20 + PSF 10.99@20 + ret-shipping 165.00@20
+    //     feeGross = 331.98
+    //     feeVat   = 25.9983... + 1.8317... + 27.5 = 55.3300...
+    //   netVat = 5.6090... - 0 - 1.0283... - 55.3300... = -50.7493...
+    //   netProfit = 61.71 - 0 - 6.17 - 331.98 - 0 - (-50.7493...) = -225.69...
+    //   Rounded: -225.69
     //
     // With ESTIMATE amounts (counterfactual, should NOT appear):
     //   fold: sale.gross=0, commission.gross=0, cost.gross=0
-    //   fees (DEBIT): fwd-shipping 155.99@20 + PSF 13.19@20 + ret-shipping 60.00@20
-    //     feeGross = 229.18
+    //   fees (DEBIT): fwd-shipping 155.99@20 + PSF 10.99@20 + ret-shipping 60.00@20
+    //     feeGross = 226.98
     //     feeVat   = 25.9983... + 2.1983... + 10 = 38.1966...
     //   netVat = ~214.70 - ~90.90... - ~39.36... - 38.1966... (complex; roughly -176.xx)
     //   netProfit would be in a completely different range
     //
     // The concrete value proves ACTUAL was used.
-    expect(orderAfterReconcile.settledNetProfit!.toFixed(2)).toBe('-227.52');
+    expect(orderAfterReconcile.settledNetProfit!.toFixed(2)).toBe('-225.69');
   });
 });

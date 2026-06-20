@@ -255,7 +255,8 @@ export async function getOrderById(
                 fee.feeType === 'REFUND_DEDUCTION' ||
                 fee.feeType === 'COMMISSION_REFUND' ||
                 fee.feeType === 'COST_RETURN' ||
-                fee.feeType === 'RETURN_SHIPPING',
+                fee.feeType === 'RETURN_SHIPPING' ||
+                fee.feeType === 'STOPPAGE_REFUND',
             )
             .map((fee) => ({
               feeType: fee.feeType,

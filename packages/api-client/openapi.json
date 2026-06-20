@@ -1385,6 +1385,7 @@
               "REFUND_DEDUCTION",
               "COMMISSION_REFUND",
               "COST_RETURN",
+              "STOPPAGE_REFUND",
               "PROVISION_ADJUSTMENT",
               "MANUAL_REFUND",
               "REVENUE_ADJUSTMENT",

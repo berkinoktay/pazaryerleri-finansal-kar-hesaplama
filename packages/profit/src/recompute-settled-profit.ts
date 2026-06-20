@@ -170,7 +170,15 @@ export async function recomputeSettledProfit(
   const returnFeeRows = await tx.orderFee.findMany({
     where: {
       orderId,
-      feeType: { in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'] },
+      feeType: {
+        in: [
+          'REFUND_DEDUCTION',
+          'COMMISSION_REFUND',
+          'COST_RETURN',
+          'RETURN_SHIPPING',
+          'STOPPAGE_REFUND',
+        ],
+      },
       OR: [
         { source: { in: ['SETTLEMENT', 'CARGO_INVOICE'] } },
         { source: 'ESTIMATE', confirmedAt: { not: null } },

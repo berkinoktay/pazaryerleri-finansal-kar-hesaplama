@@ -300,7 +300,15 @@ export async function applyEstimateOnOrderCreate(
   const returnFeeRows = await tx.orderFee.findMany({
     where: {
       orderId,
-      feeType: { in: ['REFUND_DEDUCTION', 'COMMISSION_REFUND', 'COST_RETURN', 'RETURN_SHIPPING'] },
+      feeType: {
+        in: [
+          'REFUND_DEDUCTION',
+          'COMMISSION_REFUND',
+          'COST_RETURN',
+          'RETURN_SHIPPING',
+          'STOPPAGE_REFUND',
+        ],
+      },
     },
     select: { feeType: true, source: true, amountGross: true, vatRate: true },
   });

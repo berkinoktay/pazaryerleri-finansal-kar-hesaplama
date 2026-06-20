@@ -38,12 +38,17 @@ import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping
 const ZERO = new Decimal(0);
 const ACCEPTED_STATUS = 'Accepted';
 
-/** İade kabul edildiğinde kabul edilen birim başına yazılan görünen adlar. */
+/**
+ * İade bacaklarının görünen adları (ücret zaman çizgisi başlığı). "(tahmini)" eki
+ * KASTEN yok: kesinleşmemiş/kesinleşmiş ayrımını UI'daki kaynak rozeti ("Kesinleşmemiş")
+ * taşır → başlıkta tekrar etmez. Etiketler i18n `orderDetail.fees.types.*` ile hizalı.
+ */
 const RETURN_LEG_DISPLAY_NAMES: Record<ReturnFeeType, string> = {
-  REFUND_DEDUCTION: 'İade (tahmini)',
-  COMMISSION_REFUND: 'Komisyon iadesi (tahmini)',
-  COST_RETURN: 'Maliyet iadesi (tahmini)',
-  RETURN_SHIPPING: 'İade kargosu (tahmini)',
+  REFUND_DEDUCTION: 'İade kesintisi',
+  COMMISSION_REFUND: 'Komisyon iadesi',
+  COST_RETURN: 'Maliyet iadesi',
+  RETURN_SHIPPING: 'İade kargosu',
+  STOPPAGE_REFUND: 'Stopaj iadesi',
 } as const;
 
 /**
@@ -56,6 +61,7 @@ const RETURN_LEG_DIRECTIONS: Record<ReturnFeeType, OrderFeeDirection> = {
   COMMISSION_REFUND: 'CREDIT',
   COST_RETURN: 'CREDIT',
   RETURN_SHIPPING: 'DEBIT',
+  STOPPAGE_REFUND: 'CREDIT',
 } as const;
 
 interface UpsertReturnEstimateFeeArgs {
@@ -204,6 +210,28 @@ export async function estimateReturnOnClaim(
   await writeLegIfPositive(tx, order.id, order.organizationId, 'REFUND_DEDUCTION', refund);
   await writeLegIfPositive(tx, order.id, order.organizationId, 'COMMISSION_REFUND', commission);
   await writeLegIfPositive(tx, order.id, order.organizationId, 'COST_RETURN', cost);
+
+  // ─── Stopaj iadesi (STOPPAGE_REFUND) — iade edilen satışın stopajı geri alınır ────
+  // Stopaj satıştan kesilen %1 vergidir; iade edilen satış için vergiden mahsupla geri
+  // döner → satıcı gideri DEĞİL (Berkin kararı 2026-06-20). İade edilen NET satış ×
+  // stopaj oranı kadar CREDIT yazılır (fold-return-legs base.stoppage'tan düşer; tam
+  // iade → tam geri, kısmi → orantılı). vatRate 0. Diğer bacaklar gibi açık satır →
+  // hem kâr matematiğinde netlenir hem ücret zaman çizgisinde "Stopaj iadesi" görünür.
+  if (refund.gross.gt(0)) {
+    const stopajDef = await resolveFeeDefinition(tx, {
+      platform: order.store.platform,
+      feeType: 'STOPPAGE',
+      at: order.orderDate,
+    });
+    const stopajRate = new Decimal(stopajDef.rateOfSale ?? 0);
+    const refundSaleNet = refund.vatRate.isZero()
+      ? refund.gross
+      : refund.gross.mul(100).div(new Decimal(100).add(refund.vatRate));
+    await writeLegIfPositive(tx, order.id, order.organizationId, 'STOPPAGE_REFUND', {
+      gross: refundSaleNet.mul(stopajRate),
+      vatRate: ZERO,
+    });
+  }
 
   // ─── İade kargosu (RETURN_SHIPPING) — Barem YOK (iade kargosu Barem'e girmez) ─
   // estimateShippingCostForOrder NET tarife döner; RETURN_SHIPPING FeeDefinition'ın

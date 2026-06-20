@@ -19,7 +19,8 @@ export type ReturnFeeType =
   | 'REFUND_DEDUCTION'
   | 'COMMISSION_REFUND'
   | 'COST_RETURN'
-  | 'RETURN_SHIPPING';
+  | 'RETURN_SHIPPING'
+  | 'STOPPAGE_REFUND';
 
 export interface ReturnFeeRow {
   feeType: ReturnFeeType;
@@ -35,6 +36,7 @@ const RETURN_FEE_TYPES: ReturnFeeType[] = [
   'COMMISSION_REFUND',
   'COST_RETURN',
   'RETURN_SHIPPING',
+  'STOPPAGE_REFUND',
 ];
 
 const ACTUAL_SOURCES = new Set<ReturnFeeRow['source']>(['SETTLEMENT', 'CARGO_INVOICE']);
@@ -45,6 +47,7 @@ export function resolveReturnLegs(rows: ReturnFeeRow[]): ResolvedReturnLegs {
     COMMISSION_REFUND: { gross: ZERO, vat: ZERO },
     COST_RETURN: { gross: ZERO, vat: ZERO },
     RETURN_SHIPPING: { gross: ZERO, vat: ZERO },
+    STOPPAGE_REFUND: { gross: ZERO, vat: ZERO },
   };
   for (const type of RETURN_FEE_TYPES) {
     const ofType = rows.filter((r) => r.feeType === type);
@@ -76,6 +79,15 @@ export function foldReturnLegs(base: ProfitInput, legs: ResolvedReturnLegs): Pro
     vat: legs.RETURN_SHIPPING.vat,
   };
   const fees = legs.RETURN_SHIPPING.gross.isZero() ? base.fees : [...base.fees, returnShippingFee];
+
+  // Stopaj iade'de geri alınır (Berkin kararı 2026-06-20): stopaj satıştan kesilen %1
+  // vergidir; satış iade edilince o stopaj nakit gelmese de vergiden mahsup edilir →
+  // satıcının gerçek gideri DEĞİLDİR. Diğer bacaklar gibi AÇIK bir STOPPAGE_REFUND
+  // (CREDIT) satırıyla geri alınır: TAM iade → tam stopaj geri (net 0); KISMİ iade →
+  // iade edilen satışın stopajı kadar. base.stoppage (orijinal) − STOPPAGE_REFUND.
+  // Alt sınır 0 (refund > orijinal anomalisi negatif stopaj üretmesin).
+  const foldedStoppage = Decimal.max(0, base.stoppage.gross.sub(legs.STOPPAGE_REFUND.gross));
+
   return {
     sale: {
       gross: base.sale.gross.sub(legs.REFUND_DEDUCTION.gross),
@@ -90,6 +102,6 @@ export function foldReturnLegs(base: ProfitInput, legs: ResolvedReturnLegs): Pro
       vat: base.commission.vat.sub(legs.COMMISSION_REFUND.vat),
     },
     fees,
-    stoppage: base.stoppage,
+    stoppage: { gross: foldedStoppage },
   };
 }
