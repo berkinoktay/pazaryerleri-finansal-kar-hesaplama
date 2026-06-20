@@ -72,6 +72,12 @@ export interface ProfitBreakdownView {
   commissionVat: string;
   shippingGross: string;
   shippingVat: string;
+  /** Gidiş (forward SHIPPING) kargo brüt — "Toplam kargo" collapsible alt satırı. */
+  outboundShippingGross: string;
+  outboundShippingVat: string;
+  /** İade (RETURN_SHIPPING) kargo brüt. '0.00' → iade kargosu yok (düz "Kargo" satırı). */
+  returnShippingGross: string;
+  returnShippingVat: string;
   platformServiceGross: string;
   platformServiceVat: string;
   // Stopaj ayrı bir düşülen terim (komisyon/PSF içine katlanmaz). STOPPAGE fee'leri
@@ -173,6 +179,12 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     commissionVat: dispCommissionVat.toDecimalPlaces(2).toFixed(2),
     shippingGross: dispShippingGross.toFixed(2),
     shippingVat: dispShippingVat.toDecimalPlaces(2).toFixed(2),
+    // Toplam (shipping*) KORUNUR; bileşenler ayrı: gidiş = forward SHIPPING feeAgg,
+    // iade = RETURN_SHIPPING bacağı. outbound + return == shipping (invariant).
+    outboundShippingGross: shipping.gross.toFixed(2),
+    outboundShippingVat: shipping.vat.toDecimalPlaces(2).toFixed(2),
+    returnShippingGross: returnLegs.RETURN_SHIPPING.gross.toFixed(2),
+    returnShippingVat: returnLegs.RETURN_SHIPPING.vat.toDecimalPlaces(2).toFixed(2),
     platformServiceGross: platformService.gross.toFixed(2),
     platformServiceVat: platformService.vat.toDecimalPlaces(2).toFixed(2),
     stoppage: dispStoppage.toFixed(2),

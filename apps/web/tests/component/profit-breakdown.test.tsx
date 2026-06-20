@@ -18,6 +18,9 @@ const messages = {
     cost: 'Ürün maliyeti',
     commission: 'Komisyon',
     shipping: 'Kargo',
+    shippingTotal: 'Toplam kargo bedeli',
+    outboundShipping: 'Gidiş kargosu',
+    returnShipping: 'İade kargosu',
     platformService: 'Platform hizmet bedeli',
     stoppage: 'Stopaj',
     promotions: 'Promosyonlar',
@@ -27,6 +30,8 @@ const messages = {
     costVat: 'Ürün maliyeti KDV',
     commissionVat: 'Komisyon KDV',
     shippingVat: 'Kargo KDV',
+    outboundShippingVat: 'Gidiş kargo KDV',
+    returnShippingVat: 'İade kargo KDV',
     platformServiceVat: 'Platform hizmet bedeli KDV',
     margin: 'Kâr marjı',
     estimatedProfit: 'Tahmini kâr',
@@ -46,6 +51,10 @@ const BREAKDOWN = {
   commissionVat: '110.00',
   shippingGross: '135.32',
   shippingVat: '22.55',
+  outboundShippingGross: '135.32',
+  outboundShippingVat: '22.55',
+  returnShippingGross: '0.00',
+  returnShippingVat: '0.00',
   platformServiceGross: '13.19',
   platformServiceVat: '2.20',
   // Stopaj ayrı düşülen brüt terim (KDV-siz). 569592424: kâr 876,24 yerine 848,74
@@ -161,5 +170,58 @@ describe('ProfitBreakdownCard', () => {
     expect(screen.getByText('Bu sipariş için kâr hesaplanmadı.')).toBeInTheDocument();
     expect(screen.queryByText('Kâr dökümü')).toBeInTheDocument(); // başlık sabit kalır
     expect(screen.queryByText('Satış')).not.toBeInTheDocument();
+  });
+
+  it('shows a single plain "Kargo" row when there is no return shipping', () => {
+    renderCard(BREAKDOWN); // returnShippingGross '0.00'
+    expect(screen.getByText('Kargo')).toBeInTheDocument();
+    // İadesiz → collapsible toplam / iade alt satırı YOK.
+    expect(screen.queryByText('Toplam kargo bedeli')).not.toBeInTheDocument();
+    expect(screen.queryByText('İade kargosu')).not.toBeInTheDocument();
+  });
+
+  it('splits cargo into a collapsible total (outbound + return) when the order has return shipping', async () => {
+    const user = userEvent.setup();
+    renderCard({
+      ...BREAKDOWN,
+      shippingGross: '280.32', // 135.32 gidiş + 145.00 iade
+      shippingVat: '46.72',
+      outboundShippingGross: '135.32',
+      outboundShippingVat: '22.55',
+      returnShippingGross: '145.00',
+      returnShippingVat: '24.17',
+    });
+
+    // Toplam başlık görünür; düz tek "Kargo" satırı yerini collapsible'a bıraktı.
+    expect(screen.getByText('Toplam kargo bedeli')).toBeInTheDocument();
+    // Kapalıyken alt satırlar DOM'da değil (Radix unmount).
+    expect(screen.queryByText('Gidiş kargosu')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Toplam kargo bedeli/ }));
+
+    expect(screen.getByText('Gidiş kargosu')).toBeInTheDocument();
+    expect(screen.getByText('İade kargosu')).toBeInTheDocument();
+    expect(screen.getByText(formatCurrency('135.32'))).toBeInTheDocument();
+    expect(screen.getByText(formatCurrency('145.00'))).toBeInTheDocument();
+  });
+
+  it('splits the shipping VAT into outbound + return rows in the Net VAT breakdown on return', async () => {
+    const user = userEvent.setup();
+    renderCard({
+      ...BREAKDOWN,
+      shippingGross: '280.32',
+      shippingVat: '46.72',
+      outboundShippingGross: '135.32',
+      outboundShippingVat: '22.55',
+      returnShippingGross: '145.00',
+      returnShippingVat: '24.17',
+    });
+
+    await user.click(screen.getByRole('button', { name: /Net KDV/ }));
+
+    expect(screen.getByText('Gidiş kargo KDV')).toBeInTheDocument();
+    expect(screen.getByText('İade kargo KDV')).toBeInTheDocument();
+    // İade varken tek birleşik "Kargo KDV" satırı YOK.
+    expect(screen.queryByText('Kargo KDV')).not.toBeInTheDocument();
   });
 });

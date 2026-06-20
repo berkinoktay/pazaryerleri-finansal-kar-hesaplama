@@ -380,6 +380,15 @@ const ProfitBreakdownSchema = z
     commissionVat: z.string(),
     shippingGross: z.string(),
     shippingVat: z.string(),
+    outboundShippingGross: z.string().openapi({
+      description:
+        'Gidiş (forward) kargo brüt — kargo collapsible alt satırı. shippingGross = outbound + return.',
+    }),
+    outboundShippingVat: z.string(),
+    returnShippingGross: z.string().openapi({
+      description: "İade (return) kargo brüt. '0.00' → iade kargosu yok.",
+    }),
+    returnShippingVat: z.string(),
     platformServiceGross: z.string(),
     platformServiceVat: z.string(),
     stoppage: z.string().openapi({
