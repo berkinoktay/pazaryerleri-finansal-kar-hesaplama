@@ -25,8 +25,6 @@ import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 import { insertOrgPeriodFee } from './org-period-fee';
 import type { HandleSettlementResult } from './sale';
 
-const ZERO = new Decimal('0');
-
 export async function handleAdvertising(
   storeId: string,
   organizationId: string,
@@ -38,7 +36,7 @@ export async function handleAdvertising(
     organizationId,
     feeType: 'ADVERTISING',
     row,
-    amounts: { amountGross: new Decimal(row.debt), vatRate: ZERO },
+    amounts: { amountGross: new Decimal(row.debt), vatRate: new Decimal(0) },
     tx,
     logScope: 'settlements.advertising',
   });

@@ -4,15 +4,16 @@
 // Trendyol filter:
 //   transactionType=Stoppage  (otherfinancials)
 //
-// Design §5.2 line 1098: Stopaj %1 of saleGross, KDV YOK. The per-order
-// ESTIMATE was deterministically computed at T+0; this row audits the
-// aggregate Trendyol invoice. Research §4.3: bir PaymentOrder cycle birden
-// fazla paymentDate içerebilir → 2+ Stoppage rows possible. Each row is
-// inserted independently (no aggregation) because Trendyol's `id` is unique
-// per row.
+// Stopaj %1 oranındadır; matrah per-order ESTIMATE'te NET satış (saleGross −
+// saleVat), bkz. estimate-on-order-create.ts. Bu settlement satırı ise
+// Trendyol'un faturaladığı `debt` tutarını doğrudan denetim olarak kaydeder
+// (matrah seçmez). Research §4.3: bir PaymentOrder cycle birden fazla
+// paymentDate içerebilir → 2+ Stoppage rows possible. Each row is inserted
+// independently (no aggregation) because Trendyol's `id` is unique per row.
 //
-// KDV: zero. GROSS CONVENTION (2026-06-16, Bölüm E Task 20): debt doğrudan
-// amountGross; vatRate=0. Net-split kaldırıldı (KDV = 0 zaten).
+// KDV: stopaj YAPISAL olarak KDV taşımaz (vergi tevkifatı) → vatRate verilmez;
+// insertOrgPeriodFee 0 yazar. GROSS CONVENTION (2026-06-16, Bölüm E Task 20):
+// debt doğrudan amountGross; net-split kaldırıldı (KDV = 0 zaten).
 
 import { Decimal } from 'decimal.js';
 
@@ -21,8 +22,6 @@ import type { TrendyolFinancialTransaction } from '@pazarsync/marketplace';
 
 import { insertOrgPeriodFee } from './org-period-fee';
 import type { HandleSettlementResult } from './sale';
-
-const ZERO = new Decimal('0');
 
 export async function handleStoppage(
   storeId: string,
@@ -35,7 +34,7 @@ export async function handleStoppage(
     organizationId,
     feeType: 'STOPPAGE',
     row,
-    amounts: { amountGross: new Decimal(row.debt), vatRate: ZERO },
+    amounts: { amountGross: new Decimal(row.debt) },
     tx,
     logScope: 'settlements.stoppage',
   });

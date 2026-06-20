@@ -10,10 +10,8 @@ import { Decimal } from 'decimal.js';
 
 import type { ProfitInput, ProfitInputFee, ProfitMoneyPair } from './profit-formula';
 
-const ZERO = new Decimal(0);
-
 const grossToVat = (gross: Decimal, rate: Decimal): Decimal =>
-  rate.isZero() ? ZERO : gross.mul(rate).div(new Decimal(100).add(rate));
+  rate.isZero() ? new Decimal(0) : gross.mul(rate).div(new Decimal(100).add(rate));
 
 export type ReturnFeeType =
   | 'REFUND_DEDUCTION'
@@ -43,11 +41,11 @@ const ACTUAL_SOURCES = new Set<ReturnFeeRow['source']>(['SETTLEMENT', 'CARGO_INV
 
 export function resolveReturnLegs(rows: ReturnFeeRow[]): ResolvedReturnLegs {
   const out: ResolvedReturnLegs = {
-    REFUND_DEDUCTION: { gross: ZERO, vat: ZERO },
-    COMMISSION_REFUND: { gross: ZERO, vat: ZERO },
-    COST_RETURN: { gross: ZERO, vat: ZERO },
-    RETURN_SHIPPING: { gross: ZERO, vat: ZERO },
-    STOPPAGE_REFUND: { gross: ZERO, vat: ZERO },
+    REFUND_DEDUCTION: { gross: new Decimal(0), vat: new Decimal(0) },
+    COMMISSION_REFUND: { gross: new Decimal(0), vat: new Decimal(0) },
+    COST_RETURN: { gross: new Decimal(0), vat: new Decimal(0) },
+    RETURN_SHIPPING: { gross: new Decimal(0), vat: new Decimal(0) },
+    STOPPAGE_REFUND: { gross: new Decimal(0), vat: new Decimal(0) },
   };
   for (const type of RETURN_FEE_TYPES) {
     const ofType = rows.filter((r) => r.feeType === type);
@@ -55,8 +53,8 @@ export function resolveReturnLegs(rows: ReturnFeeRow[]): ResolvedReturnLegs {
     const chosen = ofType.filter((r) =>
       hasActual ? ACTUAL_SOURCES.has(r.source) : r.source === 'ESTIMATE',
     );
-    let gross = ZERO;
-    let vat = ZERO;
+    let gross = new Decimal(0);
+    let vat = new Decimal(0);
     for (const r of chosen) {
       gross = gross.add(r.amountGross);
       vat = vat.add(grossToVat(r.amountGross, r.vatRate));

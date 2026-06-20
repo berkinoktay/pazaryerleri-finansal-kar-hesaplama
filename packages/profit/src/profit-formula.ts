@@ -14,8 +14,6 @@
 
 import { Decimal } from 'decimal.js';
 
-const ZERO = new Decimal(0);
-
 export interface ProfitMoneyPair {
   gross: Decimal;
   vat: Decimal;
@@ -66,14 +64,14 @@ export interface ProfitBreakdown {
  *               − Σ(DEBIT feeGross) + Σ(CREDIT feeGross) − stoppage − netVat
  */
 export function computeProfit(input: ProfitInput): ProfitBreakdown {
-  let shippingGross = ZERO;
-  let shippingVat = ZERO;
-  let platformServiceGross = ZERO;
-  let platformServiceVat = ZERO;
-  let debitVat = ZERO;
-  let creditVat = ZERO;
-  let debitGross = ZERO;
-  let creditGross = ZERO;
+  let shippingGross = new Decimal(0);
+  let shippingVat = new Decimal(0);
+  let platformServiceGross = new Decimal(0);
+  let platformServiceVat = new Decimal(0);
+  let debitVat = new Decimal(0);
+  let creditVat = new Decimal(0);
+  let debitGross = new Decimal(0);
+  let creditGross = new Decimal(0);
 
   for (const fee of input.fees) {
     if (fee.type === 'SHIPPING') {
@@ -113,7 +111,7 @@ export function computeProfit(input: ProfitInput): ProfitBreakdown {
 
   return {
     listGross: input.sale.gross, // adapter override eder (BuildProfitBreakdownInput'tan items üzerinden)
-    sellerDiscountGross: ZERO, // adapter override eder
+    sellerDiscountGross: new Decimal(0), // adapter override eder
     saleGross: input.sale.gross,
     saleVat: input.sale.vat,
     costGross: input.cost.gross,
