@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -58,9 +58,6 @@ async function truncateAll(): Promise<void> {
        fx_rates,
        expenses,
        own_shipping_tariffs,
-       shipping_desi_tariffs,
-       shipping_barem_tariffs,
-       shipping_carriers,
        member_store_access,
        stores,
        organization_members,
@@ -80,25 +77,14 @@ async function truncateAll(): Promise<void> {
 }
 
 /**
- * Seeds a carrier + a desi tariff at desi=5 (cargoDeci=5 -> ceil=5 -> 50.00 net).
- * Returns the carrier id.
+ * Returns the seeded SENDEOMP carrier id. Shipping reference data is a READ-ONLY
+ * fixture seeded once by globalSetup (@pazarsync/db/test-support) — tests never
+ * create or truncate it. Both tenants share this carrier (carrier is
+ * platform-scoped, not tenant-scoped). cargoDeci=5 -> ceil(5)=5 -> SENDEOMP desi
+ * tariff at desi=5 net 121.99.
  */
-async function seedCarrierWithDesiTariff(): Promise<string> {
-  const carrier = await prisma.shippingCarrier.create({
-    data: {
-      platform: 'TRENDYOL',
-      externalId: Math.floor(Math.random() * 1_000_000),
-      code: `TEST-CARRIER-${randomUUID().slice(0, 6)}`,
-      displayName: 'Test Kargo',
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
-    },
-  });
-
-  await prisma.shippingDesiTariff.create({
-    data: { carrierId: carrier.id, desi: 5, priceNet: new Decimal('50.00') },
-  });
-
+async function getSeededCarrierId(): Promise<string> {
+  const carrier = await prisma.shippingCarrier.findFirstOrThrow({ where: { code: 'SENDEOMP' } });
   return carrier.id;
 }
 
@@ -284,14 +270,6 @@ describe('estimateReturnOnClaim — tenant isolation', () => {
     await truncateAll();
   });
 
-  // CI paylaşılan DB: bıraktığımız custom carrier/seed satırları sonraki suite'e (api list-carriers) sızmasın diye suite sonunda temizle.
-  afterAll(async () => {
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM shipping_desi_tariffs WHERE carrier_id IN (SELECT id FROM shipping_carriers WHERE code LIKE 'TEST-%')`,
-    );
-    await prisma.$executeRawUnsafe(`DELETE FROM shipping_carriers WHERE code LIKE 'TEST-%'`);
-  });
-
   /**
    * Two tenants (A and B) each have an eligible order + accepted claim.
    * Only org A's order is processed; org B's data must remain untouched.
@@ -302,7 +280,7 @@ describe('estimateReturnOnClaim — tenant isolation', () => {
   it('only org A gets return-leg ESTIMATE rows; org B remains untouched', async () => {
     // ---- Seed shared platform data -------------------------------------------
     await seedFeeDefinitions();
-    const carrierId = await seedCarrierWithDesiTariff();
+    const carrierId = await getSeededCarrierId();
 
     // ---- Seed org A ----------------------------------------------------------
     const tenantA = await createTenantContext(carrierId);
@@ -341,8 +319,8 @@ describe('estimateReturnOnClaim — tenant isolation', () => {
     expect(byTypeA.get('REFUND_DEDUCTION')?.amountGross.toFixed(2)).toBe('1100.00');
     expect(byTypeA.get('COMMISSION_REFUND')?.amountGross.toFixed(2)).toBe('110.00');
     expect(byTypeA.get('COST_RETURN')?.amountGross.toFixed(2)).toBe('500.00');
-    // RETURN_SHIPPING estimate: net 50.00 * 1.2 (VAT 20%) = 60.00
-    expect(byTypeA.get('RETURN_SHIPPING')?.amountGross.toFixed(2)).toBe('60.00');
+    // RETURN_SHIPPING estimate: SENDEOMP desi=5 net 121.99 * 1.2 (VAT 20%) = 146.39
+    expect(byTypeA.get('RETURN_SHIPPING')?.amountGross.toFixed(2)).toBe('146.39');
 
     const orderA = await prisma.order.findUniqueOrThrow({ where: { id: orderAId } });
     expect(orderA.estimatedNetProfit).not.toBeNull();

@@ -13,7 +13,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 
@@ -51,9 +51,6 @@ async function truncateAll(): Promise<void> {
        fx_rates,
        expenses,
        own_shipping_tariffs,
-       shipping_desi_tariffs,
-       shipping_barem_tariffs,
-       shipping_carriers,
        member_store_access,
        stores,
        organization_members,
@@ -73,27 +70,15 @@ async function truncateAll(): Promise<void> {
 }
 
 /**
- * Seeds a carrier + a desi tariff at desi=5 and points the store at it, so the
- * RETURN_SHIPPING estimate resolves (desi-based path, no barem). Returns the
- * carrier id so the store can reference it as defaultShippingCarrier.
+ * Returns the seeded SENDEOMP carrier id so the store can reference it as
+ * defaultShippingCarrier. Shipping reference data is a READ-ONLY fixture seeded
+ * once by globalSetup (@pazarsync/db/test-support) — tests never create or
+ * truncate it. The RETURN_SHIPPING estimate resolves via the desi path
+ * (estimateReturnOnClaim passes applyBarem:false): cargoDeci=5 → ceil(5)=5 →
+ * SENDEOMP desi tariff at desi=5 net 121.99.
  */
-async function seedCarrierWithDesiTariff(): Promise<string> {
-  const carrier = await prisma.shippingCarrier.create({
-    data: {
-      platform: 'TRENDYOL',
-      externalId: Math.floor(Math.random() * 1_000_000),
-      code: `TEST-CARRIER-${randomUUID().slice(0, 6)}`,
-      displayName: 'Test Kargo',
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
-    },
-  });
-
-  // cargoDeci=5 → ceil(5)=5 → desi tariff at desi=5 net 50.00.
-  await prisma.shippingDesiTariff.create({
-    data: { carrierId: carrier.id, desi: 5, priceNet: new Decimal('50.00') },
-  });
-
+async function getSeededCarrierId(): Promise<string> {
+  const carrier = await prisma.shippingCarrier.findFirstOrThrow({ where: { code: 'SENDEOMP' } });
   return carrier.id;
 }
 
@@ -113,7 +98,7 @@ async function createSeedContext(): Promise<{ orgId: string; storeId: string }> 
     data: { organizationId: org.id, userId, role: 'OWNER' },
   });
 
-  const carrierId = await seedCarrierWithDesiTariff();
+  const carrierId = await getSeededCarrierId();
 
   const store = await prisma.store.create({
     data: {
@@ -306,14 +291,6 @@ describe('estimateReturnOnClaim', () => {
     await truncateAll();
   });
 
-  // CI paylaşılan DB: bıraktığımız custom carrier/seed satırları sonraki suite'e (api list-carriers) sızmasın diye suite sonunda temizle.
-  afterAll(async () => {
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM shipping_desi_tariffs WHERE carrier_id IN (SELECT id FROM shipping_carriers WHERE code LIKE 'TEST-%')`,
-    );
-    await prisma.$executeRawUnsafe(`DELETE FROM shipping_carriers WHERE code LIKE 'TEST-%'`);
-  });
-
   /**
    * Full single-unit return: one accepted claim item. After the call there must
    * be EXACTLY 4 ESTIMATE return-leg OrderFee rows (one per fee_type) and the
@@ -348,11 +325,12 @@ describe('estimateReturnOnClaim', () => {
     expect(byType.get('COST_RETURN')?.direction).toBe('CREDIT');
     expect(byType.get('RETURN_SHIPPING')?.direction).toBe('DEBIT');
 
-    // Gross amounts: refund=1100, commission=110, cost=500, ret-shipping=50×1.2=60.
+    // Gross amounts: refund=1100, commission=110, cost=500, ret-shipping=121.99×1.2=146.39
+    // (SENDEOMP desi=5 net 121.99, RETURN_SHIPPING VAT 20%).
     expect(byType.get('REFUND_DEDUCTION')?.amountGross.toFixed(2)).toBe('1100.00');
     expect(byType.get('COMMISSION_REFUND')?.amountGross.toFixed(2)).toBe('110.00');
     expect(byType.get('COST_RETURN')?.amountGross.toFixed(2)).toBe('500.00');
-    expect(byType.get('RETURN_SHIPPING')?.amountGross.toFixed(2)).toBe('60.00');
+    expect(byType.get('RETURN_SHIPPING')?.amountGross.toFixed(2)).toBe('146.39');
 
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.estimatedNetProfit).not.toBeNull();

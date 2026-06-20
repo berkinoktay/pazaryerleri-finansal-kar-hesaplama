@@ -17,5 +17,9 @@ export default defineConfig({
     fileParallelism: false, // integration tests share one DB
     globals: false,
     environment: 'node',
+    // Seed the shipping reference fixture once (carriers + tariffs) so the claims
+    // return-estimate handler can look up the seeded SENDEOMP carrier. Read-only
+    // fixture, never truncated. Skipped on unit-only runs via PAZARSYNC_SKIP_RESEED.
+    globalSetup: [path.resolve(here, './tests/global-setup.ts')],
   },
 });

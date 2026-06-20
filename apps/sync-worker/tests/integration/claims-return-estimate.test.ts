@@ -12,10 +12,8 @@
 // Requires: `supabase start` + `pnpm db:push`.
 // Run: pnpm --filter sync-worker test:integration -- claims-return-estimate
 
-import { randomUUID } from 'node:crypto';
-
 import { Decimal } from 'decimal.js';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -94,26 +92,14 @@ async function seedFeeDefinitions(): Promise<void> {
 }
 
 /**
- * Creates a ShippingCarrier and a DesiTariff at desi=5 so RETURN_SHIPPING
- * can be estimated. Returns the carrierId for store.defaultShippingCarrierId.
+ * Returns the seeded SENDEOMP carrier id for store.defaultShippingCarrierId, so
+ * RETURN_SHIPPING can be estimated. Shipping reference data is a READ-ONLY
+ * fixture seeded once by globalSetup (@pazarsync/db/test-support) — tests never
+ * create or truncate it. cargoDeci=5 → ceil(5)=5 → SENDEOMP desi tariff at
+ * desi=5 (the exact amount is not asserted here; only the leg's presence is).
  */
-async function seedCarrierWithDesiTariff(): Promise<string> {
-  const carrier = await prisma.shippingCarrier.create({
-    data: {
-      platform: 'TRENDYOL',
-      externalId: Math.floor(Math.random() * 1_000_000),
-      code: `TEST-RET-${randomUUID().slice(0, 6)}`,
-      displayName: 'Test Kargo (Return Estimate)',
-      supportsBaremDestek: true,
-      maxBaremDesi: 10,
-    },
-  });
-
-  // cargoDeci=5 → ceil(5)=5 → desi tariff at desi=5 net 50.00.
-  await prisma.shippingDesiTariff.create({
-    data: { carrierId: carrier.id, desi: 5, priceNet: new Decimal('50.00') },
-  });
-
+async function getSeededCarrierId(): Promise<string> {
+  const carrier = await prisma.shippingCarrier.findFirstOrThrow({ where: { code: 'SENDEOMP' } });
   return carrier.id;
 }
 
@@ -123,7 +109,7 @@ async function buildScenario(): Promise<ScenarioCtx> {
   await createMembership(org.id, user.id);
 
   await seedFeeDefinitions();
-  const carrierId = await seedCarrierWithDesiTariff();
+  const carrierId = await getSeededCarrierId();
 
   const credentials = encryptCredentials({ supplierId: '5001', apiKey: 'k', apiSecret: 's' });
   const store = await prisma.store.create({
@@ -255,18 +241,6 @@ describe('processClaimsChunk — return estimate backstop (Task 7)', () => {
 
   beforeEach(async () => {
     await truncateAll();
-  });
-
-  // CI paylaşılan DB: bu test her senaryoda TEST-RET-* ShippingCarrier yaratıyor,
-  // ama api truncateAll'ı shipping_carriers'ı SİLMEZ (reference data) → carrier'lar
-  // birikip sonraki suite'in (api list-carriers) "tam 10 carrier" beklentisine sızar.
-  // Suite sonunda temizle. stores.defaultShippingCarrierId FK'sı onDelete:SetNull →
-  // carrier silinince store referansı null'lanır; önce desi tariff'leri (carrier FK) silinir.
-  afterAll(async () => {
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM shipping_desi_tariffs WHERE carrier_id IN (SELECT id FROM shipping_carriers WHERE code LIKE 'TEST-%')`,
-    );
-    await prisma.$executeRawUnsafe(`DELETE FROM shipping_carriers WHERE code LIKE 'TEST-%'`);
   });
 
   it('fires estimateReturnOnClaim when the synced claim has an Accepted item — writes REFUND_DEDUCTION ESTIMATE fee', async () => {
