@@ -1164,6 +1164,20 @@
           "shippingVat": {
             "type": "string"
           },
+          "outboundShippingGross": {
+            "type": "string",
+            "description": "Gidiş (forward) kargo brüt — kargo collapsible alt satırı. shippingGross = outbound + return."
+          },
+          "outboundShippingVat": {
+            "type": "string"
+          },
+          "returnShippingGross": {
+            "type": "string",
+            "description": "İade (return) kargo brüt. '0.00' → iade kargosu yok."
+          },
+          "returnShippingVat": {
+            "type": "string"
+          },
           "platformServiceGross": {
             "type": "string"
           },
@@ -1207,6 +1221,10 @@
           "commissionVat",
           "shippingGross",
           "shippingVat",
+          "outboundShippingGross",
+          "outboundShippingVat",
+          "returnShippingGross",
+          "returnShippingVat",
           "platformServiceGross",
           "platformServiceVat",
           "stoppage",
