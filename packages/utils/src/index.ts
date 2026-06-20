@@ -1,4 +1,5 @@
 export { formatCurrency, formatNumber, formatPercent } from './currency';
+export { requireEnv } from './env';
 export {
   APP_TIME_ZONE,
   businessZoneEpochToInstant,

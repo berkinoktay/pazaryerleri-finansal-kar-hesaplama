@@ -11,6 +11,9 @@
  * catch anything the webhook missed (delivery failure, our downtime).
  */
 
+import { syncLog } from '@pazarsync/sync-core';
+import { requireEnv } from '@pazarsync/utils';
+
 interface SyncEnv {
   historicalBackfillDays: number;
   safetyNetHours: number;
@@ -47,4 +50,39 @@ export function readSyncEnv(): SyncEnv {
       8,
     ),
   };
+}
+
+// Worker-specific required vars — deliberately NARROWER than apps/api's:
+// the worker uses Prisma (DATABASE_URL) + credential decryption
+// (ENCRYPTION_KEY) + the Trendyol adapter base URLs, but never touches
+// SUPABASE_URL / SUPABASE_SECRET_KEY (no Supabase Auth or JS client calls).
+const REQUIRED_ENV = [
+  'DATABASE_URL',
+  'ENCRYPTION_KEY',
+  'TRENDYOL_PROD_BASE_URL',
+  'TRENDYOL_SANDBOX_BASE_URL',
+] as const;
+
+/**
+ * Fail fast at worker boot if a required env var is missing. Called first
+ * thing in `main()` so a misconfigured deployment (or a forgotten local
+ * `.env`) surfaces immediately with a clear message, instead of throwing a
+ * Prisma/crypto error deep inside the first sync.
+ *
+ * `PUBLIC_API_BASE_URL` is recommended-not-required: without it the webhook
+ * reconcile tick is disabled (the hourly cron is the safety net), so a
+ * missing value is a one-time warning rather than a boot failure.
+ */
+export function validateRequiredEnv(): void {
+  for (const key of REQUIRED_ENV) {
+    requireEnv(key);
+  }
+  const publicApiBaseUrl = process.env['PUBLIC_API_BASE_URL'];
+  if (publicApiBaseUrl === undefined || publicApiBaseUrl.length === 0) {
+    syncLog.warn('worker.config.webhook-disabled', {
+      hint:
+        'PUBLIC_API_BASE_URL is not set — Trendyol webhook reconcile is disabled ' +
+        '(the hourly cron remains the safety net). Set it to your public https URL to enable webhooks.',
+    });
+  }
 }

@@ -36,6 +36,8 @@ import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
 import { processVariantResolution } from './handlers/variant-resolution';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
+import { dbConnectivity } from './lib/db-connectivity';
+import { validateRequiredEnv } from './lib/env';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
 import { errorMessageOf, handleRunError } from './run-error';
@@ -76,6 +78,21 @@ function isShuttingDown(): boolean {
 async function main(): Promise<void> {
   syncLog.info('worker.starting', { workerId: WORKER_ID });
 
+  // Fail fast on a misconfigured environment (e.g. forgotten workspace-root
+  // .env) with one clear message, instead of a Prisma/crypto error deep
+  // inside the first sync. Exit non-zero so a supervisor restarts after the
+  // operator fixes the config.
+  try {
+    validateRequiredEnv();
+  } catch (err) {
+    syncLog.error('worker.config-invalid', {
+      workerId: WORKER_ID,
+      errorMessage: err instanceof Error ? err.message : String(err),
+      hint: 'Fix the environment configuration (workspace-root .env) and restart the worker.',
+    });
+    process.exit(1);
+  }
+
   process.on('SIGTERM', () => {
     shuttingDown = true;
     syncLog.info('worker.shutdown.requested', { workerId: WORKER_ID, signal: 'SIGTERM' });
@@ -93,19 +110,13 @@ async function main(): Promise<void> {
         }
       })
       .catch((err: unknown) => {
-        syncLog.error('watchdog.error', {
-          workerId: WORKER_ID,
-          errorMessage: err instanceof Error ? err.message : String(err),
-        });
+        dbConnectivity.logBackgroundError('watchdog.error', err, { workerId: WORKER_ID });
       });
   }, WATCHDOG_INTERVAL_MS);
 
   const bufferPromoteTimer = setInterval(() => {
     void processBufferPromote().catch((err: unknown) => {
-      syncLog.error('buffer.promote-tick-error', {
-        workerId: WORKER_ID,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
+      dbConnectivity.logBackgroundError('buffer.promote-tick-error', err, { workerId: WORKER_ID });
     });
     // Past-day graduation: PENDING entries whose calendar day has ended are
     // graduated into `orders` as PROFIT-EXCLUDED (COST_DEADLINE_MISSED, spec
@@ -113,10 +124,7 @@ async function main(): Promise<void> {
     // profit fields stay permanently frozen.
     // Separate catch so a flush hiccup never stops the promote tick.
     void processPastDayBufferFlush().catch((err: unknown) => {
-      syncLog.error('buffer.flush-tick-error', {
-        workerId: WORKER_ID,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
+      dbConnectivity.logBackgroundError('buffer.flush-tick-error', err, { workerId: WORKER_ID });
     });
   }, BUFFER_PROMOTE_INTERVAL_MS);
 
@@ -125,16 +133,12 @@ async function main(): Promise<void> {
   // the interval. Wrapped like buffer-promote so a Trendyol/DB hiccup never
   // crashes the worker.
   void processWebhookReconcile().catch((err: unknown) => {
-    syncLog.error('webhook.reconcile-boot-error', {
-      workerId: WORKER_ID,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
+    dbConnectivity.logBackgroundError('webhook.reconcile-boot-error', err, { workerId: WORKER_ID });
   });
   const webhookReconcileTimer = setInterval(() => {
     void processWebhookReconcile().catch((err: unknown) => {
-      syncLog.error('webhook.reconcile-tick-error', {
+      dbConnectivity.logBackgroundError('webhook.reconcile-tick-error', err, {
         workerId: WORKER_ID,
-        errorMessage: err instanceof Error ? err.message : String(err),
       });
     });
   }, WEBHOOK_RECONCILE_INTERVAL_MS);
@@ -144,17 +148,11 @@ async function main(): Promise<void> {
   // on the interval. Wrapped like the other ticks so a vendor/DB hiccup never
   // crashes the worker.
   void processVariantResolution().catch((err: unknown) => {
-    syncLog.error('resolution.boot-error', {
-      workerId: WORKER_ID,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
+    dbConnectivity.logBackgroundError('resolution.boot-error', err, { workerId: WORKER_ID });
   });
   const variantResolutionTimer = setInterval(() => {
     void processVariantResolution().catch((err: unknown) => {
-      syncLog.error('resolution.tick-error', {
-        workerId: WORKER_ID,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
+      dbConnectivity.logBackgroundError('resolution.tick-error', err, { workerId: WORKER_ID });
     });
   }, VARIANT_RESOLUTION_INTERVAL_MS);
 
@@ -164,6 +162,9 @@ async function main(): Promise<void> {
   while (!shuttingDown) {
     try {
       const claimed = await tryClaimNext(WORKER_ID);
+      // A poll that returns (claim or null) proves the DB is reachable —
+      // clears any standing "db.unreachable" state with one "reconnected" line.
+      dbConnectivity.reportDbHealthy();
       if (claimed === null) {
         const now = Date.now();
         if (now - lastIdleLogAt >= IDLE_LOG_THROTTLE_MS) {
@@ -189,8 +190,13 @@ async function main(): Promise<void> {
           syncLogId: claimed.id,
           syncType: claimed.syncType,
         });
+        const runStartedAt = Date.now();
         await runSyncToCompletion(claimed, REGISTRY, isShuttingDown);
-        syncLog.info('worker.run.complete', { workerId: WORKER_ID, syncLogId: claimed.id });
+        syncLog.info('worker.run.complete', {
+          workerId: WORKER_ID,
+          syncLogId: claimed.id,
+          durationMs: Date.now() - runStartedAt,
+        });
       } catch (err) {
         syncLog.error('worker.run.error', {
           workerId: WORKER_ID,
@@ -202,12 +208,11 @@ async function main(): Promise<void> {
       }
     } catch (loopErr) {
       // Outer catch protects against systemic failures (DB connection
-      // dropped, malformed claim row, etc.). Back off the full max
-      // window so we do not hot-spin while the underlying issue resolves.
-      syncLog.error('worker.outer.error', {
-        workerId: WORKER_ID,
-        errorMessage: loopErr instanceof Error ? loopErr.message : String(loopErr),
-      });
+      // dropped, malformed claim row, etc.). DB-unreachable errors collapse
+      // into a single throttled connectivity warning; anything else logs
+      // loudly. Either way, back off the full max window so we do not
+      // hot-spin while the underlying issue resolves.
+      dbConnectivity.logBackgroundError('worker.outer.error', loopErr, { workerId: WORKER_ID });
       await sleep(POLL_BACKOFF_MAX_MS);
     }
   }
