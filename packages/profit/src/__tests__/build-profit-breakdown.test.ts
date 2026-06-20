@@ -48,6 +48,9 @@ describe('buildProfitBreakdown — GROSS view', () => {
     expect(v.saleGross).toBe('200.00');
     expect(v.costGross).toBe('60.00'); // 30 × 2
     expect(v.shippingGross).toBe('10.00');
+    // İade yok → outbound == toplam, return == 0 (frontend düz "Kargo" satırı çizer).
+    expect(v.outboundShippingGross).toBe('10.00');
+    expect(v.returnShippingGross).toBe('0.00');
     expect(v.stoppage).toBe('0.00'); // STOPPAGE fee yok → '0.00'
     expect(v.netProfit).toBe('56.00');
     expect(v.saleMarginPct).toBe('28.00');
@@ -322,6 +325,16 @@ describe('buildProfitBreakdown — GROSS view', () => {
     expect(v.costGross).toBe('0.00');
     expect(v.commissionGross).toBe('0.00');
     expect(v.shippingGross).toBe('311.98'); // 155.99 + 155.99
+    // YENİ: toplam korunur, gidiş/iade bileşenleri ayrı servis edilir.
+    expect(v.outboundShippingGross).toBe('155.99'); // forward SHIPPING (ESTIMATE)
+    expect(v.returnShippingGross).toBe('155.99'); // RETURN_SHIPPING (CARGO_INVOICE)
+    // Bileşen toplamı = toplam (backend invariant; frontend türetmez).
+    expect(new Decimal(v.outboundShippingGross).add(v.returnShippingGross).toFixed(2)).toBe(
+      v.shippingGross,
+    );
+    expect(new Decimal(v.outboundShippingVat).add(v.returnShippingVat).toFixed(2)).toBe(
+      v.shippingVat,
+    );
   });
 
   it('VAT derived from gross × rate/(100+rate)', () => {
