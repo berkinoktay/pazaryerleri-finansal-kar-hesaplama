@@ -59,3 +59,4 @@ tmp/
 
 # docs/ personal knowledge base (research, plans, integration notes) — local-only
 docs/
+apps/sync-worker/scripts/

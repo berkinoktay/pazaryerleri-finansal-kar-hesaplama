@@ -486,15 +486,14 @@ describe('settlement handlers', () => {
       expect(costReturn.amountGross.toFixed(2)).toBe('48.00');
       expect(costReturn.vatRate.toFixed(2)).toBe('20.00');
 
-      // Orphan-fee fix: the handler refreshed the ALREADY-SETTLED figure
-      // itself (fixture pre-sets 50.00 as the payment cycle's output) —
-      // no PaymentOrder re-poll needed. Under GROSS convention, recompute uses
-      // saleGross (HAK EDİLEN) as base — return legs don't flow into computeProfit
-      // input, so settled profit is recomputed from the same base data.
-      // Fixture: saleGross=120, cost=48, commission=12, no shipping/psf/stoppage.
-      // netVat = 20 - 8 - 2 = 10; netProfit = 120 - 48 - 12 - 10 = 50.
+      // Orphan-fee fix: the handler refreshes the ALREADY-SETTLED figure itself
+      // (fixture pre-sets 50.00 as the payment cycle's output) — no PaymentOrder
+      // re-poll needed. İade-kâra-yansıtma (2026-06): recompute artık iade
+      // bacaklarını computeProfit'e KATLAR (per-leg prefer-actual). TAM iade →
+      // sale 120-120=0, cost 48-48=0, commission 12-12=0; kalıcı kargo/PSF/stopaj
+      // yok → netVat 0, netProfit 0. (Eskiden iade fold edilmiyordu → 50.)
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-      expect(order.settledNetProfit?.toFixed(2)).toBe('50.00');
+      expect(order.settledNetProfit?.toFixed(2)).toBe('0.00');
     });
 
     it('qty=2 line, ONE unit returned — trio amounts are per-unit (row.debt/commissionAmount); return legs use row values directly (NOT × quantity)', async () => {
@@ -529,11 +528,12 @@ describe('settlement handlers', () => {
       expect(byType.get('COST_RETURN')?.amountGross.toFixed(2)).toBe('48.00');
       expect(byType.get('COST_RETURN')?.vatRate.toFixed(2)).toBe('20.00');
 
-      // recomputeSettledProfit runs on saleGross base (qty=2 fixture):
-      // saleGross=240, saleVat=40, costGross=96 (48×2), commGross=24 (12×2)
-      // netVat = 40 - 16 - 4 = 20; netProfit = 240 - 96 - 24 - 20 = 100.
+      // İade-kâra-yansıtma (2026-06): recompute iade bacaklarını fold eder.
+      // qty=2 fixture (saleGross=240/cost=96/comm=24), 1 birim iade →
+      // sale 240-120=120, cost 96-48=48, comm 24-12=12; netVat 20-8-2=10;
+      // netProfit 120-48-12-10 = 50 (yarısı iade → yarı kâr; eskiden 100).
       const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-      expect(order.settledNetProfit?.toFixed(2)).toBe('100.00');
+      expect(order.settledNetProfit?.toFixed(2)).toBe('50.00');
     });
 
     it('skips the commission credit (loudly) when the row carries no commissionAmount', async () => {

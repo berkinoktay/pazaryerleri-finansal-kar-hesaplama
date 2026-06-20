@@ -212,7 +212,9 @@ export async function handleReturn(
         direction: 'DEBIT',
         amountGross: debtGross,
         vatRate: refundVatRate,
-        displayName: 'İade',
+        // estimate (estimate-return-on-claim) + i18n types.REFUND_DEDUCTION ile AYNI etiket
+        // ("İade kesintisi") — zaman çizgisinde estimate↔hakediş satırları tek isimle görünür.
+        displayName: 'İade kesintisi',
         trendyolTransactionId,
         orderClaimItemId,
         externalRef,

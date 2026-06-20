@@ -218,7 +218,9 @@ function SignedAmount({
   const magnitude = isNegative ? value.slice(1) : value;
   const showMinus = positive ? isNegative : !isNegative;
   return (
-    <span className="tabular-nums">
+    // whitespace-nowrap: işaret glyph'i (−/+) değerden ayrı satıra KAYMASIN
+    // (dar kolonda "−" tek başına alt satıra düşüp "—" gibi görünüyordu).
+    <span className="whitespace-nowrap tabular-nums">
       {showMinus ? '−' : '+'}
       <Currency value={magnitude} />
     </span>

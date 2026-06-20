@@ -84,6 +84,7 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 │   ├── SECURITY.md       # CRITICAL: Tenant isolation, encryption, auth rules
 │   ├── ARCHITECTURE.md   # System architecture, DB schema, API design
 │   ├── PRODUCT_VISION.md # Product vision and requirements
+│   ├── business-rules/   # Durable domain rules (e.g. profit-formula.md) — valid until the marketplace changes its system
 │   └── integrations/
 │       └── trendyol/     # Trendyol API documentation (Turkish)
 ├── turbo.json
@@ -95,18 +96,19 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 
 ## Documentation References
 
-| Document                 | Path                            | When to Read                                                                                     |
-| ------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------ |
-| **Security Rules**       | **`docs/SECURITY.md`**          | **MUST READ before touching user data, credentials, or cross-tenant code**                       |
-| Architecture & DB Schema | `docs/ARCHITECTURE.md`          | Before designing new features or modifying the DB                                                |
-| Product Vision           | `docs/PRODUCT_VISION.md`        | Before making UX or feature scope decisions                                                      |
-| Trendyol API Docs        | `docs/integrations/trendyol/`   | **MUST READ** before any Trendyol integration work                                               |
-| Frontend Rules           | `apps/web/CLAUDE.md`            | When working in `apps/web/`                                                                      |
-| Backend Rules            | `apps/api/CLAUDE.md`            | When working in `apps/api/`                                                                      |
-| API Changelog            | `docs/api-changelog.md`         | When changing any route — log under `[Unreleased]`                                               |
-| Design Plans             | `docs/plans/`                   | When designing or implementing a non-trivial feature (shipped plans under `docs/plans/archive/`) |
-| Testing Patterns         | `docs/TESTING.md`               | When writing OR running tests                                                                    |
-| RLS Policies             | `supabase/sql/rls-policies.sql` | When adding a tenant-scoped table or changing tenant access patterns                             |
+| Document                 | Path                                    | When to Read                                                                                                                                             |
+| ------------------------ | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Security Rules**       | **`docs/SECURITY.md`**                  | **MUST READ before touching user data, credentials, or cross-tenant code**                                                                               |
+| Architecture & DB Schema | `docs/ARCHITECTURE.md`                  | Before designing new features or modifying the DB                                                                                                        |
+| Product Vision           | `docs/PRODUCT_VISION.md`                | Before making UX or feature scope decisions                                                                                                              |
+| Trendyol API Docs        | `docs/integrations/trendyol/`           | **MUST READ** before any Trendyol integration work                                                                                                       |
+| Profit & Fee Rules       | `docs/business-rules/profit-formula.md` | **MUST READ** before touching the profit engine, fees, commission, VAT, returns, or stopaj — authoritative Net Kâr formula (durable, marketplace-driven) |
+| Frontend Rules           | `apps/web/CLAUDE.md`                    | When working in `apps/web/`                                                                                                                              |
+| Backend Rules            | `apps/api/CLAUDE.md`                    | When working in `apps/api/`                                                                                                                              |
+| API Changelog            | `docs/api-changelog.md`                 | When changing any route — log under `[Unreleased]`                                                                                                       |
+| Design Plans             | `docs/plans/`                           | When designing or implementing a non-trivial feature (shipped plans under `docs/plans/archive/`)                                                         |
+| Testing Patterns         | `docs/TESTING.md`                       | When writing OR running tests                                                                                                                            |
+| RLS Policies             | `supabase/sql/rls-policies.sql`         | When adding a tenant-scoped table or changing tenant access patterns                                                                                     |
 
 **Trendyol integration:** Before writing any Trendyol-related code, read the relevant files under `docs/integrations/trendyol/`. Key files:
 

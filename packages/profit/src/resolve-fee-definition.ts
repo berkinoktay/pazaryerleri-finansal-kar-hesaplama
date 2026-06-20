@@ -60,15 +60,20 @@ export async function resolveFeeDefinition(tx: Prisma.TransactionClient, args: R
 }
 
 /**
- * Platform Hizmet Bedeli muafiyet kuralı (design §3.7):
- *   - status === 'RETURNED' → PSF = 0
+ * Platform Hizmet Bedeli muafiyet kuralı:
  *   - micro === true (Trendyol Yurt Dışı Aracılığı) → PSF = 0
  *   - Tüm OrderItem.productVariant.isDigital === true → PSF = 0
+ *
+ * İADE NOTU (Berkin kararı 2026-06-20): RETURNED durumu PSF'yi MUAF ETMEZ.
+ * PSF siparişin ilk anında BİR KEZ kesilir ve sipariş iade olsa da x1 kalır
+ * (asla x2 olmaz — tek PLATFORM_SERVICE ESTIMATE satırı, skip-if-exists). Otoritatif
+ * kuraldaki "iade paketinde PSF uygulanmaz" = iade paketi İKİNCİ bir PSF doğurmaz;
+ * orijinal x1 durur. Eski `status === 'RETURNED' → 0` dalı bu kuralla çelişiyordu
+ * (sıfırdan-RETURNED siparişte PSF'yi yanlışlıkla siliyordu) → kaldırıldı. profit-formula.md §2.4.
  *
  * `applyEstimateOnOrderCreate` PSF OrderFee yazmadan önce kontrol eder.
  */
 interface OrderForPsfExempt {
-  status: string;
   micro: boolean;
   items: Array<{
     productVariant: { isDigital: boolean } | null;
@@ -76,7 +81,6 @@ interface OrderForPsfExempt {
 }
 
 export function isPsfExempt(order: OrderForPsfExempt): boolean {
-  if (order.status === 'RETURNED') return true;
   if (order.micro === true) return true;
   if (order.items.length === 0) return false;
   return order.items.every((item) => item.productVariant?.isDigital === true);

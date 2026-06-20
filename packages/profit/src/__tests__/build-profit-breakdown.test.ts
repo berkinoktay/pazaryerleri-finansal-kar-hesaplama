@@ -31,7 +31,15 @@ describe('buildProfitBreakdown — GROSS view', () => {
           unitCostSnapshotVatRate: 20,
         },
       ],
-      fees: [{ feeType: 'SHIPPING', direction: 'DEBIT', amountGross: D('10'), vatRate: 20 }],
+      fees: [
+        {
+          feeType: 'SHIPPING',
+          direction: 'DEBIT',
+          amountGross: D('10'),
+          vatRate: 20,
+          source: 'ESTIMATE',
+        },
+      ],
       netProfit: D('56'),
       netVat: D('14'),
       saleMarginPct: D('28'),
@@ -70,10 +78,28 @@ describe('buildProfitBreakdown — GROSS view', () => {
         },
       ],
       fees: [
-        { feeType: 'SHIPPING', direction: 'DEBIT', amountGross: D('50'), vatRate: 20 },
-        { feeType: 'PLATFORM_SERVICE', direction: 'DEBIT', amountGross: D('20'), vatRate: 20 },
+        {
+          feeType: 'SHIPPING',
+          direction: 'DEBIT',
+          amountGross: D('50'),
+          vatRate: 20,
+          source: 'ESTIMATE',
+        },
+        {
+          feeType: 'PLATFORM_SERVICE',
+          direction: 'DEBIT',
+          amountGross: D('20'),
+          vatRate: 20,
+          source: 'ESTIMATE',
+        },
         // Stopaj vatRate 0 → Net KDV'ye girmez, ayrı düşülür.
-        { feeType: 'STOPPAGE', direction: 'DEBIT', amountGross: D('30'), vatRate: 0 },
+        {
+          feeType: 'STOPPAGE',
+          direction: 'DEBIT',
+          amountGross: D('30'),
+          vatRate: 0,
+          source: 'ESTIMATE',
+        },
       ],
       netProfit: D('300'),
       netVat: D('100'),
@@ -180,8 +206,20 @@ describe('buildProfitBreakdown — GROSS view', () => {
       sellerDiscountGross: D('0'),
       items: [],
       fees: [
-        { feeType: 'SHIPPING', direction: 'DEBIT', amountGross: D('100'), vatRate: 20 },
-        { feeType: 'SHIPPING', direction: 'CREDIT', amountGross: D('40'), vatRate: 20 },
+        {
+          feeType: 'SHIPPING',
+          direction: 'DEBIT',
+          amountGross: D('100'),
+          vatRate: 20,
+          source: 'ESTIMATE',
+        },
+        {
+          feeType: 'SHIPPING',
+          direction: 'CREDIT',
+          amountGross: D('40'),
+          vatRate: 20,
+          source: 'ESTIMATE',
+        },
       ],
       netProfit: D('0'),
       netVat: D('0'),
@@ -190,6 +228,100 @@ describe('buildProfitBreakdown — GROSS view', () => {
     });
     // DEBIT 100 - CREDIT 40 = net 60 signed gross
     expect(v.shippingGross).toBe('60.00');
+  });
+
+  it('full-return: netted display shows 0 sale/cost/commission, combined shipping', () => {
+    // Senaryo: tam iade. Satici kargo vadeli 155.99 (ESTIMATE) + iade kargosu
+    // 155.99 (CARGO_INVOICE). Satis hakediş REFUND_DEDUCTION (SETTLEMENT) ile
+    // tam silinir. Komisyon COMMISSION_REFUND (SETTLEMENT) ile tam silinir.
+    // Maliyet COST_RETURN (SETTLEMENT) ile tam silinir.
+    //
+    // Satis gross 2361.71, vatRate %10 → VAT = 2361.71 * 10/110 = 214.70090...
+    // REFUND_DEDUCTION gross 2361.71, vatRate %10 → ayni VAT → dispSaleGross = 0.00
+    //
+    // Gorunum beklentisi:
+    //   saleGross        = '0.00'
+    //   costGross        = '0.00'
+    //   commissionGross  = '0.00'
+    //   shippingGross    = '311.98'  (155.99 ileri + 155.99 iade)
+    const saleGross = D('2361.71');
+    const saleVatRate = 10;
+    const saleVat = saleGross.mul(saleVatRate).div(new Decimal(100).add(saleVatRate));
+    const commissionGross = D('558.16');
+    const costGross = D('800.00');
+
+    const v = buildProfitBreakdown({
+      saleGross,
+      saleVat,
+      listGross: D('2361.71'),
+      sellerDiscountGross: D('0'),
+      items: [
+        {
+          quantity: 1,
+          lineListGross: D('2361.71'),
+          lineSaleGross: D('2361.71'),
+          lineSellerDiscountGross: D('0'),
+          saleVatRate,
+          commissionGross,
+          refundedCommissionGross: D('0'),
+          commissionVatRate: 20,
+          unitCostSnapshotGross: costGross,
+          unitCostSnapshotVatRate: 18,
+        },
+      ],
+      fees: [
+        // Ileri kargo — tahmin (ESTIMATE)
+        {
+          feeType: 'SHIPPING',
+          direction: 'DEBIT',
+          amountGross: D('155.99'),
+          vatRate: 20,
+          source: 'ESTIMATE',
+        },
+        // Iade kargosu — gercek fatura (CARGO_INVOICE); resolveReturnLegs bunu tercih eder
+        {
+          feeType: 'RETURN_SHIPPING',
+          direction: 'DEBIT',
+          amountGross: D('155.99'),
+          vatRate: 20,
+          source: 'CARGO_INVOICE',
+        },
+        // Satis iadesi — hakediş (SETTLEMENT)
+        {
+          feeType: 'REFUND_DEDUCTION',
+          direction: 'CREDIT',
+          amountGross: D('2361.71'),
+          vatRate: 10,
+          source: 'SETTLEMENT',
+        },
+        // Komisyon iadesi — hakediş (SETTLEMENT)
+        {
+          feeType: 'COMMISSION_REFUND',
+          direction: 'CREDIT',
+          amountGross: commissionGross,
+          vatRate: 20,
+          source: 'SETTLEMENT',
+        },
+        // Maliyet iadesi — hakediş (SETTLEMENT)
+        {
+          feeType: 'COST_RETURN',
+          direction: 'CREDIT',
+          amountGross: costGross,
+          vatRate: 18,
+          source: 'SETTLEMENT',
+        },
+      ],
+      // netProfit/netVat zaten motor tarafindan dogru hesaplandi; burada display test
+      netProfit: D('0'),
+      netVat: D('0'),
+      saleMarginPct: null,
+      costMarkupPct: null,
+    });
+
+    expect(v.saleGross).toBe('0.00');
+    expect(v.costGross).toBe('0.00');
+    expect(v.commissionGross).toBe('0.00');
+    expect(v.shippingGross).toBe('311.98'); // 155.99 + 155.99
   });
 
   it('VAT derived from gross × rate/(100+rate)', () => {

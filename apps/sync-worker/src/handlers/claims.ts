@@ -45,6 +45,7 @@ import {
   type MappedClaim,
   type TrendyolClaim,
 } from '@pazarsync/marketplace';
+import { estimateReturnOnClaim } from '@pazarsync/profit';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
 
 import type { ChunkResult, ModuleHandler } from './types';
@@ -332,6 +333,13 @@ async function upsertClaim(
         ...(orderItemId !== null ? { orderItemId } : {}),
       },
     });
+  }
+
+  // İade gerçekleşme tetikleyici (backstop): bu claim'de kabul edilmiş (Accepted) birim
+  // varsa erken iade tahminini hesapla (estimateReturnOnClaim idempotent: tek-satır upsert + fold).
+  // Webhook bu yolu hızlandırır (ayrı task); cron bu handler'ı düzenli çağırır.
+  if (claim.items.some((it) => it.status === 'Accepted')) {
+    await estimateReturnOnClaim(order.id, tx);
   }
 
   return 'written';

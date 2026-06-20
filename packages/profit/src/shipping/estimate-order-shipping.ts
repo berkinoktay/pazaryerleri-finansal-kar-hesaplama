@@ -25,6 +25,7 @@ import { resolveTariffForDesi, type EstimateOutcome } from './resolve-tariff';
 export async function estimateShippingCostForOrder(
   orderId: string,
   tx: Prisma.TransactionClient,
+  opts?: { applyBarem?: boolean },
 ): Promise<EstimateOutcome> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
@@ -82,6 +83,7 @@ export async function estimateShippingCostForOrder(
         : null,
     desi,
     grossTotalForBarem,
-    fastEligible: order.fastDelivery === true && hasSaleAggregates,
+    fastEligible:
+      opts?.applyBarem === false ? false : order.fastDelivery === true && hasSaleAggregates,
   });
 }

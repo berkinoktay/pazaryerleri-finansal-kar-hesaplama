@@ -242,13 +242,28 @@ export async function getOrderById(
                 : new Decimal(item.unitCostSnapshotGross.toString()),
             unitCostSnapshotVatRate: Number(item.unitCostSnapshotVatRate ?? 0),
           })),
+          // Breakdown estimated kârla eşleşir (netProfit: estimatedNetProfit aşağıda).
+          // Forward fee'ler (SHIPPING/PSF/STOPPAGE) YALNIZ ESTIMATE kaynağından alınır —
+          // estimate motorunun (applyEstimateOnOrderCreate) kullandığıyla birebir; aksi
+          // halde feeAgg, cargo-invoice geldikten sonra gerçek+tahmin forward'ı ÇİFT sayar.
+          // İade bacakları (4 tip) TÜM kaynaklardan geçer; resolveReturnLegs (breakdown
+          // içinde) per-leg gerçek-varsa-gerçek seçer (estimate motoruyla aynı).
           fees: row.fees
-            .filter((fee) => fee.source === 'ESTIMATE')
+            .filter(
+              (fee) =>
+                fee.source === 'ESTIMATE' ||
+                fee.feeType === 'REFUND_DEDUCTION' ||
+                fee.feeType === 'COMMISSION_REFUND' ||
+                fee.feeType === 'COST_RETURN' ||
+                fee.feeType === 'RETURN_SHIPPING' ||
+                fee.feeType === 'STOPPAGE_REFUND',
+            )
             .map((fee) => ({
               feeType: fee.feeType,
               direction: fee.direction,
               amountGross: new Decimal(fee.amountGross.toString()),
               vatRate: Number(fee.vatRate),
+              source: fee.source,
             })),
           netProfit: new Decimal(row.estimatedNetProfit.toString()),
           netVat: new Decimal(row.estimatedNetVat.toString()),

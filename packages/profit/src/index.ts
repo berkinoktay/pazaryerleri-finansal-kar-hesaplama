@@ -1,4 +1,5 @@
 export { applyEstimateOnOrderCreate } from './estimate-on-order-create';
+export { estimateReturnOnClaim } from './estimate-return-on-claim';
 export { computeProfit } from './profit-formula';
 export type {
   ProfitBreakdown,

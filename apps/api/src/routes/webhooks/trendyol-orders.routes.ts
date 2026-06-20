@@ -42,7 +42,7 @@ import {
 } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { resolveFeeDefinition } from '@pazarsync/profit';
-import { syncLog } from '@pazarsync/sync-core';
+import { syncLog, syncLogService, SyncInProgressError } from '@pazarsync/sync-core';
 import { businessZoneEpochToInstant } from '@pazarsync/utils';
 
 import { UnauthorizedError, ValidationError } from '../../lib/errors';
@@ -331,6 +331,35 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
       where: { id: webhookEventId },
       data: { processedAt: new Date() },
     });
+
+    // ─── RETURNED → CLAIMS hızlandırma (Task 8) ──────────────────────────
+    // Trendyol iade webhook'u iade detayını taşımaz; gerçek veri getClaims
+    // API'sinden gelir (~6 saatte bir cron ile). Müşteri iadesinin kâra
+    // yansıması için CLAIMS sync'i hemen kuyruğa alırız — söz konusu mağaza
+    // için aktif bir CLAIMS satırı varsa (SyncInProgressError) sessizce devam
+    // ederiz (dedup). Webhook 200 OK döner; enqueue başarısızlığı asla
+    // isteği bloke etmez.
+    if (mappedStatus === 'RETURNED') {
+      try {
+        await syncLogService.acquireSlot(store.organizationId, store.id, 'CLAIMS');
+        syncLog.info('webhook.claims-enqueued', {
+          storeId: store.id,
+          platformOrderId,
+          reason: 'RETURNED_webhook_accelerates_getClaims',
+        });
+      } catch (enqueueErr) {
+        if (!(enqueueErr instanceof SyncInProgressError)) {
+          // Beklenmedik hata — loglayıp devam et, webhook'u başarısız sayma.
+          syncLog.warn('webhook.claims-enqueue-failed', {
+            storeId: store.id,
+            platformOrderId,
+            errorMessage: enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
+          });
+        }
+        // SyncInProgressError: aktif CLAIMS sync zaten var — dedup, işlem gerekmez.
+      }
+    }
+
     return c.body(null, 200);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

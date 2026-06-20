@@ -22,7 +22,7 @@ import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
  *
  * Test scenarios:
  *   1. Happy path — PSF + Stopaj OrderFee yazılır, estimatedNetProfit hesaplanır
- *   2. RETURNED status — PSF muafiyet, OrderFee yazılmaz
+ *   2. RETURNED status — PSF MUAF DEĞİL, x1 yazılır (Berkin kararı 2026-06-20; PSF iade'de kalır)
  *   3. micro=true — PSF muafiyet
  *   4. Cost snapshot eksik — estimatedNetProfit null kalır
  *   5. Write-once — re-entry no-op
@@ -247,7 +247,10 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     expect(new Decimal(stopaj.vatRate).toString()).toBe('0');
   });
 
-  it('PSF muafiyet — status RETURNED → PSF OrderFee yazılmaz', async () => {
+  // Berkin kararı 2026-06-20: RETURNED PSF'yi MUAF ETMEZ — PSF siparişin ilk anında bir kez
+  // kesilir ve iade olsa da x1 kalır (isPsfExempt'ten RETURNED dalı kaldırıldı). "İade paketinde
+  // PSF uygulanmaz" = iade paketi İKİNCİ PSF doğurmaz; orijinal durur. profit-formula.md §2.4.
+  it('PSF iade-de KALIR — status RETURNED → PSF OrderFee yine yazılır (x1)', async () => {
     const { org, store } = await setup();
     const order = await createOrderWithItem({
       orgId: org.id,
@@ -260,8 +263,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     });
 
     const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
-    expect(fees.map((f) => f.feeType).sort()).toEqual(['STOPPAGE']);
-    expect(fees.some((f) => f.feeType === 'PLATFORM_SERVICE')).toBe(false);
+    expect(fees.map((f) => f.feeType).sort()).toEqual(['PLATFORM_SERVICE', 'STOPPAGE']);
+    expect(fees.some((f) => f.feeType === 'PLATFORM_SERVICE')).toBe(true);
   });
 
   it('PSF muafiyet — micro=true → PSF OrderFee yazılmaz', async () => {
@@ -670,6 +673,7 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         direction: f.direction,
         amountGross: new Decimal(f.amountGross),
         vatRate: Number(f.vatRate),
+        source: f.source,
       }));
 
       const view = buildProfitBreakdown({

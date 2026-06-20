@@ -9,7 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test:unit": "vitest run src --passWithNoTests",
+    "test:unit": "vitest run --config vitest.unit.config.ts --passWithNoTests",
+    "test:integration": "vitest run --config vitest.config.ts --reporter=verbose",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "clean": "rm -rf .turbo"
@@ -24,6 +25,7 @@
     "typescript": "catalog:",
     "vitest": "catalog:",
     "@pazarsync/eslint-config": "workspace:*",
-    "eslint": "catalog:"
+    "eslint": "catalog:",
+    "dotenv": "catalog:"
   }
 }

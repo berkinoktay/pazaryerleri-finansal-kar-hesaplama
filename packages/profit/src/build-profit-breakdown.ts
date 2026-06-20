@@ -16,7 +16,9 @@
 
 import { Decimal } from 'decimal.js';
 
-import type { OrderFeeType } from '@pazarsync/db/enums';
+import type { OrderFeeSource, OrderFeeType } from '@pazarsync/db/enums';
+
+import { resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
 
 const ZERO = new Decimal(0);
 
@@ -44,6 +46,7 @@ export interface ProfitBreakdownFeeInput {
   direction: 'DEBIT' | 'CREDIT';
   amountGross: Decimal;
   vatRate: number;
+  source: OrderFeeSource;
 }
 
 export interface BuildProfitBreakdownInput {
@@ -118,20 +121,63 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
   // Stopaj: STOPPAGE fee'leri (vatRate 0). feeAgg yön-imzalı toplar; .gross alınır.
   const stoppage = feeAgg('STOPPAGE');
 
+  // İade kalemleri: gercek varsa gercek (SETTLEMENT/CARGO_INVOICE), yoksa tahmin
+  // tercih edilir. DB enum → union daraltması kastedilerek yapılır; fold-return-legs
+  // ile aynı mantık (bkz. recompute-settled-profit.ts'deki as kullanımı).
+  const RETURN_FEE_TYPES = new Set([
+    'REFUND_DEDUCTION',
+    'COMMISSION_REFUND',
+    'COST_RETURN',
+    'RETURN_SHIPPING',
+    'STOPPAGE_REFUND',
+  ] as const);
+  const returnLegs = resolveReturnLegs(
+    input.fees
+      .filter((f) => RETURN_FEE_TYPES.has(f.feeType as ReturnFeeRow['feeType']))
+      .map(
+        (f): ReturnFeeRow => ({
+          feeType: f.feeType as ReturnFeeRow['feeType'],
+          // USER_OVERRIDE/MANUAL_ENTRY return fee'leri pratikte oluşmaz; yoksa
+          // resolveReturnLegs hiçbir actual-source bulamadığı için zaten ESTIMATE'i
+          // tercih eder — bu daraltma güvenlidir.
+          source: f.source as ReturnFeeRow['source'],
+          amountGross: f.amountGross,
+          vatRate: new Decimal(f.vatRate),
+        }),
+      ),
+  );
+
+  // Gösterim netting: tam iade durumunda satış/maliyet/komisyon sıfıra iner,
+  // kargo ilerisi + iadesi birleşir. netProfit/netVat motor değerleri değişmez.
+  const dispSaleGross = input.saleGross.sub(returnLegs.REFUND_DEDUCTION.gross);
+  const dispSaleVat = input.saleVat.sub(returnLegs.REFUND_DEDUCTION.vat);
+  const dispCostGross = costGross.sub(returnLegs.COST_RETURN.gross);
+  const dispCostVat = costVat.sub(returnLegs.COST_RETURN.vat);
+  const dispCommissionGross = commissionGross.sub(returnLegs.COMMISSION_REFUND.gross);
+  const dispCommissionVat = commissionVat.sub(returnLegs.COMMISSION_REFUND.vat);
+  const dispShippingGross = shipping.gross.add(returnLegs.RETURN_SHIPPING.gross);
+  const dispShippingVat = shipping.vat.add(returnLegs.RETURN_SHIPPING.vat);
+
+  // Stopaj gösterimi: orijinal STOPPAGE − STOPPAGE_REFUND (fold-return-legs ile AYNI
+  // cebir) → tam iade 0, kısmi orantılı. Açık STOPPAGE_REFUND bacağı sayesinde ekran
+  // (Kâr dökümü) netProfit ile toplanır; ayrıca STOPPAGE_REFUND ücret zaman çizgisinde
+  // "Stopaj iadesi" olarak görünür. Alt sınır 0 (over-refund negatif stopaj üretmesin).
+  const dispStoppage = Decimal.max(0, stoppage.gross.sub(returnLegs.STOPPAGE_REFUND.gross));
+
   return {
     listGross: input.listGross.toFixed(2),
     sellerDiscountGross: input.sellerDiscountGross.toFixed(2),
-    saleGross: input.saleGross.toFixed(2),
-    saleVat: input.saleVat.toFixed(2),
-    costGross: costGross.toFixed(2),
-    costVat: costVat.toDecimalPlaces(2).toFixed(2),
-    commissionGross: commissionGross.toFixed(2),
-    commissionVat: commissionVat.toDecimalPlaces(2).toFixed(2),
-    shippingGross: shipping.gross.toFixed(2),
-    shippingVat: shipping.vat.toDecimalPlaces(2).toFixed(2),
+    saleGross: dispSaleGross.toFixed(2),
+    saleVat: dispSaleVat.toDecimalPlaces(2).toFixed(2),
+    costGross: dispCostGross.toFixed(2),
+    costVat: dispCostVat.toDecimalPlaces(2).toFixed(2),
+    commissionGross: dispCommissionGross.toFixed(2),
+    commissionVat: dispCommissionVat.toDecimalPlaces(2).toFixed(2),
+    shippingGross: dispShippingGross.toFixed(2),
+    shippingVat: dispShippingVat.toDecimalPlaces(2).toFixed(2),
     platformServiceGross: platformService.gross.toFixed(2),
     platformServiceVat: platformService.vat.toDecimalPlaces(2).toFixed(2),
-    stoppage: stoppage.gross.toFixed(2),
+    stoppage: dispStoppage.toFixed(2),
     netVat: input.netVat.toFixed(2),
     netProfit: input.netProfit.toFixed(2),
     saleMarginPct: input.saleMarginPct === null ? '—' : input.saleMarginPct.toFixed(2),

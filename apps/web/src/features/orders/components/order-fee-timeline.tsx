@@ -61,13 +61,11 @@ export function OrderFeeTimeline({ fees }: OrderFeeTimelineProps): React.ReactEl
                         ? fee.displayName
                         : t(`types.${fee.feeType}`)}
                     </span>
+                    {/* Tek durum rozeti = kaynak (Kesinleşmemiş / Hakediş / Kargo Faturası …).
+                        Kaynak zaten kesinleşmiş/kesinleşmemiş ayrımını taşıdığından ayrı
+                        bir "Kesinleşmemiş/Gerçek fatura" rozeti basılmaz (çift rozet olurdu). */}
                     <Badge tone={SOURCE_TONES[fee.source]} size="sm">
                       {t(`sources.${fee.source}`)}
-                    </Badge>
-                    {/* Tahmini (T+0 deterministik) mi, vendor faturasıyla doğrulanmış
-                        gerçek değer mi — backend-servisli isEstimate sürer. */}
-                    <Badge tone={fee.isEstimate ? 'info' : 'success'} size="sm">
-                      {fee.isEstimate ? t('estimateBadge') : t('settledBadge')}
                     </Badge>
                   </div>
                   <span className="text-2xs text-muted-foreground tabular-nums">

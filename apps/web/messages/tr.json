@@ -1602,7 +1602,8 @@
       "settledNetProfit": {
         "label": "Fiili kâr",
         "hint": "Hakediş kalemleri Trendyol'dan akıp mutabakat tamamlandığında güncellendi.",
-        "pending": "Henüz mutabakat satırı işlenmedi."
+        "pending": "Henüz mutabakat satırı işlenmedi.",
+        "partial": "Kısmi mutabakat işlendi; fiili kâr tam mutabakatta kesinleşecek."
       },
       "margin": {
         "label": "Kâr marjı",
@@ -1634,8 +1635,6 @@
       },
       "vatLabel": "KDV %{rate}",
       "confirmedAt": "Mutabakat: {date}",
-      "estimateBadge": "Tahmini",
-      "settledBadge": "Gerçek fatura",
       "types": {
         "SHIPPING": "Kargo",
         "PLATFORM_SERVICE": "Hizmet Bedeli (PSF)",
@@ -1645,6 +1644,7 @@
         "REFUND_DEDUCTION": "İade kesintisi",
         "COMMISSION_REFUND": "Komisyon iadesi",
         "COST_RETURN": "Maliyet iadesi",
+        "STOPPAGE_REFUND": "Stopaj iadesi",
         "PROVISION_ADJUSTMENT": "Provizyon düzeltme",
         "MANUAL_REFUND": "Manuel iade",
         "REVENUE_ADJUSTMENT": "Gelir düzeltme",
@@ -1660,7 +1660,7 @@
         "COMMISSION_INVOICE": "Komisyon faturası"
       },
       "sources": {
-        "ESTIMATE": "Tahmini",
+        "ESTIMATE": "Kesinleşmemiş",
         "SETTLEMENT": "Hakediş",
         "CARGO_INVOICE": "Kargo Faturası",
         "USER_OVERRIDE": "Kullanıcı düzeltmesi",
