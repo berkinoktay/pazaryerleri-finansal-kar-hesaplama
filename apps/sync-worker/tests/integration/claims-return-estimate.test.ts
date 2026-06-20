@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -255,6 +255,18 @@ describe('processClaimsChunk — return estimate backstop (Task 7)', () => {
 
   beforeEach(async () => {
     await truncateAll();
+  });
+
+  // CI paylaşılan DB: bu test her senaryoda TEST-RET-* ShippingCarrier yaratıyor,
+  // ama api truncateAll'ı shipping_carriers'ı SİLMEZ (reference data) → carrier'lar
+  // birikip sonraki suite'in (api list-carriers) "tam 10 carrier" beklentisine sızar.
+  // Suite sonunda temizle. stores.defaultShippingCarrierId FK'sı onDelete:SetNull →
+  // carrier silinince store referansı null'lanır; önce desi tariff'leri (carrier FK) silinir.
+  afterAll(async () => {
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM shipping_desi_tariffs WHERE carrier_id IN (SELECT id FROM shipping_carriers WHERE code LIKE 'TEST-%')`,
+    );
+    await prisma.$executeRawUnsafe(`DELETE FROM shipping_carriers WHERE code LIKE 'TEST-%'`);
   });
 
   it('fires estimateReturnOnClaim when the synced claim has an Accepted item — writes REFUND_DEDUCTION ESTIMATE fee', async () => {
