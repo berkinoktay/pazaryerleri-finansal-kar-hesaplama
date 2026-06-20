@@ -39,19 +39,28 @@ export interface ProfitBreakdownCardProps {
 // Stopaj ayrı bir düşülen brüt terim (backend `stoppage`; KDV-siz, Net KDV'ye
 // katlanmaz). Çoğu siparişte '0.00' (yalnız teslim sonrası kesilir) → sıfırken
 // satır gizlenir (gürültü yok); değer varken görünür olur ki Σ kâra kapansın.
-const DEDUCTION_ROWS = [
+// Kargo (gidiş/iade) bu iki grubun ARASINDA koşullu render edilir: iade yoksa tek düz
+// "Kargo" satırı, iade varsa "Toplam kargo bedeli" collapsible (Net KDV deseniyle aynı).
+const DEDUCTION_ROWS_PRE_SHIPPING = [
   { key: 'cost', amount: 'costGross' },
   { key: 'commission', amount: 'commissionGross' },
-  { key: 'shipping', amount: 'shippingGross' },
+] as const satisfies ReadonlyArray<{ key: string; amount: keyof ProfitBreakdownData }>;
+const DEDUCTION_ROWS_POST_SHIPPING = [
   { key: 'platformService', amount: 'platformServiceGross' },
 ] as const satisfies ReadonlyArray<{ key: string; amount: keyof ProfitBreakdownData }>;
 
 // Net KDV kırılımı: Satış KDV (+) − diğer KDV'ler (−) = Net KDV.
-const VAT_ROWS = [
+// Kargo KDV de gidiş/iade için aynı şekilde aralarında koşullu render edilir.
+const VAT_ROWS_PRE_SHIPPING = [
   { key: 'saleVat', amount: 'saleVat', positive: true },
   { key: 'costVat', amount: 'costVat', positive: false },
   { key: 'commissionVat', amount: 'commissionVat', positive: false },
-  { key: 'shippingVat', amount: 'shippingVat', positive: false },
+] as const satisfies ReadonlyArray<{
+  key: string;
+  amount: keyof ProfitBreakdownData;
+  positive: boolean;
+}>;
+const VAT_ROWS_POST_SHIPPING = [
   { key: 'platformServiceVat', amount: 'platformServiceVat', positive: false },
 ] as const satisfies ReadonlyArray<{
   key: string;
@@ -124,7 +133,40 @@ export function ProfitBreakdownCard({
               </BreakdownRow>
             )}
 
-            {DEDUCTION_ROWS.map((row) => (
+            {DEDUCTION_ROWS_PRE_SHIPPING.map((row) => (
+              <BreakdownRow key={row.key} label={t(row.key)}>
+                <SignedAmount value={breakdown[row.amount]} positive={false} />
+              </BreakdownRow>
+            ))}
+
+            {/* Kargo: iade yoksa tek düz "Kargo" satırı; iade varsa "Toplam kargo
+                bedeli" collapsible → Gidiş + İade alt satırları (Net KDV deseniyle aynı).
+                Koşul string karşılaştırma = aritmetik DEĞİL. */}
+            {breakdown.returnShippingGross === '0.00' ? (
+              <BreakdownRow label={t('shipping')}>
+                <SignedAmount value={breakdown.shippingGross} positive={false} />
+              </BreakdownRow>
+            ) : (
+              <Collapsible>
+                <div className="gap-sm flex items-center justify-between">
+                  <CollapsibleTrigger className="gap-3xs text-muted-foreground hover:text-foreground group flex items-center transition-colors">
+                    <span>{t('shippingTotal')}</span>
+                    <ArrowDown01Icon className="size-icon-xs transition-transform group-data-[state=open]:rotate-180" />
+                  </CollapsibleTrigger>
+                  <SignedAmount value={breakdown.shippingGross} positive={false} />
+                </div>
+                <CollapsibleContent className="gap-3xs pt-3xs pl-sm mt-3xs flex flex-col border-l">
+                  <BreakdownRow label={t('outboundShipping')} muted>
+                    <SignedAmount value={breakdown.outboundShippingGross} positive={false} />
+                  </BreakdownRow>
+                  <BreakdownRow label={t('returnShipping')} muted>
+                    <SignedAmount value={breakdown.returnShippingGross} positive={false} />
+                  </BreakdownRow>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+
+            {DEDUCTION_ROWS_POST_SHIPPING.map((row) => (
               <BreakdownRow key={row.key} label={t(row.key)}>
                 <SignedAmount value={breakdown[row.amount]} positive={false} />
               </BreakdownRow>
@@ -148,7 +190,30 @@ export function ProfitBreakdownCard({
                 <SignedAmount value={breakdown.netVat} positive={false} />
               </div>
               <CollapsibleContent className="gap-3xs pt-3xs pl-sm mt-3xs flex flex-col border-l">
-                {VAT_ROWS.map((row) => (
+                {VAT_ROWS_PRE_SHIPPING.map((row) => (
+                  <BreakdownRow key={row.key} label={t(row.key)} muted>
+                    <SignedAmount value={breakdown[row.amount]} positive={row.positive} />
+                  </BreakdownRow>
+                ))}
+
+                {/* Kargo KDV: iade yoksa tek satır; iade varsa Gidiş + İade iki düz satır
+                    (iç içe collapsible YOK; bileşen toplamı = shippingVat, backend invariant). */}
+                {breakdown.returnShippingGross === '0.00' ? (
+                  <BreakdownRow label={t('shippingVat')} muted>
+                    <SignedAmount value={breakdown.shippingVat} positive={false} />
+                  </BreakdownRow>
+                ) : (
+                  <>
+                    <BreakdownRow label={t('outboundShippingVat')} muted>
+                      <SignedAmount value={breakdown.outboundShippingVat} positive={false} />
+                    </BreakdownRow>
+                    <BreakdownRow label={t('returnShippingVat')} muted>
+                      <SignedAmount value={breakdown.returnShippingVat} positive={false} />
+                    </BreakdownRow>
+                  </>
+                )}
+
+                {VAT_ROWS_POST_SHIPPING.map((row) => (
                   <BreakdownRow key={row.key} label={t(row.key)} muted>
                     <SignedAmount value={breakdown[row.amount]} positive={row.positive} />
                   </BreakdownRow>
