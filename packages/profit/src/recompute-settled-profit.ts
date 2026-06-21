@@ -48,11 +48,7 @@ import type { Prisma } from '@pazarsync/db';
 
 import { computeProfit, type ProfitInputFee } from './profit-formula';
 import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
-
-/** gross × rate / (100 + rate) — KDV-dahil tutardan içerideki KDV'yi çıkarır. */
-function grossToVat(gross: Decimal, rate: Decimal): Decimal {
-  return gross.mul(rate).div(new Decimal(100).add(rate));
-}
+import { grossToVat } from './money';
 
 export interface RecomputeSettledProfitResult {
   /** True when settledNetProfit was written. False when skipped (logged in caller). */

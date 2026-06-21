@@ -9,9 +9,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { ProfitInput, ProfitInputFee, ProfitMoneyPair } from './profit-formula';
-
-const grossToVat = (gross: Decimal, rate: Decimal): Decimal =>
-  rate.isZero() ? new Decimal(0) : gross.mul(rate).div(new Decimal(100).add(rate));
+import { grossToVat } from './money';
 
 export type ReturnFeeType =
   | 'REFUND_DEDUCTION'
