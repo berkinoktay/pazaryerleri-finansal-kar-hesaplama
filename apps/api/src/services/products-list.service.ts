@@ -287,7 +287,7 @@ function deriveCostStatus(
   return 'OK';
 }
 
-async function fetchCostAggregates(
+export async function fetchCostAggregates(
   organizationId: string,
   variantIds: string[],
 ): Promise<Map<string, VariantCostAggregate>> {

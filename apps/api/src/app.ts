@@ -18,6 +18,7 @@ import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index
 import fxRatesRoutes from './routes/fx-rates/index';
 import livePerformanceRoutes from './routes/live-performance/index';
 import orderRoutes from './routes/orders/index';
+import productPricingRoutes from './routes/product-pricing/index';
 import productsSubRoutes from './routes/products/index';
 import shippingRoutes from './routes/shipping/index';
 import variantRoutes from './routes/variants/index';
@@ -155,6 +156,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', livePerformanceRoutes);
   app.route('/', productRoutes);
   app.route('/', productsSubRoutes);
+  app.route('/', productPricingRoutes);
   app.route('/', syncLogRoutes);
   app.route('/', costProfileRoutes);
   app.route('/', costProfileAttachmentRoutes);
