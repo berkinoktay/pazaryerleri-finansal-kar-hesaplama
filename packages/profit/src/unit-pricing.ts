@@ -1,7 +1,13 @@
 import { Decimal } from 'decimal.js';
 
 import { grossToVat } from './money';
-import { type ProfitInput, type ProfitInputFee, type ProfitMoneyPair } from './profit-formula';
+import {
+  computeProfit,
+  type ProfitBreakdown,
+  type ProfitInput,
+  type ProfitInputFee,
+  type ProfitMoneyPair,
+} from './profit-formula';
 
 /**
  * Bir varyantın TEK bir satışının fiyattan-bağımsız ekonomisi. Caller (Dilim 2 API)
@@ -41,4 +47,9 @@ export function buildUnitProfitInput(econ: UnitEconomics, price: Decimal): Profi
     fees: econ.fixedFees,
     stoppage: { gross: stoppageGross },
   };
+}
+
+/** Verili fiyatta tek-birim kâr dökümü (forward). */
+export function computeUnitProfit(econ: UnitEconomics, price: Decimal): ProfitBreakdown {
+  return computeProfit(buildUnitProfitInput(econ, price));
 }

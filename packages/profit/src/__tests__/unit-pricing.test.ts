@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { buildUnitProfitInput, type UnitEconomics } from '../unit-pricing';
+import { buildUnitProfitInput, computeUnitProfit, type UnitEconomics } from '../unit-pricing';
 
 const D = (v: string) => new Decimal(v);
 
@@ -13,6 +13,21 @@ const ECON: UnitEconomics = {
   stoppageRate: D('0.01'),
   fixedFees: [{ type: 'SHIPPING', gross: D('40'), vat: D('6.6666666667'), direction: 'DEBIT' }],
 };
+
+describe('computeUnitProfit', () => {
+  it('computes the full breakdown at a price', () => {
+    const econ: UnitEconomics = {
+      saleVatRate: D('0'),
+      cost: { gross: D('50'), vat: D('0') },
+      commissionRate: D('10'),
+      commissionVatRate: D('0'),
+      stoppageRate: D('0'),
+      fixedFees: [],
+    };
+    // netProfit = P − cost − commission = 100 − 50 − 10 = 40
+    expect(computeUnitProfit(econ, D('100')).netProfit.toString()).toBe('40');
+  });
+});
 
 describe('buildUnitProfitInput', () => {
   it('assembles a ProfitInput at a given price (no intermediate rounding)', () => {
