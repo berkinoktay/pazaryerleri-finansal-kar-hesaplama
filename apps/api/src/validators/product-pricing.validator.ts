@@ -38,14 +38,22 @@ const CommissionStatusSchema = z.enum(['OK', 'NO_RULE']).openapi({
   example: 'OK',
 });
 
-const SolveReasonSchema = z.enum(['NOT_PRICE_SENSITIVE', 'UNREACHABLE_TARGET', 'NO_COST']).openapi({
-  description:
-    'Why the price could not be solved. NOT_PRICE_SENSITIVE = net profit does not ' +
-    'increase with price (commission + fees > margin). UNREACHABLE_TARGET = the ' +
-    'requested margin/markup target cannot be reached at any positive price. ' +
-    'NO_COST = cost is unavailable so the calculation would be incorrect.',
-  example: 'UNREACHABLE_TARGET',
-});
+/**
+ * Quote-level failure reason. Superset of the engine's SolveReason — adds
+ * NOT_CALCULABLE for the case where cost is OK but shipping or commission data
+ * is missing, preventing the solver from being invoked at all.
+ */
+const QuoteReasonSchema = z
+  .enum(['NOT_PRICE_SENSITIVE', 'UNREACHABLE_TARGET', 'NO_COST', 'NOT_CALCULABLE'])
+  .openapi({
+    description:
+      'Why the price could not be solved. NOT_PRICE_SENSITIVE = net profit does not ' +
+      'increase with price (commission + fees > margin). UNREACHABLE_TARGET = the ' +
+      'requested margin/markup target cannot be reached at any positive price. ' +
+      'NO_COST = cost is unavailable so the calculation would be incorrect. ' +
+      'NOT_CALCULABLE = required cost/commission/shipping inputs are missing for this variant.',
+    example: 'UNREACHABLE_TARGET',
+  });
 
 // ─── List query ──────────────────────────────────────────────────────────────
 
@@ -201,7 +209,7 @@ export const QuoteResponseSchema = z
       description: 'Whether the solver produced a valid price for this target.',
       example: true,
     }),
-    reason: SolveReasonSchema.optional().openapi({
+    reason: QuoteReasonSchema.optional().openapi({
       description: 'Present only when calculable=false. Explains why the price could not be found.',
     }),
     price: moneyString.optional().openapi({

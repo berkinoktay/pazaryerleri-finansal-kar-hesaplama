@@ -36,6 +36,11 @@ import {
   type SolveReason,
   type UnitEconomics,
 } from '@pazarsync/profit';
+
+// Quote-level failure reason — superset of the engine's SolveReason.
+// NOT_CALCULABLE is quote-only: cost is OK here but shipping or commission is
+// missing, so the engine cannot be invoked at all.
+export type QuoteReason = SolveReason | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
 import { resolveCommissionRate } from './commission-rate-resolver';
@@ -379,10 +384,10 @@ export interface QuoteBreakdown {
 
 export type QuoteResult =
   | { calculable: true; variantId: string; price: string; breakdown: QuoteBreakdown }
-  | { calculable: false; variantId: string; reason: SolveReason };
+  | { calculable: false; variantId: string; reason: QuoteReason };
 
 /** Input to `quoteProductPrice` — the target after Zod parsing. */
-export interface QuoteInput {
+export interface QuoteServiceInput {
   variantId: string;
   target: { type: 'margin' | 'markup' | 'profit'; value: string };
 }
@@ -423,7 +428,7 @@ export async function quoteProductPrice(
   orgId: string,
   storeId: string,
   store: PrismaStore,
-  input: QuoteInput,
+  input: QuoteServiceInput,
 ): Promise<QuoteResult> {
   // ─── 1. Fetch the variant (must belong to this store) ────────────────────
   let variant: VariantForAssembly;
@@ -466,12 +471,9 @@ export async function quoteProductPrice(
   const assemblyResult = await assembleUnitEconomics(tx, ctx, variant, costAggregate);
 
   if (assemblyResult.econ === null) {
-    // Shipping or commission not OK — pick the first non-OK reason.
-    const reason: SolveReason =
-      assemblyResult.shippingStatus !== 'OK' || assemblyResult.commissionStatus !== 'OK'
-        ? 'NOT_PRICE_SENSITIVE'
-        : 'NO_COST';
-    return { calculable: false, variantId: input.variantId, reason };
+    // Cost is guaranteed OK here (the gate above returned 'NO_COST' otherwise),
+    // so econ is null only because shipping or commission is not available.
+    return { calculable: false, variantId: input.variantId, reason: 'NOT_CALCULABLE' };
   }
 
   // ─── 4. Solve ────────────────────────────────────────────────────────────
