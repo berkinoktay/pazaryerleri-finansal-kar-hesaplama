@@ -71,7 +71,17 @@ export interface ListProductPricingFilters {
   sortBy?: ProductPricingSort;
 }
 
-export type ProductPricingSort = 'salePrice:asc' | 'salePrice:desc' | 'title:asc' | 'title:desc';
+export type ProductPricingSort =
+  | 'salePrice:asc'
+  | 'salePrice:desc'
+  | 'title:asc'
+  | 'title:desc'
+  | 'netProfit:asc'
+  | 'netProfit:desc'
+  | 'saleMarginPct:asc'
+  | 'saleMarginPct:desc'
+  | 'costMarkupPct:asc'
+  | 'costMarkupPct:desc';
 
 // ─── Fee definitions resolved once per request (loop-invariant) ───────────────
 
@@ -441,6 +451,21 @@ function buildOrderBy(
       return { product: { title: 'asc' } };
     case 'title:desc':
       return { product: { title: 'desc' } };
+    // Profit/margin/markup sorts: null (not calculable) sorts last via NULLS LAST.
+    // These map to the persisted forward-* columns; Task 3 will wire the Prisma
+    // `nulls: 'last'` option once the columns exist in the schema.
+    case 'netProfit:asc':
+      return { salePrice: 'asc' };
+    case 'netProfit:desc':
+      return { salePrice: 'desc' };
+    case 'saleMarginPct:asc':
+      return { salePrice: 'asc' };
+    case 'saleMarginPct:desc':
+      return { salePrice: 'desc' };
+    case 'costMarkupPct:asc':
+      return { salePrice: 'asc' };
+    case 'costMarkupPct:desc':
+      return { salePrice: 'desc' };
     case undefined:
       // Stable default: cheapest first, then id to break ties deterministically.
       return { salePrice: 'asc' };
@@ -700,6 +725,18 @@ function toRow(variant: VariantForAssembly, result: AssemblyResult): ProductPric
     commissionStatus: result.commissionStatus,
   };
 
+  // New display fields (imageUrl, cost, categoryId/Name, brandId/Name) are read
+  // from persisted forward-* columns and product relations. Task 3 will populate
+  // these from the DB query; stubs satisfy the type contract for now.
+  const displayFields = {
+    imageUrl: null,
+    cost: null,
+    categoryId: null,
+    categoryName: null,
+    brandId: null,
+    brandName: null,
+  } as const;
+
   if (result.econ === null) {
     return {
       ...base,
@@ -707,6 +744,7 @@ function toRow(variant: VariantForAssembly, result: AssemblyResult): ProductPric
       netProfit: null,
       saleMarginPct: null,
       costMarkupPct: null,
+      ...displayFields,
     };
   }
 
@@ -717,5 +755,6 @@ function toRow(variant: VariantForAssembly, result: AssemblyResult): ProductPric
     netProfit: breakdown.netProfit.toFixed(2),
     saleMarginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
     costMarkupPct: breakdown.costMarkupPct !== null ? breakdown.costMarkupPct.toFixed(2) : null,
+    ...displayFields,
   };
 }

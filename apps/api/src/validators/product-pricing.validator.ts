@@ -58,9 +58,22 @@ const QuoteReasonSchema = z
 // ─── List query ──────────────────────────────────────────────────────────────
 
 const ProductPricingSortSchema = z
-  .enum(['salePrice:asc', 'salePrice:desc', 'title:asc', 'title:desc'])
+  .enum([
+    'salePrice:asc',
+    'salePrice:desc',
+    'title:asc',
+    'title:desc',
+    'netProfit:asc',
+    'netProfit:desc',
+    'saleMarginPct:asc',
+    'saleMarginPct:desc',
+    'costMarkupPct:asc',
+    'costMarkupPct:desc',
+  ])
   .openapi({
-    description: 'Sort order for the product pricing list.',
+    description:
+      'Sort order for the product pricing list. ' +
+      'Profit/margin/markup sorts: rows where the value is null (not calculable) sort last (NULLS LAST).',
     example: 'salePrice:asc',
   });
 
@@ -86,6 +99,46 @@ export const ListProductPricingQuerySchema = TablePaginationQuerySchema.extend({
         'commission all resolved). Useful for displaying only actionable variants.',
       example: 'false',
     }),
+  profitStatus: z
+    .enum(['profitable', 'breakeven', 'loss', 'all'])
+    .default('all')
+    .optional()
+    .openapi({
+      description:
+        'Filter by forward profit direction. ' +
+        'profitable: forwardNetProfit > 0. ' +
+        'breakeven: forwardNetProfit = 0. ' +
+        'loss: forwardNetProfit < 0. ' +
+        'all: no filter (default). ' +
+        'Not-calculable rows (forwardNetProfit IS NULL) are excluded by profitable/breakeven/loss.',
+      example: 'profitable',
+    }),
+  marginMin: z
+    .string()
+    .regex(/^-?\d+(\.\d{1,4})?$/, 'INVALID_MARGIN_FORMAT')
+    .optional()
+    .openapi({
+      description:
+        'Minimum sale margin % (inclusive). Negative values allowed — margins can be negative.',
+      example: '15.5',
+    }),
+  marginMax: z
+    .string()
+    .regex(/^-?\d+(\.\d{1,4})?$/, 'INVALID_MARGIN_FORMAT')
+    .optional()
+    .openapi({
+      description:
+        'Maximum sale margin % (inclusive). Negative values allowed — margins can be negative.',
+      example: '80',
+    }),
+  categoryId: z.string().regex(/^\d+$/, 'INVALID_CATEGORY_ID').optional().openapi({
+    description: 'Filter by product category (bigint as string).',
+    example: '12345',
+  }),
+  brandId: z.string().regex(/^\d+$/, 'INVALID_BRAND_ID').optional().openapi({
+    description: 'Filter by product brand (bigint as string).',
+    example: '67890',
+  }),
 }).openapi('ListProductPricingQuery');
 
 export type ListProductPricingQuery = z.infer<typeof ListProductPricingQuerySchema>;
@@ -124,6 +177,26 @@ export const ProductPricingItemSchema = z
       description: 'Net profit / cost GROSS × 100. Null when calculable=false or costGross=0.',
       example: '42.30',
     }),
+    imageUrl: z.string().url().nullable().openapi({
+      description: 'Primary product image URL (position=0). Null if no image is attached.',
+      example: 'https://cdn.example.com/p-123.jpg',
+    }),
+    cost: moneyString.nullable().openapi({
+      description: 'Current cost (GROSS, TRY), decimal string. Null when costStatus is not OK.',
+      example: '250.00',
+    }),
+    categoryId: z
+      .string()
+      .regex(/^\d+$/)
+      .nullable()
+      .openapi({ description: 'Product category ID (bigint as string).', example: '12345' }),
+    categoryName: z.string().nullable().openapi({ example: 'Ayakkabı' }),
+    brandId: z
+      .string()
+      .regex(/^\d+$/)
+      .nullable()
+      .openapi({ description: 'Product brand ID (bigint as string).', example: '67890' }),
+    brandName: z.string().nullable().openapi({ example: 'Nike' }),
   })
   .openapi('ProductPricingItem');
 
