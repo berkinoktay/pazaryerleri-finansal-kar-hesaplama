@@ -3285,6 +3285,56 @@
             "pattern": "^-?\\d+(\\.\\d{1,4})?$",
             "description": "Net profit / cost GROSS × 100. Null when calculable=false or costGross=0.",
             "example": "42.30"
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Primary product image URL (position=0). Null if no image is attached.",
+            "example": "https://cdn.example.com/p-123.jpg"
+          },
+          "cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "Current cost (GROSS, TRY), decimal string. Null when costStatus is not OK.",
+            "example": "250.00"
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d+$",
+            "description": "Product category ID (bigint as string).",
+            "example": "12345"
+          },
+          "categoryName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "Ayakkabı"
+          },
+          "brandId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d+$",
+            "description": "Product brand ID (bigint as string).",
+            "example": "67890"
+          },
+          "brandName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "Nike"
           }
         },
         "required": [
@@ -3299,7 +3349,13 @@
           "calculable",
           "netProfit",
           "saleMarginPct",
-          "costMarkupPct"
+          "costMarkupPct",
+          "imageUrl",
+          "cost",
+          "categoryId",
+          "categoryName",
+          "brandId",
+          "brandName"
         ]
       },
       "ProductPriceQuote": {
@@ -8899,7 +8955,7 @@
           "ProductPricing"
         ],
         "summary": "List per-variant forward profit for a store",
-        "description": "Returns one forward-pricing row per APPROVED ProductVariant. Each row assembles a single-unit profit from the existing cost / commission / shipping / PSF / stoppage resolvers and the profit engine. Rows are ALWAYS returned — even when a variant cannot be costed — so the user can see which input is missing: the three independent status fields (costStatus, shippingEstimateStatus, commissionStatus) surface the gap, and `calculable` is their conjunction. When calculable=false, netProfit / saleMarginPct / costMarkupPct are null. Money fields are GROSS (VAT-inclusive) decimal strings. Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, 100} with a default of 25. `calculableOnly=true` restricts to actionable rows. Note: when `calculableOnly=true`, `total`/`totalPages` reflect the UNFILTERED match set, so a filtered page may contain fewer than `perPage` rows (v1 limitation). All financial math is computed in the backend; the frontend only renders these strings.",
+        "description": "Returns one forward-pricing row per APPROVED ProductVariant. Each row assembles a single-unit profit from the existing cost / commission / shipping / PSF / stoppage resolvers and the profit engine. Rows are ALWAYS returned — even when a variant cannot be costed — so the user can see which input is missing: the three independent status fields (costStatus, shippingEstimateStatus, commissionStatus) surface the gap, and `calculable` is their conjunction. When calculable=false, netProfit / saleMarginPct / costMarkupPct are null. Money fields are GROSS (VAT-inclusive) decimal strings. Each row also carries `imageUrl` (primary image), `cost` (GROSS TRY, null unless costStatus=OK), and category/brand ids + names. Every approved variant is computed in memory, then filtered, sorted and paginated server-side, so `total`/`totalPages` reflect the FILTERED set exactly. Filters: `calculableOnly=true` (actionable rows only), `profitStatus` (profitable/breakeven/loss/all), `marginMin`/`marginMax` (sale margin %), `categoryId`/`brandId` (SQL). Sorts: salePrice/title (SQL columns) plus netProfit/saleMarginPct/costMarkupPct (computed values, null sorts last). Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, 100} with a default of 25. All financial math is computed in the backend; the frontend only renders these strings.",
         "security": [
           {
             "bearerAuth": []
@@ -8969,13 +9025,19 @@
                 "salePrice:asc",
                 "salePrice:desc",
                 "title:asc",
-                "title:desc"
+                "title:desc",
+                "netProfit:asc",
+                "netProfit:desc",
+                "saleMarginPct:asc",
+                "saleMarginPct:desc",
+                "costMarkupPct:asc",
+                "costMarkupPct:desc"
               ],
-              "description": "Sort order for the product pricing list.",
+              "description": "Sort order for the product pricing list. Profit/margin/markup sorts: rows where the value is null (not calculable) sort last (NULLS LAST).",
               "example": "salePrice:asc"
             },
             "required": false,
-            "description": "Sort order for the product pricing list.",
+            "description": "Sort order for the product pricing list. Profit/margin/markup sorts: rows where the value is null (not calculable) sort last (NULLS LAST).",
             "name": "sortBy",
             "in": "query"
           },
@@ -8992,6 +9054,72 @@
             "required": false,
             "description": "When 'true', returns only rows where calculable=true (cost + shipping + commission all resolved). Useful for displaying only actionable variants.",
             "name": "calculableOnly",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "profitable",
+                "breakeven",
+                "loss",
+                "all"
+              ],
+              "default": "all",
+              "description": "Filter by forward profit direction. profitable: forwardNetProfit > 0. breakeven: forwardNetProfit = 0. loss: forwardNetProfit < 0. all: no filter (default). Not-calculable rows (forwardNetProfit IS NULL) are excluded by profitable/breakeven/loss.",
+              "example": "profitable"
+            },
+            "required": false,
+            "description": "Filter by forward profit direction. profitable: forwardNetProfit > 0. breakeven: forwardNetProfit = 0. loss: forwardNetProfit < 0. all: no filter (default). Not-calculable rows (forwardNetProfit IS NULL) are excluded by profitable/breakeven/loss.",
+            "name": "profitStatus",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^-?\\d+(\\.\\d{1,4})?$",
+              "description": "Minimum sale margin % (inclusive). Negative values allowed — margins can be negative.",
+              "example": "15.5"
+            },
+            "required": false,
+            "description": "Minimum sale margin % (inclusive). Negative values allowed — margins can be negative.",
+            "name": "marginMin",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^-?\\d+(\\.\\d{1,4})?$",
+              "description": "Maximum sale margin % (inclusive). Negative values allowed — margins can be negative.",
+              "example": "80"
+            },
+            "required": false,
+            "description": "Maximum sale margin % (inclusive). Negative values allowed — margins can be negative.",
+            "name": "marginMax",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$",
+              "description": "Filter by product category (bigint as string).",
+              "example": "12345"
+            },
+            "required": false,
+            "description": "Filter by product category (bigint as string).",
+            "name": "categoryId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$",
+              "description": "Filter by product brand (bigint as string).",
+              "example": "67890"
+            },
+            "required": false,
+            "description": "Filter by product brand (bigint as string).",
+            "name": "brandId",
             "in": "query"
           }
         ],

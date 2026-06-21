@@ -18,7 +18,23 @@ section "Versioning" for details.
   (`saleMarginPct`) ve maliyet markup'ı (`costMarkupPct`) backend'de hesaplanarak döner. Maliyet, komisyon
   veya kargo tahmini eksik olan varyantlar `calculable: false` ile listelenir; eksiklik `costStatus` /
   `commissionStatus` / `shippingEstimateStatus` alanlarıyla raporlanır. Tüm finansal değerler backend'de
-  hesaplanır, frontend yalnızca render eder. Sayfalama ve metin arama (`q`) desteklenir.
+  hesaplanır, frontend yalnızca render eder. Sayfalama ve metin arama (`q`) desteklenir. (Dilim 2.5
+  genişletmesi — aşağıda)
+
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/product-pricing`** — Dilim 2.5: liste endpoint'i
+  sunucu tarafında genişletildi. Yeni sorgu parametreleri:
+  - `profitStatus` (`profitable` / `breakeven` / `loss` / `all`, varsayılan `all`) — net kâra göre
+    sunucu bellekte filtreler (kârlı: `netProfit > 0`, başabaş: `= 0`, zararlı: `< 0`).
+  - `marginMin` / `marginMax` (ondalıklı string, negatife izin verilir) — satış marjı (`saleMarginPct`)
+    aralığı filtresi.
+  - `categoryId` / `brandId` (rakam string) — SQL düzeyinde kategori ve marka filtresi.
+  - `sortBy` — yeni sıralama seçenekleri: `netProfit:asc|desc`, `saleMarginPct:asc|desc`,
+    `costMarkupPct:asc|desc`; mevcut `salePrice:asc|desc` ve `title:asc|desc` korunur. Hesaplanamayanlar
+    (null kâr/marj) her iki yönde de sona düşer.
+  Yeni yanıt alanları (`ProductPricingItem` başına): `imageUrl` (ürünün ilk görselinin URL'i, nullable),
+  `cost` (ondalıklı string, nullable), `categoryId` / `categoryName` / `brandId` / `brandName`
+  (nullable). Kâr her istekte bellekte hesaplanır — kalıcı yazma yoktur. `total` filtreli küme sayısını
+  yansıtır (tümü bellekte toplanır). Additive, geriye dönük uyumlu.
 
 - **`POST /v1/organizations/{orgId}/stores/{storeId}/product-pricing/quote`** — tek bir varyant için
   hedef marj, markup veya kâr değerinden geriye çözülen satış fiyatını hesaplar. İstek gövdesi:
