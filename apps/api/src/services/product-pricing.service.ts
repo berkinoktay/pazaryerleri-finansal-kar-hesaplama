@@ -30,6 +30,7 @@ import {
   grossToVat,
   resolveFeeDefinition,
   solvePriceForTarget,
+  type EstimateOutcome,
   type EstimateUnavailableReason,
   type ProfitBreakdown,
   type ProfitInputFee,
@@ -43,10 +44,11 @@ import {
 export type QuoteReason = SolveReason | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
-import { resolveCommissionRate } from './commission-rate-resolver';
+import { resolveCommissionRate, type ResolvedCommissionRate } from './commission-rate-resolver';
 import { feeToProfitInputFee, deriveCalculable } from './product-pricing-assembly';
 import { fetchCostAggregates } from './products-list.service';
 import { estimateShippingCostForVariant } from './shipping-estimator.service';
+import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CommissionStatus,
   CostStatus,
@@ -62,14 +64,32 @@ const DEFAULT_VAT_RATE = 20;
 
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
+export type ProfitStatusFilter = 'profitable' | 'breakeven' | 'loss' | 'all';
+
 export interface ListProductPricingFilters {
   page: number;
   perPage: number;
   q?: string;
   sortBy?: ProductPricingSort;
+  calculableOnly?: boolean;
+  profitStatus?: ProfitStatusFilter;
+  marginMin?: string;
+  marginMax?: string;
+  categoryId?: string;
+  brandId?: string;
 }
 
-export type ProductPricingSort = 'salePrice:asc' | 'salePrice:desc' | 'title:asc' | 'title:desc';
+export type ProductPricingSort =
+  | 'salePrice:asc'
+  | 'salePrice:desc'
+  | 'title:asc'
+  | 'title:desc'
+  | 'netProfit:asc'
+  | 'netProfit:desc'
+  | 'saleMarginPct:asc'
+  | 'saleMarginPct:desc'
+  | 'costMarkupPct:asc'
+  | 'costMarkupPct:desc';
 
 // ─── Fee definitions resolved once per request (loop-invariant) ───────────────
 
@@ -95,6 +115,23 @@ interface VariantForAssembly {
   vatRate: number | null;
   isDigital: boolean;
   product: { title: string; categoryId: bigint | null; brandId: bigint | null };
+}
+
+/**
+ * Variant shape for the LIST pipeline — the assembly columns plus the display
+ * fields (category/brand names + primary image) the list rows surface. A
+ * superset of `VariantForAssembly`, so it can be passed straight to
+ * `assembleUnitEconomics` and the batch commission resolver.
+ */
+interface VariantForListRow extends VariantForAssembly {
+  product: {
+    title: string;
+    categoryId: bigint | null;
+    categoryName: string | null;
+    brandId: bigint | null;
+    brandName: string | null;
+    images: { url: string }[];
+  };
 }
 
 interface AssemblyContext {
@@ -167,6 +204,20 @@ async function resolveFeeDefs(
   };
 }
 
+// ─── Pre-resolved inputs (batch-friendly) ────────────────────────────────────
+
+/**
+ * The three per-variant inputs `assembleUnitEconomics` needs, resolved UPSTREAM
+ * so the assembly stays pure (no DB). `quoteProductPrice` resolves these for one
+ * variant; `listProductPricing` resolves them in batch (one query each) across
+ * the whole page — that is how the N+1 is removed without changing the math.
+ */
+export interface AssemblyInputs {
+  costAggregate: VariantCostAggregate | undefined;
+  commission: ResolvedCommissionRate | null;
+  shipping: EstimateOutcome;
+}
+
 // ─── Assembly ─────────────────────────────────────────────────────────────────
 
 /**
@@ -174,57 +225,49 @@ async function resolveFeeDefs(
  * `econ` is non-null only when cost, shipping and commission are all OK; in any
  * other case it is `null` (the caller turns that into a not-calculable row).
  *
- * `costAggregate` is looked up upstream (batch); shipping + commission are
- * per-variant DB calls (N+1 accepted at perPage ≤ 100 — see plan §Kararlar 2).
+ * PURE — performs no DB queries. All three resolver-backed inputs (cost,
+ * commission, shipping) are supplied via `inputs`, resolved upstream in batch by
+ * the caller. The unit math (percent vs fraction, NET → GROSS) is unchanged from
+ * the previous per-variant version; only WHERE the inputs come from changed.
  */
-export async function assembleUnitEconomics(
-  tx: Prisma.TransactionClient,
+export function assembleUnitEconomics(
   ctx: AssemblyContext,
   variant: VariantForAssembly,
-  costAggregate: VariantCostAggregate | undefined,
-): Promise<AssemblyResult> {
+  inputs: AssemblyInputs,
+): AssemblyResult {
   const saleVatRate = new Decimal(variant.vatRate ?? DEFAULT_VAT_RATE);
 
   // ─── cost (GROSS-TRY batch aggregate; VAT extracted at sale rate) ───────────
   // A null `currentCostTry` (e.g. FX_MISSING) never pairs with costStatus 'OK',
   // but we read it directly so the type narrows without an assertion.
-  const costStatus: CostStatus = costAggregate?.costStatus ?? 'NO_PROFILES';
-  const currentCostTry = costAggregate?.currentCostTry ?? null;
+  const costStatus: CostStatus = inputs.costAggregate?.costStatus ?? 'NO_PROFILES';
+  const currentCostTry = inputs.costAggregate?.currentCostTry ?? null;
   const costGross =
     costStatus === 'OK' && currentCostTry !== null ? new Decimal(currentCostTry) : null;
 
   // ─── commission (platform-global rate; null ⇒ NO_RULE) ──────────────────────
-  // categoryId is required to match a rule — null means no possible match, so we
-  // skip the resolver entirely and report NO_RULE directly.
+  // categoryId is required to match a rule — when there is no possible match the
+  // caller passes `commission: null` (it skips the resolver), so a null here
+  // means NO_RULE regardless of why.
   let commissionStatus: CommissionStatus = 'NO_RULE';
   let commissionRate: Decimal | null = null;
-  if (variant.product.categoryId !== null) {
-    const resolved = await resolveCommissionRate({
-      platform: ctx.platform,
-      categoryId: variant.product.categoryId,
-      brandId: variant.product.brandId,
-      // Trendyol does not expose a seller's segment via API — always null today.
-      sellerSegment: null,
-    });
-    if (resolved !== null) {
-      commissionStatus = 'OK';
-      commissionRate = resolved.rate;
-    }
+  if (inputs.commission !== null) {
+    commissionStatus = 'OK';
+    commissionRate = inputs.commission.rate;
   }
 
   // ─── shipping (NET tariff → GROSS DEBIT fee) ────────────────────────────────
-  const shippingOutcome = await estimateShippingCostForVariant(variant.id, tx);
   let shippingStatus: ShippingEstimateStatus;
   let shippingFee: ProfitInputFee | null = null;
-  if (shippingOutcome.ok) {
+  if (inputs.shipping.ok) {
     shippingStatus = 'OK';
     shippingFee = feeToProfitInputFee(
-      shippingOutcome.estimate.amount,
+      inputs.shipping.estimate.amount,
       ctx.feeDefs.shipVatRate,
       'SHIPPING',
     );
   } else {
-    shippingStatus = shippingReasonToStatus(shippingOutcome.reason);
+    shippingStatus = shippingReasonToStatus(inputs.shipping.reason);
   }
 
   const calculable = deriveCalculable(costStatus, shippingStatus, commissionStatus);
@@ -254,6 +297,161 @@ export async function assembleUnitEconomics(
   return { econ, costStatus, shippingStatus, commissionStatus };
 }
 
+// ─── Batch resolvers (one DB round-trip for the whole page) ───────────────────
+
+/** Variant fields the batch commission resolver reads. */
+interface VariantForCommission {
+  id: string;
+  product: { categoryId: bigint | null; brandId: bigint | null };
+}
+
+/**
+ * Resolves the commission rate for every variant with at most one
+ * `resolveCommissionRate` call per UNIQUE `(categoryId, brandId)` pair — the
+ * rate is platform-global, so two variants in the same category+brand share a
+ * result. Variants with a null `categoryId` cannot match any rule and map to
+ * `null` without a resolver call.
+ *
+ * Returns a `Map<variantId, ResolvedCommissionRate | null>` covering every input
+ * variant. Same-pair variants receive the SAME resolved reference, so the dedupe
+ * is observable both by call count and by reference identity.
+ */
+export async function batchResolveCommission(
+  platform: Platform,
+  variants: VariantForCommission[],
+): Promise<Map<string, ResolvedCommissionRate | null>> {
+  // Unique pairs keyed by a stable string; null categoryId never enters the pool.
+  const pairKey = (categoryId: bigint, brandId: bigint | null): string =>
+    `${categoryId.toString()}|${brandId === null ? '' : brandId.toString()}`;
+
+  const uniquePairs = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
+  for (const variant of variants) {
+    const { categoryId, brandId } = variant.product;
+    if (categoryId === null) continue;
+    const key = pairKey(categoryId, brandId);
+    if (!uniquePairs.has(key)) {
+      uniquePairs.set(key, { categoryId, brandId });
+    }
+  }
+
+  // Resolve each unique pair exactly once (in parallel).
+  const resolvedByKey = new Map<string, ResolvedCommissionRate | null>();
+  await Promise.all(
+    [...uniquePairs.entries()].map(async ([key, pair]) => {
+      const resolved = await resolveCommissionRate({
+        platform,
+        categoryId: pair.categoryId,
+        brandId: pair.brandId,
+        // Trendyol does not expose a seller's segment via API — always null today.
+        sellerSegment: null,
+      });
+      resolvedByKey.set(key, resolved);
+    }),
+  );
+
+  // Map every variant back to its pair's result (null categoryId ⇒ null).
+  const result = new Map<string, ResolvedCommissionRate | null>();
+  for (const variant of variants) {
+    const { categoryId, brandId } = variant.product;
+    if (categoryId === null) {
+      result.set(variant.id, null);
+      continue;
+    }
+    result.set(variant.id, resolvedByKey.get(pairKey(categoryId, brandId)) ?? null);
+  }
+  return result;
+}
+
+/**
+ * Maps a `ShippingEstimateRow` (from the CTE) back to the `EstimateOutcome`
+ * shape `assembleUnitEconomics` consumes. The CTE already mirrors the canonical
+ * `estimateShippingCostForVariant` (equivalence test guarantees agreement), so
+ * this is a pure wire-shape adaptation — no recomputation.
+ *
+ * `NO_DESI` is unreachable in practice (`synced_dimensional_weight` is non-null
+ * `@default(0)`, so the COALESCE'd desi is never NULL); it is mapped defensively
+ * to `DESI_OVERFLOW` so the `EstimateOutcome` reason union stays closed.
+ */
+function shippingRowToOutcome(row: ShippingEstimateRow): EstimateOutcome {
+  if (row.shipping_estimate_status === 'OK') {
+    if (row.estimated_shipping_net === null || row.shipping_tariff_applied === null) {
+      // Defensive: an 'OK' row always carries a net amount + applied tariff.
+      return { ok: false, reason: 'DESI_OVERFLOW' };
+    }
+    return {
+      ok: true,
+      estimate: {
+        amount: new Decimal(row.estimated_shipping_net),
+        carrierCode: row.shipping_carrier_code ?? 'OWN',
+        tariffApplied: row.shipping_tariff_applied,
+        // The CTE selects only `price_net`, not the winning tariff row id — null
+        // matches the OWN_CONTRACT branch of the per-variant estimator. Neither
+        // field feeds the profit math (assembly reads only `amount`).
+        sourceTariffId: null,
+        baseDesiAtEstimate: new Decimal(row.eff_desi ?? '0'),
+      },
+    };
+  }
+
+  switch (row.shipping_estimate_status) {
+    case 'NO_CARRIER':
+      return { ok: false, reason: 'NO_CARRIER' };
+    case 'OWN_CONTRACT_EMPTY':
+      return { ok: false, reason: 'OWN_CONTRACT_EMPTY' };
+    case 'DESI_OVERFLOW':
+      return { ok: false, reason: 'DESI_OVERFLOW' };
+    case 'NO_DESI':
+      return { ok: false, reason: 'DESI_OVERFLOW' };
+    default: {
+      const _exhaustive: never = row.shipping_estimate_status;
+      throw new Error(`Unhandled shipping estimate status: ${_exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Resolves shipping for every variant in a store with ONE query, reusing the
+ * canonical `SHIPPING_ESTIMATE_CTE_SQL` (the same CTE products-list uses). The
+ * CTE returns one row per variant in the (org, store) scope; we keep only the
+ * requested `variantIds` and adapt each row to an `EstimateOutcome`. Variants
+ * with no CTE row (e.g. STORE_NOT_FOUND) map to `STORE_NOT_FOUND`.
+ */
+export async function batchResolveShipping(
+  organizationId: string,
+  storeId: string,
+  variantIds: string[],
+): Promise<Map<string, EstimateOutcome>> {
+  const result = new Map<string, EstimateOutcome>();
+  if (variantIds.length === 0) return result;
+
+  let rows: ShippingEstimateRow[];
+  try {
+    rows = await prisma.$queryRawUnsafe<ShippingEstimateRow[]>(
+      SHIPPING_ESTIMATE_CTE_SQL,
+      organizationId,
+      storeId,
+    );
+  } catch (err) {
+    mapPrismaError(err);
+  }
+
+  const requested = new Set(variantIds);
+  for (const row of rows) {
+    if (requested.has(row.id)) {
+      result.set(row.id, shippingRowToOutcome(row));
+    }
+  }
+
+  // Any requested variant the CTE did not return (no store join, etc.) degrades
+  // to STORE_NOT_FOUND so the row stays present and not-calculable.
+  for (const id of variantIds) {
+    if (!result.has(id)) {
+      result.set(id, { ok: false, reason: 'STORE_NOT_FOUND' });
+    }
+  }
+  return result;
+}
+
 // ─── Query builders ───────────────────────────────────────────────────────────
 
 function buildSearchWhere(q: string): Prisma.ProductVariantWhereInput {
@@ -266,7 +464,15 @@ function buildSearchWhere(q: string): Prisma.ProductVariantWhereInput {
   };
 }
 
-function buildOrderBy(
+/**
+ * SQL ordering for the candidate set. Only the two TRUE-column sorts
+ * (salePrice/title) are expressible in Prisma `orderBy`; the profit / margin /
+ * markup sorts operate on COMPUTED in-memory values, so for those the SQL order
+ * is a stable placeholder (salePrice:asc + id) and the real ordering is applied
+ * by `compareRows` after the in-memory profit math. This replaces the previous
+ * salePrice PROXY (which wrongly let Prisma "sort by profit" via salePrice).
+ */
+function buildCandidateOrderBy(
   sort: ProductPricingSort | undefined,
 ): Prisma.ProductVariantOrderByWithRelationInput {
   switch (sort) {
@@ -278,8 +484,16 @@ function buildOrderBy(
       return { product: { title: 'asc' } };
     case 'title:desc':
       return { product: { title: 'desc' } };
+    // Computed-value sorts: ordering is decided in memory by compareRows. Use a
+    // stable, deterministic candidate order so the in-memory sort's tie-breaks
+    // (and the no-op path when every value is null) are reproducible.
+    case 'netProfit:asc':
+    case 'netProfit:desc':
+    case 'saleMarginPct:asc':
+    case 'saleMarginPct:desc':
+    case 'costMarkupPct:asc':
+    case 'costMarkupPct:desc':
     case undefined:
-      // Stable default: cheapest first, then id to break ties deterministically.
       return { salePrice: 'asc' };
     default: {
       const _exhaustive: never = sort;
@@ -288,12 +502,152 @@ function buildOrderBy(
   }
 }
 
+// ─── In-memory computed row (filter + sort working copy) ──────────────────────
+
+/**
+ * The product-pricing row PLUS the un-serialized profit metrics kept as
+ * `Decimal | null`. The list pipeline computes EVERY approved variant in memory,
+ * then filters / sorts by these numeric copies (decimal.js compares, never
+ * float), and finally serializes the surviving page to `ProductPricingRow`. The
+ * numeric copies never leave the service.
+ */
+interface ComputedPricingRow {
+  row: ProductPricingRow;
+  netProfit: Decimal | null;
+  saleMarginPct: Decimal | null;
+  costMarkupPct: Decimal | null;
+}
+
+/** Builds the SQL `where` for the candidate set: org + store + approved + cheap filters. */
+function buildListWhere(
+  orgId: string,
+  storeId: string,
+  filters: ListProductPricingFilters,
+): Prisma.ProductVariantWhereInput {
+  const productWhere: Prisma.ProductWhereInput = { approved: true };
+  if (filters.categoryId !== undefined) {
+    productWhere.categoryId = BigInt(filters.categoryId);
+  }
+  if (filters.brandId !== undefined) {
+    productWhere.brandId = BigInt(filters.brandId);
+  }
+  return {
+    organizationId: orgId,
+    storeId,
+    product: productWhere,
+    ...(filters.q !== undefined ? buildSearchWhere(filters.q) : {}),
+  };
+}
+
+/** Maps a `profitStatus` filter value to a netProfit predicate. `null` rows never match a direction. */
+function matchesProfitStatus(status: ProfitStatusFilter, netProfit: Decimal | null): boolean {
+  switch (status) {
+    case 'all':
+      return true;
+    case 'profitable':
+      return netProfit !== null && netProfit.gt(0);
+    case 'breakeven':
+      return netProfit !== null && netProfit.isZero();
+    case 'loss':
+      return netProfit !== null && netProfit.lt(0);
+    default: {
+      const _exhaustive: never = status;
+      throw new Error(`Unhandled profit status filter: ${_exhaustive}`);
+    }
+  }
+}
+
+/** Applies the in-memory filters (calculableOnly, profitStatus, margin range) to the computed rows. */
+function applyInMemoryFilters(
+  rows: ComputedPricingRow[],
+  filters: ListProductPricingFilters,
+): ComputedPricingRow[] {
+  const profitStatus = filters.profitStatus ?? 'all';
+  const marginMin = filters.marginMin !== undefined ? new Decimal(filters.marginMin) : null;
+  const marginMax = filters.marginMax !== undefined ? new Decimal(filters.marginMax) : null;
+
+  return rows.filter((computed) => {
+    if (filters.calculableOnly === true && !computed.row.calculable) return false;
+    if (!matchesProfitStatus(profitStatus, computed.netProfit)) return false;
+    // Margin range: a null margin is excluded whenever either bound is set.
+    if (marginMin !== null || marginMax !== null) {
+      if (computed.saleMarginPct === null) return false;
+      if (marginMin !== null && computed.saleMarginPct.lt(marginMin)) return false;
+      if (marginMax !== null && computed.saleMarginPct.gt(marginMax)) return false;
+    }
+    return true;
+  });
+}
+
+/** Reads the sortable numeric field for a computed-value sort. */
+function computedSortValue(computed: ComputedPricingRow, sort: ProductPricingSort): Decimal | null {
+  switch (sort) {
+    case 'netProfit:asc':
+    case 'netProfit:desc':
+      return computed.netProfit;
+    case 'saleMarginPct:asc':
+    case 'saleMarginPct:desc':
+      return computed.saleMarginPct;
+    case 'costMarkupPct:asc':
+    case 'costMarkupPct:desc':
+      return computed.costMarkupPct;
+    case 'salePrice:asc':
+    case 'salePrice:desc':
+    case 'title:asc':
+    case 'title:desc':
+    case undefined:
+      return null;
+    default: {
+      const _exhaustive: never = sort;
+      throw new Error(`Unhandled product pricing sort: ${_exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Sorts the computed rows. salePrice/title (and the undefined default) keep the
+ * SQL order untouched — the candidate query already ordered by salePrice:asc/id
+ * or title. The profit/margin/markup sorts compare the COMPUTED Decimal values;
+ * null values always sort LAST regardless of asc/desc (decimal.js comparison —
+ * never float). Stable: equal keys preserve the SQL candidate order.
+ */
+function sortComputedRows(
+  rows: ComputedPricingRow[],
+  sort: ProductPricingSort | undefined,
+): ComputedPricingRow[] {
+  // salePrice/title and the default already arrive in the right SQL order.
+  if (
+    sort === undefined ||
+    sort === 'salePrice:asc' ||
+    sort === 'salePrice:desc' ||
+    sort === 'title:asc' ||
+    sort === 'title:desc'
+  ) {
+    return rows;
+  }
+
+  const desc = sort.endsWith(':desc');
+  // Array.prototype.sort is stable in Node ≥ 12, so equal keys keep SQL order.
+  return [...rows].sort((a, b) => {
+    const av = computedSortValue(a, sort);
+    const bv = computedSortValue(b, sort);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1; // nulls last
+    if (bv === null) return -1; // nulls last
+    const cmp = av.comparedTo(bv);
+    return desc ? -cmp : cmp;
+  });
+}
+
 // ─── List entry point ─────────────────────────────────────────────────────────
 
 /**
- * Lists per-variant forward pricing for a store's APPROVED products. Every
- * matching variant yields a row; calculability is reported per row so the user
- * can see and fix the gaps.
+ * Lists per-variant forward pricing for a store's APPROVED products. Computes
+ * EVERY candidate variant's profit in memory (batch resolvers — no N+1), then
+ * filters / sorts / paginates IN MEMORY so the profit/margin sorts and the
+ * profit/margin filters operate on the live computed values and `total` is the
+ * exact filtered count. Calculability is reported per row so the user can see
+ * and fix the gaps. `imageUrl` / `cost` / category + brand names are included.
  */
 export async function listProductPricing(
   orgId: string,
@@ -301,62 +655,78 @@ export async function listProductPricing(
   store: PrismaStore,
   filters: ListProductPricingFilters,
 ): Promise<{ data: ProductPricingRow[]; total: number }> {
-  const where: Prisma.ProductVariantWhereInput = {
-    organizationId: orgId,
-    storeId,
-    product: { approved: true },
-    ...(filters.q !== undefined ? buildSearchWhere(filters.q) : {}),
-  };
+  const where = buildListWhere(orgId, storeId, filters);
 
-  const skip = (filters.page - 1) * filters.perPage;
-
-  let variants: VariantForAssembly[];
-  let total: number;
+  // 1. Candidate set — ALL approved variants matching the cheap SQL filters.
+  //    No skip/take here: the full set must be computed before in-memory
+  //    filter/sort/paginate can produce a correct `total`.
+  let variants: VariantForListRow[];
   try {
-    [variants, total] = await Promise.all([
-      prisma.productVariant.findMany({
-        where,
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: { select: { title: true, categoryId: true, brandId: true } },
+    variants = await prisma.productVariant.findMany({
+      where,
+      select: {
+        id: true,
+        stockCode: true,
+        barcode: true,
+        salePrice: true,
+        vatRate: true,
+        isDigital: true,
+        product: {
+          select: {
+            title: true,
+            categoryId: true,
+            categoryName: true,
+            brandId: true,
+            brandName: true,
+            images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+          },
         },
-        orderBy: [buildOrderBy(filters.sortBy), { id: 'asc' }],
-        take: filters.perPage,
-        skip,
-      }),
-      prisma.productVariant.count({ where }),
-    ]);
+      },
+      orderBy: [buildCandidateOrderBy(filters.sortBy), { id: 'asc' }],
+    });
   } catch (err) {
     mapPrismaError(err);
   }
 
   if (variants.length === 0) {
-    return { data: [], total };
+    return { data: [], total: 0 };
   }
 
   const variantIds = variants.map((v) => v.id);
-  const costByVariantId = await fetchCostAggregates(orgId, variantIds);
 
-  // Shipping + commission resolvers need a transaction client; the fee
-  // definitions are resolved once inside the same transaction.
-  const data = await prisma.$transaction(async (tx) => {
+  // 2. Batch-resolve all three per-variant inputs up front (one query each) so
+  //    the per-variant assembly below is a pure in-memory loop — no N+1.
+  const [costByVariantId, commissionByVariantId, shippingByVariantId] = await Promise.all([
+    fetchCostAggregates(orgId, variantIds),
+    batchResolveCommission(store.platform, variants),
+    batchResolveShipping(orgId, storeId, variantIds),
+  ]);
+
+  // 3. Compute every variant in memory. Fee definitions are loop-invariant —
+  //    resolved once inside a transaction.
+  const computed = await prisma.$transaction(async (tx) => {
     const feeDefs = await resolveFeeDefs(tx, store.platform);
     const ctx: AssemblyContext = { platform: store.platform, feeDefs };
 
-    const rows: ProductPricingRow[] = [];
-    for (const variant of variants) {
-      const result = await assembleUnitEconomics(tx, ctx, variant, costByVariantId.get(variant.id));
-      rows.push(toRow(variant, result));
-    }
-    return rows;
+    return variants.map((variant): ComputedPricingRow => {
+      const costAggregate = costByVariantId.get(variant.id);
+      const result = assembleUnitEconomics(ctx, variant, {
+        costAggregate,
+        commission: commissionByVariantId.get(variant.id) ?? null,
+        shipping: shippingByVariantId.get(variant.id) ?? { ok: false, reason: 'STORE_NOT_FOUND' },
+      });
+      return computeRow(variant, result, costAggregate);
+    });
   });
 
-  return { data, total };
+  // 4. Filter → 5. sort → 6. paginate, all in memory; `total` is exact.
+  const filtered = applyInMemoryFilters(computed, filters);
+  const sorted = sortComputedRows(filtered, filters.sortBy);
+  const total = sorted.length;
+  const start = (filters.page - 1) * filters.perPage;
+  const page = sorted.slice(start, start + filters.perPage);
+
+  return { data: page.map((c) => c.row), total };
 }
 
 // ─── Quote ────────────────────────────────────────────────────────────────────
@@ -465,10 +835,31 @@ export async function quoteProductPrice(
     return { calculable: false, variantId: input.variantId, reason: 'NO_COST' };
   }
 
-  // ─── 3. Assemble UnitEconomics ───────────────────────────────────────────
+  // ─── 3. Resolve the per-variant inputs, then assemble ────────────────────
+  // Single variant: resolve commission + shipping directly (one call each),
+  // exactly as the old in-assembly path did, then run the pure assembly. The
+  // commission resolver is skipped when categoryId is null (no possible match);
+  // shipping uses the canonical per-variant estimator (CTE-equivalent).
   const feeDefs = await resolveFeeDefs(tx, store.platform);
   const ctx: AssemblyContext = { platform: store.platform, feeDefs };
-  const assemblyResult = await assembleUnitEconomics(tx, ctx, variant, costAggregate);
+
+  const commission =
+    variant.product.categoryId !== null
+      ? await resolveCommissionRate({
+          platform: store.platform,
+          categoryId: variant.product.categoryId,
+          brandId: variant.product.brandId,
+          // Trendyol does not expose a seller's segment via API — always null today.
+          sellerSegment: null,
+        })
+      : null;
+  const shipping = await estimateShippingCostForVariant(variant.id, tx);
+
+  const assemblyResult = assembleUnitEconomics(ctx, variant, {
+    costAggregate,
+    commission,
+    shipping,
+  });
 
   if (assemblyResult.econ === null) {
     // Cost is guaranteed OK here (the gate above returned 'NO_COST' otherwise),
@@ -496,22 +887,55 @@ export async function quoteProductPrice(
 
 // ─── Serialization ────────────────────────────────────────────────────────────
 
-function toRow(variant: VariantForAssembly, result: AssemblyResult): ProductPricingRow {
+/**
+ * Builds a `ComputedPricingRow` — the serialized DTO row PLUS the un-rounded
+ * Decimal profit metrics the in-memory filter/sort consume. `cost` is the GROSS
+ * TRY aggregate, present only when costStatus is OK (it is null otherwise, even
+ * if a stale FX value sits in `currentCostTry`). `imageUrl` is the position-0
+ * product image url or null. category / brand ids are serialized bigints.
+ */
+function computeRow(
+  variant: VariantForListRow,
+  result: AssemblyResult,
+  costAggregate: VariantCostAggregate | undefined,
+): ComputedPricingRow {
+  const { product } = variant;
+  const imageUrl = product.images[0]?.url ?? null;
+  const cost =
+    result.costStatus === 'OK' && costAggregate?.currentCostTry != null
+      ? costAggregate.currentCostTry
+      : null;
+
+  const displayFields = {
+    imageUrl,
+    cost,
+    categoryId: product.categoryId !== null ? product.categoryId.toString() : null,
+    categoryName: product.categoryName,
+    brandId: product.brandId !== null ? product.brandId.toString() : null,
+    brandName: product.brandName,
+  };
+
   const base = {
     variantId: variant.id,
     sku: variant.stockCode,
     barcode: variant.barcode,
-    productName: variant.product.title,
+    productName: product.title,
     salePrice: new Decimal(variant.salePrice.toString()).toFixed(2),
     costStatus: result.costStatus,
     shippingEstimateStatus: result.shippingStatus,
     commissionStatus: result.commissionStatus,
+    ...displayFields,
   };
 
   if (result.econ === null) {
     return {
-      ...base,
-      calculable: false,
+      row: {
+        ...base,
+        calculable: false,
+        netProfit: null,
+        saleMarginPct: null,
+        costMarkupPct: null,
+      },
       netProfit: null,
       saleMarginPct: null,
       costMarkupPct: null,
@@ -520,10 +944,15 @@ function toRow(variant: VariantForAssembly, result: AssemblyResult): ProductPric
 
   const breakdown = computeUnitProfit(result.econ, new Decimal(variant.salePrice.toString()));
   return {
-    ...base,
-    calculable: true,
-    netProfit: breakdown.netProfit.toFixed(2),
-    saleMarginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
-    costMarkupPct: breakdown.costMarkupPct !== null ? breakdown.costMarkupPct.toFixed(2) : null,
+    row: {
+      ...base,
+      calculable: true,
+      netProfit: breakdown.netProfit.toFixed(2),
+      saleMarginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
+      costMarkupPct: breakdown.costMarkupPct !== null ? breakdown.costMarkupPct.toFixed(2) : null,
+    },
+    netProfit: breakdown.netProfit,
+    saleMarginPct: breakdown.saleMarginPct,
+    costMarkupPct: breakdown.costMarkupPct,
   };
 }

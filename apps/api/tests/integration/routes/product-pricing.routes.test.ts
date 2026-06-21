@@ -193,6 +193,12 @@ interface PricingRowWire {
   netProfit: string | null;
   saleMarginPct: string | null;
   costMarkupPct: string | null;
+  imageUrl: string | null;
+  cost: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  brandId: string | null;
+  brandName: string | null;
 }
 
 interface ListResponseWire {
@@ -334,9 +340,11 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — fully
     expect(body.data.every((r) => r.calculable)).toBe(true);
   });
 
-  it('calculableOnly=true: total/totalPages reflect the UNFILTERED count (v1 caveat)', async () => {
+  it('calculableOnly=true: total/totalPages reflect the FILTERED count (in-memory pipeline)', async () => {
     // Two variants total (calculable + noCost); only one survives the filter.
-    // total and totalPages must reflect all 2 variants, not just the 1 shown.
+    // Slice 2.5 Task 3 computes every variant in memory then filters BEFORE the
+    // slice, so total/totalPages now reflect the 1 surviving row exactly (the
+    // previous v1 caveat — unfiltered total — was removed with the salePrice proxy).
     const res = await app.request(
       `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing?calculableOnly=true`,
       { headers: { Authorization: bearer(ctx.accessToken) } },
@@ -345,7 +353,7 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — fully
     const body = (await res.json()) as ListResponseWire;
 
     expect(body.data).toHaveLength(1);
-    expect(body.pagination.total).toBe(2);
+    expect(body.pagination.total).toBe(1);
     expect(body.pagination.totalPages).toBe(1);
   });
 
@@ -371,6 +379,344 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — fully
       { headers: { Authorization: bearer(outsider.accessToken) } },
     );
     expect(res.status).toBe(403);
+  });
+});
+
+// ── In-memory filter / sort / paginate + image/cost (Slice 2.5 Task 3) ────────
+//
+// A richer fixture: six variants spanning profitable / loss / no-cost across two
+// categories + two brands, one product carrying a position-ordered image set.
+// All six share the SENDEOMP / TRENDYOL_CONTRACT store (shipping OK) and a
+// seeded commission rate per category (commission OK), so calculability is
+// driven purely by cost presence/amount:
+//   - profitable: cost 200 GROSS  → netProfit > 0
+//   - loss:       cost 480 GROSS  → netProfit < 0
+//   - no-cost:    no profile      → calculable=false, netProfit null
+//
+// The fixture is built once in beforeAll; every test is a read.
+
+const CATEGORY_B_ID = 700n;
+const BRAND_B_ID = 3100n;
+const PRIMARY_IMAGE_URL = 'https://cdn.example.com/p-primary.jpg';
+const SECONDARY_IMAGE_URL = 'https://cdn.example.com/p-secondary.jpg';
+
+interface RichFixtureVariants {
+  aProfit1: string;
+  aProfit2: string;
+  aLoss: string;
+  aNoCost: string;
+  bProfit: string;
+  bLoss: string;
+}
+
+interface RichFixtureCtx {
+  accessToken: string;
+  orgId: string;
+  storeId: string;
+  variants: RichFixtureVariants;
+}
+
+/** Seed a CATEGORY commission rate for an arbitrary category so it resolves. */
+async function seedCommissionRateFor(categoryId: bigint, categoryName: string): Promise<void> {
+  await prisma.marketplaceCommissionRate.create({
+    data: {
+      platform: 'TRENDYOL',
+      ruleKind: 'CATEGORY',
+      categoryId,
+      brandId: null,
+      categoryName,
+      parentCategoryName: null,
+      brandName: null,
+      baseRate: new Decimal('18.00'),
+      paymentTermDays: 60,
+      segmentOverrides: {},
+      fetchedAt: new Date(),
+      sourceScreen: 'CategoryCommissionPaymentTerms',
+    },
+  });
+}
+
+async function setupRichFixture(): Promise<RichFixtureCtx> {
+  const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+  if (carrier === null) {
+    throw new Error('SENDEOMP carrier missing — globalSetup ensureShippingReferenceData must run');
+  }
+
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  const store = await prisma.store.create({
+    data: {
+      organizationId: org.id,
+      name: 'Rich Pricing Store',
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId: 'rich-pricing',
+      credentials: 'opaque',
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+      defaultShippingCarrierId: carrier.id,
+    },
+  });
+
+  await ensureFeeDefinitions();
+  await seedCommissionRate(); // category A (597)
+  await seedCommissionRateFor(CATEGORY_B_ID, 'Pantolon'); // category B (700)
+
+  // Two products: A in category 597/brand 2032, B in category 700/brand 3100.
+  const productA = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: 9001n,
+      productMainId: 'pm-9001',
+      title: 'A Beyaz Gömlek',
+      categoryId: CATEGORY_ID,
+      categoryName: 'Gömlek',
+      brandId: BRAND_ID,
+      brandName: 'Modline',
+    },
+  });
+  const productB = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: 9002n,
+      productMainId: 'pm-9002',
+      title: 'Z Siyah Pantolon',
+      categoryId: CATEGORY_B_ID,
+      categoryName: 'Pantolon',
+      brandId: BRAND_B_ID,
+      brandName: 'Denimco',
+    },
+  });
+
+  // Two ordered images on product A — position 0 is the primary the row surfaces.
+  await prisma.productImage.createMany({
+    data: [
+      { organizationId: org.id, productId: productA.id, url: SECONDARY_IMAGE_URL, position: 1 },
+      { organizationId: org.id, productId: productA.id, url: PRIMARY_IMAGE_URL, position: 0 },
+    ],
+  });
+
+  // A low-cost (200) and a high-cost (480) profile to drive profitable vs loss.
+  const lowCost = await prisma.costProfile.create({
+    data: {
+      organizationId: org.id,
+      name: 'Low COGS',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      currency: 'TRY',
+      vatRate: 20,
+      fxRateMode: 'MANUAL',
+    },
+  });
+  const highCost = await prisma.costProfile.create({
+    data: {
+      organizationId: org.id,
+      name: 'High COGS',
+      type: 'COGS',
+      amountGross: new Decimal('480.00'),
+      currency: 'TRY',
+      vatRate: 20,
+      fxRateMode: 'MANUAL',
+    },
+  });
+
+  let seq = 90100n;
+  async function makeVariant(
+    product: { id: string },
+    sku: string,
+    profileId: string | null,
+  ): Promise<string> {
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: seq++,
+        barcode: `BC-${sku}`,
+        stockCode: sku,
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeight: new Decimal('3.0'),
+      },
+    });
+    if (profileId !== null) {
+      await prisma.productVariantCostProfile.create({
+        data: { organizationId: org.id, profileId, productVariantId: variant.id },
+      });
+    }
+    return variant.id;
+  }
+
+  // Category A: 2 profitable + 1 loss + 1 no-cost. Category B: 1 profitable + 1 loss.
+  const aProfit1 = await makeVariant(productA, 'A-PROFIT-1', lowCost.id);
+  const aProfit2 = await makeVariant(productA, 'A-PROFIT-2', lowCost.id);
+  const aLoss = await makeVariant(productA, 'A-LOSS', highCost.id);
+  const aNoCost = await makeVariant(productA, 'A-NOCOST', null);
+  const bProfit = await makeVariant(productB, 'B-PROFIT', lowCost.id);
+  const bLoss = await makeVariant(productB, 'B-LOSS', highCost.id);
+
+  return {
+    accessToken: user.accessToken,
+    orgId: org.id,
+    storeId: store.id,
+    variants: { aProfit1, aProfit2, aLoss, aNoCost, bProfit, bLoss },
+  };
+}
+
+describe('GET .../product-pricing — in-memory filter/sort/paginate + image/cost', () => {
+  let ctx: RichFixtureCtx;
+
+  beforeAll(async () => {
+    await truncateAll();
+    ctx = await setupRichFixture();
+  });
+
+  function listUrl(query: string): string {
+    return `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing${query}`;
+  }
+
+  async function fetchList(query: string): Promise<ListResponseWire> {
+    const res = await app.request(listUrl(query), {
+      headers: { Authorization: bearer(ctx.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as ListResponseWire;
+  }
+
+  it('no filter: returns all six variants with an exact total', async () => {
+    const body = await fetchList('?perPage=25');
+    expect(body.data).toHaveLength(6);
+    expect(body.pagination.total).toBe(6);
+  });
+
+  it('profitStatus=profitable: only netProfit>0 rows, total is the FILTERED count', async () => {
+    const body = await fetchList('?profitStatus=profitable&perPage=25');
+    // 3 profitable variants (aProfit1, aProfit2, bProfit) out of 6.
+    expect(body.pagination.total).toBe(3);
+    expect(body.data).toHaveLength(3);
+    expect(body.data.every((r) => r.netProfit !== null && Number(r.netProfit) > 0)).toBe(true);
+    const ids = body.data.map((r) => r.variantId);
+    expect(ids).toContain(ctx.variants.aProfit1);
+    expect(ids).toContain(ctx.variants.bProfit);
+    expect(ids).not.toContain(ctx.variants.aLoss);
+    expect(ids).not.toContain(ctx.variants.aNoCost);
+  });
+
+  it('profitStatus=loss: only netProfit<0 rows (no-cost excluded)', async () => {
+    const body = await fetchList('?profitStatus=loss&perPage=25');
+    expect(body.pagination.total).toBe(2);
+    expect(body.data.every((r) => r.netProfit !== null && Number(r.netProfit) < 0)).toBe(true);
+    const ids = body.data.map((r) => r.variantId);
+    expect(ids).toContain(ctx.variants.aLoss);
+    expect(ids).toContain(ctx.variants.bLoss);
+    expect(ids).not.toContain(ctx.variants.aNoCost);
+  });
+
+  it('marginMin=20 filters out the sub-20% (and null-margin) rows', async () => {
+    // Profitable rows have margin 11.57% (< 20), loss rows are negative, no-cost
+    // is null — so marginMin=20 yields ZERO rows here, proving the bound applies
+    // AND that null margins are excluded.
+    const all = await fetchList('?perPage=25');
+    const margins = all.data
+      .map((r) => (r.saleMarginPct === null ? null : Number(r.saleMarginPct)))
+      .filter((m): m is number => m !== null);
+    expect(margins.every((m) => m < 20)).toBe(true); // sanity: fixture has no ≥20 margins
+
+    const body = await fetchList('?marginMin=20&perPage=25');
+    expect(body.pagination.total).toBe(0);
+    expect(body.data).toHaveLength(0);
+
+    // marginMin=-100 keeps every CALCULABLE row (5: 3 profitable + 2 loss) but
+    // drops the null-margin no-cost row.
+    const wide = await fetchList('?marginMin=-100&perPage=25');
+    expect(wide.pagination.total).toBe(5);
+    expect(wide.data.every((r) => r.saleMarginPct !== null)).toBe(true);
+  });
+
+  it('categoryId=B filters to category-B variants only (SQL filter)', async () => {
+    const body = await fetchList(`?categoryId=${CATEGORY_B_ID}&perPage=25`);
+    expect(body.pagination.total).toBe(2);
+    const ids = body.data.map((r) => r.variantId);
+    expect(ids).toContain(ctx.variants.bProfit);
+    expect(ids).toContain(ctx.variants.bLoss);
+    expect(body.data.every((r) => r.categoryId === CATEGORY_B_ID.toString())).toBe(true);
+    expect(body.data.every((r) => r.categoryName === 'Pantolon')).toBe(true);
+  });
+
+  it('brandId filters to brand-B variants only (SQL filter)', async () => {
+    const body = await fetchList(`?brandId=${BRAND_B_ID}&perPage=25`);
+    expect(body.pagination.total).toBe(2);
+    expect(body.data.every((r) => r.brandId === BRAND_B_ID.toString())).toBe(true);
+    expect(body.data.every((r) => r.brandName === 'Denimco')).toBe(true);
+  });
+
+  it('sortBy=netProfit:desc orders by COMPUTED profit with null-profit rows LAST', async () => {
+    const body = await fetchList('?sortBy=netProfit:desc&perPage=25');
+    expect(body.data).toHaveLength(6);
+
+    // Split at the first null netProfit; everything before is calculable (desc),
+    // everything at/after is null. This proves the salePrice-proxy was removed:
+    // a salePrice sort would NOT cluster nulls or order by profit.
+    const profits = body.data.map((r) => (r.netProfit === null ? null : Number(r.netProfit)));
+    const firstNull = profits.indexOf(null);
+    expect(firstNull).toBeGreaterThan(-1); // the no-cost row is null
+
+    // Non-null prefix is descending; nulls cluster last.
+    const nonNull = profits.slice(0, firstNull).filter((p): p is number => p !== null);
+    expect([...nonNull].sort((a, b) => b - a)).toEqual(nonNull);
+    expect(profits.slice(firstNull).every((p) => p === null)).toBe(true);
+
+    // The top row is a profitable one; the last row is the no-cost (null) one.
+    const last = body.data[body.data.length - 1];
+    expect(body.data[0]?.netProfit).not.toBeNull();
+    expect(last?.netProfit).toBeNull();
+    expect(last?.variantId).toBe(ctx.variants.aNoCost);
+  });
+
+  it('sortBy=netProfit:asc orders ascending with null-profit rows still LAST', async () => {
+    const body = await fetchList('?sortBy=netProfit:asc&perPage=25');
+    const profits = body.data.map((r) => (r.netProfit === null ? null : Number(r.netProfit)));
+    const firstNull = profits.indexOf(null);
+    const nonNull = profits.slice(0, firstNull).filter((p): p is number => p !== null);
+    expect([...nonNull].sort((a, b) => a - b)).toEqual(nonNull);
+    // nulls last even on ascending sort
+    expect(body.data[body.data.length - 1]?.netProfit).toBeNull();
+  });
+
+  it('imageUrl is the position-0 image when present, null otherwise', async () => {
+    const body = await fetchList('?perPage=25');
+    const withImage = body.data.find((r) => r.variantId === ctx.variants.aProfit1);
+    expect(withImage?.imageUrl).toBe(PRIMARY_IMAGE_URL);
+
+    // Category-B product has no images.
+    const noImage = body.data.find((r) => r.variantId === ctx.variants.bProfit);
+    expect(noImage?.imageUrl).toBeNull();
+  });
+
+  it('cost is the GROSS aggregate when costStatus=OK, null for the no-cost row', async () => {
+    const body = await fetchList('?perPage=25');
+    const profitable = body.data.find((r) => r.variantId === ctx.variants.aProfit1);
+    expect(profitable?.costStatus).toBe('OK');
+    expect(profitable?.cost).toBe('200.00');
+
+    const noCost = body.data.find((r) => r.variantId === ctx.variants.aNoCost);
+    expect(noCost?.costStatus).toBe('NO_PROFILES');
+    expect(noCost?.cost).toBeNull();
+  });
+
+  it('pagination over a filtered set: total is filtered, page slices correctly', async () => {
+    const page1 = await fetchList('?profitStatus=profitable&perPage=10&page=1');
+    expect(page1.pagination.total).toBe(3);
+    expect(page1.pagination.totalPages).toBe(1);
+    expect(page1.data).toHaveLength(3);
+
+    // page 2 at perPage=10 is past the 3-row filtered set → empty slice, total still 3.
+    const page2 = await fetchList('?profitStatus=profitable&perPage=10&page=2');
+    expect(page2.pagination.total).toBe(3);
+    expect(page2.data).toHaveLength(0);
   });
 });
 

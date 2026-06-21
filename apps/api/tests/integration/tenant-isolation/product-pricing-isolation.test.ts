@@ -127,6 +127,59 @@ describe('product-pricing list: route-layer authorization', () => {
     // Org A's store has no products → empty list, and Org B's variant is absent.
     expect(body.data).toHaveLength(0);
   });
+
+  // ─── New filter param does not open a cross-tenant data path ─────────────
+  // Pins that adding ?profitStatus=profitable (Slice 2.5) does not create
+  // a route through which org A's variants surface in an org B request.
+  // Setup: org A has a profitable variant (high salePrice, no cost → calculable:false,
+  // so it won't be in the profitable set anyway, but the filter MUST NOT cause
+  // the service to skip its org+store WHERE clause). Org B's user queries
+  // their own empty store with the new filter → result is empty, not org A's data.
+
+  it('profitStatus filter does not expose cross-tenant variants', async () => {
+    // Org A: create a member + store + variant with a positive salePrice.
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+    const productA = await prisma.product.create({
+      data: {
+        organizationId: orgA.id,
+        storeId: storeA.id,
+        platformContentId: 8001n,
+        productMainId: 'pm-a-8001',
+        title: 'Org A Profitable Product',
+      },
+    });
+    await prisma.productVariant.create({
+      data: {
+        organizationId: orgA.id,
+        storeId: storeA.id,
+        productId: productA.id,
+        platformVariantId: 80010n,
+        barcode: 'BC-A-0001',
+        stockCode: 'STK-A-0001',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+      },
+    });
+
+    // Org B: independent member + store (empty — no variants).
+    const userB = await createAuthenticatedTestUser();
+    const orgB = await createOrganization();
+    await createMembership(orgB.id, userB.id);
+    const storeB = await createStore(orgB.id);
+
+    // Org B queries its own (empty) store with ?profitStatus=profitable.
+    // Must return an empty list — not org A's variant.
+    const res = await app.request(
+      `/v1/organizations/${orgB.id}/stores/${storeB.id}/product-pricing?profitStatus=profitable`,
+      { headers: { Authorization: bearer(userB.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { variantId: string }[] };
+    expect(body.data).toHaveLength(0);
+  });
 });
 
 // ─── Quote isolation ──────────────────────────────────────────────────────────

@@ -25,4 +25,16 @@ export interface ProductPricingRow {
   netProfit: string | null;
   saleMarginPct: string | null;
   costMarkupPct: string | null;
+  /** Primary product image URL (position=0). Null if no image is attached. */
+  imageUrl: string | null;
+  /** Current cost (GROSS, TRY), decimal string. Null when costStatus is not OK. */
+  cost: string | null;
+  /** Product category ID (bigint serialized as string). Null if not set. */
+  categoryId: string | null;
+  /** Product category display name. Null if not set. */
+  categoryName: string | null;
+  /** Product brand ID (bigint serialized as string). Null if not set. */
+  brandId: string | null;
+  /** Product brand display name. Null if not set. */
+  brandName: string | null;
 }

@@ -37,12 +37,16 @@ const listProductPricingRoute = createRoute({
     'be costed — so the user can see which input is missing: the three independent status ' +
     'fields (costStatus, shippingEstimateStatus, commissionStatus) surface the gap, and ' +
     '`calculable` is their conjunction. When calculable=false, netProfit / saleMarginPct / ' +
-    'costMarkupPct are null. Money fields are GROSS (VAT-inclusive) decimal strings. ' +
-    'Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, ' +
-    '100} with a default of 25. `calculableOnly=true` restricts to actionable rows. Note: when ' +
-    '`calculableOnly=true`, `total`/`totalPages` reflect the UNFILTERED match set, so a filtered ' +
-    'page may contain fewer than `perPage` rows (v1 limitation). All ' +
-    'financial math is computed in the backend; the frontend only renders these strings.',
+    'costMarkupPct are null. Money fields are GROSS (VAT-inclusive) decimal strings. Each row ' +
+    'also carries `imageUrl` (primary image), `cost` (GROSS TRY, null unless costStatus=OK), and ' +
+    'category/brand ids + names. Every approved variant is computed in memory, then filtered, ' +
+    'sorted and paginated server-side, so `total`/`totalPages` reflect the FILTERED set exactly. ' +
+    'Filters: `calculableOnly=true` (actionable rows only), `profitStatus` (profitable/breakeven/' +
+    'loss/all), `marginMin`/`marginMax` (sale margin %), `categoryId`/`brandId` (SQL). Sorts: ' +
+    'salePrice/title (SQL columns) plus netProfit/saleMarginPct/costMarkupPct (computed values, ' +
+    'null sorts last). Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to ' +
+    '{10, 25, 50, 100} with a default of 25. All financial math is computed in the backend; the ' +
+    'frontend only renders these strings.',
   security: [{ bearerAuth: [] }],
   request: {
     params: pathParams,
@@ -81,26 +85,27 @@ app.openapi(listProductPricingRoute, async (c) => {
   const { store, role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
+  // The service computes EVERY approved variant in memory, then filters / sorts /
+  // paginates in memory, so `total` is the EXACT filtered count (calculableOnly,
+  // profitStatus, margin range and category/brand all applied before the slice).
   const { data, total } = await listProductPricing(orgId, storeId, store, {
     page: filters.page,
     perPage: filters.perPage,
     q: filters.q,
     sortBy: filters.sortBy,
+    calculableOnly: filters.calculableOnly,
+    profitStatus: filters.profitStatus,
+    marginMin: filters.marginMin,
+    marginMax: filters.marginMax,
+    categoryId: filters.categoryId,
+    brandId: filters.brandId,
   });
 
-  // `calculableOnly` hides non-actionable rows on the current page. Calculability
-  // is derived per row after assembly (cost/shipping/commission resolvers), not a
-  // SQL predicate, so it is applied here rather than in the DB query. `total` /
-  // `totalPages` intentionally reflect the UNFILTERED match set so page navigation
-  // stays stable; the filter is a per-page display refinement (v1 — see plan
-  // §Kararlar 2: perPage ≤ 100 keeps the page small). A future batch resolver can
-  // promote this to a true filtered count.
-  const rows = filters.calculableOnly === true ? data.filter((row) => row.calculable) : data;
   const totalPages = total === 0 ? 0 : Math.ceil(total / filters.perPage);
 
   return c.json(
     {
-      data: rows,
+      data,
       pagination: {
         page: filters.page,
         perPage: filters.perPage,
