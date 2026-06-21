@@ -32,6 +32,14 @@ type OrdersToolbarProps = React.ComponentProps<typeof OrdersToolbar>;
 export interface OrdersTableProps {
   rows: OrderListItem[];
   loading?: boolean;
+  /**
+   * Overrides the table's per-tab embedded empty body. The page client passes
+   * the richer "no orders yet" welcome ONLY when the store is genuinely empty
+   * (no rows, no filter); otherwise this is undefined and the per-tab default
+   * below applies. The filtered-to-zero case never reaches here (the client
+   * leaves it undefined) so the no-results affordance is unaffected.
+   */
+  empty?: React.ReactNode;
   pagination: {
     page: number;
     perPage: number;
@@ -65,6 +73,7 @@ export interface OrdersTableProps {
 export function OrdersTable({
   rows,
   loading = false,
+  empty,
   pagination,
   filters,
   costStatus,
@@ -267,9 +276,10 @@ export function OrdersTable({
 
   // Server-filtered: filters live in props (not TanStack columnFilters), so the
   // table can't detect "filtered" on its own. Telling it lets the zero-row body
-  // render the no-results state (clear-filters CTA) instead of the first-run
-  // empty — the page-client already routes the genuine no-orders case to its own
-  // empty state before this table renders.
+  // render the no-results state (clear-filters CTA) when a filter is active,
+  // versus the first-run `empty` body when it is not. For the genuinely-empty
+  // store the page-client passes a richer `empty` (the "no orders yet" welcome);
+  // otherwise the per-tab default below applies.
   const hasActiveFilters = Boolean(
     filters.q || filters.status || filters.reconciliationStatus || filters.from || filters.to,
   );
@@ -317,7 +327,7 @@ export function OrdersTable({
           onChange={onCostStatusChange}
         />
       }
-      empty={emptyState}
+      empty={empty ?? emptyState}
       toolbar={() => (
         <OrdersToolbar
           q={filters.q}

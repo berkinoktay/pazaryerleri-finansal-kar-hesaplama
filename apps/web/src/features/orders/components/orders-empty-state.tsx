@@ -10,9 +10,19 @@ import { Button } from '@/components/ui/button';
 
 interface OrdersEmptyStateProps {
   variant: 'no-store' | 'no-orders';
+  /**
+   * `no-store` is a Tier-1 page-level hero (rendered before the table when no
+   * store is connected) and stays a standalone card. `no-orders` renders INSIDE
+   * the DataTable's `empty` slot once a store IS connected, so it passes
+   * `embedded` to drop the card frame and span the table body.
+   */
+  embedded?: boolean;
 }
 
-export function OrdersEmptyState({ variant }: OrdersEmptyStateProps): React.ReactElement {
+export function OrdersEmptyState({
+  variant,
+  embedded = false,
+}: OrdersEmptyStateProps): React.ReactElement {
   const t = useTranslations('ordersPage.empty');
 
   if (variant === 'no-store') {
@@ -32,6 +42,7 @@ export function OrdersEmptyState({ variant }: OrdersEmptyStateProps): React.Reac
 
   return (
     <EmptyState
+      embedded={embedded}
       icon={Invoice03Icon}
       title={t('noOrders.title')}
       description={t('noOrders.description')}

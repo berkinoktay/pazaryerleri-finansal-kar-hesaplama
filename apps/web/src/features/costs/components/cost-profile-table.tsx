@@ -8,6 +8,7 @@ import * as React from 'react';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { createRowActionsColumn } from '@/components/patterns/data-table-row-actions';
+import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { Link } from '@/i18n/navigation';
 import { useIsMounted } from '@/lib/use-is-mounted';
@@ -181,6 +182,11 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
       data={props.data}
       loading={props.loading}
       empty={props.empty}
+      // `empty` is the genuine first-run body (zero profiles, no search). When a
+      // client-side name search excludes everything the table resolves to the
+      // no-results state instead — without this explicit slot `empty` would fall
+      // through and wrongly show the "create first profile" CTA over a search miss.
+      noResultsState={<TableNoResultsState onClearFilters={() => props.onSearchChange('')} />}
       getRowId={(row) => row.id}
       columnFilters={props.q.length > 0 ? [{ id: 'name', value: props.q }] : []}
       toolbar={(table) => (
