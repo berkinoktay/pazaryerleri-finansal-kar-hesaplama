@@ -19,12 +19,7 @@ import { Decimal } from 'decimal.js';
 import type { OrderFeeSource, OrderFeeType } from '@pazarsync/db/enums';
 
 import { resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
-
-const grossToVat = (gross: Decimal, ratePct: number): Decimal => {
-  if (ratePct === 0) return new Decimal(0);
-  const r = new Decimal(ratePct);
-  return gross.mul(r).div(new Decimal(100).add(r));
-};
+import { grossToVat } from './money';
 
 export interface ProfitBreakdownItemInput {
   quantity: number;
@@ -100,11 +95,11 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     const qty = new Decimal(item.quantity);
     const unitCost = (item.unitCostSnapshotGross ?? new Decimal(0)).mul(qty);
     costGross = costGross.add(unitCost);
-    costVat = costVat.add(grossToVat(unitCost, item.unitCostSnapshotVatRate));
+    costVat = costVat.add(grossToVat(unitCost, new Decimal(item.unitCostSnapshotVatRate)));
 
     const effComm = item.commissionGross.sub(item.refundedCommissionGross);
     commissionGross = commissionGross.add(effComm);
-    commissionVat = commissionVat.add(grossToVat(effComm, item.commissionVatRate));
+    commissionVat = commissionVat.add(grossToVat(effComm, new Decimal(item.commissionVatRate)));
   }
 
   // Fee aggregation: direction-signed (DEBIT subtracts in display, CREDIT adds back)
@@ -115,7 +110,9 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
       if (fee.feeType !== type) continue;
       const signed = fee.direction === 'DEBIT' ? fee.amountGross : fee.amountGross.neg();
       gross = gross.add(signed);
-      vat = vat.add(grossToVat(signed.abs(), fee.vatRate).mul(fee.direction === 'DEBIT' ? 1 : -1));
+      vat = vat.add(
+        grossToVat(signed.abs(), new Decimal(fee.vatRate)).mul(fee.direction === 'DEBIT' ? 1 : -1),
+      );
     }
     return { gross, vat };
   };

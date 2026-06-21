@@ -29,14 +29,10 @@ import { syncLog } from '@pazarsync/sync-core';
 
 import { inferShippedSameDay } from './infer-shipped-same-day';
 import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
+import { grossToVat } from './money';
 import { computeProfit, type ProfitInputFee } from './profit-formula';
 import { isPsfExempt, resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
-
-/** gross × rate / (100 + rate) — KDV-dahil tutardan içerideki KDV'yi çıkarır. */
-function grossToVat(gross: Decimal, rate: Decimal): Decimal {
-  return gross.mul(rate).div(new Decimal(100).add(rate));
-}
 
 /**
  * Computes and persists `Order.estimatedNetProfit` (refinable) along with the

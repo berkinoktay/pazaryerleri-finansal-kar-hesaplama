@@ -38,3 +38,13 @@ export {
   type ShippingEstimate,
 } from './shipping/resolve-tariff';
 export { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
+export { grossToVat } from './money';
+export {
+  buildUnitProfitInput,
+  computeUnitProfit,
+  solvePriceForTarget,
+  type UnitEconomics,
+  type PriceTarget,
+  type SolveReason,
+  type SolveResult,
+} from './unit-pricing';
