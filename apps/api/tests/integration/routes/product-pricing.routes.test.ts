@@ -8,9 +8,14 @@
 //                   categoryId, plus the four loop-invariant fee definitions
 //                   (COMMISSION_INVOICE / STOPPAGE / PLATFORM_SERVICE / SHIPPING)
 //
-// truncateAll() wipes fee_definitions + marketplace_commission_rate every test
-// (they are restored only at teardown), so each test that needs them seeds them
-// itself. The shipping reference catalog (carriers + tariffs) is NOT truncated —
+// Structure rationale: two nested describes with independent lifecycle hooks.
+//   "simple" tests: truncateAll in beforeEach (each test starts clean).
+//   "fixture-sharing" tests: one beforeAll that truncates and builds the full
+//      fixture once, then all tests in the group read from it. This avoids
+//      creating a Supabase auth user for every test (each Admin API call takes
+//      ~800 ms locally; 4 consecutive calls reliably hit the 5 s timeout).
+//
+// The shipping reference catalog (carriers + tariffs) is NOT truncated —
 // it is ensured once by globalSetup — so SENDEOMP is always present.
 
 import { Decimal } from 'decimal.js';
@@ -23,6 +28,7 @@ import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization } from '../../helpers/factories';
+import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
 
@@ -30,54 +36,6 @@ const app = createApp();
 
 const CATEGORY_ID = 597n;
 const BRAND_ID = 2032n;
-
-/** Seed the four loop-invariant fee definitions a calculable variant needs. */
-async function seedFeeDefinitions(): Promise<void> {
-  await prisma.feeDefinition.createMany({
-    data: [
-      {
-        platform: 'TRENDYOL',
-        feeType: 'COMMISSION_INVOICE',
-        displayName: 'Komisyon Faturası',
-        calculationKind: 'RATE_OF_SALE',
-        rateOfSale: new Decimal('0'),
-        defaultVatRate: new Decimal('20.00'),
-        effectiveFrom: new Date('2026-01-01'),
-        isRequired: true,
-      },
-      {
-        platform: 'TRENDYOL',
-        feeType: 'STOPPAGE',
-        displayName: 'Stopaj',
-        calculationKind: 'RATE_OF_SALE',
-        rateOfSale: new Decimal('0.0100'),
-        defaultVatRate: new Decimal('0'),
-        effectiveFrom: new Date('2026-01-01'),
-        isRequired: true,
-      },
-      {
-        platform: 'TRENDYOL',
-        feeType: 'PLATFORM_SERVICE',
-        displayName: 'Platform Hizmet Bedeli',
-        calculationKind: 'FIXED',
-        fixedAmountNet: new Decimal('10.99'),
-        defaultVatRate: new Decimal('20.00'),
-        effectiveFrom: new Date('2026-01-01'),
-        isRequired: true,
-      },
-      {
-        platform: 'TRENDYOL',
-        feeType: 'SHIPPING',
-        displayName: 'Kargo',
-        calculationKind: 'FIXED',
-        fixedAmountNet: new Decimal('0'),
-        defaultVatRate: new Decimal('20.00'),
-        effectiveFrom: new Date('2026-01-01'),
-        isRequired: true,
-      },
-    ],
-  });
-}
 
 /** Seed a CATEGORY commission rate so resolveCommissionRate returns a rate. */
 async function seedCommissionRate(): Promise<void> {
@@ -113,6 +71,11 @@ interface FullySetupCtx {
  *     SENDEOMP / TRENDYOL_CONTRACT store) + commission OK (category rule)
  *   - `noCostVariantId`: same product/category (commission + shipping OK) but
  *     NO cost profile attached → costStatus NO_PROFILES, calculable false
+ *
+ * Uses ensureFeeDefinitions() (shared helper that reads the real migration SQL)
+ * instead of an inline seed to avoid the DRY violation and ensure the test
+ * exercises the actual production data shape (platform ALL for STOPPAGE +
+ * COMMISSION_INVOICE; platform TRENDYOL for PLATFORM_SERVICE + SHIPPING).
  */
 async function setupFullyConfiguredStore(): Promise<FullySetupCtx> {
   const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
@@ -203,7 +166,7 @@ async function setupFullyConfiguredStore(): Promise<FullySetupCtx> {
     },
   });
 
-  await seedFeeDefinitions();
+  await ensureFeeDefinitions();
   await seedCommissionRate();
 
   return {
@@ -237,11 +200,15 @@ interface ListResponseWire {
   pagination: { page: number; perPage: number; total: number; totalPages: number };
 }
 
-describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing', () => {
-  beforeAll(async () => {
-    await ensureDbReachable();
-  });
+// ─── Suite ────────────────────────────────────────────────────────────────────
 
+beforeAll(async () => {
+  await ensureDbReachable();
+});
+
+// ── Simple tests that need a clean DB per test ────────────────────────────────
+
+describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — simple cases', () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -286,10 +253,24 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing', () => {
     expect(body.data).toEqual([]);
     expect(body.pagination).toEqual({ page: 1, perPage: 25, total: 0, totalPages: 0 });
   });
+});
 
-  it('returns calculable=true with non-null profit + margin for a fully-set-up variant', async () => {
-    const ctx = await setupFullyConfiguredStore();
+// ── Tests that share the fully-configured-store fixture ───────────────────────
+//
+// All fixture-sharing tests run inside a single describe whose beforeAll builds
+// the store ONCE. Because there is no outer beforeEach that would truncate the
+// DB between tests inside this group, the fixture persists for the whole group.
+// Only read operations are performed; no test mutates the shared fixture.
 
+describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — fully-configured store', () => {
+  let ctx: FullySetupCtx;
+
+  beforeAll(async () => {
+    await truncateAll();
+    ctx = await setupFullyConfiguredStore();
+  });
+
+  it('returns calculable=true with pinned profit + margin for the calculable variant', async () => {
     const res = await app.request(
       `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing`,
       { headers: { Authorization: bearer(ctx.accessToken) } },
@@ -303,17 +284,23 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing', () => {
     expect(row?.shippingEstimateStatus).toBe('OK');
     expect(row?.commissionStatus).toBe('OK');
     expect(row?.calculable).toBe(true);
-    // Financial fields are present and parse as decimals (computed in backend).
-    expect(row?.netProfit).not.toBeNull();
-    expect(row?.saleMarginPct).not.toBeNull();
-    expect(Number.isNaN(Number(row?.netProfit))).toBe(false);
-    expect(Number.isNaN(Number(row?.saleMarginPct))).toBe(false);
     expect(row?.salePrice).toBe('500.00');
+
+    // ── Golden-value guard ────────────────────────────────────────────────────
+    // Fixture: salePrice=500 (VAT 20%), cost=200 GROSS (VAT 20%), commission=18%
+    // of gross, commissionVAT=20% (ALL/COMMISSION_INVOICE), stoppage=1% of NET
+    // sale (ALL/STOPPAGE), SENDEOMP desi-3 → 101.99 NET → 122.39 GROSS (VAT 20%),
+    // PSF=10.99 NET → 13.19 GROSS (VAT 20%). netProfit=57.85, margin=11.57%,
+    // markup=28.93%. If any formula constant, fee definition, or tariff row
+    // changes, this diff makes the breakage explicit rather than silently wrong.
+    expect(Number.isFinite(Number(row?.netProfit))).toBe(true);
+    expect(Number(row?.netProfit)).toBeGreaterThan(0);
+    expect(row?.netProfit).toBe('57.85');
+    expect(row?.saleMarginPct).toBe('11.57');
+    expect(row?.costMarkupPct).toBe('28.93');
   });
 
-  it('returns a not-calculable row (costStatus NO_PROFILES, null profit) for a variant without cost', async () => {
-    const ctx = await setupFullyConfiguredStore();
-
+  it('returns a not-calculable row (costStatus NO_PROFILES, null profit) for the no-cost variant', async () => {
     const res = await app.request(
       `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing`,
       { headers: { Authorization: bearer(ctx.accessToken) } },
@@ -334,8 +321,6 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing', () => {
   });
 
   it('calculableOnly=true hides the not-calculable row while keeping the calculable one', async () => {
-    const ctx = await setupFullyConfiguredStore();
-
     const res = await app.request(
       `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing?calculableOnly=true`,
       { headers: { Authorization: bearer(ctx.accessToken) } },
@@ -347,5 +332,44 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing', () => {
     expect(ids).toContain(ctx.calculableVariantId);
     expect(ids).not.toContain(ctx.noCostVariantId);
     expect(body.data.every((r) => r.calculable)).toBe(true);
+  });
+
+  it('calculableOnly=true: total/totalPages reflect the UNFILTERED count (v1 caveat)', async () => {
+    // Two variants total (calculable + noCost); only one survives the filter.
+    // total and totalPages must reflect all 2 variants, not just the 1 shown.
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing?calculableOnly=true`,
+      { headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ListResponseWire;
+
+    expect(body.data).toHaveLength(1);
+    expect(body.pagination.total).toBe(2);
+    expect(body.pagination.totalPages).toBe(1);
+  });
+
+  it('pagination: page 1 returns both variants when calculableOnly is absent', async () => {
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing?page=1&perPage=25`,
+      { headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ListResponseWire;
+
+    expect(body.pagination.total).toBe(2);
+    expect(body.pagination.page).toBe(1);
+    expect(body.pagination.perPage).toBe(25);
+    expect(body.data).toHaveLength(2);
+  });
+
+  it('returns 403 when a user not in the org accesses the same store', async () => {
+    // A second user with no membership in this org must get 403 — tenant boundary.
+    const outsider = await createAuthenticatedTestUser();
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing`,
+      { headers: { Authorization: bearer(outsider.accessToken) } },
+    );
+    expect(res.status).toBe(403);
   });
 });

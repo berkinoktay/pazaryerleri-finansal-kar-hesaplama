@@ -39,7 +39,9 @@ const listProductPricingRoute = createRoute({
     '`calculable` is their conjunction. When calculable=false, netProfit / saleMarginPct / ' +
     'costMarkupPct are null. Money fields are GROSS (VAT-inclusive) decimal strings. ' +
     'Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, ' +
-    '100} with a default of 25. `calculableOnly=true` restricts to actionable rows. All ' +
+    '100} with a default of 25. `calculableOnly=true` restricts to actionable rows. Note: when ' +
+    '`calculableOnly=true`, `total`/`totalPages` reflect the UNFILTERED match set, so a filtered ' +
+    'page may contain fewer than `perPage` rows (v1 limitation). All ' +
     'financial math is computed in the backend; the frontend only renders these strings.',
   security: [{ bearerAuth: [] }],
   request: {
