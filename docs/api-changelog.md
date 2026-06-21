@@ -13,6 +13,19 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/product-pricing`** — org+store kapsamlı ürün fiyatlandırma
+  listesi: her onaylı `ProductVariant` için mevcut satış fiyatı, birim net kâr (`netProfit`), satış marjı
+  (`saleMarginPct`) ve maliyet markup'ı (`costMarkupPct`) backend'de hesaplanarak döner. Maliyet, komisyon
+  veya kargo tahmini eksik olan varyantlar `calculable: false` ile listelenir; eksiklik `costStatus` /
+  `commissionStatus` / `shippingEstimateStatus` alanlarıyla raporlanır. Tüm finansal değerler backend'de
+  hesaplanır, frontend yalnızca render eder. Sayfalama ve metin arama (`q`) desteklenir.
+
+- **`POST /v1/organizations/{orgId}/stores/{storeId}/product-pricing/quote`** — tek bir varyant için
+  hedef marj, markup veya kâr değerinden geriye çözülen satış fiyatını hesaplar. İstek gövdesi:
+  `{ variantId, target: { type: 'margin' | 'markup' | 'profit', value: string } }`. Maliyet eksik ise
+  `{ calculable: false, reason: 'NO_COST' }` döner; hedef erişilemez ise `reason: 'UNREACHABLE_TARGET'`.
+  Kalıcı yazma yoktur; yetki `DATA_READ` yeterlidir.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** ve
   **`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/orders`** — liste/canlı satırlarına
   yeni `promotionDisplays` (`{ displayName, amountGross }[] | null`) alanı: sipariş alımında yakalanan

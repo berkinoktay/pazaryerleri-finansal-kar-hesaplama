@@ -3178,6 +3178,311 @@
           "byStore"
         ]
       },
+      "ListProductPricingResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductPricingItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/TableMeta"
+          }
+        },
+        "required": [
+          "data",
+          "pagination"
+        ]
+      },
+      "ProductPricingItem": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "sku": {
+            "type": "string",
+            "example": "NK-AIR-42-WHT"
+          },
+          "barcode": {
+            "type": "string",
+            "example": "8680000000001"
+          },
+          "productName": {
+            "type": "string",
+            "example": "Nike Air Max 90"
+          },
+          "salePrice": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "Current list price (GROSS, VAT-inclusive), decimal string.",
+            "example": "1299.90"
+          },
+          "costStatus": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "NO_PROFILES",
+              "FX_STALE",
+              "FX_MISSING"
+            ],
+            "description": "Cost availability for this variant. OK = profiles exist + FX resolved. NO_PROFILES = no cost profiles attached. FX_STALE = AUTO profile exists but FX rate is >2 days old. FX_MISSING = AUTO profile exists but no FX rate fetched.",
+            "example": "OK"
+          },
+          "shippingEstimateStatus": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "NO_CARRIER",
+              "NO_DESI",
+              "OWN_CONTRACT_EMPTY",
+              "DESI_OVERFLOW"
+            ],
+            "description": "Shipping estimate availability. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = variant has no dimensional weight. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
+            "example": "OK"
+          },
+          "commissionStatus": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "NO_RULE"
+            ],
+            "description": "Commission rule availability. OK = a matching marketplace commission rate exists. NO_RULE = no rule found for this category/brand combination.",
+            "example": "OK"
+          },
+          "calculable": {
+            "type": "boolean",
+            "description": "True only when costStatus, shippingEstimateStatus, and commissionStatus are all OK.",
+            "example": true
+          },
+          "netProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "Net profit at current sale price. Null when calculable=false.",
+            "example": "234.56"
+          },
+          "saleMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(\\.\\d{1,4})?$",
+            "description": "Net profit / sale GROSS × 100. Null when calculable=false or saleGross=0.",
+            "example": "18.05"
+          },
+          "costMarkupPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(\\.\\d{1,4})?$",
+            "description": "Net profit / cost GROSS × 100. Null when calculable=false or costGross=0.",
+            "example": "42.30"
+          }
+        },
+        "required": [
+          "variantId",
+          "sku",
+          "barcode",
+          "productName",
+          "salePrice",
+          "costStatus",
+          "shippingEstimateStatus",
+          "commissionStatus",
+          "calculable",
+          "netProfit",
+          "saleMarginPct",
+          "costMarkupPct"
+        ]
+      },
+      "ProductPriceQuote": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "calculable": {
+            "type": "boolean",
+            "description": "Whether the solver produced a valid price for this target.",
+            "example": true
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "NOT_PRICE_SENSITIVE",
+              "UNREACHABLE_TARGET",
+              "NO_COST",
+              "NOT_CALCULABLE"
+            ],
+            "description": "Present only when calculable=false. Explains why the price could not be found.",
+            "example": "UNREACHABLE_TARGET"
+          },
+          "price": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "Solved sale price (GROSS, VAT-inclusive), decimal string. Present only when calculable=true.",
+            "example": "1499.90"
+          },
+          "breakdown": {
+            "$ref": "#/components/schemas/QuoteBreakdown"
+          }
+        },
+        "required": [
+          "variantId",
+          "calculable"
+        ]
+      },
+      "QuoteBreakdown": {
+        "type": "object",
+        "properties": {
+          "listGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "sellerDiscountGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "saleGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "saleVat": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "costGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "costVat": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "commissionGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "commissionVat": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "shippingGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "shippingVat": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "platformServiceGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "platformServiceVat": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "stoppage": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "netVat": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "netProfit": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$"
+          },
+          "saleMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(\\.\\d{1,4})?$",
+            "description": "Null when saleGross=0.",
+            "example": "20.00"
+          },
+          "costMarkupPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(\\.\\d{1,4})?$",
+            "description": "Null when costGross=0.",
+            "example": "45.00"
+          }
+        },
+        "required": [
+          "listGross",
+          "sellerDiscountGross",
+          "saleGross",
+          "saleVat",
+          "costGross",
+          "costVat",
+          "commissionGross",
+          "commissionVat",
+          "shippingGross",
+          "shippingVat",
+          "platformServiceGross",
+          "platformServiceVat",
+          "stoppage",
+          "netVat",
+          "netProfit",
+          "saleMarginPct",
+          "costMarkupPct"
+        ],
+        "description": "Full profit breakdown at the solved price. Present only when calculable=true."
+      },
+      "QuoteInput": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "margin",
+                  "markup",
+                  "profit"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "pattern": "^\\d+(\\.\\d{1,4})?$"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ],
+            "description": "Pricing target to solve for. type=margin: solve for the sale price that yields the given net-profit / sale-GROSS percentage. type=markup: solve for the sale price yielding the given net-profit / cost-GROSS percentage. type=profit: solve for the sale price yielding the given absolute net profit (TRY).",
+            "example": {
+              "type": "margin",
+              "value": "20"
+            }
+          }
+        },
+        "required": [
+          "variantId",
+          "target"
+        ]
+      },
       "ListCostProfilesResponse": {
         "type": "object",
         "properties": {
@@ -8557,6 +8862,350 @@
           },
           "403": {
             "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/product-pricing": {
+      "get": {
+        "tags": [
+          "ProductPricing"
+        ],
+        "summary": "List per-variant forward profit for a store",
+        "description": "Returns one forward-pricing row per APPROVED ProductVariant. Each row assembles a single-unit profit from the existing cost / commission / shipping / PSF / stoppage resolvers and the profit engine. Rows are ALWAYS returned — even when a variant cannot be costed — so the user can see which input is missing: the three independent status fields (costStatus, shippingEstimateStatus, commissionStatus) surface the gap, and `calculable` is their conjunction. When calculable=false, netProfit / saleMarginPct / costMarkupPct are null. Money fields are GROSS (VAT-inclusive) decimal strings. Offset/page-based pagination — `page` is 1-indexed, `perPage` is locked to {10, 25, 50, 100} with a default of 25. `calculableOnly=true` restricts to actionable rows. Note: when `calculableOnly=true`, `total`/`totalPages` reflect the UNFILTERED match set, so a filtered page may contain fewer than `perPage` rows (v1 limitation). All financial math is computed in the backend; the frontend only renders these strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "1-indexed page number",
+              "example": 1
+            },
+            "required": false,
+            "description": "1-indexed page number",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "description": "Items per page. Locked to {10, 25, 50, 100}.",
+              "example": 25
+            },
+            "required": false,
+            "description": "Items per page. Locked to {10, 25, 50, 100}.",
+            "name": "perPage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "Case-insensitive substring match across barcode, SKU, and product name.",
+              "example": "Nike"
+            },
+            "required": false,
+            "description": "Case-insensitive substring match across barcode, SKU, and product name.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "salePrice:asc",
+                "salePrice:desc",
+                "title:asc",
+                "title:desc"
+              ],
+              "description": "Sort order for the product pricing list.",
+              "example": "salePrice:asc"
+            },
+            "required": false,
+            "description": "Sort order for the product pricing list.",
+            "name": "sortBy",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "When 'true', returns only rows where calculable=true (cost + shipping + commission all resolved). Useful for displaying only actionable variants.",
+              "example": "false"
+            },
+            "required": false,
+            "description": "When 'true', returns only rows where calculable=true (cost + shipping + commission all resolved). Useful for displaying only actionable variants.",
+            "name": "calculableOnly",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of per-variant pricing rows with per-row calculability",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListProductPricingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/product-pricing/quote": {
+      "post": {
+        "tags": [
+          "ProductPricing"
+        ],
+        "summary": "Solve sale price for a target margin, markup, or profit",
+        "description": "Given a single variant and a pricing target (margin %, markup %, or absolute profit in TRY), solves for the sale price that achieves that target. Assembles the variant's full UnitEconomics (cost / commission / shipping / PSF / stoppage) and calls the Dilim 1 `solvePriceForTarget` engine. Returns `calculable: false` with a reason code when the target is unreachable or when required inputs (cost / shipping / commission) are missing. This is a read/compute operation — no data is persisted. Requires DATA_READ capability.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Solver result. Check `calculable` before reading `price`/`breakdown`. `calculable: false` is still a 200 — it means the target is valid but unachievable, not a request error.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductPriceQuote"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request body (Zod validation) or variant not found in this store (INVALID_REFERENCE — the variantId exists but does not belong to this store).",
             "content": {
               "application/json": {
                 "schema": {
