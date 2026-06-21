@@ -1,6 +1,11 @@
 import { Decimal } from 'decimal.js';
 
 import { grossToVat } from './money';
+
+// Net profit is affine in price (netProfit = A·P + B); sampling at two prices
+// recovers A and B exactly. These are the two sample points.
+const SAMPLE_PRICE_LO = new Decimal(0);
+const SAMPLE_PRICE_HI = new Decimal(100);
 import {
   computeProfit,
   type ProfitBreakdown,
@@ -76,9 +81,9 @@ export type SolveResult =
  *   markup r : P = (r·costGross − B) / A   (r = value/100)
  */
 export function solvePriceForTarget(econ: UnitEconomics, target: PriceTarget): SolveResult {
-  const npAtZero = computeUnitProfit(econ, new Decimal(0)).netProfit;
-  const npAtHundred = computeUnitProfit(econ, new Decimal(100)).netProfit;
-  const a = npAtHundred.sub(npAtZero).div(100);
+  const npAtZero = computeUnitProfit(econ, SAMPLE_PRICE_LO).netProfit;
+  const npAtHundred = computeUnitProfit(econ, SAMPLE_PRICE_HI).netProfit;
+  const a = npAtHundred.sub(npAtZero).div(SAMPLE_PRICE_HI);
   const b = npAtZero;
 
   // Fiyat artışı kârı artırmıyorsa (A ≤ 0) anlamlı çözüm yok.

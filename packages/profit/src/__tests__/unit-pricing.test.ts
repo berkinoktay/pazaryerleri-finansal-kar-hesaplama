@@ -105,4 +105,10 @@ describe('solvePriceForTarget', () => {
     const r = solvePriceForTarget(econ, { type: 'markup', value: D('60') });
     expect(r).toEqual({ calculable: false, reason: 'NO_COST' });
   });
+
+  it('profit target below the P=0 floor → calculable false', () => {
+    // B = -50 (profit at price 0); target -100 → P = (-100 - (-50))/0.9 < 0
+    const r = solvePriceForTarget(LINEAR, { type: 'profit', value: D('-100') });
+    expect(r).toEqual({ calculable: false, reason: 'UNREACHABLE_TARGET' });
+  });
 });

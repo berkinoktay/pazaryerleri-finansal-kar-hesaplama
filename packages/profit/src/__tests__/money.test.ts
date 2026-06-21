@@ -11,8 +11,8 @@ describe('grossToVat', () => {
   });
 
   it('non-terminating ratio keeps full precision', () => {
-    // 100 × 20 / 120 = 16.666…
-    expect(grossToVat(D('100'), D('20')).toFixed(4)).toBe('16.6667');
+    // 100 × 20 / 120 = 16.6666666666… — verify the precision tail survives
+    expect(grossToVat(D('100'), D('20')).toFixed(10)).toBe('16.6666666667');
   });
 
   it('zero rate yields zero VAT', () => {
