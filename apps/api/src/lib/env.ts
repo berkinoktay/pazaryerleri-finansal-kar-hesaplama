@@ -1,20 +1,9 @@
-/**
- * Read a required env var. Throws if missing or empty — prefer failing
- * fast over silently producing surprise 500s (missing DATABASE_URL),
- * 401s (missing Supabase creds), or cryptographic errors (missing
- * ENCRYPTION_KEY).
- */
-export function requireEnv(key: string): string {
-  const value = process.env[key];
-  if (value === undefined || value.length === 0) {
-    throw new Error(
-      `Required environment variable ${key} is missing. ` +
-        `Local dev: check workspace-root .env (copy from .env.example). ` +
-        `Deployment: verify the hosting provider's environment configuration.`,
-    );
-  }
-  return value;
-}
+// `requireEnv` is shared with apps/sync-worker, so it lives in
+// `@pazarsync/utils` (single source of truth). Re-exported here so existing
+// `import { requireEnv } from '../lib/env'` callers in this app keep working.
+import { requireEnv } from '@pazarsync/utils';
+
+export { requireEnv };
 
 const ALLOWED_NODE_ENVS = ['production', 'staging', 'development', 'test'] as const;
 type NodeEnv = (typeof ALLOWED_NODE_ENVS)[number];

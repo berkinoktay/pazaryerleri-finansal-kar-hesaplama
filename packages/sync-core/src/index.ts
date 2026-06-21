@@ -1,4 +1,5 @@
 export * from './checkpoint';
+export { parseDbUnreachableError, type DbUnreachable } from './connection-error';
 export * from './errors';
 export {
   EncryptionKeyError,

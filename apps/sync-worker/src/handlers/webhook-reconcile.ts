@@ -43,14 +43,24 @@ function readPublicApiBaseUrl(): string | null {
   return raw.startsWith('https://') ? raw : null;
 }
 
+// Fire-once guard: this tick runs every 5 min, so warning on each skip spams
+// the log. Boot's validateRequiredEnv already covers the missing case; this
+// one-time warning additionally catches a present-but-non-https value.
+let baseUrlSkipWarned = false;
+
 export async function processWebhookReconcile(): Promise<void> {
   const baseUrl = readPublicApiBaseUrl();
   if (baseUrl === null) {
-    syncLog.warn('webhook.reconcile-skipped', {
-      reason: 'PUBLIC_API_BASE_URL missing or not https',
-    });
+    if (!baseUrlSkipWarned) {
+      baseUrlSkipWarned = true;
+      syncLog.warn('webhook.reconcile-skipped', {
+        reason: 'PUBLIC_API_BASE_URL missing or not https',
+        hint: 'Set PUBLIC_API_BASE_URL to your public https URL to enable Trendyol webhooks.',
+      });
+    }
     return;
   }
+  baseUrlSkipWarned = false;
 
   const stores = await prisma.store.findMany({
     where: { platform: 'TRENDYOL', status: 'ACTIVE' },
