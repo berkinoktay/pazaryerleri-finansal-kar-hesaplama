@@ -79,7 +79,11 @@ estimates AS (
       WHEN barem.price_net IS NOT NULL OR desi_tariff.price_net IS NOT NULL THEN 'OK'
       ELSE 'DESI_OVERFLOW'
     END AS shipping_estimate_status,
-    vwc.carrier_code AS shipping_carrier_code
+    vwc.carrier_code AS shipping_carrier_code,
+    -- Effective desi (override ?? synced), text-cast like estimated_shipping_net.
+    -- Consumed by batchResolveShipping to populate ShippingEstimate.baseDesiAtEstimate;
+    -- products-list ignores this column.
+    vwc.eff_desi::text AS eff_desi
   FROM variant_with_carrier vwc
   LEFT JOIN LATERAL (
     SELECT price_net FROM own_shipping_tariffs
@@ -106,7 +110,7 @@ estimates AS (
      LIMIT 1
   ) desi_tariff ON vwc.shipping_tariff_source = 'TRENDYOL_CONTRACT'
 )
-SELECT id, estimated_shipping_net, shipping_tariff_applied, shipping_estimate_status, shipping_carrier_code
+SELECT id, estimated_shipping_net, shipping_tariff_applied, shipping_estimate_status, shipping_carrier_code, eff_desi
 FROM estimates;
 ` as const;
 
@@ -126,4 +130,6 @@ export interface ShippingEstimateRow {
     | 'OWN_CONTRACT_EMPTY'
     | 'DESI_OVERFLOW';
   shipping_carrier_code: string | null;
+  /** Effective desi (override ?? synced), text-cast. Null only if both are null. */
+  eff_desi: string | null;
 }

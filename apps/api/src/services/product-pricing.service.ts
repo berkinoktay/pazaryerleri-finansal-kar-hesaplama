@@ -30,6 +30,7 @@ import {
   grossToVat,
   resolveFeeDefinition,
   solvePriceForTarget,
+  type EstimateOutcome,
   type EstimateUnavailableReason,
   type ProfitBreakdown,
   type ProfitInputFee,
@@ -43,10 +44,11 @@ import {
 export type QuoteReason = SolveReason | 'NOT_CALCULABLE';
 import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
-import { resolveCommissionRate } from './commission-rate-resolver';
+import { resolveCommissionRate, type ResolvedCommissionRate } from './commission-rate-resolver';
 import { feeToProfitInputFee, deriveCalculable } from './product-pricing-assembly';
 import { fetchCostAggregates } from './products-list.service';
 import { estimateShippingCostForVariant } from './shipping-estimator.service';
+import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
   CommissionStatus,
   CostStatus,
@@ -167,6 +169,20 @@ async function resolveFeeDefs(
   };
 }
 
+// ─── Pre-resolved inputs (batch-friendly) ────────────────────────────────────
+
+/**
+ * The three per-variant inputs `assembleUnitEconomics` needs, resolved UPSTREAM
+ * so the assembly stays pure (no DB). `quoteProductPrice` resolves these for one
+ * variant; `listProductPricing` resolves them in batch (one query each) across
+ * the whole page — that is how the N+1 is removed without changing the math.
+ */
+export interface AssemblyInputs {
+  costAggregate: VariantCostAggregate | undefined;
+  commission: ResolvedCommissionRate | null;
+  shipping: EstimateOutcome;
+}
+
 // ─── Assembly ─────────────────────────────────────────────────────────────────
 
 /**
@@ -174,57 +190,49 @@ async function resolveFeeDefs(
  * `econ` is non-null only when cost, shipping and commission are all OK; in any
  * other case it is `null` (the caller turns that into a not-calculable row).
  *
- * `costAggregate` is looked up upstream (batch); shipping + commission are
- * per-variant DB calls (N+1 accepted at perPage ≤ 100 — see plan §Kararlar 2).
+ * PURE — performs no DB queries. All three resolver-backed inputs (cost,
+ * commission, shipping) are supplied via `inputs`, resolved upstream in batch by
+ * the caller. The unit math (percent vs fraction, NET → GROSS) is unchanged from
+ * the previous per-variant version; only WHERE the inputs come from changed.
  */
-export async function assembleUnitEconomics(
-  tx: Prisma.TransactionClient,
+export function assembleUnitEconomics(
   ctx: AssemblyContext,
   variant: VariantForAssembly,
-  costAggregate: VariantCostAggregate | undefined,
-): Promise<AssemblyResult> {
+  inputs: AssemblyInputs,
+): AssemblyResult {
   const saleVatRate = new Decimal(variant.vatRate ?? DEFAULT_VAT_RATE);
 
   // ─── cost (GROSS-TRY batch aggregate; VAT extracted at sale rate) ───────────
   // A null `currentCostTry` (e.g. FX_MISSING) never pairs with costStatus 'OK',
   // but we read it directly so the type narrows without an assertion.
-  const costStatus: CostStatus = costAggregate?.costStatus ?? 'NO_PROFILES';
-  const currentCostTry = costAggregate?.currentCostTry ?? null;
+  const costStatus: CostStatus = inputs.costAggregate?.costStatus ?? 'NO_PROFILES';
+  const currentCostTry = inputs.costAggregate?.currentCostTry ?? null;
   const costGross =
     costStatus === 'OK' && currentCostTry !== null ? new Decimal(currentCostTry) : null;
 
   // ─── commission (platform-global rate; null ⇒ NO_RULE) ──────────────────────
-  // categoryId is required to match a rule — null means no possible match, so we
-  // skip the resolver entirely and report NO_RULE directly.
+  // categoryId is required to match a rule — when there is no possible match the
+  // caller passes `commission: null` (it skips the resolver), so a null here
+  // means NO_RULE regardless of why.
   let commissionStatus: CommissionStatus = 'NO_RULE';
   let commissionRate: Decimal | null = null;
-  if (variant.product.categoryId !== null) {
-    const resolved = await resolveCommissionRate({
-      platform: ctx.platform,
-      categoryId: variant.product.categoryId,
-      brandId: variant.product.brandId,
-      // Trendyol does not expose a seller's segment via API — always null today.
-      sellerSegment: null,
-    });
-    if (resolved !== null) {
-      commissionStatus = 'OK';
-      commissionRate = resolved.rate;
-    }
+  if (inputs.commission !== null) {
+    commissionStatus = 'OK';
+    commissionRate = inputs.commission.rate;
   }
 
   // ─── shipping (NET tariff → GROSS DEBIT fee) ────────────────────────────────
-  const shippingOutcome = await estimateShippingCostForVariant(variant.id, tx);
   let shippingStatus: ShippingEstimateStatus;
   let shippingFee: ProfitInputFee | null = null;
-  if (shippingOutcome.ok) {
+  if (inputs.shipping.ok) {
     shippingStatus = 'OK';
     shippingFee = feeToProfitInputFee(
-      shippingOutcome.estimate.amount,
+      inputs.shipping.estimate.amount,
       ctx.feeDefs.shipVatRate,
       'SHIPPING',
     );
   } else {
-    shippingStatus = shippingReasonToStatus(shippingOutcome.reason);
+    shippingStatus = shippingReasonToStatus(inputs.shipping.reason);
   }
 
   const calculable = deriveCalculable(costStatus, shippingStatus, commissionStatus);
@@ -252,6 +260,161 @@ export async function assembleUnitEconomics(
   };
 
   return { econ, costStatus, shippingStatus, commissionStatus };
+}
+
+// ─── Batch resolvers (one DB round-trip for the whole page) ───────────────────
+
+/** Variant fields the batch commission resolver reads. */
+interface VariantForCommission {
+  id: string;
+  product: { categoryId: bigint | null; brandId: bigint | null };
+}
+
+/**
+ * Resolves the commission rate for every variant with at most one
+ * `resolveCommissionRate` call per UNIQUE `(categoryId, brandId)` pair — the
+ * rate is platform-global, so two variants in the same category+brand share a
+ * result. Variants with a null `categoryId` cannot match any rule and map to
+ * `null` without a resolver call.
+ *
+ * Returns a `Map<variantId, ResolvedCommissionRate | null>` covering every input
+ * variant. Same-pair variants receive the SAME resolved reference, so the dedupe
+ * is observable both by call count and by reference identity.
+ */
+export async function batchResolveCommission(
+  platform: Platform,
+  variants: VariantForCommission[],
+): Promise<Map<string, ResolvedCommissionRate | null>> {
+  // Unique pairs keyed by a stable string; null categoryId never enters the pool.
+  const pairKey = (categoryId: bigint, brandId: bigint | null): string =>
+    `${categoryId.toString()}|${brandId === null ? '' : brandId.toString()}`;
+
+  const uniquePairs = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
+  for (const variant of variants) {
+    const { categoryId, brandId } = variant.product;
+    if (categoryId === null) continue;
+    const key = pairKey(categoryId, brandId);
+    if (!uniquePairs.has(key)) {
+      uniquePairs.set(key, { categoryId, brandId });
+    }
+  }
+
+  // Resolve each unique pair exactly once (in parallel).
+  const resolvedByKey = new Map<string, ResolvedCommissionRate | null>();
+  await Promise.all(
+    [...uniquePairs.entries()].map(async ([key, pair]) => {
+      const resolved = await resolveCommissionRate({
+        platform,
+        categoryId: pair.categoryId,
+        brandId: pair.brandId,
+        // Trendyol does not expose a seller's segment via API — always null today.
+        sellerSegment: null,
+      });
+      resolvedByKey.set(key, resolved);
+    }),
+  );
+
+  // Map every variant back to its pair's result (null categoryId ⇒ null).
+  const result = new Map<string, ResolvedCommissionRate | null>();
+  for (const variant of variants) {
+    const { categoryId, brandId } = variant.product;
+    if (categoryId === null) {
+      result.set(variant.id, null);
+      continue;
+    }
+    result.set(variant.id, resolvedByKey.get(pairKey(categoryId, brandId)) ?? null);
+  }
+  return result;
+}
+
+/**
+ * Maps a `ShippingEstimateRow` (from the CTE) back to the `EstimateOutcome`
+ * shape `assembleUnitEconomics` consumes. The CTE already mirrors the canonical
+ * `estimateShippingCostForVariant` (equivalence test guarantees agreement), so
+ * this is a pure wire-shape adaptation — no recomputation.
+ *
+ * `NO_DESI` is unreachable in practice (`synced_dimensional_weight` is non-null
+ * `@default(0)`, so the COALESCE'd desi is never NULL); it is mapped defensively
+ * to `DESI_OVERFLOW` so the `EstimateOutcome` reason union stays closed.
+ */
+function shippingRowToOutcome(row: ShippingEstimateRow): EstimateOutcome {
+  if (row.shipping_estimate_status === 'OK') {
+    if (row.estimated_shipping_net === null || row.shipping_tariff_applied === null) {
+      // Defensive: an 'OK' row always carries a net amount + applied tariff.
+      return { ok: false, reason: 'DESI_OVERFLOW' };
+    }
+    return {
+      ok: true,
+      estimate: {
+        amount: new Decimal(row.estimated_shipping_net),
+        carrierCode: row.shipping_carrier_code ?? 'OWN',
+        tariffApplied: row.shipping_tariff_applied,
+        // The CTE selects only `price_net`, not the winning tariff row id — null
+        // matches the OWN_CONTRACT branch of the per-variant estimator. Neither
+        // field feeds the profit math (assembly reads only `amount`).
+        sourceTariffId: null,
+        baseDesiAtEstimate: new Decimal(row.eff_desi ?? '0'),
+      },
+    };
+  }
+
+  switch (row.shipping_estimate_status) {
+    case 'NO_CARRIER':
+      return { ok: false, reason: 'NO_CARRIER' };
+    case 'OWN_CONTRACT_EMPTY':
+      return { ok: false, reason: 'OWN_CONTRACT_EMPTY' };
+    case 'DESI_OVERFLOW':
+      return { ok: false, reason: 'DESI_OVERFLOW' };
+    case 'NO_DESI':
+      return { ok: false, reason: 'DESI_OVERFLOW' };
+    default: {
+      const _exhaustive: never = row.shipping_estimate_status;
+      throw new Error(`Unhandled shipping estimate status: ${_exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Resolves shipping for every variant in a store with ONE query, reusing the
+ * canonical `SHIPPING_ESTIMATE_CTE_SQL` (the same CTE products-list uses). The
+ * CTE returns one row per variant in the (org, store) scope; we keep only the
+ * requested `variantIds` and adapt each row to an `EstimateOutcome`. Variants
+ * with no CTE row (e.g. STORE_NOT_FOUND) map to `STORE_NOT_FOUND`.
+ */
+export async function batchResolveShipping(
+  organizationId: string,
+  storeId: string,
+  variantIds: string[],
+): Promise<Map<string, EstimateOutcome>> {
+  const result = new Map<string, EstimateOutcome>();
+  if (variantIds.length === 0) return result;
+
+  let rows: ShippingEstimateRow[];
+  try {
+    rows = await prisma.$queryRawUnsafe<ShippingEstimateRow[]>(
+      SHIPPING_ESTIMATE_CTE_SQL,
+      organizationId,
+      storeId,
+    );
+  } catch (err) {
+    mapPrismaError(err);
+  }
+
+  const requested = new Set(variantIds);
+  for (const row of rows) {
+    if (requested.has(row.id)) {
+      result.set(row.id, shippingRowToOutcome(row));
+    }
+  }
+
+  // Any requested variant the CTE did not return (no store join, etc.) degrades
+  // to STORE_NOT_FOUND so the row stays present and not-calculable.
+  for (const id of variantIds) {
+    if (!result.has(id)) {
+      result.set(id, { ok: false, reason: 'STORE_NOT_FOUND' });
+    }
+  }
+  return result;
 }
 
 // ─── Query builders ───────────────────────────────────────────────────────────
@@ -340,20 +503,28 @@ export async function listProductPricing(
   }
 
   const variantIds = variants.map((v) => v.id);
-  const costByVariantId = await fetchCostAggregates(orgId, variantIds);
 
-  // Shipping + commission resolvers need a transaction client; the fee
-  // definitions are resolved once inside the same transaction.
+  // Batch-resolve all three per-variant inputs up front (one query each) so the
+  // per-variant assembly below is a pure in-memory loop — no N+1.
+  const [costByVariantId, commissionByVariantId, shippingByVariantId] = await Promise.all([
+    fetchCostAggregates(orgId, variantIds),
+    batchResolveCommission(store.platform, variants),
+    batchResolveShipping(orgId, storeId, variantIds),
+  ]);
+
+  // Fee definitions are loop-invariant — resolved once inside a transaction.
   const data = await prisma.$transaction(async (tx) => {
     const feeDefs = await resolveFeeDefs(tx, store.platform);
     const ctx: AssemblyContext = { platform: store.platform, feeDefs };
 
-    const rows: ProductPricingRow[] = [];
-    for (const variant of variants) {
-      const result = await assembleUnitEconomics(tx, ctx, variant, costByVariantId.get(variant.id));
-      rows.push(toRow(variant, result));
-    }
-    return rows;
+    return variants.map((variant) => {
+      const result = assembleUnitEconomics(ctx, variant, {
+        costAggregate: costByVariantId.get(variant.id),
+        commission: commissionByVariantId.get(variant.id) ?? null,
+        shipping: shippingByVariantId.get(variant.id) ?? { ok: false, reason: 'STORE_NOT_FOUND' },
+      });
+      return toRow(variant, result);
+    });
   });
 
   return { data, total };
@@ -465,10 +636,31 @@ export async function quoteProductPrice(
     return { calculable: false, variantId: input.variantId, reason: 'NO_COST' };
   }
 
-  // ─── 3. Assemble UnitEconomics ───────────────────────────────────────────
+  // ─── 3. Resolve the per-variant inputs, then assemble ────────────────────
+  // Single variant: resolve commission + shipping directly (one call each),
+  // exactly as the old in-assembly path did, then run the pure assembly. The
+  // commission resolver is skipped when categoryId is null (no possible match);
+  // shipping uses the canonical per-variant estimator (CTE-equivalent).
   const feeDefs = await resolveFeeDefs(tx, store.platform);
   const ctx: AssemblyContext = { platform: store.platform, feeDefs };
-  const assemblyResult = await assembleUnitEconomics(tx, ctx, variant, costAggregate);
+
+  const commission =
+    variant.product.categoryId !== null
+      ? await resolveCommissionRate({
+          platform: store.platform,
+          categoryId: variant.product.categoryId,
+          brandId: variant.product.brandId,
+          // Trendyol does not expose a seller's segment via API — always null today.
+          sellerSegment: null,
+        })
+      : null;
+  const shipping = await estimateShippingCostForVariant(variant.id, tx);
+
+  const assemblyResult = assembleUnitEconomics(ctx, variant, {
+    costAggregate,
+    commission,
+    shipping,
+  });
 
   if (assemblyResult.econ === null) {
     // Cost is guaranteed OK here (the gate above returned 'NO_COST' otherwise),
