@@ -64,11 +64,19 @@ const DEFAULT_VAT_RATE = 20;
 
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
+export type ProfitStatusFilter = 'profitable' | 'breakeven' | 'loss' | 'all';
+
 export interface ListProductPricingFilters {
   page: number;
   perPage: number;
   q?: string;
   sortBy?: ProductPricingSort;
+  calculableOnly?: boolean;
+  profitStatus?: ProfitStatusFilter;
+  marginMin?: string;
+  marginMax?: string;
+  categoryId?: string;
+  brandId?: string;
 }
 
 export type ProductPricingSort =
@@ -107,6 +115,23 @@ interface VariantForAssembly {
   vatRate: number | null;
   isDigital: boolean;
   product: { title: string; categoryId: bigint | null; brandId: bigint | null };
+}
+
+/**
+ * Variant shape for the LIST pipeline — the assembly columns plus the display
+ * fields (category/brand names + primary image) the list rows surface. A
+ * superset of `VariantForAssembly`, so it can be passed straight to
+ * `assembleUnitEconomics` and the batch commission resolver.
+ */
+interface VariantForListRow extends VariantForAssembly {
+  product: {
+    title: string;
+    categoryId: bigint | null;
+    categoryName: string | null;
+    brandId: bigint | null;
+    brandName: string | null;
+    images: { url: string }[];
+  };
 }
 
 interface AssemblyContext {
@@ -439,7 +464,15 @@ function buildSearchWhere(q: string): Prisma.ProductVariantWhereInput {
   };
 }
 
-function buildOrderBy(
+/**
+ * SQL ordering for the candidate set. Only the two TRUE-column sorts
+ * (salePrice/title) are expressible in Prisma `orderBy`; the profit / margin /
+ * markup sorts operate on COMPUTED in-memory values, so for those the SQL order
+ * is a stable placeholder (salePrice:asc + id) and the real ordering is applied
+ * by `compareRows` after the in-memory profit math. This replaces the previous
+ * salePrice PROXY (which wrongly let Prisma "sort by profit" via salePrice).
+ */
+function buildCandidateOrderBy(
   sort: ProductPricingSort | undefined,
 ): Prisma.ProductVariantOrderByWithRelationInput {
   switch (sort) {
@@ -451,23 +484,16 @@ function buildOrderBy(
       return { product: { title: 'asc' } };
     case 'title:desc':
       return { product: { title: 'desc' } };
-    // Profit/margin/markup sorts: null (not calculable) sorts last via NULLS LAST.
-    // These map to the persisted forward-* columns; Task 3 will wire the Prisma
-    // `nulls: 'last'` option once the columns exist in the schema.
+    // Computed-value sorts: ordering is decided in memory by compareRows. Use a
+    // stable, deterministic candidate order so the in-memory sort's tie-breaks
+    // (and the no-op path when every value is null) are reproducible.
     case 'netProfit:asc':
-      return { salePrice: 'asc' };
     case 'netProfit:desc':
-      return { salePrice: 'desc' };
     case 'saleMarginPct:asc':
-      return { salePrice: 'asc' };
     case 'saleMarginPct:desc':
-      return { salePrice: 'desc' };
     case 'costMarkupPct:asc':
-      return { salePrice: 'asc' };
     case 'costMarkupPct:desc':
-      return { salePrice: 'desc' };
     case undefined:
-      // Stable default: cheapest first, then id to break ties deterministically.
       return { salePrice: 'asc' };
     default: {
       const _exhaustive: never = sort;
@@ -476,12 +502,152 @@ function buildOrderBy(
   }
 }
 
+// ─── In-memory computed row (filter + sort working copy) ──────────────────────
+
+/**
+ * The product-pricing row PLUS the un-serialized profit metrics kept as
+ * `Decimal | null`. The list pipeline computes EVERY approved variant in memory,
+ * then filters / sorts by these numeric copies (decimal.js compares, never
+ * float), and finally serializes the surviving page to `ProductPricingRow`. The
+ * numeric copies never leave the service.
+ */
+interface ComputedPricingRow {
+  row: ProductPricingRow;
+  netProfit: Decimal | null;
+  saleMarginPct: Decimal | null;
+  costMarkupPct: Decimal | null;
+}
+
+/** Builds the SQL `where` for the candidate set: org + store + approved + cheap filters. */
+function buildListWhere(
+  orgId: string,
+  storeId: string,
+  filters: ListProductPricingFilters,
+): Prisma.ProductVariantWhereInput {
+  const productWhere: Prisma.ProductWhereInput = { approved: true };
+  if (filters.categoryId !== undefined) {
+    productWhere.categoryId = BigInt(filters.categoryId);
+  }
+  if (filters.brandId !== undefined) {
+    productWhere.brandId = BigInt(filters.brandId);
+  }
+  return {
+    organizationId: orgId,
+    storeId,
+    product: productWhere,
+    ...(filters.q !== undefined ? buildSearchWhere(filters.q) : {}),
+  };
+}
+
+/** Maps a `profitStatus` filter value to a netProfit predicate. `null` rows never match a direction. */
+function matchesProfitStatus(status: ProfitStatusFilter, netProfit: Decimal | null): boolean {
+  switch (status) {
+    case 'all':
+      return true;
+    case 'profitable':
+      return netProfit !== null && netProfit.gt(0);
+    case 'breakeven':
+      return netProfit !== null && netProfit.isZero();
+    case 'loss':
+      return netProfit !== null && netProfit.lt(0);
+    default: {
+      const _exhaustive: never = status;
+      throw new Error(`Unhandled profit status filter: ${_exhaustive}`);
+    }
+  }
+}
+
+/** Applies the in-memory filters (calculableOnly, profitStatus, margin range) to the computed rows. */
+function applyInMemoryFilters(
+  rows: ComputedPricingRow[],
+  filters: ListProductPricingFilters,
+): ComputedPricingRow[] {
+  const profitStatus = filters.profitStatus ?? 'all';
+  const marginMin = filters.marginMin !== undefined ? new Decimal(filters.marginMin) : null;
+  const marginMax = filters.marginMax !== undefined ? new Decimal(filters.marginMax) : null;
+
+  return rows.filter((computed) => {
+    if (filters.calculableOnly === true && !computed.row.calculable) return false;
+    if (!matchesProfitStatus(profitStatus, computed.netProfit)) return false;
+    // Margin range: a null margin is excluded whenever either bound is set.
+    if (marginMin !== null || marginMax !== null) {
+      if (computed.saleMarginPct === null) return false;
+      if (marginMin !== null && computed.saleMarginPct.lt(marginMin)) return false;
+      if (marginMax !== null && computed.saleMarginPct.gt(marginMax)) return false;
+    }
+    return true;
+  });
+}
+
+/** Reads the sortable numeric field for a computed-value sort. */
+function computedSortValue(computed: ComputedPricingRow, sort: ProductPricingSort): Decimal | null {
+  switch (sort) {
+    case 'netProfit:asc':
+    case 'netProfit:desc':
+      return computed.netProfit;
+    case 'saleMarginPct:asc':
+    case 'saleMarginPct:desc':
+      return computed.saleMarginPct;
+    case 'costMarkupPct:asc':
+    case 'costMarkupPct:desc':
+      return computed.costMarkupPct;
+    case 'salePrice:asc':
+    case 'salePrice:desc':
+    case 'title:asc':
+    case 'title:desc':
+    case undefined:
+      return null;
+    default: {
+      const _exhaustive: never = sort;
+      throw new Error(`Unhandled product pricing sort: ${_exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Sorts the computed rows. salePrice/title (and the undefined default) keep the
+ * SQL order untouched — the candidate query already ordered by salePrice:asc/id
+ * or title. The profit/margin/markup sorts compare the COMPUTED Decimal values;
+ * null values always sort LAST regardless of asc/desc (decimal.js comparison —
+ * never float). Stable: equal keys preserve the SQL candidate order.
+ */
+function sortComputedRows(
+  rows: ComputedPricingRow[],
+  sort: ProductPricingSort | undefined,
+): ComputedPricingRow[] {
+  // salePrice/title and the default already arrive in the right SQL order.
+  if (
+    sort === undefined ||
+    sort === 'salePrice:asc' ||
+    sort === 'salePrice:desc' ||
+    sort === 'title:asc' ||
+    sort === 'title:desc'
+  ) {
+    return rows;
+  }
+
+  const desc = sort.endsWith(':desc');
+  // Array.prototype.sort is stable in Node ≥ 12, so equal keys keep SQL order.
+  return [...rows].sort((a, b) => {
+    const av = computedSortValue(a, sort);
+    const bv = computedSortValue(b, sort);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1; // nulls last
+    if (bv === null) return -1; // nulls last
+    const cmp = av.comparedTo(bv);
+    return desc ? -cmp : cmp;
+  });
+}
+
 // ─── List entry point ─────────────────────────────────────────────────────────
 
 /**
- * Lists per-variant forward pricing for a store's APPROVED products. Every
- * matching variant yields a row; calculability is reported per row so the user
- * can see and fix the gaps.
+ * Lists per-variant forward pricing for a store's APPROVED products. Computes
+ * EVERY candidate variant's profit in memory (batch resolvers — no N+1), then
+ * filters / sorts / paginates IN MEMORY so the profit/margin sorts and the
+ * profit/margin filters operate on the live computed values and `total` is the
+ * exact filtered count. Calculability is reported per row so the user can see
+ * and fix the gaps. `imageUrl` / `cost` / category + brand names are included.
  */
 export async function listProductPricing(
   orgId: string,
@@ -489,70 +655,78 @@ export async function listProductPricing(
   store: PrismaStore,
   filters: ListProductPricingFilters,
 ): Promise<{ data: ProductPricingRow[]; total: number }> {
-  const where: Prisma.ProductVariantWhereInput = {
-    organizationId: orgId,
-    storeId,
-    product: { approved: true },
-    ...(filters.q !== undefined ? buildSearchWhere(filters.q) : {}),
-  };
+  const where = buildListWhere(orgId, storeId, filters);
 
-  const skip = (filters.page - 1) * filters.perPage;
-
-  let variants: VariantForAssembly[];
-  let total: number;
+  // 1. Candidate set — ALL approved variants matching the cheap SQL filters.
+  //    No skip/take here: the full set must be computed before in-memory
+  //    filter/sort/paginate can produce a correct `total`.
+  let variants: VariantForListRow[];
   try {
-    [variants, total] = await Promise.all([
-      prisma.productVariant.findMany({
-        where,
-        select: {
-          id: true,
-          stockCode: true,
-          barcode: true,
-          salePrice: true,
-          vatRate: true,
-          isDigital: true,
-          product: { select: { title: true, categoryId: true, brandId: true } },
+    variants = await prisma.productVariant.findMany({
+      where,
+      select: {
+        id: true,
+        stockCode: true,
+        barcode: true,
+        salePrice: true,
+        vatRate: true,
+        isDigital: true,
+        product: {
+          select: {
+            title: true,
+            categoryId: true,
+            categoryName: true,
+            brandId: true,
+            brandName: true,
+            images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+          },
         },
-        orderBy: [buildOrderBy(filters.sortBy), { id: 'asc' }],
-        take: filters.perPage,
-        skip,
-      }),
-      prisma.productVariant.count({ where }),
-    ]);
+      },
+      orderBy: [buildCandidateOrderBy(filters.sortBy), { id: 'asc' }],
+    });
   } catch (err) {
     mapPrismaError(err);
   }
 
   if (variants.length === 0) {
-    return { data: [], total };
+    return { data: [], total: 0 };
   }
 
   const variantIds = variants.map((v) => v.id);
 
-  // Batch-resolve all three per-variant inputs up front (one query each) so the
-  // per-variant assembly below is a pure in-memory loop — no N+1.
+  // 2. Batch-resolve all three per-variant inputs up front (one query each) so
+  //    the per-variant assembly below is a pure in-memory loop — no N+1.
   const [costByVariantId, commissionByVariantId, shippingByVariantId] = await Promise.all([
     fetchCostAggregates(orgId, variantIds),
     batchResolveCommission(store.platform, variants),
     batchResolveShipping(orgId, storeId, variantIds),
   ]);
 
-  // Fee definitions are loop-invariant — resolved once inside a transaction.
-  const data = await prisma.$transaction(async (tx) => {
+  // 3. Compute every variant in memory. Fee definitions are loop-invariant —
+  //    resolved once inside a transaction.
+  const computed = await prisma.$transaction(async (tx) => {
     const feeDefs = await resolveFeeDefs(tx, store.platform);
     const ctx: AssemblyContext = { platform: store.platform, feeDefs };
 
-    return variants.map((variant) => {
+    return variants.map((variant): ComputedPricingRow => {
+      const costAggregate = costByVariantId.get(variant.id);
       const result = assembleUnitEconomics(ctx, variant, {
-        costAggregate: costByVariantId.get(variant.id),
+        costAggregate,
         commission: commissionByVariantId.get(variant.id) ?? null,
         shipping: shippingByVariantId.get(variant.id) ?? { ok: false, reason: 'STORE_NOT_FOUND' },
       });
-      return toRow(variant, result);
+      return computeRow(variant, result, costAggregate);
     });
   });
 
-  return { data, total };
+  // 4. Filter → 5. sort → 6. paginate, all in memory; `total` is exact.
+  const filtered = applyInMemoryFilters(computed, filters);
+  const sorted = sortComputedRows(filtered, filters.sortBy);
+  const total = sorted.length;
+  const start = (filters.page - 1) * filters.perPage;
+  const page = sorted.slice(start, start + filters.perPage);
+
+  return { data: page.map((c) => c.row), total };
 }
 
 // ─── Quote ────────────────────────────────────────────────────────────────────
@@ -713,48 +887,72 @@ export async function quoteProductPrice(
 
 // ─── Serialization ────────────────────────────────────────────────────────────
 
-function toRow(variant: VariantForAssembly, result: AssemblyResult): ProductPricingRow {
+/**
+ * Builds a `ComputedPricingRow` — the serialized DTO row PLUS the un-rounded
+ * Decimal profit metrics the in-memory filter/sort consume. `cost` is the GROSS
+ * TRY aggregate, present only when costStatus is OK (it is null otherwise, even
+ * if a stale FX value sits in `currentCostTry`). `imageUrl` is the position-0
+ * product image url or null. category / brand ids are serialized bigints.
+ */
+function computeRow(
+  variant: VariantForListRow,
+  result: AssemblyResult,
+  costAggregate: VariantCostAggregate | undefined,
+): ComputedPricingRow {
+  const { product } = variant;
+  const imageUrl = product.images[0]?.url ?? null;
+  const cost =
+    result.costStatus === 'OK' && costAggregate?.currentCostTry != null
+      ? costAggregate.currentCostTry
+      : null;
+
+  const displayFields = {
+    imageUrl,
+    cost,
+    categoryId: product.categoryId !== null ? product.categoryId.toString() : null,
+    categoryName: product.categoryName,
+    brandId: product.brandId !== null ? product.brandId.toString() : null,
+    brandName: product.brandName,
+  };
+
   const base = {
     variantId: variant.id,
     sku: variant.stockCode,
     barcode: variant.barcode,
-    productName: variant.product.title,
+    productName: product.title,
     salePrice: new Decimal(variant.salePrice.toString()).toFixed(2),
     costStatus: result.costStatus,
     shippingEstimateStatus: result.shippingStatus,
     commissionStatus: result.commissionStatus,
+    ...displayFields,
   };
-
-  // New display fields (imageUrl, cost, categoryId/Name, brandId/Name) are read
-  // from persisted forward-* columns and product relations. Task 3 will populate
-  // these from the DB query; stubs satisfy the type contract for now.
-  const displayFields = {
-    imageUrl: null,
-    cost: null,
-    categoryId: null,
-    categoryName: null,
-    brandId: null,
-    brandName: null,
-  } as const;
 
   if (result.econ === null) {
     return {
-      ...base,
-      calculable: false,
+      row: {
+        ...base,
+        calculable: false,
+        netProfit: null,
+        saleMarginPct: null,
+        costMarkupPct: null,
+      },
       netProfit: null,
       saleMarginPct: null,
       costMarkupPct: null,
-      ...displayFields,
     };
   }
 
   const breakdown = computeUnitProfit(result.econ, new Decimal(variant.salePrice.toString()));
   return {
-    ...base,
-    calculable: true,
-    netProfit: breakdown.netProfit.toFixed(2),
-    saleMarginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
-    costMarkupPct: breakdown.costMarkupPct !== null ? breakdown.costMarkupPct.toFixed(2) : null,
-    ...displayFields,
+    row: {
+      ...base,
+      calculable: true,
+      netProfit: breakdown.netProfit.toFixed(2),
+      saleMarginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
+      costMarkupPct: breakdown.costMarkupPct !== null ? breakdown.costMarkupPct.toFixed(2) : null,
+    },
+    netProfit: breakdown.netProfit,
+    saleMarginPct: breakdown.saleMarginPct,
+    costMarkupPct: breakdown.costMarkupPct,
   };
 }
