@@ -373,3 +373,118 @@ describe('GET /v1/organizations/:orgId/stores/:storeId/product-pricing — fully
     expect(res.status).toBe(403);
   });
 });
+
+// ── Quote tests that share the fully-configured-store fixture ─────────────────
+//
+// These tests re-use the same fixture as the list tests above. The quote tests
+// are READ operations; no test mutates the shared fixture. Three cases:
+//   1. calculable variant + margin target  → 200 calculable:true, price present
+//   2. no-cost variant                     → 200 calculable:false, reason NO_COST
+//   3. unreachable margin (95%) on the calculable variant → UNREACHABLE_TARGET
+//
+// The golden price for the 20% margin case is pinned; if the profit formula,
+// fee definitions, or tariff changes, this diff makes the breakage explicit.
+
+describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote — fully-configured store', () => {
+  let ctx: FullySetupCtx;
+
+  beforeAll(async () => {
+    await truncateAll();
+    ctx = await setupFullyConfiguredStore();
+  });
+
+  // Helper: send a POST quote request.
+  function sendQuote(variantId: string, type: string, value: string, token: string) {
+    return app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing/quote`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: bearer(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ variantId, target: { type, value } }),
+      },
+    );
+  }
+
+  it('happy path: calculable variant + 20% margin target → 200 calculable:true with pinned price', async () => {
+    const res = await sendQuote(ctx.calculableVariantId, 'margin', '20', ctx.accessToken);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      calculable: boolean;
+      variantId: string;
+      price?: string;
+      breakdown?: Record<string, string>;
+    };
+    expect(body.calculable).toBe(true);
+    expect(body.variantId).toBe(ctx.calculableVariantId);
+    expect(body.price).toBeDefined();
+
+    // ── Golden price guard ─────────────────────────────────────────────────────
+    // Fixture: cost=200 GROSS (VAT 20%), commission=18% of GROSS, commissionVAT=20%
+    // (ALL/COMMISSION_INVOICE), stoppage=1% of NET sale (ALL/STOPPAGE),
+    // SENDEOMP desi-3 → 101.99 NET → 122.39 GROSS (VAT 20%),
+    // PSF=10.99 NET → 13.19 GROSS (VAT 20%). Target: margin=20%.
+    // solvePriceForTarget produces this price given those economics; if any
+    // formula constant, fee definition, or tariff row changes, the diff is explicit.
+    // Pinned empirically from first green run: 588.74.
+    expect(body.price).toBe('588.74');
+    expect(body.breakdown).toBeDefined();
+    expect(body.breakdown?.netProfit).toBeDefined();
+    // netProfit at the solved price should be approximately 20% of solved price GROSS
+    expect(Number(body.breakdown?.netProfit)).toBeGreaterThan(0);
+  });
+
+  it('no-cost variant → 200 calculable:false, reason NO_COST', async () => {
+    const res = await sendQuote(ctx.noCostVariantId, 'margin', '20', ctx.accessToken);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      calculable: boolean;
+      variantId: string;
+      reason?: string;
+    };
+    expect(body.calculable).toBe(false);
+    expect(body.variantId).toBe(ctx.noCostVariantId);
+    expect(body.reason).toBe('NO_COST');
+  });
+
+  it('unreachable margin target (95%) on the calculable variant → calculable:false, reason UNREACHABLE_TARGET', async () => {
+    // A 95% margin means only 5% goes to all costs combined — economically
+    // impossible given commission ~18% + shipping + PSF alone.
+    const res = await sendQuote(ctx.calculableVariantId, 'margin', '95', ctx.accessToken);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      calculable: boolean;
+      variantId: string;
+      reason?: string;
+    };
+    expect(body.calculable).toBe(false);
+    expect(body.reason).toBe('UNREACHABLE_TARGET');
+  });
+
+  it('returns 401 without an auth token', async () => {
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/product-pricing/quote`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variantId: ctx.calculableVariantId,
+          target: { type: 'margin', value: '20' },
+        }),
+      },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 422 INVALID_REFERENCE for a variantId not belonging to this store', async () => {
+    const res = await sendQuote(crypto.randomUUID(), 'margin', '20', ctx.accessToken);
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('INVALID_REFERENCE');
+  });
+});
