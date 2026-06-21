@@ -138,23 +138,13 @@ export function OrdersPageClient({
     ),
   };
 
-  // Show the no-orders empty state only when the dataset is genuinely empty
-  // (zero rows, no filter active). With filters active, the DataTable's
-  // built-in empty state surfaces the "clear filters to see more" affordance.
-  if (!ordersQuery.isLoading && !hasAnyFilter && noOrdersAtAll) {
-    return (
-      <>
-        <PageHeader title={pageTitle} intent={pageIntent} actions={headerSlots.actions} />
-        <OrdersEmptyState variant="no-orders" />
-        <SyncCenter
-          open={syncCenterOpen}
-          onOpenChange={setSyncCenterOpen}
-          logs={syncCenterLogs}
-          triggers={[]}
-        />
-      </>
-    );
-  }
+  // The genuinely-empty store (zero rows, no filter active) shows a welcoming
+  // "no orders yet" body INSIDE the table chrome rather than a full-page
+  // takeover — the table keeps its toolbar + headers + pagination so the page
+  // shape stays stable. With a filter active this is left undefined so the
+  // DataTable's "clear filters" no-results affordance surfaces instead.
+  const ordersEmptyBody =
+    !hasAnyFilter && noOrdersAtAll ? <OrdersEmptyState variant="no-orders" embedded /> : undefined;
 
   return (
     <>
@@ -163,6 +153,7 @@ export function OrdersPageClient({
         <OrdersTable
           rows={rows}
           loading={ordersQuery.isLoading}
+          empty={ordersEmptyBody}
           pagination={pagination}
           filters={{
             q: filters.q,

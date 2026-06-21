@@ -105,23 +105,25 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
         }
       />
 
-      {profiles.length === 0 && !isLoading ? (
-        <CostProfileEmptyState onCreateClick={() => setCreateOpen(true)} />
-      ) : (
-        <CostProfileTable
-          data={profiles}
-          loading={isLoading}
-          q={q}
-          showArchived={showArchived}
-          typeFilter={typeFilter}
-          onSearchChange={setQ}
-          onShowArchivedChange={setShowArchived}
-          onTypeFilterChange={setTypeFilter}
-          onEditClick={handleEdit}
-          onArchiveClick={handleArchiveClick}
-          onRestoreClick={handleRestore}
-        />
-      )}
+      {/* The table chrome (toolbar + headers + pagination) ALWAYS renders so the
+          page shape stays stable — loading shows skeleton rows, zero profiles
+          shows the embedded empty state (with its "create first profile" CTA)
+          INSIDE the table body instead of a full-page takeover that left the
+          right side barren. Mirrors the Returns/Products gold standard. */}
+      <CostProfileTable
+        data={profiles}
+        loading={isLoading}
+        empty={<CostProfileEmptyState onCreateClick={() => setCreateOpen(true)} />}
+        q={q}
+        showArchived={showArchived}
+        typeFilter={typeFilter}
+        onSearchChange={setQ}
+        onShowArchivedChange={setShowArchived}
+        onTypeFilterChange={setTypeFilter}
+        onEditClick={handleEdit}
+        onArchiveClick={handleArchiveClick}
+        onRestoreClick={handleRestore}
+      />
 
       {orgId !== null ? (
         <CostProfileCreateDialog
