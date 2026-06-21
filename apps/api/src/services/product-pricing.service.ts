@@ -29,11 +29,14 @@ import {
   computeUnitProfit,
   grossToVat,
   resolveFeeDefinition,
+  solvePriceForTarget,
   type EstimateUnavailableReason,
+  type ProfitBreakdown,
   type ProfitInputFee,
+  type SolveReason,
   type UnitEconomics,
 } from '@pazarsync/profit';
-import { mapPrismaError } from '@pazarsync/sync-core';
+import { InvalidReferenceError, mapPrismaError } from '@pazarsync/sync-core';
 
 import { resolveCommissionRate } from './commission-rate-resolver';
 import { feeToProfitInputFee, deriveCalculable } from './product-pricing-assembly';
@@ -349,6 +352,144 @@ export async function listProductPricing(
   });
 
   return { data, total };
+}
+
+// ─── Quote ────────────────────────────────────────────────────────────────────
+
+/** Serialized ProfitBreakdown — all Decimal fields become strings. */
+export interface QuoteBreakdown {
+  listGross: string;
+  sellerDiscountGross: string;
+  saleGross: string;
+  saleVat: string;
+  costGross: string;
+  costVat: string;
+  commissionGross: string;
+  commissionVat: string;
+  shippingGross: string;
+  shippingVat: string;
+  platformServiceGross: string;
+  platformServiceVat: string;
+  stoppage: string;
+  netVat: string;
+  netProfit: string;
+  saleMarginPct: string | null;
+  costMarkupPct: string | null;
+}
+
+export type QuoteResult =
+  | { calculable: true; variantId: string; price: string; breakdown: QuoteBreakdown }
+  | { calculable: false; variantId: string; reason: SolveReason };
+
+/** Input to `quoteProductPrice` — the target after Zod parsing. */
+export interface QuoteInput {
+  variantId: string;
+  target: { type: 'margin' | 'markup' | 'profit'; value: string };
+}
+
+function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
+  return {
+    listGross: bd.listGross.toFixed(2),
+    sellerDiscountGross: bd.sellerDiscountGross.toFixed(2),
+    saleGross: bd.saleGross.toFixed(2),
+    saleVat: bd.saleVat.toFixed(2),
+    costGross: bd.costGross.toFixed(2),
+    costVat: bd.costVat.toFixed(2),
+    commissionGross: bd.commissionGross.toFixed(2),
+    commissionVat: bd.commissionVat.toFixed(2),
+    shippingGross: bd.shippingGross.toFixed(2),
+    shippingVat: bd.shippingVat.toFixed(2),
+    platformServiceGross: bd.platformServiceGross.toFixed(2),
+    platformServiceVat: bd.platformServiceVat.toFixed(2),
+    stoppage: bd.stoppage.toFixed(2),
+    netVat: bd.netVat.toFixed(2),
+    netProfit: bd.netProfit.toFixed(2),
+    saleMarginPct: bd.saleMarginPct !== null ? bd.saleMarginPct.toFixed(4) : null,
+    costMarkupPct: bd.costMarkupPct !== null ? bd.costMarkupPct.toFixed(4) : null,
+  };
+}
+
+/**
+ * Solves for the sale price that achieves a given margin / markup / profit
+ * target for a single variant. Throws `InvalidReferenceError` (422) if the
+ * variant does not exist in this store. Returns `{ calculable: false }` when
+ * cost is missing or the target is unreachable.
+ *
+ * Decision §5 (plan): if costStatus !== 'OK', reject before calling the motor
+ * to avoid returning a price based on cost=0 for margin/profit targets.
+ */
+export async function quoteProductPrice(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  storeId: string,
+  store: PrismaStore,
+  input: QuoteInput,
+): Promise<QuoteResult> {
+  // ─── 1. Fetch the variant (must belong to this store) ────────────────────
+  let variant: VariantForAssembly;
+  try {
+    const raw = await tx.productVariant.findFirst({
+      where: { id: input.variantId, organizationId: orgId, storeId },
+      select: {
+        id: true,
+        stockCode: true,
+        barcode: true,
+        salePrice: true,
+        vatRate: true,
+        isDigital: true,
+        product: { select: { title: true, categoryId: true, brandId: true } },
+      },
+    });
+    if (raw === null) {
+      throw new InvalidReferenceError('ProductVariant', input.variantId);
+    }
+    variant = raw;
+  } catch (err) {
+    if (err instanceof InvalidReferenceError) throw err;
+    mapPrismaError(err);
+  }
+
+  // ─── 2. Maliyet kapısı (karar §5) ────────────────────────────────────────
+  // Reject before calling the solver when cost is unavailable. Margin/profit
+  // targets would "solve" with cost=0 and produce incorrect results.
+  const costMap = await fetchCostAggregates(orgId, [input.variantId]);
+  const costAggregate = costMap.get(input.variantId);
+  const costStatus = costAggregate?.costStatus ?? 'NO_PROFILES';
+
+  if (costStatus !== 'OK') {
+    return { calculable: false, variantId: input.variantId, reason: 'NO_COST' };
+  }
+
+  // ─── 3. Assemble UnitEconomics ───────────────────────────────────────────
+  const feeDefs = await resolveFeeDefs(tx, store.platform);
+  const ctx: AssemblyContext = { platform: store.platform, feeDefs };
+  const assemblyResult = await assembleUnitEconomics(tx, ctx, variant, costAggregate);
+
+  if (assemblyResult.econ === null) {
+    // Shipping or commission not OK — pick the first non-OK reason.
+    const reason: SolveReason =
+      assemblyResult.shippingStatus !== 'OK' || assemblyResult.commissionStatus !== 'OK'
+        ? 'NOT_PRICE_SENSITIVE'
+        : 'NO_COST';
+    return { calculable: false, variantId: input.variantId, reason };
+  }
+
+  // ─── 4. Solve ────────────────────────────────────────────────────────────
+  const solveResult = solvePriceForTarget(assemblyResult.econ, {
+    type: input.target.type,
+    value: new Decimal(input.target.value),
+  });
+
+  if (!solveResult.calculable) {
+    return { calculable: false, variantId: input.variantId, reason: solveResult.reason };
+  }
+
+  return {
+    calculable: true,
+    variantId: input.variantId,
+    price: solveResult.price.toFixed(2),
+    breakdown: serializeBreakdown(solveResult.breakdown),
+  };
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
