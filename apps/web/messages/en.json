@@ -179,6 +179,7 @@
       "SYNC_IN_PROGRESS": "A sync is already running for this store. Wait for it to finish.",
       "MARKETPLACE_ACCESS_DENIED": "Marketplace access blocked. Sandbox may require IP allowlisting.",
       "MARKETPLACE_UNREACHABLE": "The marketplace is currently unreachable. Please try again in a few minutes.",
+      "MARKETPLACE_WRITE_FAILED": "The marketplace rejected the price. Check the barcode, price, or daily change limit and try again.",
       "COST_PROFILE_NAME_TAKEN": "A cost profile with this name already exists. Choose a different name.",
       "COST_PROFILE_NOT_FOUND": "Cost profile not found.",
       "COST_PROFILE_ARCHIVED_CANNOT_ATTACH": "Cannot attach an archived cost profile. Restore it first.",
@@ -1477,6 +1478,14 @@
           "allVariants": "All Variants",
           "save": "Save",
           "comingSoon": "Coming soon"
+        },
+        "save": {
+          "confirmTitle": "Write price to Trendyol",
+          "confirmBody": "This product's sale price will be updated from {current} to {new}.",
+          "warning": "This action is live and irreversible: the new price is published directly on the Trendyol storefront. Trendyol allows only one price change per barcode per day, so you cannot correct it again today.",
+          "confirmLabel": "Update on Trendyol",
+          "successToast": "Price updated on Trendyol.",
+          "pendingToast": "Awaiting Trendyol approval — the change has been queued."
         },
         "breakdown": {
           "sale": "Sale",
