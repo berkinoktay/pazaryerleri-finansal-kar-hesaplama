@@ -1100,8 +1100,7 @@
       "stock": "Stok",
       "status": "Durum",
       "cost": "Maliyet",
-      "desi": "Desi",
-      "netProfit": "Tahmini Net Kar"
+      "desi": "Desi"
     },
     "delivery": {
       "sameDay": "Bugün Kargoda",
@@ -1641,20 +1640,6 @@
       "SHIPPING_CARRIER_NOT_FOUND": "Kargo firması bulunamadı."
     },
     "products": {
-      "columnHeader": "Tahmini Net Kar",
-      "popoverTitle": "Kar Detayı",
-      "rows": {
-        "salePrice": "Satış fiyatı",
-        "cost": "Maliyet",
-        "shipping": "Kargo",
-        "commission": "Komisyon",
-        "netProfit": "Net Kar"
-      },
-      "tariff": {
-        "NORMAL": "Normal",
-        "BAREM": "Barem desteği",
-        "OWN_CONTRACT": "Kendi"
-      },
       "states": {
         "NO_DESI": {
           "title": "Desi değeri eksik",
