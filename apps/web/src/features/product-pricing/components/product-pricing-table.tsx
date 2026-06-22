@@ -23,8 +23,6 @@ interface ProductPricingTableProps {
   rows: ProductPricingItem[];
   sortBy: ProductPricingSort;
   loading: boolean;
-  /** Profit-status FilterTabs strip, mounted in the panel's top zone. */
-  tabs?: React.ReactNode;
   /** Search + facet + margin filter row, mounted in the toolbar zone. */
   toolbar?: React.ReactNode;
   /** First-run empty (store connected, no approved products). */
@@ -83,7 +81,8 @@ function parseSort(sort: ProductPricingSort): { column: string; desc: boolean } 
  * Image-forward media-row table for forward pricing. Each row leads with a
  * prominent product image, then the name + sku/barcode identifiers, then the
  * right-aligned numeric columns (sale / cost / profit / markup / margin), the
- * status chip, and the "Fiyatla" stub action.
+ * status chip, and the "Fiyatla" stub action. The toolbar slot carries the
+ * search + facet + margin-range + loss-only filters.
  *
  * Sorting + pagination are server-side: the table projects the backend sort
  * into TanStack's SortingState and forwards click intent back up; the page
@@ -93,7 +92,6 @@ export function ProductPricingTable({
   rows,
   sortBy,
   loading,
-  tabs,
   toolbar,
   empty,
   noResultsState,
@@ -265,7 +263,6 @@ export function ProductPricingTable({
       columns={columns}
       data={rows}
       loading={loading}
-      tabs={tabs}
       toolbar={toolbar !== undefined ? () => toolbar : undefined}
       empty={empty}
       noResultsState={noResultsState}

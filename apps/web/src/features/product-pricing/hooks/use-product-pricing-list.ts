@@ -38,7 +38,7 @@ function argsToFilters(args: ListProductPricingArgs): ProductPricingListFilters 
   return {
     sortBy: args.sortBy,
     q: args.q ?? '',
-    profitStatus: args.profitStatus ?? 'all',
+    lossOnly: args.profitStatus === 'loss',
     marginMin: args.marginMin ?? '',
     marginMax: args.marginMax ?? '',
     categoryId: args.categoryId ?? '',

@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 
 import type { PricingFacetsResponse } from '../api/list-pricing-facets.api';
 
@@ -26,6 +27,8 @@ interface ProductPricingToolbarProps {
   brandId: string;
   onCategoryChange: (next: string) => void;
   onBrandChange: (next: string) => void;
+  lossOnly: boolean;
+  onLossOnlyChange: (next: boolean) => void;
   facets: PricingFacetsResponse | undefined;
   facetsLoading: boolean;
 }
@@ -41,8 +44,7 @@ const ALL_VALUE = '__all__';
  *   2. Category + brand single-selects, populated from the store's product
  *      facets. The "Tümü" option clears the dimension.
  *   3. Margin range (min–max %) — the `between` editor on saleMarginPct.
- *
- * The profit-status segment lives in the table's `tabs` slot above this row.
+ *   4. Loss-only toggle — when ON, sends `profitStatus: 'loss'` to the API.
  */
 export function ProductPricingToolbar({
   q,
@@ -55,6 +57,8 @@ export function ProductPricingToolbar({
   brandId,
   onCategoryChange,
   onBrandChange,
+  lossOnly,
+  onLossOnlyChange,
   facets,
   facetsLoading,
 }: ProductPricingToolbarProps): React.ReactElement {
@@ -140,6 +144,22 @@ export function ProductPricingToolbar({
             maxLabel={t('marginMax')}
           />
         </div>
+
+        {/* Loss-only toggle — sits on the same row as margin range on wider
+            viewports; wraps below on narrow. The label carries the touch target
+            via htmlFor so no extra padding is needed on the Switch itself. */}
+        <label
+          htmlFor="loss-only-toggle"
+          className="gap-xs flex cursor-pointer items-center sm:ml-auto"
+        >
+          <Switch
+            id="loss-only-toggle"
+            size="sm"
+            checked={lossOnly}
+            onCheckedChange={onLossOnlyChange}
+          />
+          <span className="text-2xs text-muted-foreground select-none">{t('lossOnly')}</span>
+        </label>
       </div>
     </div>
   );

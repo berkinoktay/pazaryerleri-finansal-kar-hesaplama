@@ -30,7 +30,8 @@ export type ProductPricingProfitStatus = 'all' | 'profitable' | 'breakeven' | 'l
 export interface ProductPricingListFilters {
   sortBy: ProductPricingSort;
   q: string;
-  profitStatus: ProductPricingProfitStatus;
+  /** When true, the query sends `profitStatus: 'loss'`; false omits the filter (all). */
+  lossOnly: boolean;
   marginMin: string;
   marginMax: string;
   categoryId: string;

@@ -1500,14 +1500,8 @@
         "brandAll": "Tüm markalar",
         "marginRangeLabel": "Marj aralığı",
         "marginMin": "En az",
-        "marginMax": "En çok"
-      },
-      "tabs": {
-        "label": "Kâr durumu",
-        "all": "Tümü",
-        "profitable": "Kârlı",
-        "breakeven": "Başabaş",
-        "loss": "Zararlı"
+        "marginMax": "En çok",
+        "lossOnly": "Sadece zarar edenleri göster"
       },
       "status": {
         "costMissing": "Maliyet eksik",

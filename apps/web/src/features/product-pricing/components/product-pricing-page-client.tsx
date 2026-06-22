@@ -4,17 +4,15 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
 
-import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
 
 import {
   useProductPricingFilters,
   PRODUCT_PRICING_DEFAULT_SORT,
-  PRODUCT_PRICING_DEFAULT_PROFIT_STATUS,
 } from '../hooks/use-product-pricing-filters';
 import { useProductPricingList } from '../hooks/use-product-pricing-list';
 import { usePricingFacets } from '../hooks/use-pricing-facets';
-import type { ProductPricingProfitStatus, ProductPricingSort } from '../query-keys';
+import type { ProductPricingSort } from '../query-keys';
 
 import { ProductPricingEmptyState } from './product-pricing-empty-state';
 import { ProductPricingTable } from './product-pricing-table';
@@ -36,7 +34,6 @@ export function ProductPricingPageClient({
   pageIntent,
 }: ProductPricingPageClientProps): React.ReactElement {
   const t = useTranslations('features.productPricing');
-  const tTabs = useTranslations('features.productPricing.tabs');
   const { filters, setFilters } = useProductPricingFilters();
   const noStoreSelected = orgId === null || storeId === null;
 
@@ -72,7 +69,7 @@ export function ProductPricingPageClient({
           storeId,
           sortBy: filters.sortBy,
           q: filters.q.length > 0 ? filters.q : undefined,
-          profitStatus: filters.profitStatus,
+          ...(filters.lossOnly ? { profitStatus: 'loss' as const } : {}),
           marginMin: filters.marginMin.length > 0 ? filters.marginMin : undefined,
           marginMax: filters.marginMax.length > 0 ? filters.marginMax : undefined,
           categoryId: filters.categoryId.length > 0 ? filters.categoryId : undefined,
@@ -102,7 +99,7 @@ export function ProductPricingPageClient({
   const hasActiveFilters =
     filters.sortBy !== PRODUCT_PRICING_DEFAULT_SORT ||
     filters.q.length > 0 ||
-    filters.profitStatus !== PRODUCT_PRICING_DEFAULT_PROFIT_STATUS ||
+    filters.lossOnly ||
     filters.marginMin.length > 0 ||
     filters.marginMax.length > 0 ||
     filters.categoryId.length > 0 ||
@@ -112,8 +109,8 @@ export function ProductPricingPageClient({
     void setFilters({ sortBy: next });
   };
 
-  const handleProfitStatusChange = (next: ProductPricingProfitStatus): void => {
-    void setFilters({ profitStatus: next });
+  const handleLossOnlyChange = (next: boolean): void => {
+    void setFilters({ lossOnly: next });
   };
 
   const handlePaginationChange = (next: { page: number; perPage: number }): void => {
@@ -127,7 +124,7 @@ export function ProductPricingPageClient({
     void setFilters({
       sortBy: PRODUCT_PRICING_DEFAULT_SORT,
       q: '',
-      profitStatus: PRODUCT_PRICING_DEFAULT_PROFIT_STATUS,
+      lossOnly: false,
       marginMin: '',
       marginMax: '',
       categoryId: '',
@@ -141,20 +138,6 @@ export function ProductPricingPageClient({
     toast.info(t('action.comingSoon'));
   };
 
-  const profitStatusTabs = (
-    <FilterTabs<ProductPricingProfitStatus>
-      value={filters.profitStatus}
-      onValueChange={handleProfitStatusChange}
-      aria-label={tTabs('label')}
-      options={[
-        { value: 'all', label: tTabs('all') },
-        { value: 'profitable', label: tTabs('profitable') },
-        { value: 'breakeven', label: tTabs('breakeven') },
-        { value: 'loss', label: tTabs('loss') },
-      ]}
-    />
-  );
-
   return (
     <div className="gap-lg flex flex-col">
       <PageHeader title={pageTitle} intent={pageIntent} />
@@ -163,7 +146,6 @@ export function ProductPricingPageClient({
         rows={rows}
         sortBy={filters.sortBy}
         loading={isInitialLoad}
-        tabs={profitStatusTabs}
         toolbar={
           <ProductPricingToolbar
             q={qInput}
@@ -176,6 +158,8 @@ export function ProductPricingPageClient({
             brandId={filters.brandId}
             onCategoryChange={(next) => void setFilters({ categoryId: next })}
             onBrandChange={(next) => void setFilters({ brandId: next })}
+            lossOnly={filters.lossOnly}
+            onLossOnlyChange={handleLossOnlyChange}
             facets={facetsQuery.data}
             facetsLoading={facetsQuery.isLoading}
           />

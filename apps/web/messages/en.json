@@ -1435,14 +1435,8 @@
         "brandAll": "All brands",
         "marginRangeLabel": "Margin range",
         "marginMin": "Min",
-        "marginMax": "Max"
-      },
-      "tabs": {
-        "label": "Profit status",
-        "all": "All",
-        "profitable": "Profitable",
-        "breakeven": "Breakeven",
-        "loss": "Loss"
+        "marginMax": "Max",
+        "lossOnly": "Show loss-making only"
       },
       "status": {
         "costMissing": "Cost missing",

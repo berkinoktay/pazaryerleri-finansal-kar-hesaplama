@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  parseAsBoolean,
   parseAsInteger,
   parseAsString,
   parseAsStringEnum,
@@ -8,7 +9,7 @@ import {
   type Values,
 } from 'nuqs';
 
-import type { ProductPricingProfitStatus, ProductPricingSort } from '../query-keys';
+import type { ProductPricingSort } from '../query-keys';
 
 export const PRODUCT_PRICING_SORTS: readonly ProductPricingSort[] = [
   'salePrice:asc',
@@ -26,22 +27,13 @@ export const PRODUCT_PRICING_PER_PAGE_OPTIONS: readonly number[] = [10, 25, 50, 
 export const PRODUCT_PRICING_DEFAULT_PER_PAGE = 25;
 export const PRODUCT_PRICING_DEFAULT_SORT: ProductPricingSort = 'title:asc';
 
-export const PRODUCT_PRICING_PROFIT_STATUSES: readonly ProductPricingProfitStatus[] = [
-  'all',
-  'profitable',
-  'breakeven',
-  'loss',
-];
-export const PRODUCT_PRICING_DEFAULT_PROFIT_STATUS: ProductPricingProfitStatus = 'all';
-
 export const productPricingFiltersParsers = {
   sortBy: parseAsStringEnum<ProductPricingSort>([...PRODUCT_PRICING_SORTS]).withDefault(
     PRODUCT_PRICING_DEFAULT_SORT,
   ),
   q: parseAsString.withDefault(''),
-  profitStatus: parseAsStringEnum<ProductPricingProfitStatus>([
-    ...PRODUCT_PRICING_PROFIT_STATUSES,
-  ]).withDefault(PRODUCT_PRICING_DEFAULT_PROFIT_STATUS),
+  /** true → send `profitStatus: 'loss'` to the API; false → no profit filter (all). */
+  lossOnly: parseAsBoolean.withDefault(false),
   marginMin: parseAsString.withDefault(''),
   marginMax: parseAsString.withDefault(''),
   categoryId: parseAsString.withDefault(''),
@@ -61,7 +53,7 @@ type FiltersUpdater = Partial<ProductPricingFilters>;
 const PAGE_RESETTING_KEYS: readonly (keyof ProductPricingFilters)[] = [
   'sortBy',
   'q',
-  'profitStatus',
+  'lossOnly',
   'marginMin',
   'marginMax',
   'categoryId',
