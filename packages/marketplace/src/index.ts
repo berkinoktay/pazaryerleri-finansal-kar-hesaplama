@@ -1,5 +1,12 @@
 export * from './types';
 export * from './registry';
+export {
+  MAX_PRICES_PER_REQUEST,
+  updatePrices,
+  checkPriceBatchStatus,
+  type UpdatePricesOpts,
+  type CheckPriceBatchOpts,
+} from './trendyol/prices';
 export { mapTrendyolResponseToDomainError } from './trendyol/errors';
 export {
   isTrendyolCredentials,
