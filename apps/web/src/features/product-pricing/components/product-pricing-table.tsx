@@ -10,8 +10,10 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { ImageCell } from '@/components/patterns/image-cell';
 import { Button } from '@/components/ui/button';
+import { useCurrentScope } from '@/providers/current-scope';
 
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
+import { canWriteMarketplacePrice } from '../lib/can-write-price';
 import type { ProductPricingSort } from '../query-keys';
 import { formatPercentDisplay } from '../lib/format-percent';
 
@@ -129,6 +131,11 @@ export function ProductPricingTable({
 }: ProductPricingTableProps): React.ReactElement {
   const t = useTranslations('features.productPricing');
   const tIdentifiers = useTranslations('features.productPricing.identifiers');
+
+  // Live price write is OWNER/ADMIN-only — gate the inline calculator's save
+  // action as UX (the backend enforces the same rule and 403s otherwise).
+  const { role } = useCurrentScope();
+  const canWritePrice = canWriteMarketplacePrice(role);
 
   const columns = React.useMemo<ColumnDef<ProductPricingItem>[]>(() => {
     const productColumn: ColumnDef<ProductPricingItem> = {
@@ -278,11 +285,12 @@ export function ProductPricingTable({
           item={row.original}
           orgId={orgId}
           storeId={storeId}
+          canWritePrice={canWritePrice}
           onClose={() => row.toggleExpanded(false)}
         />
       </div>
     ),
-    [orgId, storeId],
+    [orgId, storeId, canWritePrice],
   );
 
   // Translate TanStack's column toggle into our `sortBy` vocabulary.

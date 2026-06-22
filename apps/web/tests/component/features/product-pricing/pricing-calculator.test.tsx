@@ -7,12 +7,13 @@ import { render, screen, waitFor } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';
 
 // ─── Sonner mock ─────────────────────────────────────────────────────────────
-// PricingCalculator calls toast.info for the fake "Kaydet" / "Tüm Varyantlar"
-// actions. We mock sonner so we can assert on those calls without needing a
-// real DOM-attached Toaster component.
+// PricingCalculator calls toast.info for the "Tüm Varyantlar" stub and
+// toast.success on a confirmed price write. We mock sonner so we can assert on
+// those calls without needing a real DOM-attached Toaster component.
 
 const toastInfo = vi.hoisted(() => vi.fn());
-vi.mock('sonner', () => ({ toast: { info: toastInfo, error: vi.fn(), success: vi.fn() } }));
+const toastSuccess = vi.hoisted(() => vi.fn());
+vi.mock('sonner', () => ({ toast: { info: toastInfo, error: vi.fn(), success: toastSuccess } }));
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,17 @@ const STORE_ID = '00000000-0000-0000-0000-000000000088';
 const VARIANT_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 const QUOTE_ENDPOINT = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/product-pricing/quote`;
+const PRICE_ENDPOINT = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/product-pricing/price`;
+
+/** Compute a quote (margin 20) so a writable price is solved. */
+async function solveQuote(user: ReturnType<typeof render>['user']): Promise<void> {
+  const valueInput = screen.getByRole('textbox', { name: /Hedef değer/i });
+  await user.type(valueInput, '20');
+  await user.click(screen.getByRole('button', { name: /Hesapla/i }));
+  await waitFor(() => {
+    expect(screen.getByText('Yeni satış fiyatı')).toBeInTheDocument();
+  });
+}
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -146,8 +158,87 @@ describe('PricingCalculator', () => {
     expect(screen.queryByText('Yeni satış fiyatı')).not.toBeInTheDocument();
   });
 
-  it('calls toast.info when "Kaydet" is clicked', async () => {
-    toastInfo.mockReset();
+  it('keeps "Kaydet" disabled until a writable price is solved', async () => {
+    const { user } = render(
+      <PricingCalculator
+        item={calculableItem}
+        orgId={ORG_ID}
+        storeId={STORE_ID}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // No quote yet → nothing to write.
+    expect(screen.getByRole('button', { name: /Kaydet/i })).toBeDisabled();
+
+    server.use(
+      http.post(QUOTE_ENDPOINT, () =>
+        HttpResponse.json({
+          variantId: VARIANT_ID,
+          calculable: true,
+          price: '1000.00',
+          priceDelta: '-299.90',
+          breakdown: calculableBreakdown,
+        }),
+      ),
+    );
+    await solveQuote(user);
+
+    expect(screen.getByRole('button', { name: /Kaydet/i })).toBeEnabled();
+  });
+
+  it('hides "Kaydet" behind a backend gate: disabled for a non-OWNER/ADMIN caller', async () => {
+    const { user } = render(
+      <PricingCalculator
+        item={calculableItem}
+        orgId={ORG_ID}
+        storeId={STORE_ID}
+        canWritePrice={false}
+        onClose={vi.fn()}
+      />,
+    );
+
+    server.use(
+      http.post(QUOTE_ENDPOINT, () =>
+        HttpResponse.json({
+          variantId: VARIANT_ID,
+          calculable: true,
+          price: '1000.00',
+          priceDelta: '-299.90',
+          breakdown: calculableBreakdown,
+        }),
+      ),
+    );
+    await solveQuote(user);
+
+    // A solved price exists, but the caller may not write → still disabled.
+    expect(screen.getByRole('button', { name: /Kaydet/i })).toBeDisabled();
+  });
+
+  it('opens the destructive confirm with current → new, then writes the price on confirm', async () => {
+    toastSuccess.mockReset();
+    let capturedBody: unknown;
+
+    server.use(
+      http.post(QUOTE_ENDPOINT, () =>
+        HttpResponse.json({
+          variantId: VARIANT_ID,
+          calculable: true,
+          price: '1000.00',
+          priceDelta: '-299.90',
+          breakdown: calculableBreakdown,
+        }),
+      ),
+      http.post(PRICE_ENDPOINT, async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          variantId: VARIANT_ID,
+          newSalePrice: '1000.00',
+          batchId: 'b-1',
+        });
+      }),
+    );
 
     const { user } = render(
       <PricingCalculator
@@ -158,8 +249,22 @@ describe('PricingCalculator', () => {
       />,
     );
 
+    await solveQuote(user);
     await user.click(screen.getByRole('button', { name: /Kaydet/i }));
-    expect(toastInfo).toHaveBeenCalled();
+
+    // The confirm dialog appears with the irreversibility warning.
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog.textContent).toMatch(/geri alınamaz/i);
+    // The CTA label is the localized "Trendyol'da güncelle".
+    const confirmButton = screen.getByRole('button', { name: /Trendyol'da güncelle/i });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(capturedBody).toEqual({ variantId: VARIANT_ID, salePrice: '1000.00' });
+    });
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalled();
+    });
   });
 
   it('calls onClose when the "İptal" button is clicked', async () => {

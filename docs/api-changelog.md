@@ -42,6 +42,19 @@ section "Versioning" for details.
   `{ calculable: false, reason: 'NO_COST' }` döner; hedef erişilemez ise `reason: 'UNREACHABLE_TARGET'`.
   Kalıcı yazma yoktur; yetki `DATA_READ` yeterlidir.
 
+- **`POST /v1/organizations/{orgId}/stores/{storeId}/product-pricing/price`** — bir varyantın yeni
+  satış fiyatını Trendyol'a **gerçekten yazar** (canlı, geri alınamaz — Trendyol barkod başına günde
+  yalnızca bir fiyat değişikliğine izin verir). İstek gövdesi: `{ variantId, salePrice }` (salePrice
+  KDV-dahil, pozitif ondalık string). Yalnızca **OWNER/ADMIN** çağırabilir; MEMBER/VIEWER `403 FORBIDDEN`
+  alır. Her çağrı `PriceChangeLog` denetim tablosuna kaydedilir (kim, hangi varyant/barkod, eski→yeni
+  fiyat, batchId, sonuç). Akış: fiyat Trendyol'a gönderilir → `batchId` alınır → kısa, sınırlı bir
+  pencerede sonuç yoklanır. Onaylanan başarıda yerel `ProductVariant.salePrice` güncellenir ve
+  `{ status: 'SUCCESS', variantId, newSalePrice, batchId }` döner; pencere içinde onay gelmezse yerel
+  fiyat **değiştirilmez** ve `{ status: 'PENDING', ... }` döner (değişiklik Trendyol tarafında daha sonra
+  uygulanabilir). Trendyol kalemi reddederse `422 MARKETPLACE_WRITE_FAILED` (`meta.errorCode` satıcıya
+  dönen ham hata kodunu taşır). Kimlik bilgileri yalnızca bellekte çözülür, asla loglanmaz. Yeni hata
+  kodu: `MARKETPLACE_WRITE_FAILED` (422).
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** ve
   **`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/orders`** — liste/canlı satırlarına
   yeni `promotionDisplays` (`{ displayName, amountGross }[] | null`) alanı: sipariş alımında yakalanan

@@ -3545,6 +3545,61 @@
           "target"
         ]
       },
+      "UpdatePriceResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "PENDING"
+            ],
+            "description": "Outcome of the price write. SUCCESS = the marketplace confirmed the item and the local sale price was updated. PENDING = the marketplace accepted the batch but didn't confirm within the polling window — the local price was NOT updated; the change may still apply at the marketplace. A FAILED item does not return here — it is a 422 MARKETPLACE_WRITE_FAILED error.",
+            "example": "SUCCESS"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "newSalePrice": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "The submitted sale price (GROSS, VAT-inclusive), decimal string.",
+            "example": "1499.90"
+          },
+          "batchId": {
+            "type": "string",
+            "description": "Trendyol batch id assigned to this price update (poll target).",
+            "example": "57a7229a-e345-4232-88ac-f4169b864293"
+          }
+        },
+        "required": [
+          "status",
+          "variantId",
+          "newSalePrice",
+          "batchId"
+        ]
+      },
+      "UpdatePriceInput": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "salePrice": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$",
+            "description": "New sale price to write to the marketplace (GROSS, VAT-inclusive), decimal string. Must be strictly positive. This is the price the product is offered at on the marketplace storefront (Trendyol `buyingPrice`).",
+            "example": "1499.90"
+          }
+        },
+        "required": [
+          "variantId",
+          "salePrice"
+        ]
+      },
       "ListCostProfilesResponse": {
         "type": "object",
         "properties": {
@@ -9340,6 +9395,148 @@
           },
           "422": {
             "description": "Invalid request body (Zod validation) or variant not found in this store (INVALID_REFERENCE — the variantId exists but does not belong to this store).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/product-pricing/price": {
+      "post": {
+        "tags": [
+          "ProductPricing"
+        ],
+        "summary": "Write a variant's new sale price to the marketplace (live, irreversible)",
+        "description": "Pushes a single variant's new sale price to the marketplace (Trendyol). This is a LIVE, IRREVERSIBLE write — the product is offered at the new price on the storefront and Trendyol allows only one price change per barcode per day. Restricted to OWNER and ADMIN roles; a MEMBER or VIEWER receives 403. Every call is recorded in an audit log (PriceChangeLog). The marketplace processes the change asynchronously: the endpoint submits the batch, then polls a short bounded window. On confirmed success the local sale price is updated and `status: 'SUCCESS'` is returned; if the marketplace does not confirm in time the local price is left unchanged and `status: 'PENDING'` is returned (the change may still apply upstream). A per-item rejection by the marketplace is a 422 MARKETPLACE_WRITE_FAILED.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePriceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Price write outcome. `status: 'SUCCESS'` means the marketplace confirmed the item and the local sale price was updated. `status: 'PENDING'` means the batch was accepted but not confirmed within the polling window — the local price was NOT changed.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatePriceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization, or the caller is a MEMBER/VIEWER (only OWNER/ADMIN may write prices)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found / belongs to another organization, or the variant does not exist in this store (existence non-disclosure)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request body (Zod validation), corrupted store credentials, or the marketplace rejected the price item (MARKETPLACE_WRITE_FAILED / MARKETPLACE_AUTH_FAILED)",
             "content": {
               "application/json": {
                 "schema": {

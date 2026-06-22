@@ -3,6 +3,7 @@ import { ValidationError } from '@pazarsync/sync-core';
 import type { MarketplaceAdapter, MarketplaceAdapterFactory } from '../types';
 
 import { probeTrendyolCredentials } from './client';
+import { checkPriceBatchStatus, updatePrices } from './prices';
 import { isTrendyolCredentials, type TrendyolCredentials } from './types';
 
 function narrowCredentials(value: unknown): TrendyolCredentials {
@@ -21,6 +22,14 @@ export const trendyolFactory: MarketplaceAdapterFactory = {
       async testConnection() {
         await probeTrendyolCredentials(cred, environment);
         return { externalAccountId: cred.supplierId };
+      },
+
+      async updatePrices(items) {
+        return updatePrices({ credentials: cred, environment, items });
+      },
+
+      async checkPriceBatch(batchId) {
+        return checkPriceBatchStatus({ credentials: cred, environment, batchId });
       },
     };
   },

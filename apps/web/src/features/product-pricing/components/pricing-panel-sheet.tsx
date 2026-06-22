@@ -6,8 +6,10 @@ import * as React from 'react';
 import { ImageCell } from '@/components/patterns/image-cell';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { useCurrentScope } from '@/providers/current-scope';
 
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
+import { canWriteMarketplacePrice } from '../lib/can-write-price';
 
 import { LabeledIdentifier } from './labeled-identifier';
 import { PricingCalculator } from './pricing-calculator';
@@ -40,6 +42,9 @@ export function PricingPanelSheet({
   const t = useTranslations('features.productPricing.panel');
   const tIdentifiers = useTranslations('features.productPricing.identifiers');
 
+  const { role } = useCurrentScope();
+  const canWritePrice = canWriteMarketplacePrice(role);
+
   return (
     <Sheet
       open={item !== null}
@@ -71,7 +76,13 @@ export function PricingPanelSheet({
         <ScrollArea className="min-h-0 flex-1">
           <div className="px-lg pb-lg">
             {item !== null ? (
-              <PricingCalculator item={item} orgId={orgId} storeId={storeId} onClose={onClose} />
+              <PricingCalculator
+                item={item}
+                orgId={orgId}
+                storeId={storeId}
+                canWritePrice={canWritePrice}
+                onClose={onClose}
+              />
             ) : null}
           </div>
         </ScrollArea>

@@ -104,6 +104,28 @@ export class ShippingCarrierPlatformMismatchError extends Error {
   }
 }
 
+/**
+ * Used by the Trendyol price-write endpoint: thrown when the marketplace
+ * accepts the price-update request but the per-item batch outcome resolves to
+ * FAILED (e.g. invalid barcode, rrp < buyingPrice, barcode already updated
+ * today — Trendyol's once-per-day throttle). The submit succeeded, so this is
+ * not an auth/unreachable error; the *item* was rejected. 422 because the
+ * caller's input (the price, for that barcode, today) is what Trendyol refused.
+ * `errorCode` echoes the vendor failure reason for support correlation; it is
+ * a vendor string, not localized — the frontend renders a generic message.
+ */
+export class MarketplaceWriteFailedError extends Error {
+  readonly status = 422 as const;
+  readonly code = 'MARKETPLACE_WRITE_FAILED' as const;
+  readonly meta: { platform: string; errorCode: string };
+
+  constructor(platform: string, errorCode: string) {
+    super(`Marketplace rejected the price update for ${platform}: ${errorCode}`);
+    this.name = 'MarketplaceWriteFailedError';
+    this.meta = { platform, errorCode };
+  }
+}
+
 export class UnauthorizedError extends Error {
   readonly status = 401 as const;
   readonly code = 'UNAUTHENTICATED' as const;

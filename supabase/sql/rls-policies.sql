@@ -520,3 +520,17 @@ DROP POLICY IF EXISTS catalog_barcode_miss_org_member_read ON catalog_barcode_mi
 CREATE POLICY catalog_barcode_miss_org_member_read ON catalog_barcode_miss
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
+
+-- ─── price_change_logs — store-scoped read (trendyol-price-write) ────────
+-- Trendyol'a yazılan fiyat değişikliklerinin denetim kaydı. store_id taşır →
+-- store access ile gate'lenir (orders / sync_logs / catalog_barcode_miss ile
+-- aynı pattern). OWNER/ADMIN org'daki tüm mağazaları görür; MEMBER/VIEWER
+-- yalnız grant'li mağazaları → erişimi olmayan üye o mağazanın fiyat log'larını
+-- görmez. INSERT/UPDATE/DELETE yalnız service role (backend postgres bağlantısı
+-- RLS'i bypass eder); authenticated mutation policy YOK → default-deny.
+-- Gate düz can_access_store(store_id) — SECURITY DEFINER helper, 42P17 güvenli.
+ALTER TABLE price_change_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS price_change_logs_org_member_read ON price_change_logs;
+CREATE POLICY price_change_logs_org_member_read ON price_change_logs
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));

@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
 
+import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { Currency } from '@/components/patterns/currency';
 import { MoneyInput } from '@/components/patterns/money-input';
 import { PercentageInput } from '@/components/patterns/percentage-input';
@@ -18,6 +19,7 @@ import { cn } from '@/lib/utils';
 import type { ProductPriceQuote, QuoteInput } from '../api/quote-product-pricing.api';
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
 import { useQuoteProductPricing } from '../hooks/use-quote-product-pricing';
+import { useUpdatePrice } from '../hooks/use-update-price';
 import { formatPercentDisplay } from '../lib/format-percent';
 
 import { QuoteBreakdown } from './quote-breakdown';
@@ -36,6 +38,13 @@ export interface PricingCalculatorProps {
   orgId: string;
   storeId: string;
   onClose: () => void;
+  /**
+   * Whether the caller's role may write prices to the marketplace (OWNER/ADMIN).
+   * UX gating only — the backend enforces the same rule and 403s a MEMBER/VIEWER.
+   * Defaults to `true` so the calculator works standalone (and the backend stays
+   * the source of truth); the dashboard call sites pass the real capability.
+   */
+  canWritePrice?: boolean;
 }
 
 /**
@@ -56,14 +65,24 @@ export function PricingCalculator({
   orgId,
   storeId,
   onClose,
+  canWritePrice = true,
 }: PricingCalculatorProps): React.ReactElement {
   const t = useTranslations('features.productPricing.panel');
 
   const [targetType, setTargetType] = React.useState<TargetType>(DEFAULT_TARGET);
   const [value, setValue] = React.useState<Decimal | null>(null);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
 
   const quoteMutation = useQuoteProductPricing(orgId, storeId);
   const quote = quoteMutation.data ?? null;
+
+  const updatePriceMutation = useUpdatePrice(orgId, storeId);
+
+  // A solved, writable price exists only when the quote is calculable and
+  // carries a concrete price. The save action gates on this — never on the math
+  // (the frontend does no money math; it reads the solved string from the quote).
+  const solvedPrice = quote?.calculable === true ? quote.price : undefined;
+  const canSave = canWritePrice && solvedPrice !== undefined;
 
   const isPercentTarget = PERCENT_TARGETS.has(targetType);
 
@@ -94,6 +113,16 @@ export function PricingCalculator({
 
   const comingSoon = (): void => {
     toast.info(t('actions.comingSoon'));
+  };
+
+  const handleConfirmWrite = async (): Promise<void> => {
+    if (solvedPrice === undefined) return;
+    await updatePriceMutation.mutateAsync({
+      orgId,
+      storeId,
+      variantId: item.variantId,
+      salePrice: solvedPrice,
+    });
   };
 
   const supportingMetrics: { id: string; label: string; value: React.ReactNode }[] = [
@@ -197,9 +226,81 @@ export function PricingCalculator({
         <Button variant="outline" onClick={comingSoon}>
           {t('actions.allVariants')}
         </Button>
-        <Button onClick={comingSoon}>{t('actions.save')}</Button>
+        <Button onClick={() => setConfirmOpen(true)} disabled={!canSave}>
+          {t('actions.save')}
+        </Button>
       </footer>
+
+      {/* Live, irreversible marketplace write — guarded by a destructive confirm.
+          Only mounted once a writable price is solved so the body always has a
+          concrete current → new pair to show. */}
+      {solvedPrice !== undefined ? (
+        <ConfirmWriteDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          currentSalePrice={item.salePrice}
+          newSalePrice={solvedPrice}
+          loading={updatePriceMutation.isPending}
+          onConfirm={handleConfirmWrite}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Confirmation gate for the live Trendyol price write. Built on the shared
+ * `ConfirmDialog` (controlled, `tone='destructive'`, async `onConfirm` that the
+ * dialog awaits and keeps open on rejection). The body shows the signed
+ * current → new transition and the irreversibility / one-change-per-day warning
+ * so the seller confirms with full context.
+ */
+function ConfirmWriteDialog({
+  open,
+  onOpenChange,
+  currentSalePrice,
+  newSalePrice,
+  loading,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  currentSalePrice: string;
+  newSalePrice: string;
+  loading: boolean;
+  onConfirm: () => Promise<void>;
+}): React.ReactElement {
+  const t = useTranslations('features.productPricing.panel.save');
+
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      tone="destructive"
+      title={t('confirmTitle')}
+      description={t('confirmBody', {
+        current: formatCurrency(currentSalePrice),
+        new: formatCurrency(newSalePrice),
+      })}
+      confirmLabel={t('confirmLabel')}
+      loading={loading}
+      onConfirm={onConfirm}
+    >
+      {/* Current → new transition + the irreversibility warning, given visual
+          weight beyond the description line. */}
+      <div className="gap-sm flex flex-col">
+        <div className="gap-sm bg-surface-subtle px-md py-sm flex flex-wrap items-baseline rounded-md">
+          <Currency value={currentSalePrice} className="text-muted-foreground text-base" />
+          <span className="text-muted-foreground text-sm" aria-hidden="true">
+            →
+          </span>
+          <Currency value={newSalePrice} emphasis className="text-foreground text-lg" />
+        </div>
+        <Alert tone="warning" size="md" role="alert">
+          <AlertDescription>{t('warning')}</AlertDescription>
+        </Alert>
+      </div>
+    </ConfirmDialog>
   );
 }
 

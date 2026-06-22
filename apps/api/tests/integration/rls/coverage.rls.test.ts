@@ -38,6 +38,8 @@ const TENANT_TABLES = [
   'live_performance_buffer',
   // Catalog barcode gap tracking (catalog-barcode-vendor-miss)
   'catalog_barcode_miss',
+  // Fiyat yazma denetim kaydı (trendyol-price-write)
+  'price_change_logs',
 ] as const;
 
 describe('RLS — coverage', () => {

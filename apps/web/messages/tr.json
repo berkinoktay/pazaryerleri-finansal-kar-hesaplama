@@ -179,6 +179,7 @@
       "SYNC_IN_PROGRESS": "Bu mağaza için senkronizasyon zaten çalışıyor. Tamamlanmasını bekle.",
       "MARKETPLACE_ACCESS_DENIED": "Pazar yerine erişim engellendi. Sandbox ise IP yetkilendirmesi gerekebilir.",
       "MARKETPLACE_UNREACHABLE": "Pazar yerine şu anda ulaşılamıyor. Lütfen birkaç dakika sonra tekrar dene.",
+      "MARKETPLACE_WRITE_FAILED": "Pazar yeri fiyatı reddetti. Barkod, fiyat veya günlük değişiklik limitini kontrol edip tekrar dene.",
       "COST_PROFILE_NAME_TAKEN": "Bu ada sahip bir maliyet profili zaten mevcut. Farklı bir ad seç.",
       "COST_PROFILE_NOT_FOUND": "Maliyet profili bulunamadı.",
       "COST_PROFILE_ARCHIVED_CANNOT_ATTACH": "Arşivlenmiş bir maliyet profili ürüne eklenemez. Önce profili geri yükle.",
@@ -1542,6 +1543,14 @@
           "allVariants": "Tüm Varyantlar",
           "save": "Kaydet",
           "comingSoon": "Yakında"
+        },
+        "save": {
+          "confirmTitle": "Fiyatı Trendyol'a yaz",
+          "confirmBody": "Bu ürünün satış fiyatı {current} değerinden {new} değerine güncellenecek.",
+          "warning": "Bu işlem canlı ve geri alınamaz: yeni fiyat doğrudan Trendyol vitrininde yayınlanır. Trendyol bir barkod için günde yalnızca bir fiyat değişikliğine izin verir; bugün tekrar düzeltemezsin.",
+          "confirmLabel": "Trendyol'da güncelle",
+          "successToast": "Fiyat Trendyol'da güncellendi.",
+          "pendingToast": "Trendyol onayı bekleniyor — değişiklik kuyruğa alındı."
         },
         "breakdown": {
           "sale": "Satış",
