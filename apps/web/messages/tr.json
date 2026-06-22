@@ -1473,6 +1473,82 @@
           "action": "Filtreyi temizle"
         }
       }
+    },
+    "productPricing": {
+      "page": {
+        "title": "Ürün Fiyatlandırma",
+        "intent": "Ürün bazında tahmini kârlılığı incele, fiyatı planla"
+      },
+      "columns": {
+        "product": "Ürün",
+        "salePrice": "Satış",
+        "cost": "Maliyet",
+        "netProfit": "Kâr",
+        "costMarkupPct": "Oran %",
+        "saleMarginPct": "Marj %",
+        "status": "Durum"
+      },
+      "identifiers": {
+        "sku": "SKU",
+        "barcode": "Barkod"
+      },
+      "toolbar": {
+        "searchPlaceholder": "Ürün, SKU veya barkod ara",
+        "categoryLabel": "Kategori",
+        "categoryAll": "Tüm kategoriler",
+        "brandLabel": "Marka",
+        "brandAll": "Tüm markalar",
+        "marginRangeLabel": "Marj aralığı",
+        "marginMin": "En az",
+        "marginMax": "En çok",
+        "lossOnly": "Sadece zarar edenleri göster"
+      },
+      "status": {
+        "costMissing": "Maliyet eksik",
+        "shippingMissing": "Kargo yok",
+        "commissionMissing": "Komisyon kuralı yok",
+        "ariaLabel": "Hesaplama durumu",
+        "detail": {
+          "cost": {
+            "OK": "Maliyet hazır",
+            "NO_PROFILES": "Maliyet profili tanımlı değil",
+            "FX_STALE": "Döviz kuru güncel değil",
+            "FX_MISSING": "Döviz kuru bulunamadı"
+          },
+          "shipping": {
+            "OK": "Kargo tahmini hazır",
+            "NO_CARRIER": "Kargo firması seçilmemiş",
+            "NO_DESI": "Desi bilgisi eksik",
+            "OWN_CONTRACT_EMPTY": "Kendi kargo anlaşması tanımsız",
+            "DESI_OVERFLOW": "Desi barem dışında"
+          },
+          "commission": {
+            "OK": "Komisyon oranı hazır",
+            "NO_RULE": "Komisyon oranı tanımlı değil"
+          }
+        }
+      },
+      "action": {
+        "price": "Fiyatla",
+        "comingSoon": "Yakında",
+        "ariaLabel": "Bu ürünü fiyatla"
+      },
+      "empty": {
+        "noStore": {
+          "title": "Aktif mağaza yok",
+          "description": "Ürün kârlılığını görüntülemek için önce bir mağaza bağlaman gerekiyor.",
+          "cta": "Mağaza bağla"
+        },
+        "noProducts": {
+          "title": "Henüz onaylı ürün yok",
+          "description": "Bu mağaza için fiyatlanabilecek onaylı bir ürün bulunamadı. Ürünler senkronize edildikçe burada listelenecek."
+        },
+        "noMatches": {
+          "title": "Eşleşen ürün bulunamadı",
+          "description": "Arama veya sıralama sonuçları daralttı. Sonuçları temizleyerek tüm ürünleri görüntüle.",
+          "action": "Sıfırla"
+        }
+      }
     }
   },
   "shipping": {

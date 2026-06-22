@@ -1408,6 +1408,82 @@
           "action": "Clear filters"
         }
       }
+    },
+    "productPricing": {
+      "page": {
+        "title": "Product Pricing",
+        "intent": "Review estimated per-product profitability and plan your pricing"
+      },
+      "columns": {
+        "product": "Product",
+        "salePrice": "Sale",
+        "cost": "Cost",
+        "netProfit": "Profit",
+        "costMarkupPct": "Markup %",
+        "saleMarginPct": "Margin %",
+        "status": "Status"
+      },
+      "identifiers": {
+        "sku": "SKU",
+        "barcode": "Barcode"
+      },
+      "toolbar": {
+        "searchPlaceholder": "Search product, SKU or barcode",
+        "categoryLabel": "Category",
+        "categoryAll": "All categories",
+        "brandLabel": "Brand",
+        "brandAll": "All brands",
+        "marginRangeLabel": "Margin range",
+        "marginMin": "Min",
+        "marginMax": "Max",
+        "lossOnly": "Show loss-making only"
+      },
+      "status": {
+        "costMissing": "Cost missing",
+        "shippingMissing": "No shipping",
+        "commissionMissing": "No commission rule",
+        "ariaLabel": "Calculation status",
+        "detail": {
+          "cost": {
+            "OK": "Cost ready",
+            "NO_PROFILES": "No cost profile defined",
+            "FX_STALE": "Exchange rate is stale",
+            "FX_MISSING": "Exchange rate missing"
+          },
+          "shipping": {
+            "OK": "Shipping estimate ready",
+            "NO_CARRIER": "No carrier selected",
+            "NO_DESI": "Desi information missing",
+            "OWN_CONTRACT_EMPTY": "Own shipping contract is empty",
+            "DESI_OVERFLOW": "Desi exceeds the tariff range"
+          },
+          "commission": {
+            "OK": "Commission rate ready",
+            "NO_RULE": "No commission rule defined"
+          }
+        }
+      },
+      "action": {
+        "price": "Price",
+        "comingSoon": "Coming soon",
+        "ariaLabel": "Price this product"
+      },
+      "empty": {
+        "noStore": {
+          "title": "No active store",
+          "description": "Connect a store to view product profitability.",
+          "cta": "Connect store"
+        },
+        "noProducts": {
+          "title": "No approved products yet",
+          "description": "No approved products to price were found for this store. They will appear here as products sync."
+        },
+        "noMatches": {
+          "title": "No products match",
+          "description": "The search or sort narrowed the results. Reset to view all products.",
+          "action": "Reset"
+        }
+      }
     }
   },
   "shipping": {
