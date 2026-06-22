@@ -1547,7 +1547,7 @@
         "save": {
           "confirmTitle": "Fiyatı Trendyol'a yaz",
           "confirmBody": "Bu ürünün satış fiyatı {current} değerinden {new} değerine güncellenecek.",
-          "warning": "Bu işlem canlı ve geri alınamaz: yeni fiyat doğrudan Trendyol vitrininde yayınlanır. Trendyol bir barkod için günde yalnızca bir fiyat değişikliğine izin verir; bugün tekrar düzeltemezsin.",
+          "warning": "Bu işlem canlıdır: yeni fiyat doğrudan Trendyol vitrininde yayınlanır. Yanlışsa fiyatı tekrar değiştirebilirsin.",
           "confirmLabel": "Trendyol'da güncelle",
           "successToast": "Fiyat Trendyol'da güncellendi.",
           "pendingToast": "Trendyol onayı bekleniyor — değişiklik kuyruğa alındı."

@@ -1,27 +1,35 @@
+
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.trendyol.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
 # İade Red Sebeplerini Çekme (getClaimsIssueReasons)
 
-> Source: https://developers.trendyol.com/docs/marketplace/iade-entegrasyonu/iade-red-sebeplerini-cekme
+[createClaimIssue](https://integration-documentation-udwy.readme.io/docs/i%CC%87ade-sipari%C5%9Flerinde-ret-talebi-olu%C5%9Fturma-createclaimissue) servisine yapılacak olan isteklerde gönderilecek claimIssueReasonId değerine bu servisi kullanarak ulaşabilirsiniz.
 
-# İade Red Sebeplerini Çekme (getClaimsIssueReasons)
+* 1651 numaralı talep nedeni için, iade WaitingInAction statusune geçtikten ilk 24 saat içinde bu reason seçilemez.
 
-### İade Red Sebeplerini Çekme[​](#i̇ade-red-sebeplerini-çekme "İade Red Sebeplerini Çekme doğrudan bağlantı")
+### **GET** getClaimsIssueReasons
 
-[createClaimIssue](/docs/marketplace/iade-entegrasyonu/iade-siparislerinde-red-talebi-olusturma) servisine yapılacak olan isteklerde gönderilecek claimIssueReasonId değerine bu servisi kullanarak ulaşabilirsiniz.
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/order/claim-issue-reasons](https://apigw.trendyol.com/integration/order/claim-issue-reasons)
+</NoLinkCallout>
 
--   1651 numaralı talep nedeni için, iade WaitingInAction statusune geçtikten ilk 24 saat içinde bu reason seçilemez.
-
-### **GET** getClaimsIssueReasons[​](#get-getclaimsissuereasons "get-getclaimsissuereasons doğrudan bağlantı")
-
-PROD
-
-https://apigw.trendyol.com/integration/order/claim-issue-reasons
-
-STAGE
-
-https://stageapigw.trendyol.com/integration/order/claim-issue-reasons
+<NoLinkCallout type="info" title="STAGE">
+  [https://stageapigw.trendyol.com/integration/order/claim-issue-reasons](https://stageapigw.trendyol.com/integration/order/claim-issue-reasons)
+</NoLinkCallout>
 
 **Örnek Servis Cevabı**
 
-```
-[    {        "id": 1,        "name": "İade gelen ürün sahte"    },    ...    ..    .]
+```json
+[
+    {
+        "id": 1,
+        "name": "İade gelen ürün sahte"
+    },
+    ...
+    ..
+    .
+]
 ```

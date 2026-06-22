@@ -1482,7 +1482,7 @@
         "save": {
           "confirmTitle": "Write price to Trendyol",
           "confirmBody": "This product's sale price will be updated from {current} to {new}.",
-          "warning": "This action is live and irreversible: the new price is published directly on the Trendyol storefront. Trendyol allows only one price change per barcode per day, so you cannot correct it again today.",
+          "warning": "This action is live: the new price is published directly on the Trendyol storefront. You can change it again if it's wrong.",
           "confirmLabel": "Update on Trendyol",
           "successToast": "Price updated on Trendyol.",
           "pendingToast": "Awaiting Trendyol approval — the change has been queued."
