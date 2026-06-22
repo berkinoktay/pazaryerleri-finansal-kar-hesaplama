@@ -214,13 +214,23 @@ function SectionLabel({ children }: { children: React.ReactNode }): React.ReactE
   );
 }
 
-/** Label-over-value mini stat cell — shared by the current-state grid and the
- *  result's margin/markup metrics so both read consistently. */
+/** Label-over-value mini stat cell — used by the current-state 2×2 grid. */
 function MiniStat({ label, value }: { label: string; value: React.ReactNode }): React.ReactElement {
   return (
     <div className="gap-3xs flex flex-col">
       <span className="text-muted-foreground text-2xs">{label}</span>
       <div className="text-foreground text-sm font-medium tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+/** Emphasised result stat — a small surface chip with a prominent value, so the
+ *  newly-solved margin / markup read as results rather than dull asides. */
+function ResultStat({ label, value }: { label: string; value: string }): React.ReactElement {
+  return (
+    <div className="bg-surface-subtle gap-3xs px-md py-sm flex flex-col rounded-md">
+      <span className="text-muted-foreground text-2xs">{label}</span>
+      <span className="text-foreground text-lg font-semibold tabular-nums">{value}</span>
     </div>
   );
 }
@@ -328,13 +338,14 @@ function QuoteResult({
         </div>
       </div>
 
-      {/* New margin / markup — same mini-stat treatment as the current state. */}
-      <div className="gap-md grid grid-cols-2">
-        <MiniStat
+      {/* New margin / markup — grouped, emphasised result chips (not the dull,
+          far-apart spread of plain mini-stats). */}
+      <div className="gap-sm flex flex-wrap">
+        <ResultStat
           label={t('result.newMargin')}
           value={formatPercentDisplay(breakdown.saleMarginPct)}
         />
-        <MiniStat
+        <ResultStat
           label={t('result.newMarkup')}
           value={formatPercentDisplay(breakdown.costMarkupPct)}
         />
