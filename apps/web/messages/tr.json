@@ -1553,7 +1553,10 @@
           "platformService": "Platform Hizmet (PSF)",
           "stoppage": "Stopaj",
           "netVat": "Net KDV",
-          "netProfit": "Net Kâr"
+          "netProfit": "Net Kâr",
+          "viewLabel": "Görünüm",
+          "viewSegment": "Segment",
+          "viewBars": "Barlar"
         }
       },
       "empty": {
