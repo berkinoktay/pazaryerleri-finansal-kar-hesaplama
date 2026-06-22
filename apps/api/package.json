@@ -30,10 +30,10 @@
     "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",
-    "@scalar/hono-api-reference": "^0.10.14",
+    "@scalar/hono-api-reference": "^0.11.4",
     "@supabase/supabase-js": "catalog:",
     "decimal.js": "catalog:",
-    "hono": "^4.12.25",
+    "hono": "^4.12.26",
     "zod": "catalog:"
   },
   "devDependencies": {
