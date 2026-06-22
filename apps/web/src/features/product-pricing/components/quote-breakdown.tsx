@@ -1,10 +1,11 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
-import { DefinitionList, type DefinitionListItem } from '@/components/patterns/definition-list';
+import { DistributionBar, type DistributionSegment } from '@/components/patterns/distribution-bar';
+import { ChartSwatch } from '@/components/ui/chart';
 import { cn } from '@/lib/utils';
 
 import type { QuoteBreakdown } from '../api/quote-product-pricing.api';
@@ -14,14 +15,7 @@ export interface QuoteBreakdownProps {
   className?: string;
 }
 
-/**
- * Gösterim amaçlı işaretli tutar. Aritmetik YOK — değeri aynen Currency'ye
- * iletir, önüne salt glyph olarak "−" koyar (feedback_no_frontend_financial_calculation).
- * `positive=false` olan satırlar (Maliyet, Komisyon …) her zaman "−" ile başlar.
- * Net KDV backend'den işaretli string gelebilir; `positive=true` ise orijinal
- * işareti korur (negatif Net KDV satıcı lehine → "+" glyph uygun, Currency bunu
- * zaten basmaz).
- */
+/** Gösterim amaçlı işaretli tutar — aritmetik YOK, salt "−" glyph + Currency. */
 function DeductionAmount({ value }: { value: string }): React.ReactElement {
   return (
     <span className="whitespace-nowrap tabular-nums">
@@ -31,128 +25,139 @@ function DeductionAmount({ value }: { value: string }): React.ReactElement {
   );
 }
 
-/**
- * Net KDV: backend'den gelen değer işaretlidir (negatif → lehte).
- * Magnitude'u Currency'ye verip önüne uygun glyph koyar — hata payını sıfıra
- * indirir çünkü aritmetik yoktur.
- */
+/** Net KDV işaretlidir (negatif → satıcı lehine); magnitude + uygun glyph. */
 function NetVatAmount({ value }: { value: string }): React.ReactElement {
   const isNegative = value.startsWith('-');
-  const magnitude = isNegative ? value.slice(1) : value;
   return (
     <span className="whitespace-nowrap tabular-nums">
       {isNegative ? '+' : '−'}
-      <Currency value={magnitude} />
+      <Currency value={stripSign(value)} />
     </span>
   );
 }
 
+function stripSign(value: string): string {
+  return value.startsWith('-') ? value.slice(1) : value;
+}
+
 /**
- * QuoteBreakdown renderer — yalın definition-list tabanlı kâr kırılımı.
- *
- * Props olarak `QuoteBreakdown` alır; tüm değerler backend'den GROSS (KDV-dahil)
- * decimal string'tir. Frontend hiçbir para aritmetiği YAPMAZ; salt görüntüler.
- * `ProfitBreakdownCard`'ı KULLANMAZ çünkü `QuoteBreakdown` şekli farklıdır
- * (`returnShipping*`, `outboundShipping*`, `promotionDisplays` içermez).
+ * VISUAL proportion only (a segment width), NOT a financial figure. Every money
+ * amount the seller reads comes verbatim from the backend; this ratio only
+ * drives pixel widths. Strips a sign before measuring.
+ */
+function shareOf(amount: string, total: number): number {
+  const magnitude = Math.abs(Number(amount));
+  if (!Number.isFinite(magnitude) || !Number.isFinite(total) || total <= 0) return 0;
+  return Math.min(100, (magnitude / total) * 100);
+}
+
+interface BreakdownPart {
+  id: string;
+  label: string;
+  /** Unsigned magnitude string (drives the segment width). */
+  magnitude: string;
+  /** Rendered value node (carries the display sign). */
+  value: React.ReactElement;
+  /** Chart palette token for the segment + swatch. */
+  color: string;
+}
+
+/**
+ * QuoteBreakdown renderer — a stacked segment bar (where the sale price goes:
+ * cost / commission / shipping / PSF / stoppage / net VAT / Net Kâr) over a
+ * compact two-column legend. All values are backend GROSS strings — the
+ * frontend does NO money math; segment widths are visual proportions (`shareOf`).
  */
 export function QuoteBreakdown({ breakdown, className }: QuoteBreakdownProps): React.ReactElement {
   const t = useTranslations('features.productPricing.panel.breakdown');
+  const formatter = useFormatter();
 
-  const isProfit = !breakdown.netProfit.startsWith('-');
-
-  const mainRows: DefinitionListItem[] = [
+  const parts: BreakdownPart[] = [
     {
-      id: 'saleGross',
-      term: t('sale'),
-      description: <Currency value={breakdown.saleGross} />,
-      hint:
-        breakdown.sellerDiscountGross !== '0.00' && breakdown.sellerDiscountGross !== '0'
-          ? `${t('list')} ${breakdown.listGross} − ${t('sellerDiscount')} ${breakdown.sellerDiscountGross}`
-          : undefined,
+      id: 'cost',
+      label: t('cost'),
+      magnitude: breakdown.costGross,
+      value: <DeductionAmount value={breakdown.costGross} />,
+      color: 'var(--color-chart-1)',
     },
     {
-      id: 'costGross',
-      term: t('cost'),
-      description: <DeductionAmount value={breakdown.costGross} />,
+      id: 'commission',
+      label: t('commission'),
+      magnitude: breakdown.commissionGross,
+      value: <DeductionAmount value={breakdown.commissionGross} />,
+      color: 'var(--color-chart-2)',
     },
     {
-      id: 'commissionGross',
-      term: t('commission'),
-      description: <DeductionAmount value={breakdown.commissionGross} />,
+      id: 'shipping',
+      label: t('shipping'),
+      magnitude: breakdown.shippingGross,
+      value: <DeductionAmount value={breakdown.shippingGross} />,
+      color: 'var(--color-chart-3)',
     },
     {
-      id: 'shippingGross',
-      term: t('shipping'),
-      description: <DeductionAmount value={breakdown.shippingGross} />,
-    },
-    {
-      id: 'platformServiceGross',
-      term: t('platformService'),
-      description: <DeductionAmount value={breakdown.platformServiceGross} />,
+      id: 'platformService',
+      label: t('platformService'),
+      magnitude: breakdown.platformServiceGross,
+      value: <DeductionAmount value={breakdown.platformServiceGross} />,
+      color: 'var(--color-chart-4)',
     },
     {
       id: 'stoppage',
-      term: t('stoppage'),
-      description: <DeductionAmount value={breakdown.stoppage} />,
+      label: t('stoppage'),
+      magnitude: breakdown.stoppage,
+      value: <DeductionAmount value={breakdown.stoppage} />,
+      color: 'var(--color-chart-5)',
     },
     {
       id: 'netVat',
-      term: t('netVat'),
-      description: <NetVatAmount value={breakdown.netVat} />,
+      label: t('netVat'),
+      magnitude: stripSign(breakdown.netVat),
+      value: <NetVatAmount value={breakdown.netVat} />,
+      color: 'var(--color-chart-6)',
+    },
+    {
+      id: 'netProfit',
+      label: t('netProfit'),
+      magnitude: stripSign(breakdown.netProfit),
+      value: (
+        <Currency
+          value={breakdown.netProfit}
+          className={breakdown.netProfit.startsWith('-') ? 'text-destructive' : 'text-success'}
+        />
+      ),
+      color: 'var(--color-success)',
     },
   ];
 
-  const footerRows: DefinitionListItem[] = [
-    {
-      id: 'saleMarginPct',
-      term: t('margin'),
-      description:
-        breakdown.saleMarginPct !== null ? (
-          <span className="tabular-nums">{breakdown.saleMarginPct}%</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
-    },
-    {
-      id: 'costMarkupPct',
-      term: t('markup'),
-      description:
-        breakdown.costMarkupPct !== null ? (
-          <span className="tabular-nums">{breakdown.costMarkupPct}%</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
-    },
-  ];
+  // Normalise to the sum of magnitudes so the segments fill the bar exactly.
+  const total = parts.reduce((sum, p) => sum + Math.abs(Number(p.magnitude)), 0);
+  const segments: DistributionSegment[] = parts.map((p) => ({
+    label: p.label,
+    value: p.value,
+    percent: shareOf(p.magnitude, total),
+    color: p.color,
+  }));
 
   return (
     <div className={cn('gap-sm flex flex-col', className)}>
-      {/* Satış − kalemler */}
-      <DefinitionList items={mainRows} layout="inline" dividers dense alignRight />
-
-      {/* Net Kâr — vurgulu ayrı satır */}
-      <div
-        className={cn(
-          'border-border px-sm py-xs flex items-center justify-between rounded-md border',
-          isProfit ? 'bg-success-surface' : 'bg-destructive-surface',
-        )}
-      >
-        <span className="text-sm font-semibold">{t('netProfit')}</span>
-        <Currency
-          value={breakdown.netProfit}
-          emphasis
-          className={cn(isProfit ? 'text-success' : 'text-destructive')}
-        />
+      <div className="text-muted-foreground flex items-baseline justify-between text-sm">
+        <span>{t('sale')}</span>
+        <Currency value={breakdown.saleGross} className="text-foreground font-medium" />
       </div>
-
-      {/* Marj / Oran footer metrikleri */}
-      <DefinitionList
-        items={footerRows}
-        layout="inline"
-        dense
-        alignRight
-        className="text-muted-foreground"
-      />
+      <DistributionBar segments={segments} showLegend={false} ariaLabel={t('sale')} />
+      {/* Compact two-column legend keeps the expanded panel short. */}
+      <div className="gap-x-lg gap-y-2xs mt-2xs grid grid-cols-1 sm:grid-cols-2">
+        {segments.map((segment) => (
+          <div key={segment.label} className="gap-xs flex items-center text-xs">
+            <ChartSwatch color={segment.color} />
+            <span className="text-muted-foreground min-w-0 flex-1 truncate">{segment.label}</span>
+            <span className="text-foreground tabular-nums">{segment.value}</span>
+            <span className="text-muted-foreground w-8 shrink-0 text-right tabular-nums">
+              {formatter.number(segment.percent / 100, 'percentInt')}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

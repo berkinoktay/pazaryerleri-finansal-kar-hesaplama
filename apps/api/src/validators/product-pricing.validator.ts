@@ -290,6 +290,12 @@ export const QuoteResponseSchema = z
         'Solved sale price (GROSS, VAT-inclusive), decimal string. Present only when calculable=true.',
       example: '1499.90',
     }),
+    priceDelta: moneyString.optional().openapi({
+      description:
+        'Signed price change vs the current sale price (solved − current, GROSS). ' +
+        'Present only when calculable=true; negative when the price drops to hit the target.',
+      example: '254.90',
+    }),
     breakdown: QuoteBreakdownSchema.optional().openapi({
       description: 'Full profit breakdown at the solved price. Present only when calculable=true.',
     }),

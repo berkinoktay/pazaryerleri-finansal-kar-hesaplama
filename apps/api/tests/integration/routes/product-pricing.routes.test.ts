@@ -762,6 +762,7 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote â€
       calculable: boolean;
       variantId: string;
       price?: string;
+      priceDelta?: string;
       breakdown?: Record<string, string>;
     };
     expect(body.calculable).toBe(true);
@@ -777,6 +778,8 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote â€
     // formula constant, fee definition, or tariff row changes, the diff is explicit.
     // Pinned empirically from first green run: 588.74.
     expect(body.price).toBe('588.74');
+    // priceDelta = solved âˆ’ current sale price (588.74 âˆ’ 500.00 = 88.74), signed.
+    expect(body.priceDelta).toBe('88.74');
     expect(body.breakdown).toBeDefined();
     expect(body.breakdown?.netProfit).toBeDefined();
     // netProfit at the solved price should be approximately 20% of solved price GROSS

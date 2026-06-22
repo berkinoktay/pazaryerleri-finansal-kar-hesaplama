@@ -1484,8 +1484,7 @@
         "cost": "Maliyet",
         "netProfit": "Kâr",
         "costMarkupPct": "Oran %",
-        "saleMarginPct": "Marj %",
-        "status": "Durum"
+        "saleMarginPct": "Marj %"
       },
       "identifiers": {
         "sku": "SKU",
@@ -1501,31 +1500,6 @@
         "marginMin": "En az",
         "marginMax": "En çok",
         "lossOnly": "Sadece zarar edenleri göster"
-      },
-      "status": {
-        "costMissing": "Maliyet eksik",
-        "shippingMissing": "Kargo yok",
-        "commissionMissing": "Komisyon kuralı yok",
-        "ariaLabel": "Hesaplama durumu",
-        "detail": {
-          "cost": {
-            "OK": "Maliyet hazır",
-            "NO_PROFILES": "Maliyet profili tanımlı değil",
-            "FX_STALE": "Döviz kuru güncel değil",
-            "FX_MISSING": "Döviz kuru bulunamadı"
-          },
-          "shipping": {
-            "OK": "Kargo tahmini hazır",
-            "NO_CARRIER": "Kargo firması seçilmemiş",
-            "NO_DESI": "Desi bilgisi eksik",
-            "OWN_CONTRACT_EMPTY": "Kendi kargo anlaşması tanımsız",
-            "DESI_OVERFLOW": "Desi barem dışında"
-          },
-          "commission": {
-            "OK": "Komisyon oranı hazır",
-            "NO_RULE": "Komisyon oranı tanımlı değil"
-          }
-        }
       },
       "action": {
         "price": "Fiyatla",
@@ -1551,6 +1525,7 @@
         "valuePlaceholder": "Hedef değer",
         "calculate": "Hesapla",
         "result": {
+          "label": "Sonuç",
           "newPrice": "Yeni satış fiyatı",
           "newMargin": "Yeni marj",
           "newMarkup": "Yeni oran",
@@ -1578,9 +1553,7 @@
           "platformService": "Platform Hizmet (PSF)",
           "stoppage": "Stopaj",
           "netVat": "Net KDV",
-          "netProfit": "Net Kâr",
-          "margin": "Marj",
-          "markup": "Oran"
+          "netProfit": "Net Kâr"
         }
       },
       "empty": {

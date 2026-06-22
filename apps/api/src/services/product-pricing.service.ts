@@ -753,7 +753,13 @@ export interface QuoteBreakdown {
 }
 
 export type QuoteResult =
-  | { calculable: true; variantId: string; price: string; breakdown: QuoteBreakdown }
+  | {
+      calculable: true;
+      variantId: string;
+      price: string;
+      priceDelta: string;
+      breakdown: QuoteBreakdown;
+    }
   | { calculable: false; variantId: string; reason: QuoteReason };
 
 /** Input to `quoteProductPrice` — the target after Zod parsing. */
@@ -881,6 +887,10 @@ export async function quoteProductPrice(
     calculable: true,
     variantId: input.variantId,
     price: solveResult.price.toFixed(2),
+    // Signed change vs the current list price (solved − current). Negative when
+    // the target lowers the price. Computed here (backend) — the frontend never
+    // does money math, it only renders this value.
+    priceDelta: solveResult.price.sub(variant.salePrice.toString()).toFixed(2),
     breakdown: serializeBreakdown(solveResult.breakdown),
   };
 }
