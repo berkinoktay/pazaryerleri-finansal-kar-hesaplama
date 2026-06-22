@@ -1563,7 +1563,6 @@
           "unreachable": "Bu hedefe ulaşılamıyor.",
           "notPriceSensitive": "Fiyat değişimi kârı bu hedefe taşımıyor."
         },
-        "costHint": "Maliyet gir",
         "actions": {
           "cancel": "İptal",
           "allVariants": "Tüm Varyantlar",

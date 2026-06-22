@@ -1498,7 +1498,6 @@
           "unreachable": "This target cannot be reached.",
           "notPriceSensitive": "A price change does not move profit to this target."
         },
-        "costHint": "Enter cost",
         "actions": {
           "cancel": "Cancel",
           "allVariants": "All Variants",
