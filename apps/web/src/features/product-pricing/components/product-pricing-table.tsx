@@ -9,24 +9,15 @@ import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { ImageCell } from '@/components/patterns/image-cell';
-import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { Button } from '@/components/ui/button';
-import { type BadgeProps } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
-import { resolvePricingStatus, type PricingStatusKind } from '../lib/pricing-status';
 import type { ProductPricingSort } from '../query-keys';
 
-const EMPTY_VALUE = '—';
+import { LabeledIdentifier } from './labeled-identifier';
+import { PricingStatusChip } from './pricing-status-chip';
 
-/** Pricing status chip → Badge tone. `ready` reads success; each gap reads warning. */
-const STATUS_TONE: Record<PricingStatusKind, BadgeProps['tone']> = {
-  ready: 'success',
-  cost: 'warning',
-  shipping: 'warning',
-  commission: 'warning',
-};
+const EMPTY_VALUE = '—';
 
 interface ProductPricingTableProps {
   rows: ProductPricingItem[];
@@ -48,60 +39,6 @@ interface ProductPricingTableProps {
   totalPages: number;
   onPaginationChange: (next: { page: number; perPage: number }) => void;
   onSortChange: (next: ProductPricingSort) => void;
-}
-
-/** Status chip + tooltip carrying the precise sub-status reason. */
-function PricingStatusCell({ item }: { item: ProductPricingItem }): React.ReactElement {
-  const t = useTranslations('features.productPricing.status');
-  // Group-scoped translators keep the sub-status enum value a statically
-  // typed message key (no dynamic dotted lookup): the API enum members
-  // line up 1:1 with the keys under each detail group.
-  const tCost = useTranslations('features.productPricing.status.detail.cost');
-  const tShipping = useTranslations('features.productPricing.status.detail.shipping');
-  const tCommission = useTranslations('features.productPricing.status.detail.commission');
-  const descriptor = resolvePricingStatus(item);
-
-  const labelMap: Record<PricingStatusKind, React.ReactNode> = {
-    ready: t('ready'),
-    cost: t('cost'),
-    shipping: t('shipping'),
-    commission: t('commission'),
-  };
-
-  const detail =
-    descriptor.kind === 'ready'
-      ? tCost('OK')
-      : descriptor.group === 'cost'
-        ? tCost(descriptor.detail)
-        : descriptor.group === 'shipping'
-          ? tShipping(descriptor.detail)
-          : tCommission(descriptor.detail);
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Span (not button): this cell may sit inside a clickable row later;
-            role/tabIndex keep it focusable so the tooltip opens on keyboard
-            focus without nesting a button. */}
-        <span
-          className="inline-flex cursor-help"
-          data-row-action
-          tabIndex={0}
-          role="button"
-          aria-label={t('ariaLabel')}
-        >
-          <MappedBadge<PricingStatusKind>
-            value={descriptor.kind}
-            toneMap={STATUS_TONE}
-            labelMap={labelMap}
-          />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent align="start" className="max-w-input-narrow">
-        {detail}
-      </TooltipContent>
-    </Tooltip>
-  );
 }
 
 /**
@@ -167,6 +104,7 @@ export function ProductPricingTable({
   onSortChange,
 }: ProductPricingTableProps): React.ReactElement {
   const t = useTranslations('features.productPricing');
+  const tIdentifiers = useTranslations('features.productPricing.identifiers');
 
   const columns = React.useMemo<ColumnDef<ProductPricingItem>[]>(() => {
     const productColumn: ColumnDef<ProductPricingItem> = {
@@ -187,13 +125,10 @@ export function ProductPricingTable({
               <span className="text-foreground line-clamp-1 text-sm font-medium">
                 {item.productName}
               </span>
-              <span className="text-muted-foreground text-2xs gap-2xs flex min-w-0 items-center">
-                <span className="truncate tabular-nums">{item.sku}</span>
-                <span aria-hidden className="text-muted-foreground-dim">
-                  ·
-                </span>
-                <span className="truncate tabular-nums">{item.barcode}</span>
-              </span>
+              <div className="gap-x-sm gap-y-3xs flex min-w-0 flex-wrap items-baseline">
+                <LabeledIdentifier label={tIdentifiers('sku')} value={item.sku} />
+                <LabeledIdentifier label={tIdentifiers('barcode')} value={item.barcode} />
+              </div>
             </div>
           </div>
         );
@@ -250,7 +185,7 @@ export function ProductPricingTable({
       id: 'status',
       header: () => t('columns.status'),
       meta: { label: t('columns.status') },
-      cell: ({ row }) => <PricingStatusCell item={row.original} />,
+      cell: ({ row }) => <PricingStatusChip item={row.original} />,
       enableSorting: false,
     };
 
@@ -285,7 +220,7 @@ export function ProductPricingTable({
       statusColumn,
       actionColumn,
     ];
-  }, [onPriceRow, t]);
+  }, [onPriceRow, t, tIdentifiers]);
 
   const sortingState: SortingState = React.useMemo(() => {
     const parsed = parseSort(sortBy);

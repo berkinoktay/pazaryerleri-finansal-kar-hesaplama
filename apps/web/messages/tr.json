@@ -1488,11 +1488,19 @@
         "saleMarginPct": "Marj %",
         "status": "Durum"
       },
+      "identifiers": {
+        "sku": "SKU",
+        "barcode": "Barkod"
+      },
+      "view": {
+        "label": "Görünüm",
+        "list": "Liste",
+        "cards": "Kart"
+      },
       "status": {
-        "ready": "Hesaplanabilir",
-        "cost": "Maliyet eksik",
-        "shipping": "Kargo eksik",
-        "commission": "Komisyon eksik",
+        "costMissing": "Maliyet eksik",
+        "shippingMissing": "Kargo yok",
+        "commissionMissing": "Komisyon kuralı yok",
         "ariaLabel": "Hesaplama durumu",
         "detail": {
           "cost": {

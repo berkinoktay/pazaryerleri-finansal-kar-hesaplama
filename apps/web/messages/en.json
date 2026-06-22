@@ -1423,11 +1423,19 @@
         "saleMarginPct": "Margin %",
         "status": "Status"
       },
+      "identifiers": {
+        "sku": "SKU",
+        "barcode": "Barcode"
+      },
+      "view": {
+        "label": "View",
+        "list": "List",
+        "cards": "Cards"
+      },
       "status": {
-        "ready": "Calculable",
-        "cost": "Cost missing",
-        "shipping": "Shipping missing",
-        "commission": "Commission missing",
+        "costMissing": "Cost missing",
+        "shippingMissing": "No shipping",
+        "commissionMissing": "No commission rule",
         "ariaLabel": "Calculation status",
         "detail": {
           "cost": {

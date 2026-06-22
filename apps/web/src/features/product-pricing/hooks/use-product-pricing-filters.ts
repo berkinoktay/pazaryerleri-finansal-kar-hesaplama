@@ -20,9 +20,17 @@ export const PRODUCT_PRICING_PER_PAGE_OPTIONS: readonly number[] = [10, 25, 50, 
 export const PRODUCT_PRICING_DEFAULT_PER_PAGE = 25;
 export const PRODUCT_PRICING_DEFAULT_SORT: ProductPricingSort = 'title:asc';
 
+/** Render mode for the list — a flat table or a gallery of cards. */
+export const PRODUCT_PRICING_VIEWS = ['table', 'cards'] as const;
+export type ProductPricingView = (typeof PRODUCT_PRICING_VIEWS)[number];
+export const PRODUCT_PRICING_DEFAULT_VIEW: ProductPricingView = 'table';
+
 export const productPricingFiltersParsers = {
   sortBy: parseAsStringEnum<ProductPricingSort>([...PRODUCT_PRICING_SORTS]).withDefault(
     PRODUCT_PRICING_DEFAULT_SORT,
+  ),
+  view: parseAsStringEnum<ProductPricingView>([...PRODUCT_PRICING_VIEWS]).withDefault(
+    PRODUCT_PRICING_DEFAULT_VIEW,
   ),
   page: parseAsInteger.withDefault(1),
   perPage: parseAsInteger.withDefault(PRODUCT_PRICING_DEFAULT_PER_PAGE),
