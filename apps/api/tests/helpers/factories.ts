@@ -443,3 +443,79 @@ export async function createBufferEntry(
     },
   });
 }
+
+// ─── Fiyat Yazma Denetim Kaydı (trendyol-price-write) ─────────────────
+
+export async function createProduct(
+  organizationId: string,
+  storeId: string,
+  overrides: { platformContentId?: bigint; productMainId?: string; title?: string } = {},
+) {
+  return prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: overrides.platformContentId ?? BigInt(Math.floor(Math.random() * 1e9)),
+      productMainId: overrides.productMainId ?? `pm-${randomUUID().slice(0, 8)}`,
+      title: overrides.title ?? 'Test Product',
+    },
+  });
+}
+
+export async function createProductVariant(
+  organizationId: string,
+  storeId: string,
+  productId: string,
+  overrides: {
+    barcode?: string;
+    salePrice?: string;
+    listPrice?: string;
+    platformVariantId?: bigint;
+  } = {},
+) {
+  return prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId,
+      platformVariantId: overrides.platformVariantId ?? BigInt(Math.floor(Math.random() * 1e12)),
+      barcode: overrides.barcode ?? `BC-${randomUUID().slice(0, 10)}`,
+      stockCode: `SC-${randomUUID().slice(0, 8)}`,
+      salePrice: overrides.salePrice ?? '100.00',
+      listPrice: overrides.listPrice ?? '120.00',
+    },
+  });
+}
+
+export async function createPriceChangeLog(
+  organizationId: string,
+  storeId: string,
+  variantId: string,
+  userId: string,
+  overrides: {
+    barcode?: string;
+    oldSalePrice?: string;
+    newSalePrice?: string;
+    listPrice?: string | null;
+    trendyolBatchId?: string | null;
+    status?: 'PENDING' | 'SUCCESS' | 'FAILED';
+    errorCode?: string | null;
+  } = {},
+) {
+  return prisma.priceChangeLog.create({
+    data: {
+      organizationId,
+      storeId,
+      variantId,
+      userId,
+      platform: 'TRENDYOL',
+      barcode: overrides.barcode ?? `BC-${randomUUID().slice(0, 10)}`,
+      oldSalePrice: overrides.oldSalePrice ?? '100.00',
+      newSalePrice: overrides.newSalePrice ?? '120.00',
+      listPrice: overrides.listPrice ?? null,
+      trendyolBatchId: overrides.trendyolBatchId ?? `batch-${randomUUID()}`,
+      status: overrides.status ?? 'PENDING',
+      errorCode: overrides.errorCode ?? null,
+    },
+  });
+}

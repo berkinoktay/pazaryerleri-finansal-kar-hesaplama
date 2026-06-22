@@ -229,6 +229,16 @@ enum BufferEntryStatus {
   @@map("buffer_entry_status")
 }
 
+// Trendyol fiyat yazma denetim kaydı durumu (Task 1 — trendyol-price-write).
+// PENDING: istek gönderildi, batchId alındı, yoklama bekleniyor.
+// SUCCESS: yoklama COMPLETED + item status SUCCESS → DB write-back yapıldı.
+// FAILED: yoklama FAILED veya timeout → DB write-back yapılmadı.
+enum PriceChangeStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -264,6 +274,7 @@ model Organization {
   memberStoreAccess     MemberStoreAccess[]
   livePerformanceBuffer LivePerformanceBuffer[]
   catalogBarcodeMisses  CatalogBarcodeMiss[]
+  priceChangeLogs       PriceChangeLog[]
 
   @@map("organizations")
 }
@@ -329,6 +340,7 @@ model Store {
   livePerformanceBuffer  LivePerformanceBuffer[]
   orderClaims            OrderClaim[]
   catalogBarcodeMisses   CatalogBarcodeMiss[]
+  priceChangeLogs        PriceChangeLog[]
 
   @@unique([organizationId, platform, externalAccountId])
   @@index([organizationId])
@@ -473,6 +485,7 @@ model ProductVariant {
   store            Store                       @relation(fields: [storeId], references: [id], onDelete: Cascade)
   orderItems       OrderItem[]
   costProfileLinks ProductVariantCostProfile[]
+  priceChangeLogs  PriceChangeLog[]
 
   @@unique([storeId, platformVariantId])
   // Intentionally NOT unique on (storeId, barcode): marketplaces enforce
@@ -1449,4 +1462,39 @@ model LivePerformanceBuffer {
   @@index([status, lastFailedAt])
   @@index([organizationId])
   @@map("live_performance_buffer")
+}
+
+// ─── Fiyat Yazma Denetim Kaydı (trendyol-price-write) ─────────────────
+// Trendyol'a yazılan her fiyat değişikliği için audit trail.
+// organizationId denormalize edilir — RLS'in is_org_member() çağrısıyla
+// parent join olmadan doğrudan filtre yapabilmesi için (42P17 döngüsünü önler).
+// userId: aksiyonu tetikleyen kullanıcının auth.users UUID'si (sadece referans,
+// FK kısıtı yok — UserProfile silindi→log kaybolmasın).
+// Writes yalnız service role (backend postgres bağlantısıyla); authenticated
+// INSERT/UPDATE/DELETE policy YOK → default-deny.
+model PriceChangeLog {
+  id               String            @id @default(uuid()) @db.Uuid
+  organizationId   String            @map("organization_id") @db.Uuid
+  storeId          String            @map("store_id") @db.Uuid
+  variantId        String            @map("variant_id") @db.Uuid
+  userId           String            @map("user_id") @db.Uuid
+  platform         Platform
+  barcode          String
+  oldSalePrice     Decimal           @map("old_sale_price") @db.Decimal(12, 2)
+  newSalePrice     Decimal           @map("new_sale_price") @db.Decimal(12, 2)
+  listPrice        Decimal?          @map("list_price") @db.Decimal(12, 2)
+  trendyolBatchId  String?           @map("trendyol_batch_id")
+  status           PriceChangeStatus @default(PENDING)
+  errorCode        String?           @map("error_code")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  variant      ProductVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([storeId, createdAt(sort: Desc)])
+  @@index([variantId, createdAt(sort: Desc)])
+  @@map("price_change_logs")
 }
