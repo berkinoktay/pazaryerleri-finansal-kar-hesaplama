@@ -1,19 +1,20 @@
-// Trendyol Price Update API — pure HTTP layer.
+// Trendyol Price Update API — pure HTTP layer (DOMESTIC marketplace).
 //
-// Source-of-truth:
-//   docs/integrations/trendyol/9-trendyol-ihracat-merkezi-entegrasyonu/
-//     fiyat-entegrasyonu.md                             (POST .../prices)
-//     urun-stok-fiyat-islemleri-sonuc-entegrasyonu-    (GET .../check-status)
-//     batch-id-sorgulama.md
+// Source-of-truth (docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/
+//   urun-entegrasyonu-v2/):
+//     stok-ve-fiyat-guncelleme.md                  (POST .../price-and-inventory → batchRequestId)
+//     getBatchRequestResult (developers.trendyol.com) (GET .../batch-requests/{id})
 //
-// Endpoints (grounding §1.1, §1.2):
-//   POST PROD:  https://apigw.trendyol.com/integration/ecgw/v1/{sellerId}/prices
-//   POST STAGE: https://stageapigw.trendyol.com/integration/ecgw/v1/{sellerId}/prices
-//   GET  PROD:  https://apigw.trendyol.com/integration/ecgw/v1/{sellerId}/check-status?batchId={batchId}
-//   GET  STAGE: https://stageapigw.trendyol.com/integration/ecgw/v1/{sellerId}/check-status?batchId={batchId}
+// Endpoints:
+//   POST PROD:  https://apigw.trendyol.com/integration/inventory/sellers/{sellerId}/products/price-and-inventory
+//   POST STAGE: https://stageapigw.trendyol.com/integration/inventory/sellers/{sellerId}/products/price-and-inventory
+//   GET  PROD:  https://apigw.trendyol.com/integration/product/sellers/{sellerId}/products/batch-requests/{batchRequestId}
+//   GET  STAGE: https://stageapigw.trendyol.com/integration/product/sellers/{sellerId}/products/batch-requests/{batchRequestId}
 //
-// Trendyol fiyat yazması ASENKRON: POST → batchId; sonuç check-status ile yoklanır.
-// Barkod başına günde 1 fiyat güncellemesi; yanlış fiyat geri alınamaz.
+// Trendyol fiyat yazması ASENKRON: POST → batchRequestId; sonuç getBatchRequestResult
+// ile yoklanır. Stok ve fiyat AYRI gönderilebilir — biz yalnız salePrice/listPrice
+// göndeririz (quantity yok), böylece satılabilir STOK BİLGİSİNE DOKUNULMAZ.
+// Aynı body ile tekrar istek 15 dakika boyunca reddedilir; fiyat değiştirilebilir.
 
 import type { StoreEnvironment } from '@pazarsync/db';
 import { MarketplaceUnreachable, ValidationError } from '@pazarsync/sync-core';
@@ -27,8 +28,8 @@ import type { TrendyolCredentials } from './types';
 const PLATFORM = 'TRENDYOL';
 const TIMEOUT_MS = 30_000;
 
-/** Trendyol's documented per-request item limit for price updates (§1.1). */
-export const MAX_PRICES_PER_REQUEST = 5_000;
+/** Trendyol's documented per-request item limit for price/stock updates. */
+export const MAX_PRICES_PER_REQUEST = 1_000;
 
 export interface UpdatePricesOpts {
   credentials: TrendyolCredentials;
@@ -46,41 +47,46 @@ export interface CheckPriceBatchOpts {
 
 // ─── Wire shapes (Trendyol API) ──────────────────────────────────────────────
 
-interface TrendyolPriceInfo {
+interface TrendyolPriceItem {
   barcode: string;
-  /** KDV-dahil satış fiyatı (Trendyol perspektifinden "buyingPrice"). */
-  buyingPrice: number;
-  /** Tavsiye edilen liste fiyatı (opsiyonel; >= buyingPrice zorunlu). */
-  rrp?: number;
+  /** KDV-dahil satış fiyatı. */
+  salePrice: number;
+  /** Tavsiye edilen liste fiyatı (opsiyonel; >= salePrice zorunlu). */
+  listPrice?: number;
+  // NOTE: `quantity` intentionally omitted — price-only update leaves stock
+  // untouched (Trendyol allows sending price and stock separately).
 }
 
 interface TrendyolPriceUpdateBody {
-  priceInfos: TrendyolPriceInfo[];
+  items: TrendyolPriceItem[];
 }
 
 interface TrendyolPriceUpdateResponse {
-  batchId: string;
+  batchRequestId: string;
 }
 
-interface TrendyolBatchStatusItem {
+interface TrendyolBatchRequestItem {
   requestItem: {
     barcode: string;
-    buyingPrice: number;
-    rrp?: number;
+    salePrice?: number;
+    listPrice?: number;
+    quantity?: number;
   };
+  /** Per-item outcome: "SUCCESS" | "FAILED". */
   status: string;
-  failureReasons: string[];
+  failureReasons?: string[];
 }
 
-interface TrendyolBatchStatusResponse {
-  batchId: string;
-  batchType: string;
-  /** Batch-level status: "COMPLETED" | "IN_PROGRESS" | "FAILED". */
-  status: string;
-  items: TrendyolBatchStatusItem[];
-  creationDate: number;
-  lastModification: number;
-  itemCount: number;
+interface TrendyolBatchRequestResponse {
+  batchRequestId: string;
+  /**
+   * Batch-level status: "IN_PROGRESS" | "COMPLETED". Trendyol may omit this for
+   * stock/price batches — when absent, per-item results are authoritative.
+   */
+  status?: string;
+  items?: TrendyolBatchRequestItem[];
+  itemCount?: number;
+  failedItemCount?: number;
 }
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -120,40 +126,38 @@ function validateItems(items: PriceUpdateItem[]): void {
   }
 }
 
-function toPriceInfo(item: PriceUpdateItem): TrendyolPriceInfo {
-  const info: TrendyolPriceInfo = {
+function toPriceItem(item: PriceUpdateItem): TrendyolPriceItem {
+  const out: TrendyolPriceItem = {
     barcode: item.barcode,
     // Decimal → number for the Trendyol wire format. Money precision is
     // maintained as a decimal string throughout the domain layer; only at
     // the HTTP boundary do we convert to number (Trendyol's JSON schema
     // uses numeric literals, not strings).
-    buyingPrice: new Decimal(item.salePrice).toNumber(),
+    salePrice: new Decimal(item.salePrice).toNumber(),
   };
   if (item.listPrice !== undefined) {
-    info.rrp = new Decimal(item.listPrice).toNumber();
+    out.listPrice = new Decimal(item.listPrice).toNumber();
   }
-  return info;
+  return out;
 }
 
 // ─── HTTP functions ──────────────────────────────────────────────────────────
 
 /**
- * POST .../prices — submit a batch price update.
+ * POST .../products/price-and-inventory — submit a batch price update.
  *
- * Returns `{ batchId }` immediately; the batch processes asynchronously.
- * Per-item success/failure is only known after polling checkPriceBatchStatus.
- *
- * Grounding §1.1: POST /integration/ecgw/v1/{sellerId}/prices
- * Rate limit: UNLIMITED (grounding §1.3).
+ * Returns `{ batchId }` (Trendyol's `batchRequestId`) immediately; the batch
+ * processes asynchronously. Per-item success/failure is only known after
+ * polling checkPriceBatchStatus. Stock is NOT touched (price-only body).
  */
 export async function updatePrices(opts: UpdatePricesOpts): Promise<{ batchId: string }> {
   validateItems(opts.items);
 
   const base = baseUrlFor(opts.environment);
-  const url = `${base}/integration/ecgw/v1/${opts.credentials.supplierId}/prices`;
+  const url = `${base}/integration/inventory/sellers/${opts.credentials.supplierId}/products/price-and-inventory`;
 
   const body: TrendyolPriceUpdateBody = {
-    priceInfos: opts.items.map(toPriceInfo),
+    items: opts.items.map(toPriceItem),
   };
 
   let res: Response;
@@ -177,36 +181,37 @@ export async function updatePrices(opts: UpdatePricesOpts): Promise<{ batchId: s
   if (!res.ok) mapTrendyolResponseToDomainError(res, opts.environment);
 
   const parsed = (await res.json()) as TrendyolPriceUpdateResponse;
-  if (typeof parsed.batchId !== 'string' || parsed.batchId.length === 0) {
+  if (typeof parsed.batchRequestId !== 'string' || parsed.batchRequestId.length === 0) {
     throw new MarketplaceUnreachable(PLATFORM, {
       httpStatus: res.status,
-      responseBodySnippet: `batchId missing in response: ${JSON.stringify(parsed).slice(0, 256)}`,
+      responseBodySnippet: `batchRequestId missing in response: ${JSON.stringify(parsed).slice(0, 256)}`,
     });
   }
 
-  return { batchId: parsed.batchId };
+  return { batchId: parsed.batchRequestId };
 }
 
 /**
- * GET .../check-status?batchId={batchId} — poll the outcome of a batch.
+ * GET .../products/batch-requests/{batchRequestId} — poll the outcome of a batch
+ * (getBatchRequestResult).
  *
- * `processing: true` when batch-level status is "IN_PROGRESS".
- * `processing: false` when "COMPLETED" or "FAILED" (per-item status is definitive).
- *
- * Grounding §1.2: GET /integration/ecgw/v1/{sellerId}/check-status?batchId=
- * Rate limit: 1000 req/min (grounding §1.3).
+ * `processing: true` while the batch is still running. Trendyol omits the
+ * batch-level `status` for stock/price batches, so a missing status with no
+ * items yet is also treated as "still processing"; once `items[]` carries
+ * terminal per-item results (or status is "COMPLETED"), the batch is done.
  */
 export async function checkPriceBatchStatus(opts: CheckPriceBatchOpts): Promise<{
   processing: boolean;
   items: PriceBatchItem[];
 }> {
   const base = baseUrlFor(opts.environment);
-  const url = new URL(`${base}/integration/ecgw/v1/${opts.credentials.supplierId}/check-status`);
-  url.searchParams.set('batchId', opts.batchId);
+  const url = `${base}/integration/product/sellers/${opts.credentials.supplierId}/products/batch-requests/${encodeURIComponent(
+    opts.batchId,
+  )}`;
 
   let res: Response;
   try {
-    res = await fetch(url.toString(), {
+    res = await fetch(url, {
       method: 'GET',
       headers: {
         Authorization: buildAuthHeader(opts.credentials),
@@ -222,17 +227,23 @@ export async function checkPriceBatchStatus(opts: CheckPriceBatchOpts): Promise<
 
   if (!res.ok) mapTrendyolResponseToDomainError(res, opts.environment);
 
-  const parsed = (await res.json()) as TrendyolBatchStatusResponse;
+  const parsed = (await res.json()) as TrendyolBatchRequestResponse;
 
-  const processing = parsed.status === 'IN_PROGRESS';
+  const batchItems = parsed.items ?? [];
+  // Done when the batch reports COMPLETED, or (when status is omitted) once
+  // per-item results have landed. IN_PROGRESS or an empty not-yet-COMPLETED
+  // batch means keep polling.
+  const processing =
+    parsed.status === 'IN_PROGRESS' || (parsed.status !== 'COMPLETED' && batchItems.length === 0);
 
-  const items: PriceBatchItem[] = (parsed.items ?? []).map(
-    (entry): PriceBatchItem => ({
+  const items: PriceBatchItem[] = batchItems.map((entry): PriceBatchItem => {
+    const reasons = entry.failureReasons ?? [];
+    return {
       barcode: entry.requestItem.barcode,
       status: entry.status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
-      ...(entry.failureReasons.length > 0 ? { failureReasons: entry.failureReasons } : {}),
-    }),
-  );
+      ...(reasons.length > 0 ? { failureReasons: reasons } : {}),
+    };
+  });
 
   return { processing, items };
 }

@@ -1,88 +1,95 @@
 
 
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.trendyol.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Cari Hesap Ekstresi Entegrasyonu
+
 **Trendyol sisteminde oluşan muhasebesel kayıtlarınızı bu servis aracılığı ile entegrasyon üzerinden çekebilirsiniz.**
 
-- Finansal kayıtlar sipariş teslim edildikten sonra oluşmaktadır.
-- transactionType veya transactionTypes girilmesi zorunludur:
+* Finansal kayıtlar sipariş teslim edildikten sonra oluşmaktadır.
+* transactionType veya transactionTypes girilmesi zorunludur:
   * transactionType için 1 istekte yalnızca 1 type girilebilir.
   * transactionTypes girilmesi halinde 1 istekte birden fazla type girilebilir. Örnek: transactionTypes=Type1, Type2
   * transactionType ve transactionTypes beraber girilmesi durumunda transactionTypes için girilen değerler geçerli kabul edilir.
-- paymentOrderId siparişin ödemesi yapıldıktan sonra oluşmaktadır. İstisnalar hariç, her çarşamba, ilgili haftada vadesi gelen siparişler için ödeme emri oluşur.
-- paymentOrderId ile sipariş ve ödemelerinizi eşleştirebilirsiniz.
-- Başlangıç ve bitiş tarihi girilmesi zorunludur ve arasındaki süre **15** günden uzun **olamaz**.
-- Store bilgileri Marketplace satıcıları için "null" olarak dönecektir.
-- "affiliate" alanı "TRENDYOLTR" yada "TRENDYOLAZJV" dönebilir.
-
+* paymentOrderId siparişin ödemesi yapıldıktan sonra oluşmaktadır. İstisnalar hariç, her çarşamba, ilgili haftada vadesi gelen siparişler için ödeme emri oluşur.
+* paymentOrderId ile sipariş ve ödemelerinizi eşleştirebilirsiniz.
+* Başlangıç ve bitiş tarihi girilmesi zorunludur ve arasındaki süre **15** günden uzun **olamaz**.
+* Store bilgileri Marketplace satıcıları için "null" olarak dönecektir.
+* "affiliate" alanı "TRENDYOLTR" yada "TRENDYOLAZJV" dönebilir.
 
 **Kullanılacak olan 2 servis (settlements , otherfinancials) birbirinden ayrı işlem kayıtlarını vermektedir.**
 
-- "Settlements" servisinden satış, iade, indirim, kupon, provizyon işlemlerinin detaylarına ulaşabilirsiniz.
+* "Settlements" servisinden satış, iade, indirim, kupon, provizyon işlemlerinin detaylarına ulaşabilirsiniz.
 
   * Transaction Type, SellerRevenuePositive ve CommissionNegative birlikte değerlendirilmelidir.
   * Transaction Type, SellerRevenueNegative ve CommissionPositive birlikte değerlendirilmelidir.
   * Transaction Type, SellerRevenuePositiveCancel ve CommissionNegativeCancel birlikte değerlendirilmelidir.
   * Transaction Type, SellerRevenueNegativeCancel ve CommissionPositiveCancel birlikte değerlendirilmelidir.
 
-- "Other Financial" servisinden ise tedarikçi finansmanı, virman, ödemeler (hakediş), faturalar (Trendyoldan tedarikçiye) , tedarikçi faturaları (Tedarikçiden Trendyola), gelen havale, komisyon mutabakat faturaları işlemlerinin detaylarına ulaşabilirsiniz.
+* "Other Financial" servisinden ise tedarikçi finansmanı, virman, ödemeler (hakediş), faturalar (Trendyoldan tedarikçiye) , tedarikçi faturaları (Tedarikçiden Trendyola), gelen havale, komisyon mutabakat faturaları işlemlerinin detaylarına ulaşabilirsiniz.
 
-### **GET** settlements[](#get-settlements)
+### **GET** settlements
 
-PROD
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements)
+</NoLinkCallout>
 
-[https://apigw.trendyol.com/integration/finance/che/sellers/{sellerId}/settlements](https://apigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/settlements)
-
-STAGE
-
-[https://stageapigw.trendyol.com/integration/finance/che/sellers/{sellerId}/settlements](https://stageapigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/settlements)
+<NoLinkCallout type="info" title="STAGE">
+  [https://stageapigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements](https://stageapigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements)
+</NoLinkCallout>
 
 **Önerilen Endpoint'ler**
 
-PROD
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?endDate=\{endDate}\&startDate=\{startDate}\&transactionType=\{Type}\&page=0\&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/settlements?endDate=\{endDate}\&startDate=\{startDate}\&transactionType=\{Type}\&page=0\&size=500)
+</NoLinkCallout>
 
-[https://apigw.trendyol.com/integration/finance/che/sellers/{sellerId}/settlements?endDate={endDate}&startDate={startDate}&transactionType={Type}&page=0&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/settlements?endDate=%7BendDate%7D&startDate=%7BstartDate%7D&transactionType=%7BType%7D&page=0&size=500)
+<br />
 
+| Parametre                             | Parametre Değer                                                                                                                                                                                                                                                                                                                                                                                                                             | Açıklama                                                                                             | Tip             | Zorunlu |
+| :------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | --------------- | ------- |
+| transactionType veya transactionTypes | Sale, Return, Discount, DiscountCancel, Coupon, CouponCancel, ProvisionPositive, ProvisionNegative, ManualRefund, ManualRefundCancel, TyDiscount, TyDiscountCancel, TyCoupon, TyCouponCancel, SellerRevenuePositive, SellerRevenueNegative, CommissionPositive, CommissionNegative, SellerRevenuePositiveCancel, SellerRevenueNegativeCancel, CommissionPositiveCancel, CommissionNegativeCancel, DeliveryFee, DeliveryFeeCancel, PayByLink | Finansal işlem türüdür.                                                                              | string          | Evet    |
+| startDate                             |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp milisecond olarak gönderilmelidir. | long            | Evet    |
+| endDate                               |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp milisecond olarak gönderilmelidir. | long            | Evet    |
+| page                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Sadece belirtilen sayfadaki bilgileri döndürür                                                       | int             | Hayır   |
+| size                                  | 500 ve 1000 değerlerini alabilir. (Default=500)                                                                                                                                                                                                                                                                                                                                                                                             | Bir sayfada listelenecek maksimum adeti belirtir.                                                    | int             | Hayır   |
+| supplierId                            |                                                                                                                                                                                                                                                                                                                                                                                                                                             | İlgili tedarikçinin ID bilgisi gönderilmelidir                                                       | long            | Evet    |
+| paymentDate                           |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Ödemeye girebileceği en erken tarih                                                                  | string          | Hayır   |
+| paymentOrderId                        |                                                                                                                                                                                                                                                                                                                                                                                                                                             | Bu alanla sipariş ve ödemelerinizi eşleştirebilirsiniz.                                              | integer (int64) | Hayır   |
 
-| Parametre | Parametre Değer | Açıklama | Tip | Zorunlu |
-| --- | --- | --- | --- | --- |
-| transactionType veya transactionTypes | Sale, Return, Discount, DiscountCancel, Coupon, CouponCancel, ProvisionPositive, ProvisionNegative, SellerRevenuePositive, SellerRevenueNegative, CommissionPositive, CommissionNegative, SellerRevenuePositiveCancel, SellerRevenueNegativeCancel, CommissionPositiveCancel, CommissionNegativeCancel | Finansal işlem türüdür. | string | Evet |
-| startDate |  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp milisecond olarak gönderilmelidir. | long | Evet |
-| endDate |  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp milisecond olarak gönderilmelidir. | long | Evet |
-| page |  | Sadece belirtilen sayfadaki bilgileri döndürür | int | Hayır |
-| size | 500 ve 1000 değerlerini alabilir. (Default=500) | Bir sayfada listelenecek maksimum adeti belirtir. | int | Hayır |
-| supplierId |  | İlgili tedarikçinin ID bilgisi gönderilmelidir | long | Evet |
-| paymentDate |  | Ödemeye girebileceği en erken tarih | string | Hayır |
-| paymentOrderId |  | Bu alanla sipariş ve ödemelerinizi eşleştirebilirsiniz. | integer (int64) | Hayır |
+#### **transactionType için kullanılabilecek işlem türlerinin açıklamaları aşağıdaki gibidir**
 
-#### **transactionType için kullanılabilecek işlem türlerinin açıklamaları aşağıdaki gibidir**[](#transactiontype-için-kullanılabilecek-işlem-türlerinin-açıklamaları-aşağıdaki-gibidir)
+| transactionType                 | Açıklama                                                                                                                                                                       |
+| :------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sale**                        | Siparişlere ait satış kayıtlarını verir                                                                                                                                        |
+| **Return**                      | Siparişlere ait iade kayıtlarını verir                                                                                                                                         |
+| **Discount**                    | Tedarikçi tarafından karşılanan indirim tutarını gösterir.                                                                                                                     |
+| **DiscountCancel**              | Ürün iptal veya iade olduğunda atılan kayıttır. İndirim kaydının tersi olarak düşünülebilir                                                                                    |
+| **Coupon**                      | Tedarikçi tarafından karşılanan kupon tutarını gösterir.                                                                                                                       |
+| **CouponCancel**                | Ürün iptal veya iade olduğunda atılan kayıttır. Kupon kaydının tersi olarak düşünülebilir                                                                                      |
+| **ProvisionPositive**           | Gramaj farkından dolayı oluşan tutarlar Provizyon kaydı olarak atılır. Sipariş iptal veya iade olduğunda birbirinin tersi olarak kayıt atılır.                                 |
+| **ProvisionNegative**           | Gramaj farkından dolayı oluşan tutarlar Provizyon kaydı olarak atılır. Sipariş iptal veya iade olduğunda birbirinin tersi olarak kayıt atılır.                                 |
+| **ManualRefund**                | Kısmi iade durumunda atılan kayıttır. Bir ürün için ürün tutarından daha az olacak şekilde iade kaydı oluşturuluyor ise bu kayıt atılmaktadır.                                 |
+| **ManualRefundCancel**          | Kısmi iade olan bir ürün için ürün tamamen iade olduğunda, kısmi iadenin iptali amacıyla bu kayıt atılır. Böylece, daha önceden atılan kısmi iade tutarı için mahsuplaşılır.   |
+| **TyDiscount**                  | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı indirimler için bu kayıt atılır. Bu tutar, ay sonlarında satıcıdan talep edilen fatura ile satıcıya ödenir.          |
+| **TyDiscountCancel**            | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı indirimler için atılan TyDiscount kaydına istinaden atılır. Ürünün iptal veya iade olması durumunda bu kayıt atılır. |
+| **TyCoupon**                    | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı kuponlar için bu kayıt atılır. Bu tutar, ay sonlarında satıcıdan talep edilen fatura ile satıcıya ödenir.            |
+| **TyCouponCancel**              | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı kuponlar için atılan TyCoupon kaydına istinaden atılır. Ürünün iptal veya iade olması durumunda bu kayıt atılır.     |
+| **SellerRevenuePositive**       | Hakediş Pozitif Düzeltme                                                                                                                                                       |
+| **SellerRevenueNegative**       | Hakediş Negatif Düzeltme                                                                                                                                                       |
+| **CommissionPositive**          | Komisyon Pozitif Düzeltme                                                                                                                                                      |
+| **CommissionNegative**          | Komisyon Negatif Düzeltme                                                                                                                                                      |
+| **SellerRevenuePositiveCancel** | Hakediş Pozitif Düzeltme İptal                                                                                                                                                 |
+| **SellerRevenueNegativeCancel** | Hakediş Negatif Düzeltme İptal                                                                                                                                                 |
+| **CommissionPositiveCancel**    | Komisyon Pozitif Düzeltme İptal                                                                                                                                                |
+| **CommissionNegativeCancel**    | Komisyon Negatif Düzeltme İptal                                                                                                                                                |
+| **DeliveryFee**                 | Teslimat ücreti kayıtlarını verir.                                                                                                                                             |
+| **DeliveryFeeCancel**           | Ürün iptal veya iade olduğunda atılan teslimat ücreti iptal kaydıdır.                                                                                                          |
+| **PayByLink**                   | Pay by Link ile yapılan siparişlere ait satış kayıtlarını verir.                                                                                                               |
 
-| transactionType | Açıklama |
-| --- | --- |
-| **Sale** | Siparişlere ait satış kayıtlarını verir |
-| **Return** | Siparişlere ait iade kayıtlarını verir |
-| **Discount** | Tedarikçi tarafından karşılanan indirim tutarını gösterir. |
-| **DiscountCancel** | Ürün iptal veya iade olduğunda atılan kayıttır. İndirim kaydının tersi olarak düşünülebilir |
-| **Coupon** | Tedarikçi tarafından karşılanan kupon tutarını gösterir. |
-| **CouponCancel** | Ürün iptal veya iade olduğunda atılan kayıttır. Kupon kaydının tersi olarak düşünülebilir |
-| **ProvisionPositive** | Gramaj farkından dolayı oluşan tutarlar Provizyon kaydı olarak atılır. Sipariş iptal veya iade olduğunda birbirinin tersi olarak kayıt atılır. |
-| **ProvisionNegative** | Gramaj farkından dolayı oluşan tutarlar Provizyon kaydı olarak atılır. Sipariş iptal veya iade olduğunda birbirinin tersi olarak kayıt atılır. |
-| **ManualRefund** | Kısmi iade durumunda atılan kayıttır. Bir ürün için ürün tutarından daha az olacak şekilde iade kaydı oluşturuluyor ise bu kayıt atılmaktadır. |
-| **ManualRefundCancel** | Kısmi iade olan bir ürün için ürün tamamen iade olduğunda, kısmi iadenin iptali amacıyla bu kayıt atılır. Böylece, daha önceden atılan kısmi iade tutarı için mahsuplaşılır. |
-| **TYDiscount** | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı indirimler için bu kayıt atılır. Bu tutar, ay sonlarında satıcıdan talep edilen fatura ile satıcıya ödenir. |
-| **TYDiscountCancel** | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı indirimler için atılan TYDiscount kaydına istinaden atılır. Ürünün iptal veya iade olması durumunda bu kayıt atılır. |
-| **TYCoupon** | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı kuponlar için bu kayıt atılır. Bu tutar, ay sonlarında satıcıdan talep edilen fatura ile satıcıya ödenir. |
-| **TYCouponCancel** | Kurumsal faturalı alışverişlerde, Trendyol’un karşıladığı kuponlar için atılan TYCoupon kaydına istinaden atılır. Ürünün iptal veya iade olması durumunda bu kayıt atılır. |
-| **SellerRevenuePositive** | Hakediş Pozitif Düzeltme |
-| **SellerRevenueNegative** | Hakediş Negatif Düzeltme |
-| **CommissionPositive** | Komisyon Pozitif Düzeltme |
-| **CommissionNegative** | Komisyon Negatif Düzeltme |
-| **SellerRevenuePositiveCancel** | Hakediş Pozitif Düzeltme İptal |
-| **SellerRevenueNegativeCancel** | Hakediş Negatif Düzeltme İptal |
-| **CommissionPositiveCancel** | Komisyon Pozitif Düzeltme İptal |
-| **CommissionNegativeCancel** | Komisyon Negatif Düzeltme İptal |
-
-#### Örnek Servis Cevabı (transactionType=Sale kullanılmıştır)[](#örnek-servis-cevabı-transactiontypesale-kullanılmıştır)
-
-JSON
+#### Örnek Servis Cevabı (transactionType=Sale kullanılmıştır)
 
 ```json
 {
@@ -145,68 +152,65 @@ JSON
         }
         ]
 }
-
-
 ```
 
-### **GET** otherfinancials[](#get-otherfinancials)
+### **GET** otherfinancials
 
-PROD
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials)
+</NoLinkCallout>
 
-[https://apigw.trendyol.com/integration/finance/che/sellers/{sellerId}/otherfinancials](https://apigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/otherfinancials)
-
-STAGE
-
-[https://stageapigw.trendyol.com/integration/finance/che/sellers/{sellerId}/otherfinancials](https://stageapigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/otherfinancials)
+<NoLinkCallout type="info" title="STAGE">
+  [https://stageapigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials](https://stageapigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials)
+</NoLinkCallout>
 
 **Önerilen Endpoint'ler**
 
-PROD
-
-[https://apigw.trendyol.com/integration/finance/che/sellers/{sellerId}/otherfinancials?endDate={endDate}&startDate={startDate}&transactionType={Type}&page=0&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/otherfinancials?endDate=%7BendDate%7D&startDate=%7BstartDate%7D&transactionType=%7BType%7D&page=0&size=500)
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?endDate=\{endDate}\&startDate=\{startDate}\&transactionType=\{Type}\&page=0\&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?endDate=\{endDate}\&startDate=\{startDate}\&transactionType=\{Type}\&page=0\&size=500)
+</NoLinkCallout>
 
 veya
 
-PROD
-
-[https://apigw.trendyol.com/integration/finance/che/sellers/{sellerId}/otherfinancials?endDate={endDate}&startDate={startDate}&transactionTypes={Type1,Type2}&page=0&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/otherfinancials?endDate=%7BendDate%7D&startDate=%7BstartDate%7D&transactionTypes=%7BType1,Type2%7D&page=0&size=500)
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?endDate=\{endDate}\&startDate=\{startDate}\&transactionTypes=\{Type1,Type2}\&page=0\&size=500](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?endDate=\{endDate}\&startDate=\{startDate}\&transactionTypes=\{Type1,Type2}\&page=0\&size=500)
+</NoLinkCallout>
 
 **Yalnızca Platform Hizmet Bedeli kayıtlarını filtrelemek için önerilen endpoint**
 
-PROD
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?transactionType=DeductionInvoices\&transactionSubType=PlatformServiceFee\&startDate=\{startDate}\&endDate=\{endDate}](https://apigw.trendyol.com/integration/finance/che/sellers/\{sellerId}/otherfinancials?transactionType=DeductionInvoices\&transactionSubType=PlatformServiceFee\&startDate=\{startDate}\&endDate=\{endDate})
+</NoLinkCallout>
 
-[https://apigw.trendyol.com/integration/finance/che/sellers/{sellerId}/otherfinancials?transactionType=DeductionInvoices&transactionSubType=PlatformServiceFee&startDate={startDate}&endDate={endDate}](https://apigw.trendyol.com/integration/finance/che/sellers/%7BsellerId%7D/otherfinancials?transactionType=DeductionInvoices&transactionSubType=PlatformServiceFee&startDate=%7BstartDate%7D&endDate=%7BendDate%7D)
+<br />
 
+| Parametre                             | Parametre Değer                                                                                                                                  | Açıklama                                                                                                                                                                                                           | Tip             | Zorunlu |
+| :------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------- | :------ |
+| transactionType veya transactionTypes | Stoppage, CashAdvance, WireTransfer, IncomingTransfer, ReturnInvoice, CommissionAgreementInvoice, PaymentOrder, DeductionInvoices, FinancialItem | Finansal işlem türüdür.                                                                                                                                                                                            | string          | Evet    |
+| transactionSubType                    | PlatformServiceFee                                                                                                                               | Platform hizmet bedeli kayıtlarını filtrelemek için kullanılır. Bu parametreyi kullanmak için transactionType=DeductionInvoices ya da transactionTypes içinde DeductionInvoices olacak şekilde istek yapılmalıdır. | string          | Hayır   |
+| startDate                             |                                                                                                                                                  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp millisecond olarak gönderilmelidir.                                                                                                              | long            | Evet    |
+| endDate                               |                                                                                                                                                  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp millisecond olarak gönderilmelidir.                                                                                                              | long            | Evet    |
+| page                                  |                                                                                                                                                  | Sadece belirtilen sayfadaki bilgileri döndürür                                                                                                                                                                     | int             | Hayır   |
+| size                                  | 500 ve 1000 değerlerini alabilir. (Default=500)                                                                                                  | Bir sayfada listelenecek maksimum adeti belirtir.                                                                                                                                                                  | int             | Hayır   |
+| supplierId                            |                                                                                                                                                  | İlgili tedarikçinin ID bilgisi gönderilmelidir                                                                                                                                                                     | long            | Evet    |
+| paymentDate                           |                                                                                                                                                  | Ödemeye girebileceği en erken tarih                                                                                                                                                                                | string          | Hayır   |
+| paymentOrderId                        |                                                                                                                                                  | Bu alanla sipariş ve ödemelerinizi eşleştirebilirsiniz.                                                                                                                                                            | integer (int64) | Hayır   |
 
-| Parametre | Parametre Değer | Açıklama | Tip | Zorunlu |
-| --- | --- | --- | --- | --- |
-| transactionType veya transactionTypes | Stoppage, CashAdvance, WireTransfer, IncomingTransfer, ReturnInvoice, CommissionAgreementInvoice, PaymentOrder, DeductionInvoices, FinancialItem | Finansal işlem türüdür. | string | Evet |
-| transactionSubType | PlatformServiceFee | Platform hizmet bedeli kayıtlarını filtrelemek için kullanılır. Bu parametreyi kullanmak için transactionType=DeductionInvoices ya da transactionTypes içinde DeductionInvoices olacak şekilde istek yapılmalıdır. | string | Hayır |
-| startDate |  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp millisecond olarak gönderilmelidir. | long | Evet |
-| endDate |  | Belirli bir tarihten sonraki işlem kayıtlarını getirir. Timestamp millisecond olarak gönderilmelidir. | long | Evet |
-| page |  | Sadece belirtilen sayfadaki bilgileri döndürür | int | Hayır |
-| size | 500 ve 1000 değerlerini alabilir. (Default=500) | Bir sayfada listelenecek maksimum adeti belirtir. | int | Hayır |
-| supplierId |  | İlgili tedarikçinin ID bilgisi gönderilmelidir | long | Evet |
-| paymentDate |  | Ödemeye girebileceği en erken tarih | string | Hayır |
-| paymentOrderId |  | Bu alanla sipariş ve ödemelerinizi eşleştirebilirsiniz. | integer (int64) | Hayır |
+#### **transactionType için kullanılabilecek işlem türlerinin açıklamaları aşağıdaki gibidir.**
 
-#### **transactionType için kullanılabilecek işlem türlerinin açıklamaları aşağıdaki gibidir.**[](#transactiontype-için-kullanılabilecek-işlem-türlerinin-açıklamaları-aşağıdaki-gibidir-1)
-
-| transactionType | Açıklama |
-| --- | --- |
-| **CashAdvance** | Vadesi henüz gelmemiş hakedişler için erken ödeme alındığında atılan kayıttır. |
-| **WireTransfer** | Trendyol ile Tedarikçi arasında yapılan virman için atılan kayıttır. |
-| **IncomingTransfer** | Borçlu durumundaki tedarikçiden, Trendyola yapılan ödemeler için atılan kayıttır |
-| **ReturnInvoice** | Tedarikçiden Trendyola kesilen iade faturalarıdır. Bakiyeyi + olarak etkiler. |
+| transactionType                | Açıklama                                                                                                                                 |
+| :----------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+| **CashAdvance**                | Vadesi henüz gelmemiş hakedişler için erken ödeme alındığında atılan kayıttır.                                                           |
+| **WireTransfer**               | Trendyol ile Tedarikçi arasında yapılan virman için atılan kayıttır.                                                                     |
+| **IncomingTransfer**           | Borçlu durumundaki tedarikçiden, Trendyola yapılan ödemeler için atılan kayıttır                                                         |
+| **ReturnInvoice**              | Tedarikçiden Trendyola kesilen iade faturalarıdır. Bakiyeyi + olarak etkiler.                                                            |
 | **CommissionAgreementInvoice** | Tedarikçinin mahsuplaşma yapılacak alacağı olmadığı durumda, iade gelen ürünler için tedarikçiden alınan komisyon mutabakat faturasıdır. |
-| **PaymentOrder** | Vadesi gelen işlemlerden hesaplanarak tedarikçiye yapılan hakediş ödemesidir |
-| **DeductionInvoices** | Trendyol tarafından sağlanan hizmetler için tedarikçiye kesilen faturadır. |
-| **FinancialItem** | Trendyol tarafından atılan düzeltme kayıtlarıdır. |
-| **Stoppage** | Bu işlem tipiyle gelindiğinde ilgili tarih aralığındaki E-ticaret Stopajı ve E-ticaret Stopaj İptali kalemleri listelenecek. |
+| **PaymentOrder**               | Vadesi gelen işlemlerden hesaplanarak tedarikçiye yapılan hakediş ödemesidir                                                             |
+| **DeductionInvoices**          | Trendyol tarafından sağlanan hizmetler için tedarikçiye kesilen faturadır.                                                               |
+| **FinancialItem**              | Trendyol tarafından atılan düzeltme kayıtlarıdır.                                                                                        |
+| **Stoppage**                   | Bu işlem tipiyle gelindiğinde ilgili tarih aralığındaki E-ticaret Stopajı ve E-ticaret Stopaj İptali kalemleri listelenecek.             |
 
-#### Örnek Servis Cevabı (transactionType=PaymentOrder kullanılmıştır)[](#örnek-servis-cevabı-transactiontypepaymentorder-kullanılmıştır)
-
-JSON
+#### Örnek Servis Cevabı (transactionType=PaymentOrder kullanılmıştır)
 
 ```json
 {
@@ -270,56 +274,60 @@ JSON
         }
     ]
 }
-
-
 ```
 
-| TransactionType | MP | Türkçe | ÖdemeTipi |
-| --- | --- | --- | --- |
-| Sale | + | Satış | Alacak (+) |
-| Return | + | İade | Borç (-) |
-| Discount | + | İndirim | Borç (-) |
-| Discount Cancel | + | İndirim İptal | Alacak (+) |
-| Coupon | + | Kupon | Alacak (+) |
-| Coupon Cancel | + | Kupon İptal | Borç (-) |
-| Provision Positive | - | Provizyon + | Alacak (+) |
-| Provision Negative | - | Provizyon - | Borç (-) |
-| TYDiscount | + | Kurumsal Fatura - TY Promosyon | Borç (-) |
-| TYDiscountCancel | + | Kurumsal Fatura - TY Promosyon İptali | Alacak (+) |
-| TYCoupon | + | Kurumsal Fatura - TY Kupon | Borç (-) |
-| TYCoupon Cancel | + | Kurumsal Fatura - TY Kupon İptali | Alacak (+) |
-| ManuelRefund | - | Kısmi İade | Borç (-) |
-| ManuelRefundCancel | - | Kısmi İade İptal | Alacak (+) |
-| SellerRevenuePositive | + | Hakediş Pozitif Düzeltme | Alacak (+) |
-| SellerRevenueNegative | - | Hakediş Negatif Düzeltme | Borç (-) |
-| CommissionPositive | - | Komisyon Pozitif Düzeltme | Borç (-) |
-| CommissionNegative | + | Komisyon Negatif Düzeltme | Alacak (+) |
-| SellerRevenuePositiveCancel | - | Hakediş Pozitif Düzeltme İptal | Borç (-) |
-| SellerRevenueNegativeCancel | + | Hakediş Negatif Düzeltme İptal | Alacak (+) |
-| CommissionPositiveCancel | + | Komisyon Pozitif Düzeltme İptal | Alacak (+) |
-| CommissionNegativeCancel | - | Komisyon Negatif Düzeltme İptal | Borç (-) |
+| TransactionType             |  MP | Türkçe                                | ÖdemeTipi  |
+| :-------------------------- | :-: | :------------------------------------ | ---------- |
+| Sale                        |  +  | Satış                                 | Alacak (+) |
+| Return                      |  +  | İade                                  | Borç (-)   |
+| Discount                    |  +  | İndirim                               | Borç (-)   |
+| Discount Cancel             |  +  | İndirim İptal                         | Alacak (+) |
+| Coupon                      |  +  | Kupon                                 | Alacak (+) |
+| Coupon Cancel               |  +  | Kupon İptal                           | Borç (-)   |
+| Provision Positive          |  -  | Provizyon +                           | Alacak (+) |
+| Provision Negative          |  -  | Provizyon -                           | Borç (-)   |
+| TyDiscount                  |  +  | Kurumsal Fatura - TY Promosyon        | Borç (-)   |
+| TyDiscountCancel            |  +  | Kurumsal Fatura - TY Promosyon İptali | Alacak (+) |
+| TyCoupon                    |  +  | Kurumsal Fatura - TY Kupon            | Borç (-)   |
+| TyCoupon Cancel             |  +  | Kurumsal Fatura - TY Kupon İptali     | Alacak (+) |
+| ManuelRefund                |  -  | Kısmi İade                            | Borç (-)   |
+| ManuelRefundCancel          |  -  | Kısmi İade İptal                      | Alacak (+) |
+| SellerRevenuePositive       |  +  | Hakediş Pozitif Düzeltme              | Alacak (+) |
+| SellerRevenueNegative       |  -  | Hakediş Negatif Düzeltme              | Borç (-)   |
+| CommissionPositive          |  -  | Komisyon Pozitif Düzeltme             | Borç (-)   |
+| CommissionNegative          |  +  | Komisyon Negatif Düzeltme             | Alacak (+) |
+| SellerRevenuePositiveCancel |  -  | Hakediş Pozitif Düzeltme İptal        | Borç (-)   |
+| SellerRevenueNegativeCancel |  +  | Hakediş Negatif Düzeltme İptal        | Alacak (+) |
+| CommissionPositiveCancel    |  +  | Komisyon Pozitif Düzeltme İptal       | Alacak (+) |
+| CommissionNegativeCancel    |  -  | Komisyon Negatif Düzeltme İptal       | Borç (-)   |
+| DeliveryFee                 |  +  | Teslimat Ücreti                       | Alacak (+) |
+| DeliveryFeeCancel           |  +  | Teslimat Ücreti İptal                 | Borç (-)   |
+| PayByLink                   |  +  | Satış                                 | Alacak (+) |
 
-| Parametre | comissionAmount | sellerRevenue |
-| --- | --- | --- |
-| Sale | - | + |
-| Return | + | - |
-| Discount | + | - |
-| Discount Cancel | - | + |
-| Coupon | + | - |
-| Coupon Cancel | - | + |
-| Provision Positive | - | + |
-| Provision Negative | + | - |
-| TYDiscount | + | - |
-| TYDiscountCancel | - | + |
-| TYCoupon | + | - |
-| TYCoupon Cancel | - | + |
-| ManuelRefund | + | - |
-| ManuelRefundCancel | - | + |
-| SellerRevenuePositive | 0 | + |
-| SellerRevenueNegative | 0 | - |
-| CommissionPositive | + | 0 |
-| CommissionNegative | - | 0 |
-| SellerRevenuePositiveCancel | 0 | - |
-| SellerRevenueNegativeCancel | 0 | + |
-| CommissionPositiveCancel | - | 0 |
-| CommissionNegativeCancel | + | 0 |
+| Parametre                   | comissionAmount | sellerRevenue |
+| :-------------------------- | :-------------: | :-----------: |
+| Sale                        |        -        |       +       |
+| Return                      |        +        |       -       |
+| Discount                    |        +        |       -       |
+| Discount Cancel             |        -        |       +       |
+| Coupon                      |        +        |       -       |
+| Coupon Cancel               |        -        |       +       |
+| Provision Positive          |        -        |       +       |
+| Provision Negative          |        +        |       -       |
+| TyDiscount                  |        +        |       -       |
+| TyDiscountCancel            |        -        |       +       |
+| TyCoupon                    |        +        |       -       |
+| TyCoupon Cancel             |        -        |       +       |
+| ManuelRefund                |        +        |       -       |
+| ManuelRefundCancel          |        -        |       +       |
+| SellerRevenuePositive       |        0        |       +       |
+| SellerRevenueNegative       |        0        |       -       |
+| CommissionPositive          |        +        |       0       |
+| CommissionNegative          |        -        |       0       |
+| SellerRevenuePositiveCancel |        0        |       -       |
+| SellerRevenueNegativeCancel |        0        |       +       |
+| CommissionPositiveCancel    |        -        |       0       |
+| CommissionNegativeCancel    |        +        |       0       |
+| DeliveryFee                 |        -        |       +       |
+| DeliveryFeeCancel           |        +        |       -       |
+| PayByLink                   |        -        |       +       |

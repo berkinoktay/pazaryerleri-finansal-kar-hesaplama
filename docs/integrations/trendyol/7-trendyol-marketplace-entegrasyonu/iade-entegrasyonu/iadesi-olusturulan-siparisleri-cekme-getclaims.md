@@ -1,63 +1,65 @@
+
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.trendyol.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# İadesi Oluşturulan Siparişleri Çekme (getClaims)
+
 Trendyol sisteminde iadesi oluşan siparişleri bu metot yardımıyla çekebilirsiniz.
 
 **Red Edilen Paket Bilgileri:**
 
-- İade red paketi bilgileri, response içerisinde "rejectedpackageinfo" alanına eklenmiştir.
-- Eğer müşterinin iade talebi reddedildiyse ve geri gönderilmek üzere iade red paketi oluşturulmuşsa, bu paket bilgileri "rejectedpackageinfo" alanından tarafınıza dönecektir.Iade red paketi oluşmamışsa, bu alan görünmeyecektir.
-- "rejectedpackageinfo.packageId" bilgisi, iade red paketine ait benzersiz bir ID'yi temsil eder. Bu Id'yi kullanarak kendi kargo anlaşmanız (kendi kargo kodlarınız) ile çıkış yaparak, kargo kodu besleme servisinden tarafımıza bildirebilirsiniz.
-
+* İade red paketi bilgileri, response içerisinde "rejectedpackageinfo" alanına eklenmiştir.
+* Eğer müşterinin iade talebi reddedildiyse ve geri gönderilmek üzere iade red paketi oluşturulmuşsa, bu paket bilgileri "rejectedpackageinfo" alanından tarafınıza dönecektir.Iade red paketi oluşmamışsa, bu alan görünmeyecektir.
+* "rejectedpackageinfo.packageId" bilgisi, iade red paketine ait benzersiz bir ID'yi temsil eder. Bu Id'yi kullanarak kendi kargo anlaşmanız (kendi kargo kodlarınız) ile çıkış yaparak, kargo kodu besleme servisinden tarafımıza bildirebilirsiniz.
 
 **Kullanılabilen Statüler ve Statü Güncellemeleri:**
 
-- Kullanılabilinecek statüler şunlardır; Created, WaitingInAction, Accepted, Cancelled, Rejected, Unresolved, InAnalysis.
-- suppliers/(supplierid)/claims?claimItemStatus=Created gibi bir query ile de paket statülerine göre sorgulama yapılabilir.
-- İade servislerinde statüsü güncellenen iade paketleriniz, servis üzerinden tarafınıza **lastModifiedDate** sırasına göre dönecektir.
-- Yeni oluşmuş paketleri çekmek için **Created** olarak sorgulama yapılmalıdır.
-
+* Kullanılabilinecek statüler şunlardır; Created, WaitingInAction, Accepted, Cancelled, Rejected, Unresolved, InAnalysis.
+* suppliers/(supplierid)/claims?claimItemStatus=Created gibi bir query ile de paket statülerine göre sorgulama yapılabilir.
+* İade servislerinde statüsü güncellenen iade paketleriniz, servis üzerinden tarafınıza **lastModifiedDate** sırasına göre dönecektir.
+* Yeni oluşmuş paketleri çekmek için **Created** olarak sorgulama yapılmalıdır.
 
 **Tarih Bilgisi:**
 
-- **claimDate** bilgisi, Timestamp (milliseconds) formatında GMT olarak iletilmektedir.
-- Tarih bilgisini satıcı paneli ile eşlemek için GMT+3 olarak işlem yapmanız gerekmektedir.
-
+* **claimDate** bilgisi, Timestamp (milliseconds) formatında GMT olarak iletilmektedir.
+* Tarih bilgisini satıcı paneli ile eşlemek için GMT+3 olarak işlem yapmanız gerekmektedir.
 
 **İade Kargo Takip Linki:**
 
-- **rejectedpackageinfo.cargoTrackingLink** alanı, iade kargo paketi yola çıktığında dönen bilgidir.
-- Kendi kargo anlaşmasıyla çalışan satıcılar, kargo sürecini bu link üzerinden kontrol edebilirler.
+* **rejectedpackageinfo.cargoTrackingLink** alanı, iade kargo paketi yola çıktığında dönen bilgidir.
+* Kendi kargo anlaşmasıyla çalışan satıcılar, kargo sürecini bu link üzerinden kontrol edebilirler.
 
+### **GET** getClaims
 
-### **GET** getClaims[](#get-getclaims)
+<NoLinkCallout type="info" title="PROD">
+  [https://apigw.trendyol.com/integration/order/sellers/\{sellerId}/claims](https://apigw.trendyol.com/integration/order/sellers/\{sellerId}/claims)
+</NoLinkCallout>
 
-PROD
-
-[https://apigw.trendyol.com/integration/order/sellers/{sellerId}/claims](https://apigw.trendyol.com/integration/order/sellers/%7BsellerId%7D/claims)
-
-STAGE
-
-[https://stageapigw.trendyol.com/integration/order/sellers/{sellerId}/claims](https://stageapigw.trendyol.com/integration/order/sellers/%7BsellerId%7D/claims)
+<NoLinkCallout type="info" title="STAGE">
+  [https://stageapigw.trendyol.com/integration/order/sellers/\{sellerId}/claims](https://stageapigw.trendyol.com/integration/order/sellers/\{sellerId}/claims)
+</NoLinkCallout>
 
 **Servis Parametreleri**
 
-- claimIds parametresi verildiği zaman diğer tüm parametreler işleme alınmayarak sadece ilgili claimId'ye ait değerler dönecektir.
-- "orderShipmentPackageId" değeri iade paketinin id değeridir.
+* claimIds parametresi verildiği zaman diğer tüm parametreler işleme alınmayarak sadece ilgili claimId'ye ait değerler dönecektir.
+* "orderShipmentPackageId" değeri iade paketinin id değeridir.
 
+| Parametre       | Açıklama                                                                      | Tip     |
+| :-------------- | :---------------------------------------------------------------------------- | ------- |
+| claimIds        | Tekil veya çoğul olarak ilgili iade paketlerinin detaylarına ulaşabilirsiniz. | string  |
+| claimItemStatus | İade itemin statüsüdür.                                                       | string  |
+| endDate         | İade paketinin oluşturulma tarihine göre çalışır.                             | integer |
+| startDate       | İade paketinin oluşturulma tarihine göre çalışır.                             | integer |
+| orderNumber     | İade paketinin sipariş numarasıdır.                                           | string  |
+| size            | Bir sayfada listelenecek maksimum adeti belirtir.                             | integer |
+| page            | Sadece belirtilen sayfadaki bilgileri döndürür.                               | integer |
 
-| Parametre | Açıklama | Tip |
-| --- | --- | --- |
-| claimIds | Tekil veya çoğul olarak ilgili iade paketlerinin detaylarına ulaşabilirsiniz. | string |
-| claimItemStatus | İade itemin statüsüdür. | string |
-| endDate | İade paketinin oluşturulma tarihine göre çalışır. | integer |
-| startDate | İade paketinin oluşturulma tarihine göre çalışır. | integer |
-| orderNumber | İade paketinin sipariş numarasıdır. | string |
-| size | Bir sayfada listelenecek maksimum adeti belirtir. | integer |
-| page | Sadece belirtilen sayfadaki bilgileri döndürür. | integer |
-
-### Örnek Servis Cevabı[](#örnek-servis-cevabı)
-
-JSON
+### Örnek Servis Cevabı
 
 ```json
+
 {
     "totalElements": 2099,
     "totalPages": 2099,
@@ -189,13 +191,13 @@ JSON
 }
 ```
 
-| Servis | Açıklama |
-| --- | --- |
-| **Created** | İadesi oluşan siparişlerin ilk statüsüdür. Bu aşamada müşteri iade butonuna bastığı zaman oluşmaktadır. |
-| **WaitingInAction** | İadesi oluşturulan sipariş tedarikçimize ulaştığı zaman bu statü dönmektedir. |
-| **WaitingFraudCheck** | İadesi onaylanan sipariş fraud kontrolune uğradığı durumda bu statü dönmektedir. |
-| **Unresolved** | İhtilaflı statüsündeki iade siparişleridir. Sorun bildir işlemi yapıldıktan sonra sipariş ihtilaflı statüsüne geçmektedir. |
-| **Rejected** | İadesi reddedilen siparişler için kullanılır. |
-| **Accepted** | İadesi kabul edilen siparişler için kullanılır. |
-| **Cancelled** | İadesi iptal edilmiş siparişler için kullanılır. |
-| **InAnalysis** | Analizde olan siparişler için kullanılır. |
+| Servis                | Açıklama                                                                                                                   |
+| :-------------------- | :------------------------------------------------------------------------------------------------------------------------- |
+| **Created**           | İadesi oluşan siparişlerin ilk statüsüdür. Bu aşamada müşteri iade butonuna bastığı zaman oluşmaktadır.                    |
+| **WaitingInAction**   | İadesi oluşturulan sipariş tedarikçimize ulaştığı zaman bu statü dönmektedir.                                              |
+| **WaitingFraudCheck** | İadesi onaylanan sipariş fraud kontrolune uğradığı durumda bu statü dönmektedir.                                           |
+| **Unresolved**        | İhtilaflı statüsündeki iade siparişleridir. Sorun bildir işlemi yapıldıktan sonra sipariş ihtilaflı statüsüne geçmektedir. |
+| **Rejected**          | İadesi reddedilen siparişler için kullanılır.                                                                              |
+| **Accepted**          | İadesi kabul edilen siparişler için kullanılır.                                                                            |
+| **Cancelled**         | İadesi iptal edilmiş siparişler için kullanılır.                                                                           |
+| **InAnalysis**        | Analizde olan siparişler için kullanılır.                                                                                  |

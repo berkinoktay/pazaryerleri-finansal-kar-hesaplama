@@ -252,9 +252,9 @@ describe('PricingCalculator', () => {
     await solveQuote(user);
     await user.click(screen.getByRole('button', { name: /Kaydet/i }));
 
-    // The confirm dialog appears with the irreversibility warning.
+    // The confirm dialog appears with the live-write warning.
     const dialog = await screen.findByRole('alertdialog');
-    expect(dialog.textContent).toMatch(/geri alınamaz/i);
+    expect(dialog.textContent).toMatch(/Trendyol vitrininde/i);
     // The CTA label is the localized "Trendyol'da güncelle".
     const confirmButton = screen.getByRole('button', { name: /Trendyol'da güncelle/i });
     await user.click(confirmButton);

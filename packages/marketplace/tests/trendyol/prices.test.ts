@@ -1,9 +1,9 @@
 // Trendyol price update adapter — unit tests (HTTP layer mocked).
 //
-// Covers:
-//   updatePrices  — request builder (path, body shape, auth headers) + batchId response mapping
-//   checkPriceBatchStatus — check-status URL + response parsing (processing flag + per-item outcome)
-//   Validation guards — empty list, over-limit, rrp < salePrice
+// Covers (DOMESTIC marketplace price-and-inventory API):
+//   updatePrices  — request builder (path, items body shape, auth headers) + batchRequestId mapping
+//   checkPriceBatchStatus — getBatchRequestResult URL + response parsing (processing flag + per-item outcome)
+//   Validation guards — empty list, over-limit, listPrice < salePrice
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -51,8 +51,8 @@ afterEach(() => {
 // ─── updatePrices ─────────────────────────────────────────────────────────────
 
 describe('updatePrices', () => {
-  it('POSTs to .../ecgw/v1/{sellerId}/prices with correct path and priceInfos body', async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ batchId: 'batch-001' }));
+  it('POSTs to .../inventory/sellers/{sellerId}/products/price-and-inventory with an items body', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ batchRequestId: 'batch-001' }));
 
     const result = await updatePrices({
       credentials: CREDENTIALS,
@@ -63,38 +63,44 @@ describe('updatePrices', () => {
       ],
     });
 
+    // Trendyol's batchRequestId is surfaced as the generic batchId.
     expect(result).toEqual({ batchId: 'batch-001' });
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [urlArg, initArg] = fetchSpy.mock.calls[0] as [string, RequestInit];
 
-    // URL must include sellerId in path
-    expect(urlArg).toContain(`/ecgw/v1/${SUPPLIER_ID}/prices`);
+    // URL must hit the inventory price-and-inventory endpoint with sellerId in path
+    expect(urlArg).toContain(
+      `/integration/inventory/sellers/${SUPPLIER_ID}/products/price-and-inventory`,
+    );
     expect(urlArg).toContain(BASE_URL);
 
     // Method must be POST
     expect(initArg.method).toBe('POST');
 
-    // Body must be priceInfos array with correct field names
+    // Body must be an `items` array with salePrice/listPrice (NOT priceInfos/buyingPrice/rrp)
     const body = JSON.parse(initArg.body as string) as {
-      priceInfos: Array<{ barcode: string; buyingPrice: number; rrp?: number }>;
+      items: Array<{ barcode: string; salePrice: number; listPrice?: number; quantity?: number }>;
     };
-    expect(body.priceInfos).toHaveLength(2);
-    expect(body.priceInfos[0]).toMatchObject({
+    expect(body.items).toHaveLength(2);
+    expect(body.items[0]).toMatchObject({
       barcode: 'BC-001',
-      buyingPrice: 99.9,
-      rrp: 129.9,
+      salePrice: 99.9,
+      listPrice: 129.9,
     });
-    expect(body.priceInfos[1]).toMatchObject({
+    expect(body.items[1]).toMatchObject({
       barcode: 'BC-002',
-      buyingPrice: 49.5,
+      salePrice: 49.5,
     });
-    // No rrp when listPrice not provided
-    expect(body.priceInfos[1]).not.toHaveProperty('rrp');
+    // No listPrice when not provided
+    expect(body.items[1]).not.toHaveProperty('listPrice');
+    // Stock is never touched — quantity is never sent
+    expect(body.items[0]).not.toHaveProperty('quantity');
+    expect(body.items[1]).not.toHaveProperty('quantity');
   });
 
   it('includes Authorization and User-Agent headers', async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ batchId: 'batch-002' }));
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ batchRequestId: 'batch-002' }));
 
     await updatePrices({
       credentials: CREDENTIALS,
@@ -142,6 +148,18 @@ describe('updatePrices', () => {
     ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
+  it('throws when batchRequestId is missing from the response', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ unexpected: true }));
+
+    await expect(
+      updatePrices({
+        credentials: CREDENTIALS,
+        environment: ENV,
+        items: [{ barcode: 'BC-NB', salePrice: '10.00' }],
+      }),
+    ).rejects.toMatchObject({ name: 'MarketplaceUnreachable' });
+  });
+
   it('throws MarketplaceAuthError on 401', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }));
 
@@ -160,26 +178,27 @@ describe('updatePrices', () => {
 describe('checkPriceBatchStatus', () => {
   const BATCH_ID = '57a7229a-e345-4232-88ac-f4169b864293';
 
-  it('GETs .../ecgw/v1/{sellerId}/check-status?batchId=... and maps COMPLETED response', async () => {
+  it('GETs .../products/batch-requests/{batchRequestId} and maps a COMPLETED response', async () => {
     const wire = {
-      batchId: BATCH_ID,
-      batchType: 'PriceUpdate',
+      batchRequestId: BATCH_ID,
+      batchRequestType: 'PriceUpdate',
       status: 'COMPLETED',
       items: [
         {
-          requestItem: { barcode: 'BC-001', buyingPrice: 99.9, rrp: 129.9 },
+          requestItem: { barcode: 'BC-001', salePrice: 99.9, listPrice: 129.9 },
           status: 'SUCCESS',
           failureReasons: [],
         },
         {
-          requestItem: { barcode: 'BC-002', buyingPrice: 49.5 },
+          requestItem: { barcode: 'BC-002', salePrice: 49.5 },
           status: 'FAILED',
-          failureReasons: ['Price already updated today'],
+          failureReasons: ['Price already updated'],
         },
       ],
       creationDate: 1529734317090,
       lastModification: 1529734653403,
       itemCount: 2,
+      failedItemCount: 1,
     };
     fetchSpy.mockResolvedValueOnce(jsonResponse(wire));
 
@@ -195,23 +214,22 @@ describe('checkPriceBatchStatus', () => {
     expect(result.items[1]).toEqual({
       barcode: 'BC-002',
       status: 'FAILED',
-      failureReasons: ['Price already updated today'],
+      failureReasons: ['Price already updated'],
     });
 
-    // URL must include sellerId and batchId as query param
-    const [urlArg] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(urlArg).toContain(`/ecgw/v1/${SUPPLIER_ID}/check-status`);
-    expect(urlArg).toContain(`batchId=${encodeURIComponent(BATCH_ID)}`);
+    // URL must hit the product batch-requests endpoint with sellerId + batchRequestId in path
+    const [urlArg, initArg] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(initArg.method).toBe('GET');
+    expect(urlArg).toContain(
+      `/integration/product/sellers/${SUPPLIER_ID}/products/batch-requests/${encodeURIComponent(BATCH_ID)}`,
+    );
   });
 
   it('returns processing: true when batch status is IN_PROGRESS', async () => {
     const wire = {
-      batchId: BATCH_ID,
-      batchType: 'PriceUpdate',
+      batchRequestId: BATCH_ID,
       status: 'IN_PROGRESS',
       items: [],
-      creationDate: 1529734317090,
-      lastModification: 1529734317090,
       itemCount: 0,
     };
     fetchSpy.mockResolvedValueOnce(jsonResponse(wire));
@@ -226,20 +244,53 @@ describe('checkPriceBatchStatus', () => {
     expect(result.items).toHaveLength(0);
   });
 
-  it('items without failureReasons do not include the field', async () => {
-    const wire = {
+  it('treats a missing batch-level status with no items yet as still processing', async () => {
+    // Trendyol omits the batch-level `status` for stock/price batches.
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ batchRequestId: BATCH_ID, items: [] }));
+
+    const result = await checkPriceBatchStatus({
+      credentials: CREDENTIALS,
+      environment: ENV,
       batchId: BATCH_ID,
-      batchType: 'PriceUpdate',
-      status: 'COMPLETED',
+    });
+
+    expect(result.processing).toBe(true);
+  });
+
+  it('treats a missing batch-level status WITH per-item results as done', async () => {
+    const wire = {
+      batchRequestId: BATCH_ID,
       items: [
         {
-          requestItem: { barcode: 'BC-OK', buyingPrice: 50.0 },
+          requestItem: { barcode: 'BC-OK', salePrice: 50 },
           status: 'SUCCESS',
           failureReasons: [],
         },
       ],
-      creationDate: 1529734317090,
-      lastModification: 1529734653403,
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(wire));
+
+    const result = await checkPriceBatchStatus({
+      credentials: CREDENTIALS,
+      environment: ENV,
+      batchId: BATCH_ID,
+    });
+
+    expect(result.processing).toBe(false);
+    expect(result.items[0]).toEqual({ barcode: 'BC-OK', status: 'SUCCESS' });
+  });
+
+  it('items without failureReasons do not include the field', async () => {
+    const wire = {
+      batchRequestId: BATCH_ID,
+      status: 'COMPLETED',
+      items: [
+        {
+          requestItem: { barcode: 'BC-OK', salePrice: 50.0 },
+          status: 'SUCCESS',
+          failureReasons: [],
+        },
+      ],
       itemCount: 1,
     };
     fetchSpy.mockResolvedValueOnce(jsonResponse(wire));
