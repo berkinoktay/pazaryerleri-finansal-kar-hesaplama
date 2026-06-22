@@ -1533,6 +1533,22 @@
         "comingSoon": "Yakında",
         "ariaLabel": "Bu ürünü fiyatla"
       },
+      "panel": {
+        "breakdown": {
+          "sale": "Satış",
+          "list": "Liste",
+          "sellerDiscount": "Satıcı ind.",
+          "cost": "Maliyet",
+          "commission": "Komisyon",
+          "shipping": "Kargo",
+          "platformService": "Platform Hizmet (PSF)",
+          "stoppage": "Stopaj",
+          "netVat": "Net KDV",
+          "netProfit": "Net Kâr",
+          "margin": "Marj",
+          "markup": "Oran"
+        }
+      },
       "empty": {
         "noStore": {
           "title": "Aktif mağaza yok",

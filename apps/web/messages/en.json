@@ -1468,6 +1468,22 @@
         "comingSoon": "Coming soon",
         "ariaLabel": "Price this product"
       },
+      "panel": {
+        "breakdown": {
+          "sale": "Sale",
+          "list": "List",
+          "sellerDiscount": "Seller disc.",
+          "cost": "Cost",
+          "commission": "Commission",
+          "shipping": "Shipping",
+          "platformService": "Platform Service (PSF)",
+          "stoppage": "Stoppage",
+          "netVat": "Net VAT",
+          "netProfit": "Net Profit",
+          "margin": "Margin",
+          "markup": "Markup"
+        }
+      },
       "empty": {
         "noStore": {
           "title": "No active store",
