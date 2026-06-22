@@ -1492,11 +1492,6 @@
         "sku": "SKU",
         "barcode": "Barkod"
       },
-      "view": {
-        "label": "Görünüm",
-        "list": "Liste",
-        "cards": "Kart"
-      },
       "status": {
         "costMissing": "Maliyet eksik",
         "shippingMissing": "Kargo yok",

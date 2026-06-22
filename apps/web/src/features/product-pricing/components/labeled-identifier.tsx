@@ -29,7 +29,9 @@ export function LabeledIdentifier({ label, value }: LabeledIdentifierProps): Rea
 
   return (
     <span className="gap-2xs flex min-w-0 items-baseline">
-      <span className="text-muted-foreground text-2xs shrink-0">{label}</span>
+      {/* Trailing colon belongs to the layout, not the i18n value — so the
+          label reads "SKU:" / "Barkod:" while the copy aria-label stays clean. */}
+      <span className="text-muted-foreground text-2xs shrink-0">{label}:</span>
       {isMissing ? (
         <span className="text-muted-foreground-dim text-xs tabular-nums">{EMPTY_VALUE}</span>
       ) : (

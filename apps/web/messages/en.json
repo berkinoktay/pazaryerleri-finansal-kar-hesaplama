@@ -1427,11 +1427,6 @@
         "sku": "SKU",
         "barcode": "Barcode"
       },
-      "view": {
-        "label": "View",
-        "list": "List",
-        "cards": "Cards"
-      },
       "status": {
         "costMissing": "Cost missing",
         "shippingMissing": "No shipping",
