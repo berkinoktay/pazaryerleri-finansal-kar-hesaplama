@@ -1,10 +1,11 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { DistributionBar, type DistributionSegment } from '@/components/patterns/distribution-bar';
+import { ChartSwatch } from '@/components/ui/chart';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 
@@ -178,6 +179,7 @@ function WaterfallBreakdown({ breakdown }: { breakdown: QuoteBreakdown }): React
 /** Segment view — one stacked bar (deductions + profit) + a colour legend. */
 function SegmentBreakdown({ breakdown }: { breakdown: QuoteBreakdown }): React.ReactElement {
   const t = useTranslations('features.productPricing.panel.breakdown');
+  const formatter = useFormatter();
   const parts = useBreakdownParts(breakdown);
   const profit = {
     id: 'netProfit',
@@ -207,7 +209,21 @@ function SegmentBreakdown({ breakdown }: { breakdown: QuoteBreakdown }): React.R
         <span>{t('sale')}</span>
         <Currency value={breakdown.saleGross} className="text-foreground font-medium" />
       </div>
-      <DistributionBar segments={segments} ariaLabel={t('sale')} />
+      <DistributionBar segments={segments} showLegend={false} ariaLabel={t('sale')} />
+      {/* Compact two-column legend — keeps the expanded panel short instead of
+          stacking seven full-width rows. */}
+      <div className="gap-x-lg gap-y-2xs mt-2xs grid grid-cols-1 sm:grid-cols-2">
+        {segments.map((segment) => (
+          <div key={segment.label} className="gap-xs flex items-center text-xs">
+            <ChartSwatch color={segment.color} />
+            <span className="text-muted-foreground min-w-0 flex-1 truncate">{segment.label}</span>
+            <span className="text-foreground tabular-nums">{segment.value}</span>
+            <span className="text-muted-foreground w-8 shrink-0 text-right tabular-nums">
+              {formatter.number(segment.percent / 100, 'percentInt')}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
