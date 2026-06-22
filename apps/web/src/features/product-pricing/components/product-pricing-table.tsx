@@ -1,6 +1,6 @@
 'use client';
 
-import type { ColumnDef, PaginationState, SortingState } from '@tanstack/react-table';
+import type { ColumnDef, PaginationState, Row, SortingState } from '@tanstack/react-table';
 import { Tag01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -15,6 +15,7 @@ import type { ProductPricingItem } from '../api/list-product-pricing.api';
 import type { ProductPricingSort } from '../query-keys';
 
 import { LabeledIdentifier } from './labeled-identifier';
+import { PricingCalculator } from './pricing-calculator';
 import { PricingStatusChip } from './pricing-status-chip';
 
 const EMPTY_VALUE = '—';
@@ -23,6 +24,15 @@ interface ProductPricingTableProps {
   rows: ProductPricingItem[];
   sortBy: ProductPricingSort;
   loading: boolean;
+  /** Org/store context for the inline calculator (quote endpoint). */
+  orgId: string;
+  storeId: string;
+  /**
+   * Viewport mode from `useIsMobile()`. Desktop opens the calculator inline
+   * under the row (DataTable expand); mobile opens it in a Sheet via
+   * `onOpenPanel`. Rows are only expandable on desktop.
+   */
+  isMobile: boolean;
   /** Search + facet + margin filter row, mounted in the toolbar zone. */
   toolbar?: React.ReactNode;
   /** First-run empty (store connected, no approved products). */
@@ -33,8 +43,8 @@ interface ProductPricingTableProps {
   onClearFilters?: () => void;
   error?: boolean;
   onRetry?: () => void;
-  /** Fires with the row's variantId — carried to the future pricing panel. */
-  onPriceRow: (variantId: string) => void;
+  /** Mobile-only: opens the pricing Sheet for the row. */
+  onOpenPanel: (item: ProductPricingItem) => void;
   page: number;
   perPage: number;
   total: number;
@@ -81,8 +91,13 @@ function parseSort(sort: ProductPricingSort): { column: string; desc: boolean } 
  * Image-forward media-row table for forward pricing. Each row leads with a
  * prominent product image, then the name + sku/barcode identifiers, then the
  * right-aligned numeric columns (sale / cost / profit / markup / margin), the
- * status chip, and the "Fiyatla" stub action. The toolbar slot carries the
+ * status chip, and the "Fiyatla" action. The toolbar slot carries the
  * search + facet + margin-range + loss-only filters.
+ *
+ * "Fiyatla" opens the pricing calculator as a responsive hybrid: on desktop it
+ * expands inline under the row (DataTable `renderSubComponent`), on mobile it
+ * routes up to a Sheet via `onOpenPanel`. One `PricingCalculator` is reused in
+ * both shells.
  *
  * Sorting + pagination are server-side: the table projects the backend sort
  * into TanStack's SortingState and forwards click intent back up; the page
@@ -92,6 +107,9 @@ export function ProductPricingTable({
   rows,
   sortBy,
   loading,
+  orgId,
+  storeId,
+  isMobile,
   toolbar,
   empty,
   noResultsState,
@@ -99,7 +117,7 @@ export function ProductPricingTable({
   onClearFilters,
   error,
   onRetry,
-  onPriceRow,
+  onOpenPanel,
   page,
   perPage,
   total,
@@ -197,20 +215,32 @@ export function ProductPricingTable({
       id: 'actions',
       header: () => <span className="sr-only">{t('action.price')}</span>,
       meta: { label: t('action.price') },
-      cell: ({ row }) => (
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            size="sm"
-            data-row-action
-            aria-label={t('action.ariaLabel')}
-            onClick={() => onPriceRow(row.original.variantId)}
-          >
-            <Tag01Icon aria-hidden className="size-icon-xs" />
-            {t('action.price')}
-          </Button>
-        </div>
-      ),
+      cell: ({ row }) => {
+        // Mobile → Sheet (parent owns the open state). Desktop → toggle the
+        // inline row-expand, so a second click collapses it.
+        const handleClick = (): void => {
+          if (isMobile) {
+            onOpenPanel(row.original);
+            return;
+          }
+          row.toggleExpanded();
+        };
+        return (
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              data-row-action
+              aria-label={t('action.ariaLabel')}
+              aria-expanded={isMobile ? undefined : row.getIsExpanded()}
+              onClick={handleClick}
+            >
+              <Tag01Icon aria-hidden className="size-icon-xs" />
+              {t('action.price')}
+            </Button>
+          </div>
+        );
+      },
       enableSorting: false,
     };
 
@@ -224,7 +254,7 @@ export function ProductPricingTable({
       statusColumn,
       actionColumn,
     ];
-  }, [onPriceRow, t, tIdentifiers]);
+  }, [isMobile, onOpenPanel, t, tIdentifiers]);
 
   const sortingState: SortingState = React.useMemo(() => {
     const parsed = parseSort(sortBy);
@@ -242,6 +272,24 @@ export function ProductPricingTable({
       onPaginationChange({ page: next.pageIndex + 1, perPage: next.pageSize });
     },
     [onPaginationChange, paginationState],
+  );
+
+  // Desktop only: rows expand to mount the calculator inline; on mobile the
+  // calculator lives in a Sheet, so rows stay non-expandable.
+  const getRowCanExpand = React.useCallback(() => !isMobile, [isMobile]);
+
+  const renderSubComponent = React.useCallback(
+    (row: Row<ProductPricingItem>): React.ReactNode => (
+      <div className="px-md py-md">
+        <PricingCalculator
+          item={row.original}
+          orgId={orgId}
+          storeId={storeId}
+          onClose={() => row.toggleExpanded(false)}
+        />
+      </div>
+    ),
+    [orgId, storeId],
   );
 
   // Translate TanStack's column toggle into our `sortBy` vocabulary.
@@ -278,6 +326,8 @@ export function ProductPricingTable({
       pageCount={totalPages}
       rowCount={total}
       getRowId={(row) => row.variantId}
+      getRowCanExpand={getRowCanExpand}
+      renderSubComponent={renderSubComponent}
     />
   );
 }
