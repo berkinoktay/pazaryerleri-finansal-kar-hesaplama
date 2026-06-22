@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
 import type { ProductPricingSort } from '../query-keys';
+import { formatPercentDisplay } from '../lib/format-percent';
 
 import { LabeledIdentifier } from './labeled-identifier';
 import { PricingCalculator } from './pricing-calculator';
@@ -68,7 +69,9 @@ function PercentCell({ value }: { value: string | null }): React.ReactElement {
   if (value === null) {
     return <span className="text-muted-foreground-dim text-sm tabular-nums">{EMPTY_VALUE}</span>;
   }
-  return <span className="text-foreground text-sm tabular-nums">{value}%</span>;
+  return (
+    <span className="text-foreground text-sm tabular-nums">{formatPercentDisplay(value)}</span>
+  );
 }
 
 // Backend sort key ↔ TanStack column id. The percentage / profit columns

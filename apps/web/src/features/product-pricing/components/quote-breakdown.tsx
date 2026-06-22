@@ -102,29 +102,6 @@ export function QuoteBreakdown({ breakdown, className }: QuoteBreakdownProps): R
     },
   ];
 
-  const footerRows: DefinitionListItem[] = [
-    {
-      id: 'saleMarginPct',
-      term: t('margin'),
-      description:
-        breakdown.saleMarginPct !== null ? (
-          <span className="tabular-nums">{breakdown.saleMarginPct}%</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
-    },
-    {
-      id: 'costMarkupPct',
-      term: t('markup'),
-      description:
-        breakdown.costMarkupPct !== null ? (
-          <span className="tabular-nums">{breakdown.costMarkupPct}%</span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
-    },
-  ];
-
   return (
     <div className={cn('gap-sm flex flex-col', className)}>
       {/* Satış − kalemler */}
@@ -144,15 +121,6 @@ export function QuoteBreakdown({ breakdown, className }: QuoteBreakdownProps): R
           className={cn(isProfit ? 'text-success' : 'text-destructive')}
         />
       </div>
-
-      {/* Marj / Oran footer metrikleri */}
-      <DefinitionList
-        items={footerRows}
-        layout="inline"
-        dense
-        alignRight
-        className="text-muted-foreground"
-      />
     </div>
   );
 }

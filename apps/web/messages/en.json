@@ -1488,9 +1488,7 @@
           "platformService": "Platform Service (PSF)",
           "stoppage": "Stoppage",
           "netVat": "Net VAT",
-          "netProfit": "Net Profit",
-          "margin": "Margin",
-          "markup": "Markup"
+          "netProfit": "Net Profit"
         }
       },
       "empty": {

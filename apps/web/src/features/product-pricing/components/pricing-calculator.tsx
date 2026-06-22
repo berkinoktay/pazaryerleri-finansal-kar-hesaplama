@@ -1,6 +1,7 @@
 'use client';
 
 import type Decimal from 'decimal.js';
+import { formatCurrency } from '@pazarsync/utils';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import { toast } from 'sonner';
@@ -8,16 +9,16 @@ import { toast } from 'sonner';
 import { Currency } from '@/components/patterns/currency';
 import { MoneyInput } from '@/components/patterns/money-input';
 import { PercentageInput } from '@/components/patterns/percentage-input';
-import { StatCard } from '@/components/patterns/stat-card';
-import { StatGroup } from '@/components/patterns/stat-group';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { cn } from '@/lib/utils';
 
 import type { ProductPriceQuote, QuoteInput } from '../api/quote-product-pricing.api';
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
 import { useQuoteProductPricing } from '../hooks/use-quote-product-pricing';
+import { formatPercentDisplay } from '../lib/format-percent';
 
 import { QuoteBreakdown } from './quote-breakdown';
 
@@ -39,18 +40,16 @@ export interface PricingCalculatorProps {
 
 /**
  * Reverse-pricing calculator. Shell-agnostic: it renders the same content
- * whether mounted inline (desktop row-expand) or inside a Sheet (mobile),
- * so it contains NO Sheet/Dialog of its own — and NO product header either,
- * since the desktop row sits directly above it (and the mobile Sheet shows
- * the product in its own header). Layout is a two-column grid (current state
- * │ target) that collapses to one column on narrow viewports; the result
- * spans full width below.
+ * whether mounted inline (desktop row-expand) or inside a Sheet (mobile), so it
+ * contains NO Sheet/Dialog and NO product header (the desktop row sits above it;
+ * the mobile Sheet shows the product in its own header). Layout is a two-column
+ * grid (current state │ target); the result spans full width below.
  *
- * Frontend renders only — it performs NO money/percent math. The current
- * numbers come straight from the row (`item`), the solved price + breakdown
- * come from the quote response, and the value the user types is forwarded to
- * the API as a string (`.toString()`). A `calculable:false` quote is normal
- * data (not an error): each `reason` maps to a localized message.
+ * Frontend renders only — it performs NO money/percent math. Current numbers
+ * come from the row (`item`); the solved price, signed price delta, and
+ * breakdown come from the quote response; the typed value is forwarded to the
+ * API as a string. A `calculable:false` quote is normal data — each `reason`
+ * maps to a localized message.
  */
 export function PricingCalculator({
   item,
@@ -97,7 +96,7 @@ export function PricingCalculator({
     toast.info(t('actions.comingSoon'));
   };
 
-  const supportingMetrics = [
+  const supportingMetrics: { id: string; label: string; value: React.ReactNode }[] = [
     { id: 'cost', label: t('currentSummary.cost'), value: <NullableMoney value={item.cost} /> },
     {
       id: 'netProfit',
@@ -107,12 +106,12 @@ export function PricingCalculator({
     {
       id: 'margin',
       label: t('currentSummary.margin'),
-      value: <NullablePercent value={item.saleMarginPct} />,
+      value: formatPercentDisplay(item.saleMarginPct),
     },
     {
       id: 'markup',
       label: t('currentSummary.markup'),
-      value: <NullablePercent value={item.costMarkupPct} />,
+      value: formatPercentDisplay(item.costMarkupPct),
     },
   ];
 
@@ -134,12 +133,7 @@ export function PricingCalculator({
               divider lines; label over value, generous rhythm. */}
           <div className="gap-md grid grid-cols-2">
             {supportingMetrics.map((metric) => (
-              <div key={metric.id} className="gap-3xs flex flex-col">
-                <span className="text-muted-foreground text-2xs">{metric.label}</span>
-                <div className="text-foreground text-sm font-medium tabular-nums">
-                  {metric.value}
-                </div>
-              </div>
+              <MiniStat key={metric.id} label={metric.label} value={metric.value} />
             ))}
           </div>
         </Card>
@@ -220,7 +214,18 @@ function SectionLabel({ children }: { children: React.ReactNode }): React.ReactE
   );
 }
 
-/** Money value from the row; null (uncostable / not calculable) renders a muted dash. */
+/** Label-over-value mini stat cell — shared by the current-state grid and the
+ *  result's margin/markup metrics so both read consistently. */
+function MiniStat({ label, value }: { label: string; value: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="gap-3xs flex flex-col">
+      <span className="text-muted-foreground text-2xs">{label}</span>
+      <div className="text-foreground text-sm font-medium tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+/** Money value from the row; null (uncostable) renders a muted dash. */
 function NullableMoney({ value }: { value: string | null }): React.ReactElement {
   if (value === null) {
     return <span className="text-muted-foreground-dim tabular-nums">{EMPTY_VALUE}</span>;
@@ -228,12 +233,47 @@ function NullableMoney({ value }: { value: string | null }): React.ReactElement 
   return <Currency value={value} />;
 }
 
-/** Percent value from the row; null renders a muted dash. */
-function NullablePercent({ value }: { value: string | null }): React.ReactElement {
-  if (value === null) {
-    return <span className="text-muted-foreground-dim tabular-nums">{EMPTY_VALUE}</span>;
-  }
-  return <span className="text-foreground tabular-nums">{value}%</span>;
+/** True when a signed money string is zero (`0`, `0.00`, `-0.00`). */
+function isZeroAmount(amount: string): boolean {
+  return /^-?0(\.0+)?$/.test(amount);
+}
+
+/**
+ * Signed price change vs the current price + the current-price reference.
+ * Direction/colour read from the sign character (no math): a drop is
+ * `destructive`, a rise is `success`. The magnitude renders via `formatCurrency`
+ * with an explicit ± glyph; the absolute delta value comes from the backend.
+ */
+function PriceDelta({
+  delta,
+  currentSalePrice,
+}: {
+  delta: string | undefined;
+  currentSalePrice: string;
+}): React.ReactElement {
+  const t = useTranslations('features.productPricing.panel');
+  const showDelta = delta !== undefined && !isZeroAmount(delta);
+  const isDrop = delta !== undefined && delta.startsWith('-');
+  const magnitude = isDrop ? delta.slice(1) : (delta ?? '0');
+
+  return (
+    <div className="gap-sm flex flex-wrap items-baseline">
+      {showDelta ? (
+        <span
+          className={cn(
+            'text-sm font-medium tabular-nums',
+            isDrop ? 'text-destructive' : 'text-success',
+          )}
+        >
+          {isDrop ? '−' : '+'}
+          {formatCurrency(magnitude)}
+        </span>
+      ) : null}
+      <span className="text-muted-foreground text-2xs tabular-nums">
+        {t('result.currentPrice', { price: formatCurrency(currentSalePrice) })}
+      </span>
+    </div>
+  );
 }
 
 /**
@@ -249,10 +289,10 @@ const REASON_KEY = {
 } as const satisfies Record<QuoteReason, string>;
 
 /**
- * Result block. `calculable:true` → a full-width card with the hero new price +
- * new margin/markup stats + full breakdown + a muted reference to the current
- * price (NO delta — frontend money math is forbidden). `calculable:false` → a
- * warning keyed by reason.
+ * Result block, mirroring the current-state card: a hero new sale price with a
+ * signed delta + current-price reference, then new margin / markup mini-stats,
+ * then the full breakdown. `calculable:false` → a warning keyed by reason.
+ * NO duplicate margin/markup footer, NO frontend money math.
  */
 function QuoteResult({
   quote,
@@ -279,25 +319,28 @@ function QuoteResult({
   return (
     <Card className="gap-md p-lg flex flex-col">
       <SectionLabel>{t('result.label')}</SectionLabel>
-      <StatGroup>
-        <StatCard emphasis label={t('result.newPrice')} value={<Currency value={quote.price} />} />
-        <StatCard
+      {/* Hero — the answer: new sale price + signed delta + current reference. */}
+      <div className="gap-3xs flex flex-col">
+        <span className="text-muted-foreground text-xs">{t('result.newPrice')}</span>
+        <div className="gap-sm flex flex-wrap items-baseline">
+          <Currency value={quote.price} emphasis className="text-foreground text-3xl" />
+          <PriceDelta delta={quote.priceDelta} currentSalePrice={currentSalePrice} />
+        </div>
+      </div>
+
+      {/* New margin / markup — same mini-stat treatment as the current state. */}
+      <div className="gap-md grid grid-cols-2">
+        <MiniStat
           label={t('result.newMargin')}
-          value={breakdown.saleMarginPct !== null ? `${breakdown.saleMarginPct}%` : EMPTY_VALUE}
+          value={formatPercentDisplay(breakdown.saleMarginPct)}
         />
-        <StatCard
+        <MiniStat
           label={t('result.newMarkup')}
-          value={breakdown.costMarkupPct !== null ? `${breakdown.costMarkupPct}%` : EMPTY_VALUE}
+          value={formatPercentDisplay(breakdown.costMarkupPct)}
         />
-      </StatGroup>
+      </div>
 
       <QuoteBreakdown breakdown={breakdown} />
-
-      <p className="text-2xs text-muted-foreground tabular-nums">
-        {t.rich('result.currentPrice', {
-          price: () => <Currency value={currentSalePrice} />,
-        })}
-      </p>
     </Card>
   );
 }

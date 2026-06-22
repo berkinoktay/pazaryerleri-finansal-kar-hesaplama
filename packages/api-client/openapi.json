@@ -3388,6 +3388,12 @@
             "description": "Solved sale price (GROSS, VAT-inclusive), decimal string. Present only when calculable=true.",
             "example": "1499.90"
           },
+          "priceDelta": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "Signed price change vs the current sale price (solved − current, GROSS). Present only when calculable=true; negative when the price drops to hit the target.",
+            "example": "254.90"
+          },
           "breakdown": {
             "$ref": "#/components/schemas/QuoteBreakdown"
           }

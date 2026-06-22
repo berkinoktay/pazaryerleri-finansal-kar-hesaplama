@@ -77,6 +77,7 @@ describe('PricingCalculator', () => {
           variantId: VARIANT_ID,
           calculable: true,
           price: '1000.00',
+          priceDelta: '254.90',
           breakdown: calculableBreakdown,
         }),
       ),
@@ -104,6 +105,10 @@ describe('PricingCalculator', () => {
     await waitFor(() => {
       expect(screen.getByText('Yeni satış fiyatı')).toBeInTheDocument();
     });
+    // The signed delta line renders the current-price reference beside the new
+    // price (priceDelta comes from the backend; the frontend does no math). The
+    // colon is unique to this reference — the "Mevcut durum" card label has none.
+    expect(screen.getByText(/Mevcut:/)).toBeInTheDocument();
   });
 
   it('shows the reason message and hides the new-price hero when calculable:false', async () => {
