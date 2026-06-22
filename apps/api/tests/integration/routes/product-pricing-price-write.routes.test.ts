@@ -42,29 +42,30 @@ const CREDENTIALS = {
 const BATCH_ID = '57a7229a-e345-4232-88ac-f4169b864293';
 
 interface BatchStatusItem {
-  requestItem: { barcode: string; buyingPrice: number; rrp?: number };
+  requestItem: { barcode: string; salePrice?: number; listPrice?: number };
   status: string;
   failureReasons: string[];
 }
 
 /**
- * Stubs global.fetch so Trendyol `/prices` returns a fixed batchId and
- * `/check-status` returns a COMPLETED batch with the supplied items. Every
- * non-Trendyol request (Supabase auth) goes to the real fetch — auth tokens are
- * verified against the live local Supabase.
+ * Stubs global.fetch so the Trendyol domestic price endpoint
+ * (`/products/price-and-inventory`) returns a fixed batchRequestId and
+ * `getBatchRequestResult` (`/products/batch-requests/...`) returns a COMPLETED
+ * batch with the supplied items. Every non-Trendyol request (Supabase auth) goes
+ * to the real fetch — auth tokens are verified against the live local Supabase.
  */
 function mockTrendyolPriceBatch(items: BatchStatusItem[]): void {
   const realFetch = global.fetch.bind(global);
   vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url.includes('/prices')) {
-      return new Response(JSON.stringify({ batchId: BATCH_ID }), { status: 200 });
+    if (url.includes('/price-and-inventory')) {
+      return new Response(JSON.stringify({ batchRequestId: BATCH_ID }), { status: 200 });
     }
-    if (url.includes('/check-status')) {
+    if (url.includes('/batch-requests')) {
       return new Response(
         JSON.stringify({
-          batchId: BATCH_ID,
-          batchType: 'PriceUpdate',
+          batchRequestId: BATCH_ID,
+          batchRequestType: 'PriceUpdate',
           status: 'COMPLETED',
           items,
           creationDate: 1529734317090,
@@ -165,7 +166,7 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/price', 
     const ctx = await setupStoreWithVariant('OWNER');
     mockTrendyolPriceBatch([
       {
-        requestItem: { barcode: ctx.barcode, buyingPrice: 750, rrp: 750 },
+        requestItem: { barcode: ctx.barcode, salePrice: 750, listPrice: 750 },
         status: 'SUCCESS',
         failureReasons: [],
       },
@@ -205,7 +206,7 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/price', 
       const ctx = await setupStoreWithVariant(role);
       mockTrendyolPriceBatch([
         {
-          requestItem: { barcode: ctx.barcode, buyingPrice: 750 },
+          requestItem: { barcode: ctx.barcode, salePrice: 750 },
           status: 'SUCCESS',
           failureReasons: [],
         },
@@ -235,7 +236,7 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/price', 
     const ctx = await setupStoreWithVariant('OWNER');
     mockTrendyolPriceBatch([
       {
-        requestItem: { barcode: ctx.barcode, buyingPrice: 750 },
+        requestItem: { barcode: ctx.barcode, salePrice: 750 },
         status: 'FAILED',
         failureReasons: ['PRICE_ALREADY_UPDATED_TODAY'],
       },
