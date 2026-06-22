@@ -1,11 +1,11 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
-import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/patterns/page-header';
+import { useIsMobile } from '@/hooks/use-mobile';
 
+import type { ProductPricingItem } from '../api/list-product-pricing.api';
 import {
   useProductPricingFilters,
   PRODUCT_PRICING_DEFAULT_SORT,
@@ -14,6 +14,7 @@ import { useProductPricingList } from '../hooks/use-product-pricing-list';
 import { usePricingFacets } from '../hooks/use-pricing-facets';
 import type { ProductPricingSort } from '../query-keys';
 
+import { PricingPanelSheet } from './pricing-panel-sheet';
 import { ProductPricingEmptyState } from './product-pricing-empty-state';
 import { ProductPricingTable } from './product-pricing-table';
 import { ProductPricingToolbar } from './product-pricing-toolbar';
@@ -33,9 +34,13 @@ export function ProductPricingPageClient({
   pageTitle,
   pageIntent,
 }: ProductPricingPageClientProps): React.ReactElement {
-  const t = useTranslations('features.productPricing');
   const { filters, setFilters } = useProductPricingFilters();
+  const isMobile = useIsMobile();
   const noStoreSelected = orgId === null || storeId === null;
+
+  // Mobile pricing-panel target. Desktop uses the table's inline row-expand;
+  // this state only drives the mobile Sheet.
+  const [panelItem, setPanelItem] = React.useState<ProductPricingItem | null>(null);
 
   // Free-text inputs (search + margin bounds) keep local state so each
   // keystroke doesn't push a URL update; the URL write is debounced to ~250ms
@@ -132,10 +137,8 @@ export function ProductPricingPageClient({
     });
   };
 
-  const handlePriceRow = (_variantId: string): void => {
-    // Pricing panel ships in a later slice; the variantId is already in
-    // hand for when it does. For now, signal "coming soon".
-    toast.info(t('action.comingSoon'));
+  const handleOpenPanel = (item: ProductPricingItem): void => {
+    setPanelItem(item);
   };
 
   return (
@@ -146,6 +149,9 @@ export function ProductPricingPageClient({
         rows={rows}
         sortBy={filters.sortBy}
         loading={isInitialLoad}
+        orgId={orgId}
+        storeId={storeId}
+        isMobile={isMobile}
         toolbar={
           <ProductPricingToolbar
             q={qInput}
@@ -172,13 +178,22 @@ export function ProductPricingPageClient({
         onClearFilters={handleClearFilters}
         error={isError}
         onRetry={() => void query.refetch()}
-        onPriceRow={handlePriceRow}
+        onOpenPanel={handleOpenPanel}
         page={filters.page}
         perPage={filters.perPage}
         total={total}
         totalPages={totalPages}
         onPaginationChange={handlePaginationChange}
         onSortChange={handleSortChange}
+      />
+
+      {/* Mobile shell only — desktop pricing lives in the table's inline
+          row-expand. Passing `null` when not mobile keeps the Sheet closed. */}
+      <PricingPanelSheet
+        item={isMobile ? panelItem : null}
+        orgId={orgId}
+        storeId={storeId}
+        onClose={() => setPanelItem(null)}
       />
     </div>
   );

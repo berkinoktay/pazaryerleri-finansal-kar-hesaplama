@@ -1468,6 +1468,57 @@
         "comingSoon": "Coming soon",
         "ariaLabel": "Price this product"
       },
+      "panel": {
+        "title": "Price",
+        "currentSummary": {
+          "label": "Current state",
+          "salePrice": "Sale price",
+          "cost": "Cost",
+          "netProfit": "Net profit",
+          "margin": "Profit margin",
+          "markup": "Profit markup"
+        },
+        "target": {
+          "label": "Target",
+          "margin": "Profit Margin %",
+          "markup": "Profit Markup %",
+          "profit": "Profit ₺"
+        },
+        "valuePlaceholder": "Target value",
+        "calculate": "Calculate",
+        "result": {
+          "newPrice": "New sale price",
+          "newMargin": "New margin",
+          "newMarkup": "New markup",
+          "currentPrice": "Current: {price}"
+        },
+        "reason": {
+          "noCost": "This product has no cost; enter a cost first.",
+          "notCalculable": "Shipping/commission info is missing, price cannot be calculated.",
+          "unreachable": "This target cannot be reached.",
+          "notPriceSensitive": "A price change does not move profit to this target."
+        },
+        "actions": {
+          "cancel": "Cancel",
+          "allVariants": "All Variants",
+          "save": "Save",
+          "comingSoon": "Coming soon"
+        },
+        "breakdown": {
+          "sale": "Sale",
+          "list": "List",
+          "sellerDiscount": "Seller disc.",
+          "cost": "Cost",
+          "commission": "Commission",
+          "shipping": "Shipping",
+          "platformService": "Platform Service (PSF)",
+          "stoppage": "Stoppage",
+          "netVat": "Net VAT",
+          "netProfit": "Net Profit",
+          "margin": "Margin",
+          "markup": "Markup"
+        }
+      },
       "empty": {
         "noStore": {
           "title": "No active store",

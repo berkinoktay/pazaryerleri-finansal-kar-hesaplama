@@ -1533,6 +1533,57 @@
         "comingSoon": "Yakında",
         "ariaLabel": "Bu ürünü fiyatla"
       },
+      "panel": {
+        "title": "Fiyatla",
+        "currentSummary": {
+          "label": "Mevcut durum",
+          "salePrice": "Satış fiyatı",
+          "cost": "Maliyet",
+          "netProfit": "Net kâr",
+          "margin": "Kâr marjı",
+          "markup": "Kâr oranı"
+        },
+        "target": {
+          "label": "Hedef",
+          "margin": "Kâr Marjı %",
+          "markup": "Kâr Oranı %",
+          "profit": "Kâr ₺"
+        },
+        "valuePlaceholder": "Hedef değer",
+        "calculate": "Hesapla",
+        "result": {
+          "newPrice": "Yeni satış fiyatı",
+          "newMargin": "Yeni marj",
+          "newMarkup": "Yeni oran",
+          "currentPrice": "Mevcut: {price}"
+        },
+        "reason": {
+          "noCost": "Bu üründe maliyet yok; önce maliyet gir.",
+          "notCalculable": "Kargo/komisyon bilgisi eksik, fiyat hesaplanamıyor.",
+          "unreachable": "Bu hedefe ulaşılamıyor.",
+          "notPriceSensitive": "Fiyat değişimi kârı bu hedefe taşımıyor."
+        },
+        "actions": {
+          "cancel": "İptal",
+          "allVariants": "Tüm Varyantlar",
+          "save": "Kaydet",
+          "comingSoon": "Yakında"
+        },
+        "breakdown": {
+          "sale": "Satış",
+          "list": "Liste",
+          "sellerDiscount": "Satıcı ind.",
+          "cost": "Maliyet",
+          "commission": "Komisyon",
+          "shipping": "Kargo",
+          "platformService": "Platform Hizmet (PSF)",
+          "stoppage": "Stopaj",
+          "netVat": "Net KDV",
+          "netProfit": "Net Kâr",
+          "margin": "Marj",
+          "markup": "Oran"
+        }
+      },
       "empty": {
         "noStore": {
           "title": "Aktif mağaza yok",
