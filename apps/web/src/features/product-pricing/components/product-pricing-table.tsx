@@ -16,7 +16,6 @@ import type { ProductPricingSort } from '../query-keys';
 
 import { LabeledIdentifier } from './labeled-identifier';
 import { PricingCalculator } from './pricing-calculator';
-import { PricingStatusChip } from './pricing-status-chip';
 
 const EMPTY_VALUE = '—';
 
@@ -203,14 +202,6 @@ export function ProductPricingTable({
       enableSorting: true,
     };
 
-    const statusColumn: ColumnDef<ProductPricingItem> = {
-      id: 'status',
-      header: () => t('columns.status'),
-      meta: { label: t('columns.status') },
-      cell: ({ row }) => <PricingStatusChip item={row.original} />,
-      enableSorting: false,
-    };
-
     const actionColumn: ColumnDef<ProductPricingItem> = {
       id: 'actions',
       header: () => <span className="sr-only">{t('action.price')}</span>,
@@ -251,7 +242,6 @@ export function ProductPricingTable({
       netProfitColumn,
       costMarkupColumn,
       saleMarginColumn,
-      statusColumn,
       actionColumn,
     ];
   }, [isMobile, onOpenPanel, t, tIdentifiers]);
@@ -280,7 +270,7 @@ export function ProductPricingTable({
 
   const renderSubComponent = React.useCallback(
     (row: Row<ProductPricingItem>): React.ReactNode => (
-      <div className="px-md py-md">
+      <div className="bg-surface-subtle p-lg">
         <PricingCalculator
           item={row.original}
           orgId={orgId}

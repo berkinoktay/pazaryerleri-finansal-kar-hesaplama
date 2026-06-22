@@ -1419,8 +1419,7 @@
         "cost": "Cost",
         "netProfit": "Profit",
         "costMarkupPct": "Markup %",
-        "saleMarginPct": "Margin %",
-        "status": "Status"
+        "saleMarginPct": "Margin %"
       },
       "identifiers": {
         "sku": "SKU",
@@ -1436,31 +1435,6 @@
         "marginMin": "Min",
         "marginMax": "Max",
         "lossOnly": "Show loss-making only"
-      },
-      "status": {
-        "costMissing": "Cost missing",
-        "shippingMissing": "No shipping",
-        "commissionMissing": "No commission rule",
-        "ariaLabel": "Calculation status",
-        "detail": {
-          "cost": {
-            "OK": "Cost ready",
-            "NO_PROFILES": "No cost profile defined",
-            "FX_STALE": "Exchange rate is stale",
-            "FX_MISSING": "Exchange rate missing"
-          },
-          "shipping": {
-            "OK": "Shipping estimate ready",
-            "NO_CARRIER": "No carrier selected",
-            "NO_DESI": "Desi information missing",
-            "OWN_CONTRACT_EMPTY": "Own shipping contract is empty",
-            "DESI_OVERFLOW": "Desi exceeds the tariff range"
-          },
-          "commission": {
-            "OK": "Commission rate ready",
-            "NO_RULE": "No commission rule defined"
-          }
-        }
       },
       "action": {
         "price": "Price",
@@ -1486,6 +1460,7 @@
         "valuePlaceholder": "Target value",
         "calculate": "Calculate",
         "result": {
+          "label": "Result",
           "newPrice": "New sale price",
           "newMargin": "New margin",
           "newMarkup": "New markup",

@@ -3,11 +3,13 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { ImageCell } from '@/components/patterns/image-cell';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
 
+import { LabeledIdentifier } from './labeled-identifier';
 import { PricingCalculator } from './pricing-calculator';
 
 export interface PricingPanelSheetProps {
@@ -36,6 +38,7 @@ export function PricingPanelSheet({
   onClose,
 }: PricingPanelSheetProps): React.ReactElement {
   const t = useTranslations('features.productPricing.panel');
+  const tIdentifiers = useTranslations('features.productPricing.identifiers');
 
   return (
     <Sheet
@@ -50,7 +53,20 @@ export function PricingPanelSheet({
         className="max-w-sheet sm:max-w-sheet-wide flex w-3/4 flex-col gap-0 p-0"
       >
         <SheetHeader className="px-lg pt-lg pb-md">
-          <SheetTitle>{t('title')}</SheetTitle>
+          {item !== null ? (
+            <div className="gap-sm flex items-center">
+              <ImageCell src={item.imageUrl} alt={item.productName} size="md" />
+              <div className="gap-3xs flex min-w-0 flex-col">
+                <SheetTitle className="line-clamp-2 text-sm">{item.productName}</SheetTitle>
+                <div className="gap-x-sm gap-y-3xs flex min-w-0 flex-wrap items-baseline">
+                  <LabeledIdentifier label={tIdentifiers('sku')} value={item.sku} />
+                  <LabeledIdentifier label={tIdentifiers('barcode')} value={item.barcode} />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <SheetTitle>{t('title')}</SheetTitle>
+          )}
         </SheetHeader>
         <ScrollArea className="min-h-0 flex-1">
           <div className="px-lg pb-lg">

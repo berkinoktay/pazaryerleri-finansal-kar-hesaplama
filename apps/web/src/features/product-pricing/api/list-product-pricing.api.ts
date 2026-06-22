@@ -49,6 +49,10 @@ export async function listProductPricing(
           sortBy,
           page,
           perPage,
+          // This page only surfaces fully-priceable products: uncostable /
+          // non-calculable variants are hidden, so there is no status column
+          // or missing-input warning to manage downstream.
+          calculableOnly: 'true',
           ...(args.q !== undefined && args.q.length > 0 ? { q: args.q } : {}),
           ...(args.profitStatus !== undefined && args.profitStatus !== 'all'
             ? { profitStatus: args.profitStatus }
