@@ -303,3 +303,60 @@ export const QuoteResponseSchema = z
   .openapi('ProductPriceQuote');
 
 export type QuoteResponse = z.infer<typeof QuoteResponseSchema>;
+
+// ─── Price write request ───────────────────────────────────────────────────────
+
+/**
+ * Positive GROSS (VAT-inclusive) money string: 1–2 decimals, strictly > 0.
+ * The regex requires at least one non-zero digit so "0", "0.00" are rejected at
+ * the pattern level — a sale price must be a positive amount.
+ */
+const positiveMoneyString = z
+  .string()
+  .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_MONEY_FORMAT')
+  .refine((v) => Number(v) > 0, 'INVALID_SALE_PRICE');
+
+export const UpdatePriceInputSchema = z
+  .object({
+    variantId: z.string().uuid('INVALID_VARIANT_ID'),
+    salePrice: positiveMoneyString.openapi({
+      description:
+        'New sale price to write to the marketplace (GROSS, VAT-inclusive), decimal string. ' +
+        'Must be strictly positive. This is the price the product is offered at on the marketplace ' +
+        'storefront (Trendyol `buyingPrice`).',
+      example: '1499.90',
+    }),
+  })
+  .openapi('UpdatePriceInput');
+
+export type UpdatePriceInput = z.infer<typeof UpdatePriceInputSchema>;
+
+// ─── Price write response ──────────────────────────────────────────────────────
+
+const PriceWriteStatusSchema = z.enum(['SUCCESS', 'PENDING']).openapi({
+  description:
+    'Outcome of the price write. SUCCESS = the marketplace confirmed the item and the local ' +
+    "sale price was updated. PENDING = the marketplace accepted the batch but didn't confirm " +
+    'within the polling window — the local price was NOT updated; the change may still apply at ' +
+    'the marketplace. A FAILED item does not return here — it is a 422 MARKETPLACE_WRITE_FAILED error.',
+  example: 'SUCCESS',
+});
+
+export const UpdatePriceResponseSchema = z
+  .object({
+    status: PriceWriteStatusSchema,
+    variantId: z.string().uuid().openapi({
+      example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    }),
+    newSalePrice: moneyString.openapi({
+      description: 'The submitted sale price (GROSS, VAT-inclusive), decimal string.',
+      example: '1499.90',
+    }),
+    batchId: z.string().openapi({
+      description: 'Trendyol batch id assigned to this price update (poll target).',
+      example: '57a7229a-e345-4232-88ac-f4169b864293',
+    }),
+  })
+  .openapi('UpdatePriceResponse');
+
+export type UpdatePriceResponse = z.infer<typeof UpdatePriceResponseSchema>;

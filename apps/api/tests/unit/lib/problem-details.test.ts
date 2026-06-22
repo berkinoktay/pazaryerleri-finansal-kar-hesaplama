@@ -8,6 +8,7 @@ import {
   MarketplaceAccessError,
   MarketplaceAuthError,
   MarketplaceUnreachable,
+  MarketplaceWriteFailedError,
   NotFoundError,
   RateLimitedError,
   SyncInProgressError,
@@ -148,6 +149,21 @@ describe('problemDetailsForError — marketplace errors', () => {
     expect(status).toBe(503);
     expect(body.code).toBe('MARKETPLACE_UNREACHABLE');
     expect(body.meta).toEqual({ platform: 'TRENDYOL', httpStatus: 502 });
+  });
+
+  it('maps MarketplaceWriteFailedError to 422 MARKETPLACE_WRITE_FAILED with platform + errorCode meta', () => {
+    const { body, status } = problemDetailsForError(
+      new MarketplaceWriteFailedError('TRENDYOL', 'PRICE_ALREADY_UPDATED_TODAY'),
+    );
+    expect(status).toBe(422);
+    expect(body).toEqual({
+      type: 'https://api.pazarsync.com/errors/marketplace-write-failed',
+      title: 'Marketplace rejected the write',
+      status: 422,
+      code: 'MARKETPLACE_WRITE_FAILED',
+      detail: 'Marketplace rejected the price update for TRENDYOL: PRICE_ALREADY_UPDATED_TODAY',
+      meta: { platform: 'TRENDYOL', errorCode: 'PRICE_ALREADY_UPDATED_TODAY' },
+    });
   });
 });
 

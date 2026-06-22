@@ -12,6 +12,7 @@ import {
   MarketplaceAccessError,
   MarketplaceAuthError,
   MarketplaceUnreachable,
+  MarketplaceWriteFailedError,
   NotFoundError,
   RateLimitedError,
   ShippingCarrierPlatformMismatchError,
@@ -299,6 +300,19 @@ function classify(err: unknown): ProblemDetailsResult {
         code: SyncErrorCode.MARKETPLACE_UNREACHABLE,
         detail: err.message,
         meta: { platform: err.platform, ...err.meta },
+      },
+    };
+  }
+  if (err instanceof MarketplaceWriteFailedError) {
+    return {
+      status: 422,
+      body: {
+        type: `${TYPE_BASE}/marketplace-write-failed`,
+        title: 'Marketplace rejected the write',
+        status: 422,
+        code: 'MARKETPLACE_WRITE_FAILED',
+        detail: err.message,
+        meta: { ...err.meta },
       },
     };
   }
