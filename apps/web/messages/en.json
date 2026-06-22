@@ -1427,6 +1427,23 @@
         "sku": "SKU",
         "barcode": "Barcode"
       },
+      "toolbar": {
+        "searchPlaceholder": "Search product, SKU or barcode",
+        "categoryLabel": "Category",
+        "categoryAll": "All categories",
+        "brandLabel": "Brand",
+        "brandAll": "All brands",
+        "marginRangeLabel": "Margin range",
+        "marginMin": "Min",
+        "marginMax": "Max"
+      },
+      "tabs": {
+        "label": "Profit status",
+        "all": "All",
+        "profitable": "Profitable",
+        "breakeven": "Breakeven",
+        "loss": "Loss"
+      },
       "status": {
         "costMissing": "Cost missing",
         "shippingMissing": "No shipping",

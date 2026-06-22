@@ -20,8 +20,21 @@ export type ProductPricingSort =
   | 'costMarkupPct:asc'
   | 'costMarkupPct:desc';
 
+/**
+ * Forward-profit direction filter. Mirrors the backend `profitStatus`
+ * query enum: `all` applies no filter; the other three narrow to
+ * calculable rows whose net profit is > 0 / = 0 / < 0.
+ */
+export type ProductPricingProfitStatus = 'all' | 'profitable' | 'breakeven' | 'loss';
+
 export interface ProductPricingListFilters {
   sortBy: ProductPricingSort;
+  q: string;
+  profitStatus: ProductPricingProfitStatus;
+  marginMin: string;
+  marginMax: string;
+  categoryId: string;
+  brandId: string;
   page: number;
   perPage: number;
 }
@@ -32,4 +45,6 @@ export const productPricingKeys = {
     [...productPricingKeys.all, 'list', orgId, storeId] as const,
   list: (orgId: string, storeId: string, filters: ProductPricingListFilters) =>
     [...productPricingKeys.lists(orgId, storeId), filters] as const,
+  facets: (orgId: string, storeId: string) =>
+    [...productPricingKeys.all, 'facets', orgId, storeId] as const,
 };

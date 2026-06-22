@@ -37,6 +37,12 @@ export function useProductPricingList(
 function argsToFilters(args: ListProductPricingArgs): ProductPricingListFilters {
   return {
     sortBy: args.sortBy,
+    q: args.q ?? '',
+    profitStatus: args.profitStatus ?? 'all',
+    marginMin: args.marginMin ?? '',
+    marginMax: args.marginMax ?? '',
+    categoryId: args.categoryId ?? '',
+    brandId: args.brandId ?? '',
     page: args.page,
     perPage: args.perPage,
   };

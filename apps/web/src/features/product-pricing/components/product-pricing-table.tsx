@@ -23,6 +23,10 @@ interface ProductPricingTableProps {
   rows: ProductPricingItem[];
   sortBy: ProductPricingSort;
   loading: boolean;
+  /** Profit-status FilterTabs strip, mounted in the panel's top zone. */
+  tabs?: React.ReactNode;
+  /** Search + facet + margin filter row, mounted in the toolbar zone. */
+  toolbar?: React.ReactNode;
   /** First-run empty (store connected, no approved products). */
   empty?: React.ReactNode;
   /** No-results empty (sort/filter narrowed the set to zero). */
@@ -89,6 +93,8 @@ export function ProductPricingTable({
   rows,
   sortBy,
   loading,
+  tabs,
+  toolbar,
   empty,
   noResultsState,
   hasActiveFilters,
@@ -259,6 +265,8 @@ export function ProductPricingTable({
       columns={columns}
       data={rows}
       loading={loading}
+      tabs={tabs}
+      toolbar={toolbar !== undefined ? () => toolbar : undefined}
       empty={empty}
       noResultsState={noResultsState}
       hasActiveFilters={hasActiveFilters}

@@ -1492,6 +1492,23 @@
         "sku": "SKU",
         "barcode": "Barkod"
       },
+      "toolbar": {
+        "searchPlaceholder": "Ürün, SKU veya barkod ara",
+        "categoryLabel": "Kategori",
+        "categoryAll": "Tüm kategoriler",
+        "brandLabel": "Marka",
+        "brandAll": "Tüm markalar",
+        "marginRangeLabel": "Marj aralığı",
+        "marginMin": "En az",
+        "marginMax": "En çok"
+      },
+      "tabs": {
+        "label": "Kâr durumu",
+        "all": "Tümü",
+        "profitable": "Kârlı",
+        "breakeven": "Başabaş",
+        "loss": "Zararlı"
+      },
       "status": {
         "costMissing": "Maliyet eksik",
         "shippingMissing": "Kargo yok",
