@@ -1100,8 +1100,7 @@
       "stock": "Stock",
       "status": "Status",
       "cost": "Cost",
-      "desi": "Desi",
-      "netProfit": "Est. Net Profit"
+      "desi": "Desi"
     },
     "delivery": {
       "sameDay": "Same-day shipping",
@@ -1576,20 +1575,6 @@
       "SHIPPING_CARRIER_NOT_FOUND": "Shipping carrier not found."
     },
     "products": {
-      "columnHeader": "Est. Net Profit",
-      "popoverTitle": "Profit Breakdown",
-      "rows": {
-        "salePrice": "Sale price",
-        "cost": "Cost",
-        "shipping": "Shipping",
-        "commission": "Commission",
-        "netProfit": "Net Profit"
-      },
-      "tariff": {
-        "NORMAL": "Normal",
-        "BAREM": "Barem",
-        "OWN_CONTRACT": "Own"
-      },
       "states": {
         "NO_DESI": {
           "title": "Desi value missing",
