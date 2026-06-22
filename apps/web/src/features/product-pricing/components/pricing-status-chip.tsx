@@ -18,11 +18,10 @@ const STATUS_TONE: Record<PricingStatusKind, BadgeProps['tone']> = {
 };
 
 /**
- * Quiet-when-healthy status chip shared by the table cell and the gallery
- * card. A calculable row renders NOTHING (the profit numbers are the
- * signal). A non-calculable row surfaces a single warning-tone chip naming
- * the first missing input, with a tooltip carrying the precise sub-status
- * reason.
+ * Quiet-when-healthy status chip used in the table cell. A calculable row
+ * renders NOTHING (the profit numbers are the signal). A non-calculable row
+ * surfaces a single warning-tone chip naming the first missing input, with a
+ * tooltip carrying the precise sub-status reason.
  */
 export function PricingStatusChip({
   item,

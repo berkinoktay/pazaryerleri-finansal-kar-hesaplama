@@ -3,10 +3,8 @@
 // invalidation reads predictably across the codebase.
 
 /**
- * Sort vocabulary — a strict subset of the backend `sortBy` enum
- * (api.d.ts). Skeleton wires only the columns we expose as sortable
- * headers; the filter dimensions (profitStatus/margin/category/brand)
- * land in a later slice.
+ * Sort vocabulary — a strict subset of the backend `sortBy` enum (api.d.ts).
+ * Covers the columns exposed as sortable headers in the product-pricing table.
  */
 export type ProductPricingSort =
   | 'salePrice:asc'
