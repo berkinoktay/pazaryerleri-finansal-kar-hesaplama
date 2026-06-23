@@ -32,4 +32,14 @@ export * from '@/components/patterns/profit-cell';
 export * from '@/components/patterns/banner';
 export * from '@/components/patterns/definition-list';
 
+// Wave 3a — overlay + interactive primitives
+export * from '@/components/ui/tabs';
+export * from '@/components/ui/accordion';
+export * from '@/components/ui/collapsible';
+export * from '@/components/ui/scroll-area';
+export * from '@/components/ui/tooltip';
+export * from '@/components/ui/popover';
+export * from '@/components/ui/dropdown-menu';
+export * from '@/components/ui/dialog';
+
 export { PreviewProvider } from './preview-provider';

@@ -9,6 +9,12 @@
   "extraEntries": ["./.design-sync-build/preview-icons.tsx"],
   "provider": { "component": "PreviewProvider" },
   "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "Tooltip": { "cardMode": "single", "viewport": "460x240" },
+    "Popover": { "cardMode": "single", "viewport": "460x340" },
+    "DropdownMenu": { "cardMode": "single", "viewport": "460x400" },
+    "Dialog": { "cardMode": "single", "viewport": "680x480" }
+  },
   "componentSrcMap": {
     "Button": "src/components/ui/button.tsx",
     "Badge": "src/components/ui/badge.tsx",
@@ -35,6 +41,14 @@
     "StatRow": "src/components/patterns/stat-row.tsx",
     "ProfitCell": "src/components/patterns/profit-cell.tsx",
     "Banner": "src/components/patterns/banner.tsx",
-    "DefinitionList": "src/components/patterns/definition-list.tsx"
+    "DefinitionList": "src/components/patterns/definition-list.tsx",
+    "Tabs": "src/components/ui/tabs.tsx",
+    "Accordion": "src/components/ui/accordion.tsx",
+    "Collapsible": "src/components/ui/collapsible.tsx",
+    "ScrollArea": "src/components/ui/scroll-area.tsx",
+    "Tooltip": "src/components/ui/tooltip.tsx",
+    "Popover": "src/components/ui/popover.tsx",
+    "DropdownMenu": "src/components/ui/dropdown-menu.tsx",
+    "Dialog": "src/components/ui/dialog.tsx"
   }
 }

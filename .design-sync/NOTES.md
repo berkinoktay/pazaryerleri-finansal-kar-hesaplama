@@ -4,10 +4,13 @@ Project: **PazarSync Design System** (claude.ai/design, id `645b4e23-af00-4088-9
 
 ## What this sync is
 
-**26 components synced so far** (pilot 12 + Wave 2a 14). The DS is **not a standalone package**: it lives inside the Next.js app (`apps/web/src/components/ui` + `/patterns`, ~51 + ~65 files total). The remaining surface is tracked in `docs/plans/2026-06-23-design-sync-expansion-plan.md` (Waves 3–7).
+**34 components synced so far** (pilot 12 + Wave 2a 14 + Wave 3a 8). The DS is **not a standalone package**: it lives inside the Next.js app (`apps/web/src/components/ui` + `/patterns`, ~51 + ~65 files total). The remaining surface is tracked in `docs/plans/2026-06-23-design-sync-expansion-plan.md` (Waves 3b–7).
 
 - **Pilot (12):** `Button Badge Card Input` (`general`) · `Currency EmptyState TrendDelta MappedBadge SyncBadge TimeAgo CopyableValue StatStrip` (`patterns`).
 - **Wave 2a (14, pure):** `Avatar Checkbox Switch Progress Skeleton Spinner Separator StatusDot Table CountBadge` (`general`) · `StatRow ProfitCell Banner DefinitionList` (`patterns`).
+- **Wave 3a (8, overlay/interactive):** `Tabs Accordion Collapsible ScrollArea` (inline) · `Tooltip Popover DropdownMenu Dialog` (overlay) — all `general`.
+
+**Overlay technique (Wave 3a, reuse for Wave 3b):** force the Radix Root open with `open` / `defaultOpen` / `defaultValue` in the preview, and set `cfg.overrides.<Name> = {"cardMode":"single","viewport":"WxH"}` so the portal renders inside the card instead of escaping. Verified: Dialog (modal+scrim), DropdownMenu/Popover/Tooltip (floating-ui positioned), Accordion (`defaultValue` opens one). Tooltip also needs its own `<TooltipProvider>` wrapper inside the preview. Inline ones (Tabs/Accordion/Collapsible/ScrollArea) need no override. ContextMenu has no `open` prop (event-triggered) → defer or skip its open state.
 
 Adding a component = `cfg.componentSrcMap` entry + a re-export line in `apps/web/.design-sync-build/pilot-entry.tsx` + a `.design-sync/previews/<Name>.tsx`, then recompile CSS + rebuild (see Rebuild sequence) + re-upload (additive: full writes, empty deletes).
 
