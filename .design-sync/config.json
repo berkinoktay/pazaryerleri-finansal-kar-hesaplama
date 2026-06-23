@@ -13,7 +13,11 @@
     "Tooltip": { "cardMode": "single", "viewport": "460x240" },
     "Popover": { "cardMode": "single", "viewport": "460x340" },
     "DropdownMenu": { "cardMode": "single", "viewport": "460x400" },
-    "Dialog": { "cardMode": "single", "viewport": "680x480" }
+    "Dialog": { "cardMode": "single", "viewport": "680x480" },
+    "AlertDialog": { "cardMode": "single", "viewport": "640x440" },
+    "HoverCard": { "cardMode": "single", "viewport": "460x320" },
+    "Sheet": { "cardMode": "single", "viewport": "820x520" },
+    "Drawer": { "cardMode": "single", "viewport": "640x480" }
   },
   "componentSrcMap": {
     "Button": "src/components/ui/button.tsx",
@@ -49,6 +53,17 @@
     "Tooltip": "src/components/ui/tooltip.tsx",
     "Popover": "src/components/ui/popover.tsx",
     "DropdownMenu": "src/components/ui/dropdown-menu.tsx",
-    "Dialog": "src/components/ui/dialog.tsx"
+    "Dialog": "src/components/ui/dialog.tsx",
+    "AlertDialog": "src/components/ui/alert-dialog.tsx",
+    "HoverCard": "src/components/ui/hover-card.tsx",
+    "Sheet": "src/components/ui/sheet.tsx",
+    "Drawer": "src/components/ui/drawer.tsx",
+    "Command": "src/components/ui/command.tsx",
+    "InputOTP": "src/components/ui/input-otp.tsx",
+    "Stepper": "src/components/patterns/stepper.tsx",
+    "InlineEdit": "src/components/patterns/inline-edit.tsx",
+    "FileUpload": "src/components/patterns/file-upload.tsx",
+    "BottomDock": "src/components/patterns/bottom-dock.tsx",
+    "Wizard": "src/components/patterns/wizard.tsx"
   }
 }

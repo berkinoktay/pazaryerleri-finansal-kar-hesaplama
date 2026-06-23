@@ -4,7 +4,9 @@ Project: **PazarSync Design System** (claude.ai/design, id `645b4e23-af00-4088-9
 
 ## What this sync is
 
-**34 components synced so far** (pilot 12 + Wave 2a 14 + Wave 3a 8). The DS is **not a standalone package**: it lives inside the Next.js app (`apps/web/src/components/ui` + `/patterns`, ~51 + ~65 files total). The remaining surface is tracked in `docs/plans/2026-06-23-design-sync-expansion-plan.md` (Waves 3b–7).
+**45 components synced so far** (pilot 12 + Wave 2a 14 + Wave 3a 8 + Wave 3b 11). The DS is **not a standalone package**: it lives inside the Next.js app (`apps/web/src/components/ui` + `/patterns`, ~51 + ~65 files total). The remaining surface is tracked in `docs/plans/2026-06-23-design-sync-expansion-plan.md` (Waves 4–7 + 3b leftovers).
+
+- **Wave 3b (11):** `AlertDialog HoverCard Sheet Drawer` (overlay) · `Command InputOTP` (inline) · `Stepper InlineEdit FileUpload BottomDock Wizard` (patterns). Drawer is vaul (renders bottom drawer + drag handle under forced `open`); Sheet is a right-side panel; Wizard is controlled (`current` + no-op `onCurrentChange`). **3b leftovers deferred:** ContextMenu (no `open` prop), Menubar (low value), NavigationMenu (complex viewport), MultiFileUpload, Form (needs a react-hook-form harness in the preview).
 
 - **Pilot (12):** `Button Badge Card Input` (`general`) · `Currency EmptyState TrendDelta MappedBadge SyncBadge TimeAgo CopyableValue StatStrip` (`patterns`).
 - **Wave 2a (14, pure):** `Avatar Checkbox Switch Progress Skeleton Spinner Separator StatusDot Table CountBadge` (`general`) · `StatRow ProfitCell Banner DefinitionList` (`patterns`).

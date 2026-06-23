@@ -42,4 +42,17 @@ export * from '@/components/ui/popover';
 export * from '@/components/ui/dropdown-menu';
 export * from '@/components/ui/dialog';
 
+// Wave 3b — overlay + interactive + pattern flows
+export * from '@/components/ui/alert-dialog';
+export * from '@/components/ui/hover-card';
+export * from '@/components/ui/sheet';
+export * from '@/components/ui/drawer';
+export * from '@/components/ui/command';
+export * from '@/components/ui/input-otp';
+export * from '@/components/patterns/stepper';
+export * from '@/components/patterns/inline-edit';
+export * from '@/components/patterns/file-upload';
+export * from '@/components/patterns/bottom-dock';
+export * from '@/components/patterns/wizard';
+
 export { PreviewProvider } from './preview-provider';
