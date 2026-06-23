@@ -75,4 +75,22 @@ export * from '@/components/ui/menubar';
 export * from '@/components/patterns/data-table';
 export * from '@/components/patterns/filter-tabs';
 
+// Wave 7 — simple primitives + patterns
+export * from '@/components/ui/label';
+export * from '@/components/ui/textarea';
+export * from '@/components/ui/slider';
+export * from '@/components/ui/toggle';
+export * from '@/components/ui/toggle-group';
+export * from '@/components/ui/radio-group';
+export * from '@/components/ui/alert';
+export * from '@/components/ui/breadcrumb';
+export * from '@/components/ui/pagination';
+export * from '@/components/ui/kbd';
+export * from '@/components/ui/select';
+export * from '@/components/ui/aspect-ratio';
+export * from '@/components/patterns/search-input';
+export * from '@/components/patterns/money-input';
+export * from '@/components/patterns/percentage-input';
+export * from '@/components/patterns/page-header';
+
 export { PreviewProvider } from './preview-provider';
