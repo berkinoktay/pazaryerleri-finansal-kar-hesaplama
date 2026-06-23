@@ -65,4 +65,10 @@ export * from '@/components/patterns/sparkline';
 export * from '@/components/patterns/distribution-bar';
 export * from '@/components/patterns/chart-period-selector';
 
+// Wave 5 — next/* + remaining flows
+export * from '@/components/patterns/stat-card';
+export * from '@/components/patterns/multi-file-upload';
+export * from '@/components/ui/form';
+export * from '@/components/ui/menubar';
+
 export { PreviewProvider } from './preview-provider';

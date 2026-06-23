@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["src/*"],
+      "next/link": ["./.design-sync-build/stubs/next-link"],
+      "next/image": ["./.design-sync-build/stubs/next-image"]
+    }
+  }
+}

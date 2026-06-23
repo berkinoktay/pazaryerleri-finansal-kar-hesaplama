@@ -4,7 +4,7 @@
   "pkg": "@pazarsync/web",
   "globalName": "PazarSyncDS",
   "entry": "apps/web/.design-sync-build/pilot-entry.tsx",
-  "tsconfig": "tsconfig.json",
+  "tsconfig": ".design-sync-build/tsconfig.ds.json",
   "cssEntry": ".design-sync-build/compiled.css",
   "extraEntries": ["./.design-sync-build/preview-icons.tsx"],
   "provider": { "component": "PreviewProvider" },
@@ -22,7 +22,8 @@
     "LineChart": { "cardMode": "single", "viewport": "680x440" },
     "DonutChart": { "cardMode": "single", "viewport": "560x420" },
     "RankingChart": { "cardMode": "single", "viewport": "680x440" },
-    "ComboChart": { "cardMode": "single", "viewport": "680x440" }
+    "ComboChart": { "cardMode": "single", "viewport": "680x440" },
+    "Menubar": { "cardMode": "single", "viewport": "560x360" }
   },
   "componentSrcMap": {
     "Button": "src/components/ui/button.tsx",
@@ -77,6 +78,10 @@
     "ComboChart": "src/components/patterns/chart-combo.tsx",
     "Sparkline": "src/components/patterns/sparkline.tsx",
     "DistributionBar": "src/components/patterns/distribution-bar.tsx",
-    "ChartPeriodSelector": "src/components/patterns/chart-period-selector.tsx"
+    "ChartPeriodSelector": "src/components/patterns/chart-period-selector.tsx",
+    "StatCard": "src/components/patterns/stat-card.tsx",
+    "MultiFileUpload": "src/components/patterns/multi-file-upload.tsx",
+    "Form": "src/components/ui/form.tsx",
+    "Menubar": "src/components/ui/menubar.tsx"
   }
 }
