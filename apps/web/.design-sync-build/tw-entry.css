@@ -1,0 +1,53 @@
+/* design-sync Tailwind v4 compile input.
+ *
+ * globals.css is the *input* to Tailwind, not compiled output — the
+ * components' utility classes (bg-card, p-md, gap-sm, …) only exist after
+ * Tailwind scans the component sources. We import the real globals.css
+ * (tokens + @theme + base layer) and point @source at the component +
+ * preview trees so every utility they use is emitted. The compiled result
+ * is shipped as the DS stylesheet via cfg.cssEntry. */
+@import '../src/app/globals.css';
+
+@source '../src/components';
+@source '../src/lib';
+@source '../../../.design-sync/previews';
+
+/* Brand fonts. In the app these are fetched at runtime by next/font, so the
+ * bundle ships none — we add them here (variable woff2, OFL, from Fontsource)
+ * and define the --font-* tokens the typography layer chains to, so designs
+ * render in Host Grotesk / JetBrains Mono instead of a system fallback.
+ * latin-ext carries Turkish glyphs (ğ ş ı İ) AND the lira sign ₺ (U+20BA). */
+@font-face {
+  font-family: 'Host Grotesk';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/host-grotesk-latin-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Host Grotesk';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/host-grotesk-latin-ext-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+:root {
+  --font-host-grotesk: 'Host Grotesk';
+  --font-jetbrains-mono: 'JetBrains Mono';
+}

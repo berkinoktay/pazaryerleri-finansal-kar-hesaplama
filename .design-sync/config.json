@@ -1,0 +1,26 @@
+{
+  "projectId": "645b4e23-af00-4088-9895-4f979462ed25",
+  "shape": "package",
+  "pkg": "@pazarsync/web",
+  "globalName": "PazarSyncDS",
+  "entry": "apps/web/.design-sync-build/pilot-entry.tsx",
+  "tsconfig": "tsconfig.json",
+  "cssEntry": ".design-sync-build/compiled.css",
+  "extraEntries": ["./.design-sync-build/preview-icons.tsx"],
+  "provider": { "component": "PreviewProvider" },
+  "readmeHeader": ".design-sync/conventions.md",
+  "componentSrcMap": {
+    "Button": "src/components/ui/button.tsx",
+    "Badge": "src/components/ui/badge.tsx",
+    "Card": "src/components/ui/card.tsx",
+    "Input": "src/components/ui/input.tsx",
+    "Currency": "src/components/patterns/currency.tsx",
+    "EmptyState": "src/components/patterns/empty-state.tsx",
+    "TrendDelta": "src/components/patterns/trend-delta.tsx",
+    "MappedBadge": "src/components/patterns/mapped-badge.tsx",
+    "SyncBadge": "src/components/patterns/sync-badge.tsx",
+    "TimeAgo": "src/components/patterns/time-ago.tsx",
+    "CopyableValue": "src/components/patterns/copyable-value.tsx",
+    "StatStrip": "src/components/patterns/stat-strip.tsx"
+  }
+}
