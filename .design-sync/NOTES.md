@@ -4,7 +4,12 @@ Project: **PazarSync Design System** (claude.ai/design, id `645b4e23-af00-4088-9
 
 ## What this sync is
 
-A **pilot** of 12 components — primitives `Button Badge Card Input` (group `general`) and patterns `Currency EmptyState TrendDelta MappedBadge SyncBadge TimeAgo CopyableValue StatStrip` (group `patterns`). The DS is **not a standalone package**: it lives inside the Next.js app (`apps/web/src/components/ui` + `/patterns`, ~51 + ~65 files total). This run validated the whole pipeline end-to-end; the rest of the surface is the expansion backlog.
+**26 components synced so far** (pilot 12 + Wave 2a 14). The DS is **not a standalone package**: it lives inside the Next.js app (`apps/web/src/components/ui` + `/patterns`, ~51 + ~65 files total). The remaining surface is tracked in `docs/plans/2026-06-23-design-sync-expansion-plan.md` (Waves 3–7).
+
+- **Pilot (12):** `Button Badge Card Input` (`general`) · `Currency EmptyState TrendDelta MappedBadge SyncBadge TimeAgo CopyableValue StatStrip` (`patterns`).
+- **Wave 2a (14, pure):** `Avatar Checkbox Switch Progress Skeleton Spinner Separator StatusDot Table CountBadge` (`general`) · `StatRow ProfitCell Banner DefinitionList` (`patterns`).
+
+Adding a component = `cfg.componentSrcMap` entry + a re-export line in `apps/web/.design-sync-build/pilot-entry.tsx` + a `.design-sync/previews/<Name>.tsx`, then recompile CSS + rebuild (see Rebuild sequence) + re-upload (additive: full writes, empty deletes).
 
 ## How the build is wired (non-standard — read before rebuilding)
 

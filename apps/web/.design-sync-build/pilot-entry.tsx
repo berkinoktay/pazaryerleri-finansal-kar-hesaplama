@@ -16,4 +16,20 @@ export * from '@/components/patterns/time-ago';
 export * from '@/components/patterns/copyable-value';
 export * from '@/components/patterns/stat-strip';
 
+// Wave 2a — pure primitives + composites
+export * from '@/components/ui/avatar';
+export * from '@/components/ui/checkbox';
+export * from '@/components/ui/switch';
+export * from '@/components/ui/progress';
+export * from '@/components/ui/skeleton';
+export * from '@/components/ui/spinner';
+export * from '@/components/ui/separator';
+export * from '@/components/ui/status-dot';
+export * from '@/components/ui/table';
+export * from '@/components/ui/count-badge';
+export * from '@/components/patterns/stat-row';
+export * from '@/components/patterns/profit-cell';
+export * from '@/components/patterns/banner';
+export * from '@/components/patterns/definition-list';
+
 export { PreviewProvider } from './preview-provider';

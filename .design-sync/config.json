@@ -21,6 +21,20 @@
     "SyncBadge": "src/components/patterns/sync-badge.tsx",
     "TimeAgo": "src/components/patterns/time-ago.tsx",
     "CopyableValue": "src/components/patterns/copyable-value.tsx",
-    "StatStrip": "src/components/patterns/stat-strip.tsx"
+    "StatStrip": "src/components/patterns/stat-strip.tsx",
+    "Avatar": "src/components/ui/avatar.tsx",
+    "Checkbox": "src/components/ui/checkbox.tsx",
+    "Switch": "src/components/ui/switch.tsx",
+    "Progress": "src/components/ui/progress.tsx",
+    "Skeleton": "src/components/ui/skeleton.tsx",
+    "Spinner": "src/components/ui/spinner.tsx",
+    "Separator": "src/components/ui/separator.tsx",
+    "StatusDot": "src/components/ui/status-dot.tsx",
+    "Table": "src/components/ui/table.tsx",
+    "CountBadge": "src/components/ui/count-badge.tsx",
+    "StatRow": "src/components/patterns/stat-row.tsx",
+    "ProfitCell": "src/components/patterns/profit-cell.tsx",
+    "Banner": "src/components/patterns/banner.tsx",
+    "DefinitionList": "src/components/patterns/definition-list.tsx"
   }
 }
