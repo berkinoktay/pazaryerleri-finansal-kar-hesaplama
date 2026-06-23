@@ -93,4 +93,34 @@ export * from '@/components/patterns/money-input';
 export * from '@/components/patterns/percentage-input';
 export * from '@/components/patterns/page-header';
 
+// Wave 8 — remaining surface (display, domain, overlay, feature)
+export * from '@/components/patterns/activity-feed';
+export * from '@/components/patterns/stat-group';
+export * from '@/components/patterns/identity-cell';
+export * from '@/components/patterns/unmatched-variant-badge';
+export * from '@/components/patterns/chart-frame';
+export * from '@/components/ui/range-input';
+export * from '@/components/ui/soft-square-icon';
+export * from '@/components/patterns/filter-chip-group';
+export * from '@/components/patterns/nav-group';
+export * from '@/components/patterns/bulk-action-bar';
+export * from '@/components/patterns/rail-warning-card';
+export * from '@/components/patterns/notification-bell';
+export * from '@/components/patterns/date-input';
+export * from '@/components/patterns/theme-toggle-inline';
+export * from '@/components/patterns/profit-breakdown';
+export * from '@/components/patterns/promotion-indicator';
+export * from '@/components/patterns/badge-with-overflow';
+export * from '@/components/patterns/combobox';
+export * from '@/components/ui/calendar';
+export * from '@/components/patterns/date-range-picker';
+export * from '@/components/patterns/info-hint';
+export * from '@/components/patterns/confirm-dialog';
+export * from '@/components/ui/image-modal';
+export * from '@/components/patterns/image-cell';
+export * from '@/components/patterns/data-table-states';
+export * from '@/components/ui/sidebar';
+export * from '@/components/patterns/org-store-switcher';
+export * from '@/components/ui/navigation-menu';
+
 export { PreviewProvider } from './preview-provider';
