@@ -71,4 +71,8 @@ export * from '@/components/patterns/multi-file-upload';
 export * from '@/components/ui/form';
 export * from '@/components/ui/menubar';
 
+// Wave 6 — feature/query group (controlled, no internal fetch)
+export * from '@/components/patterns/data-table';
+export * from '@/components/patterns/filter-tabs';
+
 export { PreviewProvider } from './preview-provider';

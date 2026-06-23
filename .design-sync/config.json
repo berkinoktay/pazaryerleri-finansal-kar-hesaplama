@@ -23,7 +23,8 @@
     "DonutChart": { "cardMode": "single", "viewport": "560x420" },
     "RankingChart": { "cardMode": "single", "viewport": "680x440" },
     "ComboChart": { "cardMode": "single", "viewport": "680x440" },
-    "Menubar": { "cardMode": "single", "viewport": "560x360" }
+    "Menubar": { "cardMode": "single", "viewport": "560x360" },
+    "DataTable": { "cardMode": "single", "viewport": "920x520" }
   },
   "componentSrcMap": {
     "Button": "src/components/ui/button.tsx",
@@ -82,6 +83,8 @@
     "StatCard": "src/components/patterns/stat-card.tsx",
     "MultiFileUpload": "src/components/patterns/multi-file-upload.tsx",
     "Form": "src/components/ui/form.tsx",
-    "Menubar": "src/components/ui/menubar.tsx"
+    "Menubar": "src/components/ui/menubar.tsx",
+    "DataTable": "src/components/patterns/data-table.tsx",
+    "FilterTabs": "src/components/patterns/filter-tabs.tsx"
   }
 }
