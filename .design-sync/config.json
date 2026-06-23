@@ -17,7 +17,12 @@
     "AlertDialog": { "cardMode": "single", "viewport": "640x440" },
     "HoverCard": { "cardMode": "single", "viewport": "460x320" },
     "Sheet": { "cardMode": "single", "viewport": "820x520" },
-    "Drawer": { "cardMode": "single", "viewport": "640x480" }
+    "Drawer": { "cardMode": "single", "viewport": "640x480" },
+    "BarChart": { "cardMode": "single", "viewport": "680x440" },
+    "LineChart": { "cardMode": "single", "viewport": "680x440" },
+    "DonutChart": { "cardMode": "single", "viewport": "560x420" },
+    "RankingChart": { "cardMode": "single", "viewport": "680x440" },
+    "ComboChart": { "cardMode": "single", "viewport": "680x440" }
   },
   "componentSrcMap": {
     "Button": "src/components/ui/button.tsx",
@@ -64,6 +69,14 @@
     "InlineEdit": "src/components/patterns/inline-edit.tsx",
     "FileUpload": "src/components/patterns/file-upload.tsx",
     "BottomDock": "src/components/patterns/bottom-dock.tsx",
-    "Wizard": "src/components/patterns/wizard.tsx"
+    "Wizard": "src/components/patterns/wizard.tsx",
+    "BarChart": "src/components/patterns/chart-bar.tsx",
+    "LineChart": "src/components/patterns/chart-line.tsx",
+    "DonutChart": "src/components/patterns/chart-donut.tsx",
+    "RankingChart": "src/components/patterns/chart-ranking.tsx",
+    "ComboChart": "src/components/patterns/chart-combo.tsx",
+    "Sparkline": "src/components/patterns/sparkline.tsx",
+    "DistributionBar": "src/components/patterns/distribution-bar.tsx",
+    "ChartPeriodSelector": "src/components/patterns/chart-period-selector.tsx"
   }
 }

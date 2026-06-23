@@ -55,4 +55,14 @@ export * from '@/components/patterns/file-upload';
 export * from '@/components/patterns/bottom-dock';
 export * from '@/components/patterns/wizard';
 
+// Wave 4 — charts (recharts)
+export * from '@/components/patterns/chart-bar';
+export * from '@/components/patterns/chart-line';
+export * from '@/components/patterns/chart-donut';
+export * from '@/components/patterns/chart-ranking';
+export * from '@/components/patterns/chart-combo';
+export * from '@/components/patterns/sparkline';
+export * from '@/components/patterns/distribution-bar';
+export * from '@/components/patterns/chart-period-selector';
+
 export { PreviewProvider } from './preview-provider';
