@@ -240,6 +240,9 @@ describe('processOrdersChunk — stream endpoint (BUG #9)', () => {
     expect(new Decimal(order.sellerDiscountGross!).toString()).toBe('0');
     expect(order.agreedDeliveryDate?.getTime()).toBe(AGREED_DATE_MS);
     expect(order.actualDeliveryDate?.getTime()).toBe(DELIVERED_DATE_MS);
+    // deliveredOnTime is now derived from agreed vs actual + persisted (was always
+    // null before this fix). Assert the computed relationship, not a hardcoded bool.
+    expect(order.deliveredOnTime).toBe(DELIVERED_DATE_MS <= AGREED_DATE_MS);
     expect(order.fastDelivery).toBe(false);
     expect(order.reconciliationStatus).toBe('NOT_SETTLED');
     // PR-B: the order is calculable (variant + cost seeded), so the estimate

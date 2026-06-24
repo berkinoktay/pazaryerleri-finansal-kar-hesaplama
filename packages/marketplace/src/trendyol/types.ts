@@ -427,6 +427,11 @@ export interface MappedOrder {
   agreedDeliveryDate: Date | null;
   /** packageHistories[status='Delivered'].createdAt'tan türetilir; teslim olmadıysa null. */
   actualDeliveryDate: Date | null;
+  /** Türetilmiş: actualDeliveryDate ≤ agreedDeliveryDate → zamanında (true). İki
+   * tarihten biri yoksa null. computeDeliveredOnTime ile mapper'da hesaplanır.
+   * Opsiyonel: buffer JSONB'sinden gelen eski mappedOrder kayıtlarında yoktur
+   * (undefined) — upsert `?? null` ile karşılar. */
+  deliveredOnTime?: boolean | null;
   /** packageHistories[status='Shipped'].createdAt'tan türetilir ("taşıma durumuna
    * geçiş"); sevk olmadıysa null. SameDayShipping PSF kriterinin (aynı-gün sevk) tabanı. */
   actualShipDate: Date | null;
