@@ -1748,6 +1748,7 @@
       },
       "vatLabel": "KDV %{rate}",
       "confirmedAt": "Mutabakat: {date}",
+      "superseded": "Hakedişle güncellendi",
       "types": {
         "SHIPPING": "Kargo",
         "PLATFORM_SERVICE": "Hizmet Bedeli (PSF)",

@@ -1683,6 +1683,7 @@
       },
       "vatLabel": "VAT %{rate}",
       "confirmedAt": "Confirmed: {date}",
+      "superseded": "Superseded by settlement",
       "types": {
         "SHIPPING": "Shipping",
         "PLATFORM_SERVICE": "Platform Service Fee",
