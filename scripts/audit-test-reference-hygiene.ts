@@ -33,8 +33,19 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN_DIRS = ['apps', 'packages'];
 const EXCLUDED_DIRS = new Set(['node_modules', 'dist', 'generated', '.turbo']);
 
-/** Read-only shipping fixture tables that no TRUNCATE may list. */
-const FORBIDDEN_TABLES = ['shipping_carriers', 'shipping_desi_tariffs', 'shipping_barem_tariffs'];
+/**
+ * Read-only global fixture tables that no TRUNCATE may list. Seeded once per
+ * integration package by globalSetup (@pazarsync/db/test-support); wiping any of
+ * them in one suite empties it for every later suite under the shared CI Postgres.
+ * micro_export_return_fee_tiers is the micro-export "Yurt Dışı İade Operasyon Bedeli"
+ * tier catalogue — same read-only-fixture contract as the shipping tables.
+ */
+const FORBIDDEN_TABLES = [
+  'shipping_carriers',
+  'shipping_desi_tariffs',
+  'shipping_barem_tariffs',
+  'micro_export_return_fee_tiers',
+];
 
 // Capture each `TRUNCATE TABLE ...` statement body up to its first terminator
 // (RESTART IDENTITY / CASCADE / `;` / closing template backtick).

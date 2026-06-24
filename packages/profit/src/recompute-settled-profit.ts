@@ -133,7 +133,9 @@ export async function recomputeSettledProfit(
   const confirmedFees = await tx.orderFee.findMany({
     where: {
       orderId,
-      feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE', 'INTERNATIONAL_SERVICE'] },
+      feeType: {
+        in: ['SHIPPING', 'PLATFORM_SERVICE', 'INTERNATIONAL_SERVICE', 'OVERSEAS_RETURN_OPERATION'],
+      },
       OR: [
         { source: { in: ['SETTLEMENT', 'CARGO_INVOICE'] } },
         { source: 'ESTIMATE', confirmedAt: { not: null } },
@@ -147,7 +149,9 @@ export async function recomputeSettledProfit(
         ? 'SHIPPING'
         : f.feeType === 'INTERNATIONAL_SERVICE'
           ? 'INTERNATIONAL_SERVICE'
-          : 'PLATFORM_SERVICE',
+          : f.feeType === 'OVERSEAS_RETURN_OPERATION'
+            ? 'OVERSEAS_RETURN_OPERATION'
+            : 'PLATFORM_SERVICE',
     gross: new Decimal(f.amountGross),
     // KDV tam precision (per-fee yuvarlama YOK); tek yuvarlama persist'te.
     vat: grossToVat(new Decimal(f.amountGross), new Decimal(f.vatRate)),

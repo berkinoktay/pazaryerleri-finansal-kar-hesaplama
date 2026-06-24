@@ -20,11 +20,12 @@ export interface ProfitMoneyPair {
 }
 
 export interface ProfitInputFee {
-  // INTERNATIONAL_SERVICE (mikro ihracat Uluslararası Hizmet Bedeli) matematiğe
-  // DEBIT olarak girer; ProfitBreakdown'da ayrı kovası YOK (görünüm yolu
-  // build-profit-breakdown OrderFee satırlarından kurar — computeProfit kovaları
-  // yalnız unit-pricing quote'unda kullanılır, orada mikro yok).
-  type: 'SHIPPING' | 'PLATFORM_SERVICE' | 'INTERNATIONAL_SERVICE';
+  // INTERNATIONAL_SERVICE (Uluslararası Hizmet Bedeli) + OVERSEAS_RETURN_OPERATION
+  // (Yurt Dışı İade Operasyon Bedeli) mikro ihracata özgüdür; matematiğe DEBIT olarak
+  // girer; ProfitBreakdown'da ayrı kovası YOK (görünüm yolu build-profit-breakdown
+  // OrderFee satırlarından kurar — computeProfit kovaları yalnız unit-pricing quote'unda
+  // kullanılır, orada mikro yok).
+  type: 'SHIPPING' | 'PLATFORM_SERVICE' | 'INTERNATIONAL_SERVICE' | 'OVERSEAS_RETURN_OPERATION';
   gross: Decimal;
   vat: Decimal;
   direction: 'DEBIT' | 'CREDIT';
@@ -85,8 +86,9 @@ export function computeProfit(input: ProfitInput): ProfitBreakdown {
       platformServiceGross = platformServiceGross.add(fee.gross);
       platformServiceVat = platformServiceVat.add(fee.vat);
     }
-    // INTERNATIONAL_SERVICE: ProfitBreakdown'da ayrı kova yok (kasıtlı) — yalnız
-    // aşağıdaki DEBIT/CREDIT matematiğine girer; platformService'e KARIŞTIRILMAZ.
+    // INTERNATIONAL_SERVICE + OVERSEAS_RETURN_OPERATION (mikro ihracat): ProfitBreakdown'da
+    // ayrı kova yok (kasıtlı) — yalnız aşağıdaki DEBIT/CREDIT matematiğine girer;
+    // platformService'e KARIŞTIRILMAZ.
     if (fee.direction === 'DEBIT') {
       debitGross = debitGross.add(fee.gross);
       debitVat = debitVat.add(fee.vat);

@@ -1,5 +1,6 @@
 /**
- * Shared test-support: shipping reference-data fixture seeding.
+ * Shared test-support: global reference-data fixture seeding (shipping catalogue +
+ * micro-export return-fee tiers).
  *
  * The shipping reference tables (`shipping_carriers` + `shipping_desi_tariffs`
  * + `shipping_barem_tariffs`) are a READ-ONLY global fixture, not tenant data:
@@ -33,10 +34,17 @@ const MIGRATION_SQL_PATH = resolve(
   '../prisma/migrations/20260517085409_shipping_tariffs/migration.sql',
 );
 
+const MICRO_RETURN_TIER_MIGRATION_SQL_PATH = resolve(
+  __dirname,
+  '../prisma/migrations/20260625120000_micro_export_return_fee_tiers/migration.sql',
+);
+
 const EXPECTED_CARRIER_COUNT = 10;
 const SEED_SECTION_MARKER = '-- ─── Seed: shipping_carriers';
+const MICRO_RETURN_TIER_SEED_MARKER = '-- ─── Seed: micro_export_return_fee_tiers';
 
 let cachedSeedSql: string | null = null;
+let cachedMicroReturnTierSeedSql: string | null = null;
 
 function loadSeedSql(): string {
   if (cachedSeedSql !== null) return cachedSeedSql;
@@ -50,6 +58,32 @@ function loadSeedSql(): string {
   }
   cachedSeedSql = full.substring(seedStart);
   return cachedSeedSql;
+}
+
+function loadMicroReturnTierSeedSql(): string {
+  if (cachedMicroReturnTierSeedSql !== null) return cachedMicroReturnTierSeedSql;
+  const full = readFileSync(MICRO_RETURN_TIER_MIGRATION_SQL_PATH, 'utf-8');
+  const seedStart = full.indexOf(MICRO_RETURN_TIER_SEED_MARKER);
+  if (seedStart === -1) {
+    throw new Error(
+      `Could not find micro-export return tier seed section ("${MICRO_RETURN_TIER_SEED_MARKER}") ` +
+        `in ${MICRO_RETURN_TIER_MIGRATION_SQL_PATH}.`,
+    );
+  }
+  cachedMicroReturnTierSeedSql = full.substring(seedStart);
+  return cachedMicroReturnTierSeedSql;
+}
+
+/**
+ * Seeds the micro-export "Yurt Dışı İade Operasyon Bedeli" tier rows from the
+ * migration's seed section (single source of truth). Global reference fixture
+ * (not tenant data); truncateAll() never touches it. Idempotent (ON CONFLICT
+ * DO NOTHING in the SQL); seeds only when the table is empty.
+ */
+export async function ensureMicroExportReturnTiers(): Promise<void> {
+  const count = await prisma.microExportReturnFeeTier.count();
+  if (count > 0) return;
+  await prisma.$executeRawUnsafe(loadMicroReturnTierSeedSql());
 }
 
 /**

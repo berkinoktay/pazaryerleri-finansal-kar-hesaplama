@@ -301,9 +301,32 @@ async function seedFeeDefinitions(): Promise<void> {
   console.log(`✓ fee definitions: ${count.toString()} rows ensured`);
 }
 
+// Mikro ihracat "Yurt Dışı İade Operasyon Bedeli" kademe oranları. Aynı pattern:
+// migration'ın marked seed section'ı idempotent (ON CONFLICT DO NOTHING) replay edilir.
+const MICRO_RETURN_TIER_SEED_MIGRATION = path.resolve(
+  __dirname,
+  '../prisma/migrations/20260625120000_micro_export_return_fee_tiers/migration.sql',
+);
+const MICRO_RETURN_TIER_SEED_MARKER = '-- ─── Seed: micro_export_return_fee_tiers';
+
+async function seedMicroExportReturnTiers(): Promise<void> {
+  const full = readFileSync(MICRO_RETURN_TIER_SEED_MIGRATION, 'utf-8');
+  const start = full.indexOf(MICRO_RETURN_TIER_SEED_MARKER);
+  if (start === -1) {
+    throw new Error(
+      `Micro-export return tier seed section ("${MICRO_RETURN_TIER_SEED_MARKER}") not found in ` +
+        MICRO_RETURN_TIER_SEED_MIGRATION,
+    );
+  }
+  await prisma.$executeRawUnsafe(full.substring(start));
+  const count = await prisma.microExportReturnFeeTier.count();
+  console.log(`✓ micro-export return fee tiers: ${count.toString()} rows ensured`);
+}
+
 async function main(): Promise<void> {
   console.log('Loading reference data — safe to re-run on a populated DB.\n');
   await seedFeeDefinitions();
+  await seedMicroExportReturnTiers();
   await seedTrendyolCommissionRates();
   console.log('\n✓ Reference seed complete.');
 }

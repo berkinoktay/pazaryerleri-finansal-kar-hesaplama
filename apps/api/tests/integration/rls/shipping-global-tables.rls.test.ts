@@ -33,6 +33,10 @@ const GLOBAL_TABLES = [
   'shipping_carriers',
   'shipping_desi_tariffs',
   'shipping_barem_tariffs',
+  // Mikro ihracat "Yurt Dışı İade Operasyon Bedeli" kademe oranları — aynı global
+  // referans RLS kontratı (authenticated read açık, anon + authenticated-write kapalı).
+  // globalSetup (ensureMicroExportReturnTiers) seed'ler; truncateAll dokunmaz.
+  'micro_export_return_fee_tiers',
 ] as const;
 
 describe('RLS — shipping global reference tables', () => {
