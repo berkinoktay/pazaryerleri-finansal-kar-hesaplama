@@ -54,17 +54,17 @@ export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
     <div className="gap-md grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
         label={t('saleGross.label')}
-        value={<Currency value={netSaleGross ?? '0'} />}
+        value={<Currency value={netSaleGross ?? '0'} animate />}
         context={netSaleGross === null ? t('common.notAvailable') : undefined}
       />
       <StatCard
         label={t('estimatedNetProfit.label')}
-        value={<Currency value={estimatedProfit ?? '0'} />}
+        value={<Currency value={estimatedProfit ?? '0'} animate />}
         context={estimatedProfit === null ? t('common.notAvailable') : t('estimatedNetProfit.hint')}
       />
       <StatCard
         label={t('settledNetProfit.label')}
-        value={<Currency value={settledProfit ?? '0'} />}
+        value={<Currency value={settledProfit ?? '0'} animate />}
         context={settledContext}
       />
       <StatCard

@@ -1,11 +1,11 @@
 'use client';
 
-import Decimal from 'decimal.js';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { formatNumber, formatPercent } from '@pazarsync/utils';
 
+import { AnimatedNumber } from '@/components/patterns/animated-number';
 import { Currency } from '@/components/patterns/currency';
 import { StatCard, type StatCardDelta } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
@@ -52,25 +52,25 @@ const KPI_CARDS: KpiCardDescriptor[] = [
   {
     key: 'revenue',
     labelKey: 'revenue',
-    value: (k) => <Currency value={k.revenueToday} />,
+    value: (k) => <Currency value={k.revenueToday} animate />,
     deltaPair: (k) => [k.revenueToday, k.revenueYesterday],
   },
   {
     key: 'orderCount',
     labelKey: 'orderCount',
-    value: (k) => formatNumber(k.orderCountToday),
+    value: (k) => <AnimatedNumber value={k.orderCountToday} format={formatNumber} />,
     deltaPair: (k) => [String(k.orderCountToday), String(k.orderCountYesterday)],
   },
   {
     key: 'unitsSold',
     labelKey: 'unitsSold',
-    value: (k) => formatNumber(k.unitsSoldToday),
+    value: (k) => <AnimatedNumber value={k.unitsSoldToday} format={formatNumber} />,
     deltaPair: (k) => [String(k.unitsSoldToday), String(k.unitsSoldYesterday)],
   },
   {
     key: 'netProfit',
     labelKey: 'netProfit',
-    value: (k) => <Currency value={k.netProfitToday} />,
+    value: (k) => <Currency value={k.netProfitToday} animate />,
     deltaPair: (k) => [k.netProfitToday, k.netProfitYesterday],
     hintKey: 'estimateHint',
     pending: (k) => k.pendingOrderCountToday,
@@ -78,14 +78,14 @@ const KPI_CARDS: KpiCardDescriptor[] = [
   {
     key: 'margin',
     labelKey: 'margin',
-    value: (k) => formatPercent(new Decimal(k.marginToday)),
+    value: (k) => <AnimatedNumber value={Number(k.marginToday)} format={formatPercent} />,
     deltaPair: (k) => [k.marginToday, k.marginYesterday],
     hintKey: 'estimateHint',
   },
   {
     key: 'profitCostRatio',
     labelKey: 'profitCostRatio',
-    value: (k) => formatPercent(new Decimal(k.profitCostRatioToday)),
+    value: (k) => <AnimatedNumber value={Number(k.profitCostRatioToday)} format={formatPercent} />,
     deltaPair: (k) => [k.profitCostRatioToday, k.profitCostRatioYesterday],
     hintKey: 'estimateHint',
   },

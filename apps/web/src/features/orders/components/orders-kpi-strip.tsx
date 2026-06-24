@@ -1,11 +1,11 @@
 'use client';
 
-import Decimal from 'decimal.js';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { formatPercent } from '@pazarsync/utils';
 
+import { AnimatedNumber } from '@/components/patterns/animated-number';
 import { Currency } from '@/components/patterns/currency';
 import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
@@ -31,28 +31,34 @@ export function OrdersKpiStrip({ summary, status }: OrdersKpiStripProps): React.
       <StatCard
         status={status}
         label={t('revenue')}
-        value={summary ? <Currency value={summary.totalRevenueGross} /> : null}
+        value={summary ? <Currency value={summary.totalRevenueGross} animate /> : null}
       />
       <StatCard
         status={status}
         label={t('netProfit')}
-        value={summary ? <Currency value={summary.netProfitGross} emphasis /> : null}
+        value={summary ? <Currency value={summary.netProfitGross} emphasis animate /> : null}
       />
       <StatCard
         status={status}
         label={t('avgMargin')}
         value={
-          summary
-            ? summary.avgMarginPct === null
-              ? '—'
-              : formatPercent(new Decimal(summary.avgMarginPct))
-            : null
+          summary ? (
+            summary.avgMarginPct === null ? (
+              '—'
+            ) : (
+              <AnimatedNumber value={Number(summary.avgMarginPct)} format={formatPercent} />
+            )
+          ) : null
         }
       />
       <StatCard
         status={status}
         label={t('lossRate')}
-        value={summary ? formatPercent(new Decimal(summary.lossOrderRate.pct)) : null}
+        value={
+          summary ? (
+            <AnimatedNumber value={Number(summary.lossOrderRate.pct)} format={formatPercent} />
+          ) : null
+        }
         context={
           summary
             ? t('lossCount', {
