@@ -13,6 +13,15 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** — liste öğelerine `costMarkupPct` (ROI =
+  kâr / Σ maliyet brüt × 100, consumed: `settled ?? estimated`) alanı eklendi; yeni `lossOnly` sorgu
+  parametresi yalnız consumed net kârı negatif siparişleri döndürür ("sadece zararlı" hızlı filtresi).
+
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders/summary`** — yeni KPI özet ucu. Liste ile aynı
+  filtreleri (status / reconciliationStatus / tarih / `q` / `costStatus` / `lossOnly`) onurlandırarak
+  `totalRevenueGross`, `netProfitGross` (consumed), `avgMarginPct` ve `lossOrderRate`
+  ({lossCount, totalCount, pct}) döndürür. Sayfalama/sort kabul etmez; tüm finansal değerler backend'de hesaplanır.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/product-pricing`** — org+store kapsamlı ürün fiyatlandırma
   listesi: her onaylı `ProductVariant` için mevcut satış fiyatı, birim net kâr (`netProfit`), satış marjı
   (`saleMarginPct`) ve maliyet markup'ı (`costMarkupPct`) backend'de hesaplanarak döner. Maliyet, komisyon

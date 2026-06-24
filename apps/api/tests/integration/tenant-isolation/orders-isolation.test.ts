@@ -59,6 +59,39 @@ describe('Orders — tenant isolation', () => {
     expect(res.status).toBe(404);
   });
 
+  it('SUMMARY: returns 403 when caller targets an org they do not belong to', async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    const res = await app.request(
+      `/v1/organizations/${orgB.id}/stores/${storeB.id}/orders/summary`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('SUMMARY: orgB orders never aggregate into orgA summary', async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await createOrder(orgB.id, storeB.id);
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/orders/summary`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.lossOrderRate.totalCount).toBe(0);
+    expect(body.totalRevenueGross).toBe('0');
+  });
+
   it("GET: returns 404 when caller targets a sibling org's storeId via their own org", async () => {
     const user = await createAuthenticatedTestUser();
     const orgA = await createOrganization();

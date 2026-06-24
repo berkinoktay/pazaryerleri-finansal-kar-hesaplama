@@ -11,6 +11,7 @@ import type {
   OrderDetailResponse,
   OrderListItemResponse,
   OrderListSort,
+  OrderSummaryQuery,
 } from '../validators/order.validator';
 
 interface OrderListResult {
@@ -18,6 +19,21 @@ interface OrderListResult {
   total: number;
   counts: { calculated: number; excluded: number };
 }
+
+interface OrderSummaryResult {
+  totalRevenueGross: string;
+  netProfitGross: string;
+  avgMarginPct: string | null;
+  lossOrderRate: { lossCount: number; totalCount: number; pct: string };
+}
+
+// buildOrderListWhere reads only the filter fields (not pagination/sort), so both
+// the list query (ListOrdersQuery) and the summary query (which omits page/perPage/
+// sort) structurally satisfy it.
+type OrderListFilters = Pick<
+  ListOrdersQuery,
+  'status' | 'reconciliationStatus' | 'from' | 'to' | 'q' | 'costStatus' | 'lossOnly'
+>;
 
 /**
  * Verify the store belongs to the organization. Cross-tenant access from a
@@ -38,7 +54,7 @@ async function ensureStoreInOrg(orgId: string, storeId: string): Promise<void> {
 function buildOrderListWhere(
   orgId: string,
   storeId: string,
-  filters: ListOrdersQuery,
+  filters: OrderListFilters,
 ): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {
     organizationId: orgId,
@@ -72,6 +88,22 @@ function buildOrderListWhere(
     } else {
       where.profitExcludedAt = { not: null };
     }
+  }
+
+  // "Sadece zararlı": consumed net kâr (settled ?? estimated) < 0. Prisma coalesce
+  // desteklemediği için OR; q filtresi where.OR'u kullandığından AND ile birleştir.
+  if (filters.lossOnly === true) {
+    const lossCondition: Prisma.OrderWhereInput = {
+      OR: [
+        { settledNetProfit: { lt: 0 } },
+        { settledNetProfit: null, estimatedNetProfit: { lt: 0 } },
+      ],
+    };
+    where.AND = Array.isArray(where.AND)
+      ? [...where.AND, lossCondition]
+      : where.AND === undefined
+        ? [lossCondition]
+        : [where.AND, lossCondition];
   }
 
   return where;
@@ -139,6 +171,8 @@ export async function listOrders(
     // Consumed marj: hakediş gerçeği varsa onu, yoksa T+0 tahminini servis et.
     // Frontend SADECE render eder (render-time hesap yok).
     saleMarginPct: (row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)?.toString() ?? null,
+    // ROI (consumed): settled ?? estimated cost-markup; frontend türetmez, render eder.
+    costMarkupPct: (row.settledCostMarkupPct ?? row.estimatedCostMarkupPct)?.toString() ?? null,
     // Promosyon adları (spec ekleme #3): detaydakiyle aynı runtime-doğrulamalı
     // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
@@ -148,6 +182,75 @@ export async function listOrders(
   }));
 
   return { data, total, counts: { calculated: calculatedCount, excluded: excludedCount } };
+}
+
+/**
+ * Filter-aware KPI aggregation for the orders page header. Honors the same
+ * filters as listOrders (no pagination/sort). Revenue + counts use Prisma
+ * aggregate; consumed net profit / margin use a column projection reduced with
+ * Decimal (Prisma can't COALESCE in aggregate). Bounded by the store + date
+ * filter; if a very large unfiltered range becomes a hotspot, move the coalesce
+ * sums to a $queryRaw SUM(COALESCE(...)).
+ */
+export async function getOrdersSummary(
+  orgId: string,
+  storeId: string,
+  filters: OrderSummaryQuery,
+): Promise<OrderSummaryResult> {
+  await ensureStoreInOrg(orgId, storeId);
+  const where = buildOrderListWhere(orgId, storeId, filters);
+
+  const lossCondition: Prisma.OrderWhereInput = {
+    OR: [
+      { settledNetProfit: { lt: 0 } },
+      { settledNetProfit: null, estimatedNetProfit: { lt: 0 } },
+    ],
+  };
+  const lossWhere: Prisma.OrderWhereInput = {
+    ...where,
+    AND: [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND !== undefined ? [where.AND] : []),
+      lossCondition,
+    ],
+  };
+
+  const [agg, totalCount, lossCount, profitRows] = await Promise.all([
+    prisma.order.aggregate({ where, _sum: { saleGross: true } }),
+    prisma.order.count({ where }),
+    prisma.order.count({ where: lossWhere }),
+    prisma.order.findMany({
+      where,
+      select: {
+        settledNetProfit: true,
+        estimatedNetProfit: true,
+        settledSaleMarginPct: true,
+        estimatedSaleMarginPct: true,
+      },
+    }),
+  ]);
+
+  const netProfit = profitRows.reduce((sum, row) => {
+    const value = row.settledNetProfit ?? row.estimatedNetProfit;
+    return value === null ? sum : sum.add(new Decimal(value.toString()));
+  }, new Decimal(0));
+
+  const margins = profitRows
+    .map((row) => row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)
+    .filter((margin): margin is NonNullable<typeof margin> => margin !== null)
+    .map((margin) => new Decimal(margin.toString()));
+  const avgMargin =
+    margins.length === 0
+      ? null
+      : margins.reduce((sum, margin) => sum.add(margin), new Decimal(0)).div(margins.length);
+
+  const pct = totalCount === 0 ? new Decimal(0) : new Decimal(lossCount).div(totalCount).mul(100);
+
+  return {
+    totalRevenueGross: (agg._sum.saleGross ?? new Decimal(0)).toString(),
+    netProfitGross: netProfit.toString(),
+    avgMarginPct: avgMargin === null ? null : avgMargin.toString(),
+    lossOrderRate: { lossCount, totalCount, pct: pct.toString() },
+  };
 }
 
 export async function getOrderById(

@@ -97,6 +97,16 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
         'permanent). There is no pending state: orders persist in one of the two. Omit for all.',
       example: 'excluded',
     }),
+  lossOnly: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional()
+    .openapi({
+      description:
+        'When true, return only orders whose consumed net profit ' +
+        '(settledNetProfit ?? estimatedNetProfit) is negative ("sadece zararlı").',
+      example: 'true',
+    }),
   sort: z
     .enum(ORDER_LIST_SORTS)
     .default('-orderDate')
@@ -110,6 +120,9 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
 }).openapi('ListOrdersQuery');
 
 export type ListOrdersQuery = z.infer<typeof listOrdersQuerySchema>;
+
+// Summary (KPI) shares the list filters but not pagination/sort.
+export type OrderSummaryQuery = Omit<ListOrdersQuery, 'page' | 'perPage' | 'sort'>;
 
 // ─── List item ─────────────────────────────────────────────────────────────
 
@@ -171,6 +184,17 @@ export const OrderListItemSchema = z
           'Net profit / gross sale × 100. Null until computed or when the gross sale is 0.',
         example: '15.50',
       }),
+    // ROI = kâr / Σ maliyet brüt × 100 (consumed: settled ?? estimated). Frontend
+    // SADECE render eder (% glyph'i salt gösterim) — türetmez. null: maliyet brüt 0.
+    costMarkupPct: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Cost markup % (ROI, decimal string) = settledCostMarkupPct ?? estimatedCostMarkupPct. ' +
+          'Net profit / total cost gross × 100. Null until computed or when total cost is 0.',
+        example: '38.40',
+      }),
     // Promosyon gösterimi (spec ekleme #3): mapper'ın yakaladığı satıcı-indirimi
     // promosyon isimleri + brüt tutarları. İndirim/promosyon yoksa null. Liste
     // satırında indirimli siparişin promosyon adı küçük bir rozet/tooltip ile
@@ -217,6 +241,29 @@ export const ListOrdersResponseSchema = z
       }),
   })
   .openapi('ListOrdersResponse');
+
+// ─── Summary (KPI) ────────────────────────────────────────────────────────
+
+export const OrderSummaryResponseSchema = z
+  .object({
+    totalRevenueGross: z
+      .string()
+      .openapi({ description: 'Σ saleGross (KDV-dahil) over the filtered set.' }),
+    netProfitGross: z
+      .string()
+      .openapi({ description: 'Σ consumed net profit (settledNetProfit ?? estimatedNetProfit).' }),
+    avgMarginPct: z.string().nullable().openapi({
+      description: 'Average consumed sale margin % (decimal string); null when no scored orders.',
+    }),
+    lossOrderRate: z
+      .object({
+        lossCount: z.number().int().nonnegative(),
+        totalCount: z.number().int().nonnegative(),
+        pct: z.string().openapi({ description: 'lossCount / totalCount × 100 (decimal string).' }),
+      })
+      .openapi({ description: 'Share of filtered orders whose consumed net profit is negative.' }),
+  })
+  .openapi('OrderSummaryResponse');
 
 // ─── Detail: nested shapes ────────────────────────────────────────────────
 

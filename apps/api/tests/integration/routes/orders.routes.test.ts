@@ -74,6 +74,48 @@ describe('Order routes', () => {
       expect(res.status).toBe(401);
     });
 
+    it('returns costMarkupPct (ROI) on list items', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const order = await seedSimpleOrder(org.id, store.id);
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { estimatedCostMarkupPct: new Decimal('38.40') },
+      });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data[0].costMarkupPct).toBe('38.4');
+    });
+
+    it('lossOnly=true returns only orders whose consumed net profit is negative', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const profitable = await seedSimpleOrder(org.id, store.id);
+      const losing = await seedSimpleOrder(org.id, store.id);
+      await prisma.order.update({
+        where: { id: losing.id },
+        data: { estimatedNetProfit: new Decimal('-50.00') },
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?lossOnly=true`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const ids = body.data.map((o: { id: string }) => o.id);
+      expect(ids).toContain(losing.id);
+      expect(ids).not.toContain(profitable.id);
+    });
+
     it('returns 403 when caller is not a member of the org', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
@@ -752,6 +794,35 @@ describe('Order routes', () => {
         .sub(b.platformServiceGross)
         .sub(b.netVat);
       expect(sum.toFixed(2)).toBe(b.netProfit);
+    });
+  });
+
+  describe('GET /v1/organizations/:orgId/stores/:storeId/orders/summary', () => {
+    it('aggregates revenue, net profit and loss rate honoring filters', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      await seedSimpleOrder(org.id, store.id);
+      await seedSimpleOrder(org.id, store.id);
+      const losing = await seedSimpleOrder(org.id, store.id);
+      await prisma.order.update({
+        where: { id: losing.id },
+        data: {
+          estimatedNetProfit: new Decimal('-40.00'),
+          estimatedSaleMarginPct: new Decimal('-16.67'),
+        },
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/summary`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.totalRevenueGross).toBe('720'); // 3 × 240
+      expect(body.netProfitGross).toBe('80'); // 60 + 60 − 40
+      expect(body.lossOrderRate).toMatchObject({ lossCount: 1, totalCount: 3 });
     });
   });
 });
