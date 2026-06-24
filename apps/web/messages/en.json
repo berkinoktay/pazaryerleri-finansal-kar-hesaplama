@@ -807,7 +807,16 @@
       "statusPlaceholder": "Order status",
       "statusAll": "All statuses",
       "reconciliationPlaceholder": "Reconciliation status",
-      "reconciliationAll": "All reconciliations"
+      "reconciliationAll": "All reconciliations",
+      "lossOnly": "Loss only",
+      "exportExcel": "Excel"
+    },
+    "kpis": {
+      "revenue": "Total Revenue",
+      "netProfit": "Net Profit",
+      "avgMargin": "Avg. Margin",
+      "lossRate": "Loss-Making Orders",
+      "lossCount": "{count}/{total} orders"
     },
     "status": {
       "PENDING": "Pending",
@@ -834,7 +843,12 @@
         "saleMarginPct": "Margin %",
         "itemCount": "Items",
         "revenue": "Revenue",
-        "costStatus": "Cost status"
+        "costStatus": "Cost status",
+        "costMarkupPct": "ROI %"
+      },
+      "badges": {
+        "fastDelivery": "Fast",
+        "micro": "Micro"
       }
     },
     "tabs": {
@@ -1669,6 +1683,7 @@
       },
       "vatLabel": "VAT %{rate}",
       "confirmedAt": "Confirmed: {date}",
+      "superseded": "Superseded by settlement",
       "types": {
         "SHIPPING": "Shipping",
         "PLATFORM_SERVICE": "Platform Service Fee",
@@ -1726,7 +1741,15 @@
         "description": "Return claims will appear here once they start flowing from Trendyol."
       },
       "open": "Open",
-      "resolved": "Resolved"
+      "resolved": "Resolved",
+      "cargo": "Return cargo",
+      "accepted": "Accepted"
+    },
+    "delivery": {
+      "agreed": "Promised delivery",
+      "actual": "Actual delivery",
+      "onTime": "On time",
+      "late": "Late"
     },
     "errors": {
       "noStoreContext": "An active store is required to view order detail.",

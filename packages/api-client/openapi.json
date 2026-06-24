@@ -734,7 +734,7 @@
               "string",
               "null"
             ],
-            "description": "Sale total incl. VAT (decimal string) — null until OrderItems are synced.",
+            "description": "Net sale incl. VAT (decimal string): gross sale minus resolved return deductions (matches the detail modal). null until OrderItems are synced.",
             "example": "299.40"
           },
           "saleVat": {
@@ -776,6 +776,14 @@
             ],
             "description": "Sale margin % (decimal string) = settledSaleMarginPct ?? estimatedSaleMarginPct. Net profit / gross sale × 100. Null until computed or when the gross sale is 0.",
             "example": "15.50"
+          },
+          "costMarkupPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cost markup % (ROI, decimal string) = settledCostMarkupPct ?? estimatedCostMarkupPct. Net profit / total cost gross × 100. Null until computed or when total cost is 0.",
+            "example": "38.40"
           },
           "promotionDisplays": {
             "type": [
@@ -827,6 +835,7 @@
           "estimatedNetProfit",
           "settledNetProfit",
           "saleMarginPct",
+          "costMarkupPct",
           "promotionDisplays",
           "fastDelivery",
           "micro",
@@ -861,6 +870,55 @@
           "perPage",
           "total",
           "totalPages"
+        ]
+      },
+      "OrderSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "totalRevenueGross": {
+            "type": "string",
+            "description": "Σ net sale (return-adjusted, KDV-dahil) over the filtered set."
+          },
+          "netProfitGross": {
+            "type": "string",
+            "description": "Σ consumed net profit (settledNetProfit ?? estimatedNetProfit)."
+          },
+          "avgMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Average consumed sale margin % (decimal string); null when no scored orders."
+          },
+          "lossOrderRate": {
+            "type": "object",
+            "properties": {
+              "lossCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pct": {
+                "type": "string",
+                "description": "lossCount / totalCount × 100 (decimal string)."
+              }
+            },
+            "required": [
+              "lossCount",
+              "totalCount",
+              "pct"
+            ],
+            "description": "Share of filtered orders whose consumed net profit is negative."
+          }
+        },
+        "required": [
+          "totalRevenueGross",
+          "netProfitGross",
+          "avgMarginPct",
+          "lossOrderRate"
         ]
       },
       "OrderDetail": {
@@ -6342,6 +6400,21 @@
             "schema": {
               "type": "string",
               "enum": [
+                "true",
+                "false"
+              ],
+              "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+              "example": "true"
+            },
+            "required": false,
+            "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+            "name": "lossOnly",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
                 "-orderDate",
                 "marginPct",
                 "-marginPct"
@@ -6389,6 +6462,246 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ListOrdersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query params",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/orders/summary": {
+      "get": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Order KPI summary for a store",
+        "description": "Aggregates the orders that match the same filters as the list endpoint (status, reconciliationStatus, date range, q, costStatus, lossOnly) into headline KPIs: total revenue, consumed net profit, average margin, and loss-order rate. Pagination/sort are not accepted.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "PROCESSING",
+                "SHIPPED",
+                "DELIVERED",
+                "CANCELLED",
+                "RETURNED"
+              ],
+              "description": "Filter by marketplace status. Omit for all statuses.",
+              "example": "DELIVERED"
+            },
+            "required": false,
+            "description": "Filter by marketplace status. Omit for all statuses.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NOT_SETTLED",
+                "PARTIALLY_SETTLED",
+                "FULLY_SETTLED"
+              ],
+              "description": "Filter by settlement progression. Omit for all.",
+              "example": "PARTIALLY_SETTLED"
+            },
+            "required": false,
+            "description": "Filter by settlement progression. Omit for all.",
+            "name": "reconciliationStatus",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
+              "example": "2026-04-01T00:00:00.000Z"
+            },
+            "required": false,
+            "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
+              "example": "2026-05-23T23:59:59.999Z"
+            },
+            "required": false,
+            "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "Substring match on platformOrderNumber or platformOrderId.",
+              "example": "TY-2024"
+            },
+            "required": false,
+            "description": "Substring match on platformOrderNumber or platformOrderId.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "calculated",
+                "excluded"
+              ],
+              "description": "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — permanent). There is no pending state: orders persist in one of the two. Omit for all.",
+              "example": "excluded"
+            },
+            "required": false,
+            "description": "Filter by profit universe (spec 2026-06-12 calculated-or-excluded). 'calculated' = estimatedNetProfit set; 'excluded' = profit_excluded_at set (cost window missed — permanent). There is no pending state: orders persist in one of the two. Omit for all.",
+            "name": "costStatus",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+              "example": "true"
+            },
+            "required": false,
+            "description": "When true, return only orders whose consumed net profit (settledNetProfit ?? estimatedNetProfit) is negative (\"sadece zararlı\").",
+            "name": "lossOnly",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregated KPI summary",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSummaryResponse"
                 }
               }
             }

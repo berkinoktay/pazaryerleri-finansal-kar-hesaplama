@@ -14,13 +14,16 @@ import { cn } from '@/lib/utils';
 
 import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
+import { useOrdersSummary } from '../hooks/use-orders-summary';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
 import {
   type OrderStatusValue,
   type ReconciliationStatusValue,
 } from '../lib/orders-filter-parsers';
 
+import { OrderDetailModal, type OrderDetailModalSelection } from './order-detail-modal';
 import { OrdersEmptyState } from './orders-empty-state';
+import { OrdersKpiStrip } from './orders-kpi-strip';
 import { OrdersTable } from './orders-table';
 
 interface OrdersPageClientProps {
@@ -52,6 +55,7 @@ export function OrdersPageClient({
   const tSync = useTranslations('syncCenter');
   const { filters, setFilters } = useOrdersFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
+  const [selectedOrder, setSelectedOrder] = React.useState<OrderDetailModalSelection | null>(null);
 
   const noStoreSelected = orgId === null || storeId === null;
 
@@ -65,11 +69,27 @@ export function OrdersPageClient({
           status: filters.status ?? undefined,
           reconciliationStatus: filters.reconciliationStatus ?? undefined,
           costStatus: filters.costStatus,
+          lossOnly: filters.lossOnly,
           from: filters.from.length > 0 ? filters.from : undefined,
           to: filters.to.length > 0 ? filters.to : undefined,
           sort: filters.sort,
           page: filters.page,
           perPage: filters.perPage,
+        },
+  );
+  const summaryQuery = useOrdersSummary(
+    noStoreSelected
+      ? null
+      : {
+          orgId,
+          storeId,
+          q: filters.q.length > 0 ? filters.q : undefined,
+          status: filters.status ?? undefined,
+          reconciliationStatus: filters.reconciliationStatus ?? undefined,
+          costStatus: filters.costStatus,
+          lossOnly: filters.lossOnly,
+          from: filters.from.length > 0 ? filters.from : undefined,
+          to: filters.to.length > 0 ? filters.to : undefined,
         },
   );
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
@@ -98,6 +118,7 @@ export function OrdersPageClient({
     filters.q.length > 0 ||
     filters.status !== null ||
     filters.reconciliationStatus !== null ||
+    filters.lossOnly ||
     filters.from.length > 0 ||
     filters.to.length > 0;
 
@@ -150,6 +171,10 @@ export function OrdersPageClient({
     <>
       <div className="gap-lg flex flex-col">
         <PageHeader title={pageTitle} intent={pageIntent} actions={headerSlots.actions} />
+        <OrdersKpiStrip
+          summary={summaryQuery.data}
+          status={summaryQuery.isPending ? 'loading' : summaryQuery.isError ? 'error' : 'ready'}
+        />
         <OrdersTable
           rows={rows}
           loading={ordersQuery.isLoading}
@@ -159,6 +184,7 @@ export function OrdersPageClient({
             q: filters.q,
             status: filters.status,
             reconciliationStatus: filters.reconciliationStatus,
+            lossOnly: filters.lossOnly,
             from: filters.from,
             to: filters.to,
           }}
@@ -168,6 +194,16 @@ export function OrdersPageClient({
           tabsLoading={ordersQuery.isLoading}
           onCostStatusChange={(next) => setFilters({ costStatus: next })}
           onSortChange={(next) => setFilters({ sort: next })}
+          onRowOpen={(id) => {
+            const selected = rows.find((row) => row.id === id);
+            if (selected !== undefined) {
+              setSelectedOrder({
+                id,
+                title: selected.platformOrderNumber ?? selected.platformOrderId,
+                orderDate: selected.orderDate,
+              });
+            }
+          }}
           onFiltersChange={(next) =>
             setFilters({
               ...(next.q !== undefined ? { q: next.q } : {}),
@@ -180,6 +216,7 @@ export function OrdersPageClient({
                       next.reconciliationStatus as ReconciliationStatusValue | null,
                   }
                 : {}),
+              ...(next.lossOnly !== undefined ? { lossOnly: next.lossOnly } : {}),
               ...(next.from !== undefined ? { from: next.from } : {}),
               ...(next.to !== undefined ? { to: next.to } : {}),
             })
@@ -192,6 +229,13 @@ export function OrdersPageClient({
           }
         />
       </div>
+
+      <OrderDetailModal
+        orgId={orgId}
+        storeId={storeId}
+        order={selectedOrder}
+        onClose={() => setSelectedOrder(null)}
+      />
 
       <SyncCenter
         open={syncCenterOpen}

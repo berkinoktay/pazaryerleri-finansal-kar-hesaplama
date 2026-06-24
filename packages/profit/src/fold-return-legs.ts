@@ -62,6 +62,25 @@ export function resolveReturnLegs(rows: ReturnFeeRow[]): ResolvedReturnLegs {
   return out;
 }
 
+/**
+ * Net (iade-düşülmüş) satış: ham satış − çözümlenmiş REFUND_DEDUCTION (gerçek-varsa-
+ * gerçek, yoksa tahmin). Liste + özet (ciro) yüzeyleri, kâr dökümündeki dispSaleGross
+ * ile AYNI net satışı göstermek için kullanır — tek mantık, frontend türetme yok.
+ * Yalnız REFUND_DEDUCTION fee'leri verilir (satış netlemesi için diğer leg'ler gereksiz).
+ */
+export function computeNetSaleGross(
+  saleGross: Decimal,
+  refundDeductions: ReadonlyArray<{ source: string; amountGross: Decimal; vatRate: Decimal }>,
+): Decimal {
+  const rows: ReturnFeeRow[] = refundDeductions.map((f) => ({
+    feeType: 'REFUND_DEDUCTION',
+    source: f.source === 'SETTLEMENT' || f.source === 'CARGO_INVOICE' ? f.source : 'ESTIMATE',
+    amountGross: f.amountGross,
+    vatRate: f.vatRate,
+  }));
+  return saleGross.sub(resolveReturnLegs(rows).REFUND_DEDUCTION.gross);
+}
+
 export function foldReturnLegs(base: ProfitInput, legs: ResolvedReturnLegs): ProfitInput {
   // Düz çıkarma — clamp YOK. İade > satış gibi bir anomali negatif değer üretirse bu
   // KASTEN yansır (sessizce sıfıra çekilmez); alt-kuruş yuvarlama farkı persist'te

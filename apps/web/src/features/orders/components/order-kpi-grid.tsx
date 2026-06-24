@@ -5,6 +5,7 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { StatCard } from '@/components/patterns/stat-card';
+import { cn } from '@/lib/utils';
 
 import { type OrderDetail } from '../api/get-order.api';
 
@@ -17,6 +18,8 @@ export interface OrderKpiGridProps {
     | 'profitBreakdown'
     | 'reconciliationStatus'
   >;
+  /** Dense (modal/sheet) → 2 columns so labels/values never truncate; default 4-col (full page). */
+  dense?: boolean;
 }
 
 /**
@@ -29,7 +32,7 @@ export interface OrderKpiGridProps {
  * estimated/settledSaleMarginPct alanı servis EDİLMEZ; tek servisli marj kaynağı
  * kâr dökümünün içindeki `saleMarginPct`'tir.)
  */
-export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
+export function OrderKpiGrid({ order, dense = false }: OrderKpiGridProps): React.ReactElement {
   const t = useTranslations('orderDetail.kpis');
 
   // Satış KPI = NET satış (iade düşülmüş) → kâr dökümüyle tutarlı (Berkin kararı
@@ -51,20 +54,20 @@ export function OrderKpiGrid({ order }: OrderKpiGridProps): React.ReactElement {
         : t('settledNetProfit.pending');
 
   return (
-    <div className="gap-md grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+    <div className={cn('gap-md grid grid-cols-1 sm:grid-cols-2', !dense && 'lg:grid-cols-4')}>
       <StatCard
         label={t('saleGross.label')}
-        value={<Currency value={netSaleGross ?? '0'} />}
+        value={<Currency value={netSaleGross ?? '0'} animate />}
         context={netSaleGross === null ? t('common.notAvailable') : undefined}
       />
       <StatCard
         label={t('estimatedNetProfit.label')}
-        value={<Currency value={estimatedProfit ?? '0'} />}
+        value={<Currency value={estimatedProfit ?? '0'} animate />}
         context={estimatedProfit === null ? t('common.notAvailable') : t('estimatedNetProfit.hint')}
       />
       <StatCard
         label={t('settledNetProfit.label')}
-        value={<Currency value={settledProfit ?? '0'} />}
+        value={<Currency value={settledProfit ?? '0'} animate />}
         context={settledContext}
       />
       <StatCard

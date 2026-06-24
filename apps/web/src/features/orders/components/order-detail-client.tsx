@@ -16,8 +16,9 @@ import { ApiError } from '@/lib/api-error';
 import { useOrder } from '../hooks/use-order';
 
 import { OrderClaimsCard } from './order-claims-card';
+import { OrderDeliverySection } from './order-delivery-section';
 import { OrderFeeTimeline } from './order-fee-timeline';
-import { OrderItemsTable } from './order-items-table';
+import { OrderItemsList } from './order-items-list';
 import { OrderKpiGrid } from './order-kpi-grid';
 import { OrderStatusBadge } from './order-status-badge';
 import { OrderStatusBanner } from './order-status-banner';
@@ -152,7 +153,9 @@ export function OrderDetailClient({
         </Alert>
       ) : null}
 
-      <OrderKpiGrid order={order} />
+      <OrderKpiGrid order={order} dense={chrome === 'modal'} />
+
+      <OrderDeliverySection order={order} />
 
       <div className="gap-lg grid grid-cols-1 lg:grid-cols-2">
         <ProfitBreakdownCard
@@ -162,7 +165,7 @@ export function OrderDetailClient({
         <OrderFeeTimeline fees={order.fees} />
       </div>
 
-      <OrderItemsTable items={order.items} profitExcluded={order.profitExcludedAt !== null} />
+      <OrderItemsList items={order.items} profitExcluded={order.profitExcludedAt !== null} />
 
       <OrderClaimsCard claims={order.claims} />
     </div>

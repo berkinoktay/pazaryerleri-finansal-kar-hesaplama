@@ -1,4 +1,4 @@
-import { parseAsInteger, parseAsString, parseAsStringEnum } from 'nuqs';
+import { parseAsBoolean, parseAsInteger, parseAsString, parseAsStringEnum } from 'nuqs';
 import type { SortingState } from '@tanstack/react-table';
 
 // Single source of truth for the URL ↔ React Query state binding on
@@ -43,6 +43,7 @@ export const ordersFiltersParsers = {
   status: parseAsStringEnum<OrderStatusValue>([...ORDER_STATUSES]),
   reconciliationStatus: parseAsStringEnum<ReconciliationStatusValue>([...RECONCILIATION_STATUSES]),
   costStatus: parseAsStringEnum<CostStatusValue>([...COST_STATUSES]).withDefault('calculated'),
+  lossOnly: parseAsBoolean.withDefault(false),
   from: parseAsString.withDefault(''),
   to: parseAsString.withDefault(''),
   sort: parseAsStringEnum<OrderSortValue>([...ORDER_SORTS]).withDefault(DEFAULT_ORDER_SORT),
@@ -55,6 +56,7 @@ export interface OrdersFilters {
   status: OrderStatusValue | null;
   reconciliationStatus: ReconciliationStatusValue | null;
   costStatus: CostStatusValue;
+  lossOnly: boolean;
   from: string;
   to: string;
   sort: OrderSortValue;

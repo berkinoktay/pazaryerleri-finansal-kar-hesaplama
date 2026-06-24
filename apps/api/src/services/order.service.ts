@@ -1,6 +1,6 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
-import { buildProfitBreakdown } from '@pazarsync/profit';
+import { buildProfitBreakdown, computeNetSaleGross } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
@@ -11,6 +11,7 @@ import type {
   OrderDetailResponse,
   OrderListItemResponse,
   OrderListSort,
+  OrderSummaryQuery,
 } from '../validators/order.validator';
 
 interface OrderListResult {
@@ -18,6 +19,21 @@ interface OrderListResult {
   total: number;
   counts: { calculated: number; excluded: number };
 }
+
+interface OrderSummaryResult {
+  totalRevenueGross: string;
+  netProfitGross: string;
+  avgMarginPct: string | null;
+  lossOrderRate: { lossCount: number; totalCount: number; pct: string };
+}
+
+// buildOrderListWhere reads only the filter fields (not pagination/sort), so both
+// the list query (ListOrdersQuery) and the summary query (which omits page/perPage/
+// sort) structurally satisfy it.
+type OrderListFilters = Pick<
+  ListOrdersQuery,
+  'status' | 'reconciliationStatus' | 'from' | 'to' | 'q' | 'costStatus' | 'lossOnly'
+>;
 
 /**
  * Verify the store belongs to the organization. Cross-tenant access from a
@@ -38,7 +54,7 @@ async function ensureStoreInOrg(orgId: string, storeId: string): Promise<void> {
 function buildOrderListWhere(
   orgId: string,
   storeId: string,
-  filters: ListOrdersQuery,
+  filters: OrderListFilters,
 ): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {
     organizationId: orgId,
@@ -72,6 +88,22 @@ function buildOrderListWhere(
     } else {
       where.profitExcludedAt = { not: null };
     }
+  }
+
+  // "Sadece zararlı": consumed net kâr (settled ?? estimated) < 0. Prisma coalesce
+  // desteklemediği için OR; q filtresi where.OR'u kullandığından AND ile birleştir.
+  if (filters.lossOnly === true) {
+    const lossCondition: Prisma.OrderWhereInput = {
+      OR: [
+        { settledNetProfit: { lt: 0 } },
+        { settledNetProfit: null, estimatedNetProfit: { lt: 0 } },
+      ],
+    };
+    where.AND = Array.isArray(where.AND)
+      ? [...where.AND, lossCondition]
+      : where.AND === undefined
+        ? [lossCondition]
+        : [where.AND, lossCondition];
   }
 
   return where;
@@ -117,6 +149,11 @@ export async function listOrders(
       take: filters.perPage,
       include: {
         _count: { select: { items: true } },
+        // İade-düşülmüş net satış için REFUND_DEDUCTION fee'leri (kâr dökümüyle aynı).
+        fees: {
+          where: { feeType: 'REFUND_DEDUCTION' },
+          select: { source: true, amountGross: true, vatRate: true },
+        },
       },
     }),
     prisma.order.count({ where }),
@@ -131,7 +168,20 @@ export async function listOrders(
     orderDate: row.orderDate.toISOString(),
     status: row.status,
     reconciliationStatus: row.reconciliationStatus,
-    saleGross: row.saleGross?.toString() ?? null,
+    // Satış = NET (iade düşülmüş), modal + kâr dökümüyle tutarlı (Berkin kararı
+    // 2026-06-20): ham saleGross − çözümlenmiş REFUND_DEDUCTION. İadesiz siparişte
+    // fee yok → net = ham. Frontend türetmez, hazır net değeri render eder.
+    saleGross:
+      row.saleGross === null
+        ? null
+        : computeNetSaleGross(
+            new Decimal(row.saleGross.toString()),
+            row.fees.map((f) => ({
+              source: f.source,
+              amountGross: new Decimal(f.amountGross.toString()),
+              vatRate: new Decimal(f.vatRate.toString()),
+            })),
+          ).toString(),
     saleVat: row.saleVat?.toString() ?? null,
     listGross: row.listGross?.toString() ?? null,
     estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
@@ -139,6 +189,8 @@ export async function listOrders(
     // Consumed marj: hakediş gerçeği varsa onu, yoksa T+0 tahminini servis et.
     // Frontend SADECE render eder (render-time hesap yok).
     saleMarginPct: (row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)?.toString() ?? null,
+    // ROI (consumed): settled ?? estimated cost-markup; frontend türetmez, render eder.
+    costMarkupPct: (row.settledCostMarkupPct ?? row.estimatedCostMarkupPct)?.toString() ?? null,
     // Promosyon adları (spec ekleme #3): detaydakiyle aynı runtime-doğrulamalı
     // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
@@ -148,6 +200,96 @@ export async function listOrders(
   }));
 
   return { data, total, counts: { calculated: calculatedCount, excluded: excludedCount } };
+}
+
+/**
+ * Filter-aware KPI aggregation for the orders page header. Honors the same
+ * filters as listOrders (no pagination/sort). Revenue + counts use Prisma
+ * aggregate; consumed net profit / margin use a column projection reduced with
+ * Decimal (Prisma can't COALESCE in aggregate). Bounded by the store + date
+ * filter; if a very large unfiltered range becomes a hotspot, move the coalesce
+ * sums to a $queryRaw SUM(COALESCE(...)).
+ */
+export async function getOrdersSummary(
+  orgId: string,
+  storeId: string,
+  filters: OrderSummaryQuery,
+): Promise<OrderSummaryResult> {
+  await ensureStoreInOrg(orgId, storeId);
+  const where = buildOrderListWhere(orgId, storeId, filters);
+
+  const lossCondition: Prisma.OrderWhereInput = {
+    OR: [
+      { settledNetProfit: { lt: 0 } },
+      { settledNetProfit: null, estimatedNetProfit: { lt: 0 } },
+    ],
+  };
+  const lossWhere: Prisma.OrderWhereInput = {
+    ...where,
+    AND: [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND !== undefined ? [where.AND] : []),
+      lossCondition,
+    ],
+  };
+
+  const [totalCount, lossCount, profitRows] = await Promise.all([
+    prisma.order.count({ where }),
+    prisma.order.count({ where: lossWhere }),
+    prisma.order.findMany({
+      where,
+      select: {
+        saleGross: true,
+        settledNetProfit: true,
+        estimatedNetProfit: true,
+        settledSaleMarginPct: true,
+        estimatedSaleMarginPct: true,
+        // Net satış (iade düşülmüş) için REFUND_DEDUCTION fee'leri.
+        fees: {
+          where: { feeType: 'REFUND_DEDUCTION' },
+          select: { source: true, amountGross: true, vatRate: true },
+        },
+      },
+    }),
+  ]);
+
+  // Ciro = Σ NET satış (iade düşülmüş), liste + kâr dökümüyle tutarlı (ham Σ saleGross
+  // DEĞİL): her sipariş için ham satış − çözümlenmiş REFUND_DEDUCTION.
+  const totalRevenue = profitRows.reduce((sum, row) => {
+    if (row.saleGross === null) return sum;
+    return sum.add(
+      computeNetSaleGross(
+        new Decimal(row.saleGross.toString()),
+        row.fees.map((f) => ({
+          source: f.source,
+          amountGross: new Decimal(f.amountGross.toString()),
+          vatRate: new Decimal(f.vatRate.toString()),
+        })),
+      ),
+    );
+  }, new Decimal(0));
+
+  const netProfit = profitRows.reduce((sum, row) => {
+    const value = row.settledNetProfit ?? row.estimatedNetProfit;
+    return value === null ? sum : sum.add(new Decimal(value.toString()));
+  }, new Decimal(0));
+
+  const margins = profitRows
+    .map((row) => row.settledSaleMarginPct ?? row.estimatedSaleMarginPct)
+    .filter((margin): margin is NonNullable<typeof margin> => margin !== null)
+    .map((margin) => new Decimal(margin.toString()));
+  const avgMargin =
+    margins.length === 0
+      ? null
+      : margins.reduce((sum, margin) => sum.add(margin), new Decimal(0)).div(margins.length);
+
+  const pct = totalCount === 0 ? new Decimal(0) : new Decimal(lossCount).div(totalCount).mul(100);
+
+  return {
+    totalRevenueGross: totalRevenue.toString(),
+    netProfitGross: netProfit.toString(),
+    avgMarginPct: avgMargin === null ? null : avgMargin.toString(),
+    lossOrderRate: { lossCount, totalCount, pct: pct.toString() },
+  };
 }
 
 export async function getOrderById(

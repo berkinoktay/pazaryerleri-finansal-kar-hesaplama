@@ -149,9 +149,17 @@ export function ProfitBreakdownCard({
             ) : (
               <Collapsible>
                 <div className="gap-sm flex items-center justify-between">
-                  <CollapsibleTrigger className="gap-3xs text-muted-foreground hover:text-foreground group flex items-center transition-colors">
-                    <span>{t('shippingTotal')}</span>
-                    <ArrowDown01Icon className="size-icon-xs transition-transform group-data-[state=open]:rotate-180" />
+                  {/* asChild: the trigger IS this inline label+chevron group — no
+                      base full-width/padding styling and no auto-injected chevron
+                      (the manual size-icon-xs one below is the single affordance). */}
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="gap-3xs text-muted-foreground hover:text-foreground group flex items-center transition-colors"
+                    >
+                      <span>{t('shippingTotal')}</span>
+                      <ArrowDown01Icon className="size-icon-xs transition-transform group-data-[state=open]:rotate-180" />
+                    </button>
                   </CollapsibleTrigger>
                   <SignedAmount value={breakdown.shippingGross} positive={false} />
                 </div>
@@ -183,9 +191,16 @@ export function ProfitBreakdownCard({
 
             <Collapsible>
               <div className="gap-sm flex items-center justify-between">
-                <CollapsibleTrigger className="gap-3xs text-muted-foreground hover:text-foreground group flex items-center transition-colors">
-                  <span>{t('netVat')}</span>
-                  <ArrowDown01Icon className="size-icon-xs transition-transform group-data-[state=open]:rotate-180" />
+                {/* asChild: inline label+chevron group only — avoids the auto
+                    chevron (duplicate) + base button styling. */}
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="gap-3xs text-muted-foreground hover:text-foreground group flex items-center transition-colors"
+                  >
+                    <span>{t('netVat')}</span>
+                    <ArrowDown01Icon className="size-icon-xs transition-transform group-data-[state=open]:rotate-180" />
+                  </button>
                 </CollapsibleTrigger>
                 <SignedAmount value={breakdown.netVat} positive={false} />
               </div>

@@ -50,11 +50,25 @@ export function OrderClaimsCard({ claims }: OrderClaimsCardProps): React.ReactEl
                     {t(claim.resolved ? 'resolved' : 'open')}
                   </Badge>
                 </div>
+                {claim.cargoProviderName !== null || claim.cargoTrackingNumber !== null ? (
+                  <p className="text-2xs text-muted-foreground mt-xs tabular-nums">
+                    {t('cargo')}: {claim.cargoProviderName ?? '—'}
+                    {claim.cargoTrackingNumber !== null ? ` · ${claim.cargoTrackingNumber}` : ''}
+                  </p>
+                ) : null}
                 {claim.items.length > 0 ? (
                   <ul className="mt-sm gap-3xs flex flex-col">
                     {claim.items.map((item) => (
-                      <li key={item.id} className="text-2xs text-muted-foreground">
-                        {item.reasonName}
+                      <li
+                        key={item.id}
+                        className="text-2xs text-muted-foreground gap-xs flex items-center"
+                      >
+                        <span>{item.reasonName}</span>
+                        {item.acceptedBySeller ? (
+                          <Badge tone="success" size="sm">
+                            {t('accepted')}
+                          </Badge>
+                        ) : null}
                       </li>
                     ))}
                   </ul>

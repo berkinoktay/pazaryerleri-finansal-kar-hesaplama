@@ -23,6 +23,7 @@ const baseRow = {
   estimatedNetProfit: null,
   settledNetProfit: null,
   saleMarginPct: null,
+  costMarkupPct: null,
   promotionDisplays: null,
   fastDelivery: false,
   micro: false,
@@ -40,7 +41,14 @@ function renderTable(costStatus: 'calculated' | 'excluded'): void {
       <OrdersTable
         rows={[baseRow]}
         pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
-        filters={{ q: '', status: null, reconciliationStatus: null, from: '', to: '' }}
+        filters={{
+          q: '',
+          status: null,
+          reconciliationStatus: null,
+          lossOnly: false,
+          from: '',
+          to: '',
+        }}
         costStatus={costStatus}
         sort="-orderDate"
         counts={{ calculated: 1, excluded: 1 }}

@@ -1,7 +1,12 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from '../fold-return-legs';
+import {
+  computeNetSaleGross,
+  foldReturnLegs,
+  resolveReturnLegs,
+  type ReturnFeeRow,
+} from '../fold-return-legs';
 import type { ProfitInput } from '../profit-formula';
 
 const D = (v: string | number) => new Decimal(v);
@@ -13,6 +18,41 @@ const baseInput = (): ProfitInput => ({
   commission: { gross: D('0'), vat: D('0') },
   fees: [{ type: 'SHIPPING', gross: D('155.99'), vat: D('25.99'), direction: 'DEBIT' }],
   stoppage: { gross: D('0') },
+});
+
+describe('computeNetSaleGross', () => {
+  it('returns gross sale unchanged when there are no return deductions', () => {
+    expect(computeNetSaleGross(D('90'), []).toString()).toBe('90');
+  });
+
+  it('subtracts the estimate refund deduction when no settlement exists', () => {
+    const net = computeNetSaleGross(D('90'), [
+      { source: 'ESTIMATE', amountGross: D('30'), vatRate: D('20') },
+    ]);
+    expect(net.toString()).toBe('60');
+  });
+
+  it('prefers the settlement refund over the estimate (no double-count)', () => {
+    const net = computeNetSaleGross(D('90'), [
+      { source: 'ESTIMATE', amountGross: D('90'), vatRate: D('20') },
+      { source: 'SETTLEMENT', amountGross: D('88'), vatRate: D('20') },
+    ]);
+    expect(net.toString()).toBe('2');
+  });
+
+  it('nets a fully returned order to zero', () => {
+    const net = computeNetSaleGross(D('90'), [
+      { source: 'SETTLEMENT', amountGross: D('90'), vatRate: D('20') },
+    ]);
+    expect(net.toString()).toBe('0');
+  });
+
+  it('treats non-actual sources (USER_OVERRIDE / MANUAL_ENTRY) as estimate', () => {
+    const net = computeNetSaleGross(D('90'), [
+      { source: 'USER_OVERRIDE', amountGross: D('10'), vatRate: D('20') },
+    ]);
+    expect(net.toString()).toBe('80');
+  });
 });
 
 describe('resolveReturnLegs', () => {

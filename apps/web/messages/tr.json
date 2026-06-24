@@ -807,7 +807,16 @@
       "statusPlaceholder": "Sipariş durumu",
       "statusAll": "Tüm durumlar",
       "reconciliationPlaceholder": "Mutabakat durumu",
-      "reconciliationAll": "Tüm mutabakatlar"
+      "reconciliationAll": "Tüm mutabakatlar",
+      "lossOnly": "Sadece zararlı",
+      "exportExcel": "Excel"
+    },
+    "kpis": {
+      "revenue": "Toplam Ciro",
+      "netProfit": "Net Kâr",
+      "avgMargin": "Ortalama Marj",
+      "lossRate": "Zarar Eden Sipariş",
+      "lossCount": "{count}/{total} sipariş"
     },
     "status": {
       "PENDING": "Bekliyor",
@@ -834,7 +843,12 @@
         "saleMarginPct": "Marj %",
         "itemCount": "Kalem",
         "revenue": "Ciro",
-        "costStatus": "Maliyet durumu"
+        "costStatus": "Maliyet durumu",
+        "costMarkupPct": "ROI %"
+      },
+      "badges": {
+        "fastDelivery": "Hızlı",
+        "micro": "Mikro"
       }
     },
     "tabs": {
@@ -1734,6 +1748,7 @@
       },
       "vatLabel": "KDV %{rate}",
       "confirmedAt": "Mutabakat: {date}",
+      "superseded": "Hakedişle güncellendi",
       "types": {
         "SHIPPING": "Kargo",
         "PLATFORM_SERVICE": "Hizmet Bedeli (PSF)",
@@ -1791,7 +1806,15 @@
         "description": "İade talepleri Trendyol'dan akmaya başladığında burada listelenecek."
       },
       "open": "Açık",
-      "resolved": "Tamamlandı"
+      "resolved": "Tamamlandı",
+      "cargo": "İade kargosu",
+      "accepted": "Kabul edildi"
+    },
+    "delivery": {
+      "agreed": "Söz verilen teslim",
+      "actual": "Gerçekleşen teslim",
+      "onTime": "Zamanında",
+      "late": "Geç teslim"
     },
     "errors": {
       "noStoreContext": "Sipariş detayını görmek için aktif bir mağaza gerekli.",

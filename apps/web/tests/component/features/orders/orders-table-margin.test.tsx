@@ -24,6 +24,7 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     estimatedNetProfit: '60.00',
     settledNetProfit: null,
     saleMarginPct: '15.5',
+    costMarkupPct: '38.4',
     promotionDisplays: null,
     fastDelivery: false,
     micro: false,
@@ -38,7 +39,14 @@ function renderTable(props: Partial<OrdersTableProps> = {}): OrdersTableProps['o
     <OrdersTable
       rows={[makeRow()]}
       pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
-      filters={{ q: '', status: null, reconciliationStatus: null, from: '', to: '' }}
+      filters={{
+        q: '',
+        status: null,
+        reconciliationStatus: null,
+        lossOnly: false,
+        from: '',
+        to: '',
+      }}
       costStatus="calculated"
       sort="-orderDate"
       counts={{ calculated: 1, excluded: 0 }}
@@ -69,7 +77,14 @@ describe('OrdersTable — Marj % column', () => {
           makeRow({ saleMarginPct: null, estimatedNetProfit: '60.00', settledNetProfit: '58.00' }),
         ]}
         pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
-        filters={{ q: '', status: null, reconciliationStatus: null, from: '', to: '' }}
+        filters={{
+          q: '',
+          status: null,
+          reconciliationStatus: null,
+          lossOnly: false,
+          from: '',
+          to: '',
+        }}
         costStatus="calculated"
         sort="-orderDate"
         counts={{ calculated: 1, excluded: 0 }}
@@ -122,7 +137,14 @@ describe('OrdersTable — Marj % column', () => {
       <OrdersTable
         rows={[makeRow({ estimatedNetProfit: null, saleMarginPct: null })]}
         pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
-        filters={{ q: '', status: null, reconciliationStatus: null, from: '', to: '' }}
+        filters={{
+          q: '',
+          status: null,
+          reconciliationStatus: null,
+          lossOnly: false,
+          from: '',
+          to: '',
+        }}
         costStatus="excluded"
         sort="-orderDate"
         counts={{ calculated: 0, excluded: 1 }}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Cancel01Icon, Search01Icon } from 'hugeicons-react';
+import { Alert02Icon, Cancel01Icon, DownloadSquare02Icon, Search01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import type { DateRange } from 'react-day-picker';
@@ -32,12 +32,14 @@ export interface OrdersToolbarProps {
   q: string;
   status: OrderStatusValue | null;
   reconciliationStatus: ReconciliationStatusValue | null;
+  lossOnly: boolean;
   from: string;
   to: string;
   onChange: (next: {
     q?: string;
     status?: OrderStatusValue | null;
     reconciliationStatus?: ReconciliationStatusValue | null;
+    lossOnly?: boolean;
     from?: string;
     to?: string;
   }) => void;
@@ -54,6 +56,7 @@ export function OrdersToolbar({
   q,
   status,
   reconciliationStatus,
+  lossOnly,
   from,
   to,
   onChange,
@@ -81,6 +84,7 @@ export function OrdersToolbar({
     q.length > 0 ||
     status !== null ||
     reconciliationStatus !== null ||
+    lossOnly ||
     from.length > 0 ||
     to.length > 0;
 
@@ -138,6 +142,31 @@ export function OrdersToolbar({
 
       <DateRangePicker value={range} onChange={handleRangeChange} />
 
+      <Button
+        type="button"
+        variant={lossOnly ? 'default' : 'outline'}
+        size="sm"
+        aria-pressed={lossOnly}
+        onClick={() => onChange({ lossOnly: !lossOnly })}
+        className="gap-xs"
+      >
+        <Alert02Icon className="size-icon-sm" />
+        {t('toolbar.lossOnly')}
+      </Button>
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          // Excel dışa aktarma backend'i henüz yok — yalnız yerleşim (no-op).
+        }}
+        className="gap-xs"
+      >
+        <DownloadSquare02Icon className="size-icon-sm" />
+        {t('toolbar.exportExcel')}
+      </Button>
+
       {hasAnyFilter ? (
         <Button
           variant="ghost"
@@ -147,6 +176,7 @@ export function OrdersToolbar({
               q: '',
               status: null,
               reconciliationStatus: null,
+              lossOnly: false,
               from: '',
               to: '',
             })
