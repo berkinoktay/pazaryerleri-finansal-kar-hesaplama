@@ -32,7 +32,12 @@ import type { OrderFeeDirection, Prisma } from '@pazarsync/db';
 
 import { applyEstimateOnOrderCreate } from './estimate-on-order-create';
 import type { ReturnFeeType } from './fold-return-legs';
-import { resolveFeeDefinition } from './resolve-fee-definition';
+import {
+  overseasReturnOperationGross,
+  resolveOverseasReturnRate,
+  type OverseasReturnLeg,
+} from './overseas-return-operation';
+import { isMicroExport, resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
 const ACCEPTED_STATUS = 'Accepted';
 
@@ -182,6 +187,66 @@ export async function estimateReturnOnClaim(
   // satır TEK oran taşır → son yazan item'ın oranı = dokümante edilmiş yaklaşım,
   // gerçek hakediş/kargo faturası per-leg mutabık kılar). Çoğu sipariş tek-item.
   const itemsById = new Map(order.items.map((item) => [item.id, item]));
+
+  // ─── Mikro ihracat iade modeli — domestic bacaklar YAZILMAZ ──────────────────
+  // Mikro ihracatta iade gerçekleşse de satış hakedişi satıcıda KALIR (REFUND_DEDUCTION
+  // yok), komisyon iade edilmez (COMMISSION_REFUND yok), ürün genelde geri gelmez
+  // (COST_RETURN/RETURN_SHIPPING yok). Bunun YERİNE tek "Yurt Dışı İade Operasyon Bedeli"
+  // (DEBIT) kesilir: Σ hakediş × kademe-oranı; hakediş = kabul edilen (satış − komisyon);
+  // oran ürünün KDV-dahil birim satışına göre (≤2000₺→%35, >2000₺→%30, data-driven).
+  // Düz DEBIT fee → fold-return-legs çalıştırılmaz; computeProfit fees[] üzerinden düşer.
+  if (isMicroExport(order)) {
+    const legs: OverseasReturnLeg[] = [];
+    for (const [orderItemId, acceptedQty] of acceptedQtyByItem) {
+      const item = itemsById.get(orderItemId);
+      if (item === undefined || item.lineSaleGross === null) continue;
+      const quantity = new Decimal(item.quantity);
+      if (quantity.isZero()) continue;
+      const acceptedRatio = new Decimal(acceptedQty).div(quantity);
+      const unitSaleGross = new Decimal(item.lineSaleGross).div(quantity);
+      const rate = await resolveOverseasReturnRate(tx, unitSaleGross, order.orderDate);
+      legs.push({
+        acceptedSaleGross: new Decimal(item.lineSaleGross).mul(acceptedRatio),
+        acceptedCommissionGross: new Decimal(item.commissionGross).mul(acceptedRatio),
+        rate,
+      });
+    }
+    const opGross = overseasReturnOperationGross(legs).toDecimalPlaces(2);
+
+    // Tek OVERSEAS_RETURN_OPERATION ESTIMATE satırı (find-then-update-or-create; partial
+    // unique (order_id, fee_type) WHERE source='ESTIMATE' → prisma upsert kullanılamaz).
+    // vatRate verilmez → @default(0): operasyon bedeli KDV taşımaz (canlı hakedişten doğrulanacak).
+    const existingOp = await tx.orderFee.findFirst({
+      where: { orderId: order.id, feeType: 'OVERSEAS_RETURN_OPERATION', source: 'ESTIMATE' },
+      select: { id: true },
+    });
+    if (opGross.gt(0)) {
+      const opData = {
+        amountGross: opGross,
+        direction: 'DEBIT' as const,
+        displayName: 'Yurt Dışı İade Operasyon Bedeli',
+      };
+      if (existingOp !== null) {
+        await tx.orderFee.update({ where: { id: existingOp.id }, data: opData });
+      } else {
+        await tx.orderFee.create({
+          data: {
+            orderId: order.id,
+            organizationId: order.organizationId,
+            feeType: 'OVERSEAS_RETURN_OPERATION',
+            source: 'ESTIMATE',
+            ...opData,
+          },
+        });
+      }
+    } else if (existingOp !== null) {
+      await tx.orderFee.delete({ where: { id: existingOp.id } });
+    }
+
+    // estimatedNetProfit'i yeniden hesapla (OVERSEAS_RETURN_OPERATION fees[]'e girer).
+    await applyEstimateOnOrderCreate(orderId, tx);
+    return;
+  }
 
   const refund: LegAccumulator = { gross: new Decimal(0), vatRate: new Decimal(0) };
   const commission: LegAccumulator = { gross: new Decimal(0), vatRate: new Decimal(0) };

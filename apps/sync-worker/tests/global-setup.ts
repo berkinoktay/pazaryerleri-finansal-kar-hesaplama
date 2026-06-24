@@ -1,4 +1,7 @@
-import { ensureShippingReferenceData } from '@pazarsync/db/test-support';
+import {
+  ensureMicroExportReturnTiers,
+  ensureShippingReferenceData,
+} from '@pazarsync/db/test-support';
 
 /**
  * vitest globalSetup for the sync-worker test run.
@@ -19,6 +22,7 @@ export default async function globalSetup(): Promise<void> {
   if (process.env['PAZARSYNC_SKIP_RESEED'] === '1') return;
   try {
     await ensureShippingReferenceData();
+    await ensureMicroExportReturnTiers();
   } catch (err) {
     console.warn(
       '⚠️  Shipping reference seed skipped (DB likely unreachable). ' +

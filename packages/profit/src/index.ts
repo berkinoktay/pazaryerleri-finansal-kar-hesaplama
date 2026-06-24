@@ -26,6 +26,12 @@ export {
 export { buildCalcCheckLines } from './build-calc-check-lines';
 export { computeNetSaleGross } from './fold-return-legs';
 export {
+  overseasReturnOperationGross,
+  resolveOverseasReturnRate,
+  MicroExportReturnTierNotFoundError,
+  type OverseasReturnLeg,
+} from './overseas-return-operation';
+export {
   buildProfitBreakdown,
   type BuildProfitBreakdownInput,
   type ProfitBreakdownFeeInput,

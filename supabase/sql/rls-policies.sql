@@ -466,6 +466,18 @@ CREATE POLICY fee_definitions_authenticated_read ON fee_definitions
   FOR SELECT TO authenticated
   USING (true);
 
+-- ─── micro_export_return_fee_tiers — global reference, public read ─────
+-- Mikro ihracat "Yurt Dışı İade Operasyon Bedeli" kademe oranları (≤2000₺→%35,
+-- >2000₺→%30). Tüm seller'lara aynı — fee_definitions / shipping_barem_tariffs ile
+-- aynı pattern. Yazma postgres rolü (seed migration); authenticated INSERT/UPDATE/DELETE
+-- policy yok → default-deny. Backend (Prisma) zaten superuser ile okur (RLS bypass);
+-- bu policy defense-in-depth + scoped-client okumalarına izin.
+ALTER TABLE micro_export_return_fee_tiers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS micro_export_return_fee_tiers_authenticated_read ON micro_export_return_fee_tiers;
+CREATE POLICY micro_export_return_fee_tiers_authenticated_read ON micro_export_return_fee_tiers
+  FOR SELECT TO authenticated
+  USING (true);
+
 -- ─── webhook_events — store-scoped read (PR-C1) ───────────────────────────
 -- Trendyol webhook idempotency log + raw audit trail. Composite unique key
 -- (storeId, platformOrderId, platformStatus, platformLastModifiedDate) →

@@ -332,13 +332,16 @@ export async function applyEstimateOnOrderCreate(
     commissionVat = commissionVat.add(grossToVat(effComm, new Decimal(item.commissionVatRate)));
   }
 
-  // PSF + Kargo + Uluslararası Hizmet Bedeli (mikro ihracat) ESTIMATE fee'leri
-  // (Stopaj motorda ayrı `stoppage` terimidir — fee listesine GİRMEZ, çift sayım olmaz).
+  // PSF + Kargo + Uluslararası Hizmet Bedeli + Yurt Dışı İade Operasyon Bedeli (mikro
+  // ihracat) ESTIMATE fee'leri (Stopaj motorda ayrı `stoppage` terimidir — fee listesine
+  // GİRMEZ, çift sayım olmaz).
   const estimateFees = await tx.orderFee.findMany({
     where: {
       orderId,
       source: 'ESTIMATE',
-      feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE', 'INTERNATIONAL_SERVICE'] },
+      feeType: {
+        in: ['SHIPPING', 'PLATFORM_SERVICE', 'INTERNATIONAL_SERVICE', 'OVERSEAS_RETURN_OPERATION'],
+      },
     },
     select: { feeType: true, amountGross: true, vatRate: true, direction: true },
   });
@@ -348,7 +351,9 @@ export async function applyEstimateOnOrderCreate(
         ? 'SHIPPING'
         : fee.feeType === 'INTERNATIONAL_SERVICE'
           ? 'INTERNATIONAL_SERVICE'
-          : 'PLATFORM_SERVICE',
+          : fee.feeType === 'OVERSEAS_RETURN_OPERATION'
+            ? 'OVERSEAS_RETURN_OPERATION'
+            : 'PLATFORM_SERVICE',
     gross: new Decimal(fee.amountGross),
     // KDV tam precision (per-fee yuvarlama YOK); tek yuvarlama persist'te.
     vat: grossToVat(new Decimal(fee.amountGross), new Decimal(fee.vatRate)),

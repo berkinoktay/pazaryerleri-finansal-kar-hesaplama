@@ -2,7 +2,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { prisma } from '@pazarsync/db';
-import { ensureShippingReferenceData } from '@pazarsync/db/test-support';
+import {
+  ensureMicroExportReturnTiers,
+  ensureShippingReferenceData,
+} from '@pazarsync/db/test-support';
 
 const execFilePromise = promisify(execFile);
 
@@ -74,6 +77,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   if (process.env['PAZARSYNC_SKIP_RESEED'] !== '1') {
     try {
       await ensureShippingReferenceData();
+      await ensureMicroExportReturnTiers();
     } catch (err) {
       console.warn(
         '⚠️  Shipping reference seed skipped (DB likely unreachable). ' +

@@ -159,6 +159,17 @@ async function seedFeeDefinitions(): Promise<void> {
         defaultVatRate: new Decimal('20.00'),
         effectiveFrom: new Date('2024-01-01'),
       },
+      {
+        // Mikro ihracat: estimate-on-order-create (estimateReturnOnClaim sonunda çağrılır)
+        // mikro siparişte Uluslararası Hizmet Bedeli'ni resolve eder → seed gerekli.
+        platform: 'TRENDYOL',
+        feeType: 'INTERNATIONAL_SERVICE',
+        displayName: 'Uluslararası Hizmet Bedeli',
+        calculationKind: 'RATE_OF_SALE',
+        rateOfSale: new Decimal('0.0600'),
+        defaultVatRate: new Decimal('20.00'),
+        effectiveFrom: new Date('2024-01-01'),
+      },
     ],
   });
 }
@@ -166,6 +177,8 @@ async function seedFeeDefinitions(): Promise<void> {
 interface BuildOrderArgs {
   quantity: number;
   profitExcludedAt?: Date;
+  /** Mikro ihracat siparişi (satış KDV %0, iade modeli OVERSEAS_RETURN_OPERATION). */
+  micro?: boolean;
 }
 
 /**
@@ -179,9 +192,11 @@ async function buildOrderWithItem(
   args: BuildOrderArgs,
 ): Promise<{ orderId: string; orderItemId: string }> {
   const qty = args.quantity;
+  const micro = args.micro ?? false;
   // Per-unit: sale 1100 (VAT 10%), cost 500 (VAT 10%), commission 110 (VAT 20%).
+  // Mikro ihracatta satış KDV %0 (ihracat istisnası — upsert kaynakta sıfırlar).
   const lineSaleGross = new Decimal('1100.00').mul(qty);
-  const saleVat = lineSaleGross.mul(10).div(110).toDecimalPlaces(2);
+  const saleVat = micro ? new Decimal('0.00') : lineSaleGross.mul(10).div(110).toDecimalPlaces(2);
 
   const order = await prisma.order.create({
     data: {
@@ -190,6 +205,7 @@ async function buildOrderWithItem(
       platformOrderId: `test-claim-${randomUUID().slice(0, 8)}`,
       orderDate: new Date(),
       status: 'RETURNED',
+      micro,
       saleGross: lineSaleGross,
       saleVat,
       cargoDeci: new Decimal('5.00'),
@@ -206,7 +222,7 @@ async function buildOrderWithItem(
       quantity: qty,
       lineListGross: lineSaleGross,
       lineSaleGross,
-      saleVatRate: new Decimal('10.00'),
+      saleVatRate: micro ? new Decimal('0.00') : new Decimal('10.00'),
       commissionRate: new Decimal('10.00'),
       commissionGross: new Decimal('110.00').mul(qty),
       commissionVatRate: new Decimal('20.00'),
@@ -335,6 +351,44 @@ describe('estimateReturnOnClaim', () => {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.estimatedNetProfit).not.toBeNull();
     expect(order.estimatedNetProfit!.toNumber()).toBeLessThan(0);
+  });
+
+  /**
+   * Mikro ihracat iadesi: domestic bacaklar (REFUND_DEDUCTION/COMMISSION_REFUND/
+   * COST_RETURN/RETURN_SHIPPING) YAZILMAZ — satış reverse edilmez. Bunun YERİNE tek
+   * OVERSEAS_RETURN_OPERATION (DEBIT) kesilir: (satış − komisyon) × kademe-oranı.
+   * Birim satış 1100 ≤ 2000₺ → %35 kademesi (globalSetup'tan seed'li). 1 birim kabul:
+   * hakediş = 1100 − 110 = 990; bedel = 990 × 0.35 = 346.50.
+   */
+  it('micro export return: writes ONLY OVERSEAS_RETURN_OPERATION (no domestic legs)', async () => {
+    const { orgId, storeId } = await createSeedContext();
+    await seedFeeDefinitions();
+    const { orderId, orderItemId } = await buildOrderWithItem(orgId, storeId, {
+      quantity: 1,
+      micro: true,
+    });
+    await createClaim(orgId, storeId, orderId, orderItemId, 1);
+
+    await prisma.$transaction(async (tx) => {
+      await estimateReturnOnClaim(orderId, tx);
+    });
+
+    // Domestic iade bacakları YAZILMAMALI (satış reverse edilmez).
+    const domesticLegs = await prisma.orderFee.findMany({
+      where: { orderId, feeType: { in: [...RETURN_FEE_TYPES, 'STOPPAGE_REFUND'] } },
+    });
+    expect(domesticLegs).toHaveLength(0);
+
+    // Tek OVERSEAS_RETURN_OPERATION (DEBIT) = (1100 − 110) × 0.35 = 346.50.
+    const opFees = await prisma.orderFee.findMany({
+      where: { orderId, feeType: 'OVERSEAS_RETURN_OPERATION', source: 'ESTIMATE' },
+    });
+    expect(opFees).toHaveLength(1);
+    expect(opFees[0]?.direction).toBe('DEBIT');
+    expect(opFees[0]?.amountGross.toFixed(2)).toBe('346.50');
+
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(order.estimatedNetProfit).not.toBeNull();
   });
 
   /**

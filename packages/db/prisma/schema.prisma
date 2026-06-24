@@ -1153,6 +1153,30 @@ model FeeDefinition {
   @@map("fee_definitions")
 }
 
+// Mikro ihracat "Yurt Dışı İade Operasyon Bedeli" kademe tablosu (data-driven).
+// İadeye dönen mikro ihracat ürününde hakediş (KDV-dahil satış − komisyon) üzerinden
+// kademeli oran kesilir: ürünün KDV-dahil satış fiyatı ≤2000₺ → %35, >2000₺ → %30
+// (Trendyol 16.07.2024 duyurusu). Oran/eşik DB'de (Trendyol değişirse SQL UPDATE).
+// ShippingBaremTariff deseni (min/max tutar aralığı + effectiveFrom). Global referans:
+// her satıcı aynı satırları okur; RLS authenticated SELECT açık (USING true), yazım
+// postgres rolünde. truncateAll() dokunmaz (tenant tablosu değil).
+model MicroExportReturnFeeTier {
+  id           String  @id @default(uuid()) @db.Uuid
+  // Ürünün KDV-dahil satış fiyatı bandı (kademe eşikleri). min ≤ saleGross ≤ max.
+  minSaleGross Decimal @map("min_sale_gross") @db.Decimal(12, 2)
+  maxSaleGross Decimal @map("max_sale_gross") @db.Decimal(12, 2)
+  // Hakediş (satış − komisyon) üzerine uygulanan oran (kesir: 0.3500 = %35).
+  rate         Decimal @db.Decimal(7, 4)
+
+  effectiveFrom DateTime @default(now()) @map("effective_from") @db.Date
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([minSaleGross, maxSaleGross, effectiveFrom])
+  @@index([minSaleGross, maxSaleGross])
+  @@map("micro_export_return_fee_tiers")
+}
+
 // Sipariş paket-düzeyi ücret satırı — tüm pazaryeri ücretleri (komisyon hariç,
 // o OrderItem'da) burada (design §3.3). source ESTIMATE/SETTLEMENT/CARGO_INVOICE
 // karışık yaşar, recomputeSettledProfit filtreyle toplar. PSF/Stopaj ESTIMATE
