@@ -20,6 +20,7 @@ import { getBusinessDate, getBusinessHour } from '@pazarsync/utils';
 import { syncLog } from '@pazarsync/sync-core';
 
 import {
+  computeDeliveredOnTime,
   mapLine,
   mapTrendyolOrdersResponse,
   mapTrendyolShipmentPackage,
@@ -798,5 +799,58 @@ describe('mapTrendyolOrdersResponse', () => {
     expect(mapped.batch).toHaveLength(2);
     expect(mapped.batch[0]?.status).toBe('PENDING');
     expect(mapped.batch[1]?.status).toBe('DELIVERED');
+  });
+});
+
+describe('computeDeliveredOnTime', () => {
+  const agreed = new Date('2026-05-20T00:00:00Z');
+
+  it('returns true when delivered before the agreed date', () => {
+    expect(computeDeliveredOnTime(agreed, new Date('2026-05-19T10:00:00Z'))).toBe(true);
+  });
+
+  it('returns true when delivered exactly on the agreed date (boundary = on time)', () => {
+    expect(computeDeliveredOnTime(agreed, new Date('2026-05-20T00:00:00Z'))).toBe(true);
+  });
+
+  it('returns false when delivered after the agreed date', () => {
+    expect(computeDeliveredOnTime(agreed, new Date('2026-05-22T10:00:00Z'))).toBe(false);
+  });
+
+  it('returns null when not yet delivered (actual null)', () => {
+    expect(computeDeliveredOnTime(agreed, null)).toBeNull();
+  });
+
+  it('returns null when there is no agreed date', () => {
+    expect(computeDeliveredOnTime(null, new Date('2026-05-19T10:00:00Z'))).toBeNull();
+  });
+
+  it('returns null when both dates are missing', () => {
+    expect(computeDeliveredOnTime(null, null)).toBeNull();
+  });
+});
+
+describe('mapTrendyolShipmentPackage — deliveredOnTime', () => {
+  const AGREED_MS = Date.parse('2026-05-20T00:00:00Z');
+
+  it('derives true when the Delivered event is on/before the agreed date', () => {
+    const pkg = buildPackage({
+      agreedDeliveryDate: AGREED_MS,
+      packageHistories: [{ status: 'Delivered', createdDate: Date.parse('2026-05-19T10:00:00Z') }],
+    });
+    expect(mapTrendyolShipmentPackage(pkg).deliveredOnTime).toBe(true);
+  });
+
+  it('derives false when the Delivered event is after the agreed date', () => {
+    const pkg = buildPackage({
+      agreedDeliveryDate: AGREED_MS,
+      packageHistories: [{ status: 'Delivered', createdDate: Date.parse('2026-05-22T10:00:00Z') }],
+    });
+    expect(mapTrendyolShipmentPackage(pkg).deliveredOnTime).toBe(false);
+  });
+
+  it('is null when the package has not been delivered', () => {
+    const pkg = buildPackage({ agreedDeliveryDate: AGREED_MS, packageHistories: [] });
+    expect(mapTrendyolShipmentPackage(pkg).deliveredOnTime).toBeNull();
   });
 });

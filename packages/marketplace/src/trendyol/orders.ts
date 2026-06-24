@@ -149,6 +149,20 @@ function normalizeFastDeliveryType(value: string | undefined): string | null {
  * preserved as-is from Trendyol (typically integer like 20, but the field is
  * declared decimal — defensive parsing).
  */
+/**
+ * Türetilmiş: teslim, söz verilen tarihte ya da öncesinde mi gerçekleşti?
+ * İki tarih de varsa boolean (eşitlik = zamanında); biri null ise (teslim
+ * olmadı veya söz tarihi yok) null. Saf fonksiyon — unit-test edilebilir;
+ * mapper bunu MappedOrder.deliveredOnTime'a koyar, upsert persist eder.
+ */
+export function computeDeliveredOnTime(
+  agreedDeliveryDate: Date | null,
+  actualDeliveryDate: Date | null,
+): boolean | null {
+  if (agreedDeliveryDate === null || actualDeliveryDate === null) return null;
+  return actualDeliveryDate.getTime() <= agreedDeliveryDate.getTime();
+}
+
 export function mapTrendyolShipmentPackage(
   pkg: TrendyolShipmentPackage,
   commissionVatRate: number = TRENDYOL_COMMISSION_VAT_RATE,
@@ -162,6 +176,12 @@ export function mapTrendyolShipmentPackage(
   const shippedEvent = (pkg.packageHistories ?? []).find((h) => h.status === 'Shipped');
   const actualShipDate =
     shippedEvent !== undefined ? epochMsToDate(shippedEvent.createdDate) : null;
+
+  // Zamanında-teslim: söz verilen vs gerçekleşen. Saf helper (computeDeliveredOnTime)
+  // ile türetilir; iki tarihten biri yoksa null. agreedDeliveryDate aşağıda return'de
+  // de kullanılacağı için const'a alınır.
+  const agreedDeliveryDate = epochMsToDate(pkg.agreedDeliveryDate);
+  const deliveredOnTime = computeDeliveredOnTime(agreedDeliveryDate, actualDeliveryDate);
 
   const mappedLines: MappedOrderLine[] = pkg.lines.map((line) =>
     mapLine(line, { shipmentPackageId: pkg.shipmentPackageId }, commissionVatRate),
@@ -217,10 +237,11 @@ export function mapTrendyolShipmentPackage(
     listGross: new Decimal(pkg.packageGrossAmount ?? 0).toFixed(2),
     sellerDiscountGross: new Decimal(pkg.packageSellerDiscount ?? 0).toFixed(2),
     promotionDisplays: extractPromotionDisplays(mappedLines),
-    agreedDeliveryDate: epochMsToDate(pkg.agreedDeliveryDate),
+    agreedDeliveryDate,
     estimatedDeliveryStartDate: epochMsToDate(pkg.estimatedDeliveryStartDate),
     estimatedDeliveryEndDate: epochMsToDate(pkg.estimatedDeliveryEndDate),
     actualDeliveryDate,
+    deliveredOnTime,
     actualShipDate,
     fastDelivery: pkg.fastDelivery,
     fastDeliveryType: normalizeFastDeliveryType(pkg.fastDeliveryType),
