@@ -142,7 +142,8 @@ export const OrderListItemSchema = z
     // saleGross = satış toplamı (KDV-dahil), saleVat = içindeki KDV, listGross =
     // liste fiyatı (KDV-dahil). null: OrderItem'lar henüz senkronlanmadı.
     saleGross: z.string().nullable().openapi({
-      description: 'Sale total incl. VAT (decimal string) — null until OrderItems are synced.',
+      description:
+        'Net sale incl. VAT (decimal string): gross sale minus resolved return deductions (matches the detail modal). null until OrderItems are synced.',
       example: '299.40',
     }),
     saleVat: z.string().nullable().openapi({
@@ -246,9 +247,9 @@ export const ListOrdersResponseSchema = z
 
 export const OrderSummaryResponseSchema = z
   .object({
-    totalRevenueGross: z
-      .string()
-      .openapi({ description: 'Σ saleGross (KDV-dahil) over the filtered set.' }),
+    totalRevenueGross: z.string().openapi({
+      description: 'Σ net sale (return-adjusted, KDV-dahil) over the filtered set.',
+    }),
     netProfitGross: z
       .string()
       .openapi({ description: 'Σ consumed net profit (settledNetProfit ?? estimatedNetProfit).' }),

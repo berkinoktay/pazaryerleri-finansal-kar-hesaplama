@@ -1,6 +1,6 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
-import { buildProfitBreakdown } from '@pazarsync/profit';
+import { buildProfitBreakdown, computeNetSaleGross } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
@@ -149,6 +149,11 @@ export async function listOrders(
       take: filters.perPage,
       include: {
         _count: { select: { items: true } },
+        // İade-düşülmüş net satış için REFUND_DEDUCTION fee'leri (kâr dökümüyle aynı).
+        fees: {
+          where: { feeType: 'REFUND_DEDUCTION' },
+          select: { source: true, amountGross: true, vatRate: true },
+        },
       },
     }),
     prisma.order.count({ where }),
@@ -163,7 +168,20 @@ export async function listOrders(
     orderDate: row.orderDate.toISOString(),
     status: row.status,
     reconciliationStatus: row.reconciliationStatus,
-    saleGross: row.saleGross?.toString() ?? null,
+    // Satış = NET (iade düşülmüş), modal + kâr dökümüyle tutarlı (Berkin kararı
+    // 2026-06-20): ham saleGross − çözümlenmiş REFUND_DEDUCTION. İadesiz siparişte
+    // fee yok → net = ham. Frontend türetmez, hazır net değeri render eder.
+    saleGross:
+      row.saleGross === null
+        ? null
+        : computeNetSaleGross(
+            new Decimal(row.saleGross.toString()),
+            row.fees.map((f) => ({
+              source: f.source,
+              amountGross: new Decimal(f.amountGross.toString()),
+              vatRate: new Decimal(f.vatRate.toString()),
+            })),
+          ).toString(),
     saleVat: row.saleVat?.toString() ?? null,
     listGross: row.listGross?.toString() ?? null,
     estimatedNetProfit: row.estimatedNetProfit?.toString() ?? null,
@@ -214,20 +232,41 @@ export async function getOrdersSummary(
     ],
   };
 
-  const [agg, totalCount, lossCount, profitRows] = await Promise.all([
-    prisma.order.aggregate({ where, _sum: { saleGross: true } }),
+  const [totalCount, lossCount, profitRows] = await Promise.all([
     prisma.order.count({ where }),
     prisma.order.count({ where: lossWhere }),
     prisma.order.findMany({
       where,
       select: {
+        saleGross: true,
         settledNetProfit: true,
         estimatedNetProfit: true,
         settledSaleMarginPct: true,
         estimatedSaleMarginPct: true,
+        // Net satış (iade düşülmüş) için REFUND_DEDUCTION fee'leri.
+        fees: {
+          where: { feeType: 'REFUND_DEDUCTION' },
+          select: { source: true, amountGross: true, vatRate: true },
+        },
       },
     }),
   ]);
+
+  // Ciro = Σ NET satış (iade düşülmüş), liste + kâr dökümüyle tutarlı (ham Σ saleGross
+  // DEĞİL): her sipariş için ham satış − çözümlenmiş REFUND_DEDUCTION.
+  const totalRevenue = profitRows.reduce((sum, row) => {
+    if (row.saleGross === null) return sum;
+    return sum.add(
+      computeNetSaleGross(
+        new Decimal(row.saleGross.toString()),
+        row.fees.map((f) => ({
+          source: f.source,
+          amountGross: new Decimal(f.amountGross.toString()),
+          vatRate: new Decimal(f.vatRate.toString()),
+        })),
+      ),
+    );
+  }, new Decimal(0));
 
   const netProfit = profitRows.reduce((sum, row) => {
     const value = row.settledNetProfit ?? row.estimatedNetProfit;
@@ -246,7 +285,7 @@ export async function getOrdersSummary(
   const pct = totalCount === 0 ? new Decimal(0) : new Decimal(lossCount).div(totalCount).mul(100);
 
   return {
-    totalRevenueGross: (agg._sum.saleGross ?? new Decimal(0)).toString(),
+    totalRevenueGross: totalRevenue.toString(),
     netProfitGross: netProfit.toString(),
     avgMarginPct: avgMargin === null ? null : avgMargin.toString(),
     lossOrderRate: { lossCount, totalCount, pct: pct.toString() },

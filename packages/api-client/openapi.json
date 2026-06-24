@@ -734,7 +734,7 @@
               "string",
               "null"
             ],
-            "description": "Sale total incl. VAT (decimal string) — null until OrderItems are synced.",
+            "description": "Net sale incl. VAT (decimal string): gross sale minus resolved return deductions (matches the detail modal). null until OrderItems are synced.",
             "example": "299.40"
           },
           "saleVat": {
@@ -877,7 +877,7 @@
         "properties": {
           "totalRevenueGross": {
             "type": "string",
-            "description": "Σ saleGross (KDV-dahil) over the filtered set."
+            "description": "Σ net sale (return-adjusted, KDV-dahil) over the filtered set."
           },
           "netProfitGross": {
             "type": "string",

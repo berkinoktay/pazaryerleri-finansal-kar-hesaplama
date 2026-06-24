@@ -23,6 +23,7 @@ export {
   type OrderLineForCalcCheck,
 } from './resolve-order-calculability';
 export { buildCalcCheckLines } from './build-calc-check-lines';
+export { computeNetSaleGross } from './fold-return-legs';
 export {
   buildProfitBreakdown,
   type BuildProfitBreakdownInput,
