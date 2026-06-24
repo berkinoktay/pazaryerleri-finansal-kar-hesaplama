@@ -14,6 +14,7 @@ export {
 } from './recompute-settled-profit';
 export {
   FeeDefinitionNotFoundError,
+  isMicroExport,
   isPsfExempt,
   resolveFeeDefinition,
 } from './resolve-fee-definition';

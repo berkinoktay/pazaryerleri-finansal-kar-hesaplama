@@ -36,7 +36,13 @@ import type { HandleSettlementResult } from './sale';
 // PSF artık tek refinable PLATFORM_SERVICE satırı (SameDayShipping 6.99/10.99 rate
 // estimate'te belirlenir; feeType hep PLATFORM_SERVICE). PLATFORM_SERVICE_FAST feeType'ı
 // hiçbir kod yazmaz → confirmation listesinden çıkarıldı (2026-06-14).
-const CONFIRMABLE_FEE_TYPES: readonly OrderFeeType[] = ['PLATFORM_SERVICE', 'STOPPAGE'];
+// INTERNATIONAL_SERVICE (mikro ihracat Uluslararası Hizmet Bedeli): PSF gibi deterministik
+// dönem-düzeyi ESTIMATE — PaymentOrder cycle'ında confirm edilir ki settled kâra girsin.
+const CONFIRMABLE_FEE_TYPES: readonly OrderFeeType[] = [
+  'PLATFORM_SERVICE',
+  'STOPPAGE',
+  'INTERNATIONAL_SERVICE',
+];
 
 // Satıcı kendi kargo anlaşmasını kullanıyorsa (usesSellerCargoAgreement) Trendyol
 // kargo faturası BEKLENMEZ → ESTIMATE SHIPPING zaten gerçek maliyettir (kendi

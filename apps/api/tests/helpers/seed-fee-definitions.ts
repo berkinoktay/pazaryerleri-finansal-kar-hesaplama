@@ -34,13 +34,14 @@ const SEED_MIGRATION_PATHS = [
   '../../../../packages/db/prisma/migrations/20260519175540_fee_definitions_trendyol_seed/migration.sql',
   '../../../../packages/db/prisma/migrations/20260610090000_cargo_invoice_foundation/migration.sql',
   '../../../../packages/db/prisma/migrations/20260614020000_fee_scope_commission_vat/migration.sql',
+  '../../../../packages/db/prisma/migrations/20260624120100_international_service_fee_seed/migration.sql',
 ].map((rel) => resolve(__dirname, rel));
 
 // PR-2: PSF + PSF_FAST + RETURN_SHIPPING (TRENDYOL) + STOPPAGE (ALL, denetim A) ·
-// PR-8: SHIPPING (TRENDYOL) · denetim A: COMMISSION_INVOICE (ALL). 6 total: 4
-// TRENDYOL + 2 ALL. Count is over ALL rows (not just TRENDYOL) since the
-// fee scope is now mixed (FeeScope enum).
-const EXPECTED_FEE_DEFINITION_ROWS = 6;
+// PR-8: SHIPPING (TRENDYOL) · denetim A: COMMISSION_INVOICE (ALL) · mikro ihracat:
+// INTERNATIONAL_SERVICE (TRENDYOL). 7 total: 5 TRENDYOL + 2 ALL. Count is over ALL
+// rows (not just TRENDYOL) since the fee scope is now mixed (FeeScope enum).
+const EXPECTED_FEE_DEFINITION_ROWS = 7;
 const SEED_SECTION_MARKER = '-- ─── Seed: fee_definitions';
 
 let cachedSeedSqls: string[] | null = null;

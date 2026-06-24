@@ -28,6 +28,26 @@ describe('computeProfit — GROSS convention', () => {
     expect(r.costMarkupPct?.toFixed(2)).toBe('56.67'); // 34/60×100
   });
 
+  it('micro export: international service fee is a DEBIT, not a platform-service bucket; sale VAT %0 reclaims input VAT', () => {
+    const r = computeProfit({
+      // Mikro ihracat: satış KDV %0 (ihracat istisnası); komisyon/kargo TR ile aynı;
+      // PSF yok; stopaj yok; Uluslararası Hizmet Bedeli (%6) DEBIT.
+      sale: { gross: D('1000'), vat: D('0') },
+      cost: { gross: D('600'), vat: D('60') },
+      commission: { gross: D('190'), vat: D('38') },
+      fees: [{ type: 'INTERNATIONAL_SERVICE', gross: D('60'), vat: D('10'), direction: 'DEBIT' }],
+      stoppage: { gross: D('0') },
+    });
+    // netVat = 0 − 60 − 38 − 10 = −108 (girdi-KDV mahsubu → negatif → kâra ekler)
+    // netProfit = 1000 − 600 − 190 − 60 − 0 − (−108) = 258
+    expect(r.netVat.toString()).toBe('-108');
+    expect(r.netProfit.toString()).toBe('258');
+    // Uluslararası Hizmet Bedeli platformService/shipping kovasına KARIŞMAMALI.
+    expect(r.platformServiceGross.toString()).toBe('0');
+    expect(r.platformServiceVat.toString()).toBe('0');
+    expect(r.shippingGross.toString()).toBe('0');
+  });
+
   // ── Task 12: edge cases ──────────────────────────────────────────────────
 
   it('negative Net VAT when input VAT > sale VAT', () => {

@@ -108,18 +108,33 @@ describe('FeeDefinition seed — FeeScope (denetim A)', () => {
     expect(row?.isRequired).toBe(false);
   });
 
+  it('INTERNATIONAL_SERVICE row exists (TRENDYOL, mikro ihracat — %6 RATE_OF_SALE)', async () => {
+    const row = await prisma.feeDefinition.findFirst({
+      where: { platform: 'TRENDYOL', feeType: 'INTERNATIONAL_SERVICE' },
+    });
+    expect(row).not.toBeNull();
+    expect(row?.calculationKind).toBe('RATE_OF_SALE');
+    expect(new Decimal(row?.rateOfSale ?? '0').toString()).toBe('0.06');
+    expect(new Decimal(row?.defaultVatRate ?? '0').toString()).toBe('20');
+    expect(row?.isRequired).toBe(true);
+    // Trendyol mikro ihracat Uluslararası Hizmet Bedeli 16.07.2024'te yürürlüğe girdi.
+    expect(row?.effectiveFrom.toISOString().startsWith('2024-07-16')).toBe(true);
+  });
+
   it('seed is idempotent — re-running does not duplicate rows', async () => {
     await ensureFeeDefinitions();
     await ensureFeeDefinitions();
     const all = await prisma.feeDefinition.findMany();
-    expect(all).toHaveLength(6);
+    expect(all).toHaveLength(7);
   });
 
-  it('effectiveFrom is set to 2026-05-18 for all seed rows', async () => {
+  it('every seed row has its documented effectiveFrom and an open effectiveTo', async () => {
     const rows = await prisma.feeDefinition.findMany();
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(7);
     for (const row of rows) {
-      expect(row.effectiveFrom.toISOString().startsWith('2026-05-18')).toBe(true);
+      // Mikro ihracat Uluslararası Hizmet Bedeli 2024-07-16; diğer tüm ücretler 2026-05-18.
+      const expectedFrom = row.feeType === 'INTERNATIONAL_SERVICE' ? '2024-07-16' : '2026-05-18';
+      expect(row.effectiveFrom.toISOString().startsWith(expectedFrom)).toBe(true);
       expect(row.effectiveTo).toBeNull();
     }
   });

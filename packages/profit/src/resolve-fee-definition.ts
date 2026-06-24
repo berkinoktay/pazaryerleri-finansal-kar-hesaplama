@@ -61,7 +61,7 @@ export async function resolveFeeDefinition(tx: Prisma.TransactionClient, args: R
 
 /**
  * Platform Hizmet Bedeli muafiyet kuralı:
- *   - micro === true (Trendyol Yurt Dışı Aracılığı) → PSF = 0
+ *   - micro === true (mikro ihracat) → PSF = 0
  *   - Tüm OrderItem.productVariant.isDigital === true → PSF = 0
  *
  * İADE NOTU (Berkin kararı 2026-06-20): RETURNED durumu PSF'yi MUAF ETMEZ.
@@ -84,4 +84,17 @@ export function isPsfExempt(order: OrderForPsfExempt): boolean {
   if (order.micro === true) return true;
   if (order.items.length === 0) return false;
   return order.items.every((item) => item.productVariant?.isDigital === true);
+}
+
+/**
+ * Mikro ihracat (Trendyol marketplace `micro=true`) ayırt edici yordamı —
+ * `isPsfExempt`'in kardeşi. Mikro ihracat finansal modeli normal siparişten ayrılır:
+ *   - Satış KDV'si %0 (ihracat istisnası 3065/11-1-a) — kaynakta sıfırlanır (upsert-order).
+ *   - PSF uygulanmaz (yukarıda `isPsfExempt` zaten true döner).
+ *   - "Uluslararası Hizmet Bedeli" (%6) kesilir; iadede "Yurt Dışı İade Operasyon Bedeli".
+ *   - Komisyon + kargo Türkiye içiyle AYNI (değişmez).
+ * Tek doğruluk kaynağı: tüm kâr yolları (estimate/settled/breakdown/claim) bunu çağırır.
+ */
+export function isMicroExport(order: { micro: boolean }): boolean {
+  return order.micro === true;
 }

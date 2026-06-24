@@ -50,6 +50,9 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
     // GROSS konvansiyon (2026-06-16): saleGross (KDV-dahil satış) + saleVat.
     saleGross?: string;
     saleVat?: string;
+    // Uluslararası Hizmet Bedeli tabanı = listGross − sellerDiscountGross (mikro ihracat).
+    listGross?: string;
+    sellerDiscountGross?: string;
     status?: 'DELIVERED' | 'RETURNED';
     micro?: boolean;
     // GROSS maliyet snapshot'ı: unitCostSnapshotGross (KDV-dahil) + oran.
@@ -72,6 +75,10 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         // saleGross 120 = net 100 + KDV 20 (eski saleSubtotalNet 100 / saleVatTotal 20).
         saleGross: args.saleGross ?? '120.00',
         saleVat: args.saleVat ?? '20.00',
+        ...(args.listGross !== undefined && { listGross: args.listGross }),
+        ...(args.sellerDiscountGross !== undefined && {
+          sellerDiscountGross: args.sellerDiscountGross,
+        }),
         micro: args.micro ?? false,
         ...(args.fastDeliveryType !== undefined && { fastDeliveryType: args.fastDeliveryType }),
         ...(args.actualShipDate !== undefined && { actualShipDate: args.actualShipDate }),
@@ -281,6 +288,59 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
 
     const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
     expect(fees.some((f) => f.feeType === 'PLATFORM_SERVICE')).toBe(false);
+  });
+
+  it('mikro ihracat — Uluslararası Hizmet Bedeli yazılır; PSF + Stopaj YAZILMAZ', async () => {
+    const { org, store } = await setup();
+    // Mikro ihracat: satış KDV %0 (upsert kaynakta sıfırlar; burada elle 0). Uluslararası
+    // Hizmet Bedeli tabanı = listGross 1000 − sellerDiscount 0 = 1000; %6 KDV-dahil = 60.
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      micro: true,
+      saleGross: '1000.00',
+      saleVat: '0.00',
+      listGross: '1000.00',
+      sellerDiscountGross: '0.00',
+    });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const fees = await prisma.orderFee.findMany({ where: { orderId: order.id } });
+    const types = fees.map((f) => f.feeType);
+    expect(types).not.toContain('PLATFORM_SERVICE'); // PSF mikro ihracatta uygulanmaz
+    expect(types).not.toContain('STOPPAGE'); // stopaj mikro ihracatta uygulanmaz (interim)
+    expect(types).toContain('INTERNATIONAL_SERVICE');
+
+    const intl = fees.find((f) => f.feeType === 'INTERNATIONAL_SERVICE')!;
+    expect(new Decimal(intl.amountGross).toString()).toBe('60'); // 1000 × %6
+    expect(new Decimal(intl.vatRate).toString()).toBe('20');
+    expect(intl.direction).toBe('DEBIT');
+    expect(intl.source).toBe('ESTIMATE');
+
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(updated.estimatedNetProfit).not.toBeNull();
+  });
+
+  it('mikro ihracat iptal — INTERNATIONAL_SERVICE yazılmaz (status CANCELLED)', async () => {
+    const { org, store } = await setup();
+    const order = await createOrderWithItem({
+      orgId: org.id,
+      storeId: store.id,
+      micro: true,
+      saleGross: '1000.00',
+      saleVat: '0.00',
+      listGross: '1000.00',
+      sellerDiscountGross: '0.00',
+    });
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'CANCELLED' } });
+
+    await prisma.$transaction((tx) => applyEstimateOnOrderCreate(order.id, tx));
+
+    const intl = await prisma.orderFee.findFirst({
+      where: { orderId: order.id, feeType: 'INTERNATIONAL_SERVICE' },
+    });
+    expect(intl).toBeNull();
   });
 
   it('PSF muafiyet — all-digital → PSF OrderFee yazılmaz', async () => {
