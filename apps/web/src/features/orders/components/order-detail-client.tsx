@@ -153,7 +153,7 @@ export function OrderDetailClient({
         </Alert>
       ) : null}
 
-      <OrderKpiGrid order={order} />
+      <OrderKpiGrid order={order} dense={chrome === 'modal'} />
 
       <OrderDeliverySection order={order} />
 

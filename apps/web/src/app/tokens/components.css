@@ -35,6 +35,17 @@ table tr[data-depth='1'] > td:first-child {
   max-height: var(--size-image-modal-h);
 }
 
+/* Order detail modal viewport caps — driven by features/orders/components/
+   order-detail-modal.tsx. Viewport-relative width/height (min(64rem, 90vw) /
+   85vh) need a CSS class, not a Tailwind max-* utility — same documented escape
+   hatch as .image-modal-img above. Unlayered, so it overrides DialogContent's
+   base `max-w-modal`; the cap lets the flex column bound its scroll body. */
+.order-detail-modal {
+  width: 100%;
+  max-width: var(--size-modal-wide);
+  max-height: var(--size-modal-tall);
+}
+
 /* Sidebar visual identity — applied to BOTH the desktop sidebar inner
    AND the BottomDock so they share one continuous surface. Two layered
    treatments give the rail its distinctive PazarSync character:

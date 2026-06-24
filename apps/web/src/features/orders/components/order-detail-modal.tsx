@@ -10,7 +10,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 
 import { OrderDetailClient } from './order-detail-client';
 
@@ -55,21 +54,24 @@ export function OrderDetailModal({
         if (!next) onClose();
       }}
     >
-      {/* gap-0 p-0 override DialogContent's base gap-md/p-lg so the header and the
-          scroll body own their own padding (cn extends twMerge with the custom
-          spacing scale, so the overrides win — feedback_cn_twmerge_custom_spacing). */}
-      <DialogContent className="max-w-modal-wide max-h-modal-tall flex w-full flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="px-lg pt-lg pb-md">
+      {/* order-detail-modal (tokens/components.css) caps width/height with
+          viewport-relative values — a CSS class, not a Tailwind max-* utility,
+          per the .image-modal-img escape hatch. gap-0 p-0 override DialogContent's
+          base gap-md/p-lg so the header and scroll body own their own padding. */}
+      <DialogContent className="order-detail-modal flex flex-col gap-0 overflow-hidden p-0">
+        {/* shrink-0 header stays put; the body is a native overflow-y-auto flex
+            child (flex-1 + min-h-0) — bulletproof scroll in a max-height dialog
+            without relying on percentage-height resolution. The scrollbar is
+            token-styled globally (globals.css), so it matches the design system. */}
+        <DialogHeader className="px-lg pt-lg pb-md shrink-0">
           <DialogTitle>{order.title}</DialogTitle>
           <DialogDescription>
             {formatter.dateTime(new Date(order.orderDate), 'long')}
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="px-lg pb-lg">
-            <OrderDetailClient orgId={orgId} storeId={storeId} orderId={order.id} chrome="modal" />
-          </div>
-        </ScrollArea>
+        <div className="px-lg pb-lg min-h-0 flex-1 overflow-y-auto">
+          <OrderDetailClient orgId={orgId} storeId={storeId} orderId={order.id} chrome="modal" />
+        </div>
       </DialogContent>
     </Dialog>
   );
