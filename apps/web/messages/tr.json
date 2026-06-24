@@ -1805,7 +1805,15 @@
         "description": "İade talepleri Trendyol'dan akmaya başladığında burada listelenecek."
       },
       "open": "Açık",
-      "resolved": "Tamamlandı"
+      "resolved": "Tamamlandı",
+      "cargo": "İade kargosu",
+      "accepted": "Kabul edildi"
+    },
+    "delivery": {
+      "agreed": "Söz verilen teslim",
+      "actual": "Gerçekleşen teslim",
+      "onTime": "Zamanında",
+      "late": "Geç teslim"
     },
     "errors": {
       "noStoreContext": "Sipariş detayını görmek için aktif bir mağaza gerekli.",

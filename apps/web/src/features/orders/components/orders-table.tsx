@@ -3,7 +3,6 @@
 import { type ColumnDef, type PaginationState, type SortingState } from '@tanstack/react-table';
 import { Alert02Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
-import { useRouter } from 'next/navigation';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
@@ -67,12 +66,14 @@ export interface OrdersTableProps {
   onPaginationChange: (next: { page?: number; perPage?: number }) => void;
   /** Commits a new server-side sort key when the user toggles the margin header. */
   onSortChange: (next: OrderSortValue) => void;
+  /** Opens the in-page detail modal for the clicked row (replaces route nav). */
+  onRowOpen?: (id: string) => void;
 }
 
 /**
  * Server-paginated orders grid. The component is presentation-only — filter
  * state, pagination state, and the React Query call live in the page client.
- * Row click navigates to the order detail page.
+ * Row click opens the in-page detail modal via onRowOpen (no route change).
  */
 export function OrdersTable({
   rows,
@@ -88,11 +89,11 @@ export function OrdersTable({
   onFiltersChange,
   onPaginationChange,
   onSortChange,
+  onRowOpen,
 }: OrdersTableProps): React.ReactElement {
   const t = useTranslations('ordersPage.table');
   const tPage = useTranslations('ordersPage');
   const formatter = useFormatter();
-  const router = useRouter();
 
   const columns = React.useMemo<ColumnDef<OrderListItem>[]>(() => {
     if (costStatus === 'excluded') {
@@ -344,7 +345,7 @@ export function OrdersTable({
       columns={columns}
       data={rows}
       loading={loading}
-      onRowClick={(row) => router.push(`/orders/${row.id}`)}
+      onRowClick={(row) => onRowOpen?.(row.id)}
       sorting={sortingState}
       onSortingChange={handleSortingChange}
       paginationState={paginationState}

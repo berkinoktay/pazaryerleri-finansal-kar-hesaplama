@@ -1740,7 +1740,15 @@
         "description": "Return claims will appear here once they start flowing from Trendyol."
       },
       "open": "Open",
-      "resolved": "Resolved"
+      "resolved": "Resolved",
+      "cargo": "Return cargo",
+      "accepted": "Accepted"
+    },
+    "delivery": {
+      "agreed": "Promised delivery",
+      "actual": "Actual delivery",
+      "onTime": "On time",
+      "late": "Late"
     },
     "errors": {
       "noStoreContext": "An active store is required to view order detail.",

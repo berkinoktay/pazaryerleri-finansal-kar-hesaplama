@@ -21,6 +21,7 @@ import {
   type ReconciliationStatusValue,
 } from '../lib/orders-filter-parsers';
 
+import { OrderDetailModal, type OrderDetailModalSelection } from './order-detail-modal';
 import { OrdersEmptyState } from './orders-empty-state';
 import { OrdersKpiStrip } from './orders-kpi-strip';
 import { OrdersTable } from './orders-table';
@@ -54,6 +55,7 @@ export function OrdersPageClient({
   const tSync = useTranslations('syncCenter');
   const { filters, setFilters } = useOrdersFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
+  const [selectedOrder, setSelectedOrder] = React.useState<OrderDetailModalSelection | null>(null);
 
   const noStoreSelected = orgId === null || storeId === null;
 
@@ -192,6 +194,16 @@ export function OrdersPageClient({
           tabsLoading={ordersQuery.isLoading}
           onCostStatusChange={(next) => setFilters({ costStatus: next })}
           onSortChange={(next) => setFilters({ sort: next })}
+          onRowOpen={(id) => {
+            const selected = rows.find((row) => row.id === id);
+            if (selected !== undefined) {
+              setSelectedOrder({
+                id,
+                title: selected.platformOrderNumber ?? selected.platformOrderId,
+                orderDate: selected.orderDate,
+              });
+            }
+          }}
           onFiltersChange={(next) =>
             setFilters({
               ...(next.q !== undefined ? { q: next.q } : {}),
@@ -217,6 +229,13 @@ export function OrdersPageClient({
           }
         />
       </div>
+
+      <OrderDetailModal
+        orgId={orgId}
+        storeId={storeId}
+        order={selectedOrder}
+        onClose={() => setSelectedOrder(null)}
+      />
 
       <SyncCenter
         open={syncCenterOpen}
