@@ -30,10 +30,12 @@ describe('FeeDefinition seed — FeeScope (denetim A)', () => {
     await ensureFeeDefinitions();
   });
 
-  it('contains 4 TRENDYOL + 2 ALL rows (6 total)', async () => {
+  it('contains 5 TRENDYOL + 2 ALL rows (7 total)', async () => {
+    // 5 TRENDYOL: PSF, PSF_FAST, RETURN_SHIPPING, SHIPPING, INTERNATIONAL_SERVICE (mikro ihracat).
+    // 2 ALL: STOPPAGE, COMMISSION_INVOICE.
     const trendyol = await prisma.feeDefinition.findMany({ where: { platform: 'TRENDYOL' } });
     const all = await prisma.feeDefinition.findMany({ where: { platform: 'ALL' } });
-    expect(trendyol).toHaveLength(4);
+    expect(trendyol).toHaveLength(5);
     expect(all).toHaveLength(2);
   });
 
