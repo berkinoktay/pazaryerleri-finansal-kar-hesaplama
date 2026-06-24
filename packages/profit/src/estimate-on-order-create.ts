@@ -31,7 +31,7 @@ import { inferShippedSameDay } from './infer-shipped-same-day';
 import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
 import { grossToVat } from './money';
 import { computeProfit, type ProfitInputFee } from './profit-formula';
-import { isPsfExempt, resolveFeeDefinition } from './resolve-fee-definition';
+import { isMicroExport, isPsfExempt, resolveFeeDefinition } from './resolve-fee-definition';
 import { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
 
 /**
@@ -146,9 +146,14 @@ export async function applyEstimateOnOrderCreate(
   // PSF üzerine stopaj YAPILMAZ (design §3.4 — 330 Tebliği Md 5/2). GROSS konvansiyon:
   // amountGross = (saleGross − saleVat) × rateOfSale. Stopaj YAPISAL olarak KDV
   // taşımaz (vergi tevkifatı) → vatRate verilmez; OrderFee.vat_rate kolonu @default(0).
+  // Mikro ihracat: stopaj ŞİMDİLİK uygulanmaz (canlı hakediş verisinden doğrulanacak —
+  // Trendyol ürünü satın aldığı + komisyon kesmediği için %1 e-ticaret stopajı bu modelde
+  // geçerli görünmüyor). Doğrulanırsa bu tek `!isMicroExport` koşulu kaldırılır + doküman
+  // güncellenir (plan: resilient-sauteeing-milner.md "Stopaj — açık nokta").
   if (
     order.saleGross !== null &&
     order.saleVat !== null &&
+    !isMicroExport(order) &&
     !existingEstimateFeeTypes.has('STOPPAGE')
   ) {
     const stopajDef = await resolveFeeDefinition(tx, {
@@ -227,6 +232,66 @@ export async function applyEstimateOnOrderCreate(
     });
   }
 
+  // ─── 3b. Uluslararası Hizmet Bedeli (yalnız mikro ihracat) ─────────────
+  // Trendyol: mikro ihracat siparişlerinde PSF UYGULANMAZ; bunun yerine ürün satışı
+  // üzerinden %6 KDV-dahil "Uluslararası Hizmet Bedeli" kesilir (16.07.2024'ten beri,
+  // tüm bölgeler). Taban: Trendyol-karşılamalı indirimler HARİÇ, satıcı indirimi düşülmüş
+  // satış = listGross − sellerDiscountGross (saleGross TY indirimini de düştüğünden taban
+  // DEĞİL). YALNIZ iptale dönen siparişte uygulanmaz (RETURNED'de uygulanır — satış
+  // gerçekleşmiştir, iadenin ayrı "Yurt Dışı İade Operasyon Bedeli"si vardır). Refinable
+  // (UPSERT, PSF gibi); oran data-driven (FeeDefinition.rateOfSale). Taban inceliği gerçek
+  // hakediş ücretiyle doğrulanacak (plan: resilient-sauteeing-milner.md).
+  if (isMicroExport(order) && order.saleGross !== null) {
+    const existingIntl = await tx.orderFee.findFirst({
+      where: { orderId, feeType: 'INTERNATIONAL_SERVICE', source: 'ESTIMATE' },
+      select: { id: true },
+    });
+    if (order.status === 'CANCELLED') {
+      // İptale dönen mikro ihracat: ücret kalmamalı (önceki tahmin temizlenir).
+      if (existingIntl !== null) {
+        await tx.orderFee.delete({ where: { id: existingIntl.id } });
+      }
+    } else {
+      const intlDef = await resolveFeeDefinition(tx, {
+        platform: order.store.platform,
+        feeType: 'INTERNATIONAL_SERVICE',
+        at: order.orderDate,
+      });
+      if (intlDef.rateOfSale === null) {
+        throw new Error(`INTERNATIONAL_SERVICE FeeDefinition ${intlDef.id} missing rateOfSale`);
+      }
+      // Taban: effectiveSaleGross = listGross − sellerDiscountGross (TY-fonlu indirim HARİÇ).
+      // listGross/sellerDiscountGross şemada nullable; saleGross dolu olduğunda (yukarıdaki
+      // koşul) upsert üçünü birlikte yazar → pratikte dolu. Defansif ?? 0.
+      const intlBase = new Decimal(order.listGross ?? 0).sub(
+        new Decimal(order.sellerDiscountGross ?? 0),
+      );
+      // %6 KDV-DAHİL → amountGross = base × rateOfSale (GROSS); KDV bileşeni downstream
+      // grossToVat ile defaultVatRate'ten türetilir.
+      const intlGross = intlBase.mul(new Decimal(intlDef.rateOfSale)).toDecimalPlaces(2);
+      const intlData = {
+        feeDefinitionId: intlDef.id,
+        amountGross: intlGross,
+        vatRate: new Decimal(intlDef.defaultVatRate),
+        displayName: intlDef.displayName,
+      };
+      if (existingIntl !== null) {
+        await tx.orderFee.update({ where: { id: existingIntl.id }, data: intlData });
+      } else {
+        await tx.orderFee.create({
+          data: {
+            orderId,
+            organizationId: order.organizationId,
+            feeType: 'INTERNATIONAL_SERVICE',
+            source: 'ESTIMATE',
+            direction: 'DEBIT',
+            ...intlData,
+          },
+        });
+      }
+    }
+  }
+
   // ─── 4. ProfitInput (GROSS) kur + computeProfit + Order.estimated* yaz ──
   // Tüm cost snapshot'lar dolu mu? Eksikse profit null kalır (kâr-dondurma).
   const allHaveCostSnapshot = order.items.every(
@@ -267,14 +332,23 @@ export async function applyEstimateOnOrderCreate(
     commissionVat = commissionVat.add(grossToVat(effComm, new Decimal(item.commissionVatRate)));
   }
 
-  // PSF + Kargo ESTIMATE fee'leri (Stopaj motorda ayrı `stoppage` terimidir —
-  // fee listesine GİRMEZ, çift sayım olmaz).
+  // PSF + Kargo + Uluslararası Hizmet Bedeli (mikro ihracat) ESTIMATE fee'leri
+  // (Stopaj motorda ayrı `stoppage` terimidir — fee listesine GİRMEZ, çift sayım olmaz).
   const estimateFees = await tx.orderFee.findMany({
-    where: { orderId, source: 'ESTIMATE', feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE'] } },
+    where: {
+      orderId,
+      source: 'ESTIMATE',
+      feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE', 'INTERNATIONAL_SERVICE'] },
+    },
     select: { feeType: true, amountGross: true, vatRate: true, direction: true },
   });
   const profitInputFees: ProfitInputFee[] = estimateFees.map((fee) => ({
-    type: fee.feeType === 'SHIPPING' ? 'SHIPPING' : 'PLATFORM_SERVICE',
+    type:
+      fee.feeType === 'SHIPPING'
+        ? 'SHIPPING'
+        : fee.feeType === 'INTERNATIONAL_SERVICE'
+          ? 'INTERNATIONAL_SERVICE'
+          : 'PLATFORM_SERVICE',
     gross: new Decimal(fee.amountGross),
     // KDV tam precision (per-fee yuvarlama YOK); tek yuvarlama persist'te.
     vat: grossToVat(new Decimal(fee.amountGross), new Decimal(fee.vatRate)),

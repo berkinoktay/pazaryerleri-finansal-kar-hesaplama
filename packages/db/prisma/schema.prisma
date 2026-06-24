@@ -188,6 +188,13 @@ enum OrderFeeType {
   PENALTY_SUPPLY_FAILURE
   NOTIFICATION_FEE
   COMMISSION_INVOICE
+  // Mikro ihracat (Order.micro=true) — marketplace ihracat siparişlerine özgü iki ücret:
+  // INTERNATIONAL_SERVICE: ürün satışı üzerinden %6 KDV-dahil "Uluslararası Hizmet Bedeli"
+  //   (PSF mikro ihracatta uygulanmaz; bunun yerine bu ücret kesilir). Tahmin yolunda yazılır.
+  // OVERSEAS_RETURN_OPERATION: iadede satış reverse edilmez, ayrıca (satış−komisyon)×%35/%30
+  //   "Yurt Dışı İade Operasyon Bedeli" kesilir (iade yolunda yazılır).
+  INTERNATIONAL_SERVICE
+  OVERSEAS_RETURN_OPERATION
 }
 
 // OrderFee'nin kaynağı — audit + reconciliation algoritması için kritik (§3.3).

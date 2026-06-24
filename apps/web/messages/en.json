@@ -1706,7 +1706,9 @@
         "PENALTY_LATE_DELIVERY": "Late delivery penalty",
         "PENALTY_SUPPLY_FAILURE": "Supply failure penalty",
         "NOTIFICATION_FEE": "Notification fee",
-        "COMMISSION_INVOICE": "Commission invoice"
+        "COMMISSION_INVOICE": "Commission invoice",
+        "INTERNATIONAL_SERVICE": "International service fee",
+        "OVERSEAS_RETURN_OPERATION": "Overseas return operation fee"
       },
       "sources": {
         "ESTIMATE": "Not finalized",

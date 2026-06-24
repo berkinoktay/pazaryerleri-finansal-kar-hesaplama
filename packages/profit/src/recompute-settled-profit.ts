@@ -126,12 +126,14 @@ export async function recomputeSettledProfit(
   }
 
   // Confirmed fees: SETTLEMENT + CARGO_INVOICE rows, plus ESTIMATE rows the
-  // PaymentOrder cycle marked confirmed. SHIPPING/PLATFORM_SERVICE only (stopaj
-  // ayrı `stoppage` terimi; iade-leg'leri ayrı feeType → motor input'una girmez).
+  // PaymentOrder cycle marked confirmed. SHIPPING/PLATFORM_SERVICE/INTERNATIONAL_SERVICE
+  // (stopaj ayrı `stoppage` terimi; iade-leg'leri ayrı feeType → motor input'una girmez).
+  // INTERNATIONAL_SERVICE (mikro ihracat) tahmin yolundaki gibi settled'a da girer —
+  // yoksa mikro settled kârı bu ücreti atlar (estimate ile tutarsızlık).
   const confirmedFees = await tx.orderFee.findMany({
     where: {
       orderId,
-      feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE'] },
+      feeType: { in: ['SHIPPING', 'PLATFORM_SERVICE', 'INTERNATIONAL_SERVICE'] },
       OR: [
         { source: { in: ['SETTLEMENT', 'CARGO_INVOICE'] } },
         { source: 'ESTIMATE', confirmedAt: { not: null } },
@@ -140,7 +142,12 @@ export async function recomputeSettledProfit(
     select: { feeType: true, amountGross: true, vatRate: true, direction: true },
   });
   const profitInputFees: ProfitInputFee[] = confirmedFees.map((f) => ({
-    type: f.feeType === 'SHIPPING' ? 'SHIPPING' : 'PLATFORM_SERVICE',
+    type:
+      f.feeType === 'SHIPPING'
+        ? 'SHIPPING'
+        : f.feeType === 'INTERNATIONAL_SERVICE'
+          ? 'INTERNATIONAL_SERVICE'
+          : 'PLATFORM_SERVICE',
     gross: new Decimal(f.amountGross),
     // KDV tam precision (per-fee yuvarlama YOK); tek yuvarlama persist'te.
     vat: grossToVat(new Decimal(f.amountGross), new Decimal(f.vatRate)),

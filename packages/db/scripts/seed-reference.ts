@@ -278,6 +278,7 @@ const FEE_SEED_MIGRATIONS = [
   '../prisma/migrations/20260519175540_fee_definitions_trendyol_seed/migration.sql',
   '../prisma/migrations/20260610090000_cargo_invoice_foundation/migration.sql',
   '../prisma/migrations/20260614020000_fee_scope_commission_vat/migration.sql',
+  '../prisma/migrations/20260624120100_international_service_fee_seed/migration.sql',
 ].map((rel) => path.resolve(__dirname, rel));
 
 const FEE_SEED_MARKER = '-- ─── Seed: fee_definitions';

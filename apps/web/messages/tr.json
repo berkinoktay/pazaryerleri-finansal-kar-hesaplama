@@ -1771,7 +1771,9 @@
         "PENALTY_LATE_DELIVERY": "Geç teslimat cezası",
         "PENALTY_SUPPLY_FAILURE": "Tedarik başarısızlığı cezası",
         "NOTIFICATION_FEE": "Bildirim ücreti",
-        "COMMISSION_INVOICE": "Komisyon faturası"
+        "COMMISSION_INVOICE": "Komisyon faturası",
+        "INTERNATIONAL_SERVICE": "Uluslararası hizmet bedeli",
+        "OVERSEAS_RETURN_OPERATION": "Yurt dışı iade operasyon bedeli"
       },
       "sources": {
         "ESTIMATE": "Kesinleşmemiş",

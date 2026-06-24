@@ -236,20 +236,29 @@ export async function upsertOrderWithSnapshot(
   // promoted order is never left half-written with its buffer placeholder still
   // present (which would double-count it on the Live Performance page).
   const run = async (tx: Prisma.TransactionClient): Promise<void> => {
+    // Mikro ihracat (Trendyol marketplace `micro=true`): satış KDV'den müstesnadır
+    // (ihracat istisnası, 3065 sayılı KDV Kanunu 11/1-a — e-arşiv fatura tipi "İstisna").
+    // KDV'yi KAYNAKTA sıfırlarız (Order.saleVat + OrderItem.saleVatRate + sellerDiscountVat):
+    // depolanan değer GERÇEKTİR (distorsiyon değil), tüm kâr yolları (estimate/settled/
+    // breakdown) + liste/özet otomatik doğru olur. Komisyon/kargo TR içiyle aynı kalır.
+    const microExport = order.micro === true;
+
     // sellerDiscountVat: satıcı indirimi KDV'si — per-line GERÇEK satış KDV oranından
     // türetilir (hardcoded %20 DEĞİL). %10 satışlarda (Türk bayrağı, kitap) %20
     // varsayımı yanlış değer saklardı. Her satırın lineSellerDiscountGross'u kendi
     // saleVatRate'i ile KDV'ye çevrilir; TAM PRECISION'da biriktirilir, persist'te
     // BİR kez yuvarlanır (Bug 1 ile aynı precision disiplini). Türev gösterim kolonu
-    // (kâr formülünde değil) ama doğru değer olmalı.
-    const sellerDiscountVat = order.lines
-      .reduce((acc, line) => {
-        const discountGross = new Decimal(line.lineSellerDiscountGross);
-        const rate = new Decimal(line.saleVatRate);
-        if (rate.isZero()) return acc;
-        return acc.add(discountGross.mul(rate).div(new Decimal(100).add(rate)));
-      }, new Decimal(0))
-      .toDecimalPlaces(2);
+    // (kâr formülünde değil) ama doğru değer olmalı. Mikro ihracatta satış KDV %0 → 0.
+    const sellerDiscountVat = microExport
+      ? new Decimal(0)
+      : order.lines
+          .reduce((acc, line) => {
+            const discountGross = new Decimal(line.lineSellerDiscountGross);
+            const rate = new Decimal(line.saleVatRate);
+            if (rate.isZero()) return acc;
+            return acc.add(discountGross.mul(rate).div(new Decimal(100).add(rate)));
+          }, new Decimal(0))
+          .toDecimalPlaces(2);
 
     // 1. UPSERT Order — NEW convention native.
     //    Sale/discount agregat'ı + flagler MappedOrder'dan direkt.
@@ -271,7 +280,9 @@ export async function upsertOrderWithSnapshot(
         // hardcoded %20 DEĞİL — karışık/standart-dışı KDV oranlı satışlarda doğru.
         // listGross/saleVat mapper'dan gelir; promotionDisplays UI gösterimi (ekleme #3).
         saleGross: new Decimal(order.saleGross),
-        saleVat: new Decimal(order.saleVat),
+        // Mikro ihracat → satış KDV %0 (ihracat istisnası). saleGross (KDV-dahil tutar)
+        // değişmez; yalnız KDV bileşeni 0 olur (saleNet = saleGross).
+        saleVat: microExport ? new Decimal(0) : new Decimal(order.saleVat),
         listGross: new Decimal(order.listGross),
         sellerDiscountGross: new Decimal(order.sellerDiscountGross),
         sellerDiscountVat,
@@ -426,7 +437,9 @@ export async function upsertOrderWithSnapshot(
           lineListGross: new Decimal(line.lineListGross),
           lineSaleGross: new Decimal(line.lineSaleGross),
           lineSellerDiscountGross: new Decimal(line.lineSellerDiscountGross),
-          saleVatRate: new Decimal(line.saleVatRate),
+          // Mikro ihracat → satış KDV oranı %0 (ihracat istisnası). build-profit-breakdown
+          // saleVat'i bu orandan türetir → micro siparişte 0 (Order.saleVat=0 ile tutarlı).
+          saleVatRate: microExport ? new Decimal(0) : new Decimal(line.saleVatRate),
           commissionRate: new Decimal(line.commissionRate),
           commissionGross: new Decimal(line.commissionGross),
           refundedCommissionGross: new Decimal(line.refundedCommissionGross),
