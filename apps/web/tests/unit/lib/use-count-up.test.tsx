@@ -31,6 +31,16 @@ describe('useCountUp', () => {
     await waitFor(() => expect(result.current).toBe(100), { timeout: 1000 });
   });
 
+  it('begins the mount count-up below the target (no flash of the final value)', () => {
+    stubReducedMotion(false);
+    const { result } = renderHook(() => useCountUp(100, { durationMs: 1000 }));
+    // First committed value is the count-up START, not the target. Guards two
+    // regressions: the 1-frame flash of the final value, AND the StrictMode
+    // double-mount snap (displayRef must stay at the start so the re-run still
+    // tweens from 0 instead of seeing from===target and snapping).
+    expect(result.current).toBeLessThan(100);
+  });
+
   it('reaches a new target when the value changes', async () => {
     stubReducedMotion(false);
     const { result, rerender } = renderHook(({ v }) => useCountUp(v, { durationMs: 40 }), {
