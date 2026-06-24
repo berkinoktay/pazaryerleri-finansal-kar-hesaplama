@@ -11,8 +11,11 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 
 import { type OrderListItem } from '../api/list-orders.api';
+import { profitToneClass } from '../lib/profit-tone';
 import {
   type CostStatusValue,
   type OrderSortValue,
@@ -50,6 +53,7 @@ export interface OrdersTableProps {
     q: string;
     status: OrderListItem['status'] | null;
     reconciliationStatus: OrderListItem['reconciliationStatus'] | null;
+    lossOnly: boolean;
     from: string;
     to: string;
   };
@@ -173,6 +177,17 @@ export function OrdersTable({
               {/* İndirimli siparişte promosyon adlarını gösteren gürültüsüz rozet
                   (spec ekleme #3). Promosyon yoksa hiçbir şey çizilmez. */}
               <PromotionIndicator promotions={row.original.promotionDisplays} />
+              {/* Sevkıyat tipi sinyalleri (veri liste API'sinde zaten var). */}
+              {row.original.fastDelivery ? (
+                <Badge tone="info" size="sm">
+                  {t('badges.fastDelivery')}
+                </Badge>
+              ) : null}
+              {row.original.micro ? (
+                <Badge tone="neutral" size="sm">
+                  {t('badges.micro')}
+                </Badge>
+              ) : null}
             </span>
           );
         },
@@ -207,7 +222,7 @@ export function OrdersTable({
           return value === null ? (
             <span className="text-muted-foreground">—</span>
           ) : (
-            <Currency value={value} />
+            <Currency value={value} className={profitToneClass(value)} />
           );
         },
       },
@@ -219,7 +234,7 @@ export function OrdersTable({
           return value === null ? (
             <span className="text-muted-foreground">—</span>
           ) : (
-            <Currency value={value} emphasis />
+            <Currency value={value} emphasis className={profitToneClass(value)} />
           );
         },
       },
@@ -238,7 +253,23 @@ export function OrdersTable({
           return value === null ? (
             <span className="text-muted-foreground">—</span>
           ) : (
-            <span className="tabular-nums">{value}%</span>
+            <span className={cn('tabular-nums', profitToneClass(value))}>{value}%</span>
+          );
+        },
+      },
+      {
+        // ROI = kâr / maliyet (Marj %'nin yanında ikinci marj tanımı). Backend
+        // costMarkupPct'i hesaplar; burada yalnız render + işaret-tonu.
+        id: 'costMarkupPct',
+        accessorFn: (row) => row.costMarkupPct,
+        header: t('columns.costMarkupPct'),
+        meta: { numeric: true, label: t('columns.costMarkupPct') },
+        cell: ({ row }) => {
+          const value = row.original.costMarkupPct;
+          return value === null ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <span className={cn('tabular-nums', profitToneClass(value))}>{value}%</span>
           );
         },
       },
@@ -281,7 +312,12 @@ export function OrdersTable({
   // store the page-client passes a richer `empty` (the "no orders yet" welcome);
   // otherwise the per-tab default below applies.
   const hasActiveFilters = Boolean(
-    filters.q || filters.status || filters.reconciliationStatus || filters.from || filters.to,
+    filters.q ||
+    filters.status ||
+    filters.reconciliationStatus ||
+    filters.lossOnly ||
+    filters.from ||
+    filters.to,
   );
 
   const handlePaginationChange = (
@@ -317,7 +353,14 @@ export function OrdersTable({
       rowCount={pagination.total}
       hasActiveFilters={hasActiveFilters}
       onClearFilters={() =>
-        onFiltersChange({ q: '', status: null, reconciliationStatus: null, from: '', to: '' })
+        onFiltersChange({
+          q: '',
+          status: null,
+          reconciliationStatus: null,
+          lossOnly: false,
+          from: '',
+          to: '',
+        })
       }
       tabs={
         <OrdersCostStatusTabs
@@ -333,6 +376,7 @@ export function OrdersTable({
           q={filters.q}
           status={filters.status}
           reconciliationStatus={filters.reconciliationStatus}
+          lossOnly={filters.lossOnly}
           from={filters.from}
           to={filters.to}
           onChange={onFiltersChange}

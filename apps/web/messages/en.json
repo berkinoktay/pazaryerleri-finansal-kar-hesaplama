@@ -807,7 +807,16 @@
       "statusPlaceholder": "Order status",
       "statusAll": "All statuses",
       "reconciliationPlaceholder": "Reconciliation status",
-      "reconciliationAll": "All reconciliations"
+      "reconciliationAll": "All reconciliations",
+      "lossOnly": "Loss only",
+      "exportExcel": "Excel"
+    },
+    "kpis": {
+      "revenue": "Total Revenue",
+      "netProfit": "Net Profit",
+      "avgMargin": "Avg. Margin",
+      "lossRate": "Loss-Making Orders",
+      "lossCount": "{count}/{total} orders"
     },
     "status": {
       "PENDING": "Pending",
@@ -834,7 +843,12 @@
         "saleMarginPct": "Margin %",
         "itemCount": "Items",
         "revenue": "Revenue",
-        "costStatus": "Cost status"
+        "costStatus": "Cost status",
+        "costMarkupPct": "ROI %"
+      },
+      "badges": {
+        "fastDelivery": "Fast",
+        "micro": "Micro"
       }
     },
     "tabs": {

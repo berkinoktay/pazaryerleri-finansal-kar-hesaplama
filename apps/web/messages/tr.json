@@ -807,7 +807,16 @@
       "statusPlaceholder": "Sipariş durumu",
       "statusAll": "Tüm durumlar",
       "reconciliationPlaceholder": "Mutabakat durumu",
-      "reconciliationAll": "Tüm mutabakatlar"
+      "reconciliationAll": "Tüm mutabakatlar",
+      "lossOnly": "Sadece zararlı",
+      "exportExcel": "Excel"
+    },
+    "kpis": {
+      "revenue": "Toplam Ciro",
+      "netProfit": "Net Kâr",
+      "avgMargin": "Ortalama Marj",
+      "lossRate": "Zarar Eden Sipariş",
+      "lossCount": "{count}/{total} sipariş"
     },
     "status": {
       "PENDING": "Bekliyor",
@@ -834,7 +843,12 @@
         "saleMarginPct": "Marj %",
         "itemCount": "Kalem",
         "revenue": "Ciro",
-        "costStatus": "Maliyet durumu"
+        "costStatus": "Maliyet durumu",
+        "costMarkupPct": "ROI %"
+      },
+      "badges": {
+        "fastDelivery": "Hızlı",
+        "micro": "Mikro"
       }
     },
     "tabs": {

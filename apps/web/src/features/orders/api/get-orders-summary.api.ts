@@ -3,30 +3,32 @@ import type { components } from '@pazarsync/api-client';
 import { apiClient } from '@/lib/api-client/browser';
 import { throwApiError } from '@/lib/api-error';
 
-import type { CostStatusValue, OrderSortValue } from '../lib/orders-filter-parsers';
+import type { OrderListItem } from './list-orders.api';
+import type { CostStatusValue } from '../lib/orders-filter-parsers';
 
-export type OrderListItem = components['schemas']['OrderListItem'];
-export type ListOrdersResponse = components['schemas']['ListOrdersResponse'];
+export type OrderSummary = components['schemas']['OrderSummaryResponse'];
 
-export interface ListOrdersArgs {
+export interface OrdersSummaryArgs {
   orgId: string;
   storeId: string;
   q?: string;
   status?: OrderListItem['status'];
   reconciliationStatus?: OrderListItem['reconciliationStatus'];
   costStatus?: CostStatusValue;
-  lossOnly?: boolean;
   from?: string;
   to?: string;
-  sort?: OrderSortValue;
-  page: number;
-  perPage: number;
+  lossOnly?: boolean;
 }
 
-export async function listOrders(args: ListOrdersArgs): Promise<ListOrdersResponse> {
+/**
+ * Filter-aware KPI summary for the orders page header. Mirrors the list query
+ * (same filters) minus pagination/sort. lossOnly goes on the wire as the
+ * string 'true' (the backend transforms it) — matching list-orders.api.
+ */
+export async function getOrdersSummary(args: OrdersSummaryArgs): Promise<OrderSummary> {
   const { orgId, storeId, ...query } = args;
   const { data, error, response } = await apiClient.GET(
-    '/v1/organizations/{orgId}/stores/{storeId}/orders',
+    '/v1/organizations/{orgId}/stores/{storeId}/orders/summary',
     {
       params: {
         path: { orgId, storeId },
@@ -40,9 +42,6 @@ export async function listOrders(args: ListOrdersArgs): Promise<ListOrdersRespon
           ...(query.lossOnly === true ? { lossOnly: 'true' as const } : {}),
           ...(query.from !== undefined && query.from.length > 0 ? { from: query.from } : {}),
           ...(query.to !== undefined && query.to.length > 0 ? { to: query.to } : {}),
-          ...(query.sort !== undefined ? { sort: query.sort } : {}),
-          page: query.page,
-          perPage: query.perPage,
         },
       },
     },

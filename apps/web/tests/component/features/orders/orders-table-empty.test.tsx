@@ -30,7 +30,14 @@ function renderTable(empty?: React.ReactNode): void {
         rows={[]}
         empty={empty}
         pagination={{ page: 1, perPage: 25, total: 0, totalPages: 0 }}
-        filters={{ q: '', status: null, reconciliationStatus: null, from: '', to: '' }}
+        filters={{
+          q: '',
+          status: null,
+          reconciliationStatus: null,
+          lossOnly: false,
+          from: '',
+          to: '',
+        }}
         costStatus="calculated"
         sort="-orderDate"
         counts={{ calculated: 0, excluded: 0 }}
