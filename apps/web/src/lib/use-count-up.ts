@@ -32,8 +32,16 @@ export function useCountUp(target: number, options: UseCountUpOptions = {}): num
   const { durationMs = COUNT_UP_DURATION_MS, animateOnMount = true } = options;
   const mounted = useIsMounted();
 
-  const [display, setDisplay] = React.useState(target);
-  const displayRef = React.useRef(target);
+  // Mount'ta display'i HEDEF değil BAŞLANGIÇ değeriyle başlat (animateOnMount → 0).
+  // Böylece: (a) ilk boya hedefi 1-kare "flaş"lamaz, (b) StrictMode mount effect'i
+  // iki kez çalıştırsa bile displayRef 0'da kalır → ikinci çalışma da 0→target
+  // tween'ler. (Eskiden displayRef=target ile başlıyordu; StrictMode'un attığı ilk
+  // çalışma firstRunRef'i tüketip RAF'ı iptal ettiğinden ikinci çalışma from=target
+  // görüp SNAP ediyordu → mount'ta animasyon kaçıyordu.) SSR/hydration güvenliği
+  // aşağıdaki `return mounted ? display : target` ile korunur (mounted=false → target).
+  const initialDisplay = animateOnMount ? 0 : target;
+  const [display, setDisplay] = React.useState(initialDisplay);
+  const displayRef = React.useRef(initialDisplay);
   const frameRef = React.useRef<number | null>(null);
   const firstRunRef = React.useRef(true);
 
