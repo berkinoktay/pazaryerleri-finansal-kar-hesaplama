@@ -1614,6 +1614,8 @@
     "outboundShipping": "Outbound shipping",
     "returnShipping": "Return shipping",
     "platformService": "Platform service fee",
+    "internationalService": "International service fee",
+    "overseasReturnOperation": "Overseas return operation fee",
     "stoppage": "Withholding tax",
     "promotions": "Promotions",
     "netVat": "Net VAT",
@@ -1625,9 +1627,13 @@
     "outboundShippingVat": "Outbound shipping VAT",
     "returnShippingVat": "Return shipping VAT",
     "platformServiceVat": "Platform service fee VAT",
+    "internationalServiceVat": "International service fee VAT",
+    "overseasReturnOperationVat": "Overseas return operation fee VAT",
     "margin": "Profit margin",
     "estimatedProfit": "Estimated profit",
-    "settledProfit": "Actual profit"
+    "settledProfit": "Actual profit",
+    "microExport": "Micro export",
+    "exportVatExemption": "VAT %0 — export exemption"
   },
   "promotionIndicator": {
     "label": "Promotion",

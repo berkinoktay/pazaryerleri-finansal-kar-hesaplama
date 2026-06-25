@@ -13,6 +13,12 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`** — `profitBreakdown` nesnesine mikro
+  ihracat ücret alanları eklendi: `internationalServiceGross` / `internationalServiceVat` (Uluslararası
+  Hizmet Bedeli, PSF yerine) ve `overseasReturnOperationGross` / `overseasReturnOperationVat` (Yurt Dışı
+  İade Operasyon Bedeli). Normal (non-micro) siparişlerde tümü `"0.00"` döner; değerler backend'de
+  hesaplanır (`buildProfitBreakdown`), frontend yalnızca render eder. Ek alanlar geriye dönük uyumludur.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** — liste öğelerine `costMarkupPct` (ROI =
   kâr / Σ maliyet brüt × 100, consumed: `settled ?? estimated`) alanı eklendi; yeni `lossOnly` sorgu
   parametresi yalnız consumed net kârı negatif siparişleri döndürür ("sadece zararlı" hızlı filtresi).

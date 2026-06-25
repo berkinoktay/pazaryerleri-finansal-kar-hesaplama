@@ -75,6 +75,15 @@ export interface ProfitBreakdownView {
   returnShippingVat: string;
   platformServiceGross: string;
   platformServiceVat: string;
+  // Mikro ihracat (Trendyol). Yalnız micro=true siparişlerde dolu; normal siparişte
+  // '0.00' (frontend sıfır satırı gizler). Uluslararası Hizmet Bedeli PSF'nin yerini
+  // alır (mikroda PSF muaf); Yurt Dışı İade Operasyon Bedeli iadede satış reverse
+  // ETMEDEN tek DEBIT ücrettir (fold-return-legs çalışmaz). KDV'leri (varsa) Net KDV'ye
+  // girer (computeProfit debitVat'a katar) → kartta da gösterilir ki Σ netVat'a kapansın.
+  internationalServiceGross: string;
+  internationalServiceVat: string;
+  overseasReturnOperationGross: string;
+  overseasReturnOperationVat: string;
   // Stopaj ayrı bir düşülen terim (komisyon/PSF içine katlanmaz). STOPPAGE fee'leri
   // (direction-signed) toplanır; vatRate 0 olduğu için Net KDV'ye GİRMEZ — netProfit'ten
   // doğrudan düşülür (computeProfit ile aynı cebir).
@@ -119,6 +128,11 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
 
   const shipping = feeAgg('SHIPPING');
   const platformService = feeAgg('PLATFORM_SERVICE');
+  // Mikro ihracat ücretleri (Trendyol). Yön-imzalı toplanır; non-micro siparişte
+  // ücret yok → '0.00'. OVERSEAS_RETURN_OPERATION RETURN_FEE_TYPES'ta DEĞİL (düz DEBIT,
+  // return-leg değil) → resolveReturnLegs onu yok sayar, burada bir kez toplanır.
+  const internationalService = feeAgg('INTERNATIONAL_SERVICE');
+  const overseasReturnOperation = feeAgg('OVERSEAS_RETURN_OPERATION');
   // Stopaj: STOPPAGE fee'leri (vatRate 0). feeAgg yön-imzalı toplar; .gross alınır.
   const stoppage = feeAgg('STOPPAGE');
 
@@ -184,6 +198,10 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     returnShippingVat: returnLegs.RETURN_SHIPPING.vat.toDecimalPlaces(2).toFixed(2),
     platformServiceGross: platformService.gross.toFixed(2),
     platformServiceVat: platformService.vat.toDecimalPlaces(2).toFixed(2),
+    internationalServiceGross: internationalService.gross.toFixed(2),
+    internationalServiceVat: internationalService.vat.toDecimalPlaces(2).toFixed(2),
+    overseasReturnOperationGross: overseasReturnOperation.gross.toFixed(2),
+    overseasReturnOperationVat: overseasReturnOperation.vat.toDecimalPlaces(2).toFixed(2),
     stoppage: dispStoppage.toFixed(2),
     netVat: input.netVat.toFixed(2),
     netProfit: input.netProfit.toFixed(2),
