@@ -179,6 +179,8 @@ interface BuildOrderArgs {
   profitExcludedAt?: Date;
   /** Mikro ihracat siparişi (satış KDV %0, iade modeli OVERSEAS_RETURN_OPERATION). */
   micro?: boolean;
+  /** İade edilen komisyon (satıcı-indiriminin komisyon payı) — effective komisyon testi için. */
+  refundedCommissionGross?: string;
 }
 
 /**
@@ -226,7 +228,7 @@ async function buildOrderWithItem(
       commissionRate: new Decimal('10.00'),
       commissionGross: new Decimal('110.00').mul(qty),
       commissionVatRate: new Decimal('20.00'),
-      refundedCommissionGross: new Decimal('0.00'),
+      refundedCommissionGross: new Decimal(args.refundedCommissionGross ?? '0.00'),
       unitCostSnapshotGross: new Decimal('500.00'),
       unitCostSnapshotVatRate: new Decimal('10.00'),
     },
@@ -389,6 +391,33 @@ describe('estimateReturnOnClaim', () => {
 
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.estimatedNetProfit).not.toBeNull();
+  });
+
+  /**
+   * Mikro iade — İNDİRİMLİ sipariş: hakediş tabanındaki komisyon EFFECTIVE olmalı
+   * (commissionGross − refundedCommissionGross), GROSS değil. Aksi halde indirimli
+   * siparişte iade bedeli `refundedComm × oran` kadar EKSİK çıkar (çift-düşme; canlı
+   * doğrulama 2026-06-25, sipariş 775882190). Burada: satış 1100, komisyon 110, iade
+   * komisyonu 20 → effective 90 → hakediş 1100 − 90 = 1010 → bedel 1010 × %35 = 353.50.
+   * (GROSS yanlış değeri 990 × %35 = 346.50 verirdi.)
+   */
+  it('micro export return (discounted): uses EFFECTIVE commission, not gross', async () => {
+    const { orgId, storeId } = await createSeedContext();
+    await seedFeeDefinitions();
+    const { orderId, orderItemId } = await buildOrderWithItem(orgId, storeId, {
+      quantity: 1,
+      micro: true,
+      refundedCommissionGross: '20.00',
+    });
+    await createClaim(orgId, storeId, orderId, orderItemId, 1);
+
+    await prisma.$transaction((tx) => estimateReturnOnClaim(orderId, tx));
+
+    const op = await prisma.orderFee.findFirstOrThrow({
+      where: { orderId, feeType: 'OVERSEAS_RETURN_OPERATION', source: 'ESTIMATE' },
+    });
+    expect(op.amountGross.toFixed(2)).toBe('353.50'); // (1100 − (110−20)) × %35
+    expect(op.amountGross.toFixed(2)).not.toBe('346.50'); // gross-komisyon (çift-düşme) DEĞİL
   });
 
   /**

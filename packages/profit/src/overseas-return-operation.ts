@@ -20,7 +20,8 @@ import type { Prisma } from '@pazarsync/db';
 export interface OverseasReturnLeg {
   /** Kabul edilen satış (KDV-dahil): lineSaleGross × kabul-oranı. */
   acceptedSaleGross: Decimal;
-  /** Kabul edilen komisyon: commissionGross × kabul-oranı. */
+  /** Kabul edilen EFFECTIVE komisyon: (commissionGross − refundedCommissionGross) × kabul-oranı
+   *  — hakediş = satış − effective komisyon. GROSS kullanmak indirimli siparişte çift-düşmedir. */
   acceptedCommissionGross: Decimal;
   /** Kademe oranı (kesir: 0.35 = %35). */
   rate: Decimal;
