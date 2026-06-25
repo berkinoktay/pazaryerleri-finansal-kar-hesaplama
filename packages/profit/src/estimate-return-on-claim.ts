@@ -205,9 +205,16 @@ export async function estimateReturnOnClaim(
       const acceptedRatio = new Decimal(acceptedQty).div(quantity);
       const unitSaleGross = new Decimal(item.lineSaleGross).div(quantity);
       const rate = await resolveOverseasReturnRate(tx, unitSaleGross, order.orderDate);
+      // Hakediş = satış − EFFECTIVE komisyon. Effective = commissionGross − refundedCommissionGross
+      // (komisyon liste fiyatı üzerinden gross taşınır, satıcı-indiriminin komisyon payı
+      // refunded'da düşülür — #332 net-satış tabanı). GROSS kullanmak çift-düşmedir: indirimli
+      // siparişte iade bedeli `refundedComm × oran` kadar EKSİK çıkar (canlı doğrulama 2026-06-25).
+      const effectiveCommission = new Decimal(item.commissionGross).sub(
+        new Decimal(item.refundedCommissionGross),
+      );
       legs.push({
         acceptedSaleGross: new Decimal(item.lineSaleGross).mul(acceptedRatio),
-        acceptedCommissionGross: new Decimal(item.commissionGross).mul(acceptedRatio),
+        acceptedCommissionGross: effectiveCommission.mul(acceptedRatio),
         rate,
       });
     }
