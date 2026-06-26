@@ -33,6 +33,12 @@ const messages = {
     outboundShippingVat: 'Gidiş kargo KDV',
     returnShippingVat: 'İade kargo KDV',
     platformServiceVat: 'Platform hizmet bedeli KDV',
+    internationalService: 'Uluslararası hizmet bedeli',
+    overseasReturnOperation: 'Yurt dışı iade operasyon bedeli',
+    internationalServiceVat: 'Uluslararası hizmet bedeli KDV',
+    overseasReturnOperationVat: 'Yurt dışı iade operasyon bedeli KDV',
+    microExport: 'Mikro İhracat',
+    exportVatExemption: 'KDV %0 — İhracat istisnası',
     margin: 'Kâr marjı',
     estimatedProfit: 'Tahmini kâr',
     settledProfit: 'Fiili kâr',
@@ -57,6 +63,11 @@ const BREAKDOWN = {
   returnShippingVat: '0.00',
   platformServiceGross: '13.19',
   platformServiceVat: '2.20',
+  // Mikro ihracat ücretleri — normal (non-micro) siparişte '0.00' (satır gizli).
+  internationalServiceGross: '0.00',
+  internationalServiceVat: '0.00',
+  overseasReturnOperationGross: '0.00',
+  overseasReturnOperationVat: '0.00',
   // Stopaj ayrı düşülen brüt terim (KDV-siz). 569592424: kâr 876,24 yerine 848,74
   // → fark tam 27,50 stopaj. Σ düşülen + Net KDV = saleGross − netProfit ile kapanır.
   stoppage: '27.50',
@@ -64,6 +75,17 @@ const BREAKDOWN = {
   netProfit: '848.74',
   saleMarginPct: '25.7',
   costMarkupPct: '58.9',
+};
+
+// Mikro ihracat: satış KDV %0 + Uluslararası Hizmet Bedeli (KDV'li) + Yurt Dışı İade
+// Operasyon Bedeli (şu an KDV-siz). Gerçek stage siparişi 775882190 mertebesinde.
+const MICRO_BREAKDOWN = {
+  ...BREAKDOWN,
+  saleVat: '0.00',
+  internationalServiceGross: '46.46',
+  internationalServiceVat: '7.74',
+  overseasReturnOperationGross: '219.50',
+  overseasReturnOperationVat: '0.00',
 };
 
 function renderCard(breakdown: typeof BREAKDOWN | null): void {
@@ -146,6 +168,12 @@ describe('ProfitBreakdownCard', () => {
     expect(screen.queryByText('Stopaj')).not.toBeInTheDocument();
   });
 
+  it('hides the platform service fee row when zero (e.g. micro export PSF exemption)', () => {
+    // PSF mikro ihracatta muaf → '0.00' → satır gizlenir (stopaj deseniyle aynı).
+    renderCard({ ...BREAKDOWN, platformServiceGross: '0.00', platformServiceVat: '0.00' });
+    expect(screen.queryByText('Platform hizmet bedeli')).not.toBeInTheDocument();
+  });
+
   it('shows promotion names near the discount line when promotionDisplays are present', () => {
     render(
       <NextIntlClientProvider locale="tr" messages={messages}>
@@ -223,5 +251,55 @@ describe('ProfitBreakdownCard', () => {
     expect(screen.getByText('İade kargo KDV')).toBeInTheDocument();
     // İade varken tek birleşik "Kargo KDV" satırı YOK.
     expect(screen.queryByText('Kargo KDV')).not.toBeInTheDocument();
+  });
+
+  it('shows the micro export badge and VAT-exemption note when micro', () => {
+    render(
+      <NextIntlClientProvider locale="tr" messages={messages}>
+        <ProfitBreakdownCard breakdown={{ ...BREAKDOWN, saleVat: '0.00' }} micro />
+      </NextIntlClientProvider>,
+    );
+    expect(screen.getByText('Mikro İhracat')).toBeInTheDocument();
+    expect(screen.getByText('KDV %0 — İhracat istisnası')).toBeInTheDocument();
+  });
+
+  it('does not show the micro badge / exemption note for a normal order', () => {
+    renderCard(BREAKDOWN); // micro varsayılan false
+    expect(screen.queryByText('Mikro İhracat')).not.toBeInTheDocument();
+    expect(screen.queryByText('KDV %0 — İhracat istisnası')).not.toBeInTheDocument();
+  });
+
+  it('renders the micro export fee deduction rows when present', () => {
+    render(
+      <NextIntlClientProvider locale="tr" messages={messages}>
+        <ProfitBreakdownCard breakdown={MICRO_BREAKDOWN} micro />
+      </NextIntlClientProvider>,
+    );
+    expect(screen.getByText('Uluslararası hizmet bedeli')).toBeInTheDocument();
+    expect(screen.getByText('Yurt dışı iade operasyon bedeli')).toBeInTheDocument();
+    // Tutarlar backend-servisli; bileşen yalnız formatlar (SignedAmount magnitude).
+    expect(screen.getByText(formatCurrency('46.46'))).toBeInTheDocument();
+    expect(screen.getByText(formatCurrency('219.50'))).toBeInTheDocument();
+  });
+
+  it('hides the micro export fee rows when zero (normal order)', () => {
+    renderCard(BREAKDOWN); // mikro ücretler '0.00'
+    expect(screen.queryByText('Uluslararası hizmet bedeli')).not.toBeInTheDocument();
+    expect(screen.queryByText('Yurt dışı iade operasyon bedeli')).not.toBeInTheDocument();
+  });
+
+  it('shows the international service VAT row in the Net VAT breakdown; hides the zero-VAT return fee', async () => {
+    const user = userEvent.setup();
+    render(
+      <NextIntlClientProvider locale="tr" messages={messages}>
+        <ProfitBreakdownCard breakdown={MICRO_BREAKDOWN} micro />
+      </NextIntlClientProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: /Net KDV/ }));
+
+    expect(screen.getByText('Uluslararası hizmet bedeli KDV')).toBeInTheDocument();
+    // Yurt dışı iade bedeli şu an KDV-siz ('0.00') → KDV satırı gizli (data-driven).
+    expect(screen.queryByText('Yurt dışı iade operasyon bedeli KDV')).not.toBeInTheDocument();
   });
 });

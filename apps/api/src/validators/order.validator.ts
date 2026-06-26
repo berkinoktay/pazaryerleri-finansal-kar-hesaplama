@@ -439,6 +439,18 @@ const ProfitBreakdownSchema = z
     returnShippingVat: z.string(),
     platformServiceGross: z.string(),
     platformServiceVat: z.string(),
+    internationalServiceGross: z.string().openapi({
+      description:
+        'Mikro ihracat Uluslararası Hizmet Bedeli brüt (KDV-dahil). PSF yerine geçer. ' +
+        "Normal siparişte '0.00'.",
+    }),
+    internationalServiceVat: z.string(),
+    overseasReturnOperationGross: z.string().openapi({
+      description:
+        'Mikro ihracat Yurt Dışı İade Operasyon Bedeli brüt. İadede satış reverse ' +
+        "ETMEDEN kesilen düz DEBIT ücret. Normal siparişte '0.00'.",
+    }),
+    overseasReturnOperationVat: z.string(),
     stoppage: z.string().openapi({
       description:
         'Stopaj (kaynakta kesinti) — ayrı düşülen brüt terim, KDV-siz (vatRate 0). ' +

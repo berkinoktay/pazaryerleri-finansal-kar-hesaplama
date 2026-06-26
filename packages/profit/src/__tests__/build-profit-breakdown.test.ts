@@ -123,6 +123,71 @@ describe('buildProfitBreakdown — GROSS view', () => {
     expect(sumOfDeductions.toFixed(2)).toBe('700.00');
   });
 
+  it('aggregates micro export fees (international service + overseas return operation) reconciling to netProfit', () => {
+    // Mikro ihracat: satış KDV %0; Uluslararası Hizmet Bedeli (KDV'li) PSF yerine;
+    // Yurt Dışı İade Operasyon Bedeli düz DEBIT (return-leg DEĞİL). computeProfit cebri:
+    //   netVat = 0 − 100 − 40 − 10 = −150
+    //   netProfit = 1000 − 600 − 240 − (60+50) − 0 − (−150) = 200
+    const v = buildProfitBreakdown({
+      saleGross: D('1000'),
+      saleVat: D('0'), // mikro: satış KDV %0 (ihracat istisnası)
+      listGross: D('1000'),
+      sellerDiscountGross: D('0'),
+      items: [
+        {
+          quantity: 1,
+          lineListGross: D('1000'),
+          lineSaleGross: D('1000'),
+          lineSellerDiscountGross: D('0'),
+          saleVatRate: 0,
+          commissionGross: D('240'),
+          refundedCommissionGross: D('0'),
+          commissionVatRate: 20,
+          unitCostSnapshotGross: D('600'),
+          unitCostSnapshotVatRate: 20,
+        },
+      ],
+      fees: [
+        {
+          feeType: 'INTERNATIONAL_SERVICE',
+          direction: 'DEBIT',
+          amountGross: D('60'),
+          vatRate: 20,
+          source: 'ESTIMATE',
+        },
+        {
+          feeType: 'OVERSEAS_RETURN_OPERATION',
+          direction: 'DEBIT',
+          amountGross: D('50'),
+          vatRate: 0,
+          source: 'ESTIMATE',
+        },
+      ],
+      netProfit: D('200'),
+      netVat: D('-150'),
+      saleMarginPct: D('20'),
+      costMarkupPct: null,
+    });
+    expect(v.saleVat).toBe('0.00'); // mikro KDV %0
+    expect(v.internationalServiceGross).toBe('60.00');
+    expect(v.internationalServiceVat).toBe('10.00'); // 60 × 20/120
+    expect(v.overseasReturnOperationGross).toBe('50.00');
+    expect(v.overseasReturnOperationVat).toBe('0.00'); // vatRate 0
+
+    // Σ düşülen terimler + Net KDV = saleGross − netProfit (mikro ücretler tam BİR kez sayılır).
+    const sumOfDeductions = new Decimal(v.costGross)
+      .add(v.commissionGross)
+      .add(v.shippingGross)
+      .add(v.platformServiceGross)
+      .add(v.internationalServiceGross)
+      .add(v.overseasReturnOperationGross)
+      .add(v.stoppage)
+      .add(v.netVat);
+    expect(sumOfDeductions.toFixed(2)).toBe(new Decimal(v.saleGross).sub(v.netProfit).toFixed(2));
+    // 600 + 240 + 0 + 0 + 60 + 50 + 0 + (−150) = 800 = 1000 − 200.
+    expect(sumOfDeductions.toFixed(2)).toBe('800.00');
+  });
+
   it('null margin renders dash', () => {
     const v = buildProfitBreakdown({
       saleGross: D('0'),

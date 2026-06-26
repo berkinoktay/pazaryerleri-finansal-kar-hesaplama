@@ -1242,6 +1242,20 @@
           "platformServiceVat": {
             "type": "string"
           },
+          "internationalServiceGross": {
+            "type": "string",
+            "description": "Mikro ihracat Uluslararası Hizmet Bedeli brüt (KDV-dahil). PSF yerine geçer. Normal siparişte '0.00'."
+          },
+          "internationalServiceVat": {
+            "type": "string"
+          },
+          "overseasReturnOperationGross": {
+            "type": "string",
+            "description": "Mikro ihracat Yurt Dışı İade Operasyon Bedeli brüt. İadede satış reverse ETMEDEN kesilen düz DEBIT ücret. Normal siparişte '0.00'."
+          },
+          "overseasReturnOperationVat": {
+            "type": "string"
+          },
           "stoppage": {
             "type": "string",
             "description": "Stopaj (kaynakta kesinti) — ayrı düşülen brüt terim, KDV-siz (vatRate 0). Net KDV içine katlanmaz; kârdan doğrudan düşülür."
@@ -1285,6 +1299,10 @@
           "returnShippingVat",
           "platformServiceGross",
           "platformServiceVat",
+          "internationalServiceGross",
+          "internationalServiceVat",
+          "overseasReturnOperationGross",
+          "overseasReturnOperationVat",
           "stoppage",
           "netVat",
           "netProfit",

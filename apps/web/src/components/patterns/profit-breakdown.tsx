@@ -7,6 +7,7 @@ import * as React from 'react';
 import type { components } from '@pazarsync/api-client';
 
 import { Currency } from '@/components/patterns/currency';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
@@ -31,6 +32,13 @@ export interface ProfitBreakdownCardProps {
    * promosyon adları gösterilir. null/boş → promosyon satırı çizilmez.
    */
   promotionDisplays?: PromotionDisplay[] | null;
+  /**
+   * Mikro ihracat siparişi mi (Trendyol `Order.micro`). true ise: başlıkta "Mikro
+   * İhracat" rozeti + satış altında "KDV %0 — İhracat istisnası" notu. Uluslararası
+   * Hizmet / Yurt Dışı İade Operasyon ücret satırları zaten tutar varken kendiliğinden
+   * görünür (breakdown alanları), bu flag yalnız bağlam/etiket içindir.
+   */
+  micro?: boolean;
   className?: string;
 }
 
@@ -81,6 +89,7 @@ export function ProfitBreakdownCard({
   breakdown,
   profitLabel,
   promotionDisplays,
+  micro = false,
   className,
 }: ProfitBreakdownCardProps): React.ReactElement {
   const t = useTranslations('profitBreakdown');
@@ -90,7 +99,14 @@ export function ProfitBreakdownCard({
   return (
     <Card className={className}>
       <CardHeader>
-        <CardTitle>{t('title')}</CardTitle>
+        <div className="gap-xs flex flex-wrap items-center">
+          <CardTitle>{t('title')}</CardTitle>
+          {micro ? (
+            <Badge tone="neutral" size="sm">
+              {t('microExport')}
+            </Badge>
+          ) : null}
+        </div>
       </CardHeader>
       <CardContent>
         {breakdown === null ? (
@@ -133,6 +149,13 @@ export function ProfitBreakdownCard({
               </BreakdownRow>
             )}
 
+            {/* Mikro ihracat: satış KDV %0 (ihracat istisnası 3065/11-1-a). Net KDV
+                collapsible'ında "Satış KDV: 0,00" satırı kalır; bu not satırın neden
+                sıfır olduğunu satışın hemen altında görünür kılar (collapse açmadan). */}
+            {micro ? (
+              <p className="text-muted-foreground text-2xs">{t('exportVatExemption')}</p>
+            ) : null}
+
             {DEDUCTION_ROWS_PRE_SHIPPING.map((row) => (
               <BreakdownRow key={row.key} label={t(row.key)}>
                 <SignedAmount value={breakdown[row.amount]} positive={false} />
@@ -174,11 +197,32 @@ export function ProfitBreakdownCard({
               </Collapsible>
             )}
 
-            {DEDUCTION_ROWS_POST_SHIPPING.map((row) => (
-              <BreakdownRow key={row.key} label={t(row.key)}>
-                <SignedAmount value={breakdown[row.amount]} positive={false} />
+            {/* Sıfırken gizle (stopaj/iade kargosu deseniyle aynı gürültü-yok kuralı):
+                PSF mikro ihracatta muaf → '0.00' → satır çizilmez (yerini Uluslararası
+                hizmet bedeli alır). String karşılaştırma = aritmetik DEĞİL. */}
+            {DEDUCTION_ROWS_POST_SHIPPING.filter((row) => breakdown[row.amount] !== '0.00').map(
+              (row) => (
+                <BreakdownRow key={row.key} label={t(row.key)}>
+                  <SignedAmount value={breakdown[row.amount]} positive={false} />
+                </BreakdownRow>
+              ),
+            )}
+
+            {/* Mikro ihracat ücretleri (Trendyol): yalnız tutar varken görünür
+                (normal siparişte '0.00' → gizli, stopaj deseniyle aynı koşullu render).
+                Uluslararası Hizmet Bedeli PSF yerine; Yurt Dışı İade Operasyon Bedeli
+                iadede satış reverse etmeden kesilen düz ücret. String karşılaştırma =
+                aritmetik DEĞİL (no-frontend-financial-calculation). */}
+            {breakdown.internationalServiceGross !== '0.00' ? (
+              <BreakdownRow label={t('internationalService')}>
+                <SignedAmount value={breakdown.internationalServiceGross} positive={false} />
               </BreakdownRow>
-            ))}
+            ) : null}
+            {breakdown.overseasReturnOperationGross !== '0.00' ? (
+              <BreakdownRow label={t('overseasReturnOperation')}>
+                <SignedAmount value={breakdown.overseasReturnOperationGross} positive={false} />
+              </BreakdownRow>
+            ) : null}
 
             {/* Stopaj: ayrı düşülen brüt terim (KDV-siz). Çoğu siparişte '0.00'
                 (teslim öncesi kesilmez) → sıfırken gizle. String karşılaştırma =
@@ -228,11 +272,30 @@ export function ProfitBreakdownCard({
                   </>
                 )}
 
-                {VAT_ROWS_POST_SHIPPING.map((row) => (
-                  <BreakdownRow key={row.key} label={t(row.key)} muted>
-                    <SignedAmount value={breakdown[row.amount]} positive={row.positive} />
+                {/* PSF KDV de gross'u sıfırken gizlenir (mikroda muaf). Net KDV'ye
+                    katkısı 0 olduğundan toplam değişmez. */}
+                {VAT_ROWS_POST_SHIPPING.filter((row) => breakdown[row.amount] !== '0.00').map(
+                  (row) => (
+                    <BreakdownRow key={row.key} label={t(row.key)} muted>
+                      <SignedAmount value={breakdown[row.amount]} positive={row.positive} />
+                    </BreakdownRow>
+                  ),
+                )}
+
+                {/* Mikro ihracat ücret KDV'leri: yalnız sıfırdan farklıyken (Net KDV'ye
+                    girer — computeProfit debitVat'a katar; gösterilmezse Σ netVat'a kapanmaz).
+                    Uluslararası hizmet bedeli KDV'lidir; yurt dışı iade bedeli şu an KDV-siz
+                    (data-driven değişirse kendiliğinden görünür). */}
+                {breakdown.internationalServiceVat !== '0.00' ? (
+                  <BreakdownRow label={t('internationalServiceVat')} muted>
+                    <SignedAmount value={breakdown.internationalServiceVat} positive={false} />
                   </BreakdownRow>
-                ))}
+                ) : null}
+                {breakdown.overseasReturnOperationVat !== '0.00' ? (
+                  <BreakdownRow label={t('overseasReturnOperationVat')} muted>
+                    <SignedAmount value={breakdown.overseasReturnOperationVat} positive={false} />
+                  </BreakdownRow>
+                ) : null}
                 <BreakdownRow label={t('netVatResult')} muted>
                   <SignedAmount value={breakdown.netVat} positive={false} />
                 </BreakdownRow>

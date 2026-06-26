@@ -1679,6 +1679,8 @@
     "outboundShipping": "Gidiş kargosu",
     "returnShipping": "İade kargosu",
     "platformService": "Platform hizmet bedeli",
+    "internationalService": "Uluslararası hizmet bedeli",
+    "overseasReturnOperation": "Yurt dışı iade operasyon bedeli",
     "stoppage": "Stopaj",
     "promotions": "Promosyonlar",
     "netVat": "Net KDV",
@@ -1690,9 +1692,13 @@
     "outboundShippingVat": "Gidiş kargo KDV",
     "returnShippingVat": "İade kargo KDV",
     "platformServiceVat": "Platform hizmet bedeli KDV",
+    "internationalServiceVat": "Uluslararası hizmet bedeli KDV",
+    "overseasReturnOperationVat": "Yurt dışı iade operasyon bedeli KDV",
     "margin": "Kâr marjı",
     "estimatedProfit": "Tahmini kâr",
-    "settledProfit": "Fiili kâr"
+    "settledProfit": "Fiili kâr",
+    "microExport": "Mikro İhracat",
+    "exportVatExemption": "KDV %0 — İhracat istisnası"
   },
   "promotionIndicator": {
     "label": "Promosyon",

@@ -161,6 +161,7 @@ export function OrderDetailClient({
         <ProfitBreakdownCard
           breakdown={order.profitBreakdown}
           promotionDisplays={order.promotionDisplays}
+          micro={order.micro}
         />
         <OrderFeeTimeline fees={order.fees} />
       </div>
