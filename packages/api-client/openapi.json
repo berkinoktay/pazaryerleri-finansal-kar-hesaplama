@@ -820,6 +820,29 @@
             "minimum": 0,
             "description": "Number of OrderItems on this order.",
             "example": 2
+          },
+          "profitExcludedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set when the order is permanently outside the profit universe (cost window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
+            "example": null
+          },
+          "profitExclusionReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "COST_DEADLINE_MISSED",
+              "LATE_UNCOSTED_ARRIVAL",
+              "LEGACY_BACKFILL",
+              null
+            ],
+            "description": "Why the order left the profit universe. Paired with profitExcludedAt.",
+            "example": null
           }
         },
         "required": [
@@ -839,7 +862,9 @@
           "promotionDisplays",
           "fastDelivery",
           "micro",
-          "itemCount"
+          "itemCount",
+          "profitExcludedAt",
+          "profitExclusionReason"
         ]
       },
       "TableMeta": {

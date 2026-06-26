@@ -873,7 +873,22 @@
     },
     "excludedList": {
       "label": "Kâr hesabı dışı",
-      "empty": "Kâr hesabı dışında kalan sipariş yok"
+      "empty": "Kâr hesabı dışında kalan sipariş yok",
+      "intro": "Bu siparişler cironuza dâhildir ama kâr hesabına girmez. Her birinin nedenini aşağıda görebilirsiniz."
+    }
+  },
+  "exclusionReasons": {
+    "COST_DEADLINE_MISSED": {
+      "label": "Maliyet girilmedi",
+      "detail": "Gün sonuna kadar maliyet girilmediği için bu sipariş kâr hesabına dahil edilmedi."
+    },
+    "LATE_UNCOSTED_ARRIVAL": {
+      "label": "Geç gelen sipariş",
+      "detail": "Sipariş geç ulaştığı ve maliyeti girilmediği için kâr hesabına dahil edilmedi."
+    },
+    "LEGACY_BACKFILL": {
+      "label": "Eski sipariş",
+      "detail": "Eski bir sipariş olduğu ve maliyeti bilinmediği için kâr hesabına dahil edilmedi."
     }
   },
   "productsPage": {
@@ -1831,7 +1846,7 @@
     },
     "exclusion": {
       "title": "Kâr hesabı dışı",
-      "description": "Maliyet penceresi {date} tarihinde kapandı — bu sipariş kâr hesaplamalarına dahil edilmez. Ciro kayıtlarda görünmeye devam eder."
+      "description": "Bu sipariş kâr hesabına dahil edilmedi. Ciroda görünür, kâr raporlarına girmez."
     }
   },
   "livePerformance": {

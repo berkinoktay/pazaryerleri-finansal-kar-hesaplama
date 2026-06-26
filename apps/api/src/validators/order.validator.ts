@@ -219,6 +219,23 @@ export const OrderListItemSchema = z
       description: 'Number of OrderItems on this order.',
       example: 2,
     }),
+    // Kâr-dışı bilgisi liste satırında da gerekiyor: "Kâr Hesabı Dışı" sekmesinde
+    // her satır kendi dışlanma sebebini + tarihini gösterir (CHECK: ikisi birlikte
+    // null ya da birlikte dolu). Hesaplanan siparişlerde her ikisi de null.
+    profitExcludedAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .openapi({
+        description:
+          'Set when the order is permanently outside the profit universe (cost window missed). ' +
+          'Irreversible — enforced by a DB trigger (spec 2026-06-12).',
+        example: null,
+      }),
+    profitExclusionReason: z.enum(ProfitExclusionReason).nullable().openapi({
+      description: 'Why the order left the profit universe. Paired with profitExcludedAt.',
+      example: null,
+    }),
   })
   .openapi('OrderListItem');
 

@@ -197,6 +197,10 @@ export async function listOrders(
     fastDelivery: row.fastDelivery,
     micro: row.micro,
     itemCount: row._count.items,
+    // Kâr-dışı satırında sebep + tarih gösterimi için (liste include'u tüm Order
+    // kolonlarını getirir; ekstra sorgu yok). Hesaplanan siparişlerde her ikisi null.
+    profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
+    profitExclusionReason: row.profitExclusionReason,
   }));
 
   return { data, total, counts: { calculated: calculatedCount, excluded: excludedCount } };

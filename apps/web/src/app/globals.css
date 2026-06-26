@@ -209,6 +209,9 @@
   --spacing-sheet-wide: var(--size-sheet-wide);
   --spacing-modal: var(--size-modal);
   --spacing-dropdown-popover: var(--size-dropdown-popover);
+  /* InfoHint/açıklama tooltip genişliği — bu eşleme olmadan `max-w-tooltip` no-op
+     olur ve tooltip içeriğe göre sınırsız genişler (cümle tek satıra sprawl eder). */
+  --spacing-tooltip: var(--size-tooltip);
   --spacing-pagesize-select: var(--size-pagesize-select);
   --spacing-thumb-sm: var(--size-thumb-sm);
   --spacing-thumb-md: var(--size-thumb-md);
