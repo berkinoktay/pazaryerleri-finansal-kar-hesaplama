@@ -197,11 +197,16 @@ export function ProfitBreakdownCard({
               </Collapsible>
             )}
 
-            {DEDUCTION_ROWS_POST_SHIPPING.map((row) => (
-              <BreakdownRow key={row.key} label={t(row.key)}>
-                <SignedAmount value={breakdown[row.amount]} positive={false} />
-              </BreakdownRow>
-            ))}
+            {/* Sıfırken gizle (stopaj/iade kargosu deseniyle aynı gürültü-yok kuralı):
+                PSF mikro ihracatta muaf → '0.00' → satır çizilmez (yerini Uluslararası
+                hizmet bedeli alır). String karşılaştırma = aritmetik DEĞİL. */}
+            {DEDUCTION_ROWS_POST_SHIPPING.filter((row) => breakdown[row.amount] !== '0.00').map(
+              (row) => (
+                <BreakdownRow key={row.key} label={t(row.key)}>
+                  <SignedAmount value={breakdown[row.amount]} positive={false} />
+                </BreakdownRow>
+              ),
+            )}
 
             {/* Mikro ihracat ücretleri (Trendyol): yalnız tutar varken görünür
                 (normal siparişte '0.00' → gizli, stopaj deseniyle aynı koşullu render).
@@ -267,11 +272,15 @@ export function ProfitBreakdownCard({
                   </>
                 )}
 
-                {VAT_ROWS_POST_SHIPPING.map((row) => (
-                  <BreakdownRow key={row.key} label={t(row.key)} muted>
-                    <SignedAmount value={breakdown[row.amount]} positive={row.positive} />
-                  </BreakdownRow>
-                ))}
+                {/* PSF KDV de gross'u sıfırken gizlenir (mikroda muaf). Net KDV'ye
+                    katkısı 0 olduğundan toplam değişmez. */}
+                {VAT_ROWS_POST_SHIPPING.filter((row) => breakdown[row.amount] !== '0.00').map(
+                  (row) => (
+                    <BreakdownRow key={row.key} label={t(row.key)} muted>
+                      <SignedAmount value={breakdown[row.amount]} positive={row.positive} />
+                    </BreakdownRow>
+                  ),
+                )}
 
                 {/* Mikro ihracat ücret KDV'leri: yalnız sıfırdan farklıyken (Net KDV'ye
                     girer — computeProfit debitVat'a katar; gösterilmezse Σ netVat'a kapanmaz).

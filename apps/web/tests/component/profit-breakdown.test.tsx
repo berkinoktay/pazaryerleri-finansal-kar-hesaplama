@@ -168,6 +168,12 @@ describe('ProfitBreakdownCard', () => {
     expect(screen.queryByText('Stopaj')).not.toBeInTheDocument();
   });
 
+  it('hides the platform service fee row when zero (e.g. micro export PSF exemption)', () => {
+    // PSF mikro ihracatta muaf → '0.00' → satır gizlenir (stopaj deseniyle aynı).
+    renderCard({ ...BREAKDOWN, platformServiceGross: '0.00', platformServiceVat: '0.00' });
+    expect(screen.queryByText('Platform hizmet bedeli')).not.toBeInTheDocument();
+  });
+
   it('shows promotion names near the discount line when promotionDisplays are present', () => {
     render(
       <NextIntlClientProvider locale="tr" messages={messages}>
