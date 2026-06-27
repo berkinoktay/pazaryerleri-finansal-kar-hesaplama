@@ -2,18 +2,12 @@ import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { OrderListItem } from '@/features/orders/api/list-orders.api';
+import { MarginColoringContext } from '@/features/account/components/margin-coloring-provider';
 import { OrdersTable, type OrdersTableProps } from '@/features/orders/components/orders-table';
 import type { MarginScale } from '@/lib/margin-coloring';
 
 import { render, screen } from '../../../helpers/render';
 import trMessages from '../../../../messages/tr.json';
-
-// Stable mock — the module is replaced before any test runs.
-// vi.fn() returns MarginScale | null; mockReturnValue overrides per-test.
-let mockScaleReturnValue: MarginScale | null = null;
-vi.mock('@/features/account/components/margin-coloring-provider', () => ({
-  useMarginColoring: () => mockScaleReturnValue,
-}));
 
 vi.mock('next/navigation', () => ({ useRouter: vi.fn(() => ({ push: vi.fn() })) }));
 
@@ -42,9 +36,12 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
   };
 }
 
-function renderTable(props: Partial<OrdersTableProps> = {}): OrdersTableProps['onSortChange'] {
+function renderTable(
+  props: Partial<OrdersTableProps> = {},
+  scale: MarginScale | null = null,
+): OrdersTableProps['onSortChange'] {
   const onSortChange = vi.fn();
-  render(
+  const table = (
     <OrdersTable
       rows={[makeRow()]}
       pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
@@ -64,8 +61,10 @@ function renderTable(props: Partial<OrdersTableProps> = {}): OrdersTableProps['o
       onPaginationChange={vi.fn()}
       onSortChange={onSortChange}
       {...props}
-    />,
+    />
   );
+  // Wrap in MarginColoringContext to inject the scale without needing the full provider.
+  render(<MarginColoringContext.Provider value={scale}>{table}</MarginColoringContext.Provider>);
   return onSortChange;
 }
 
@@ -169,36 +168,35 @@ describe('OrdersTable — Marj % column', () => {
 
 describe('OrdersTable — marj renklendirme (binary vs scale)', () => {
   it('binary mode (scale null): positive margin cell carries text-success class', () => {
-    // Default mock returns null -> binary fallback via profitToneClass.
-    mockScaleReturnValue = null;
-    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] });
+    // Pass null scale -> binary fallback via profitToneClass.
+    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] }, null);
     const cell = screen.getByText('15.5%');
     expect(cell.className).toContain('text-success');
     expect(cell).not.toHaveAttribute('style');
   });
 
   it('binary mode (scale null): negative margin cell carries text-destructive class', () => {
-    mockScaleReturnValue = null;
-    renderTable({ rows: [makeRow({ saleMarginPct: '-5.0' })] });
+    renderTable({ rows: [makeRow({ saleMarginPct: '-5.0' })] }, null);
     const cell = screen.getByText('-5.0%');
     expect(cell.className).toContain('text-destructive');
     expect(cell).not.toHaveAttribute('style');
   });
 
-  it('scale-enabled mode: margin cell uses inline color style (no tone class)', () => {
+  it('scale-enabled mode: margin cell carries inline style + no binary tone class', () => {
+    // Use rgb() instead of oklch() — happy-dom's CSS parser does not support oklch,
+    // which causes style.color assignment to be silently discarded.
     const scale: MarginScale = {
       enabled: true,
       buckets: [
-        { threshold: 0, color: 'oklch(58% 0.20 27)' },
-        { threshold: 20, color: 'oklch(58% 0.14 155)' },
+        { threshold: 0, color: 'rgb(200, 50, 50)' }, // "loss red" (readable by happy-dom)
+        { threshold: 20, color: 'rgb(50, 180, 50)' }, // "profit green"
       ],
     };
-    mockScaleReturnValue = scale;
-    // saleMarginPct '15.5' -> between bucket[0] (>=0) and bucket[1] (>=20) -> bucket[0] color.
-    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] });
+    // saleMarginPct '15.5' -> >= 0 but < 20 -> bucket[0] color rgb(200, 50, 50).
+    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] }, scale);
     const cell = screen.getByText('15.5%');
-    // Style-driven color; no binary tone class.
-    expect(cell.style.color).toBe('oklch(58% 0.20 27)');
+    // style.color should be set to the bucket color.
+    expect(cell.style.color).toBe('rgb(200, 50, 50)');
     expect(cell.className).not.toContain('text-success');
     expect(cell.className).not.toContain('text-destructive');
   });

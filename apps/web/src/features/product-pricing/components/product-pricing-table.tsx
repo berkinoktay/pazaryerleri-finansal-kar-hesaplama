@@ -10,6 +10,10 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { ImageCell } from '@/components/patterns/image-cell';
 import { Button } from '@/components/ui/button';
+import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { marginColorStyle } from '@/lib/margin-color-style';
+import type { MarginScale } from '@/lib/margin-coloring';
+import { cn } from '@/lib/utils';
 import { useCurrentScope } from '@/providers/current-scope';
 
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
@@ -67,9 +71,24 @@ function NumericCell({ value }: { value: string | null }): React.ReactElement {
   return <Currency value={value} className="text-sm" />;
 }
 
-function PercentCell({ value }: { value: string | null }): React.ReactElement {
+function PercentCell({
+  value,
+  marginScale,
+}: {
+  value: string | null;
+  /** When provided, applies margin coloring via marginColorStyle (margin % column only). */
+  marginScale?: MarginScale | null;
+}): React.ReactElement {
   if (value === null) {
     return <span className="text-muted-foreground-dim text-sm tabular-nums">{EMPTY_VALUE}</span>;
+  }
+  if (marginScale !== undefined && marginScale !== null) {
+    const s = marginColorStyle(value, marginScale);
+    return (
+      <span className={cn('text-sm tabular-nums', s.className)} style={s.style}>
+        {formatPercentDisplay(value)}
+      </span>
+    );
   }
   return (
     <span className="text-foreground text-sm tabular-nums">{formatPercentDisplay(value)}</span>
@@ -136,6 +155,8 @@ export function ProductPricingTable({
   // action as UX (the backend enforces the same rule and 403s otherwise).
   const { role } = useCurrentScope();
   const canWritePrice = canWriteMarketplacePrice(role);
+  // Read once at the component level — never inside cell render functions.
+  const scale = useMarginColoring();
 
   const columns = React.useMemo<ColumnDef<ProductPricingItem>[]>(() => {
     const productColumn: ColumnDef<ProductPricingItem> = {
@@ -208,7 +229,8 @@ export function ProductPricingTable({
       accessorKey: 'saleMarginPct',
       header: () => t('columns.saleMarginPct'),
       meta: { numeric: true, label: t('columns.saleMarginPct') },
-      cell: ({ row }) => <PercentCell value={row.original.saleMarginPct} />,
+      // Scale threaded via closure — scale is captured from the enclosing useMemo scope.
+      cell: ({ row }) => <PercentCell value={row.original.saleMarginPct} marginScale={scale} />,
       enableSorting: true,
     };
 
@@ -254,7 +276,7 @@ export function ProductPricingTable({
       saleMarginColumn,
       actionColumn,
     ];
-  }, [isMobile, onOpenPanel, t, tIdentifiers]);
+  }, [isMobile, onOpenPanel, t, tIdentifiers, scale]);
 
   const sortingState: SortingState = React.useMemo(() => {
     const parsed = parseSort(sortBy);

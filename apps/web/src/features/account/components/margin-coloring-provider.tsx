@@ -10,7 +10,12 @@ import { useMyPreferences } from '../hooks/use-my-preferences';
 // Context
 // ---------------------------------------------------------------------------
 
-const MarginColoringContext = React.createContext<MarginScale | null | undefined>(undefined);
+/**
+ * Exported for test helpers that need to inject a scale without using
+ * the full `MarginColoringProvider` (which requires a React Query context).
+ * Production code should always go through `useMarginColoring()`.
+ */
+export const MarginColoringContext = React.createContext<MarginScale | null | undefined>(undefined);
 
 // ---------------------------------------------------------------------------
 // Provider
