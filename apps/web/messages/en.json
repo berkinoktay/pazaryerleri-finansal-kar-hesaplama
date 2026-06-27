@@ -740,6 +740,11 @@
     "comingSoon": "Coming soon",
     "description": "This page is still under development. It will be active in upcoming updates."
   },
+  "featureStatus": {
+    "draftLabel": "Draft",
+    "draftHint": "This section's backend is not wired up yet. This marker only shows in development.",
+    "draftActionToast": "This feature isn't active yet; coming soon."
+  },
   "returnsPage": {
     "title": "Returns",
     "intent": "Track your store's return claims and their profit impact in one place",
@@ -894,16 +899,65 @@
   "settings": {
     "nav": {
       "ariaLabel": "Settings menu",
+      "mobileNavLabel": "Settings section",
       "sections": {
         "account": "Account",
-        "connections": "Connections"
+        "organization": "Organization",
+        "store": "Store"
+      },
+      "storePicker": {
+        "label": "Store",
+        "placeholder": "Select a store",
+        "empty": "No connected store",
+        "connectFirst": "Connect a store first to edit these settings."
       },
       "profile": "Profile",
-      "team": "Team",
+      "security": "Security",
+      "notifications": "Notifications",
+      "preferences": "Preferences",
+      "general": "General",
       "members": "Members",
-      "billing": "Billing",
-      "stores": "Stores",
-      "notifications": "Notifications"
+      "subscription": "Subscription",
+      "connections": "Connections",
+      "shipping": "Shipping",
+      "commission": "Commission"
+    },
+    "profile": {
+      "title": "Profile",
+      "intent": "Your account details and how we show you.",
+      "identity": {
+        "title": "Profile information",
+        "description": "Your name and contact details. Your email is used to sign in."
+      },
+      "avatar": {
+        "alt": "Profile photo",
+        "change": "Change photo",
+        "hint": "JPG or PNG, up to 2 MB."
+      },
+      "fields": {
+        "fullName": "Full name",
+        "fullNamePlaceholder": "Your first and last name",
+        "email": "Email",
+        "emailHint": "Email is changed through a separate verification flow.",
+        "phone": "Phone",
+        "phonePlaceholder": "+90 5xx xxx xx xx"
+      },
+      "save": "Save",
+      "region": {
+        "title": "Region & language",
+        "description": "Controls how dates, times and currency are shown.",
+        "timezone": "Time zone",
+        "language": "Language"
+      },
+      "summary": {
+        "title": "Account summary",
+        "role": "Role",
+        "membership": "Member since",
+        "stores": "Connected stores",
+        "active": "Active",
+        "tipTitle": "Complete your profile",
+        "tipBody": "Adding a name and photo helps your teammates recognize you."
+      }
     },
     "members": {
       "loading": "Loading members…",
@@ -954,7 +1008,333 @@
       "error": {
         "title": "Couldn't load members",
         "description": "Something went wrong. Please try again."
+      },
+      "intent": "Manage team members, their roles and store access.",
+      "invite": "Invite member"
+    },
+    "notifications": {
+      "title": "Notifications",
+      "intent": "Manage which notifications you want to receive.",
+      "email": {
+        "title": "Email notifications",
+        "description": "Configure the email notifications sent to keep you informed.",
+        "masterLabel": "All email notifications",
+        "masterDescription": "Turn all email notifications on or off with a single switch.",
+        "dailySummaryLabel": "Daily summary",
+        "dailySummaryDescription": "Receive an email at the end of the day summarising your store's performance.",
+        "weeklyReportLabel": "Weekly report",
+        "weeklyReportDescription": "A detailed report showing your overall status is sent at the start of each week.",
+        "save": "Save"
+      },
+      "alerts": {
+        "title": "Alert notifications",
+        "description": "Get notified when situations requiring attention arise in your store.",
+        "lossLabel": "Loss-making sale",
+        "lossDescription": "Get an alert when a product is sold below its cost price.",
+        "marginLabel": "Below profit margin",
+        "marginDescription": "Receive a notification when the profit margin falls below your set threshold.",
+        "priceChangeLabel": "Price change",
+        "priceChangeDescription": "Be notified when your product's price changes.",
+        "returnLabel": "Return",
+        "returnDescription": "Receive a notification when a new return request is created.",
+        "stockLabel": "Stock",
+        "stockDescription": "Get an alert when stock levels drop to a critical point.",
+        "save": "Save"
+      },
+      "system": {
+        "title": "System notifications",
+        "description": "These notifications are always on and cannot be disabled.",
+        "body": "Account security sign-in alerts, subscription and payment status updates, and important platform-wide announcements are always sent. These notifications are required for the service to operate correctly and cannot be turned off individually."
+      },
+      "summary": {
+        "howTitle": "How do notifications work?",
+        "howBody": "PazarSync delivers your notifications via email. Alert thresholds and report periods will be configurable directly from here in the future.",
+        "tipTitle": "Tip",
+        "tipBody": "Enable alert notifications to take action early against loss-making sales and stock shortages."
       }
+    },
+    "commission": {
+      "title": "Commission",
+      "intent": "View category-based commission rates and manage the seller level for your active store",
+      "sellerLevel": {
+        "title": "Seller Level",
+        "description": "Your seller level directly affects the commission rates applied. Higher levels may qualify for more favorable rates.",
+        "label": "Current level",
+        "level1": "Level 1",
+        "level2": "Level 2",
+        "level3": "Level 3"
+      },
+      "categoryRates": {
+        "title": "Category Commission Rates",
+        "description": "The rates below are reference values set by the marketplace. Actual rates may vary based on your seller level and campaign conditions.",
+        "colCategory": "Category",
+        "colRate": "Commission rate (%)",
+        "importButton": "Import via Excel",
+        "saveButton": "Save",
+        "categories": {
+          "electronics": "Electronics",
+          "clothing": "Clothing & Accessories",
+          "homeLife": "Home & Living",
+          "cosmetics": "Cosmetics & Personal Care",
+          "sports": "Sports & Outdoors",
+          "books": "Books & Hobbies"
+        }
+      },
+      "summary": {
+        "title": "About commissions",
+        "infoBody": "Commission rates are set by the marketplace and vary by seller level. The values on this page are for reference only.",
+        "tipTitle": "Tip",
+        "tipBody": "To see your actual commission rates, check your seller level and rate details in your marketplace seller panel. When settlement reconciliation runs, the system reflects real rates automatically."
+      }
+    },
+    "organization": {
+      "title": "General",
+      "intent": "Your organization's name, identity, and financial settings.",
+      "info": {
+        "title": "Organization details",
+        "description": "Your organization's display name and short identifier. These represent your identity on the platform."
+      },
+      "logo": {
+        "upload": "Upload",
+        "hint": "PNG or JPG, up to 2 MB.",
+        "alt": "Organization logo"
+      },
+      "fields": {
+        "name": "Organization name",
+        "namePlaceholder": "Your organization's full name",
+        "slug": "Short name (slug)",
+        "slugHint": "The short name cannot be changed.",
+        "timezone": "Time zone",
+        "currency": "Currency"
+      },
+      "accounting": {
+        "title": "Accounting settings",
+        "description": "Configure which tax and deduction items are factored into profit calculations."
+      },
+      "rows": {
+        "negativeVat": {
+          "title": "Include negative VAT",
+          "description": "Negative VAT amounts from returns and cancellations are included in profit calculations."
+        },
+        "stopaj": {
+          "title": "Include withholding tax (stopaj)",
+          "description": "Withholding tax applied on settlement payouts is reflected in net profit calculations."
+        }
+      },
+      "save": "Save",
+      "summary": {
+        "title": "Organization summary",
+        "orgName": "Organization",
+        "role": "Your role",
+        "stores": "Connected stores",
+        "plan": "Plan",
+        "planValue": "—",
+        "tipTitle": "About these settings",
+        "tipBody": "Organization details and accounting preferences apply to all your stores. Changes saved here are immediately reflected in profit calculations."
+      }
+    },
+    "preferences": {
+      "title": "Preferences",
+      "intent": "Configure display and formatting settings specific to your account.",
+      "appearance": {
+        "title": "Appearance",
+        "description": "Choose the visual theme for the application. Your preference is stored in this browser only.",
+        "themeLabel": "Theme",
+        "themeDescription": "Use a light, dark, or your operating system's default theme.",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+        "themeSystem": "System"
+      },
+      "formats": {
+        "title": "Formats",
+        "description": "Customise how currency, numbers, and dates are displayed.",
+        "currencyLabel": "Currency display",
+        "currencyDescription": "Choose the currency symbol shown next to amounts.",
+        "numberLabel": "Number format",
+        "numberDescription": "Choose the thousands separator and decimal notation.",
+        "dateLabel": "Date format",
+        "dateDescription": "Choose how dates are displayed.",
+        "save": "Save",
+        "currencyTRY": "₺ Turkish Lira",
+        "currencyUSD": "$ US Dollar",
+        "numberDotComma": "1.234,56 (dot thousands, comma decimal)",
+        "numberCommaPoint": "1,234.56 (comma thousands, dot decimal)",
+        "dateDMY": "31.12.2026 (day.month.year)",
+        "dateYMD": "2026-12-31 (year-month-day)"
+      },
+      "shortcuts": {
+        "title": "Keyboard shortcuts",
+        "description": "Use keyboard shortcuts to navigate the app quickly.",
+        "comingSoon": "Coming soon",
+        "note": "Keyboard shortcut support is coming soon. Once enabled, you will be able to use quick-access keys for navigation, search, and common actions."
+      },
+      "summary": {
+        "scopeTitle": "When do these settings take effect?",
+        "scopeBody": "Appearance and formatting preferences belong to your account only — they do not affect other members or your organisation. The theme preference is stored per browser.",
+        "tipTitle": "Tip",
+        "tipBody": "Theme changes apply instantly — no need to save. Format settings take effect across all screens once saved."
+      }
+    },
+    "security": {
+      "title": "Security",
+      "intent": "Manage your password, two-factor authentication, and active sessions.",
+      "save": "Save",
+      "password": {
+        "title": "Change password",
+        "description": "Change your password regularly to improve account security.",
+        "currentPassword": "Current password",
+        "currentPasswordPlaceholder": "Enter your current password",
+        "newPassword": "New password",
+        "newPasswordPlaceholder": "Enter your new password",
+        "confirmPassword": "New password (again)",
+        "confirmPasswordPlaceholder": "Re-enter your new password",
+        "reveal": {
+          "show": "Show password",
+          "hide": "Hide password"
+        }
+      },
+      "twoFactor": {
+        "title": "Two-factor authentication",
+        "description": "Add an extra layer of security to your account to protect against unauthorized access.",
+        "sms": {
+          "title": "SMS verification",
+          "description": "A one-time verification code is sent to your phone number when signing in."
+        },
+        "authenticator": {
+          "title": "Authenticator app",
+          "description": "Generate time-based codes via Google Authenticator or a similar app."
+        },
+        "comingSoon": "Coming soon"
+      },
+      "sessions": {
+        "title": "Sessions",
+        "description": "View and manage active sessions connected to your account.",
+        "activeSession": {
+          "title": "Chrome · macOS",
+          "description": "Istanbul · Active now"
+        },
+        "signOut": "Sign out"
+      },
+      "dangerZone": {
+        "title": "Danger zone",
+        "description": "These actions are irreversible. Read carefully before proceeding.",
+        "deleteAccount": {
+          "title": "Delete account",
+          "description": "Your account and all associated data will be permanently deleted. This action cannot be undone.",
+          "button": "Delete account",
+          "dialog": {
+            "title": "Are you sure you want to delete your account?",
+            "description": "This action cannot be undone. Your account, store connections, and all financial data will be permanently deleted.",
+            "confirm": "Yes, delete account",
+            "cancel": "Cancel"
+          }
+        }
+      },
+      "summary": {
+        "title": "Security status",
+        "twoFactor": "Two-factor authentication",
+        "twoFactorValue": "Off",
+        "lastPasswordChange": "Last password change",
+        "lastPasswordChangeValue": "—",
+        "activeSessions": "Active sessions",
+        "activeSessionsValue": "1",
+        "tipTitle": "Protect your account",
+        "tipBody": "Enable two-factor authentication to add an extra layer of security. We recommend changing your password at least every 3 months."
+      }
+    },
+    "subscription": {
+      "title": "Subscription",
+      "intent": "Manage your subscription plan and billing details here.",
+      "plan": {
+        "title": "Current plan",
+        "description": "Details of your active subscription plan and current usage.",
+        "planName": "Starter",
+        "storeLimit": "Store limit",
+        "periodEnd": "Period end",
+        "autoRenewLabel": "Auto-renewal",
+        "autoRenewDescription": "Your subscription will renew automatically at the end of the period.",
+        "periodProgress": "Period progress",
+        "changePlan": "Change plan",
+        "daysRemaining": "{days} days remaining"
+      },
+      "billing": {
+        "title": "Billing details",
+        "description": "Enter the person or company details to be used on your invoices.",
+        "invoiceType": "Invoice type",
+        "individual": "Individual",
+        "corporate": "Corporate",
+        "fullName": "Full name",
+        "fullNamePlaceholder": "Enter your full name",
+        "companyName": "Company name",
+        "companyNamePlaceholder": "Enter the company name",
+        "tcKimlik": "National ID (TC)",
+        "tcKimlikPlaceholder": "Your 11-digit national ID number",
+        "vkn": "Tax ID (VKN)",
+        "vknPlaceholder": "Your 10-digit tax ID number",
+        "address": "Address",
+        "addressPlaceholder": "Enter your billing address",
+        "city": "City",
+        "cityPlaceholder": "Select or type a city",
+        "district": "District",
+        "districtPlaceholder": "Enter district",
+        "postalCode": "Postal code",
+        "postalCodePlaceholder": "Enter your postal code",
+        "save": "Save"
+      },
+      "history": {
+        "title": "Invoice history",
+        "description": "View and download your past invoices.",
+        "emptyTitle": "No invoices yet",
+        "emptyDescription": "Invoices issued after your subscription becomes active will appear here.",
+        "colNo": "No",
+        "colDate": "Date",
+        "colAmount": "Amount",
+        "colStatus": "Status",
+        "colDownload": "Download",
+        "statusPaid": "Paid",
+        "download": "Download"
+      },
+      "summary": {
+        "usageTitle": "Usage",
+        "stores": "Stores",
+        "orders": "Orders",
+        "tipTitle": "About your plan",
+        "tipBody": "When you need more stores or higher order volume, you can upgrade your plan to instantly expand your capacity."
+      }
+    },
+    "connections": {
+      "title": "Connections",
+      "intent": "Connect, monitor and manage your marketplace stores.",
+      "listTitle": "Connected stores",
+      "connect": "Connect a store",
+      "status": {
+        "active": "Connected",
+        "error": "Connection error",
+        "disabled": "Disabled"
+      },
+      "lastSync": "Last sync",
+      "neverSynced": "Not synced yet",
+      "actions": {
+        "menu": "Actions",
+        "rotate": "Rotate credentials",
+        "disconnect": "Disconnect"
+      },
+      "disconnectConfirm": {
+        "title": "Disconnect this store?",
+        "body": "{name} will be disconnected. Its orders, products and settlements are permanently deleted. This cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "Disconnect"
+      },
+      "disconnected": "Store disconnected.",
+      "supported": {
+        "title": "Supported marketplaces",
+        "body": "PazarSync currently works with Trendyol and Hepsiburada. More integrations are on the way."
+      }
+    },
+    "shipping": {
+      "intent": "Set the shipping tariff source and carrier for the selected store.",
+      "infoTitle": "How is shipping calculated?",
+      "infoBody": "With the Trendyol contract, shipping cost is derived from the desi tariff of the carrier you pick. With your own contract, you enter your own tariff table."
     }
   },
   "notificationsPage": {

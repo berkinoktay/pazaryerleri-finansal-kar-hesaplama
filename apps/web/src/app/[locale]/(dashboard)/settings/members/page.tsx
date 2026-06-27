@@ -5,6 +5,7 @@ import type { ReactElement } from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
 import type { Store } from '@/features/members/api/members.api';
+import { InviteMemberButton } from '@/features/members/components/invite-member-button';
 import { MembersSettingsPageClient } from '@/features/members/components/members-settings-page-client';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
@@ -35,6 +36,10 @@ export default async function SettingsMembersPage({
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
   const tNav = await getTranslations({ locale: effectiveLocale, namespace: 'settings.nav' });
+  const tMembers = await getTranslations({
+    locale: effectiveLocale,
+    namespace: 'settings.members',
+  });
 
   const api = await getServerApiClient();
   const { data: orgsResponse } = await api.GET('/v1/organizations', {});
@@ -60,13 +65,17 @@ export default async function SettingsMembersPage({
   }
 
   return (
-    <>
-      <PageHeader title={tNav('members')} />
+    <div className="gap-lg flex flex-col">
+      <PageHeader
+        title={tNav('members')}
+        intent={tMembers('intent')}
+        actions={canReadRoster ? <InviteMemberButton /> : undefined}
+      />
       <MembersSettingsPageClient
         orgId={activeOrgId ?? null}
         canReadRoster={canReadRoster}
         stores={stores}
       />
-    </>
+    </div>
   );
 }
