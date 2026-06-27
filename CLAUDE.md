@@ -659,7 +659,8 @@ Before running `pnpm check:all`, apply skills in this order on all changed code:
 
 1. Run `/code-review` on all changed code. It covers correctness bugs AND the reuse / simplification / efficiency cleanups, so it supersedes the old `/simplify` step (which was quality-only and never hunted bugs). Apply findings with `--fix` (or by hand); raise the effort (`high` / `ultra`) for a deeper, broader pass on larger or higher-risk diffs. `/simplify` stays available for a cleanup-only pass when you explicitly do NOT want bug-hunting, but `/code-review` is the default pre-commit gate.
 2. After `/code-review` finishes, run `/vercel-react-best-practices` on changed React/Next.js code, and `supabase-postgres-best-practices` on changed database code (if applicable).
-3. After all skill fixes are done, run `pnpm check:all` and fix every error.
+3. If the change touches `apps/web` (frontend), run `/frontend-pr-review` before opening the PR — do not skip this just because the diff looks small. It is the PazarSync-specific convention & UI/UX gate (defined in `.claude/skills/frontend-pr-review/`): it reviews the changed frontend diff against this repo's own living rules (root + `apps/web/CLAUDE.md`, `docs/SECURITY.md`, and the design memories), reports violations by severity (blocker / warning / suggestion), and auto-fixes only the unambiguous ones. It complements `/code-review` (general bug hunting) — it does not replace it.
+4. After all skill fixes are done, run `pnpm check:all` and fix every error.
 
 ## Bug Fix Workflow
 
