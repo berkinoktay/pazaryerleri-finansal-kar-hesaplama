@@ -1,8 +1,12 @@
+'use client';
+
 import type Decimal from 'decimal.js';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { TrendDelta } from '@/components/patterns/trend-delta';
+import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { marginColorStyle } from '@/lib/margin-color-style';
 import { cn } from '@/lib/utils';
 
 /**
@@ -56,6 +60,13 @@ export interface ProfitCellProps {
    */
   align?: 'left' | 'right';
   className?: string;
+  /**
+   * Row's margin percentage — when provided, the Currency color is driven
+   * by the margin bucket (scale mode) or by sign (binary fallback) instead
+   * of the default neutral foreground. Pass the row's `saleMarginPct` here
+   * so profit and margin columns share the same color bucket.
+   */
+  marginPct?: string | null;
 }
 
 export function ProfitCell({
@@ -66,8 +77,13 @@ export function ProfitCell({
   dimWhenZero = false,
   align = 'right',
   className,
+  marginPct,
 }: ProfitCellProps): React.ReactElement {
   const alignClass = align === 'right' ? 'text-right items-end' : 'text-left items-start';
+  // Coloring: when marginPct is provided, derive the currency color from the
+  // margin bucket (scale-enabled) or from binary sign-based tone (fallback).
+  const scale = useMarginColoring();
+  const colorStyle = marginPct !== undefined ? marginColorStyle(marginPct, scale) : {};
 
   if (layout === 'inline') {
     return (
@@ -78,7 +94,13 @@ export function ProfitCell({
           className,
         )}
       >
-        <Currency value={value} emphasis={emphasis} dimWhenZero={dimWhenZero} />
+        <Currency
+          value={value}
+          emphasis={emphasis}
+          dimWhenZero={dimWhenZero}
+          className={cn('tabular-nums', colorStyle.className)}
+          style={colorStyle.style}
+        />
         {delta !== undefined ? (
           <TrendDelta value={delta.percent} goodDirection={delta.goodDirection ?? 'up'} />
         ) : null}
@@ -88,7 +110,13 @@ export function ProfitCell({
 
   return (
     <span className={cn('gap-3xs flex flex-col', alignClass, className)}>
-      <Currency value={value} emphasis={emphasis} dimWhenZero={dimWhenZero} />
+      <Currency
+        value={value}
+        emphasis={emphasis}
+        dimWhenZero={dimWhenZero}
+        className={cn('tabular-nums', colorStyle.className)}
+        style={colorStyle.style}
+      />
       {delta !== undefined ? (
         <TrendDelta value={delta.percent} goodDirection={delta.goodDirection ?? 'up'} />
       ) : null}

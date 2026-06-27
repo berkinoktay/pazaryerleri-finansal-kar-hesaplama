@@ -122,7 +122,7 @@ function BucketRow({
         disabled={total <= 2}
         onClick={() => onRemove(index)}
         className={cn(
-          'text-muted-foreground hover:text-destructive focus-visible:ring-ring rounded p-1 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none',
+          'text-muted-foreground hover:text-destructive focus-visible:ring-ring p-3xs rounded text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none',
           'disabled:pointer-events-none disabled:opacity-30',
         )}
       >
