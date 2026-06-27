@@ -139,13 +139,37 @@ describe('<MarginColoringSettings>', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getAllByRole('spinbutton')).toHaveLength(2);
+        // Floor model: 2 buckets expose 1 threshold input (the first is the floor).
+        expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
       });
 
       const removeBtns = screen.getAllByRole('button', { name: /kald/i });
       for (const btn of removeBtns) {
         expect(btn).toBeDisabled();
       }
+    });
+
+    it('reset-to-default restores the 5-bucket default', async () => {
+      const { user } = setup({
+        marginColoring: {
+          enabled: true,
+          buckets: [
+            { threshold: 0, color: 'oklch(58% 0.20 27)' },
+            { threshold: 50, color: 'oklch(58% 0.14 155)' },
+          ],
+        },
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
+      });
+
+      await user.click(screen.getByRole('button', { name: /varsay/i }));
+
+      // Default has 5 buckets → 4 threshold inputs (first is the floor).
+      await waitFor(() => {
+        expect(screen.getAllByRole('spinbutton')).toHaveLength(4);
+      });
     });
   });
 

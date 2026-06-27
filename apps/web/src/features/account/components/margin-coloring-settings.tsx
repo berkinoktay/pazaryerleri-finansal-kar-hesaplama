@@ -28,16 +28,16 @@ import {
   type PresetKey,
 } from '@/lib/margin-coloring';
 import { marginColorStyle } from '@/lib/margin-color-style';
+import { cn } from '@/lib/utils';
 
 import { useMyPreferences, useUpdateMyPreferences } from '../hooks/use-my-preferences';
 
-/** Sample margin values shown in the always-on live preview strip. */
+/** Sample margin values shown in the live preview strip. */
 const PREVIEW_VALUES = [-30, -5, 8, 18, 40, 75] as const;
 
 const MIN_BUCKETS = 2;
 const MAX_BUCKETS = 8;
 
-/** i18n key suffix for each preset, in display order. */
 const PRESET_LABEL_KEY: Record<PresetKey, string> = {
   redGreen: 'presetRedGreen',
   colorblind: 'presetColorblind',
@@ -46,7 +46,18 @@ const PRESET_LABEL_KEY: Record<PresetKey, string> = {
   mono: 'presetMono',
 };
 
-/** Strictly-ascending + in-range validation; returns the first failure type. */
+/**
+ * Keep bucket[0] (the floor — no visible threshold) strictly below bucket[1],
+ * which the backend's ascending-threshold check requires. bucket[0]'s threshold
+ * is never shown or edited; only the boundaries on buckets[1..n-1] matter.
+ */
+function normalizeFloor(buckets: MarginBucket[]): MarginBucket[] {
+  if (buckets.length < 2) return buckets;
+  const floorCeil = buckets[1]!.threshold - 1;
+  const floor = Math.max(-100, Math.min(buckets[0]!.threshold, floorCeil));
+  return [{ ...buckets[0]!, threshold: floor }, ...buckets.slice(1)];
+}
+
 function validateBuckets(buckets: MarginBucket[]): 'ascending' | 'range' | null {
   for (const b of buckets) {
     if (b.threshold < -100 || b.threshold > 1000) return 'range';
@@ -59,59 +70,60 @@ function validateBuckets(buckets: MarginBucket[]): 'ascending' | 'range' | null 
 
 // ── BucketRow ────────────────────────────────────────────────────────────────
 
-interface BucketRowLabels {
-  pickColor: string;
-  customColor: string;
-  threshold: string;
-  andBelow: string;
-  andAbove: string;
-  remove: string;
-}
-
 interface BucketRowProps {
   bucket: MarginBucket;
   index: number;
   total: number;
+  /** Resolved range label for this row (e.g. "%78 ve altı", "%10 eşiğine kadar", "ve üstü"). */
+  rangeLabel: string;
   onColorChange: (index: number, color: string) => void;
   onThresholdChange: (index: number, value: number) => void;
   onRemove: (index: number) => void;
-  labels: BucketRowLabels;
+  pickColorLabel: string;
+  customColorLabel: string;
+  thresholdLabel: string;
+  removeLabel: string;
 }
 
 function BucketRow({
   bucket,
   index,
   total,
+  rangeLabel,
   onColorChange,
   onThresholdChange,
   onRemove,
-  labels,
+  pickColorLabel,
+  customColorLabel,
+  thresholdLabel,
+  removeLabel,
 }: BucketRowProps): React.ReactElement {
-  const positionLabel =
-    index === 0 ? labels.andBelow : index === total - 1 ? labels.andAbove : undefined;
+  const isFloor = index === 0;
 
   return (
     <div className="gap-sm flex items-center">
       <ColorSwatchPicker
         value={bucket.color}
         onChange={(color) => onColorChange(index, color)}
-        label={labels.pickColor}
-        customLabel={labels.customColor}
+        label={pickColorLabel}
+        customLabel={customColorLabel}
       />
 
-      <Input
-        type="number"
-        size="sm"
-        aria-label={labels.threshold}
-        value={bucket.threshold}
-        onChange={(e) => {
-          const parsed = Number(e.target.value);
-          if (!Number.isNaN(parsed)) onThresholdChange(index, parsed);
-        }}
-        className="w-20 tabular-nums"
-      />
+      {isFloor ? null : (
+        <Input
+          type="number"
+          size="sm"
+          aria-label={thresholdLabel}
+          value={bucket.threshold}
+          onChange={(e) => {
+            const parsed = Number(e.target.value);
+            if (!Number.isNaN(parsed)) onThresholdChange(index, parsed);
+          }}
+          className="w-20 tabular-nums"
+        />
+      )}
 
-      <span className="text-muted-foreground w-16 text-xs">{positionLabel}</span>
+      <span className="text-muted-foreground text-xs">{rangeLabel}</span>
 
       <div className="flex-1" />
 
@@ -119,7 +131,7 @@ function BucketRow({
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label={labels.remove}
+        aria-label={removeLabel}
         disabled={total <= MIN_BUCKETS}
         onClick={() => onRemove(index)}
         className="text-muted-foreground hover:text-destructive hover:bg-destructive-surface shrink-0 pointer-coarse:size-11"
@@ -130,33 +142,14 @@ function BucketRow({
   );
 }
 
-// ── PreviewStrip ─────────────────────────────────────────────────────────────
-
-function PreviewStrip({ buckets }: { buckets: MarginBucket[] }): React.ReactElement {
-  return (
-    <div className="gap-md flex flex-wrap">
-      {PREVIEW_VALUES.map((v) => {
-        // Preview ALWAYS shows the configured scale (enabled: true) so the user
-        // sees their ranges even before flipping the master toggle on.
-        const style = marginColorStyle(String(v), { enabled: true, buckets });
-        return (
-          <span key={v} className="text-sm font-semibold tabular-nums" style={style.style}>
-            {v > 0 ? `+${v}%` : `${v}%`}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── MarginColoringSettings ───────────────────────────────────────────────────
 
 /**
- * "Kâr Marjı Renklendirme" — a sibling card in the Tercihler page. Lets the user
- * enable a threshold-based color scale, edit each range's color (curated swatches
- * or a custom color) + lower threshold, apply a preset ramp, and preview live.
- * Local state seeds from useMyPreferences once it resolves (guarded setState, no
- * derived-state effect).
+ * "Kâr Marjı Renklendirme" settings card (a sibling in Tercihler). The user
+ * toggles colored display on, edits a contiguous set of color ranges (the first
+ * is the floor with no threshold; the rest carry a lower-bound threshold), can
+ * apply a preset or reset to default, and sees a live preview that mirrors the
+ * toggle. Local state seeds once from the server (guarded setState — no effect).
  */
 export function MarginColoringSettings(): React.ReactElement {
   const t = useTranslations('settings.marginColoring');
@@ -168,7 +161,6 @@ export function MarginColoringSettings(): React.ReactElement {
   const [buckets, setBuckets] = React.useState<MarginBucket[]>(Array.from(DEFAULT_MARGIN_BUCKETS));
   const [error, setError] = React.useState<'ascending' | 'range' | null>(null);
 
-  // One-time seed from the server once preferences arrive.
   if (!initialized && preferences !== undefined) {
     setInitialized(true);
     setEnabled(preferences.marginColoring?.enabled ?? false);
@@ -199,25 +191,30 @@ export function MarginColoringSettings(): React.ReactElement {
     setError(null);
   }
 
-  const bucketLabels: BucketRowLabels = {
-    pickColor: t('pickColor'),
-    customColor: t('customColor'),
-    threshold: t('thresholdLabel'),
-    andBelow: t('andBelow'),
-    andAbove: t('andAbove'),
-    remove: t('removeBucket'),
-  };
+  function handleReset(): void {
+    setBuckets(Array.from(DEFAULT_MARGIN_BUCKETS));
+    setError(null);
+  }
 
   function handleSave(): void {
-    const err = validateBuckets(buckets);
+    const normalized = normalizeFloor(buckets);
+    const err = validateBuckets(normalized);
     if (err !== null) {
       setError(err);
       return;
     }
     updateMutation.mutate(
-      { marginColoring: { enabled, buckets } },
+      { marginColoring: { enabled, buckets: normalized } },
       { onSuccess: () => toast.success(t('savedToast')) },
     );
+  }
+
+  /** Range label for a row: floor → "% next ve altı"; last → "ve üstü"; middle → "up to next". */
+  function rangeLabelFor(index: number): string {
+    const next = buckets[index + 1]?.threshold ?? 0;
+    if (index === 0) return t('belowMax', { max: next });
+    if (index === buckets.length - 1) return t('andAbove');
+    return t('upToMax', { max: next });
   }
 
   return (
@@ -236,7 +233,7 @@ export function MarginColoringSettings(): React.ReactElement {
           handleSave();
         }}
       >
-        <CardContent className="gap-lg pt-lg flex flex-col">
+        <CardContent className="gap-lg flex flex-col">
           {/* Enable toggle */}
           <SettingsRow
             htmlFor="margin-coloring-enabled"
@@ -258,7 +255,9 @@ export function MarginColoringSettings(): React.ReactElement {
             <div className="gap-sm flex flex-wrap items-end justify-between">
               <div className="gap-3xs flex flex-col">
                 <span className="text-foreground text-sm font-medium">{t('bucketsTitle')}</span>
-                <span className="text-muted-foreground text-2xs">{t('bucketsDescription')}</span>
+                <span className="text-muted-foreground text-2xs max-w-prose-max">
+                  {t('bucketsDescription')}
+                </span>
               </div>
               <Select onValueChange={(v) => handlePreset(v as PresetKey)}>
                 <SelectTrigger size="sm" className="w-44" aria-label={t('presetLabel')}>
@@ -281,10 +280,14 @@ export function MarginColoringSettings(): React.ReactElement {
                   bucket={bucket}
                   index={index}
                   total={buckets.length}
+                  rangeLabel={rangeLabelFor(index)}
                   onColorChange={(i, color) => patchBucket(i, { color })}
                   onThresholdChange={(i, threshold) => patchBucket(i, { threshold })}
                   onRemove={handleRemoveBucket}
-                  labels={bucketLabels}
+                  pickColorLabel={t('pickColor')}
+                  customColorLabel={t('customColor')}
+                  thresholdLabel={t('thresholdLabel')}
+                  removeLabel={t('removeBucket')}
                 />
               ))}
             </div>
@@ -295,25 +298,42 @@ export function MarginColoringSettings(): React.ReactElement {
               </p>
             ) : null}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={buckets.length >= MAX_BUCKETS}
-              onClick={handleAddBucket}
-              className="w-fit"
-            >
-              {t('addBucket')}
-            </Button>
+            <div className="gap-xs flex flex-wrap items-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={buckets.length >= MAX_BUCKETS}
+                onClick={handleAddBucket}
+              >
+                {t('addBucket')}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={handleReset}>
+                {t('resetDefault')}
+              </Button>
+            </div>
           </div>
 
-          {/* Live preview */}
+          {/* Live preview — mirrors the toggle (binary when off, scale when on) */}
           <div className="gap-xs flex flex-col">
             <div className="gap-3xs flex flex-col">
               <span className="text-foreground text-sm font-medium">{t('previewTitle')}</span>
               <span className="text-muted-foreground text-2xs">{t('previewDescription')}</span>
             </div>
-            <PreviewStrip buckets={buckets} />
+            <div className="gap-md flex flex-wrap">
+              {PREVIEW_VALUES.map((v) => {
+                const style = marginColorStyle(String(v), { enabled, buckets });
+                return (
+                  <span
+                    key={v}
+                    className={cn('text-sm font-semibold tabular-nums', style.className)}
+                    style={style.style}
+                  >
+                    {v > 0 ? `+${v}%` : `${v}%`}
+                  </span>
+                );
+              })}
+            </div>
           </div>
         </CardContent>
 

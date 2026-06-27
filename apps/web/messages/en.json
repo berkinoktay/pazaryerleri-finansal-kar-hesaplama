@@ -1399,12 +1399,12 @@
       "title": "Profit Margin Coloring",
       "description": "Color profit and margin values from red to green based on thresholds you define.",
       "enableLabel": "Enable coloring",
-      "enableDescription": "When off, profit and margin values use the classic green/red (profit/loss) styling.",
+      "enableDescription": "When on, profit and margin values are colored by the ranges you set below. When off, profits show green and losses red.",
       "presetLabel": "Preset scale",
       "presetRedGreen": "Red to green",
       "presetColorblind": "Color-blind friendly",
       "bucketsTitle": "Ranges",
-      "bucketsDescription": "Set a color and lower threshold (%) for each range. Ranges are automatically contiguous.",
+      "bucketsDescription": "Each color covers margins from its threshold up to the next. The lowest color covers everything below it; the highest, everything above.",
       "thresholdLabel": "Threshold (%)",
       "andBelow": "and below",
       "andAbove": "and above",
@@ -1412,7 +1412,7 @@
       "removeBucket": "Remove range",
       "pickColor": "Pick color",
       "previewTitle": "Preview",
-      "previewDescription": "Sample margin values with your scale.",
+      "previewDescription": "How sample margin values look with your current settings.",
       "save": "Save",
       "savedToast": "Your coloring preference has been saved.",
       "errorAscending": "Thresholds must be in ascending order and distinct.",
@@ -1420,7 +1420,10 @@
       "presetPurpleGreen": "Purple to green",
       "presetSunset": "Sunset",
       "presetMono": "Green intensity",
-      "customColor": "Custom color"
+      "customColor": "Custom color",
+      "resetDefault": "Reset to default",
+      "belowMax": "{max}% and below",
+      "upToMax": "up to {max}%"
     }
   },
   "notificationsPage": {

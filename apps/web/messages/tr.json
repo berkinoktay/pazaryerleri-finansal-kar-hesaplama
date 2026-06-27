@@ -1399,12 +1399,12 @@
       "title": "Kâr Marjı Renklendirme",
       "description": "Kâr ve marj değerlerini, belirlediğiniz eşiklere göre kırmızıdan yeşile doğru renklendirin.",
       "enableLabel": "Renklendirmeyi etkinleştir",
-      "enableDescription": "Kapalıyken kâr ve marj değerleri klasik yeşil/kırmızı (kâr/zarar) olarak gösterilir.",
+      "enableDescription": "Açtığınızda kâr ve marj değerleri, aşağıda belirlediğiniz aralıklara göre renklenir. Kapalıyken kârlar yeşil, zararlar kırmızı gösterilir.",
       "presetLabel": "Hazır skala",
       "presetRedGreen": "Kırmızıdan yeşile",
       "presetColorblind": "Renk körü dostu",
       "bucketsTitle": "Aralıklar",
-      "bucketsDescription": "Her aralık için bir renk ve alt eşik (%) belirleyin. Aralıklar otomatik olarak birbirine bitişiktir.",
+      "bucketsDescription": "Her renk, eşik değerinden bir sonraki eşiğe kadar olan marjları kapsar. En alttaki renk altındaki tüm değerleri, en üstteki ise üstündeki tüm değerleri kapsar.",
       "thresholdLabel": "Eşik (%)",
       "andBelow": "ve altı",
       "andAbove": "ve üstü",
@@ -1412,7 +1412,7 @@
       "removeBucket": "Aralığı kaldır",
       "pickColor": "Renk seç",
       "previewTitle": "Önizleme",
-      "previewDescription": "Örnek marj değerleri, seçtiğiniz skalayla.",
+      "previewDescription": "Örnek marj değerlerinin seçtiğiniz ayarla nasıl görüneceği.",
       "save": "Kaydet",
       "savedToast": "Renklendirme tercihiniz kaydedildi.",
       "errorAscending": "Eşikler artan sırada ve birbirinden farklı olmalı.",
@@ -1420,7 +1420,10 @@
       "presetPurpleGreen": "Mordan yeşile",
       "presetSunset": "Gün batımı",
       "presetMono": "Yeşil yoğunluğu",
-      "customColor": "Özel renk"
+      "customColor": "Özel renk",
+      "resetDefault": "Varsayılana dön",
+      "belowMax": "%{max} ve altı",
+      "upToMax": "%{max} eşiğine kadar"
     }
   },
   "notificationsPage": {
