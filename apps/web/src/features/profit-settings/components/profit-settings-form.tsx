@@ -1,5 +1,6 @@
 'use client';
 
+import { DEFAULT_PROFIT_SETTINGS } from '@pazarsync/utils';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -23,18 +24,17 @@ export interface ProfitSettingsFormProps {
 
 type FormDraft = ProfitSettings;
 
-const FALLBACK_DRAFT: FormDraft = { includeStopaj: true, includeNegativeNetVat: false };
-
 /**
  * Reads the user's pending edits if they exist, otherwise the server snapshot,
- * otherwise the safe defaults. The pending layer is only set by the toggle
+ * otherwise the shared defaults (@pazarsync/utils — single source of truth, same
+ * values the backend resolves to). The pending layer is only set by the toggle
  * handlers, so a query refetch never clobbers in-progress edits. No `useEffect`
  * (react-hooks/set-state-in-effect forbids copying server state into local state).
  */
 function resolveDraft(pending: FormDraft | null, server: ProfitSettings | undefined): FormDraft {
   if (pending !== null) return pending;
   if (server !== undefined) return server;
-  return FALLBACK_DRAFT;
+  return DEFAULT_PROFIT_SETTINGS;
 }
 
 /**
