@@ -15,7 +15,9 @@ import {
   DeliveryTruck01Icon,
   FileExportIcon,
   GlobalIcon,
+  Idea01Icon,
   Image01Icon,
+  InformationCircleIcon,
   Invoice01Icon,
   KeyboardIcon,
   LanguageSkillIcon,
@@ -55,6 +57,12 @@ type IconComponent = React.ComponentType<{ className?: string }>;
  * never touches a feature component.
  */
 export const DOMAIN_ICONS = {
+  // Contextual hints — secondary aside cards. `hint` (lightbulb) for tips,
+  // `info` (info-circle) for "how it works / about" explainers. The primary
+  // summary/status aside card keeps its own domain icon.
+  hint: Idea01Icon,
+  info: InformationCircleIcon,
+
   // Notifications
   notifEmail: Mail01Icon,
   notifDailySummary: Calendar03Icon,

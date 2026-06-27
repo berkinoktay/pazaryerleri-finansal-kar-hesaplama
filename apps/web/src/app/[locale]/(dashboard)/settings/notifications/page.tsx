@@ -2,12 +2,11 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { PageHeader } from '@/components/patterns/page-header';
 import { NotificationsSettings } from '@/features/account/components/notifications-settings';
 import { NotificationsSummaryCard } from '@/features/account/components/notifications-summary-card';
 import { routing } from '@/i18n/routing';
 
-import { SettingsDetail } from '../settings-detail';
+import { SettingsPageShell } from '../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -37,11 +36,8 @@ export default async function SettingsNotificationsPage({
   const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.notifications' });
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
-      <SettingsDetail aside={<NotificationsSummaryCard />}>
-        <NotificationsSettings />
-      </SettingsDetail>
-    </div>
+    <SettingsPageShell title={t('title')} intent={t('intent')} aside={<NotificationsSummaryCard />}>
+      <NotificationsSettings />
+    </SettingsPageShell>
   );
 }

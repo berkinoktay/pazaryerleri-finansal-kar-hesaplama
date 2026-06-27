@@ -34,7 +34,7 @@ export function SettingsNav(): React.ReactElement {
   return (
     <>
       {/* Mobile: one grouped select. */}
-      <div className="w-full md:hidden">
+      <nav aria-label={t('settings.nav.ariaLabel')} className="w-full md:hidden">
         <Select value={pathname} onValueChange={(href) => router.push(href)}>
           <SelectTrigger aria-label={t('settings.nav.mobileNavLabel')}>
             <SelectValue />
@@ -52,12 +52,12 @@ export function SettingsNav(): React.ReactElement {
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </nav>
 
       {/* Desktop: sticky grouped sidebar. */}
       <aside
         aria-label={t('settings.nav.ariaLabel')}
-        className="border-border bg-card p-sm gap-lg md:w-settings-aside md:top-lg hidden h-fit w-full flex-col rounded-lg border shadow-xs md:sticky md:flex md:shrink-0"
+        className="border-border bg-card p-sm gap-lg md:w-settings-aside md:top-xl hidden h-fit w-full flex-col rounded-lg border shadow-xs md:sticky md:flex md:shrink-0"
       >
         {SETTINGS_NAV_SECTIONS.map((section) => (
           <div key={section.key} className="gap-2xs flex flex-col">

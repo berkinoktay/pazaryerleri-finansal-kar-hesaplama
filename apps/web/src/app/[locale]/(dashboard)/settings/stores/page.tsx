@@ -3,14 +3,14 @@ import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
-import { PageHeader } from '@/components/patterns/page-header';
-import { Card, CardContent } from '@/components/ui/card';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
 import { StoreConnectionsList } from '@/features/stores/components/store-connections-list';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 
-import { SettingsDetail } from '../settings-detail';
+import { SettingsPageShell } from '../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -54,9 +54,8 @@ export default async function SettingsStoresPage({
       : [];
 
   const aside = (
-    <Card>
-      <CardContent className="gap-md flex flex-col">
-        <span className="text-foreground text-sm font-semibold">{t('supported.title')}</span>
+    <SettingsAsideCard title={t('supported.title')} icon={<DOMAIN_ICONS.stores />}>
+      <div className="gap-2xs flex flex-col">
         <div className="gap-lg flex items-center">
           <MarketplaceLogo platform="TRENDYOL" size="md" alt={tStores('platforms.TRENDYOL')} />
           <MarketplaceLogo
@@ -66,18 +65,19 @@ export default async function SettingsStoresPage({
           />
         </div>
         <p className="text-2xs text-muted-foreground leading-relaxed">{t('supported.body')}</p>
-      </CardContent>
-    </Card>
+      </div>
+    </SettingsAsideCard>
   );
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
+    <SettingsPageShell
+      title={t('title')}
+      intent={t('intent')}
+      aside={activeOrgId !== undefined ? aside : undefined}
+    >
       {activeOrgId !== undefined ? (
-        <SettingsDetail aside={aside}>
-          <StoreConnectionsList orgId={activeOrgId} initialStores={stores} />
-        </SettingsDetail>
+        <StoreConnectionsList orgId={activeOrgId} initialStores={stores} />
       ) : null}
-    </div>
+    </SettingsPageShell>
   );
 }

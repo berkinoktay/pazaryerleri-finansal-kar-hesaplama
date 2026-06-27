@@ -3,13 +3,14 @@ import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 import type { ReactElement } from 'react';
 
-import { PageHeader } from '@/components/patterns/page-header';
 import type { Store } from '@/features/members/api/members.api';
 import { InviteMemberButton } from '@/features/members/components/invite-member-button';
 import { MembersSettingsPageClient } from '@/features/members/components/members-settings-page-client';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { getServerApiClient } from '@/lib/api-client/server';
+
+import { SettingsPageShell } from '../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -18,8 +19,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.nav' });
-  return { title: t('members') };
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.members' });
+  return { title: t('title') };
 }
 
 /**
@@ -35,7 +36,6 @@ export default async function SettingsMembersPage({
 }): Promise<ReactElement> {
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const tNav = await getTranslations({ locale: effectiveLocale, namespace: 'settings.nav' });
   const tMembers = await getTranslations({
     locale: effectiveLocale,
     namespace: 'settings.members',
@@ -65,17 +65,16 @@ export default async function SettingsMembersPage({
   }
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader
-        title={tNav('members')}
-        intent={tMembers('intent')}
-        actions={canReadRoster ? <InviteMemberButton /> : undefined}
-      />
+    <SettingsPageShell
+      title={tMembers('title')}
+      intent={tMembers('intent')}
+      actions={canReadRoster ? <InviteMemberButton /> : undefined}
+    >
       <MembersSettingsPageClient
         orgId={activeOrgId ?? null}
         canReadRoster={canReadRoster}
         stores={stores}
       />
-    </div>
+    </SettingsPageShell>
   );
 }

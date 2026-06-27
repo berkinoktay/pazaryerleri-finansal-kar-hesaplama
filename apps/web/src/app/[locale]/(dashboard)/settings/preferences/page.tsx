@@ -2,12 +2,11 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { PageHeader } from '@/components/patterns/page-header';
 import { PreferencesSettings } from '@/features/account/components/preferences-settings';
 import { PreferencesSummaryCard } from '@/features/account/components/preferences-summary-card';
 import { routing } from '@/i18n/routing';
 
-import { SettingsDetail } from '../settings-detail';
+import { SettingsPageShell } from '../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -36,11 +35,8 @@ export default async function SettingsPreferencesPage({
   const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.preferences' });
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
-      <SettingsDetail aside={<PreferencesSummaryCard />}>
-        <PreferencesSettings />
-      </SettingsDetail>
-    </div>
+    <SettingsPageShell title={t('title')} intent={t('intent')} aside={<PreferencesSummaryCard />}>
+      <PreferencesSettings />
+    </SettingsPageShell>
   );
 }

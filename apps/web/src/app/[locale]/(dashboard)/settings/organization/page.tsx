@@ -2,12 +2,11 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { PageHeader } from '@/components/patterns/page-header';
 import { OrganizationSettings } from '@/features/organization/components/organization-settings';
 import { OrganizationSummaryCard } from '@/features/organization/components/organization-summary-card';
 import { routing } from '@/i18n/routing';
 
-import { SettingsDetail } from '../settings-detail';
+import { SettingsPageShell } from '../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -42,11 +41,8 @@ export default async function SettingsOrganizationPage({
   });
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
-      <SettingsDetail aside={<OrganizationSummaryCard />}>
-        <OrganizationSettings />
-      </SettingsDetail>
-    </div>
+    <SettingsPageShell title={t('title')} intent={t('intent')} aside={<OrganizationSummaryCard />}>
+      <OrganizationSettings />
+    </SettingsPageShell>
   );
 }

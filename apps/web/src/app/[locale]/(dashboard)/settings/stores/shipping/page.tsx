@@ -3,15 +3,15 @@ import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
 import { EmptyState } from '@/components/patterns/empty-state';
-import { PageHeader } from '@/components/patterns/page-header';
-import { Card, CardContent } from '@/components/ui/card';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
 import { ShippingConfigForm } from '@/features/shipping/components/shipping-config-form';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
 import { getServerApiClient } from '@/lib/api-client/server';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 
-import { SettingsDetail } from '../../settings-detail';
+import { SettingsPageShell } from '../../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -20,8 +20,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.nav' });
-  return { title: t('shipping') };
+  const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.shipping' });
+  return { title: t('title') };
 }
 
 interface StoreOption {
@@ -43,8 +43,8 @@ export default async function ShippingSettingsPage({
 }): Promise<React.ReactElement> {
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const tNav = await getTranslations({ locale: effectiveLocale, namespace: 'settings.nav' });
   const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.shipping' });
+  const tNav = await getTranslations({ locale: effectiveLocale, namespace: 'settings.nav' });
 
   const api = await getServerApiClient();
   const { data: orgsResponse } = await api.GET('/v1/organizations', {});
@@ -64,31 +64,29 @@ export default async function ShippingSettingsPage({
   }
 
   const aside = (
-    <Card>
-      <CardContent className="gap-2xs flex flex-col">
-        <span className="text-foreground text-sm font-semibold">{t('infoTitle')}</span>
-        <p className="text-2xs text-muted-foreground leading-relaxed">{t('infoBody')}</p>
-      </CardContent>
-    </Card>
+    <SettingsAsideCard title={t('infoTitle')} icon={<DOMAIN_ICONS.info />}>
+      <p className="text-2xs text-muted-foreground leading-relaxed">{t('infoBody')}</p>
+    </SettingsAsideCard>
   );
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={tNav('shipping')} intent={t('intent')} />
+    <SettingsPageShell
+      title={t('title')}
+      intent={t('intent')}
+      aside={activeOrgId !== undefined && selectedStore !== undefined ? aside : undefined}
+    >
       {activeOrgId !== undefined && selectedStore !== undefined ? (
-        <SettingsDetail aside={aside}>
-          <ShippingConfigForm
-            orgId={activeOrgId}
-            storeId={selectedStore.id}
-            platform={selectedStore.platform}
-          />
-        </SettingsDetail>
+        <ShippingConfigForm
+          orgId={activeOrgId}
+          storeId={selectedStore.id}
+          platform={selectedStore.platform}
+        />
       ) : (
         <EmptyState
           title={tNav('storePicker.empty')}
           description={tNav('storePicker.connectFirst')}
         />
       )}
-    </div>
+    </SettingsPageShell>
   );
 }

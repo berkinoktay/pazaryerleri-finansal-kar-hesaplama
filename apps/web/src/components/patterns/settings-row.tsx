@@ -73,8 +73,10 @@ export function SettingsRow({
 
 /**
  * Stacks `SettingsRow`s with hairline dividers between them. Drop it inside a
- * `CardContent`; the negative vertical margin trims the first/last row's own
- * padding so the group sits flush against the card's padding.
+ * `CardContent`; each row keeps its own vertical padding so the list reads as an
+ * even, breathing rhythm: the first row keeps its top padding (never glued to
+ * the section header above it), while the trailing row's bottom padding is
+ * trimmed so it sits flush against the card's own bottom padding.
  */
 export function SettingsRowGroup({
   children,
@@ -84,7 +86,7 @@ export function SettingsRowGroup({
   className?: string;
 }): React.ReactElement {
   return (
-    <div className={cn('divide-border-muted -my-md flex flex-col divide-y', className)}>
+    <div className={cn('divide-border-muted -mb-md flex flex-col divide-y', className)}>
       {children}
     </div>
   );

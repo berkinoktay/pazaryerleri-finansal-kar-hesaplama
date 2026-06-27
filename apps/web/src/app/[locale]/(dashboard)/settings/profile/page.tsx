@@ -2,13 +2,12 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { PageHeader } from '@/components/patterns/page-header';
 import { AccountSummaryCard } from '@/features/account/components/account-summary-card';
 import { ProfileSettings } from '@/features/account/components/profile-settings';
 import { routing } from '@/i18n/routing';
 import { getServerApiClient } from '@/lib/api-client/server';
 
-import { SettingsDetail } from '../settings-detail';
+import { SettingsPageShell } from '../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -45,13 +44,12 @@ export default async function SettingsProfilePage({
   const createdAt = me?.createdAt ?? null;
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
-      <SettingsDetail
-        aside={<AccountSummaryCard email={email} fullName={null} createdAt={createdAt} />}
-      >
-        <ProfileSettings email={email} fullName={null} timezone={timezone} language={language} />
-      </SettingsDetail>
-    </div>
+    <SettingsPageShell
+      title={t('title')}
+      intent={t('intent')}
+      aside={<AccountSummaryCard email={email} fullName={null} createdAt={createdAt} />}
+    >
+      <ProfileSettings email={email} fullName={null} timezone={timezone} language={language} />
+    </SettingsPageShell>
   );
 }

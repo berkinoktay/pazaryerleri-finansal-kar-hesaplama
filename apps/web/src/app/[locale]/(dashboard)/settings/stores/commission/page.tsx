@@ -2,12 +2,11 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { PageHeader } from '@/components/patterns/page-header';
 import { CommissionSettings } from '@/features/stores/components/commission-settings';
 import { CommissionSummaryCard } from '@/features/stores/components/commission-summary-card';
 import { routing } from '@/i18n/routing';
 
-import { SettingsDetail } from '../../settings-detail';
+import { SettingsPageShell } from '../../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -40,11 +39,8 @@ export default async function SettingsCommissionPage({
   const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.commission' });
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
-      <SettingsDetail aside={<CommissionSummaryCard />}>
-        <CommissionSettings />
-      </SettingsDetail>
-    </div>
+    <SettingsPageShell title={t('title')} intent={t('intent')} aside={<CommissionSummaryCard />}>
+      <CommissionSettings />
+    </SettingsPageShell>
   );
 }

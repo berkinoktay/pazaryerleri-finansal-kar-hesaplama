@@ -2,12 +2,11 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { PageHeader } from '@/components/patterns/page-header';
 import { SecuritySettings } from '@/features/account/components/security-settings';
 import { SecuritySummaryCard } from '@/features/account/components/security-summary-card';
 import { routing } from '@/i18n/routing';
 
-import { SettingsDetail } from '../settings-detail';
+import { SettingsPageShell } from '../settings-page-shell';
 
 export async function generateMetadata({
   params,
@@ -36,11 +35,8 @@ export default async function SettingsSecurityPage({
   const t = await getTranslations({ locale: effectiveLocale, namespace: 'settings.security' });
 
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
-      <SettingsDetail aside={<SecuritySummaryCard />}>
-        <SecuritySettings />
-      </SettingsDetail>
-    </div>
+    <SettingsPageShell title={t('title')} intent={t('intent')} aside={<SecuritySummaryCard />}>
+      <SecuritySettings />
+    </SettingsPageShell>
   );
 }
