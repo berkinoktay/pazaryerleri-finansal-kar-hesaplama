@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
+import { MarginColoringSettings } from '@/features/account/components/margin-coloring-settings';
 import { PreferencesSettings } from '@/features/account/components/preferences-settings';
 import { PreferencesSummaryCard } from '@/features/account/components/preferences-summary-card';
 import { routing } from '@/i18n/routing';
@@ -37,6 +38,7 @@ export default async function SettingsPreferencesPage({
   return (
     <SettingsPageShell title={t('title')} intent={t('intent')} aside={<PreferencesSummaryCard />}>
       <PreferencesSettings />
+      <MarginColoringSettings />
     </SettingsPageShell>
   );
 }
