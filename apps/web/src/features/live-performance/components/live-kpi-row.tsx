@@ -9,7 +9,7 @@ import { AnimatedNumber } from '@/components/patterns/animated-number';
 import { Currency } from '@/components/patterns/currency';
 import { StatCard, type StatCardDelta } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
-import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 
 import type { LivePerformanceKpis } from '../api/get-live-kpis.api';

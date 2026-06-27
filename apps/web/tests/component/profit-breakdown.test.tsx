@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { formatCurrency } from '@pazarsync/utils';
 
 import { ProfitBreakdownCard } from '@/components/patterns/profit-breakdown';
-import { MarginColoringContext } from '@/features/account/components/margin-coloring-provider';
+import { MarginColoringContext } from '@/lib/margin-coloring-context';
 import type { MarginScale } from '@/lib/margin-coloring';
 
 const messages = {

@@ -3,39 +3,27 @@
 import * as React from 'react';
 
 import type { MarginScale } from '@/lib/margin-coloring';
+import { MarginColoringContext } from '@/lib/margin-coloring-context';
 
 import { useMyPreferences } from '../hooks/use-my-preferences';
 
-// ---------------------------------------------------------------------------
-// Context
-// ---------------------------------------------------------------------------
-
-/**
- * Exported for test helpers that need to inject a scale without using
- * the full `MarginColoringProvider` (which requires a React Query context).
- * Production code should always go through `useMarginColoring()`.
- */
-export const MarginColoringContext = React.createContext<MarginScale | null | undefined>(undefined);
-
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
-
 /**
  * Reads the user's marginColoring preference via `useMyPreferences()` and
- * exposes a `MarginScale | null` to all descendants via context.
+ * provides a `MarginScale | null` to all descendants through the shared
+ * `MarginColoringContext` (`@/lib/margin-coloring-context`).
  *
- * Return values:
+ * Mount ONCE in the dashboard layout, next to OrgSyncsProvider and
+ * CurrentScopeProvider. Consumers call `useMarginColoring()` from
+ * `@/lib/margin-coloring-context`.
+ *
+ * Return values flowing through the context:
  *   undefined  — still loading (before first successful fetch)
  *   null       — loaded but marginColoring is not configured / disabled
  *   MarginScale — loaded and the user has an active scale
  *
- * Mount ONCE in the dashboard layout, next to OrgSyncsProvider and
- * CurrentScopeProvider. Consumers call `useMarginColoring()`.
- *
  * SSR-safe: the server renders undefined (context default), the first client
- * paint resolves to null until React Query delivers data. Both states
- * produce the binary color fallback — no hydration mismatch.
+ * paint resolves to null until React Query delivers data. Both states produce
+ * the binary color fallback — no hydration mismatch.
  */
 export function MarginColoringProvider({
   children,
@@ -51,22 +39,4 @@ export function MarginColoringProvider({
     : undefined;
 
   return <MarginColoringContext.Provider value={scale}>{children}</MarginColoringContext.Provider>;
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
-/**
- * Returns the user's active `MarginScale`, or `null` while loading / when
- * the scale is not configured or is disabled. Consumers should fall back to
- * binary green/red when this returns null.
- *
- * Must be called inside `MarginColoringProvider`.
- */
-export function useMarginColoring(): MarginScale | null {
-  const value = React.useContext(MarginColoringContext);
-  // undefined means the provider is not yet resolved — treat as null (binary fallback).
-  // This also handles the SSR case where the context is the default undefined.
-  return value ?? null;
 }

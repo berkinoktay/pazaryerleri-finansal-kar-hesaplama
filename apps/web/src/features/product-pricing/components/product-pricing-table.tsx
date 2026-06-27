@@ -10,7 +10,7 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { ImageCell } from '@/components/patterns/image-cell';
 import { Button } from '@/components/ui/button';
-import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 import type { MarginScale } from '@/lib/margin-coloring';
 import { useCurrentScope } from '@/providers/current-scope';

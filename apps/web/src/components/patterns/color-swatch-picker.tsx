@@ -7,6 +7,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { SWATCH_PALETTE } from '@/lib/margin-coloring';
 import { cn } from '@/lib/utils';
 
+/** Initial swatch shown by the native color input when the value isn't a hex
+ * (the input can only display hex, never an OKLCH palette stop). */
+const DEFAULT_CUSTOM_HEX = '#3aa657';
+
 interface ColorSwatchPickerProps {
   /** The currently selected color string (palette OKLCH or a custom hex). */
   value: string;
@@ -99,7 +103,7 @@ export function ColorSwatchPicker({
               <input
                 type="color"
                 aria-label={customLabel}
-                value={isCustom(value) ? value : '#3aa657'}
+                value={isCustom(value) ? value : DEFAULT_CUSTOM_HEX}
                 onChange={(e) => onChange(e.target.value)}
                 className="size-12 -translate-x-1 -translate-y-1 cursor-pointer border-0 bg-transparent p-0"
               />

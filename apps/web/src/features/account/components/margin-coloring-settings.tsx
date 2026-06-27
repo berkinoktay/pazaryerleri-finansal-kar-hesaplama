@@ -39,13 +39,13 @@ const PREVIEW_VALUES = [-30, -5, 8, 18, 40, 75] as const;
 const MIN_BUCKETS = 2;
 const MAX_BUCKETS = 8;
 
-const PRESET_LABEL_KEY: Record<PresetKey, string> = {
+const PRESET_LABEL_KEY = {
   redGreen: 'presetRedGreen',
   colorblind: 'presetColorblind',
   purpleGreen: 'presetPurpleGreen',
   sunset: 'presetSunset',
   mono: 'presetMono',
-};
+} as const satisfies Record<PresetKey, string>;
 
 /**
  * Keep bucket[0] (the floor — no visible threshold) strictly below bucket[1],
@@ -267,7 +267,7 @@ export function MarginColoringSettings(): React.ReactElement {
                 <SelectContent>
                   {PRESET_KEYS.map((key) => (
                     <SelectItem key={key} value={key}>
-                      {t(PRESET_LABEL_KEY[key] as Parameters<typeof t>[0])}
+                      {t(PRESET_LABEL_KEY[key])}
                     </SelectItem>
                   ))}
                 </SelectContent>

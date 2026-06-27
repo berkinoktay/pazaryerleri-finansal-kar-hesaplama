@@ -10,7 +10,7 @@ import { Currency } from '@/components/patterns/currency';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 import { cn } from '@/lib/utils';
 
