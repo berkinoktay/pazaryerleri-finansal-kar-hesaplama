@@ -5,6 +5,7 @@ import { createSubApp } from '../lib/create-hono-app';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as userProfileService from '../services/user-profile.service';
 import { MeResponseSchema } from '../validators/user-profile.validator';
+import preferencesRoute from './me/preferences.route';
 
 const app = createSubApp<{ Variables: { userId: string; email: string } }>();
 
@@ -41,5 +42,8 @@ app.openapi(getMeRoute, async (c) => {
   const profile = await userProfileService.getOrCreateByUserId(userId, email);
   return c.json(profile, 200);
 });
+
+// Mount preferences sub-routes (GET/PATCH /me/preferences)
+app.route('/', preferencesRoute);
 
 export default app;

@@ -13,6 +13,16 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/me/preferences`** — Returns the authenticated user's preferences blob (`{}`
+  for new users). User-scoped: always returns the calling user's own row. Supports
+  `marginColoring` (threshold-based margin color scale, opt-in).
+
+- **`PATCH /v1/me/preferences`** — Shallow-merges a partial `Preferences` object into the
+  stored blob (only supplied top-level keys are overwritten). Body validated by
+  `PreferencesSchema`: `marginColoring.buckets` must be 2–8 entries with strictly ascending,
+  unique thresholds; returns `422 VALIDATION_ERROR` otherwise. Scoped to the JWT subject —
+  no caller-supplied id is accepted. Defined types: `MarginBucket`, `MarginColoring`, `Preferences`.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`** — `profitBreakdown` nesnesine mikro
   ihracat ücret alanları eklendi: `internationalServiceGross` / `internationalServiceVat` (Uluslararası
   Hizmet Bedeli, PSF yerine) ve `overseasReturnOperationGross` / `overseasReturnOperationVat` (Yurt Dışı
