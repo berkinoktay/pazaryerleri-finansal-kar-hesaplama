@@ -26,6 +26,11 @@ import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
 import { syncLog } from '@pazarsync/sync-core';
+import {
+  resolveProfitSettings,
+  resolveSnapshotProfitSettings,
+  type ResolvedProfitSettings,
+} from '@pazarsync/utils';
 
 import { inferShippedSameDay } from './infer-shipped-same-day';
 import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
@@ -63,6 +68,38 @@ export async function applyEstimateOnOrderCreate(
 
   // Kâr-dışı sipariş: ne fee ne estimate — kalıcı donuk (spec 2026-06-12).
   if (order.profitExcludedAt !== null) return;
+
+  // ─── Kâr formülü ayar snapshot'ı (write-once, snapshot-at-create) ──────
+  // İLK hesapta mağazanın CANLI ayarını (Store.profitSettings) çöz + Order'a yaz.
+  // Re-entry'de (kargo rafinesi / variant-resolution / psf) snapshot DOLU → canlı ayarı
+  // OKUMA, snapshot'ı koru. Maliyet snapshot ile aynı write-once felsefesi: mağaza ayarı
+  // sonradan değişse bile bu siparişin stopaj/negatif-KDV davranışı sabit kalır; ayar
+  // değişimi yalnız BUNDAN SONRA yaratılan siparişleri etkiler. resolve* @pazarsync/utils.
+  const snapshotMissing =
+    order.snapshotIncludeStopaj === null || order.snapshotIncludeNegativeNetVat === null;
+  let profitSettings: ResolvedProfitSettings;
+  if (snapshotMissing) {
+    const live = resolveProfitSettings(order.store.profitSettings);
+    // Mikro ihracat YAPISAL kuralı: satış KDV %0 (ihracat istisnası) + ürün girdi-KDV'si
+    // netVat ile mahsup edilir (KDV iadesi, satıcı lehine — profit-formula.md §10) → negatif
+    // net KDV mikro'da DAİMA dahildir; mağazanın "negatif net KDV hariç" tercihi (domestik
+    // düşük-KDV ürünler içindir) mikro'yu EZEMEZ. Snapshot'a EFEKTİF politika yazılır; böylece
+    // settled tekrar mikro kontrolü yapmadan snapshot'ı okur. Stopaj zaten ayrı `!isMicroExport`
+    // gate'iyle mikro'da yazılmaz → snapshotIncludeStopaj canlı tercihi olduğu gibi taşır.
+    profitSettings = {
+      includeStopaj: live.includeStopaj,
+      includeNegativeNetVat: isMicroExport(order) ? true : live.includeNegativeNetVat,
+    };
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        snapshotIncludeStopaj: profitSettings.includeStopaj,
+        snapshotIncludeNegativeNetVat: profitSettings.includeNegativeNetVat,
+      },
+    });
+  } else {
+    profitSettings = resolveSnapshotProfitSettings(order);
+  }
 
   // Re-entry fee guard: fonksiyon her sync'te yeniden çağrılır (maliyet backfill,
   // variant-resolution tick, sevk re-sync). Çift-fee'yi önlemek için: Stopaj
@@ -150,10 +187,15 @@ export async function applyEstimateOnOrderCreate(
   // Trendyol ürünü satın aldığı + komisyon kesmediği için %1 e-ticaret stopajı bu modelde
   // geçerli görünmüyor). Doğrulanırsa bu tek `!isMicroExport` koşulu kaldırılır + doküman
   // güncellenir (plan: resilient-sauteeing-milner.md "Stopaj — açık nokta").
+  // Mağaza ayarı (snapshot): includeStopaj=false ise STOPPAGE OrderFee HİÇ yazılmaz →
+  // computeProfit'in `stoppage` terimi 0 olur ve settled tarafı da (yalnız var olan ESTIMATE
+  // STOPPAGE'ı okur) doğal olarak stopaj görmez. Snapshot write-once olduğu için re-entry'de
+  // canlı ayar değil snapshot belirleyicidir.
   if (
     order.saleGross !== null &&
     order.saleVat !== null &&
     !isMicroExport(order) &&
+    profitSettings.includeStopaj &&
     !existingEstimateFeeTypes.has('STOPPAGE')
   ) {
     const stopajDef = await resolveFeeDefinition(tx, {
@@ -411,6 +453,8 @@ export async function applyEstimateOnOrderCreate(
         commission: { gross: commissionGross, vat: commissionVat },
         fees: profitInputFees,
         stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
+        // Snapshot'tan: negatif net KDV (alacak) kâra dahil edilsin mi (klamp kararı).
+        includeNegativeNetVat: profitSettings.includeNegativeNetVat,
       },
       returnLegs,
     ),

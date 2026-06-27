@@ -274,6 +274,14 @@ describe('applyEstimateOnOrderCreate — return legs (estimate path)', () => {
 
     // Must be negative: return zeroed revenue but costs (PSF + RETURN_SHIPPING + stoppage) remain
     expect(order.estimatedNetProfit!.toNumber()).toBeLessThan(0);
+
+    // Kâr formülü ayar snapshot'ı VARSAYILANDAN yazıldı (store.profitSettings = '{}'):
+    // stopaj dahil (true) + negatif net KDV HARİÇ (false).
+    expect(order.snapshotIncludeStopaj).toBe(true);
+    expect(order.snapshotIncludeNegativeNetVat).toBe(false);
+    // İade sonrası ham net KDV negatiftir (satış sıfırlandı, iade-kargo girdi-KDV'si kaldı);
+    // varsayılan klamp (false) ile effectiveNetVat 0'a çekilir → persist edilen net KDV = 0.
+    expect(order.estimatedNetVat!.toNumber()).toBe(0);
   });
 
   /**

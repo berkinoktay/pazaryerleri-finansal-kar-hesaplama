@@ -45,6 +45,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { Prisma } from '@pazarsync/db';
+import { resolveSnapshotProfitSettings } from '@pazarsync/utils';
 
 import { computeProfit, type ProfitInputFee } from './profit-formula';
 import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
@@ -67,7 +68,16 @@ export async function recomputeSettledProfit(
 ): Promise<RecomputeSettledProfitResult> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { saleGross: true, saleVat: true, profitExcludedAt: true },
+    select: {
+      saleGross: true,
+      saleVat: true,
+      profitExcludedAt: true,
+      // Kâr formülü ayar snapshot'ı (order-create'te yazıldı) — settled de AYNI snapshot'ı
+      // okur, canlı mağaza ayarını DEĞİL (forward-only; estimate ile tutarlı). null →
+      // DEFAULT_PROFIT_SETTINGS (resolveSnapshotProfitSettings).
+      snapshotIncludeStopaj: true,
+      snapshotIncludeNegativeNetVat: true,
+    },
   });
   if (order === null) return { recomputed: false, skipReason: 'order_not_found' };
 
@@ -218,6 +228,9 @@ export async function recomputeSettledProfit(
         commission: { gross: commissionGross, vat: commissionVat },
         fees: profitInputFees,
         stoppage: { gross: new Decimal(stoppageFee?.amountGross ?? 0) },
+        // Order-create snapshot'ından oku (canlı ayar DEĞİL) — settled, estimate ile aynı
+        // negatif-net-KDV politikasını uygular. null → DEFAULT_PROFIT_SETTINGS.
+        includeNegativeNetVat: resolveSnapshotProfitSettings(order).includeNegativeNetVat,
       },
       returnLegs,
     ),

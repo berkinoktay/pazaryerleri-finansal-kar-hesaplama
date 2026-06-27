@@ -126,6 +126,13 @@ async function buildBaseOrder(orgId: string, storeId: string): Promise<{ orderId
       // overwritten by the recompute call).
       estimatedNetProfit: new Decimal('999.00'),
       reconciliationStatus: 'NOT_SETTLED',
+      // Kâr formülü ayar snapshot'ı: bu testler iade KATLAMA matematiğini doğrular, varsayılan
+      // negatif-net-KDV klamp'ını değil. recomputeSettledProfit snapshot'ı okur (canlı mağaza
+      // ayarını değil) ve bu test applyEstimateOnOrderCreate'i ATLADIĞI için snapshot'ı burada
+      // açıkça kurarız: stopaj dahil + negatif net KDV DAHİL (iade sonrası net KDV doğal negatif;
+      // tarihsel beklenen değerler bu politikayla geçerli). Klamp davranışı profit-formula.test.ts'te.
+      snapshotIncludeStopaj: true,
+      snapshotIncludeNegativeNetVat: true,
     },
   });
 

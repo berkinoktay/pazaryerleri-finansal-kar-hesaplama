@@ -51,6 +51,12 @@ export function buildUnitProfitInput(econ: UnitEconomics, price: Decimal): Profi
     commission: { gross: commissionGross, vat: commissionVat },
     fees: econ.fixedFees,
     stoppage: { gross: stoppageGross },
+    // Fiyat çözücü (solvePriceForTarget) netProfit'in fiyatta GLOBAL doğrusal olmasına dayanır
+    // (iki örnek noktadan eğim/kesişim çıkarır). Negatif net KDV klamp'ı (max(netVat,0)) parçalı
+    // doğrusaldır → kırılım yaratıp çözücüyü bozar. Bu yüzden quote daima klampsız (ham) hesaplar.
+    // Klamp yalnız gerçekleşmiş siparişin muhasebe tercihidir; pozitif hedef fiyatta net KDV zaten
+    // pozitiftir (klamp etkisiz), dolayısıyla çözüm noktasında quote ile gerçek kâr örtüşür.
+    includeNegativeNetVat: true,
   };
 }
 

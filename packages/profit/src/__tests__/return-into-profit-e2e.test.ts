@@ -119,6 +119,11 @@ async function createSeedContext(): Promise<{ orgId: string; storeId: string }> 
       credentials: 'test-encrypted-blob',
       shippingTariffSource: 'TRENDYOL_CONTRACT',
       defaultShippingCarrierId: carrierId,
+      // Bu test iade KATLAMA matematiğini doğrular; varsayılan negatif-net-KDV klamp'ı
+      // (false) değil. İade sonrası net KDV doğal olarak negatiftir (iade-kargo girdi-KDV'si).
+      // Tarihsel beklenen değerleri korumak + iade folding'i izole test etmek için bu mağaza
+      // "negatif net KDV dahil" politikasını kullanır. Klamp davranışı profit-formula.test.ts'te.
+      profitSettings: { includeNegativeNetVat: true },
     },
   });
 

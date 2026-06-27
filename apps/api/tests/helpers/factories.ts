@@ -78,6 +78,9 @@ export interface CreateStoreOverrides {
   environment?: StoreEnvironment;
   externalAccountId?: string;
   status?: StoreStatus;
+  // Per-store profit-formula toggles (JSONB). Omit for the default '{}' (resolves to
+  // includeStopaj=true, includeNegativeNetVat=false).
+  profitSettings?: { includeStopaj?: boolean; includeNegativeNetVat?: boolean };
 }
 
 export async function createStore(organizationId: string, overrides: CreateStoreOverrides = {}) {
@@ -95,6 +98,9 @@ export async function createStore(organizationId: string, overrides: CreateStore
       // Opaque placeholder; tests that need a real encrypted value
       // call encryptCredentials themselves.
       credentials: 'test-encrypted-blob',
+      ...(overrides.profitSettings === undefined
+        ? {}
+        : { profitSettings: overrides.profitSettings }),
     },
   });
 }

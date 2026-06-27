@@ -935,7 +935,8 @@
       "subscription": "Abonelik",
       "connections": "Bağlantılar",
       "shipping": "Kargo",
-      "commission": "Komisyon"
+      "commission": "Komisyon",
+      "profitSettings": "Kâr Formülü"
     },
     "profile": {
       "title": "Profil",
@@ -1409,6 +1410,25 @@
       "intent": "Seçili mağazanın kargo tarife kaynağını ve taşıyıcısını belirle.",
       "infoTitle": "Kargo nasıl hesaplanır?",
       "infoBody": "Trendyol sözleşmesini kullanırsan kargo bedeli, seçtiğin taşıyıcının desi tarifesinden hesaplanır. Kendi anlaşmanı seçersen kendi tarife tablonu girersin."
+    },
+    "profitSettings": {
+      "title": "Kâr Formülü",
+      "intent": "Seçili mağazanın kâr hesabında stopajın ve negatif Net KDV'nin nasıl ele alınacağını belirle.",
+      "infoTitle": "Bu ayarlar ne işe yarar?",
+      "infoBody": "Stopaj, satışlardan kesilen %1'lik e-ticaret stopaj vergisidir. Net KDV ise tahsil ettiğiniz KDV'den, size kesilen (indirilecek) KDV'lerin çıkarılmasıyla bulunur; bu fark negatif çıkarsa bir KDV alacağınız oluşur. Bu iki kalemin kârınıza dahil edilip edilmeyeceğini muhasebecinize danışarak belirlemenizi öneririz.",
+      "cardTitle": "Vergi ve kesintiler",
+      "cardDescription": "Bu seçenekler yalnızca bundan sonra oluşturulacak siparişlerin kâr hesabını etkiler.",
+      "forwardOnlyTitle": "Yalnızca yeni siparişleri etkiler",
+      "forwardOnlyBody": "Bu ayarları değiştirmek geçmiş siparişlerin kârını yeniden hesaplamaz; her sipariş, oluşturulduğu andaki ayarlarla hesaplanmış değerini korur. Değişiklik yalnızca bundan sonra gelen siparişlere uygulanır.",
+      "stopaj": {
+        "title": "Stopajı kâra dahil et",
+        "description": "Açıkken %1 e-ticaret stopajı net kârdan düşülür. Kapatırsanız stopaj kâr hesabına katılmaz."
+      },
+      "negativeNetVat": {
+        "title": "Negatif Net KDV'yi kâra dahil et",
+        "description": "Net KDV negatif çıktığında (KDV alacağı) bu tutar kâra eklenir. Kapalıyken (önerilen) negatif Net KDV hesaba katılmaz; pozitif Net KDV her hâlükârda düşülür."
+      },
+      "saveSuccess": "Kâr formülü ayarları kaydedildi"
     },
     "marginColoring": {
       "title": "Kâr Marjı Renklendirme",

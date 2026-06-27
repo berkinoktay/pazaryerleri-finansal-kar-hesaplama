@@ -13,6 +13,18 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/profit-settings`** — Returns the resolved
+  per-store profit-formula toggles (`ProfitSettings`: `includeStopaj`, `includeNegativeNetVat`),
+  with defaults applied (`includeStopaj=true`, `includeNegativeNetVat=false`). Store-scoped: the
+  lookup filters by `(id, organizationId)`, so a cross-org store id returns `404 NOT_FOUND`.
+  Readable by any org member with access to the store (`requireStoreAccess`).
+
+- **`PATCH /v1/organizations/{orgId}/stores/{storeId}/profit-settings`** — Shallow-merges a partial
+  `UpdateProfitSettingsInput` (`includeStopaj?`, `includeNegativeNetVat?`) into the store's JSONB blob
+  (only supplied keys change). Gated to OWNER/ADMIN (`STORES_CONFIGURE`) → `403 FORBIDDEN` otherwise.
+  SNAPSHOT-AT-CREATE: the change only affects orders created afterwards; existing orders keep their
+  stored profit values (no recompute). Defined types: `ProfitSettings`, `UpdateProfitSettingsInput`.
+
 - **`GET /v1/me/preferences`** — Returns the authenticated user's preferences blob (`{}`
   for new users). User-scoped: always returns the calling user's own row. Supports
   `marginColoring` (threshold-based margin color scale, opt-in).

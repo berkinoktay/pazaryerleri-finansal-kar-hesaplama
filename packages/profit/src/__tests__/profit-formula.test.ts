@@ -1,6 +1,9 @@
 /**
  * Unit tests for `computeProfit()` — pure function, no DB required.
  * GROSS convention (spec §2). Task 11 = happy path; Task 12 = edge cases.
+ *
+ * `includeNegativeNetVat: true` mevcut (eski) davranıştır — negatif net KDV (alacak) kâra
+ * eklenir. Tarihsel testler bu bayrakla korunur; klamp (false) davranışı ayrı blokta test edilir.
  */
 
 import { Decimal } from 'decimal.js';
@@ -18,6 +21,7 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('12'), vat: D('2') },
       fees: [{ type: 'SHIPPING', gross: D('6'), vat: D('1'), direction: 'DEBIT' }],
       stoppage: { gross: D('1') },
+      includeNegativeNetVat: true,
     };
     const r = computeProfit(input);
     // netVat = 20 − (10+2+1) = 7
@@ -37,6 +41,7 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('190'), vat: D('38') },
       fees: [{ type: 'INTERNATIONAL_SERVICE', gross: D('60'), vat: D('10'), direction: 'DEBIT' }],
       stoppage: { gross: D('0') },
+      includeNegativeNetVat: true,
     });
     // netVat = 0 − 60 − 38 − 10 = −108 (girdi-KDV mahsubu → negatif → kâra ekler)
     // netProfit = 1000 − 600 − 190 − 60 − 0 − (−108) = 258
@@ -57,6 +62,7 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('10'), vat: D('2') },
       fees: [],
       stoppage: { gross: D('0') },
+      includeNegativeNetVat: true,
     });
     // netVat = 5 − 10 − 2 = −7
     // netProfit = 100 − 50 − 10 − 0 − (−7) = 47
@@ -71,6 +77,7 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('0'), vat: D('0') },
       fees: [],
       stoppage: { gross: D('0') },
+      includeNegativeNetVat: true,
     });
     expect(r.saleMarginPct).toBeNull();
     // netVat = 0 − 10 = −10; netProfit = 0 − 50 − 0 − 0 − (−10) = −40
@@ -85,6 +92,7 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('0'), vat: D('0') },
       fees: [],
       stoppage: { gross: D('0') },
+      includeNegativeNetVat: true,
     });
     expect(r.costMarkupPct).toBeNull();
   });
@@ -96,6 +104,7 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('30'), vat: D('2.73') },
       fees: [{ type: 'SHIPPING', gross: D('10'), vat: D('0.10'), direction: 'DEBIT' }],
       stoppage: { gross: D('0') },
+      includeNegativeNetVat: true,
     });
     // netVat = 50 − 20 − 2.73 − 0.10 = 27.17
     expect(r.netVat.toString()).toBe('27.17');
@@ -108,6 +117,7 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('10'), vat: D('2') },
       fees: [],
       stoppage: { gross: D('0.83') },
+      includeNegativeNetVat: true,
     });
     // netVat = 20 − 8 − 2 = 10 (stopaj yok)
     expect(r.netVat.toString()).toBe('10');
@@ -125,6 +135,7 @@ describe('computeProfit — GROSS convention', () => {
         { type: 'PLATFORM_SERVICE', gross: D('5'), vat: D('1'), direction: 'CREDIT' },
       ],
       stoppage: { gross: D('0') },
+      includeNegativeNetVat: true,
     });
     // netVat = 20 − 8 − 2 + 1 = 11
     expect(r.netVat.toString()).toBe('11');
@@ -137,9 +148,53 @@ describe('computeProfit — GROSS convention', () => {
       commission: { gross: D('12'), vat: D('2') },
       fees: [{ type: 'SHIPPING', gross: D('6'), vat: D('1'), direction: 'DEBIT' }],
       stoppage: { gross: D('1') },
+      includeNegativeNetVat: true,
     };
     const r = computeProfit(input);
     // net convention: (120−20) − (60−10) − (12−2) − (6−1) − 1 = 100−50−10−5−1 = 34
     expect(r.netProfit.toString()).toBe('34');
+  });
+});
+
+// ── Negatif net KDV klamp (includeNegativeNetVat) — mağaza-bazlı ayar ──────────
+describe('computeProfit — negatif net KDV klamp', () => {
+  // Mikro-benzeri senaryo: girdi-KDV > satış-KDV → ham netVat negatif (KDV alacağı).
+  const negativeNetVatBase: Omit<ProfitInput, 'includeNegativeNetVat'> = {
+    sale: { gross: D('1000'), vat: D('0') },
+    cost: { gross: D('600'), vat: D('60') },
+    commission: { gross: D('190'), vat: D('38') },
+    fees: [{ type: 'INTERNATIONAL_SERVICE', gross: D('60'), vat: D('10'), direction: 'DEBIT' }],
+    stoppage: { gross: D('0') },
+  };
+
+  it('false: negatif net KDV 0a klamplanır — kâr alacakla şişmez', () => {
+    const r = computeProfit({ ...negativeNetVatBase, includeNegativeNetVat: false });
+    // ham netVat = −108 → effectiveNetVat = max(−108, 0) = 0 (saklanır/gösterilir).
+    // netProfit = 1000 − 600 − 190 − 60 − 0 − 0 = 150 (true'daki 258'den 108 düşük).
+    expect(r.netVat.toString()).toBe('0');
+    expect(r.netProfit.toString()).toBe('150');
+  });
+
+  it('true: negatif net KDV kâra eklenir — eski davranış', () => {
+    const r = computeProfit({ ...negativeNetVatBase, includeNegativeNetVat: true });
+    expect(r.netVat.toString()).toBe('-108');
+    expect(r.netProfit.toString()).toBe('258');
+  });
+
+  it('pozitif net KDV bayraktan bağımsız her zaman düşülür (false===true)', () => {
+    const positiveBase: Omit<ProfitInput, 'includeNegativeNetVat'> = {
+      sale: { gross: D('120'), vat: D('20') },
+      cost: { gross: D('60'), vat: D('10') },
+      commission: { gross: D('12'), vat: D('2') },
+      fees: [{ type: 'SHIPPING', gross: D('6'), vat: D('1'), direction: 'DEBIT' }],
+      stoppage: { gross: D('1') },
+    };
+    const off = computeProfit({ ...positiveBase, includeNegativeNetVat: false });
+    const on = computeProfit({ ...positiveBase, includeNegativeNetVat: true });
+    // netVat = 7 (pozitif) → klamp etkisiz; iki sonuç birebir aynı.
+    expect(off.netVat.toString()).toBe('7');
+    expect(off.netProfit.toString()).toBe('34');
+    expect(off.netProfit.toString()).toBe(on.netProfit.toString());
+    expect(off.netVat.toString()).toBe(on.netVat.toString());
   });
 });

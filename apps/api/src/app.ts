@@ -20,6 +20,7 @@ import livePerformanceRoutes from './routes/live-performance/index';
 import orderRoutes from './routes/orders/index';
 import productPricingRoutes from './routes/product-pricing/index';
 import productsSubRoutes from './routes/products/index';
+import profitSettingsRoutes from './routes/profit-settings/index';
 import shippingRoutes from './routes/shipping/index';
 import variantRoutes from './routes/variants/index';
 import meRoutes from './routes/me.routes';
@@ -164,6 +165,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', fxRatesRoutes);
   app.route('/', commissionRateRoutes);
   app.route('/', shippingRoutes);
+  app.route('/', profitSettingsRoutes);
 
   return app;
 }

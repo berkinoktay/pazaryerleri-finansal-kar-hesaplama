@@ -319,6 +319,13 @@ model Store {
   lastSyncAt               DateTime?            @map("last_sync_at")
   shippingTariffSource     ShippingTariffSource @default(TRENDYOL_CONTRACT) @map("shipping_tariff_source")
   defaultShippingCarrierId String?              @map("default_shipping_carrier_id") @db.Uuid
+  // Mağaza-bazlı kâr formülü ayarları (JSONB, genişletilebilir — UserProfile.preferences deseni).
+  // Şekil: { includeStopaj?: boolean, includeNegativeNetVat?: boolean }. Boş {} = varsayılanlar
+  // (@pazarsync/utils resolveProfitSettings ile çözülür: includeStopaj=true, includeNegativeNetVat=false).
+  // SNAPSHOT-AT-CREATE: bu CANLI ayardır; sipariş ilk hesaplanırken Order.snapshot* kolonlarına
+  // snapshot'lanır, sonraki hesaplar snapshot'ı okur (bu kolonu DEĞİL). Geçmiş sipariş asla
+  // yeniden hesaplanmaz — ayar değişimi yalnız BUNDAN SONRA oluşan siparişleri etkiler.
+  profitSettings           Json                 @default("{}") @map("profit_settings")
   // ─── PR-C1: Trendyol webhook subscription ───────────────────────────
   // webhookId: Trendyol'un atadığı subscription UUID (POST /webhooks response.id).
   //   PUT/DELETE call'larında kullanılır. Register fail'de null kalır.
@@ -613,6 +620,17 @@ model Order {
   // backend-hesaplı gösterir (frontend ASLA türetmez). Net KDV negatif olabilir → CHECK yok.
   estimatedNetVat      Decimal?             @map("estimated_net_vat") @db.Decimal(12, 2)
   settledNetVat        Decimal?             @map("settled_net_vat") @db.Decimal(12, 2)
+
+  // ─── Kâr formülü ayar snapshot'ı (snapshot-at-create, forward-only) ──────
+  // applyEstimateOnOrderCreate sipariş İLK hesaplanırken mağazanın o anki
+  // Store.profitSettings'ini çözüp buraya YAZAR (write-once). Sonraki TÜM hesaplar
+  // (kargo rafinesi re-entry + settlement recompute) bu snapshot'ı okur, canlı ayarı
+  // DEĞİL. Mağaza ayarı değişince yalnız BUNDAN SONRA yaratılan siparişler etkilenir;
+  // geçmiş sipariş asla yeniden hesaplanmaz (maliyet snapshot'ıyla aynı felsefe).
+  // Nullable: snapshot henüz yazılmamış / kâr-dışı sipariş = null; okurken null →
+  // @pazarsync/utils DEFAULT_PROFIT_SETTINGS (resolveSnapshotProfitSettings).
+  snapshotIncludeStopaj         Boolean?            @map("snapshot_include_stopaj")
+  snapshotIncludeNegativeNetVat Boolean?            @map("snapshot_include_negative_net_vat")
 
   // ─── Kâr dondurma (spec 2026-06-12 cost-deadline-profit-freeze) ──────
   // Maliyet penceresi (sipariş gününün sonu, İstanbul) kaçırıldıysa sipariş
