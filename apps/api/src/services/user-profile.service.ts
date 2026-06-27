@@ -65,8 +65,11 @@ function toView(row: {
  * (patchPreferences) is the source of truth for shape correctness.
  */
 export async function getPreferences(userId: string): Promise<Preferences> {
-  const profile = await prisma.userProfile.findUniqueOrThrow({ where: { id: userId } });
-  return (profile.preferences ?? {}) as Preferences;
+  // findUnique (not …OrThrow): a missing row — the legacy/trigger-gap edge that
+  // getOrCreateByUserId documents — yields the opt-in default `{}` rather than a
+  // spurious 500 for an authenticated user reading their own preferences.
+  const profile = await prisma.userProfile.findUnique({ where: { id: userId } });
+  return (profile?.preferences ?? {}) as Preferences;
 }
 
 /**
@@ -81,7 +84,15 @@ export async function getPreferences(userId: string): Promise<Preferences> {
  * The userId comes from the JWT (set by authMiddleware on c.get('userId')) —
  * never from the request body.
  */
-export async function patchPreferences(userId: string, patch: Preferences): Promise<Preferences> {
+export async function patchPreferences(
+  userId: string,
+  email: string,
+  patch: Preferences,
+): Promise<Preferences> {
+  // Guarantee the row exists (legacy/trigger-gap edge) before updating, so an
+  // authenticated user never hard-fails saving their own preferences.
+  await getOrCreateByUserId(userId, email);
+
   const existing = await getPreferences(userId);
   const merged: Preferences = { ...existing, ...patch };
 

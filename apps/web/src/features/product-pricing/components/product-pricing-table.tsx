@@ -13,7 +13,6 @@ import { Button } from '@/components/ui/button';
 import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
 import { marginColorStyle } from '@/lib/margin-color-style';
 import type { MarginScale } from '@/lib/margin-coloring';
-import { cn } from '@/lib/utils';
 import { useCurrentScope } from '@/providers/current-scope';
 
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
@@ -82,16 +81,14 @@ function PercentCell({
   if (value === null) {
     return <span className="text-muted-foreground-dim text-sm tabular-nums">{EMPTY_VALUE}</span>;
   }
-  if (marginScale !== undefined && marginScale !== null) {
-    const s = marginColorStyle(value, marginScale);
-    return (
-      <span className={cn('text-sm tabular-nums', s.className)} style={s.style}>
-        {formatPercentDisplay(value)}
-      </span>
-    );
-  }
+  // OFF: original colorless appearance (no className).
+  // ON: inline color from the bucket (style overrides the default foreground).
+  // marginScale === undefined means the prop was not passed (non-margin columns) — no style.
+  const colorStyle = marginScale !== undefined ? marginColorStyle(value, marginScale) : undefined;
   return (
-    <span className="text-foreground text-sm tabular-nums">{formatPercentDisplay(value)}</span>
+    <span className="text-foreground text-sm tabular-nums" style={colorStyle}>
+      {formatPercentDisplay(value)}
+    </span>
   );
 }
 

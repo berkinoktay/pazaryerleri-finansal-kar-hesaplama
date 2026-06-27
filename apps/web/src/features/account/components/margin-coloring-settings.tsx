@@ -28,6 +28,7 @@ import {
   type PresetKey,
 } from '@/lib/margin-coloring';
 import { marginColorStyle } from '@/lib/margin-color-style';
+import { profitToneClass } from '@/lib/profit-tone';
 import { cn } from '@/lib/utils';
 
 import { useMyPreferences, useUpdateMyPreferences } from '../hooks/use-my-preferences';
@@ -322,12 +323,18 @@ export function MarginColoringSettings(): React.ReactElement {
             </div>
             <div className="gap-md flex flex-wrap">
               {PREVIEW_VALUES.map((v) => {
-                const style = marginColorStyle(String(v), { enabled, buckets });
+                const strV = String(v);
+                // OFF: show the binary tone class (profitToneClass) so the preview
+                //      reflects exactly what cells look like without margin coloring.
+                // ON:  show the scale color via inline style (overrides the class).
                 return (
                   <span
                     key={v}
-                    className={cn('text-sm font-semibold tabular-nums', style.className)}
-                    style={style.style}
+                    className={cn(
+                      'text-sm font-semibold tabular-nums',
+                      enabled ? undefined : profitToneClass(strV),
+                    )}
+                    style={marginColorStyle(strV, { enabled, buckets })}
                   >
                     {v > 0 ? `+${v}%` : `${v}%`}
                   </span>

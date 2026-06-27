@@ -59,4 +59,30 @@ describe('LiveKpiRow', () => {
     await waitFor(() => expect(screen.getByText('Kâr Tutarı')).toBeInTheDocument());
     expect(screen.queryByText(/maliyet bekliyor/)).toBeNull();
   });
+
+  it('OFF state (no provider): margin KPI value has no text-success or text-destructive class', async () => {
+    // Regression guard for the OFF-state parity invariant: when MarginColoringProvider
+    // is absent (scale = null), the margin AnimatedNumber must render exactly as it did
+    // before the margin-coloring feature — colorless (no binary tone class).
+    server.use(http.get(URL, () => HttpResponse.json(KPIS)));
+
+    render(<LiveKpiRow orgId={ORG_ID} storeId={STORE_ID} />);
+
+    // Wait for the KPI data to resolve and the card heading to appear.
+    await waitFor(() => expect(screen.getByText('Kâr Marjı')).toBeInTheDocument());
+
+    // AnimatedNumber renders into a <span>. Find the span inside the margin KPI
+    // card by querying the card element that contains "Kâr Marjı" and then
+    // inspecting all spans inside for tone classes.
+    const card =
+      screen.getByText('Kâr Marjı').closest('[data-slot="card"]') ??
+      screen.getByText('Kâr Marjı').closest('div');
+    expect(card).toBeTruthy();
+    // No element inside the margin card should carry a binary tone class.
+    const allSpans = card!.querySelectorAll('span');
+    for (const span of allSpans) {
+      expect(span.className).not.toContain('text-success');
+      expect(span.className).not.toContain('text-destructive');
+    }
+  });
 });

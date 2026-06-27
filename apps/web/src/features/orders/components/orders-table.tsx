@@ -16,8 +16,9 @@ import { cn } from '@/lib/utils';
 import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
 import { marginColorStyle } from '@/lib/margin-color-style';
 
+import { profitToneClass } from '@/lib/profit-tone';
+
 import { type OrderListItem } from '../api/list-orders.api';
-import { profitToneClass } from '../lib/profit-tone';
 import {
   type CostStatusValue,
   type OrderSortValue,
@@ -226,10 +227,14 @@ export function OrdersTable({
         cell: ({ row }) => {
           const value = row.original.estimatedNetProfit;
           if (value === null) return <span className="text-muted-foreground">—</span>;
-          // Color driven by the row's margin % (same bucket as the margin cell).
-          const s = marginColorStyle(row.original.saleMarginPct, scale);
+          // OFF: original binary tone class (profitToneClass on the profit value).
+          // ON: inline color from the row's margin % overrides the class (style wins).
           return (
-            <Currency value={value} className={cn('tabular-nums', s.className)} style={s.style} />
+            <Currency
+              value={value}
+              className={cn('tabular-nums', profitToneClass(value))}
+              style={marginColorStyle(row.original.saleMarginPct, scale)}
+            />
           );
         },
       },
@@ -239,14 +244,14 @@ export function OrdersTable({
         cell: ({ row }) => {
           const value = row.original.settledNetProfit;
           if (value === null) return <span className="text-muted-foreground">—</span>;
-          // Color driven by the row's margin % (same bucket as the margin cell).
-          const s = marginColorStyle(row.original.saleMarginPct, scale);
+          // OFF: original binary tone class (profitToneClass on the profit value).
+          // ON: inline color from the row's margin % overrides the class (style wins).
           return (
             <Currency
               value={value}
               emphasis
-              className={cn('tabular-nums', s.className)}
-              style={s.style}
+              className={cn('tabular-nums', profitToneClass(value))}
+              style={marginColorStyle(row.original.saleMarginPct, scale)}
             />
           );
         },
@@ -264,9 +269,13 @@ export function OrdersTable({
         cell: ({ row }) => {
           const value = row.original.saleMarginPct;
           if (value === null) return <span className="text-muted-foreground">—</span>;
-          const s = marginColorStyle(value, scale);
+          // OFF: original binary tone class (profitToneClass on the margin value).
+          // ON: inline color from the bucket overrides the class (style wins).
           return (
-            <span className={cn('tabular-nums', s.className)} style={s.style}>
+            <span
+              className={cn('tabular-nums', profitToneClass(value))}
+              style={marginColorStyle(value, scale)}
+            >
               {value}%
             </span>
           );

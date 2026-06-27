@@ -9,7 +9,7 @@ import {
   PreferencesSchema,
 } from '../../validators/preferences.validator';
 
-const app = createSubApp<{ Variables: { userId: string } }>();
+const app = createSubApp<{ Variables: { userId: string; email: string } }>();
 
 // ─── GET /v1/me/preferences ───────────────────────────────────────────────────
 
@@ -92,7 +92,8 @@ app.openapi(patchPreferencesRoute, async (c) => {
     throw new UnauthorizedError('Authenticated user id missing from context');
   }
   const patch = c.req.valid('json');
-  const updated = await userProfileService.patchPreferences(userId, patch);
+  const email = c.get('email') ?? '';
+  const updated = await userProfileService.patchPreferences(userId, email, patch);
   return c.json({ data: updated }, 200);
 });
 

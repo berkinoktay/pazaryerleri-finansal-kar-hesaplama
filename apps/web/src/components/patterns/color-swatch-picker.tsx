@@ -95,12 +95,10 @@ export function ColorSwatchPicker({
 
           {/* Custom color row */}
           <div className="border-border-muted gap-2xs pt-sm flex items-center border-t">
-            <label
-              className="border-border size-8 shrink-0 cursor-pointer overflow-hidden rounded-full border-2"
-              aria-label={customLabel}
-            >
+            <label className="border-border size-8 shrink-0 cursor-pointer overflow-hidden rounded-full border-2">
               <input
                 type="color"
+                aria-label={customLabel}
                 value={isCustom(value) ? value : '#3aa657'}
                 onChange={(e) => onChange(e.target.value)}
                 className="size-12 -translate-x-1 -translate-y-1 cursor-pointer border-0 bg-transparent p-0"

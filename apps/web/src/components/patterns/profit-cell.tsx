@@ -80,10 +80,11 @@ export function ProfitCell({
   marginPct,
 }: ProfitCellProps): React.ReactElement {
   const alignClass = align === 'right' ? 'text-right items-end' : 'text-left items-start';
-  // Coloring: when marginPct is provided, derive the currency color from the
-  // margin bucket (scale-enabled) or from binary sign-based tone (fallback).
+  // Coloring: when marginPct is provided, apply the margin-scale color as an
+  // inline style. OFF (scale null or disabled): style is undefined → original
+  // colorless Currency appearance is preserved (OFF-parity invariant).
   const scale = useMarginColoring();
-  const colorStyle = marginPct !== undefined ? marginColorStyle(marginPct, scale) : {};
+  const colorStyle = marginPct !== undefined ? marginColorStyle(marginPct, scale) : undefined;
 
   if (layout === 'inline') {
     return (
@@ -94,13 +95,7 @@ export function ProfitCell({
           className,
         )}
       >
-        <Currency
-          value={value}
-          emphasis={emphasis}
-          dimWhenZero={dimWhenZero}
-          className={cn('tabular-nums', colorStyle.className)}
-          style={colorStyle.style}
-        />
+        <Currency value={value} emphasis={emphasis} dimWhenZero={dimWhenZero} style={colorStyle} />
         {delta !== undefined ? (
           <TrendDelta value={delta.percent} goodDirection={delta.goodDirection ?? 'up'} />
         ) : null}
@@ -110,13 +105,7 @@ export function ProfitCell({
 
   return (
     <span className={cn('gap-3xs flex flex-col', alignClass, className)}>
-      <Currency
-        value={value}
-        emphasis={emphasis}
-        dimWhenZero={dimWhenZero}
-        className={cn('tabular-nums', colorStyle.className)}
-        style={colorStyle.style}
-      />
+      <Currency value={value} emphasis={emphasis} dimWhenZero={dimWhenZero} style={colorStyle} />
       {delta !== undefined ? (
         <TrendDelta value={delta.percent} goodDirection={delta.goodDirection ?? 'up'} />
       ) : null}

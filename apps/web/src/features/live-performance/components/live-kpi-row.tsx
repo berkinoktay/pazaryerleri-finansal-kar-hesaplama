@@ -117,16 +117,16 @@ export function LiveKpiRow({
         const pair = kpis ? card.deltaPair(kpis) : undefined;
         const pendingCount = kpis && card.pending ? card.pending(kpis) : 0;
         // For the margin KPI, color the AnimatedNumber by the live margin value.
+        // OFF: original colorless AnimatedNumber (no className/tone — was colorless in
+        //      origin/main). ON: inline color from the bucket (style wins over default).
         const value =
           kpis && card.key === 'margin'
             ? (() => {
-                const s = marginColorStyle(kpis.marginToday, scale);
                 return (
                   <AnimatedNumber
                     value={Number(kpis.marginToday)}
                     format={formatPercent}
-                    className={s.className}
-                    style={s.style}
+                    style={marginColorStyle(kpis.marginToday, scale)}
                   />
                 );
               })()

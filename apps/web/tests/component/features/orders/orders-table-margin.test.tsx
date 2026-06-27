@@ -182,7 +182,7 @@ describe('OrdersTable — marj renklendirme (binary vs scale)', () => {
     expect(cell).not.toHaveAttribute('style');
   });
 
-  it('scale-enabled mode: margin cell carries inline style + no binary tone class', () => {
+  it('scale-enabled mode: margin cell carries inline style color from the bucket', () => {
     // Use rgb() instead of oklch() — happy-dom's CSS parser does not support oklch,
     // which causes style.color assignment to be silently discarded.
     const scale: MarginScale = {
@@ -195,9 +195,11 @@ describe('OrdersTable — marj renklendirme (binary vs scale)', () => {
     // saleMarginPct '15.5' -> >= 0 but < 20 -> bucket[0] color rgb(200, 50, 50).
     renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] }, scale);
     const cell = screen.getByText('15.5%');
-    // style.color should be set to the bucket color.
+    // The inline style.color is the bucket color (overrides the class color visually).
     expect(cell.style.color).toBe('rgb(200, 50, 50)');
-    expect(cell.className).not.toContain('text-success');
-    expect(cell.className).not.toContain('text-destructive');
+    // The original binary tone class is kept as the OFF-state baseline; the inline
+    // style overrides it when ON. This is the "layered" approach: class = baseline,
+    // style = override (OFF-parity invariant: when style is removed, original shows).
+    expect(cell.className).toContain('text-success');
   });
 });
