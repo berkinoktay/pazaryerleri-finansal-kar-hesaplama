@@ -1,14 +1,12 @@
 /**
- * Margin coloring scale — types, curated palette, default buckets, and the
+ * Margin coloring scale — types, palette, default buckets, presets, and the
  * threshold-lookup helper. Pure module: no React, no side-effects.
  *
- * Contrast notes (WCAG AA, >= 4.5:1):
- * - Light bg: oklch(98-100% 0 0)  — requires text lightness roughly <= 60% at mid chroma.
- * - Dark  bg: oklch(14-17% 0.01 265) — requires text lightness roughly >= 57% at mid chroma.
- * - All SWATCH_PALETTE entries are tuned to ~57-62% lightness so a single stored
- *   color string reads at >= 4.5:1 on both light and dark neutral backgrounds.
- *   The colorblind-safe orange stop is slightly lower (55%) to maintain hue clarity;
- *   the blue stop is slightly higher (62%) to stay visible on dark.
+ * These colors are used as TEXT colors on both the light card background
+ * (oklch ~100%) and the dark card (oklch ~17%). To clear WCAG AA (>= 4.5:1) on
+ * BOTH, every stop is tuned to ~48-64% lightness. That ceiling is why warm
+ * mid-hues (pure yellow) can't appear — they'd be unreadable on white — so the
+ * default ramp goes red -> orange -> yellow-green -> green and skips muddy gold.
  */
 
 // ---------------------------------------------------------------------------
@@ -19,7 +17,7 @@
 export type MarginBucket = {
   /** Lower-bound threshold (inclusive). First bucket has no lower bound; last has no upper. */
   readonly threshold: number;
-  /** OKLCH color string used for this bucket's text. */
+  /** CSS color string used for this bucket's text. */
   readonly color: string;
 };
 
@@ -30,117 +28,166 @@ export type MarginScale = {
   readonly buckets: readonly MarginBucket[];
 };
 
+/** Identifier for a built-in preset color ramp. */
+export type PresetKey = 'redGreen' | 'colorblind' | 'purpleGreen' | 'sunset' | 'mono';
+
 // ---------------------------------------------------------------------------
-// Curated swatch palette
+// Swatch palette — the quick-pick grid in ColorSwatchPicker
 // ---------------------------------------------------------------------------
 
 /**
- * ~14 OKLCH color stops spanning red -> amber -> green plus colorblind-safe
- * blue / orange / neutral stops. Every entry targets ~57-62% lightness at
- * moderate chroma so it reads >= 4.5:1 on both light card (oklch 100% 0 0)
- * and dark card (oklch 17% 0.012 265) backgrounds.
- *
- * Hue landmarks:
- *   27  = destructive red (matches --destructive token hue)
- *   50  = orange-red
- *   75  = warning amber (matches --warning token hue)
- *   95  = yellow-green
- *  115  = fresh green
- *  155  = success green (matches --success token hue)
- *  200  = teal (chart-2 hue)
- *  240  = info blue (matches --info token hue)
- *  265  = brand violet (chart-1 hue)
- *   50 (orange, CB-safe pair with 240 blue)
+ * A varied set of text-readable color stops (all ~48-64% lightness so they read
+ * on both light and dark card backgrounds). Grouped by family so the picker
+ * grid reads as an organized spectrum. Users who want anything else use the
+ * custom color input in the picker.
  */
 export const SWATCH_PALETTE = [
-  // --- Red spectrum ---
-  'oklch(58% 0.20 27)', // vivid red — strong loss signal
-  'oklch(59% 0.18 50)', // orange-red
-  // --- Amber / yellow-green ---
-  'oklch(57% 0.17 75)', // warning amber
-  'oklch(60% 0.16 95)', // yellow-green
-  // --- Green spectrum ---
-  'oklch(59% 0.15 115)', // fresh mid-green
-  'oklch(58% 0.15 140)', // green
-  'oklch(58% 0.14 155)', // success green
-  // --- Neutral / muted ---
-  'oklch(57% 0.07 155)', // desaturated green (conservative)
-  'oklch(57% 0.07 27)', // desaturated red (conservative)
-  // --- Colorblind-safe blue / orange ---
-  'oklch(59% 0.15 240)', // CB-safe blue (info hue)
-  'oklch(57% 0.17 200)', // teal
-  'oklch(58% 0.17 60)', // CB-safe orange
-  // --- Additional stops ---
-  'oklch(60% 0.13 265)', // brand violet (neutral / special)
-  'oklch(62% 0.14 310)', // pink-violet (chart-6 hue)
+  // reds
+  'oklch(54% 0.21 27)',
+  'oklch(62% 0.19 30)',
+  // oranges
+  'oklch(60% 0.17 50)',
+  'oklch(64% 0.15 65)',
+  // golds (darker — text-safe)
+  'oklch(58% 0.13 90)',
+  // yellow-greens / greens
+  'oklch(60% 0.16 130)',
+  'oklch(56% 0.16 150)',
+  'oklch(48% 0.16 152)',
+  'oklch(62% 0.10 155)',
+  // teals / cyans
+  'oklch(57% 0.13 195)',
+  'oklch(60% 0.12 220)',
+  // blues
+  'oklch(55% 0.16 250)',
+  'oklch(60% 0.15 265)',
+  // indigos / purples
+  'oklch(55% 0.18 290)',
+  'oklch(58% 0.17 320)',
+  // magenta / pink
+  'oklch(58% 0.20 350)',
+  // neutrals
+  'oklch(62% 0.03 250)',
+  'oklch(48% 0.02 250)',
 ] as const satisfies readonly string[];
 
 // ---------------------------------------------------------------------------
-// Default 5-bucket scale (red -> orange -> amber -> light-green -> green)
+// Preset ramps — ordered loss -> profit color stops
 // ---------------------------------------------------------------------------
 
 /**
- * Default 5-bucket scale mapped to standard profit zones:
- *   bucket[0]: ..up to -10%  -> red
- *   bucket[1]: -10..0%       -> orange-red
- *   bucket[2]:   0..10%      -> warning amber
- *   bucket[3]:  10..25%      -> fresh green
- *   bucket[4]:  25%..        -> success green
+ * Each preset is an ordered ramp (loss on the left, profit on the right).
+ * Applying a preset re-colors the CURRENT buckets by sampling N evenly-spaced
+ * stops from the ramp, so it works for any bucket count and keeps thresholds.
  */
-export const DEFAULT_MARGIN_BUCKETS = [
-  { threshold: -10, color: SWATCH_PALETTE[0] }, // red
-  { threshold: 0, color: SWATCH_PALETTE[2] }, // amber (0% margin = break-even zone)
-  { threshold: 10, color: SWATCH_PALETTE[4] }, // fresh green
-  { threshold: 25, color: SWATCH_PALETTE[5] }, // green
-  { threshold: 50, color: SWATCH_PALETTE[6] }, // success green
-] as const satisfies readonly MarginBucket[];
-
-// ---------------------------------------------------------------------------
-// Preset scales
-// ---------------------------------------------------------------------------
-
-/** Colorblind-safe 5-bucket scale: blue -> neutral -> orange. */
-const COLORBLIND_BUCKETS: MarginBucket[] = [
-  { threshold: -10, color: SWATCH_PALETTE[9] }, // CB-safe blue (loss)
-  { threshold: 0, color: SWATCH_PALETTE[11] }, // CB-safe orange (break-even)
-  { threshold: 10, color: SWATCH_PALETTE[10] }, // teal
-  { threshold: 25, color: SWATCH_PALETTE[6] }, // success green
-  { threshold: 50, color: SWATCH_PALETTE[6] }, // success green (reinforced)
-];
-
-/**
- * Named preset scales. `redGreen` mirrors the default; `colorblind` uses
- * a blue-orange-teal variant that avoids red/green confusion.
- */
-export const PRESET_SCALES: Record<'redGreen' | 'colorblind', MarginBucket[]> = {
-  redGreen: Array.from(DEFAULT_MARGIN_BUCKETS),
-  colorblind: COLORBLIND_BUCKETS,
+export const PRESET_RAMPS: Record<PresetKey, readonly string[]> = {
+  // Clean red -> orange -> yellow-green -> green (skips muddy gold).
+  redGreen: [
+    'oklch(54% 0.21 27)',
+    'oklch(62% 0.17 45)',
+    'oklch(60% 0.15 120)',
+    'oklch(56% 0.16 150)',
+    'oklch(48% 0.16 153)',
+  ],
+  // Color-blind safe: orange (loss) <-> blue (profit) — distinguishable for
+  // deuteranopia/protanopia (Okabe-Ito style); never relies on red vs green.
+  colorblind: [
+    'oklch(58% 0.16 42)', // vermillion-orange (loss)
+    'oklch(64% 0.12 70)', // amber
+    'oklch(70% 0.04 230)', // near-neutral
+    'oklch(60% 0.12 235)', // sky blue
+    'oklch(52% 0.16 255)', // strong blue (profit)
+  ],
+  // Color-blind safe diverging: purple (loss) <-> green (profit).
+  purpleGreen: [
+    'oklch(52% 0.18 305)',
+    'oklch(62% 0.12 320)',
+    'oklch(70% 0.03 280)',
+    'oklch(60% 0.13 150)',
+    'oklch(50% 0.16 152)',
+  ],
+  // Warm sunset: deep red -> orange -> gold -> teal -> blue.
+  sunset: [
+    'oklch(54% 0.20 25)',
+    'oklch(62% 0.16 55)',
+    'oklch(60% 0.12 90)',
+    'oklch(58% 0.12 195)',
+    'oklch(55% 0.15 250)',
+  ],
+  // Single-hue intensity (green getting deeper) — calm, minimal.
+  mono: [
+    'oklch(72% 0.07 155)',
+    'oklch(64% 0.11 153)',
+    'oklch(56% 0.14 152)',
+    'oklch(48% 0.15 151)',
+    'oklch(40% 0.13 150)',
+  ],
 } as const;
+
+/** Display order + i18n key suffix for the preset selector. */
+export const PRESET_KEYS: readonly PresetKey[] = [
+  'redGreen',
+  'colorblind',
+  'purpleGreen',
+  'sunset',
+  'mono',
+] as const;
+
+/**
+ * Sample `n` evenly-spaced colors from a ramp. n === ramp.length returns the
+ * ramp as-is; otherwise picks indices across the ramp so any bucket count maps
+ * onto the full loss->profit spread.
+ */
+export function sampleRamp(ramp: readonly string[], n: number): string[] {
+  if (n <= 1) return [ramp[0]!];
+  if (n >= ramp.length) {
+    // Repeat-extend by clamping the last stop (rare: more buckets than stops).
+    return Array.from({ length: n }, (_, i) => ramp[Math.min(i, ramp.length - 1)]!);
+  }
+  const step = (ramp.length - 1) / (n - 1);
+  return Array.from({ length: n }, (_, i) => ramp[Math.round(i * step)]!);
+}
+
+/** Re-color the given buckets from a preset ramp, preserving thresholds. */
+export function applyPreset(buckets: readonly MarginBucket[], preset: PresetKey): MarginBucket[] {
+  const colors = sampleRamp(PRESET_RAMPS[preset], buckets.length);
+  return buckets.map((b, i) => ({ threshold: b.threshold, color: colors[i]! }));
+}
+
+// ---------------------------------------------------------------------------
+// Default 5-bucket scale
+// ---------------------------------------------------------------------------
+
+/**
+ * Default scale: thresholds at the common profit zones, colored from the
+ * redGreen ramp. bucket[0] = loss (red) ... bucket[4] = strong profit (green).
+ */
+export const DEFAULT_MARGIN_BUCKETS: readonly MarginBucket[] = applyPreset(
+  [
+    { threshold: -10, color: '' },
+    { threshold: 0, color: '' },
+    { threshold: 10, color: '' },
+    { threshold: 25, color: '' },
+    { threshold: 50, color: '' },
+  ],
+  'redGreen',
+);
 
 // ---------------------------------------------------------------------------
 // Threshold lookup
 // ---------------------------------------------------------------------------
 
 /**
- * Map a margin percentage to the matching bucket color.
- *
- * Buckets must be provided in ascending threshold order. The lookup semantics:
- *   - bucket_i covers [threshold_i, threshold_{i+1})
- *   - The first bucket also covers everything below threshold_0 (no lower bound).
- *   - The last bucket covers threshold_{n-1} and everything above (no upper bound).
- *   - A value exactly equal to a threshold belongs to that bucket (lower-bound inclusive).
- *
- * @param marginPct  The margin percentage as a plain number (e.g. 25.7 for 25.7%).
- * @param buckets    The ordered bucket array. Must have at least one entry.
+ * Map a margin percentage to the matching bucket color. Buckets must be in
+ * ascending threshold order. The first bucket also covers everything below its
+ * threshold; the last covers its threshold and above; a value equal to a
+ * threshold belongs to that bucket (lower-bound inclusive).
  */
 export function bucketColorFor(marginPct: number, buckets: readonly MarginBucket[]): string {
-  // Walk from the last bucket downwards. The first bucket whose threshold
-  // is <= marginPct is the matching one (lower-bound inclusive).
   for (let i = buckets.length - 1; i >= 0; i--) {
     if (marginPct >= buckets[i]!.threshold) {
       return buckets[i]!.color;
     }
   }
-  // marginPct is below the first bucket's threshold — still the first bucket.
   return buckets[0]!.color;
 }

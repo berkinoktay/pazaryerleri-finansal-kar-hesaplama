@@ -1416,7 +1416,11 @@
       "save": "Save",
       "savedToast": "Your coloring preference has been saved.",
       "errorAscending": "Thresholds must be in ascending order and distinct.",
-      "errorRange": "Threshold must be between -100 and 1000."
+      "errorRange": "Threshold must be between -100 and 1000.",
+      "presetPurpleGreen": "Purple to green",
+      "presetSunset": "Sunset",
+      "presetMono": "Green intensity",
+      "customColor": "Custom color"
     }
   },
   "notificationsPage": {

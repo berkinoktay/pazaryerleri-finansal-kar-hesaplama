@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyPreset,
   bucketColorFor,
   DEFAULT_MARGIN_BUCKETS,
-  PRESET_SCALES,
+  PRESET_KEYS,
+  PRESET_RAMPS,
+  sampleRamp,
   SWATCH_PALETTE,
   type MarginBucket,
   type MarginScale,
@@ -35,29 +38,35 @@ describe('DEFAULT_MARGIN_BUCKETS', () => {
     }
   });
 
-  it('every bucket color comes from SWATCH_PALETTE', () => {
+  it('every bucket has a non-empty color', () => {
     for (const bucket of DEFAULT_MARGIN_BUCKETS) {
-      expect(SWATCH_PALETTE).toContain(bucket.color);
+      expect(typeof bucket.color).toBe('string');
+      expect(bucket.color.length).toBeGreaterThan(0);
     }
   });
 });
 
-describe('PRESET_SCALES', () => {
-  it('has redGreen and colorblind presets', () => {
-    expect(PRESET_SCALES.redGreen).toBeDefined();
-    expect(PRESET_SCALES.colorblind).toBeDefined();
-  });
-
-  it('redGreen preset matches DEFAULT_MARGIN_BUCKETS', () => {
-    expect(PRESET_SCALES.redGreen).toEqual(DEFAULT_MARGIN_BUCKETS);
-  });
-
-  it('colorblind preset has at least 2 buckets with ascending thresholds', () => {
-    const cb = PRESET_SCALES.colorblind;
-    expect(cb.length).toBeGreaterThanOrEqual(2);
-    for (let i = 1; i < cb.length; i++) {
-      expect(cb[i]!.threshold).toBeGreaterThan(cb[i - 1]!.threshold);
+describe('presets', () => {
+  it('PRESET_RAMPS has a non-empty ramp for every PRESET_KEYS entry', () => {
+    for (const key of PRESET_KEYS) {
+      expect(PRESET_RAMPS[key].length).toBeGreaterThanOrEqual(2);
     }
+  });
+
+  it('sampleRamp returns the requested number of stops', () => {
+    const ramp = PRESET_RAMPS.redGreen;
+    expect(sampleRamp(ramp, 3)).toHaveLength(3);
+    expect(sampleRamp(ramp, ramp.length)).toEqual([...ramp]);
+    expect(sampleRamp(ramp, ramp.length + 2)).toHaveLength(ramp.length + 2);
+  });
+
+  it('applyPreset preserves thresholds and recolors from the ramp', () => {
+    const recolored = applyPreset(DEFAULT_MARGIN_BUCKETS, 'colorblind');
+    expect(recolored).toHaveLength(DEFAULT_MARGIN_BUCKETS.length);
+    recolored.forEach((b, i) => {
+      expect(b.threshold).toBe(DEFAULT_MARGIN_BUCKETS[i]!.threshold);
+      expect(b.color.length).toBeGreaterThan(0);
+    });
   });
 });
 

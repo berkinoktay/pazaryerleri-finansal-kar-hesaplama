@@ -2,51 +2,44 @@
 
 import * as React from 'react';
 
-import { cn } from '@/lib/utils';
-import { SWATCH_PALETTE } from '@/lib/margin-coloring';
+import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import { SWATCH_PALETTE } from '@/lib/margin-coloring';
+import { cn } from '@/lib/utils';
 
 interface ColorSwatchPickerProps {
-  /** The currently selected OKLCH color string. */
+  /** The currently selected color string (palette OKLCH or a custom hex). */
   value: string;
-  /** Called with the new color string when the user selects a swatch. */
+  /** Called with the new color string when the user picks a swatch or custom color. */
   onChange: (color: string) => void;
-  /**
-   * Accessible label for the trigger button. Defaults to 'Renk sec'.
-   * Pass a translated string from the parent once i18n is wired (Faz 3).
-   */
-  label?: string;
+  /** Accessible label for the trigger + custom-input group. */
+  label: string;
+  /** Label for the custom-color row (e.g. "Özel renk"). */
+  customLabel: string;
 }
 
-// ---------------------------------------------------------------------------
-// ColorSwatchPicker
-// ---------------------------------------------------------------------------
+/** Treat anything that isn't one of the preset palette stops as a custom color. */
+function isCustom(value: string): boolean {
+  return !SWATCH_PALETTE.includes(value as (typeof SWATCH_PALETTE)[number]);
+}
 
 /**
- * A Popover-based color picker composed from the curated SWATCH_PALETTE.
- * The trigger is a round swatch button showing the current color. The popover
- * content is a grid of palette swatches; clicking one calls `onChange` and
- * closes the popover.
+ * Popover color picker: a quick-pick grid of the curated SWATCH_PALETTE plus a
+ * custom-color row (a native color input + a hex field) so the user is never
+ * boxed in by the presets. Composed from ui/Popover + ui/Input — no forks.
+ * Chrome is token-driven; only the swatch fills are runtime-dynamic.
  *
- * Token-only for all chrome; runtime-dynamic color fills are annotated with
- * `// runtime-dynamic:` comments.
- *
- * @useWhen letting the user select a margin-scale bucket color from the curated palette
+ * @useWhen letting the user choose a margin-scale bucket color (palette or custom)
  */
 export function ColorSwatchPicker({
   value,
   onChange,
   label,
+  customLabel,
 }: ColorSwatchPickerProps): React.ReactElement {
   const [open, setOpen] = React.useState(false);
 
-  const ariaLabel = label ?? 'Renk sec';
-
-  function handleSelect(color: string): void {
+  function selectSwatch(color: string): void {
     onChange(color);
     setOpen(false);
   }
@@ -54,61 +47,74 @@ export function ColorSwatchPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        {/* Trigger: a round swatch button with the current color as background. */}
         <button
           type="button"
-          aria-label={ariaLabel}
+          aria-label={label}
           className={cn(
-            // Size + shape
-            'size-7 rounded-full border-2',
-            // Border transitions to signal interactive state
-            'border-border hover:border-border-strong focus-visible:border-border-strong',
+            'size-7 rounded-full border-2 transition-colors',
+            'border-border hover:border-border-strong',
             'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
-            // Cursor
             'cursor-pointer',
           )}
-          style={{
-            // runtime-dynamic: user-selected swatch color
-            backgroundColor: value,
-          }}
+          // runtime-dynamic: user-selected bucket color
+          style={{ backgroundColor: value }}
         />
       </PopoverTrigger>
 
       <PopoverContent
-        className="p-sm w-auto"
+        className="p-md w-auto"
         align="start"
-        // Prevent the popover itself from receiving focus-stealing on open.
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        {/* Palette grid — 7 columns to fit ~14 swatches in two rows */}
-        <div role="group" aria-label="Renk paleti" className="gap-xs grid grid-cols-7">
-          {SWATCH_PALETTE.map((color) => {
-            const isSelected = color === value;
-            return (
-              <button
-                key={color}
-                type="button"
-                aria-label={color}
-                aria-pressed={isSelected}
-                onClick={() => handleSelect(color)}
-                className={cn(
-                  // Size + shape
-                  'size-7 rounded-full border-2',
-                  // Border: selected = ring, else standard border
-                  isSelected
-                    ? 'border-foreground ring-ring ring-2 ring-offset-1'
-                    : 'border-border hover:border-border-strong',
-                  // Focus
-                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
-                  'cursor-pointer',
-                )}
-                style={{
+        <div className="gap-sm flex flex-col">
+          {/* Palette grid */}
+          <div role="group" aria-label={label} className="gap-2xs grid grid-cols-6">
+            {SWATCH_PALETTE.map((color) => {
+              const isSelected = color === value;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  aria-label={color}
+                  aria-pressed={isSelected}
+                  onClick={() => selectSwatch(color)}
+                  className={cn(
+                    'size-8 rounded-full border-2 transition-colors',
+                    isSelected
+                      ? 'border-foreground ring-ring ring-2 ring-offset-1'
+                      : 'border-border hover:border-border-strong',
+                    'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+                    'cursor-pointer',
+                  )}
                   // runtime-dynamic: palette swatch color
-                  backgroundColor: color,
-                }}
+                  style={{ backgroundColor: color }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Custom color row */}
+          <div className="border-border-muted gap-2xs pt-sm flex items-center border-t">
+            <label
+              className="border-border size-8 shrink-0 cursor-pointer overflow-hidden rounded-full border-2"
+              aria-label={customLabel}
+            >
+              <input
+                type="color"
+                value={isCustom(value) ? value : '#3aa657'}
+                onChange={(e) => onChange(e.target.value)}
+                className="size-12 -translate-x-1 -translate-y-1 cursor-pointer border-0 bg-transparent p-0"
               />
-            );
-          })}
+            </label>
+            <Input
+              size="sm"
+              aria-label={customLabel}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              spellCheck={false}
+              className="font-mono text-xs"
+            />
+          </div>
         </div>
       </PopoverContent>
     </Popover>

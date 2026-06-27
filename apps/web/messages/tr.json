@@ -1416,7 +1416,11 @@
       "save": "Kaydet",
       "savedToast": "Renklendirme tercihiniz kaydedildi.",
       "errorAscending": "Eşikler artan sırada ve birbirinden farklı olmalı.",
-      "errorRange": "Eşik değeri -100 ile 1000 arasında olmalı."
+      "errorRange": "Eşik değeri -100 ile 1000 arasında olmalı.",
+      "presetPurpleGreen": "Mordan yeşile",
+      "presetSunset": "Gün batımı",
+      "presetMono": "Yeşil yoğunluğu",
+      "customColor": "Özel renk"
     }
   },
   "notificationsPage": {
