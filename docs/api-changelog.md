@@ -23,6 +23,12 @@ section "Versioning" for details.
   unique thresholds; returns `422 VALIDATION_ERROR` otherwise. Scoped to the JWT subject —
   no caller-supplied id is accepted. Defined types: `MarginBucket`, `MarginColoring`, `Preferences`.
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** — liste öğelerine (`OrderListItem`)
+  `profitExcludedAt` (nullable datetime) ve `profitExclusionReason` (nullable enum:
+  `COST_DEADLINE_MISSED` / `LATE_UNCOSTED_ARRIVAL` / `LEGACY_BACKFILL`) alanları eklendi. "Kâr Hesabı
+  Dışı" sekmesinde her satırın dışlanma sebebini + tarihini göstermek için (daha önce yalnız sipariş
+  detayında vardı). Hesaplanan siparişlerde her ikisi de null. Ek alanlar geriye dönük uyumludur.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`** — `profitBreakdown` nesnesine mikro
   ihracat ücret alanları eklendi: `internationalServiceGross` / `internationalServiceVat` (Uluslararası
   Hizmet Bedeli, PSF yerine) ve `overseasReturnOperationGross` / `overseasReturnOperationVat` (Yurt Dışı

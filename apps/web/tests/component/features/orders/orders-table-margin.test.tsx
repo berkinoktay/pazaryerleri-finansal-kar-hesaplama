@@ -32,6 +32,8 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     fastDelivery: false,
     micro: false,
     itemCount: 2,
+    profitExcludedAt: null,
+    profitExclusionReason: null,
     ...overrides,
   };
 }

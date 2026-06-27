@@ -878,7 +878,22 @@
     },
     "excludedList": {
       "label": "Outside profit",
-      "empty": "No orders are excluded from profit"
+      "empty": "No orders are excluded from profit",
+      "intro": "These orders count toward your revenue but not your profit. You can see the reason for each one below."
+    }
+  },
+  "exclusionReasons": {
+    "COST_DEADLINE_MISSED": {
+      "label": "Cost not entered",
+      "detail": "The cost wasn't entered by the end of the day, so this order isn't included in profit."
+    },
+    "LATE_UNCOSTED_ARRIVAL": {
+      "label": "Late order",
+      "detail": "The order arrived late without a cost, so it isn't included in profit."
+    },
+    "LEGACY_BACKFILL": {
+      "label": "Old order",
+      "detail": "This is an old order with no cost, so it isn't included in profit."
     }
   },
   "productsPage": {
@@ -2235,7 +2250,7 @@
     },
     "exclusion": {
       "title": "Outside profit calculations",
-      "description": "The cost window closed on {date} — this order is permanently excluded from profit. Revenue still appears in records."
+      "description": "This order isn't included in profit. It still appears in revenue but not in profit reports."
     }
   },
   "livePerformance": {

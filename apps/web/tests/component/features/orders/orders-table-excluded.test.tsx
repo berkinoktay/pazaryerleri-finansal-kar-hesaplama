@@ -3,6 +3,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { OrderListItem } from '@/features/orders/api/list-orders.api';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { OrdersTable } from '@/features/orders/components/orders-table';
 
 import messages from '../../../../messages/tr.json';
@@ -28,9 +30,14 @@ const baseRow = {
   fastDelivery: false,
   micro: false,
   itemCount: 2,
+  profitExcludedAt: null,
+  profitExclusionReason: null,
 };
 
-function renderTable(costStatus: 'calculated' | 'excluded'): void {
+function renderTable(
+  costStatus: 'calculated' | 'excluded',
+  rows: OrderListItem[] = [baseRow],
+): void {
   render(
     <NextIntlClientProvider
       locale="tr"
@@ -38,34 +45,48 @@ function renderTable(costStatus: 'calculated' | 'excluded'): void {
       formats={FORMATS}
       timeZone="Europe/Istanbul"
     >
-      <OrdersTable
-        rows={[baseRow]}
-        pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
-        filters={{
-          q: '',
-          status: null,
-          reconciliationStatus: null,
-          lossOnly: false,
-          from: '',
-          to: '',
-        }}
-        costStatus={costStatus}
-        sort="-orderDate"
-        counts={{ calculated: 1, excluded: 1 }}
-        onCostStatusChange={vi.fn()}
-        onFiltersChange={vi.fn()}
-        onPaginationChange={vi.fn()}
-        onSortChange={vi.fn()}
-      />
+      {/* InfoHint (kâr-dışı sebep tooltip'i) Radix Tooltip kullanır → uygulamada
+          kökte mount'lu TooltipProvider'ı testte de sağla. */}
+      <TooltipProvider>
+        <OrdersTable
+          rows={rows}
+          pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
+          filters={{
+            q: '',
+            status: null,
+            reconciliationStatus: null,
+            lossOnly: false,
+            from: '',
+            to: '',
+          }}
+          costStatus={costStatus}
+          sort="-orderDate"
+          counts={{ calculated: 1, excluded: 1 }}
+          onCostStatusChange={vi.fn()}
+          onFiltersChange={vi.fn()}
+          onPaginationChange={vi.fn()}
+          onSortChange={vi.fn()}
+        />
+      </TooltipProvider>
     </NextIntlClientProvider>,
   );
 }
 
 describe('OrdersTable segments', () => {
-  it('excluded segment shows the info label (no CTA) and omits the profit column', () => {
-    renderTable('excluded');
-    expect(screen.getByText(messages.ordersPage.excludedList.label)).toBeInTheDocument();
-    // Bilgilendirme segmenti — eski iş-listesi CTA'sı yok (spec 2026-06-12 K2).
+  it('excluded segment shows the per-row reason badge + tab intro (no CTA, no profit column)', () => {
+    renderTable('excluded', [
+      {
+        ...baseRow,
+        profitExcludedAt: '2026-04-16T00:00:00.000Z',
+        profitExclusionReason: 'COST_DEADLINE_MISSED',
+      },
+    ]);
+    // Her satır KENDİ sebebini gösterir (rozet) + sekme-başı açıklama satırı.
+    expect(
+      screen.getByText(messages.exclusionReasons.COST_DEADLINE_MISSED.label),
+    ).toBeInTheDocument();
+    expect(screen.getByText(messages.ordersPage.excludedList.intro)).toBeInTheDocument();
+    // Bilgilendirme segmenti — eski iş-listesi CTA'sı yok (spec 2026-06-12 K2) + kâr sütunu yok.
     expect(screen.queryByText('Maliyet Ekle')).toBeNull();
     expect(screen.queryByText(messages.ordersPage.table.columns.estimatedNetProfit)).toBeNull();
   });
