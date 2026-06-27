@@ -118,5 +118,8 @@ export function foldReturnLegs(base: ProfitInput, legs: ResolvedReturnLegs): Pro
     },
     fees,
     stoppage: { gross: foldedStoppage },
+    // Snapshot bayrağı base'ten taşınır — katlama yalnız tutarları değiştirir, kâr-formülü
+    // ayarını DEĞİL. Atlanırsa flag tüm estimate/settled iade yolunda sessizce düşerdi.
+    includeNegativeNetVat: base.includeNegativeNetVat,
   };
 }

@@ -15,3 +15,9 @@ export {
   capabilitiesFor,
   type Capability,
 } from './permissions';
+export {
+  DEFAULT_PROFIT_SETTINGS,
+  resolveProfitSettings,
+  resolveSnapshotProfitSettings,
+  type ResolvedProfitSettings,
+} from './profit-settings';

@@ -935,7 +935,8 @@
       "subscription": "Subscription",
       "connections": "Connections",
       "shipping": "Shipping",
-      "commission": "Commission"
+      "commission": "Commission",
+      "profitSettings": "Profit Formula"
     },
     "profile": {
       "title": "Profile",
@@ -1409,6 +1410,25 @@
       "intent": "Set the shipping tariff source and carrier for the selected store.",
       "infoTitle": "How is shipping calculated?",
       "infoBody": "With the Trendyol contract, shipping cost is derived from the desi tariff of the carrier you pick. With your own contract, you enter your own tariff table."
+    },
+    "profitSettings": {
+      "title": "Profit Formula",
+      "intent": "Set how withholding tax and negative net VAT are handled in the selected store's profit calculation.",
+      "infoTitle": "What do these settings do?",
+      "infoBody": "Stopaj is the 1% e-commerce withholding tax deducted from sales. Net VAT is the VAT you collected minus the deductible VAT charged to you; when this is negative you have a VAT receivable. We recommend deciding whether to include these two items in your profit with your accountant.",
+      "cardTitle": "Taxes and deductions",
+      "cardDescription": "These options only affect orders created from now on.",
+      "forwardOnlyTitle": "Only affects new orders",
+      "forwardOnlyBody": "Changing these settings does not recompute past orders; each order keeps the value computed with the settings in force when it was created. The change applies only to orders that arrive afterwards.",
+      "stopaj": {
+        "title": "Include withholding tax (stopaj) in profit",
+        "description": "When on, the 1% e-commerce withholding tax is subtracted from net profit. Turn it off to exclude stopaj from the calculation."
+      },
+      "negativeNetVat": {
+        "title": "Include negative net VAT in profit",
+        "description": "When net VAT is negative (a VAT receivable), it is added to profit. When off (recommended), negative net VAT is not counted; positive net VAT is always subtracted."
+      },
+      "saveSuccess": "Profit formula settings saved"
     },
     "marginColoring": {
       "title": "Profit Margin Coloring",

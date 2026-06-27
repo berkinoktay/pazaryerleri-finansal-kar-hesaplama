@@ -18,6 +18,7 @@ const baseInput = (): ProfitInput => ({
   commission: { gross: D('0'), vat: D('0') },
   fees: [{ type: 'SHIPPING', gross: D('155.99'), vat: D('25.99'), direction: 'DEBIT' }],
   stoppage: { gross: D('0') },
+  includeNegativeNetVat: true,
 });
 
 describe('computeNetSaleGross', () => {

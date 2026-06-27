@@ -37,6 +37,11 @@ export interface ProfitInput {
   commission: ProfitMoneyPair;
   fees: ProfitInputFee[];
   stoppage: { gross: Decimal };
+  // Negatif net KDV (KDV alacağı) kâra dahil edilsin mi? false → netVat<0 ise 0'a klamplanır
+  // (alacak kârı şişirmez); netVat≥0 her zaman düşülür. Mağaza-bazlı snapshot'tan gelir
+  // (order-create'te Order'a yazılan değer; @pazarsync/utils resolveSnapshotProfitSettings).
+  // Eski/değişmemiş davranış için caller true geçer.
+  includeNegativeNetVat: boolean;
 }
 
 export interface ProfitBreakdown {
@@ -63,10 +68,12 @@ export interface ProfitBreakdown {
  * Computes profit. Pure function — no I/O, no DB. Unit-testable in isolation.
  *
  * Formula (spec §2, GROSS convention):
- *   netVat    = saleVat − costVat − commissionVat − Σ(DEBIT feeVat) + Σ(CREDIT feeVat)
- *               [stopaj HARİÇ netVat'tan — direkt netProfit'ten düşülür]
- *   netProfit = saleGross − costGross − commissionGross
- *               − Σ(DEBIT feeGross) + Σ(CREDIT feeGross) − stoppage − netVat
+ *   netVat         = saleVat − costVat − commissionVat − Σ(DEBIT feeVat) + Σ(CREDIT feeVat)
+ *                    [stopaj HARİÇ netVat'tan — direkt netProfit'ten düşülür]
+ *   effectiveNetVat = includeNegativeNetVat ? netVat : max(netVat, 0)
+ *   netProfit       = saleGross − costGross − commissionGross
+ *                    − Σ(DEBIT feeGross) + Σ(CREDIT feeGross) − stoppage − effectiveNetVat
+ * Dönen ProfitBreakdown.netVat = effectiveNetVat (saklanır/gösterilir; döküm kapanır).
  */
 export function computeProfit(input: ProfitInput): ProfitBreakdown {
   let shippingGross = new Decimal(0);
@@ -98,12 +105,19 @@ export function computeProfit(input: ProfitInput): ProfitBreakdown {
     }
   }
 
-  // Net KDV (spec §2): stopaj HARİÇ. CREDIT feeVat geri eklenir.
+  // Net KDV (spec §2): stopaj HARİÇ. CREDIT feeVat geri eklenir. Ham (gerçek) değer.
   const netVat = input.sale.vat
     .sub(input.cost.vat)
     .sub(input.commission.vat)
     .sub(debitVat)
     .add(creditVat);
+
+  // Negatif net KDV (KDV alacağı) opsiyonu: kapalıyken (includeNegativeNetVat=false) net KDV
+  // negatifse 0'a klamplanır (alacak kârı şişirmez); pozitif net KDV her zaman düşülür.
+  // Açıkken (true) eski davranış: negatif net KDV kâra eklenir (sub(negatif) = ekleme).
+  const effectiveNetVat = input.includeNegativeNetVat
+    ? netVat
+    : Decimal.max(netVat, new Decimal(0));
 
   const netProfit = input.sale.gross
     .sub(input.cost.gross)
@@ -111,7 +125,7 @@ export function computeProfit(input: ProfitInput): ProfitBreakdown {
     .sub(debitGross)
     .add(creditGross)
     .sub(input.stoppage.gross)
-    .sub(netVat);
+    .sub(effectiveNetVat);
 
   const saleMarginPct = input.sale.gross.isZero() ? null : netProfit.div(input.sale.gross).mul(100);
 
@@ -131,7 +145,9 @@ export function computeProfit(input: ProfitInput): ProfitBreakdown {
     platformServiceGross,
     platformServiceVat,
     stoppage: input.stoppage.gross,
-    netVat,
+    // Saklanan/gösterilen net KDV = effectiveNetVat (klamplı): kâr dökümü matematiksel kapanır
+    // (netProfit = saleGross − … − netVat). includeNegativeNetVat=true iken netVat===effectiveNetVat.
+    netVat: effectiveNetVat,
     netProfit,
     saleMarginPct,
     costMarkupPct,

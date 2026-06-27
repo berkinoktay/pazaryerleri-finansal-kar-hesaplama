@@ -1,5 +1,6 @@
 import {
   Building06Icon,
+  Calculator01Icon,
   CreditCardIcon,
   DeliveryTruck01Icon,
   Notification03Icon,
@@ -43,7 +44,8 @@ export type SettingsItemLabelKey =
   | 'settings.nav.subscription'
   | 'settings.nav.connections'
   | 'settings.nav.shipping'
-  | 'settings.nav.commission';
+  | 'settings.nav.commission'
+  | 'settings.nav.profitSettings';
 
 export type SettingsSectionLabelKey =
   | 'settings.nav.sections.account'
@@ -150,6 +152,13 @@ export const SETTINGS_NAV_SECTIONS = [
         href: '/settings/stores/commission',
         icon: PercentIcon,
         status: 'draft',
+      },
+      {
+        key: 'profit-settings',
+        labelKey: 'settings.nav.profitSettings',
+        href: '/settings/stores/profit-settings',
+        icon: Calculator01Icon,
+        status: 'ready',
       },
     ],
   },
