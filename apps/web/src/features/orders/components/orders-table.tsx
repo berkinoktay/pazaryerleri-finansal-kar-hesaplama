@@ -1,7 +1,7 @@
 'use client';
 
 import { type ColumnDef, type PaginationState, type SortingState } from '@tanstack/react-table';
-import { Alert02Icon } from 'hugeicons-react';
+import { Alert02Icon, InformationCircleIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -24,6 +24,7 @@ import {
   tanstackToOrderSort,
 } from '../lib/orders-filter-parsers';
 
+import { ExcludedReasonCell } from './excluded-reason-cell';
 import { OrderStatusBadge } from './order-status-badge';
 import { OrdersCostStatusTabs } from './orders-cost-status-tabs';
 import { OrdersToolbar } from './orders-toolbar';
@@ -143,17 +144,22 @@ export function OrdersTable({
         },
         {
           // Bilgilendirme hücresi (iş listesi DEĞİL — spec 2026-06-12): pencere
-          // kaçmış, dışlama kalıcı; satıcının yapacağı bir aksiyon yok. Ciro
-          // kayıtlı kalır, kâr alanları donuk. Satır tıklaması detaydaki kalıcı
-          // banner'a götürür.
+          // kaçmış, dışlama kalıcı; satıcının yapacağı bir aksiyon yok. Her satır
+          // KENDİ sebebini (rozet) + üzerine-gelince tam cümle/tarih gösterir.
+          // reason null (olmamalı; CHECK çifti zorlar) → eski generic etikete düş.
           id: 'profitExcluded',
           header: t('columns.costStatus'),
-          cell: () => (
-            <span className="gap-2xs text-muted-foreground inline-flex items-center text-sm">
-              <Alert02Icon className="size-icon-sm" />
-              {tPage('excludedList.label')}
-            </span>
-          ),
+          cell: ({ row }) => {
+            const reason = row.original.profitExclusionReason;
+            return reason === null ? (
+              <span className="gap-2xs text-muted-foreground inline-flex items-center text-sm">
+                <Alert02Icon className="size-icon-sm" />
+                {tPage('excludedList.label')}
+              </span>
+            ) : (
+              <ExcludedReasonCell reason={reason} />
+            );
+          },
         },
       ];
     }
@@ -364,12 +370,22 @@ export function OrdersTable({
         })
       }
       tabs={
-        <OrdersCostStatusTabs
-          value={costStatus}
-          counts={counts}
-          loading={tabsLoading}
-          onChange={onCostStatusChange}
-        />
+        <div className="gap-sm flex flex-col">
+          <OrdersCostStatusTabs
+            value={costStatus}
+            counts={counts}
+            loading={tabsLoading}
+            onChange={onCostStatusChange}
+          />
+          {/* Sekme-başı tek-satır açıklama (yalnız kâr-dışı): bu kovanın ne anlama
+              geldiğini söyler — ciroya dâhil, kâr raporlarına değil; sebep satırda. */}
+          {costStatus === 'excluded' ? (
+            <p className="text-muted-foreground gap-2xs flex items-start text-sm">
+              <InformationCircleIcon className="size-icon-sm mt-3xs shrink-0" />
+              <span>{tPage('excludedList.intro')}</span>
+            </p>
+          ) : null}
+        </div>
       }
       empty={empty ?? emptyState}
       toolbar={() => (

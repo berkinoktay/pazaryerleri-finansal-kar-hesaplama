@@ -51,6 +51,8 @@ export function OrderDetailClient({
   chrome = 'page',
 }: OrderDetailClientProps): React.ReactElement {
   const t = useTranslations('orderDetail');
+  // Dışlama sebebi kopyası tek kaynaktan (kâr-dışı liste hücresiyle aynı namespace).
+  const tReason = useTranslations('exclusionReasons');
   const formatter = useFormatter();
   const router = useRouter();
 
@@ -102,6 +104,25 @@ export function OrderDetailClient({
 
   const headerTitle = order.platformOrderNumber ?? order.platformOrderId;
 
+  // Kâr-dışı banner açıklaması sebebe özel + sade (kâr-dışı liste hücresiyle aynı
+  // `exclusionReasons` kaynağı, tek cümle, jargonsuz). reason null (CHECK gereği
+  // olmamalı) → generic metne düşer. profitExcludedAt null ise banner çizilmez.
+  const exclusionDescription =
+    order.profitExcludedAt === null
+      ? null
+      : ((): string => {
+          switch (order.profitExclusionReason) {
+            case 'COST_DEADLINE_MISSED':
+              return tReason('COST_DEADLINE_MISSED.detail');
+            case 'LATE_UNCOSTED_ARRIVAL':
+              return tReason('LATE_UNCOSTED_ARRIVAL.detail');
+            case 'LEGACY_BACKFILL':
+              return tReason('LEGACY_BACKFILL.detail');
+            default:
+              return t('exclusion.description');
+          }
+        })();
+
   return (
     <div className="gap-lg flex flex-col">
       {chrome === 'page' && (
@@ -141,15 +162,11 @@ export function OrderDetailClient({
       <OrderStatusBanner order={order} />
 
       {/* Kalıcı kâr-dışı banner'ı (spec 2026-06-12 §7): pencere kaçtı, dışlama
-          geri dönüşsüz — satıcı nedenini ve tarihini her zaman görür. */}
-      {order.profitExcludedAt !== null ? (
+          geri dönüşsüz — satıcı nedenini (sebebe özel) ve tarihini her zaman görür. */}
+      {exclusionDescription !== null ? (
         <Alert tone="warning" size="md">
           <AlertTitle>{t('exclusion.title')}</AlertTitle>
-          <AlertDescription>
-            {t('exclusion.description', {
-              date: formatter.dateTime(new Date(order.profitExcludedAt), 'short'),
-            })}
-          </AlertDescription>
+          <AlertDescription>{exclusionDescription}</AlertDescription>
         </Alert>
       ) : null}
 
