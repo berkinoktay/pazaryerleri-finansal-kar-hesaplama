@@ -2,7 +2,8 @@
 
 import { useTranslations } from 'next-intl';
 
-import { Card, CardContent } from '@/components/ui/card';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 
 /**
  * Contextual aside for the Güvenlik page — a compact security status summary
@@ -25,29 +26,23 @@ export function SecuritySummaryCard(): React.ReactElement {
 
   return (
     <>
-      <Card>
-        <CardContent className="gap-md flex flex-col">
-          <span className="text-foreground pt-2xs text-sm font-semibold">{t('title')}</span>
-          <dl className="flex flex-col">
-            {rows.map((row) => (
-              <div
-                key={row.key}
-                className="border-border-muted py-xs flex items-center justify-between border-t text-sm"
-              >
-                <dt className="text-muted-foreground">{row.label}</dt>
-                <dd className="text-foreground font-medium">{row.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('title')} icon={<DOMAIN_ICONS.twoFactor />}>
+        <dl className="flex flex-col">
+          {rows.map((row) => (
+            <div
+              key={row.key}
+              className="border-border-muted py-xs flex items-center justify-between border-t text-sm"
+            >
+              <dt className="text-muted-foreground">{row.label}</dt>
+              <dd className="text-foreground font-medium">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </SettingsAsideCard>
 
-      <Card>
-        <CardContent className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-semibold">{t('tipTitle')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('tipTitle')} icon={<DOMAIN_ICONS.hint />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
+      </SettingsAsideCard>
     </>
   );
 }

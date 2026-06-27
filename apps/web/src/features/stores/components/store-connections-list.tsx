@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
+import { SettingsCardHeader } from '@/components/patterns/settings-section';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -91,14 +93,17 @@ export function StoreConnectionsList({
   return (
     <>
       <Card>
-        <div className="border-border gap-md p-lg flex items-center justify-between border-b">
-          <h2 className="text-md font-semibold">{t('listTitle')}</h2>
-          <Button size="sm" onClick={() => setConnectOpen(true)}>
-            <Add01Icon />
-            {t('connect')}
-          </Button>
-        </div>
-        <div className="divide-border flex flex-col divide-y">
+        <SettingsCardHeader
+          icon={<DOMAIN_ICONS.stores />}
+          title={t('listTitle')}
+          actions={
+            <Button size="sm" onClick={() => setConnectOpen(true)}>
+              <Add01Icon />
+              {t('connect')}
+            </Button>
+          }
+        />
+        <div className="divide-border-muted flex flex-col divide-y">
           {stores.map((store) => {
             const status = STATUS[store.status];
             return (

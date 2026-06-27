@@ -960,6 +960,7 @@
       }
     },
     "members": {
+      "title": "Members",
       "loading": "Loading members…",
       "table": {
         "columns": {
@@ -1143,7 +1144,12 @@
         "themeDescription": "Use a light, dark, or your operating system's default theme.",
         "themeLight": "Light",
         "themeDark": "Dark",
-        "themeSystem": "System"
+        "themeSystem": "System",
+        "instantHint": "Applied instantly",
+        "themeCardLight": "Light",
+        "themeCardDark": "Dark",
+        "themeCardSystem": "System",
+        "themeCardSelectedLabel": "Selected theme"
       },
       "formats": {
         "title": "Formats",
@@ -1160,13 +1166,20 @@
         "numberDotComma": "1.234,56 (dot thousands, comma decimal)",
         "numberCommaPoint": "1,234.56 (comma thousands, dot decimal)",
         "dateDMY": "31.12.2026 (day.month.year)",
-        "dateYMD": "2026-12-31 (year-month-day)"
+        "dateYMD": "2026-12-31 (year-month-day)",
+        "fieldsRow": "Formatting fields"
       },
       "shortcuts": {
         "title": "Keyboard shortcuts",
         "description": "Use keyboard shortcuts to navigate the app quickly.",
         "comingSoon": "Coming soon",
-        "note": "Keyboard shortcut support is coming soon. Once enabled, you will be able to use quick-access keys for navigation, search, and common actions."
+        "note": "Keyboard shortcut support is coming soon. Once enabled, you will be able to use quick-access keys for navigation, search, and common actions.",
+        "enableLabel": "Keyboard shortcuts",
+        "enableDescription": "Enable shortcuts throughout the application.",
+        "listTitle": "Available shortcuts",
+        "shortcutCommandMenu": "Command menu",
+        "shortcutGoToSettings": "Go to settings",
+        "shortcutQuickSearch": "Quick search"
       },
       "summary": {
         "scopeTitle": "When do these settings take effect?",
@@ -1204,7 +1217,8 @@
           "title": "Authenticator app",
           "description": "Generate time-based codes via Google Authenticator or a similar app."
         },
-        "comingSoon": "Coming soon"
+        "comingSoon": "Coming soon",
+        "configure": "Configure"
       },
       "sessions": {
         "title": "Sessions",
@@ -1213,7 +1227,34 @@
           "title": "Chrome · macOS",
           "description": "Istanbul · Active now"
         },
-        "signOut": "Sign out"
+        "signOut": "Sign out",
+        "terminateOthers": "Sign out other sessions",
+        "thisDevice": "This device",
+        "activeNow": "Active now",
+        "terminate": "Terminate",
+        "cannotTerminate": "You cannot terminate the current session.",
+        "rows": {
+          "macbook": {
+            "device": "MacBook Pro 16",
+            "browser": "Chrome",
+            "os": "macOS",
+            "location": "Istanbul, Turkey"
+          },
+          "iphone": {
+            "device": "iPhone 15 Pro",
+            "browser": "Safari",
+            "os": "iOS",
+            "location": "Istanbul, Turkey",
+            "lastSeen": "2 hours ago"
+          },
+          "thinkpad": {
+            "device": "ThinkPad X1",
+            "browser": "Edge",
+            "os": "Windows",
+            "location": "Ankara, Turkey",
+            "lastSeen": "Yesterday 18:42"
+          }
+        }
       },
       "dangerZone": {
         "title": "Danger zone",
@@ -1221,6 +1262,7 @@
         "deleteAccount": {
           "title": "Delete account",
           "description": "Your account and all associated data will be permanently deleted. This action cannot be undone.",
+          "headerDescription": "Your account and all personal data will be permanently deleted. This action cannot be undone.",
           "button": "Delete account",
           "dialog": {
             "title": "Are you sure you want to delete your account?",
@@ -1255,7 +1297,14 @@
         "autoRenewDescription": "Your subscription will renew automatically at the end of the period.",
         "periodProgress": "Period progress",
         "changePlan": "Change plan",
-        "daysRemaining": "{days} days remaining"
+        "daysRemaining": "{days} days remaining",
+        "price": "999",
+        "pricePer": "/mo",
+        "currentBadge": "Current Plan",
+        "currentDescription": "Unlimited products, daily sync.",
+        "storeFeature": "5 Store Connections ({used}/{limit} Used)",
+        "upgrade": "Upgrade Plan",
+        "cancelPlan": "Cancel"
       },
       "billing": {
         "title": "Billing details",
@@ -1292,7 +1341,8 @@
         "colStatus": "Status",
         "colDownload": "Download",
         "statusPaid": "Paid",
-        "download": "Download"
+        "download": "Download",
+        "downloadAriaLabel": "Download invoice"
       },
       "summary": {
         "usageTitle": "Usage",
@@ -1300,6 +1350,14 @@
         "orders": "Orders",
         "tipTitle": "About your plan",
         "tipBody": "When you need more stores or higher order volume, you can upgrade your plan to instantly expand your capacity."
+      },
+      "payment": {
+        "title": "Payment method",
+        "description": "The card linked to your subscription.",
+        "cardMask": "**** 4242",
+        "expiry": "Expires: 12/25",
+        "cardBrand": "VISA",
+        "update": "Update"
       }
     },
     "connections": {
@@ -1332,6 +1390,7 @@
       }
     },
     "shipping": {
+      "title": "Shipping",
       "intent": "Set the shipping tariff source and carrier for the selected store.",
       "infoTitle": "How is shipping calculated?",
       "infoBody": "With the Trendyol contract, shipping cost is derived from the desi tariff of the carrier you pick. With your own contract, you enter your own tariff table."

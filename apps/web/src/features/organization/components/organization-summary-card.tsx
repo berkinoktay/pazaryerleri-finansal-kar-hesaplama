@@ -2,8 +2,8 @@
 
 import { useTranslations } from 'next-intl';
 
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Card, CardContent } from '@/components/ui/card';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 import { useCurrentScope } from '@/providers/current-scope';
 
 const ROLE_KEY = {
@@ -24,12 +24,6 @@ export function OrganizationSummaryCard(): React.ReactElement {
   const tRoles = useTranslations('settings.members.roles');
   const { org, role, accessibleStores } = useCurrentScope();
 
-  const orgInitials = org.name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('');
-
   const rows = [
     { key: 'orgName', label: t('orgName'), value: org.name },
     { key: 'role', label: t('role'), value: tRoles(ROLE_KEY[role]) },
@@ -39,13 +33,10 @@ export function OrganizationSummaryCard(): React.ReactElement {
 
   return (
     <>
-      <Card>
-        <CardContent className="gap-md flex flex-col">
+      <SettingsAsideCard title={t('title')} icon={<DOMAIN_ICONS.orgGeneral />}>
+        <div className="gap-md flex flex-col">
           <div className="gap-2xs pt-2xs flex flex-col items-center text-center">
-            <Avatar size="lg">
-              <AvatarFallback>{orgInitials}</AvatarFallback>
-            </Avatar>
-            <span className="text-foreground pt-2xs text-sm font-semibold">{org.name}</span>
+            <span className="text-foreground text-sm font-semibold">{org.name}</span>
             <span className="text-muted-foreground text-2xs">{org.slug}</span>
           </div>
 
@@ -60,15 +51,12 @@ export function OrganizationSummaryCard(): React.ReactElement {
               </div>
             ))}
           </dl>
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsAsideCard>
 
-      <Card>
-        <CardContent className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-semibold">{t('tipTitle')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('tipTitle')} icon={<DOMAIN_ICONS.info />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
+      </SettingsAsideCard>
     </>
   );
 }

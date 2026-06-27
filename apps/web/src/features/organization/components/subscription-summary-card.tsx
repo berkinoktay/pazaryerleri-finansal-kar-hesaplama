@@ -2,8 +2,9 @@
 
 import { useTranslations } from 'next-intl';
 
-import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 import { useCurrentScope } from '@/providers/current-scope';
 
 /**
@@ -44,37 +45,31 @@ export function SubscriptionSummaryCard(): React.ReactElement {
 
   return (
     <>
-      <Card>
-        <CardContent className="gap-md flex flex-col">
-          <span className="text-foreground pt-xs text-sm font-semibold">{t('usageTitle')}</span>
-          <dl className="gap-md flex flex-col">
-            {quotaRows.map((row) => (
-              <div key={row.key} className="gap-xs flex flex-col">
-                <div className="flex items-center justify-between text-sm">
-                  <dt className="text-muted-foreground">{row.label}</dt>
-                  <dd className="text-foreground font-medium tabular-nums">
-                    {row.used}
-                    <span className="text-muted-foreground font-normal">/{row.limit}</span>
-                  </dd>
-                </div>
-                <Progress
-                  value={row.percent}
-                  size="sm"
-                  tone={row.percent >= 90 ? 'warning' : 'primary'}
-                  aria-label={row.label}
-                />
+      <SettingsAsideCard title={t('usageTitle')} icon={<DOMAIN_ICONS.usage />}>
+        <dl className="gap-md flex flex-col">
+          {quotaRows.map((row) => (
+            <div key={row.key} className="gap-xs flex flex-col">
+              <div className="flex items-center justify-between text-sm">
+                <dt className="text-muted-foreground">{row.label}</dt>
+                <dd className="text-foreground font-medium tabular-nums">
+                  {row.used}
+                  <span className="text-muted-foreground font-normal">/{row.limit}</span>
+                </dd>
               </div>
-            ))}
-          </dl>
-        </CardContent>
-      </Card>
+              <Progress
+                value={row.percent}
+                size="sm"
+                tone={row.percent >= 90 ? 'warning' : 'primary'}
+                aria-label={row.label}
+              />
+            </div>
+          ))}
+        </dl>
+      </SettingsAsideCard>
 
-      <Card>
-        <CardContent className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-semibold">{t('tipTitle')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('tipTitle')} icon={<DOMAIN_ICONS.info />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
+      </SettingsAsideCard>
     </>
   );
 }

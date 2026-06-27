@@ -2,7 +2,8 @@
 
 import { useTranslations } from 'next-intl';
 
-import { Card, CardContent } from '@/components/ui/card';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 
 /**
  * Contextual aside for the Tercihler page — a short scope explanation and
@@ -13,19 +14,13 @@ export function PreferencesSummaryCard(): React.ReactElement {
 
   return (
     <>
-      <Card>
-        <CardContent className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-semibold">{t('scopeTitle')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('scopeBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('scopeTitle')} icon={<DOMAIN_ICONS.theme />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('scopeBody')}</p>
+      </SettingsAsideCard>
 
-      <Card>
-        <CardContent className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-semibold">{t('tipTitle')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('tipTitle')} icon={<DOMAIN_ICONS.hint />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
+      </SettingsAsideCard>
     </>
   );
 }

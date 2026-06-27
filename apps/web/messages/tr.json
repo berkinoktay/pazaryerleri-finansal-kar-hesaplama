@@ -960,6 +960,7 @@
       }
     },
     "members": {
+      "title": "Üyeler",
       "loading": "Üyeler yükleniyor…",
       "table": {
         "columns": {
@@ -1143,7 +1144,12 @@
         "themeDescription": "Açık, koyu veya işletim sisteminizin varsayılan temasını kullanın.",
         "themeLight": "Açık",
         "themeDark": "Koyu",
-        "themeSystem": "Sistem"
+        "themeSystem": "Sistem",
+        "instantHint": "Anında uygulanır",
+        "themeCardLight": "Açık",
+        "themeCardDark": "Koyu",
+        "themeCardSystem": "Sistem",
+        "themeCardSelectedLabel": "Seçili tema"
       },
       "formats": {
         "title": "Biçimler",
@@ -1160,13 +1166,20 @@
         "numberDotComma": "1.234,56 (nokta binlik, virgül ondalık)",
         "numberCommaPoint": "1,234.56 (virgül binlik, nokta ondalık)",
         "dateDMY": "31.12.2026 (gün.ay.yıl)",
-        "dateYMD": "2026-12-31 (yıl-ay-gün)"
+        "dateYMD": "2026-12-31 (yıl-ay-gün)",
+        "fieldsRow": "Biçimlendirme alanları"
       },
       "shortcuts": {
         "title": "Klavye kısayolları",
         "description": "Uygulamayı klavyeyle hızlıca kullanmak için kısayollar.",
         "comingSoon": "Yakında",
-        "note": "Klavye kısayolları desteği yakında eklenecektir. Bu özellik etkinleştirildiğinde gezinti, arama ve sık kullanılan işlemler için hızlı erişim tuşları kullanabileceksiniz."
+        "note": "Klavye kısayolları desteği yakında eklenecektir. Bu özellik etkinleştirildiğinde gezinti, arama ve sık kullanılan işlemler için hızlı erişim tuşları kullanabileceksiniz.",
+        "enableLabel": "Klavye kısayolları",
+        "enableDescription": "Uygulama genelinde kısayolları etkinleştir.",
+        "listTitle": "Mevcut kısayollar",
+        "shortcutCommandMenu": "Komut menüsü",
+        "shortcutGoToSettings": "Ayarlara git",
+        "shortcutQuickSearch": "Hızlı arama"
       },
       "summary": {
         "scopeTitle": "Bu ayarlar ne zaman geçerli?",
@@ -1204,7 +1217,8 @@
           "title": "Authenticator uygulaması",
           "description": "Google Authenticator veya benzeri bir uygulama üzerinden zaman tabanlı kod üretin."
         },
-        "comingSoon": "Yakında"
+        "comingSoon": "Yakında",
+        "configure": "Yapılandır"
       },
       "sessions": {
         "title": "Oturumlar",
@@ -1213,7 +1227,34 @@
           "title": "Chrome · macOS",
           "description": "İstanbul · Şu an aktif"
         },
-        "signOut": "Oturumu kapat"
+        "signOut": "Oturumu kapat",
+        "terminateOthers": "Diğer oturumları kapat",
+        "thisDevice": "Bu cihaz",
+        "activeNow": "Şu anda aktif",
+        "terminate": "Sonlandır",
+        "cannotTerminate": "Bu oturumu sonlandıramazsınız.",
+        "rows": {
+          "macbook": {
+            "device": "MacBook Pro 16",
+            "browser": "Chrome",
+            "os": "macOS",
+            "location": "İstanbul, Türkiye"
+          },
+          "iphone": {
+            "device": "iPhone 15 Pro",
+            "browser": "Safari",
+            "os": "iOS",
+            "location": "İstanbul, Türkiye",
+            "lastSeen": "2 saat önce"
+          },
+          "thinkpad": {
+            "device": "ThinkPad X1",
+            "browser": "Edge",
+            "os": "Windows",
+            "location": "Ankara, Türkiye",
+            "lastSeen": "Dün 18:42"
+          }
+        }
       },
       "dangerZone": {
         "title": "Tehlikeli bölge",
@@ -1221,6 +1262,7 @@
         "deleteAccount": {
           "title": "Hesabı sil",
           "description": "Hesabınız ve tüm ilişkili veriler kalıcı olarak silinir. Bu işlem geri alınamaz.",
+          "headerDescription": "Hesabınız ve tüm kişisel verileriniz kalıcı olarak silinir. Bu işlem geri alınamaz.",
           "button": "Hesabı sil",
           "dialog": {
             "title": "Hesabınızı silmek istediğinizden emin misiniz?",
@@ -1255,7 +1297,14 @@
         "autoRenewDescription": "Dönem sonunda aboneliğiniz otomatik olarak yenilenir.",
         "periodProgress": "Dönem ilerlemesi",
         "changePlan": "Planı değiştir",
-        "daysRemaining": "{days} gün kaldı"
+        "daysRemaining": "{days} gün kaldı",
+        "price": "999",
+        "pricePer": "/ay",
+        "currentBadge": "Mevcut Plan",
+        "currentDescription": "Sınırsız ürün, günlük senkronizasyon.",
+        "storeFeature": "5 Mağaza Bağlantısı ({used}/{limit} Kullanılıyor)",
+        "upgrade": "Planı Yükselt",
+        "cancelPlan": "İptal Et"
       },
       "billing": {
         "title": "Fatura bilgileri",
@@ -1292,7 +1341,8 @@
         "colStatus": "Durum",
         "colDownload": "İndir",
         "statusPaid": "Ödendi",
-        "download": "İndir"
+        "download": "İndir",
+        "downloadAriaLabel": "Faturayı indir"
       },
       "summary": {
         "usageTitle": "Kullanım",
@@ -1300,6 +1350,14 @@
         "orders": "Sipariş",
         "tipTitle": "Plan hakkında",
         "tipBody": "Daha fazla mağaza veya daha yüksek sipariş hacmine ihtiyaç duyduğunuzda planınızı yükselterek kapasitenizi anında artırabilirsiniz."
+      },
+      "payment": {
+        "title": "Ödeme yöntemi",
+        "description": "Aboneliğinize bağlı ödeme kartı.",
+        "cardMask": "**** 4242",
+        "expiry": "Son kullanma: 12/25",
+        "cardBrand": "VISA",
+        "update": "Güncelle"
       }
     },
     "connections": {
@@ -1332,6 +1390,7 @@
       }
     },
     "shipping": {
+      "title": "Kargo",
       "intent": "Seçili mağazanın kargo tarife kaynağını ve taşıyıcısını belirle.",
       "infoTitle": "Kargo nasıl hesaplanır?",
       "infoBody": "Trendyol sözleşmesini kullanırsan kargo bedeli, seçtiğin taşıyıcının desi tarifesinden hesaplanır. Kendi anlaşmanı seçersen kendi tarife tablonu girersin."

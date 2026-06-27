@@ -126,11 +126,11 @@ export function OrganizationSettings(): React.ReactElement {
 
                 {/* Saat dilimi */}
                 <div className="gap-3xs flex flex-col">
-                  <span className="text-foreground text-sm font-medium">
+                  <label htmlFor="org-timezone" className="text-foreground text-sm font-medium">
                     {t('fields.timezone')}
-                  </span>
+                  </label>
                   <Select value={tz} onValueChange={setTz}>
-                    <SelectTrigger aria-label={t('fields.timezone')}>
+                    <SelectTrigger id="org-timezone" aria-label={t('fields.timezone')}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -145,11 +145,11 @@ export function OrganizationSettings(): React.ReactElement {
 
                 {/* Para birimi */}
                 <div className="gap-3xs flex flex-col">
-                  <span className="text-foreground text-sm font-medium">
+                  <label htmlFor="org-currency" className="text-foreground text-sm font-medium">
                     {t('fields.currency')}
-                  </span>
+                  </label>
                   <Select value={currency} onValueChange={setCurrency}>
-                    <SelectTrigger aria-label={t('fields.currency')}>
+                    <SelectTrigger id="org-currency" aria-label={t('fields.currency')}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

@@ -2,7 +2,8 @@
 
 import { useTranslations } from 'next-intl';
 
-import { Card, CardContent } from '@/components/ui/card';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 
 /**
  * Contextual aside for the Komisyon (Commission) settings page.
@@ -21,19 +22,13 @@ export function CommissionSummaryCard(): React.ReactElement {
 
   return (
     <>
-      <Card>
-        <CardContent className="gap-md flex flex-col">
-          <span className="text-foreground pt-2xs text-sm font-semibold">{t('title')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('infoBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('title')} icon={<DOMAIN_ICONS.sellerLevel />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('infoBody')}</p>
+      </SettingsAsideCard>
 
-      <Card>
-        <CardContent className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-semibold">{t('tipTitle')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('tipTitle')} icon={<DOMAIN_ICONS.hint />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
+      </SettingsAsideCard>
     </>
   );
 }

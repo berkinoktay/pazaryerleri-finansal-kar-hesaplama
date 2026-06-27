@@ -2,12 +2,10 @@
 
 import { useFormatter, useTranslations } from 'next-intl';
 
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
+import { SettingsAsideCard } from '@/components/patterns/settings-section';
+import { DOMAIN_ICONS } from '@/lib/domain-icons';
 import { useCurrentScope } from '@/providers/current-scope';
-
-import { initialsFrom } from '../lib/initials';
 
 // Role key is inferred; the `role` from useCurrentScope drives the type, so we
 // don't reach across into the organization feature just for the role union.
@@ -42,7 +40,6 @@ export function AccountSummaryCard({
   const { role, accessibleStores } = useCurrentScope();
 
   const displayName = (fullName ?? '').trim();
-  const initials = initialsFrom(displayName, email);
   const membership = createdAt !== null ? format.dateTime(new Date(createdAt), 'month') : '—';
 
   const rows = [
@@ -53,13 +50,10 @@ export function AccountSummaryCard({
 
   return (
     <>
-      <Card>
-        <CardContent className="gap-md flex flex-col">
+      <SettingsAsideCard title={t('title')} icon={<DOMAIN_ICONS.profile />}>
+        <div className="gap-md flex flex-col">
           <div className="gap-2xs pt-2xs flex flex-col items-center text-center">
-            <Avatar size="lg">
-              <AvatarFallback>{initials}</AvatarFallback>
-            </Avatar>
-            <span className="text-foreground pt-2xs text-sm font-semibold">
+            <span className="text-foreground text-sm font-semibold">
               {displayName.length > 0 ? displayName : email}
             </span>
             {displayName.length > 0 ? (
@@ -80,15 +74,12 @@ export function AccountSummaryCard({
               </div>
             ))}
           </dl>
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsAsideCard>
 
-      <Card>
-        <CardContent className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-semibold">{t('tipTitle')}</span>
-          <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
-        </CardContent>
-      </Card>
+      <SettingsAsideCard title={t('tipTitle')} icon={<DOMAIN_ICONS.hint />}>
+        <p className="text-muted-foreground text-2xs leading-relaxed">{t('tipBody')}</p>
+      </SettingsAsideCard>
     </>
   );
 }

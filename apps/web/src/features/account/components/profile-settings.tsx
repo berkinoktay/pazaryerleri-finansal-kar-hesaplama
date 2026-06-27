@@ -180,9 +180,11 @@ export function ProfileSettings({
           <CardContent>
             <div className="gap-lg grid sm:grid-cols-2">
               <div className="gap-3xs flex flex-col">
-                <span className="text-foreground text-sm font-medium">{t('region.timezone')}</span>
+                <label htmlFor="profile-timezone" className="text-foreground text-sm font-medium">
+                  {t('region.timezone')}
+                </label>
                 <Select value={tz} onValueChange={setTz}>
-                  <SelectTrigger aria-label={t('region.timezone')}>
+                  <SelectTrigger id="profile-timezone" aria-label={t('region.timezone')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -196,9 +198,11 @@ export function ProfileSettings({
               </div>
 
               <div className="gap-3xs flex flex-col">
-                <span className="text-foreground text-sm font-medium">{t('region.language')}</span>
+                <label htmlFor="profile-language" className="text-foreground text-sm font-medium">
+                  {t('region.language')}
+                </label>
                 <Select value={lang} onValueChange={setLang}>
-                  <SelectTrigger aria-label={t('region.language')}>
+                  <SelectTrigger id="profile-language" aria-label={t('region.language')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
