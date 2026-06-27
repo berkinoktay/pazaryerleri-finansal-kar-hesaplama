@@ -13,6 +13,16 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/me/preferences`** — Returns the authenticated user's preferences blob (`{}`
+  for new users). User-scoped: always returns the calling user's own row. Supports
+  `marginColoring` (threshold-based margin color scale, opt-in).
+
+- **`PATCH /v1/me/preferences`** — Shallow-merges a partial `Preferences` object into the
+  stored blob (only supplied top-level keys are overwritten). Body validated by
+  `PreferencesSchema`: `marginColoring.buckets` must be 2–8 entries with strictly ascending,
+  unique thresholds; returns `422 VALIDATION_ERROR` otherwise. Scoped to the JWT subject —
+  no caller-supplied id is accepted. Defined types: `MarginBucket`, `MarginColoring`, `Preferences`.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** — liste öğelerine (`OrderListItem`)
   `profitExcludedAt` (nullable datetime) ve `profitExclusionReason` (nullable enum:
   `COST_DEADLINE_MISSED` / `LATE_UNCOSTED_ARRIVAL` / `LEGACY_BACKFILL`) alanları eklendi. "Kâr Hesabı

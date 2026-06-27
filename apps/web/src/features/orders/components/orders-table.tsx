@@ -13,8 +13,12 @@ import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
+import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { marginColorStyle } from '@/lib/margin-color-style';
+
+import { profitToneClass } from '@/lib/profit-tone';
+
 import { type OrderListItem } from '../api/list-orders.api';
-import { profitToneClass } from '../lib/profit-tone';
 import {
   type CostStatusValue,
   type OrderSortValue,
@@ -95,6 +99,8 @@ export function OrdersTable({
   const t = useTranslations('ordersPage.table');
   const tPage = useTranslations('ordersPage');
   const formatter = useFormatter();
+  // Read once at the component level — never inside cell render functions.
+  const scale = useMarginColoring();
 
   const columns = React.useMemo<ColumnDef<OrderListItem>[]>(() => {
     if (costStatus === 'excluded') {
@@ -226,10 +232,15 @@ export function OrdersTable({
         header: t('columns.estimatedNetProfit'),
         cell: ({ row }) => {
           const value = row.original.estimatedNetProfit;
-          return value === null ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <Currency value={value} className={profitToneClass(value)} />
+          if (value === null) return <span className="text-muted-foreground">—</span>;
+          // OFF: original binary tone class (profitToneClass on the profit value).
+          // ON: inline color from the row's margin % overrides the class (style wins).
+          return (
+            <Currency
+              value={value}
+              className={cn('tabular-nums', profitToneClass(value))}
+              style={marginColorStyle(row.original.saleMarginPct, scale)}
+            />
           );
         },
       },
@@ -238,10 +249,16 @@ export function OrdersTable({
         header: t('columns.settledNetProfit'),
         cell: ({ row }) => {
           const value = row.original.settledNetProfit;
-          return value === null ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <Currency value={value} emphasis className={profitToneClass(value)} />
+          if (value === null) return <span className="text-muted-foreground">—</span>;
+          // OFF: original binary tone class (profitToneClass on the profit value).
+          // ON: inline color from the row's margin % overrides the class (style wins).
+          return (
+            <Currency
+              value={value}
+              emphasis
+              className={cn('tabular-nums', profitToneClass(value))}
+              style={marginColorStyle(row.original.saleMarginPct, scale)}
+            />
           );
         },
       },
@@ -257,10 +274,16 @@ export function OrdersTable({
         meta: { numeric: true, label: t('columns.saleMarginPct') },
         cell: ({ row }) => {
           const value = row.original.saleMarginPct;
-          return value === null ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <span className={cn('tabular-nums', profitToneClass(value))}>{value}%</span>
+          if (value === null) return <span className="text-muted-foreground">—</span>;
+          // OFF: original binary tone class (profitToneClass on the margin value).
+          // ON: inline color from the bucket overrides the class (style wins).
+          return (
+            <span
+              className={cn('tabular-nums', profitToneClass(value))}
+              style={marginColorStyle(value, scale)}
+            >
+              {value}%
+            </span>
           );
         },
       },
@@ -290,7 +313,7 @@ export function OrdersTable({
         ),
       },
     ];
-  }, [t, tPage, formatter, costStatus]);
+  }, [t, tPage, formatter, costStatus, scale]);
 
   // Bridge the page-level (page, perPage) state to TanStack's PaginationState
   // ({ pageIndex, pageSize }). Manual pagination flips on as soon as we pass

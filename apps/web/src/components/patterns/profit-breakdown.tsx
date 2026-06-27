@@ -10,6 +10,8 @@ import { Currency } from '@/components/patterns/currency';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { marginColorStyle } from '@/lib/margin-color-style';
 import { cn } from '@/lib/utils';
 
 // Spec'te ProfitBreakdown component'i nullable (field opsiyonel) → NonNullable ile
@@ -95,6 +97,8 @@ export function ProfitBreakdownCard({
   const t = useTranslations('profitBreakdown');
   const finalProfitLabel = profitLabel ?? t('estimatedProfit');
   const promotions = promotionDisplays ?? [];
+  // Read once — applied to both netProfit currency and saleMarginPct span.
+  const scale = useMarginColoring();
 
   return (
     <Card className={className}>
@@ -304,14 +308,30 @@ export function ProfitBreakdownCard({
 
             <div className="pt-xs mt-3xs gap-2xs flex flex-col border-t">
               <BreakdownRow label={finalProfitLabel} emphasis>
-                <Currency value={breakdown.netProfit} emphasis />
+                {/* OFF: original Currency rendering (no binary tone — profit-breakdown
+                    was always colorless for netProfit in origin/main).
+                    ON: inline color from the row's saleMarginPct bucket overrides. */}
+                <Currency
+                  value={breakdown.netProfit}
+                  emphasis
+                  style={marginColorStyle(breakdown.saleMarginPct, scale)}
+                />
               </BreakdownRow>
               {/* Marj backend-hesaplı (saleMarginPct); '—' payda 0 (satış brüt 0).
                   String'i biz formatlamıyoruz — yüzde glyph'i salt gösterim. */}
               <BreakdownRow label={t('margin')} muted>
-                <span className="tabular-nums">
-                  {breakdown.saleMarginPct === null ? '—' : `${breakdown.saleMarginPct}%`}
-                </span>
+                {breakdown.saleMarginPct === null ? (
+                  <span className="tabular-nums">—</span>
+                ) : (
+                  // OFF: original colorless span.
+                  // ON: inline color from the saleMarginPct bucket.
+                  <span
+                    className="tabular-nums"
+                    style={marginColorStyle(breakdown.saleMarginPct, scale)}
+                  >
+                    {breakdown.saleMarginPct}%
+                  </span>
+                )}
               </BreakdownRow>
             </div>
           </dl>

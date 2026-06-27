@@ -9,6 +9,8 @@ import { AnimatedNumber } from '@/components/patterns/animated-number';
 import { Currency } from '@/components/patterns/currency';
 import { StatCard, type StatCardDelta } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
+import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { marginColorStyle } from '@/lib/margin-color-style';
 
 import type { LivePerformanceKpis } from '../api/get-live-kpis.api';
 import { useLiveKpis } from '../hooks/use-live-kpis';
@@ -106,18 +108,37 @@ export function LiveKpiRow({
     : query.isError
       ? 'error'
       : 'ready';
+  // Margin coloring scale — read once for all KPI cards.
+  const scale = useMarginColoring();
 
   return (
     <StatGroup>
       {KPI_CARDS.map((card) => {
         const pair = kpis ? card.deltaPair(kpis) : undefined;
         const pendingCount = kpis && card.pending ? card.pending(kpis) : 0;
+        // For the margin KPI, color the AnimatedNumber by the live margin value.
+        // OFF: original colorless AnimatedNumber (no className/tone — was colorless in
+        //      origin/main). ON: inline color from the bucket (style wins over default).
+        const value =
+          kpis && card.key === 'margin'
+            ? (() => {
+                return (
+                  <AnimatedNumber
+                    value={Number(kpis.marginToday)}
+                    format={formatPercent}
+                    style={marginColorStyle(kpis.marginToday, scale)}
+                  />
+                );
+              })()
+            : kpis
+              ? card.value(kpis)
+              : null;
         return (
           <StatCard
             key={card.key}
             status={status}
             label={t(card.labelKey)}
-            value={kpis ? card.value(kpis) : null}
+            value={value}
             hint={card.hintKey ? t(card.hintKey) : undefined}
             delta={pair ? deltaProp(pair[0], pair[1]) : undefined}
             context={pendingCount > 0 ? t('pendingHint', { count: pendingCount }) : undefined}

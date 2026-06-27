@@ -1,11 +1,14 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
+import * as React from 'react';
 import { describe, expect, it } from 'vitest';
 
 import { formatCurrency } from '@pazarsync/utils';
 
 import { ProfitBreakdownCard } from '@/components/patterns/profit-breakdown';
+import { MarginColoringContext } from '@/features/account/components/margin-coloring-provider';
+import type { MarginScale } from '@/lib/margin-coloring';
 
 const messages = {
   profitBreakdown: {
@@ -88,11 +91,14 @@ const MICRO_BREAKDOWN = {
   overseasReturnOperationVat: '0.00',
 };
 
-function renderCard(breakdown: typeof BREAKDOWN | null): void {
+function renderCard(breakdown: typeof BREAKDOWN | null, scale: MarginScale | null = null): void {
   render(
-    <NextIntlClientProvider locale="tr" messages={messages}>
-      <ProfitBreakdownCard breakdown={breakdown} />
-    </NextIntlClientProvider>,
+    // MarginColoringContext injects the scale directly without the full provider.
+    <MarginColoringContext.Provider value={scale}>
+      <NextIntlClientProvider locale="tr" messages={messages}>
+        <ProfitBreakdownCard breakdown={breakdown} />
+      </NextIntlClientProvider>
+    </MarginColoringContext.Provider>,
   );
 }
 
@@ -286,6 +292,28 @@ describe('ProfitBreakdownCard', () => {
     renderCard(BREAKDOWN); // mikro ücretler '0.00'
     expect(screen.queryByText('Uluslararası hizmet bedeli')).not.toBeInTheDocument();
     expect(screen.queryByText('Yurt dışı iade operasyon bedeli')).not.toBeInTheDocument();
+  });
+
+  it('scale-enabled: margin% and netProfit cells carry inline style color from the bucket', () => {
+    // Use rgb() instead of oklch() — happy-dom's CSS parser does not support oklch,
+    // which causes React's style.color assignment to be silently discarded.
+    const scale: MarginScale = {
+      enabled: true,
+      buckets: [
+        { threshold: 0, color: 'rgb(200, 50, 50)' },
+        { threshold: 20, color: 'rgb(50, 180, 50)' },
+      ],
+    };
+    renderCard(BREAKDOWN, scale); // saleMarginPct = '25.7' -> >= 20 -> bucket[1] color
+    // Margin % span carries the bucket color as inline style.
+    const marginSpan = screen.getByText('25.7%');
+    expect(marginSpan.style.color).toBe('rgb(50, 180, 50)');
+    // netProfit Currency carries the same bucket color (margin drives both).
+    const profitSpan = screen.getByText(formatCurrency('848.74'));
+    expect(profitSpan.style.color).toBe('rgb(50, 180, 50)');
+    // No binary tone classes — scale mode replaces them.
+    expect(marginSpan.className).not.toContain('text-success');
+    expect(marginSpan.className).not.toContain('text-destructive');
   });
 
   it('shows the international service VAT row in the Net VAT breakdown; hides the zero-VAT return fee', async () => {

@@ -255,6 +255,7 @@ model UserProfile {
   avatarUrl         String?  @map("avatar_url")
   timezone          String   @default("Europe/Istanbul")
   preferredLanguage String   @default("tr") @map("preferred_language")
+  preferences       Json     @default("{}") @map("preferences")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 

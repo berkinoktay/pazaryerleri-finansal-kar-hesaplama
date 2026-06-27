@@ -1,7 +1,10 @@
+import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { OrderListItem } from '@/features/orders/api/list-orders.api';
+import { MarginColoringContext } from '@/features/account/components/margin-coloring-provider';
 import { OrdersTable, type OrdersTableProps } from '@/features/orders/components/orders-table';
+import type { MarginScale } from '@/lib/margin-coloring';
 
 import { render, screen } from '../../../helpers/render';
 import trMessages from '../../../../messages/tr.json';
@@ -35,9 +38,12 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
   };
 }
 
-function renderTable(props: Partial<OrdersTableProps> = {}): OrdersTableProps['onSortChange'] {
+function renderTable(
+  props: Partial<OrdersTableProps> = {},
+  scale: MarginScale | null = null,
+): OrdersTableProps['onSortChange'] {
   const onSortChange = vi.fn();
-  render(
+  const table = (
     <OrdersTable
       rows={[makeRow()]}
       pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
@@ -57,8 +63,10 @@ function renderTable(props: Partial<OrdersTableProps> = {}): OrdersTableProps['o
       onPaginationChange={vi.fn()}
       onSortChange={onSortChange}
       {...props}
-    />,
+    />
   );
+  // Wrap in MarginColoringContext to inject the scale without needing the full provider.
+  render(<MarginColoringContext.Provider value={scale}>{table}</MarginColoringContext.Provider>);
   return onSortChange;
 }
 
@@ -157,5 +165,43 @@ describe('OrdersTable — Marj % column', () => {
       />,
     );
     expect(screen.queryByText(MARGIN_HEADER)).toBeNull();
+  });
+});
+
+describe('OrdersTable — marj renklendirme (binary vs scale)', () => {
+  it('binary mode (scale null): positive margin cell carries text-success class', () => {
+    // Pass null scale -> binary fallback via profitToneClass.
+    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] }, null);
+    const cell = screen.getByText('15.5%');
+    expect(cell.className).toContain('text-success');
+    expect(cell).not.toHaveAttribute('style');
+  });
+
+  it('binary mode (scale null): negative margin cell carries text-destructive class', () => {
+    renderTable({ rows: [makeRow({ saleMarginPct: '-5.0' })] }, null);
+    const cell = screen.getByText('-5.0%');
+    expect(cell.className).toContain('text-destructive');
+    expect(cell).not.toHaveAttribute('style');
+  });
+
+  it('scale-enabled mode: margin cell carries inline style color from the bucket', () => {
+    // Use rgb() instead of oklch() — happy-dom's CSS parser does not support oklch,
+    // which causes style.color assignment to be silently discarded.
+    const scale: MarginScale = {
+      enabled: true,
+      buckets: [
+        { threshold: 0, color: 'rgb(200, 50, 50)' }, // "loss red" (readable by happy-dom)
+        { threshold: 20, color: 'rgb(50, 180, 50)' }, // "profit green"
+      ],
+    };
+    // saleMarginPct '15.5' -> >= 0 but < 20 -> bucket[0] color rgb(200, 50, 50).
+    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] }, scale);
+    const cell = screen.getByText('15.5%');
+    // The inline style.color is the bucket color (overrides the class color visually).
+    expect(cell.style.color).toBe('rgb(200, 50, 50)');
+    // The original binary tone class is kept as the OFF-state baseline; the inline
+    // style overrides it when ON. This is the "layered" approach: class = baseline,
+    // style = override (OFF-parity invariant: when style is removed, original shows).
+    expect(cell.className).toContain('text-success');
   });
 });
