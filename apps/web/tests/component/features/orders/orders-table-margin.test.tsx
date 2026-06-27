@@ -2,7 +2,7 @@ import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { OrderListItem } from '@/features/orders/api/list-orders.api';
-import { MarginColoringContext } from '@/features/account/components/margin-coloring-provider';
+import { MarginColoringContext } from '@/lib/margin-coloring-context';
 import { OrdersTable, type OrdersTableProps } from '@/features/orders/components/orders-table';
 import type { MarginScale } from '@/lib/margin-coloring';
 

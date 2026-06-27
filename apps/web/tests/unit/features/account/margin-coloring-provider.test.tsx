@@ -4,10 +4,8 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import {
-  MarginColoringProvider,
-  useMarginColoring,
-} from '@/features/account/components/margin-coloring-provider';
+import { MarginColoringProvider } from '@/features/account/components/margin-coloring-provider';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { createTestQueryClient } from '../../../helpers/render';
 import { server, http, HttpResponse } from '../../../helpers/msw';

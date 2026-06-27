@@ -5,7 +5,7 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { TrendDelta } from '@/components/patterns/trend-delta';
-import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 import { cn } from '@/lib/utils';
 

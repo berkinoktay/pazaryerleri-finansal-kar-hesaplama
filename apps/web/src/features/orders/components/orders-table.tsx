@@ -13,7 +13,7 @@ import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-import { useMarginColoring } from '@/features/account/components/margin-coloring-provider';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 
 import { profitToneClass } from '@/lib/profit-tone';
