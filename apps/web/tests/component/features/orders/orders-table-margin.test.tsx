@@ -1,10 +1,19 @@
+import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { OrderListItem } from '@/features/orders/api/list-orders.api';
 import { OrdersTable, type OrdersTableProps } from '@/features/orders/components/orders-table';
+import type { MarginScale } from '@/lib/margin-coloring';
 
 import { render, screen } from '../../../helpers/render';
 import trMessages from '../../../../messages/tr.json';
+
+// Stable mock — the module is replaced before any test runs.
+// vi.fn() returns MarginScale | null; mockReturnValue overrides per-test.
+let mockScaleReturnValue: MarginScale | null = null;
+vi.mock('@/features/account/components/margin-coloring-provider', () => ({
+  useMarginColoring: () => mockScaleReturnValue,
+}));
 
 vi.mock('next/navigation', () => ({ useRouter: vi.fn(() => ({ push: vi.fn() })) }));
 
@@ -155,5 +164,42 @@ describe('OrdersTable — Marj % column', () => {
       />,
     );
     expect(screen.queryByText(MARGIN_HEADER)).toBeNull();
+  });
+});
+
+describe('OrdersTable — marj renklendirme (binary vs scale)', () => {
+  it('binary mode (scale null): positive margin cell carries text-success class', () => {
+    // Default mock returns null -> binary fallback via profitToneClass.
+    mockScaleReturnValue = null;
+    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] });
+    const cell = screen.getByText('15.5%');
+    expect(cell.className).toContain('text-success');
+    expect(cell).not.toHaveAttribute('style');
+  });
+
+  it('binary mode (scale null): negative margin cell carries text-destructive class', () => {
+    mockScaleReturnValue = null;
+    renderTable({ rows: [makeRow({ saleMarginPct: '-5.0' })] });
+    const cell = screen.getByText('-5.0%');
+    expect(cell.className).toContain('text-destructive');
+    expect(cell).not.toHaveAttribute('style');
+  });
+
+  it('scale-enabled mode: margin cell uses inline color style (no tone class)', () => {
+    const scale: MarginScale = {
+      enabled: true,
+      buckets: [
+        { threshold: 0, color: 'oklch(58% 0.20 27)' },
+        { threshold: 20, color: 'oklch(58% 0.14 155)' },
+      ],
+    };
+    mockScaleReturnValue = scale;
+    // saleMarginPct '15.5' -> between bucket[0] (>=0) and bucket[1] (>=20) -> bucket[0] color.
+    renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] });
+    const cell = screen.getByText('15.5%');
+    // Style-driven color; no binary tone class.
+    expect(cell.style.color).toBe('oklch(58% 0.20 27)');
+    expect(cell.className).not.toContain('text-success');
+    expect(cell.className).not.toContain('text-destructive');
   });
 });
