@@ -740,6 +740,11 @@
     "comingSoon": "Yakında geliştirilecek",
     "description": "Bu sayfa henüz geliştirme aşamasında. İlerleyen güncellemelerde aktif olacak."
   },
+  "featureStatus": {
+    "draftLabel": "Taslak",
+    "draftHint": "Bu bölümün arka ucu henüz bağlanmadı. Bu işaret yalnızca geliştirme ortamında görünür.",
+    "draftActionToast": "Bu özellik henüz etkin değil; yakında eklenecek."
+  },
   "returnsPage": {
     "title": "İadeler",
     "intent": "Mağazanın iade taleplerini ve kâr etkisini tek yerden izleyin",
@@ -894,18 +899,68 @@
   "settings": {
     "nav": {
       "ariaLabel": "Ayarlar menüsü",
+      "mobileNavLabel": "Ayarlar bölümü",
       "sections": {
-        "account": "Hesap",
-        "connections": "Bağlantılar"
+        "account": "Hesabım",
+        "organization": "Organizasyon",
+        "store": "Mağaza"
+      },
+      "storePicker": {
+        "label": "Mağaza",
+        "placeholder": "Mağaza seçin",
+        "empty": "Bağlı mağaza yok",
+        "connectFirst": "Bu ayarları düzenlemek için önce bir mağaza bağlayın."
       },
       "profile": "Profil",
-      "team": "Ekip",
+      "security": "Güvenlik",
+      "notifications": "Bildirimler",
+      "preferences": "Tercihler",
+      "general": "Genel",
       "members": "Üyeler",
-      "billing": "Faturalama",
-      "stores": "Mağazalar",
-      "notifications": "Bildirimler"
+      "subscription": "Abonelik",
+      "connections": "Bağlantılar",
+      "shipping": "Kargo",
+      "commission": "Komisyon"
+    },
+    "profile": {
+      "title": "Profil",
+      "intent": "Hesap bilgilerin ve seni nasıl gösterdiğimiz.",
+      "identity": {
+        "title": "Profil bilgileri",
+        "description": "Adın ve iletişim bilgilerin. E-posta adresin oturum açmak için kullanılır."
+      },
+      "avatar": {
+        "alt": "Profil fotoğrafı",
+        "change": "Fotoğrafı değiştir",
+        "hint": "JPG veya PNG, en fazla 2 MB."
+      },
+      "fields": {
+        "fullName": "Ad Soyad",
+        "fullNamePlaceholder": "Adınız ve soyadınız",
+        "email": "E-posta",
+        "emailHint": "E-posta adresi ayrı bir doğrulama akışıyla değiştirilir.",
+        "phone": "Telefon",
+        "phonePlaceholder": "+90 5xx xxx xx xx"
+      },
+      "save": "Kaydet",
+      "region": {
+        "title": "Bölge ve dil",
+        "description": "Tarih, saat ve para biçimlerinin nasıl gösterileceğini belirler.",
+        "timezone": "Saat dilimi",
+        "language": "Dil"
+      },
+      "summary": {
+        "title": "Hesap özeti",
+        "role": "Rol",
+        "membership": "Üyelik",
+        "stores": "Bağlı mağaza",
+        "active": "Aktif",
+        "tipTitle": "Profilini tamamla",
+        "tipBody": "Ad ve fotoğraf eklemek, ekip üyelerinin seni tanımasını kolaylaştırır."
+      }
     },
     "members": {
+      "title": "Üyeler",
       "loading": "Üyeler yükleniyor…",
       "table": {
         "columns": {
@@ -954,7 +1009,391 @@
       "error": {
         "title": "Üyeler yüklenemedi",
         "description": "Bir şeyler ters gitti. Lütfen tekrar dene."
+      },
+      "intent": "Ekip üyelerini, rollerini ve mağaza erişimlerini yönet.",
+      "invite": "Üye davet et"
+    },
+    "notifications": {
+      "title": "Bildirimler",
+      "intent": "Hangi bildirimleri almak istediginizi buradan yonetebilirsiniz.",
+      "email": {
+        "title": "E-posta bildirimleri",
+        "description": "Sizi bilgilendirmek icin gonderilen e-posta bildirimlerini yapilandirin.",
+        "masterLabel": "Tum e-posta bildirimleri",
+        "masterDescription": "Butun e-posta bildirimlerini bir anahtar ile acin veya kapatin.",
+        "dailySummaryLabel": "Gunluk ozet",
+        "dailySummaryDescription": "Gunun sonunda magazanizin performansini ozetleyen bir e-posta alirsiniz.",
+        "weeklyReportLabel": "Haftalik rapor",
+        "weeklyReportDescription": "Her hafta basinizin genel durumunu gosteren detayli bir rapor gonderilir.",
+        "save": "Kaydet"
+      },
+      "alerts": {
+        "title": "Uyari bildirimleri",
+        "description": "Magazanizda dikkat gerektiren durumlar olusugunda bildirim alin.",
+        "lossLabel": "Zararma satis",
+        "lossDescription": "Bir urun maliyet fiyatinin altinda satildiginda uyari alin.",
+        "marginLabel": "Kar marji alti",
+        "marginDescription": "Belirledginiz kar marji esiginin altina dusuldugunde bildirim gonderilir.",
+        "priceChangeLabel": "Fiyat degisimi",
+        "priceChangeDescription": "Urununuzun fiyatinin degistiginde haberdar olun.",
+        "returnLabel": "Iade",
+        "returnDescription": "Yeni bir iade talebi olusturuldugunda bildirim alin.",
+        "stockLabel": "Stok",
+        "stockDescription": "Stok miktari kritik seviyeye dustugunde uyari gonderilir.",
+        "save": "Kaydet"
+      },
+      "system": {
+        "title": "Sistem bildirimleri",
+        "description": "Bu bildirimler her zaman aciktir ve devre disi birakilamaz.",
+        "body": "Hesap guvenliginize iliskin oturum acma bildirimleri, abonelik ve odeme durumu guncellemeleri ile platform genelindeki onemli duyurular her zaman gonderilir. Bu bildirimler hizmetin saglikli sekilde islemesi icin zorunludur; ayri olarak kapatilamaz."
+      },
+      "summary": {
+        "howTitle": "Bildirimler nasil calisir?",
+        "howBody": "PazarSync, bildirimlerinizi e-posta uzerinden iletir. Uyari esikleri ve rapor periyotlari gelecekte dogrudan buradan yapilandirilabilir olacak.",
+        "tipTitle": "Ipucu",
+        "tipBody": "Uyari bildirimlerini etkinlestirerek zararli satislari ve stok aciklarina karsi onceden tedbir alabilirsiniz."
       }
+    },
+    "commission": {
+      "title": "Komisyon",
+      "intent": "Aktif mağazanızın kategori bazlı komisyon oranlarını görüntüleyin ve satıcı seviyenizi yönetin",
+      "sellerLevel": {
+        "title": "Satıcı Seviyesi",
+        "description": "Satıcı seviyeniz, uygulanacak komisyon oranlarını doğrudan etkiler. Üst seviyelerde daha avantajlı oranlar geçerli olabilir.",
+        "label": "Mevcut seviye",
+        "level1": "Seviye 1",
+        "level2": "Seviye 2",
+        "level3": "Seviye 3"
+      },
+      "categoryRates": {
+        "title": "Kategori Komisyon Oranları",
+        "description": "Aşağıdaki oranlar, pazar yeri tarafından belirlenen referans değerlerdir. Gerçek oranlar satıcı seviyenize ve kampanya koşullarına göre değişebilir.",
+        "colCategory": "Kategori",
+        "colRate": "Komisyon oranı (%)",
+        "importButton": "Excel ile içe aktar",
+        "saveButton": "Kaydet",
+        "categories": {
+          "electronics": "Elektronik",
+          "clothing": "Giyim & Aksesuar",
+          "homeLife": "Ev & Yaşam",
+          "cosmetics": "Kozmetik & Kişisel Bakım",
+          "sports": "Spor & Outdoor",
+          "books": "Kitap & Hobi"
+        }
+      },
+      "summary": {
+        "title": "Komisyon hakkında",
+        "infoBody": "Komisyon oranları pazar yeri tarafından belirlenir ve satıcı seviyenize göre farklılık gösterir. Bu sayfadaki değerler yalnızca referans niteliğindedir.",
+        "tipTitle": "İpucu",
+        "tipBody": "Gerçek komisyon değerlerinizi öğrenmek için pazar yeri satıcı panelinizde hesabınızın seviye ve oran bilgilerini kontrol edin. Hakediş mutabakatı yapıldığında sistem gerçek oranları otomatik olarak yansıtır."
+      }
+    },
+    "organization": {
+      "title": "Genel",
+      "intent": "Organizasyonunun adı, kimliği ve finansal ayarları.",
+      "info": {
+        "title": "Organizasyon bilgileri",
+        "description": "Organizasyonunun adı ve kısa adı. Bu bilgiler platformdaki kimliğinizi temsil eder."
+      },
+      "logo": {
+        "upload": "Yükle",
+        "hint": "PNG veya JPG, en fazla 2 MB.",
+        "alt": "Organizasyon logosu"
+      },
+      "fields": {
+        "name": "Organizasyon adı",
+        "namePlaceholder": "Organizasyonunuzun tam adı",
+        "slug": "Kısa ad (slug)",
+        "slugHint": "Kısa ad değiştirilemez.",
+        "timezone": "Saat dilimi",
+        "currency": "Para birimi"
+      },
+      "accounting": {
+        "title": "Muhasebe ayarları",
+        "description": "Kâr hesaplamalarında dikkate alınacak vergi ve kesinti tercihlerinizi belirleyin."
+      },
+      "rows": {
+        "negativeVat": {
+          "title": "Negatif KDV hesaba katılsın",
+          "description": "İade ve iptal siparişlerinde oluşan negatif KDV tutarları kâr hesaplamasına dahil edilir."
+        },
+        "stopaj": {
+          "title": "Stopaj kesintisi hesaba katılsın",
+          "description": "Hakediş ödemelerinde uygulanan stopaj kesintisi net kâr hesaplamasına yansıtılır."
+        }
+      },
+      "save": "Kaydet",
+      "summary": {
+        "title": "Organizasyon özeti",
+        "orgName": "Organizasyon",
+        "role": "Rolünüz",
+        "stores": "Bağlı mağaza",
+        "plan": "Plan",
+        "planValue": "—",
+        "tipTitle": "Ayarlar hakkında",
+        "tipBody": "Organizasyon bilgileri ve muhasebe tercihleri tüm mağazalarınız için geçerlidir. Değişiklikler kaydedildiğinde kâr hesaplamalarına hemen yansır."
+      }
+    },
+    "preferences": {
+      "title": "Tercihler",
+      "intent": "Görünüm ve biçim ayarlarını hesabınıza özel olarak yapılandırın.",
+      "appearance": {
+        "title": "Görünüm",
+        "description": "Uygulamanın görsel temasını seçin. Tercihleriniz yalnızca bu tarayıcıda geçerlidir.",
+        "themeLabel": "Tema",
+        "themeDescription": "Açık, koyu veya işletim sisteminizin varsayılan temasını kullanın.",
+        "themeLight": "Açık",
+        "themeDark": "Koyu",
+        "themeSystem": "Sistem",
+        "instantHint": "Anında uygulanır",
+        "themeCardLight": "Açık",
+        "themeCardDark": "Koyu",
+        "themeCardSystem": "Sistem",
+        "themeCardSelectedLabel": "Seçili tema"
+      },
+      "formats": {
+        "title": "Biçimler",
+        "description": "Para birimi, sayı ve tarih gösterimini özelleştirin.",
+        "currencyLabel": "Para birimi gösterimi",
+        "currencyDescription": "Tutarların yanında gösterilecek para birimi sembolünü seçin.",
+        "numberLabel": "Sayı biçimi",
+        "numberDescription": "Binlik ayraç ve ondalık gösterimini seçin.",
+        "dateLabel": "Tarih biçimi",
+        "dateDescription": "Tarihlerin nasıl gösterileceğini seçin.",
+        "save": "Kaydet",
+        "currencyTRY": "₺ Türk Lirası",
+        "currencyUSD": "$ ABD Doları",
+        "numberDotComma": "1.234,56 (nokta binlik, virgül ondalık)",
+        "numberCommaPoint": "1,234.56 (virgül binlik, nokta ondalık)",
+        "dateDMY": "31.12.2026 (gün.ay.yıl)",
+        "dateYMD": "2026-12-31 (yıl-ay-gün)",
+        "fieldsRow": "Biçimlendirme alanları"
+      },
+      "shortcuts": {
+        "title": "Klavye kısayolları",
+        "description": "Uygulamayı klavyeyle hızlıca kullanmak için kısayollar.",
+        "comingSoon": "Yakında",
+        "note": "Klavye kısayolları desteği yakında eklenecektir. Bu özellik etkinleştirildiğinde gezinti, arama ve sık kullanılan işlemler için hızlı erişim tuşları kullanabileceksiniz.",
+        "enableLabel": "Klavye kısayolları",
+        "enableDescription": "Uygulama genelinde kısayolları etkinleştir.",
+        "listTitle": "Mevcut kısayollar",
+        "shortcutCommandMenu": "Komut menüsü",
+        "shortcutGoToSettings": "Ayarlara git",
+        "shortcutQuickSearch": "Hızlı arama"
+      },
+      "summary": {
+        "scopeTitle": "Bu ayarlar ne zaman geçerli?",
+        "scopeBody": "Görünüm ve biçim tercihleri yalnızca bu hesaba aittir; diğer üyelerinizi veya organizasyonunuzu etkilemez. Tema tercihi tarayıcıya özel olarak saklanır.",
+        "tipTitle": "İpucu",
+        "tipBody": "Tema değişikliği anında uygulanır; kaydetmenize gerek yoktur. Biçim ayarları ise kaydedildikten sonra tüm ekranlarda görünür."
+      }
+    },
+    "security": {
+      "title": "Güvenlik",
+      "intent": "Şifrenizi, iki faktörlü doğrulamanızı ve aktif oturumlarınızı yönetin.",
+      "save": "Kaydet",
+      "password": {
+        "title": "Şifre değiştir",
+        "description": "Hesabınızın güvenliğini artırmak için şifrenizi düzenli aralıklarla değiştirin.",
+        "currentPassword": "Mevcut şifre",
+        "currentPasswordPlaceholder": "Mevcut şifrenizi girin",
+        "newPassword": "Yeni şifre",
+        "newPasswordPlaceholder": "Yeni şifrenizi girin",
+        "confirmPassword": "Yeni şifre (tekrar)",
+        "confirmPasswordPlaceholder": "Yeni şifrenizi tekrar girin",
+        "reveal": {
+          "show": "Şifreyi göster",
+          "hide": "Şifreyi gizle"
+        }
+      },
+      "twoFactor": {
+        "title": "İki faktörlü doğrulama",
+        "description": "Hesabınıza ikinci bir güvenlik katmanı ekleyerek yetkisiz erişimlere karşı koruma sağlayın.",
+        "sms": {
+          "title": "SMS doğrulama",
+          "description": "Giriş yaparken telefon numaranıza tek kullanımlık bir doğrulama kodu gönderilir."
+        },
+        "authenticator": {
+          "title": "Authenticator uygulaması",
+          "description": "Google Authenticator veya benzeri bir uygulama üzerinden zaman tabanlı kod üretin."
+        },
+        "comingSoon": "Yakında",
+        "configure": "Yapılandır"
+      },
+      "sessions": {
+        "title": "Oturumlar",
+        "description": "Hesabınıza bağlı aktif oturumları görüntüleyin ve yönetin.",
+        "activeSession": {
+          "title": "Chrome · macOS",
+          "description": "İstanbul · Şu an aktif"
+        },
+        "signOut": "Oturumu kapat",
+        "terminateOthers": "Diğer oturumları kapat",
+        "thisDevice": "Bu cihaz",
+        "activeNow": "Şu anda aktif",
+        "terminate": "Sonlandır",
+        "cannotTerminate": "Bu oturumu sonlandıramazsınız.",
+        "rows": {
+          "macbook": {
+            "device": "MacBook Pro 16",
+            "browser": "Chrome",
+            "os": "macOS",
+            "location": "İstanbul, Türkiye"
+          },
+          "iphone": {
+            "device": "iPhone 15 Pro",
+            "browser": "Safari",
+            "os": "iOS",
+            "location": "İstanbul, Türkiye",
+            "lastSeen": "2 saat önce"
+          },
+          "thinkpad": {
+            "device": "ThinkPad X1",
+            "browser": "Edge",
+            "os": "Windows",
+            "location": "Ankara, Türkiye",
+            "lastSeen": "Dün 18:42"
+          }
+        }
+      },
+      "dangerZone": {
+        "title": "Tehlikeli bölge",
+        "description": "Bu işlemler geri alınamaz. Devam etmeden önce dikkatlice okuyun.",
+        "deleteAccount": {
+          "title": "Hesabı sil",
+          "description": "Hesabınız ve tüm ilişkili veriler kalıcı olarak silinir. Bu işlem geri alınamaz.",
+          "headerDescription": "Hesabınız ve tüm kişisel verileriniz kalıcı olarak silinir. Bu işlem geri alınamaz.",
+          "button": "Hesabı sil",
+          "dialog": {
+            "title": "Hesabınızı silmek istediğinizden emin misiniz?",
+            "description": "Bu işlem geri alınamaz. Hesabınız, mağaza bağlantılarınız ve tüm finansal verileriniz kalıcı olarak silinecektir.",
+            "confirm": "Evet, hesabı sil",
+            "cancel": "Vazgeç"
+          }
+        }
+      },
+      "summary": {
+        "title": "Güvenlik durumu",
+        "twoFactor": "İki faktörlü doğrulama",
+        "twoFactorValue": "Kapalı",
+        "lastPasswordChange": "Son şifre değişikliği",
+        "lastPasswordChangeValue": "—",
+        "activeSessions": "Aktif oturum",
+        "activeSessionsValue": "1",
+        "tipTitle": "Hesabınızı koruyun",
+        "tipBody": "İki faktörlü doğrulamayı etkinleştirerek hesabınıza ekstra güvenlik katmanı ekleyebilirsiniz. Şifrenizi en az 3 ayda bir değiştirmenizi öneririz."
+      }
+    },
+    "subscription": {
+      "title": "Abonelik",
+      "intent": "Abonelik planınızı ve fatura bilgilerinizi buradan yönetebilirsiniz.",
+      "plan": {
+        "title": "Mevcut plan",
+        "description": "Aktif abonelik planınızın ayrıntıları ve kullanım durumunuz.",
+        "planName": "Başlangıç",
+        "storeLimit": "Mağaza limiti",
+        "periodEnd": "Dönem sonu",
+        "autoRenewLabel": "Otomatik yenileme",
+        "autoRenewDescription": "Dönem sonunda aboneliğiniz otomatik olarak yenilenir.",
+        "periodProgress": "Dönem ilerlemesi",
+        "changePlan": "Planı değiştir",
+        "daysRemaining": "{days} gün kaldı",
+        "price": "999",
+        "pricePer": "/ay",
+        "currentBadge": "Mevcut Plan",
+        "currentDescription": "Sınırsız ürün, günlük senkronizasyon.",
+        "storeFeature": "5 Mağaza Bağlantısı ({used}/{limit} Kullanılıyor)",
+        "upgrade": "Planı Yükselt",
+        "cancelPlan": "İptal Et"
+      },
+      "billing": {
+        "title": "Fatura bilgileri",
+        "description": "Faturalarınızın düzenleneceği kişi veya kurum bilgilerini girin.",
+        "invoiceType": "Fatura tipi",
+        "individual": "Bireysel",
+        "corporate": "Kurumsal",
+        "fullName": "Ad Soyad",
+        "fullNamePlaceholder": "Adınızı ve soyadınızı girin",
+        "companyName": "Şirket adı",
+        "companyNamePlaceholder": "Şirket adını girin",
+        "tcKimlik": "TC Kimlik No",
+        "tcKimlikPlaceholder": "11 haneli TC kimlik numaranız",
+        "vkn": "Vergi Kimlik No (VKN)",
+        "vknPlaceholder": "10 haneli vergi kimlik numaranız",
+        "address": "Adres",
+        "addressPlaceholder": "Fatura adresinizi girin",
+        "city": "İl",
+        "cityPlaceholder": "İl seçin veya yazın",
+        "district": "İlçe",
+        "districtPlaceholder": "İlçe girin",
+        "postalCode": "Posta kodu",
+        "postalCodePlaceholder": "Posta kodunuzu girin",
+        "save": "Kaydet"
+      },
+      "history": {
+        "title": "Fatura geçmişi",
+        "description": "Geçmiş faturalarınızı görüntüleyip indirebilirsiniz.",
+        "emptyTitle": "Henüz fatura yok",
+        "emptyDescription": "Aboneliğiniz aktif olduktan sonra düzenlenen faturalar burada listelenir.",
+        "colNo": "No",
+        "colDate": "Tarih",
+        "colAmount": "Tutar",
+        "colStatus": "Durum",
+        "colDownload": "İndir",
+        "statusPaid": "Ödendi",
+        "download": "İndir",
+        "downloadAriaLabel": "Faturayı indir"
+      },
+      "summary": {
+        "usageTitle": "Kullanım",
+        "stores": "Mağaza",
+        "orders": "Sipariş",
+        "tipTitle": "Plan hakkında",
+        "tipBody": "Daha fazla mağaza veya daha yüksek sipariş hacmine ihtiyaç duyduğunuzda planınızı yükselterek kapasitenizi anında artırabilirsiniz."
+      },
+      "payment": {
+        "title": "Ödeme yöntemi",
+        "description": "Aboneliğinize bağlı ödeme kartı.",
+        "cardMask": "**** 4242",
+        "expiry": "Son kullanma: 12/25",
+        "cardBrand": "VISA",
+        "update": "Güncelle"
+      }
+    },
+    "connections": {
+      "title": "Bağlantılar",
+      "intent": "Pazaryeri mağazalarını bağla, durumlarını izle ve yönet.",
+      "listTitle": "Bağlı mağazalar",
+      "connect": "Mağaza bağla",
+      "status": {
+        "active": "Bağlı",
+        "error": "Bağlantı hatası",
+        "disabled": "Devre dışı"
+      },
+      "lastSync": "Son senkron",
+      "neverSynced": "Henüz senkron yok",
+      "actions": {
+        "menu": "İşlemler",
+        "rotate": "Kimlik bilgilerini yenile",
+        "disconnect": "Bağlantıyı kaldır"
+      },
+      "disconnectConfirm": {
+        "title": "Mağaza bağlantısı kaldırılsın mı?",
+        "body": "{name} bağlantısı kaldırılacak. Bu mağazaya ait siparişler, ürünler ve hakedişler kalıcı olarak silinir. Bu işlem geri alınamaz.",
+        "cancel": "Vazgeç",
+        "confirm": "Bağlantıyı kaldır"
+      },
+      "disconnected": "Mağaza bağlantısı kaldırıldı.",
+      "supported": {
+        "title": "Desteklenen pazaryerleri",
+        "body": "PazarSync şu an Trendyol ve Hepsiburada ile çalışır. Yeni pazaryeri entegrasyonları yolda."
+      }
+    },
+    "shipping": {
+      "title": "Kargo",
+      "intent": "Seçili mağazanın kargo tarife kaynağını ve taşıyıcısını belirle.",
+      "infoTitle": "Kargo nasıl hesaplanır?",
+      "infoBody": "Trendyol sözleşmesini kullanırsan kargo bedeli, seçtiğin taşıyıcının desi tarifesinden hesaplanır. Kendi anlaşmanı seçersen kendi tarife tablonu girersin."
     }
   },
   "notificationsPage": {
