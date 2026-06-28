@@ -9,9 +9,6 @@ catalogs:
     '@supabase/supabase-js':
       specifier: ^2.105.4
       version: 2.105.4
-    '@types/node':
-      specifier: ^20.19.41
-      version: 20.19.41
     '@vitest/ui':
       specifier: ^4.1.6
       version: 4.1.6
@@ -101,6 +98,9 @@ importers:
       '@pazarsync/profit':
         specifier: workspace:*
         version: link:../../packages/profit
+      '@pazarsync/spreadsheet':
+        specifier: workspace:*
+        version: link:../../packages/spreadsheet
       '@pazarsync/sync-core':
         specifier: workspace:*
         version: link:../../packages/sync-core
@@ -641,6 +641,9 @@ importers:
 
   packages/spreadsheet:
     dependencies:
+      decimal.js:
+        specifier: 'catalog:'
+        version: 10.6.0
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
@@ -651,9 +654,21 @@ importers:
         specifier: 4.1.1
         version: 4.1.1
     devDependencies:
+      '@pazarsync/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^20.19.41
         version: 20.19.41
+      eslint:
+        specifier: 'catalog:'
+        version: 9.39.4(jiti@2.6.1)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.6(@types/node@20.19.41)(@vitest/ui@4.1.6)(happy-dom@20.9.0)(jsdom@29.0.2)(msw@2.13.4(@types/node@20.19.41)(typescript@6.0.3))(vite@8.0.8(@types/node@20.19.41)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   packages/sync-core:
     dependencies:

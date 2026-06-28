@@ -24,6 +24,7 @@
     "@hono/zod-openapi": "^1.4.0",
     "@hono/zod-validator": "^0.8.0",
     "@pazarsync/catalog-sync": "workspace:*",
+    "@pazarsync/spreadsheet": "workspace:*",
     "@pazarsync/db": "workspace:*",
     "@pazarsync/marketplace": "workspace:*",
     "@pazarsync/order-sync": "workspace:*",
