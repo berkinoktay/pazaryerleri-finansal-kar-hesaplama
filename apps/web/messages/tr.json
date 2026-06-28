@@ -2186,7 +2186,7 @@
     "internationalService": "Uluslararası hizmet bedeli",
     "overseasReturnOperation": "Yurt dışı iade operasyon bedeli",
     "stoppage": "Stopaj",
-    "promotions": "Promosyonlar",
+    "promotions": "İndirimler",
     "netVat": "Net KDV",
     "netVatResult": "Net KDV",
     "saleVat": "Satış KDV",
@@ -2209,8 +2209,8 @@
     "tooltip": "Tıklayınca bu siparişin kâr dökümü açılır"
   },
   "promotionIndicator": {
-    "label": "Promosyon",
-    "title": "Uygulanan promosyonlar"
+    "label": "İndirim",
+    "title": "Uygulanan indirimler"
   },
   "orderDetail": {
     "title": {

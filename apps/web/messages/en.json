@@ -2121,7 +2121,7 @@
     "internationalService": "International service fee",
     "overseasReturnOperation": "Overseas return operation fee",
     "stoppage": "Withholding tax",
-    "promotions": "Promotions",
+    "promotions": "Discounts",
     "netVat": "Net VAT",
     "netVatResult": "Net VAT",
     "saleVat": "Sale VAT",
@@ -2144,8 +2144,8 @@
     "tooltip": "Click to open this order's profit breakdown"
   },
   "promotionIndicator": {
-    "label": "Promotion",
-    "title": "Applied promotions"
+    "label": "Discount",
+    "title": "Applied discounts"
   },
   "orderDetail": {
     "title": {

@@ -189,9 +189,6 @@ export function OrdersTable({
           return (
             <span className="gap-xs flex items-center">
               <span className="font-medium">{number}</span>
-              {/* İndirimli siparişte promosyon adlarını gösteren gürültüsüz rozet
-                  (spec ekleme #3). Promosyon yoksa hiçbir şey çizilmez. */}
-              <PromotionIndicator promotions={row.original.promotionDisplays} />
               {/* Sevkıyat tipi sinyalleri (veri liste API'sinde zaten var). */}
               {row.original.fastDelivery ? (
                 <Badge tone="info" size="sm">
@@ -220,14 +217,18 @@ export function OrdersTable({
       {
         id: 'saleGross',
         header: t('columns.saleGross'),
-        cell: ({ row }) => {
-          const value = row.original.saleGross;
-          return value === null ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <Currency value={value} />
-          );
-        },
+        cell: ({ row }) => (
+          <span className="gap-xs inline-flex items-center">
+            {row.original.saleGross === null ? (
+              <span className="text-muted-foreground">—</span>
+            ) : (
+              <Currency value={row.original.saleGross} />
+            )}
+            {/* İndirimli siparişte indirim adlarını gösteren gürültüsüz rozet —
+                her zaman satış tutarının yanında. İndirim yoksa hiçbir şey çizilmez. */}
+            <PromotionIndicator promotions={row.original.promotionDisplays} />
+          </span>
+        ),
       },
       {
         // Tahmini kâr — tıklanabilir, marj-renkli rozet. Arka plan rengi satırın
