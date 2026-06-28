@@ -845,6 +845,7 @@
         "saleGross": "Satış (KDV dahil)",
         "estimatedNetProfit": "Tahmini kâr",
         "settledNetProfit": "Fiili kâr",
+        "returnScenarioProfit": "İade senaryosu kârı",
         "saleMarginPct": "Marj %",
         "itemCount": "Kalem",
         "revenue": "Ciro",

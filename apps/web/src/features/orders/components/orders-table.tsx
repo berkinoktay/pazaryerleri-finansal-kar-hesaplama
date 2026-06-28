@@ -263,6 +263,23 @@ export function OrdersTable({
         },
       },
       {
+        // İade senaryosu kârı: "tam iade gelirse tahmini kâr" (backend'de hesaplanır,
+        // frontend yalnız render eder). null → senaryo yok (kâr-dışı/zaten-iadeli).
+        id: 'returnScenarioNetProfit',
+        header: t('columns.returnScenarioProfit'),
+        cell: ({ row }) => {
+          const value = row.original.returnScenarioNetProfit;
+          if (value === null) return <span className="text-muted-foreground">—</span>;
+          return (
+            <Currency
+              value={value}
+              className={cn('tabular-nums', profitToneClass(value))}
+              style={marginColorStyle(row.original.saleMarginPct, scale)}
+            />
+          );
+        },
+      },
+      {
         // Marj % — backend'de hesaplanıp persist edilen değer (settled ?? estimated).
         // accessorFn manualSorting altında getCanSort()'u açar (değer asla client-side
         // sıralama için OKUNMAZ — sıralama server-side); header buton olur. Render:

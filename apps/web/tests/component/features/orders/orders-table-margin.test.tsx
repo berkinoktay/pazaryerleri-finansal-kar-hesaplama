@@ -85,7 +85,12 @@ describe('OrdersTable — Marj % column', () => {
     render(
       <OrdersTable
         rows={[
-          makeRow({ saleMarginPct: null, estimatedNetProfit: '60.00', settledNetProfit: '58.00' }),
+          makeRow({
+            saleMarginPct: null,
+            estimatedNetProfit: '60.00',
+            settledNetProfit: '58.00',
+            returnScenarioNetProfit: '-160.19',
+          }),
         ]}
         pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}
         filters={{
