@@ -68,19 +68,25 @@ describe('OrdersTable — iade senaryosu kari kolonu', () => {
   });
 
   it('shows the formatted value when returnScenarioNetProfit is a string', () => {
-    renderTable([makeRow({ returnScenarioNetProfit: '-160.19' })]);
-    // The Currency component formats the string. The raw sign + digits must appear.
+    // Fill all nullable currency/margin cells so zero em-dashes appear on the row.
+    // The only nullable columns in the calculated segment are estimatedNetProfit,
+    // settledNetProfit, returnScenarioNetProfit, saleMarginPct, and costMarkupPct —
+    // makeRow already fills estimatedNetProfit/saleMarginPct/costMarkupPct; we
+    // add settledNetProfit here so the row has no dash at all when
+    // returnScenarioNetProfit is set to a real value.
+    renderTable([
+      makeRow({
+        returnScenarioNetProfit: '-160.19',
+        settledNetProfit: '58.00',
+      }),
+    ]);
     expect(screen.getByText(RETURN_SCENARIO_HEADER)).toBeInTheDocument();
-    // Cell must contain something derived from '-160.19' (formatted as currency).
-    // We use a partial match because Currency adds the TRY symbol/locale formatting.
-    // In test locale the formatted value contains '160,19' (comma as decimal sep).
-    // Instead, assert the em-dash is NOT the only thing in the profit area.
-    expect(screen.queryAllByText('—').length).toBeLessThan(
-      // With a real value there should be no dash in the return-scenario cell.
-      // Other nullable cells (settledNetProfit) are null → they also show '—'.
-      // Just confirm the header is present and that value renders without throwing.
-      10,
-    );
+    // tr-TR locale: '-160.19' → '−160,19 ₺' (comma decimal separator).
+    // Match the digit fragment — robust against exact symbol/sign encoding.
+    expect(screen.getByText(/160,19/)).toBeInTheDocument();
+    // No em-dashes anywhere on the row — proves the return-scenario cell rendered
+    // a real value and not a dash.
+    expect(screen.queryAllByText('—')).toHaveLength(0);
   });
 
   it('shows an em-dash when returnScenarioNetProfit is null', () => {
