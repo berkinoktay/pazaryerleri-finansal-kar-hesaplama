@@ -10,6 +10,7 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { ImageCell } from '@/components/patterns/image-cell';
 import { Button } from '@/components/ui/button';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 import type { MarginScale } from '@/lib/margin-coloring';
@@ -18,7 +19,6 @@ import { useCurrentScope } from '@/providers/current-scope';
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
 import { canWriteMarketplacePrice } from '../lib/can-write-price';
 import type { ProductPricingSort } from '../query-keys';
-import { formatPercentDisplay } from '../lib/format-percent';
 
 import { LabeledIdentifier } from './labeled-identifier';
 import { PricingCalculator } from './pricing-calculator';

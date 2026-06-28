@@ -5,6 +5,7 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { StatCard } from '@/components/patterns/stat-card';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { cn } from '@/lib/utils';
 
 import { type OrderDetail } from '../api/get-order.api';
@@ -72,7 +73,7 @@ export function OrderKpiGrid({ order, dense = false }: OrderKpiGridProps): React
       />
       <StatCard
         label={t('margin.label')}
-        value={marginPct === null ? '—' : `${marginPct}%`}
+        value={formatPercentDisplay(marginPct)}
         context={
           marginPct === null
             ? t('common.notAvailable')

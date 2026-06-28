@@ -1,0 +1,85 @@
+'use client';
+
+import type Decimal from 'decimal.js';
+import { InformationCircleIcon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
+import * as React from 'react';
+
+import { Currency } from '@/components/patterns/currency';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { marginBadgeStyle } from '@/lib/margin-color-style';
+import { type MarginScale } from '@/lib/margin-coloring';
+import { cn } from '@/lib/utils';
+
+const EMPTY_VALUE = '—';
+
+export interface ProfitBadgeProps {
+  /** Estimated profit amount. `null` renders a neutral — but still clickable — em-dash badge. */
+  value: Decimal | string | number | null;
+  /** Row margin % (percent units, e.g. `'19.35'`) that drives the red→green fill. `null` → neutral. */
+  marginPct: string | null;
+  /** Active margin scale; `null`/disabled falls back to the built-in default ramp. */
+  scale: MarginScale | null;
+  /** Opens the profit detail surface (the orders modal / live sheet). */
+  onOpen: () => void;
+  className?: string;
+}
+
+/**
+ * Clickable, color-filled estimated-profit chip for table cells. The fill hue
+ * tracks the row's margin on a red→green scale (the user's scale, else the
+ * default ramp), so profitability reads at a glance; clicking opens the row's
+ * profit detail. It is a real `<button>` (keyboard-accessible) carrying the
+ * Badge visual; the info icon, hover/focus affordances, and an on-hover tooltip
+ * (which spells out what the click does) signal it opens a detail view. A `null`
+ * amount still renders a neutral, clickable badge so no row is left without a
+ * way to open its detail.
+ *
+ * @useWhen showing an estimated-profit amount in a table cell that should open the order's profit detail
+ */
+export function ProfitBadge({
+  value,
+  marginPct,
+  scale,
+  onOpen,
+  className,
+}: ProfitBadgeProps): React.ReactElement {
+  const t = useTranslations('profitBadge');
+  // runtime-dynamic: margin-driven tinted fill/text/border (or undefined → neutral chip)
+  const style = value === null ? undefined : marginBadgeStyle(marginPct, scale);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={t('open')}
+          className={cn(
+            'group focus-visible:shadow-focus rounded-md focus-visible:outline-none',
+            // Dokunmatikte tıklama alanını büyüt — negatif marj layout'u kaydırmaz.
+            'pointer-coarse:-m-2xs pointer-coarse:p-2xs',
+            className,
+          )}
+        >
+          <Badge
+            tone="neutral"
+            variant="surface"
+            style={style}
+            trailingIcon={
+              <InformationCircleIcon
+                aria-hidden
+                className="duration-fast ease-out-quart opacity-60 transition-opacity group-hover:opacity-100"
+              />
+            }
+            className="duration-fast ease-out-quart cursor-pointer tabular-nums transition-shadow group-hover:shadow-xs"
+          >
+            {value === null ? EMPTY_VALUE : <Currency value={value} />}
+          </Badge>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{t('tooltip')}</TooltipContent>
+    </Tooltip>
+  );
+}

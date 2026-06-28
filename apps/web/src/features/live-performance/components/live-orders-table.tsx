@@ -8,8 +8,11 @@ import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
+import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 import { Badge } from '@/components/ui/badge';
+import { formatPercentDisplay } from '@/lib/format-percent';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import type { LiveOrderRow } from '../api/get-live-orders.api';
 import { useLiveOrders } from '../hooks/use-live-orders';
@@ -37,6 +40,8 @@ export function LiveOrdersTable({
 }: LiveOrdersTableProps): React.ReactElement {
   const t = useTranslations('livePerformance.orders');
   const formatter = useFormatter();
+  // Read once at the component level — never inside cell render functions.
+  const scale = useMarginColoring();
   const [filter, setFilter] = React.useState<LiveOrdersFilter>('all');
   const query = useLiveOrders(orgId, storeId, filter);
 
@@ -73,27 +78,34 @@ export function LiveOrdersTable({
         cell: ({ row }) => <Currency value={row.original.revenue} />,
       },
       {
+        // Tahmini kâr — tıklanabilir, marj-renkli rozet (siparişler tablosuyla aynı
+        // bileşen). Arka plan rengi satırın marj'ından beslenir; rozete tıklamak
+        // satır detayını (yan panel) açar. Buffer satırlarında profit/margin null →
+        // nötr ama yine tıklanabilir "—" rozet. Satır-tıklaması da korunur (DataTable
+        // onRowClick), böylece buffer akışı ve köklü davranış bozulmaz.
         accessorKey: 'profit',
         header: () => t('columns.profit'),
         meta: { numeric: true },
-        cell: ({ row }) =>
-          row.original.profit !== null ? (
-            <Currency value={row.original.profit} />
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          ),
+        cell: ({ row }) => (
+          <ProfitBadge
+            value={row.original.profit}
+            marginPct={row.original.margin}
+            scale={scale}
+            onOpen={() => onRowClick?.(row.original)}
+          />
+        ),
       },
       {
+        // Marj % — backend yüzde-birimi string'ini (örn. "26.67") tr-TR yüzde
+        // biçimine çevirir (%26,67); siparişler tablosuyla aynı yardımcı.
         accessorKey: 'margin',
         header: () => t('columns.margin'),
         meta: { numeric: true },
         cell: ({ row }) =>
-          row.original.margin !== null ? (
-            <span className="tabular-nums">
-              {formatter.number(Number(row.original.margin) / 100, 'percent')}
-            </span>
-          ) : (
+          row.original.margin === null ? (
             <span className="text-muted-foreground">—</span>
+          ) : (
+            <span className="tabular-nums">{formatPercentDisplay(row.original.margin)}</span>
           ),
       },
       {
@@ -109,7 +121,7 @@ export function LiveOrdersTable({
         },
       },
     ],
-    [t, formatter],
+    [t, formatter, scale, onRowClick],
   );
 
   const tabs = (

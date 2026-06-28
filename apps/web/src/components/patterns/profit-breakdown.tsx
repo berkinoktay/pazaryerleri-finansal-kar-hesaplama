@@ -10,6 +10,7 @@ import { Currency } from '@/components/patterns/currency';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 import { cn } from '@/lib/utils';
@@ -318,7 +319,8 @@ export function ProfitBreakdownCard({
                 />
               </BreakdownRow>
               {/* Marj backend-hesaplı (saleMarginPct); '—' payda 0 (satış brüt 0).
-                  String'i biz formatlamıyoruz — yüzde glyph'i salt gösterim. */}
+                  formatPercentDisplay yalnız tr-TR yüzde biçimi uygular (%19,35) —
+                  değer backend'den, frontend hiçbir finansal türetme yapmaz. */}
               <BreakdownRow label={t('margin')} muted>
                 {breakdown.saleMarginPct === null ? (
                   <span className="tabular-nums">—</span>
@@ -329,7 +331,7 @@ export function ProfitBreakdownCard({
                     className="tabular-nums"
                     style={marginColorStyle(breakdown.saleMarginPct, scale)}
                   >
-                    {breakdown.saleMarginPct}%
+                    {formatPercentDisplay(breakdown.saleMarginPct)}
                   </span>
                 )}
               </BreakdownRow>
