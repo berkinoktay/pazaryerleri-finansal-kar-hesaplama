@@ -927,13 +927,6 @@
             "description": "Number of OrderItems on this order.",
             "example": 2
           },
-          "returnScenarioNetProfit": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Full-return scenario net profit (TRY, 2-decimal string). null when no scenario is available."
-          },
           "profitExcludedAt": {
             "type": [
               "string",
@@ -976,7 +969,6 @@
           "fastDelivery",
           "micro",
           "itemCount",
-          "returnScenarioNetProfit",
           "profitExcludedAt",
           "profitExclusionReason"
         ]
@@ -1419,20 +1411,6 @@
               "null"
             ],
             "description": "Kâr / Σ maliyet brüt × 100. null: maliyet brüt 0."
-          },
-          "returnScenarioNetProfit": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Full-return scenario net profit (TRY, 2-decimal string). Deterministic \"what if fully returned\" downside. null when no scenario is available (profit-excluded, already-returned, or missing cost)."
-          },
-          "returnScenarioMarginPct": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Full-return scenario sale margin % (2-decimal string). null when sale gross is zero or no scenario."
           }
         },
         "required": [
@@ -1460,9 +1438,7 @@
           "netVat",
           "netProfit",
           "saleMarginPct",
-          "costMarkupPct",
-          "returnScenarioNetProfit",
-          "returnScenarioMarginPct"
+          "costMarkupPct"
         ]
       },
       "OrderItemDetail": {

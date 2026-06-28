@@ -621,14 +621,6 @@ model Order {
   estimatedNetVat      Decimal?             @map("estimated_net_vat") @db.Decimal(12, 2)
   settledNetVat        Decimal?             @map("settled_net_vat") @db.Decimal(12, 2)
 
-  // ─── İade senaryosu (deterministik "tam iade gelirse kâr") ──────────────
-  // applyEstimateOnOrderCreate, estimatedNetProfit ile AYNI yaşam döngüsünde yazar
-  // (kargo rafinesinde güncellenir; kâr-dışı/eksik-maliyet/zaten-iadeli → null).
-  // computeReturnScenario: tam iade sentetik bacaklarıyla foldReturnLegs+computeProfit.
-  // Frontend yalnız render (feedback_no_frontend_financial_calculation).
-  estimatedReturnScenarioNetProfit  Decimal? @map("estimated_return_scenario_net_profit") @db.Decimal(12, 2)
-  estimatedReturnScenarioMarginPct  Decimal? @map("estimated_return_scenario_margin_pct") @db.Decimal(8, 4)
-
   // ─── Kâr formülü ayar snapshot'ı (snapshot-at-create, forward-only) ──────
   // applyEstimateOnOrderCreate sipariş İLK hesaplanırken mağazanın o anki
   // Store.profitSettings'ini çözüp buraya YAZAR (write-once). Sonraki TÜM hesaplar

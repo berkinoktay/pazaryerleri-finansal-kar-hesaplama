@@ -48,13 +48,6 @@ export {
 export { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
 export { grossToVat } from './money';
 export {
-  computeReturnScenario,
-  foldFullReturnDomestic,
-  computeMicroReturnScenario,
-  type ReturnScenarioResult,
-  type OrderForReturnScenario,
-} from './compute-return-scenario';
-export {
   buildUnitProfitInput,
   computeUnitProfit,
   solvePriceForTarget,

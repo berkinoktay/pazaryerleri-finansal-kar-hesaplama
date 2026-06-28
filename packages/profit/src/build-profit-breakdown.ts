@@ -53,8 +53,6 @@ export interface BuildProfitBreakdownInput {
   netVat: Decimal;
   saleMarginPct: Decimal | null;
   costMarkupPct: Decimal | null;
-  returnScenarioNetProfit: Decimal | null;
-  returnScenarioMarginPct: Decimal | null;
 }
 
 /** Brut (KDV-dahil) terimler + Net KDV kirilimi — hepsi 2-ondalik string. */
@@ -94,9 +92,6 @@ export interface ProfitBreakdownView {
   netProfit: string;
   saleMarginPct: string;
   costMarkupPct: string;
-  /** "İade gelirse kâr" senaryosu (tam iade). null → senaryo yok (kâr-dışı/zaten-iadeli). */
-  returnScenarioNetProfit: string | null;
-  returnScenarioMarginPct: string | null;
 }
 
 export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBreakdownView {
@@ -212,9 +207,5 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     netProfit: input.netProfit.toFixed(2),
     saleMarginPct: input.saleMarginPct === null ? '—' : input.saleMarginPct.toFixed(2),
     costMarkupPct: input.costMarkupPct === null ? '—' : input.costMarkupPct.toFixed(2),
-    returnScenarioNetProfit:
-      input.returnScenarioNetProfit === null ? null : input.returnScenarioNetProfit.toFixed(2),
-    returnScenarioMarginPct:
-      input.returnScenarioMarginPct === null ? null : input.returnScenarioMarginPct.toFixed(2),
   };
 }

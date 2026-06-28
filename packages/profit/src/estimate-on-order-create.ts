@@ -33,7 +33,6 @@ import {
 } from '@pazarsync/utils';
 
 import { inferShippedSameDay } from './infer-shipped-same-day';
-import { computeReturnScenario } from './compute-return-scenario';
 import { foldReturnLegs, resolveReturnLegs, type ReturnFeeRow } from './fold-return-legs';
 import { grossToVat } from './money';
 import { computeProfit, type ProfitInputFee } from './profit-formula';
@@ -457,17 +456,6 @@ export async function applyEstimateOnOrderCreate(
 
   const profit = computeProfit(foldReturnLegs(baseProfitInput, returnLegs));
 
-  // İade senaryosu: zaten gerçek iade bacağı varsa senaryo anlamsız → null
-  // (gerçek iade kâr dökümünde zaten gösteriliyor). Aksi halde tam-iade
-  // senaryosunu base input'tan (iade-öncesi) hesapla.
-  // Domestik iadelerde returnFeeRows dolu; mikro iadelerde bunlar YOK, bunun
-  // yerine OVERSEAS_RETURN_OPERATION estimate yazılır → her iki durumu da kontrol et.
-  const hasReturnFees =
-    returnFeeRows.length > 0 || existingEstimateFeeTypes.has('OVERSEAS_RETURN_OPERATION');
-  const returnScenario = hasReturnFees
-    ? null
-    : await computeReturnScenario(baseProfitInput, order, tx);
-
   await tx.order.update({
     where: { id: orderId },
     data: {
@@ -475,8 +463,6 @@ export async function applyEstimateOnOrderCreate(
       estimatedNetVat: profit.netVat.toDecimalPlaces(2),
       estimatedSaleMarginPct: profit.saleMarginPct?.toDecimalPlaces(4) ?? null,
       estimatedCostMarkupPct: profit.costMarkupPct?.toDecimalPlaces(4) ?? null,
-      estimatedReturnScenarioNetProfit: returnScenario?.netProfit.toDecimalPlaces(2) ?? null,
-      estimatedReturnScenarioMarginPct: returnScenario?.saleMarginPct?.toDecimalPlaces(4) ?? null,
     },
   });
 }

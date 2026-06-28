@@ -32,7 +32,6 @@ const baseRow = {
   itemCount: 2,
   profitExcludedAt: null,
   profitExclusionReason: null,
-  returnScenarioNetProfit: null,
 };
 
 function renderTable(

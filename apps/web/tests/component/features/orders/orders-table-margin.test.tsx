@@ -34,7 +34,6 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     itemCount: 2,
     profitExcludedAt: null,
     profitExclusionReason: null,
-    returnScenarioNetProfit: null,
     ...overrides,
   };
 }
@@ -90,7 +89,6 @@ describe('OrdersTable — Marj % column', () => {
             saleMarginPct: null,
             estimatedNetProfit: '60.00',
             settledNetProfit: '58.00',
-            returnScenarioNetProfit: '-160.19',
           }),
         ]}
         pagination={{ page: 1, perPage: 25, total: 1, totalPages: 1 }}

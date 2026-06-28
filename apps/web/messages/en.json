@@ -845,7 +845,6 @@
         "saleGross": "Sale (incl. VAT)",
         "estimatedNetProfit": "Estimated profit",
         "settledNetProfit": "Settled profit",
-        "returnScenarioProfit": "Return scenario profit",
         "saleMarginPct": "Margin %",
         "itemCount": "Items",
         "revenue": "Revenue",
@@ -2138,8 +2137,7 @@
     "estimatedProfit": "Estimated profit",
     "settledProfit": "Actual profit",
     "microExport": "Micro export",
-    "exportVatExemption": "VAT %0 — export exemption",
-    "returnScenario": "If returned"
+    "exportVatExemption": "VAT %0 — export exemption"
   },
   "profitBadge": {
     "open": "View profit detail",
