@@ -300,5 +300,10 @@ describe('applyEstimateOnOrderCreate — return legs (estimate path)', () => {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.estimatedNetProfit).not.toBeNull();
     expect(order.estimatedNetProfit!.toNumber()).toBeGreaterThan(0);
+
+    // İade senaryosu: forward kâr pozitif olsa da tam iade gelirse kâr NEGATIF olmalı
+    // (iade kargosu + forward fee'ler kalır, satış sıfırlanır).
+    expect(order.estimatedReturnScenarioNetProfit).not.toBeNull();
+    expect(order.estimatedReturnScenarioNetProfit!.toNumber()).toBeLessThan(0);
   });
 });
