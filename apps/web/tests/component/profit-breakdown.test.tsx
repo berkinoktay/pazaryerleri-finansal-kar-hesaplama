@@ -78,6 +78,8 @@ const BREAKDOWN = {
   netProfit: '848.74',
   saleMarginPct: '25.7',
   costMarkupPct: '58.9',
+  returnScenarioNetProfit: null,
+  returnScenarioMarginPct: null,
 };
 
 // Mikro ihracat: satış KDV %0 + Uluslararası Hizmet Bedeli (KDV'li) + Yurt Dışı İade

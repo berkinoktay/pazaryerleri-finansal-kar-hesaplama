@@ -34,6 +34,7 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     itemCount: 2,
     profitExcludedAt: null,
     profitExclusionReason: null,
+    returnScenarioNetProfit: null,
     ...overrides,
   };
 }
