@@ -53,14 +53,7 @@ export function LiveOrdersTable({
       {
         accessorKey: 'platformOrderNumber',
         header: () => t('columns.orderNumber'),
-        cell: ({ row }) => (
-          <span className="gap-xs flex items-center">
-            <span>{row.original.platformOrderNumber ?? '—'}</span>
-            {/* İndirimli siparişte promosyon adlarını gösteren gürültüsüz rozet
-                (spec ekleme #3). Buffer satırlarında promosyon yok → çizilmez. */}
-            <PromotionIndicator promotions={row.original.promotionDisplays} />
-          </span>
-        ),
+        cell: ({ row }) => <span>{row.original.platformOrderNumber ?? '—'}</span>,
       },
       {
         accessorKey: 'orderDate',
@@ -75,7 +68,14 @@ export function LiveOrdersTable({
         accessorKey: 'revenue',
         header: () => t('columns.revenue'),
         meta: { numeric: true },
-        cell: ({ row }) => <Currency value={row.original.revenue} />,
+        cell: ({ row }) => (
+          <span className="gap-xs inline-flex items-center">
+            {/* İndirim adlarını gösteren gürültüsüz rozet — her zaman satış/ciro
+                tutarının yanında. Buffer satırlarında indirim yok → çizilmez. */}
+            <PromotionIndicator promotions={row.original.promotionDisplays} />
+            <Currency value={row.original.revenue} />
+          </span>
+        ),
       },
       {
         // Tahmini kâr — tıklanabilir, marj-renkli rozet (siparişler tablosuyla aynı

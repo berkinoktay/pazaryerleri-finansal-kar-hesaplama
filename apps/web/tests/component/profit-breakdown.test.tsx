@@ -30,7 +30,7 @@ const messages = {
     returnShipping: 'İade kargosu',
     platformService: 'Platform hizmet bedeli',
     stoppage: 'Stopaj',
-    promotions: 'Promosyonlar',
+    promotions: 'İndirimler',
     netVat: 'Net KDV',
     netVatResult: 'Net KDV',
     saleVat: 'Satış KDV',
@@ -194,13 +194,13 @@ describe('ProfitBreakdownCard', () => {
       </NextIntlClientProvider>,
     );
     // Promosyon grup etiketi + promosyon adı (backend yakaladı, frontend render eder).
-    expect(screen.getByText('Promosyonlar')).toBeInTheDocument();
+    expect(screen.getByText('İndirimler')).toBeInTheDocument();
     expect(screen.getByText('Sepette %10 İndirim')).toBeInTheDocument();
   });
 
   it('does not render the promotion section when promotionDisplays is absent', () => {
     renderCard({ ...BREAKDOWN, listGross: '3500.00', sellerDiscountGross: '200.00' });
-    expect(screen.queryByText('Promosyonlar')).not.toBeInTheDocument();
+    expect(screen.queryByText('İndirimler')).not.toBeInTheDocument();
   });
 
   it('shows the unavailable message when there is no breakdown', () => {
