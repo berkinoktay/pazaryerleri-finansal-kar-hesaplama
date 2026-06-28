@@ -16,4 +16,10 @@ describe('sanitizeCellText', () => {
     expect(sanitizeCellText('')).toBe('');
     expect(sanitizeCellText('   ')).toBe('   ');
   });
+  it('escapes a danger char hidden behind a non-breaking space (NBSP)', () => {
+    expect(sanitizeCellText(' =HYPERLINK("x")')).toBe(`' =HYPERLINK("x")`);
+  });
+  it('leaves NBSP-prefixed safe text untouched', () => {
+    expect(sanitizeCellText(' Barkod')).toBe(' Barkod');
+  });
 });
