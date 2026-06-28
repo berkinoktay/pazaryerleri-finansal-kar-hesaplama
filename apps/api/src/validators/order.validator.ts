@@ -219,6 +219,12 @@ export const OrderListItemSchema = z
       description: 'Number of OrderItems on this order.',
       example: 2,
     }),
+    // İade senaryosu kârı: "İade gelirse kâr" kolon değeri (backend-hesaplı, kayıtlı).
+    // null: senaryo yok (kâr-dışı / zaten gerçek iadeli / maliyet eksik).
+    returnScenarioNetProfit: z.string().nullable().openapi({
+      description:
+        'Full-return scenario net profit (TRY, 2-decimal string). null when no scenario is available.',
+    }),
     // Kâr-dışı bilgisi liste satırında da gerekiyor: "Kâr Hesabı Dışı" sekmesinde
     // her satır kendi dışlanma sebebini + tarihini gösterir (CHECK: ikisi birlikte
     // null ya da birlikte dolu). Hesaplanan siparişlerde her ikisi de null.
@@ -487,6 +493,16 @@ const ProfitBreakdownSchema = z
       .string()
       .nullable()
       .openapi({ description: 'Kâr / Σ maliyet brüt × 100. null: maliyet brüt 0.' }),
+    // İade senaryosu: deterministik "tam iade gelirse kâr" (backend-hesaplı, kayıtlı).
+    // null: senaryo yok (kâr-dışı sipariş / zaten gerçek iadeli / maliyet eksik).
+    returnScenarioNetProfit: z.string().nullable().openapi({
+      description:
+        'Full-return scenario net profit (TRY, 2-decimal string). Deterministic "what if fully returned" downside. null when no scenario is available (profit-excluded, already-returned, or missing cost).',
+    }),
+    returnScenarioMarginPct: z.string().nullable().openapi({
+      description:
+        'Full-return scenario sale margin % (2-decimal string). null when sale gross is zero or no scenario.',
+    }),
   })
   .openapi('ProfitBreakdown');
 

@@ -747,6 +747,8 @@ describe('applyEstimateOnOrderCreate (PR-6)', () => {
         netVat: new Decimal(updated.estimatedNetVat!),
         saleMarginPct: null,
         costMarkupPct: null,
+        returnScenarioNetProfit: null,
+        returnScenarioMarginPct: null,
       });
 
       // RAW-aggregate Net KDV'yi kalıcı gross girdilerden bağımsızca yeniden kur —
