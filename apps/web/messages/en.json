@@ -2139,8 +2139,7 @@
     "settledProfit": "Actual profit",
     "microExport": "Micro export",
     "exportVatExemption": "VAT %0 — export exemption",
-    "returnScenario": "If returned",
-    "returnScenarioHint": "Estimated profit if fully returned (incl. return shipping)"
+    "returnScenario": "If returned"
   },
   "promotionIndicator": {
     "label": "Promotion",

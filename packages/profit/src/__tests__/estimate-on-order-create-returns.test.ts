@@ -306,4 +306,89 @@ describe('applyEstimateOnOrderCreate — return legs (estimate path)', () => {
     expect(order.estimatedReturnScenarioNetProfit).not.toBeNull();
     expect(order.estimatedReturnScenarioNetProfit!.toNumber()).toBeLessThan(0);
   });
+
+  /**
+   * I1 — Mikro ihracat siparişi için iade senaryosu hesaplanır (C1 regresyon testi).
+   *
+   * C1'de saptanan hata: computeReturnScenario mikro dalında resolveFeeDefinition
+   * ('OVERSEAS_RETURN_OPERATION') çağrıyordu; bu feeType için DB'de FeeDefinition satırı
+   * yok → throw → her mikro ihracat siparişinde applyEstimateOnOrderCreate çöküyordu.
+   *
+   * Bu test o yolu doğrudan çalıştırır: mikro=true sipariş + maliyet snapshot + iade
+   * senaryosu. Hata düzeltildikten sonra throw ATILMAMALI ve
+   * estimatedReturnScenarioNetProfit null olmamalıdır.
+   *
+   * Beklenen senaryo: satış 1000 (KDV %0), komisyon 100 (oranı %10), maliyet 500 (KDV %10).
+   * Uluslararası Hizmet Bedeli: (listGross 1000 − 0) × 0.06 = 60 (KDV dahil).
+   * Iade senaryosu: satış reverse YOK; sadece OVERSEAS_RETURN_OPERATION eklenir.
+   * Birim satış 1000 ≤ 2000₺ → kademe %35; bedel = (1000 − 100) × 0.35 = 315.
+   * estimatedReturnScenarioNetProfit < estimatedNetProfit (iade bedeli ek maliyet).
+   */
+  it('mikro ihracat: computeReturnScenario iade senaryosu hesaplar — throw atmaz (I1 / C1 regresyon)', async () => {
+    const { orgId, storeId } = await createSeedContext();
+    // Mikro yol INTERNATIONAL_SERVICE tanımı gerektirir (estimateOnOrderCreate mikro dalı).
+    await seedFeeDefinitions();
+    await prisma.feeDefinition.create({
+      data: {
+        platform: 'TRENDYOL',
+        feeType: 'INTERNATIONAL_SERVICE',
+        displayName: 'Uluslararası Hizmet Bedeli',
+        calculationKind: 'RATE_OF_SALE',
+        rateOfSale: new Decimal('0.0600'),
+        defaultVatRate: new Decimal('20.00'),
+        effectiveFrom: new Date('2024-01-01'),
+      },
+    });
+
+    // Mikro ihracat siparişi: satış KDV %0 (ihracat istisnası).
+    const order = await prisma.order.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        platformOrderId: `test-micro-rtn-${randomUUID().slice(0, 8)}`,
+        orderDate: new Date(),
+        status: 'DELIVERED',
+        micro: true,
+        saleGross: new Decimal('1000.00'),
+        saleVat: new Decimal('0.00'), // ihracat istisnası
+        listGross: new Decimal('1000.00'),
+        sellerDiscountGross: new Decimal('0.00'),
+      },
+    });
+
+    await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: orgId,
+        quantity: 1,
+        lineListGross: new Decimal('1000.00'),
+        lineSaleGross: new Decimal('1000.00'),
+        saleVatRate: new Decimal('0.00'),
+        commissionRate: new Decimal('10.00'),
+        commissionGross: new Decimal('100.00'),
+        commissionVatRate: new Decimal('20.00'),
+        refundedCommissionGross: new Decimal('0.00'),
+        unitCostSnapshotGross: new Decimal('500.00'),
+        unitCostSnapshotVatRate: new Decimal('10.00'),
+      },
+    });
+
+    // C1 öncesinde bu işlem throw atıyordu (OVERSEAS_RETURN_OPERATION FeeDefinition yok).
+    await prisma.$transaction(async (tx) => {
+      await applyEstimateOnOrderCreate(order.id, tx);
+    });
+
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+
+    // Forward kâr hesaplandı.
+    expect(updated.estimatedNetProfit).not.toBeNull();
+
+    // İade senaryosu hesaplandı (non-null); throw atılmadı.
+    expect(updated.estimatedReturnScenarioNetProfit).not.toBeNull();
+
+    // İade senaryosu forward kârdan daha kötü: ek Yurt Dışı İade Operasyon Bedeli var.
+    expect(updated.estimatedReturnScenarioNetProfit!.toNumber()).toBeLessThan(
+      updated.estimatedNetProfit!.toNumber(),
+    );
+  });
 });

@@ -77,12 +77,11 @@ export async function computeReturnScenario(
   tx: Prisma.TransactionClient,
 ): Promise<ReturnScenarioResult | null> {
   if (isMicroExport(order)) {
-    const opDef = await resolveFeeDefinition(tx, {
-      platform: order.store.platform,
-      feeType: 'OVERSEAS_RETURN_OPERATION',
-      at: order.orderDate,
-    });
-    const vatRate = new Decimal(opDef.defaultVatRate);
+    // Mikro ihracat iade senaryosu: OVERSEAS_RETURN_OPERATION feeDefinitionId YOK ve
+    // vat=0 — gerçek claim yolu (estimate-return-on-claim.ts) aynı şekilde sıfır VAT
+    // ile yazar (canlı hakedişten doğrulanacak; data-driven → SQL güncellenir).
+    // resolveFeeDefinition('OVERSEAS_RETURN_OPERATION') ÇAĞIRMA — DB'de FeeDefinition
+    // satırı yok → throw. Gerçek yol vatRate=0 kullandığı için senaryo da aynısını yansıtır.
     let feeGross = new Decimal(0);
     for (const item of order.items) {
       if (item.lineSaleGross === null) continue;
@@ -101,7 +100,7 @@ export async function computeReturnScenario(
     }
     return computeMicroReturnScenario(base, {
       gross: feeGross,
-      vat: grossToVat(feeGross, vatRate),
+      vat: new Decimal(0), // KDV sıfır: gerçek claim yolunu yansıtır (vatRate=0 default)
     });
   }
 

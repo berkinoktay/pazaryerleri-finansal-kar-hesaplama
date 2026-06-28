@@ -50,7 +50,6 @@ const messages = {
     estimatedProfit: 'Tahmini kâr',
     settledProfit: 'Fiili kâr',
     returnScenario: 'İade gelirse kâr',
-    returnScenarioHint: 'Tam iade gelirse (iade kargosu cebinizden) tahmini kâr',
   },
 };
 
