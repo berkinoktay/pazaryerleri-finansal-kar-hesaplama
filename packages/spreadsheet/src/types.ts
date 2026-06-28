@@ -29,9 +29,12 @@ export interface ColumnDef<TRow, K extends keyof TRow & string = keyof TRow & st
   readonly required?: boolean; // "cell must not be empty" (row-level)
   readonly role: ColumnRole;
   readonly parse?: (raw: unknown) => TRow[K];
-  readonly format?: (value: TRow[K]) => string | number | boolean | Date | Decimal | null;
+  // Method shorthand (not arrow-function property) so TypeScript applies bivariant — not strict
+  // contravariant — checking. This allows ColumnDef<TRow, specificK> to be stored in a
+  // ReadonlyArray<ColumnDef<TRow>> (with the default widened K) without variance errors.
+  format?(value: TRow[K]): string | number | boolean | Date | Decimal | null;
+  validate?(value: TRow[K]): CellValidationError | void;
   readonly excelFormat?: string;
-  readonly validate?: (value: TRow[K]) => CellValidationError | void;
   readonly width?: number;
   readonly stringifyLossless?: boolean; // defaults to true for key columns (coerce applies)
 }
