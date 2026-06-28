@@ -49,7 +49,6 @@ const messages = {
     margin: 'Kâr marjı',
     estimatedProfit: 'Tahmini kâr',
     settledProfit: 'Fiili kâr',
-    returnScenario: 'İade gelirse kâr',
   },
 };
 
@@ -83,8 +82,6 @@ const BREAKDOWN: ProfitBreakdownData = {
   netProfit: '848.74',
   saleMarginPct: '25.7',
   costMarkupPct: '58.9',
-  returnScenarioNetProfit: null,
-  returnScenarioMarginPct: null,
 };
 
 // Mikro ihracat: satış KDV %0 + Uluslararası Hizmet Bedeli (KDV'li) + Yurt Dışı İade
@@ -321,18 +318,6 @@ describe('ProfitBreakdownCard', () => {
     // No binary tone classes — scale mode replaces them.
     expect(marginSpan.className).not.toContain('text-success');
     expect(marginSpan.className).not.toContain('text-destructive');
-  });
-
-  it('shows the return-scenario profit row when returnScenarioNetProfit is present', () => {
-    renderCard({ ...BREAKDOWN, returnScenarioNetProfit: '-160.19', returnScenarioMarginPct: null });
-    expect(screen.getByText('İade gelirse kâr')).toBeInTheDocument();
-    // Currency renders the value via formatCurrency with the sign intact.
-    expect(screen.getByText(formatCurrency('-160.19'))).toBeInTheDocument();
-  });
-
-  it('hides the return-scenario profit row when returnScenarioNetProfit is null', () => {
-    renderCard(BREAKDOWN); // returnScenarioNetProfit: null
-    expect(screen.queryByText('İade gelirse kâr')).not.toBeInTheDocument();
   });
 
   it('shows the international service VAT row in the Net VAT breakdown; hides the zero-VAT return fee', async () => {

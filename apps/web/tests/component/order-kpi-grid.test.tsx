@@ -36,8 +36,6 @@ function makeBreakdown(saleMarginPct: string | null): OrderDetail['profitBreakdo
     netProfit: '31.00',
     saleMarginPct,
     costMarkupPct: null,
-    returnScenarioNetProfit: null,
-    returnScenarioMarginPct: null,
   };
 }
 

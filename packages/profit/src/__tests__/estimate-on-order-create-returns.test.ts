@@ -300,31 +300,17 @@ describe('applyEstimateOnOrderCreate — return legs (estimate path)', () => {
     const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(order.estimatedNetProfit).not.toBeNull();
     expect(order.estimatedNetProfit!.toNumber()).toBeGreaterThan(0);
-
-    // İade senaryosu: forward kâr pozitif olsa da tam iade gelirse kâr NEGATIF olmalı
-    // (iade kargosu + forward fee'ler kalır, satış sıfırlanır).
-    expect(order.estimatedReturnScenarioNetProfit).not.toBeNull();
-    expect(order.estimatedReturnScenarioNetProfit!.toNumber()).toBeLessThan(0);
   });
 
   /**
-   * I1 — Mikro ihracat siparişi için iade senaryosu hesaplanır (C1 regresyon testi).
+   * Mikro ihracat siparişi forward kâr tahminini throw atmadan hesaplar.
    *
-   * C1'de saptanan hata: computeReturnScenario mikro dalında resolveFeeDefinition
-   * ('OVERSEAS_RETURN_OPERATION') çağrıyordu; bu feeType için DB'de FeeDefinition satırı
-   * yok → throw → her mikro ihracat siparişinde applyEstimateOnOrderCreate çöküyordu.
-   *
-   * Bu test o yolu doğrudan çalıştırır: mikro=true sipariş + maliyet snapshot + iade
-   * senaryosu. Hata düzeltildikten sonra throw ATILMAMALI ve
-   * estimatedReturnScenarioNetProfit null olmamalıdır.
-   *
-   * Beklenen senaryo: satış 1000 (KDV %0), komisyon 100 (oranı %10), maliyet 500 (KDV %10).
-   * Uluslararası Hizmet Bedeli: (listGross 1000 − 0) × 0.06 = 60 (KDV dahil).
-   * Iade senaryosu: satış reverse YOK; sadece OVERSEAS_RETURN_OPERATION eklenir.
-   * Birim satış 1000 ≤ 2000₺ → kademe %35; bedel = (1000 − 100) × 0.35 = 315.
-   * estimatedReturnScenarioNetProfit < estimatedNetProfit (iade bedeli ek maliyet).
+   * Mikro=true sipariş + maliyet snapshot + Uluslararası Hizmet Bedeli tanımıyla
+   * applyEstimateOnOrderCreate çalışır ve estimatedNetProfit hesaplanır.
+   * Beklenen: satış 1000 (KDV %0), komisyon 100 (oranı %10), maliyet 500 (KDV %10);
+   * Uluslararası Hizmet Bedeli (listGross 1000 − 0) × 0.06 = 60 (KDV dahil).
    */
-  it('mikro ihracat: computeReturnScenario iade senaryosu hesaplar — throw atmaz (I1 / C1 regresyon)', async () => {
+  it('mikro ihracat: applyEstimateOnOrderCreate forward kârı throw atmadan hesaplar', async () => {
     const { orgId, storeId } = await createSeedContext();
     // Mikro yol INTERNATIONAL_SERVICE tanımı gerektirir (estimateOnOrderCreate mikro dalı).
     await seedFeeDefinitions();
@@ -380,15 +366,7 @@ describe('applyEstimateOnOrderCreate — return legs (estimate path)', () => {
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
 
-    // Forward kâr hesaplandı.
+    // Forward kâr hesaplandı (throw atılmadı).
     expect(updated.estimatedNetProfit).not.toBeNull();
-
-    // İade senaryosu hesaplandı (non-null); throw atılmadı.
-    expect(updated.estimatedReturnScenarioNetProfit).not.toBeNull();
-
-    // İade senaryosu forward kârdan daha kötü: ek Yurt Dışı İade Operasyon Bedeli var.
-    expect(updated.estimatedReturnScenarioNetProfit!.toNumber()).toBeLessThan(
-      updated.estimatedNetProfit!.toNumber(),
-    );
   });
 });

@@ -11,6 +11,14 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Removed
+
+- **`returnScenarioNetProfit` (order list + `ProfitBreakdown`) and `returnScenarioMarginPct`
+  (`ProfitBreakdown`)** — The deterministic "if fully returned" profit-scenario fields were
+  removed from the `OrderListItem` and `ProfitBreakdown` schemas (feature dropped). Clients no
+  longer receive these keys. The backing `Order.estimatedReturnScenario*` columns and the
+  profit-engine `computeReturnScenario` were removed as well.
+
 ### Added
 
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/profit-settings`** — Returns the resolved
