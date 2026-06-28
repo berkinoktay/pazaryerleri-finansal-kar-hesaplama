@@ -2202,7 +2202,9 @@
     "estimatedProfit": "Tahmini kâr",
     "settledProfit": "Fiili kâr",
     "microExport": "Mikro İhracat",
-    "exportVatExemption": "KDV %0 — İhracat istisnası"
+    "exportVatExemption": "KDV %0 — İhracat istisnası",
+    "returnScenario": "İade gelirse kâr",
+    "returnScenarioHint": "Tam iade gelirse (iade kargosu cebinizden) tahmini kâr"
   },
   "promotionIndicator": {
     "label": "Promosyon",

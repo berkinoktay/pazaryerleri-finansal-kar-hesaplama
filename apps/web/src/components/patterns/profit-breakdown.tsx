@@ -334,6 +334,23 @@ export function ProfitBreakdownCard({
                 )}
               </BreakdownRow>
             </div>
+
+            {/* İade senaryosu: "tam iade gelirse kâr ne olur" (backend-deterministik).
+                null = senaryo yok (kâr-dışı / zaten-iadeli / maliyet eksik).
+                Ayrı kontrast bölümde — Net Kâr satırından görsel olarak ayrışır.
+                Değer + marj backend'den string; frontend HİÇBİR finansal türetme yapmaz
+                (feedback_no_frontend_financial_calculation). */}
+            {breakdown.returnScenarioNetProfit !== null ? (
+              <div className="pt-xs mt-3xs gap-2xs flex flex-col border-t border-dashed">
+                <BreakdownRow label={t('returnScenario')} emphasis>
+                  <Currency
+                    value={breakdown.returnScenarioNetProfit}
+                    emphasis
+                    style={marginColorStyle(breakdown.returnScenarioMarginPct, scale)}
+                  />
+                </BreakdownRow>
+              </div>
+            ) : null}
           </dl>
         )}
       </CardContent>
