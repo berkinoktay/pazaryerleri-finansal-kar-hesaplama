@@ -2141,6 +2141,10 @@
     "exportVatExemption": "VAT %0 — export exemption",
     "returnScenario": "If returned"
   },
+  "profitBadge": {
+    "open": "View profit detail",
+    "tooltip": "Click to open this order's profit breakdown"
+  },
   "promotionIndicator": {
     "label": "Promotion",
     "title": "Applied promotions"

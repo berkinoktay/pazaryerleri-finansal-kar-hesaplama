@@ -2206,6 +2206,10 @@
     "exportVatExemption": "KDV %0 — İhracat istisnası",
     "returnScenario": "İade gelirse kâr"
   },
+  "profitBadge": {
+    "open": "Kâr detayını gör",
+    "tooltip": "Tıklayınca bu siparişin kâr dökümü açılır"
+  },
   "promotionIndicator": {
     "label": "Promosyon",
     "title": "Uygulanan promosyonlar"

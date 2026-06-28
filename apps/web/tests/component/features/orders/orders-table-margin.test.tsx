@@ -75,8 +75,9 @@ describe('OrdersTable — Marj % column', () => {
   it('renders the served margin as a percentage (no frontend computation)', () => {
     renderTable();
     expect(screen.getByText(MARGIN_HEADER)).toBeInTheDocument();
-    // Served '15.5' → '15.5%' — frontend only appends the glyph, never derives.
-    expect(screen.getByText('15.5%')).toBeInTheDocument();
+    // Served '15.5' → tr-TR '%15,50' via formatPercentDisplay — the backend serves
+    // the magnitude, the frontend only formats (rounds for display), never derives.
+    expect(screen.getByText('%15,50')).toBeInTheDocument();
   });
 
   it('renders an em-dash when the margin is null', () => {
@@ -111,7 +112,7 @@ describe('OrdersTable — Marj % column', () => {
       />,
     );
     expect(screen.getByText(MARGIN_HEADER)).toBeInTheDocument();
-    expect(screen.queryByText('15.5%')).toBeNull();
+    expect(screen.queryByText('%15,50')).toBeNull();
     // Exactly one em-dash on the row — the margin cell.
     expect(screen.getAllByText('—')).toHaveLength(1);
   });
@@ -178,14 +179,14 @@ describe('OrdersTable — marj renklendirme (binary vs scale)', () => {
   it('binary mode (scale null): positive margin cell carries text-success class', () => {
     // Pass null scale -> binary fallback via profitToneClass.
     renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] }, null);
-    const cell = screen.getByText('15.5%');
+    const cell = screen.getByText('%15,50');
     expect(cell.className).toContain('text-success');
     expect(cell).not.toHaveAttribute('style');
   });
 
   it('binary mode (scale null): negative margin cell carries text-destructive class', () => {
     renderTable({ rows: [makeRow({ saleMarginPct: '-5.0' })] }, null);
-    const cell = screen.getByText('-5.0%');
+    const cell = screen.getByText('-%5,00');
     expect(cell.className).toContain('text-destructive');
     expect(cell).not.toHaveAttribute('style');
   });
@@ -202,7 +203,7 @@ describe('OrdersTable — marj renklendirme (binary vs scale)', () => {
     };
     // saleMarginPct '15.5' -> >= 0 but < 20 -> bucket[0] color rgb(200, 50, 50).
     renderTable({ rows: [makeRow({ saleMarginPct: '15.5' })] }, scale);
-    const cell = screen.getByText('15.5%');
+    const cell = screen.getByText('%15,50');
     // The inline style.color is the bucket color (overrides the class color visually).
     expect(cell.style.color).toBe('rgb(200, 50, 50)');
     // The original binary tone class is kept as the OFF-state baseline; the inline

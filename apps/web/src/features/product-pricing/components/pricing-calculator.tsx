@@ -14,13 +14,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { cn } from '@/lib/utils';
 
 import type { ProductPriceQuote, QuoteInput } from '../api/quote-product-pricing.api';
 import type { ProductPricingItem } from '../api/list-product-pricing.api';
 import { useQuoteProductPricing } from '../hooks/use-quote-product-pricing';
 import { useUpdatePrice } from '../hooks/use-update-price';
-import { formatPercentDisplay } from '../lib/format-percent';
 
 import { QuoteBreakdown } from './quote-breakdown';
 

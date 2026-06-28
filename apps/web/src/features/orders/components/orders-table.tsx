@@ -7,12 +7,14 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
+import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 
@@ -228,19 +230,66 @@ export function OrdersTable({
         },
       },
       {
+        // Tahmini kâr — tıklanabilir, marj-renkli rozet. Arka plan rengi satırın
+        // Marj %'sinden (kırmızı→yeşil skala) beslenir; marj renklendirme tercihi
+        // kapalı olsa bile varsayılan skala kullanılır (rozet asla renksiz). Rozet,
+        // satır-tıklaması yerine kâr detay modalını açar → satırdaki diğer
+        // etkileşimler serbest kalır. value null → nötr ama yine tıklanabilir "—"
+        // rozet (hiçbir satır detaysız/sahipsiz kalmaz).
         id: 'estimatedNetProfit',
         header: t('columns.estimatedNetProfit'),
+        cell: ({ row }) => (
+          <ProfitBadge
+            value={row.original.estimatedNetProfit}
+            marginPct={row.original.saleMarginPct}
+            scale={scale}
+            onOpen={() => onRowOpen?.(row.original.id)}
+          />
+        ),
+      },
+      {
+        // Marj % — backend'de hesaplanıp persist edilen değer (settled ?? estimated).
+        // Tahmini kâr rozetinin hemen yanında durur (aynı sinyal), ama AYRI sütun
+        // kalır: sıralanabilirliği korur (accessorFn manualSorting altında
+        // getCanSort()'u açar — değer asla client-side sıralama için OKUNMAZ;
+        // sıralama server-side, header buton olur). Render: null → '—', aksi halde
+        // formatPercentDisplay ile tr-TR yüzde biçimi (%19,35) — backend yüzde-birimi
+        // string'ini yalnız biçimler/yuvarlar, değer türetmez.
+        id: MARGIN_COLUMN_ID,
+        accessorFn: (row) => row.saleMarginPct,
+        header: t('columns.saleMarginPct'),
+        enableSorting: true,
+        meta: { numeric: true, label: t('columns.saleMarginPct') },
         cell: ({ row }) => {
-          const value = row.original.estimatedNetProfit;
+          const value = row.original.saleMarginPct;
           if (value === null) return <span className="text-muted-foreground">—</span>;
-          // OFF: original binary tone class (profitToneClass on the profit value).
-          // ON: inline color from the row's margin % overrides the class (style wins).
+          // OFF: original binary tone class (profitToneClass on the margin value).
+          // ON: inline color from the bucket overrides the class (style wins).
           return (
-            <Currency
-              value={value}
+            <span
               className={cn('tabular-nums', profitToneClass(value))}
-              style={marginColorStyle(row.original.saleMarginPct, scale)}
-            />
+              style={marginColorStyle(value, scale)}
+            >
+              {formatPercentDisplay(value)}
+            </span>
+          );
+        },
+      },
+      {
+        // ROI = kâr / maliyet (Marj %'nin yanında ikinci marj tanımı). Backend
+        // costMarkupPct'i hesaplar; burada yalnız render + işaret-tonu.
+        id: 'costMarkupPct',
+        accessorFn: (row) => row.costMarkupPct,
+        header: t('columns.costMarkupPct'),
+        meta: { numeric: true, label: t('columns.costMarkupPct') },
+        cell: ({ row }) => {
+          const value = row.original.costMarkupPct;
+          return value === null ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <span className={cn('tabular-nums', profitToneClass(value))}>
+              {formatPercentDisplay(value)}
+            </span>
           );
         },
       },
@@ -276,47 +325,6 @@ export function OrdersTable({
         },
       },
       {
-        // Marj % — backend'de hesaplanıp persist edilen değer (settled ?? estimated).
-        // accessorFn manualSorting altında getCanSort()'u açar (değer asla client-side
-        // sıralama için OKUNMAZ — sıralama server-side); header buton olur. Render:
-        // null → '—', aksi halde `${value}%` (% glyph'i salt gösterim, türetme yok).
-        id: MARGIN_COLUMN_ID,
-        accessorFn: (row) => row.saleMarginPct,
-        header: t('columns.saleMarginPct'),
-        enableSorting: true,
-        meta: { numeric: true, label: t('columns.saleMarginPct') },
-        cell: ({ row }) => {
-          const value = row.original.saleMarginPct;
-          if (value === null) return <span className="text-muted-foreground">—</span>;
-          // OFF: original binary tone class (profitToneClass on the margin value).
-          // ON: inline color from the bucket overrides the class (style wins).
-          return (
-            <span
-              className={cn('tabular-nums', profitToneClass(value))}
-              style={marginColorStyle(value, scale)}
-            >
-              {value}%
-            </span>
-          );
-        },
-      },
-      {
-        // ROI = kâr / maliyet (Marj %'nin yanında ikinci marj tanımı). Backend
-        // costMarkupPct'i hesaplar; burada yalnız render + işaret-tonu.
-        id: 'costMarkupPct',
-        accessorFn: (row) => row.costMarkupPct,
-        header: t('columns.costMarkupPct'),
-        meta: { numeric: true, label: t('columns.costMarkupPct') },
-        cell: ({ row }) => {
-          const value = row.original.costMarkupPct;
-          return value === null ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <span className={cn('tabular-nums', profitToneClass(value))}>{value}%</span>
-          );
-        },
-      },
-      {
         id: 'itemCount',
         header: t('columns.itemCount'),
         cell: ({ row }) => (
@@ -326,7 +334,7 @@ export function OrdersTable({
         ),
       },
     ];
-  }, [t, tPage, formatter, costStatus, scale]);
+  }, [t, tPage, formatter, costStatus, scale, onRowOpen]);
 
   // Bridge the page-level (page, perPage) state to TanStack's PaginationState
   // ({ pageIndex, pageSize }). Manual pagination flips on as soon as we pass
@@ -387,7 +395,11 @@ export function OrdersTable({
       columns={columns}
       data={rows}
       loading={loading}
-      onRowClick={(row) => onRowOpen?.(row.id)}
+      // Hesaplanmış sekmede satır-tıklaması modal AÇMAZ — modal yalnız Tahmini
+      // kâr rozetinden açılır (satırdaki diğer etkileşimler serbest). Kâr-dışı
+      // sekmede rozet yok (kâr sütunu yok), bu yüzden orada satır-tıklaması korunur
+      // ki o satırların detayına da ulaşılabilsin.
+      onRowClick={costStatus === 'excluded' ? (row) => onRowOpen?.(row.id) : undefined}
       sorting={sortingState}
       onSortingChange={handleSortingChange}
       paginationState={paginationState}

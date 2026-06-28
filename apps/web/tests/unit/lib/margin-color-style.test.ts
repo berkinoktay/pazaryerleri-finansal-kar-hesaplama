@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_MARGIN_BUCKETS, type MarginScale } from '@/lib/margin-coloring';
-import { marginColorStyle } from '@/lib/margin-color-style';
+import { marginBadgeStyle, marginColorStyle } from '@/lib/margin-color-style';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,5 +102,84 @@ describe('marginColorStyle — enabled scale (threshold color)', () => {
     const result = marginColorStyle('15.0', OPEN_SCALE);
     expect(result).toBeDefined();
     expect(Object.keys(result!)).toEqual(['color']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// marginBadgeStyle — the estimated-profit BADGE fill. Unlike marginColorStyle,
+// it ALWAYS produces a color (a tinted fill + matching text + border) so the
+// badge is never colorless: the user's scale when enabled, otherwise the
+// built-in red→green default ramp. It only bows out when the margin itself is
+// missing (→ neutral badge handled by the caller).
+// ---------------------------------------------------------------------------
+
+const CUSTOM_OPEN_SCALE: MarginScale = {
+  enabled: true,
+  buckets: [
+    { threshold: 0, color: 'rgb(200, 50, 50)' },
+    { threshold: 20, color: 'rgb(50, 180, 50)' },
+  ],
+};
+
+const CUSTOM_CLOSED_SCALE: MarginScale = {
+  enabled: false,
+  buckets: [
+    { threshold: 0, color: 'rgb(1, 2, 3)' },
+    { threshold: 20, color: 'rgb(4, 5, 6)' },
+  ],
+};
+
+describe('marginBadgeStyle — no usable margin (neutral badge)', () => {
+  it('returns undefined for a null margin', () => {
+    expect(marginBadgeStyle(null, null)).toBeUndefined();
+    expect(marginBadgeStyle(null, CUSTOM_OPEN_SCALE)).toBeUndefined();
+  });
+
+  it('returns undefined for an empty string', () => {
+    expect(marginBadgeStyle('', null)).toBeUndefined();
+  });
+
+  it('returns undefined for an unparseable margin', () => {
+    expect(marginBadgeStyle('not-a-number', CUSTOM_OPEN_SCALE)).toBeUndefined();
+  });
+});
+
+describe('marginBadgeStyle — always colors from a red→green scale', () => {
+  it('colors from the DEFAULT ramp when no scale is configured (scale null)', () => {
+    // High margin → last (profit) bucket of the default ramp.
+    expect(marginBadgeStyle('60', null)?.color).toBe(DEFAULT_MARGIN_BUCKETS[4]!.color);
+    // Loss margin → first (loss) bucket of the default ramp.
+    expect(marginBadgeStyle('-20', null)?.color).toBe(DEFAULT_MARGIN_BUCKETS[0]!.color);
+  });
+
+  it('colors from the DEFAULT ramp even when the user scale is DISABLED', () => {
+    // enabled:false → ignore the custom buckets, fall back to the default ramp.
+    const result = marginBadgeStyle('50', CUSTOM_CLOSED_SCALE);
+    expect(result?.color).toBe(DEFAULT_MARGIN_BUCKETS[4]!.color);
+    expect(result?.color).not.toBe('rgb(4, 5, 6)');
+  });
+
+  it("uses the user's custom buckets when the scale is ENABLED", () => {
+    // 15.5% → >= 0 but < 20 → bucket[0] of the custom scale.
+    expect(marginBadgeStyle('15.5', CUSTOM_OPEN_SCALE)?.color).toBe('rgb(200, 50, 50)');
+    // 25% → >= 20 → bucket[1].
+    expect(marginBadgeStyle('25', CUSTOM_OPEN_SCALE)?.color).toBe('rgb(50, 180, 50)');
+  });
+});
+
+describe('marginBadgeStyle — tinted fill derived from the resolved color', () => {
+  it('returns text color + a tinted backgroundColor + a tinted borderColor', () => {
+    const result = marginBadgeStyle('15.5', CUSTOM_OPEN_SCALE);
+    expect(result).toBeDefined();
+    expect(Object.keys(result!).sort()).toEqual(['backgroundColor', 'borderColor', 'color']);
+  });
+
+  it('mixes the resolved color toward transparent for both fill and border', () => {
+    const result = marginBadgeStyle('15.5', CUSTOM_OPEN_SCALE)!;
+    // Both the fill and the border are a translucent tint of the SAME text color.
+    expect(result.backgroundColor).toContain(result.color as string);
+    expect(result.backgroundColor).toMatch(/^color-mix\(in oklab, .+ \d+%, transparent\)$/);
+    expect(result.borderColor).toContain(result.color as string);
+    expect(result.borderColor).toMatch(/^color-mix\(in oklab, .+ \d+%, transparent\)$/);
   });
 });

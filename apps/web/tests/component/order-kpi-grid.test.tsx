@@ -58,8 +58,8 @@ describe('OrderKpiGrid', () => {
     // eşleşmesin diye servis değeri kasten bağımsız tutulur: 99.9% verince
     // frontend'in türetme YAPMADIĞI kanıtlanır (türetme 15.5 üretirdi).
     render(<OrderKpiGrid order={makeOrder({ profitBreakdown: makeBreakdown('99.9') })} />);
-    expect(screen.getByText('99.9%')).toBeInTheDocument();
-    expect(screen.queryByText('15.5%')).not.toBeInTheDocument();
+    expect(screen.getByText('%99,90')).toBeInTheDocument();
+    expect(screen.queryByText('%15,50')).not.toBeInTheDocument();
   });
 
   it('shows an em dash when the served margin is null (sale gross 0)', () => {

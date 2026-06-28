@@ -133,7 +133,7 @@ describe('ProfitBreakdownCard', () => {
     expect(screen.getByText(formatCurrency('27.50'))).toBeInTheDocument();
     // Marj backend-servisli (saleMarginPct) — frontend türetmez, render eder.
     expect(screen.getByText('Kâr marjı')).toBeInTheDocument();
-    expect(screen.getByText('25.7%')).toBeInTheDocument();
+    expect(screen.getByText('%25,70')).toBeInTheDocument();
     // İndirimsiz → tek "Satış" satırı; Liste/İndirim alt-kırılımı YOK.
     expect(screen.queryByText('Liste fiyatı')).not.toBeInTheDocument();
   });
@@ -313,7 +313,7 @@ describe('ProfitBreakdownCard', () => {
     };
     renderCard(BREAKDOWN, scale); // saleMarginPct = '25.7' -> >= 20 -> bucket[1] color
     // Margin % span carries the bucket color as inline style.
-    const marginSpan = screen.getByText('25.7%');
+    const marginSpan = screen.getByText('%25,70');
     expect(marginSpan.style.color).toBe('rgb(50, 180, 50)');
     // netProfit Currency carries the same bucket color (margin drives both).
     const profitSpan = screen.getByText(formatCurrency('848.74'));
