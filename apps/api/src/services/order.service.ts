@@ -197,6 +197,11 @@ export async function listOrders(
     fastDelivery: row.fastDelivery,
     micro: row.micro,
     itemCount: row._count.items,
+    // İade senaryosu kârı (backend-hesaplı, frontend türetmez).
+    returnScenarioNetProfit:
+      row.estimatedReturnScenarioNetProfit === null
+        ? null
+        : row.estimatedReturnScenarioNetProfit.toFixed(2),
     // Kâr-dışı satırında sebep + tarih gösterimi için (liste include'u tüm Order
     // kolonlarını getirir; ekstra sorgu yok). Hesaplanan siparişlerde her ikisi null.
     profitExcludedAt: row.profitExcludedAt?.toISOString() ?? null,
@@ -421,6 +426,14 @@ export async function getOrderById(
             row.estimatedCostMarkupPct === null
               ? null
               : new Decimal(row.estimatedCostMarkupPct.toString()),
+          returnScenarioNetProfit:
+            row.estimatedReturnScenarioNetProfit === null
+              ? null
+              : new Decimal(row.estimatedReturnScenarioNetProfit.toString()),
+          returnScenarioMarginPct:
+            row.estimatedReturnScenarioMarginPct === null
+              ? null
+              : new Decimal(row.estimatedReturnScenarioMarginPct.toString()),
         })
       : null;
 

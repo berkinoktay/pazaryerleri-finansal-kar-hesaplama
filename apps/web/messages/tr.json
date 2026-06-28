@@ -845,6 +845,7 @@
         "saleGross": "Satış (KDV dahil)",
         "estimatedNetProfit": "Tahmini kâr",
         "settledNetProfit": "Fiili kâr",
+        "returnScenarioProfit": "İade senaryosu kârı",
         "saleMarginPct": "Marj %",
         "itemCount": "Kalem",
         "revenue": "Ciro",
@@ -2202,7 +2203,8 @@
     "estimatedProfit": "Tahmini kâr",
     "settledProfit": "Fiili kâr",
     "microExport": "Mikro İhracat",
-    "exportVatExemption": "KDV %0 — İhracat istisnası"
+    "exportVatExemption": "KDV %0 — İhracat istisnası",
+    "returnScenario": "İade gelirse kâr"
   },
   "promotionIndicator": {
     "label": "Promosyon",

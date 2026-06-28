@@ -121,6 +121,20 @@ section "Versioning" for details.
   persist edilen `Order.estimatedNetVat`. profit-excluded / maliyet-eksik siparişte `null`.
   **Frontend hiçbir finansal değeri türetmez** — backend hesaplar+kaydeder+servis eder.
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`** — `profitBreakdown`
+  nesnesine iade senaryosu alanları eklendi: `returnScenarioNetProfit` (`string | null`) ve
+  `returnScenarioMarginPct` (`string | null`). "Tam iade gelirse kâr" deterministik senaryosu —
+  `Order.estimatedReturnScenarioNetProfit` / `estimatedReturnScenarioMarginPct` alanlarından
+  servis edilir. Zaten iade olan siparişlerde, kâr-dışı siparişlerde ve hesaplanamaz senaryolarda
+  `null` döner. Backend-hesaplanır ve kaydedilir; frontend yalnızca render eder. Additive,
+  geriye dönük uyumlu.
+
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/orders`** — liste öğelerine (`OrderListItem`)
+  `returnScenarioNetProfit` (`string | null`) alanı eklendi: sipariş listesi tablosundaki yeni
+  "İade senaryosu kârı" sütununu besler. `Order.estimatedReturnScenarioNetProfit` alanından
+  servis edilir; zaten iade olan/kâr-dışı siparişlerde `null`. Backend-hesaplanır ve kaydedilir;
+  frontend yalnızca render eder. Additive, geriye dönük uyumlu.
+
 ### Removed
 
 - **`PATCH /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}/items/{itemId}/cost`** —

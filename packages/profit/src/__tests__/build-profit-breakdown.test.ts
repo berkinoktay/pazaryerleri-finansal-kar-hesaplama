@@ -44,6 +44,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('14'),
       saleMarginPct: D('28'),
       costMarkupPct: D('56'),
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     expect(v.saleGross).toBe('200.00');
     expect(v.costGross).toBe('60.00'); // 30 × 2
@@ -108,6 +110,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('100'),
       saleMarginPct: D('30'),
       costMarkupPct: D('100'),
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     expect(v.stoppage).toBe('30.00');
 
@@ -167,6 +171,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('-150'),
       saleMarginPct: D('20'),
       costMarkupPct: null,
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     expect(v.saleVat).toBe('0.00'); // mikro KDV %0
     expect(v.internationalServiceGross).toBe('60.00');
@@ -200,6 +206,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('0'),
       saleMarginPct: null,
       costMarkupPct: null,
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     expect(v.saleMarginPct).toBe('—');
     expect(v.costMarkupPct).toBe('—');
@@ -230,6 +238,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('0'),
       saleMarginPct: null,
       costMarkupPct: null,
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     // effectiveCommission = 200 - 50 = 150; VAT derived: 150 × 20/120 = 25
     expect(v.commissionGross).toBe('150.00');
@@ -261,6 +271,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('0'),
       saleMarginPct: null,
       costMarkupPct: null,
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     expect(v.costGross).toBe('0.00');
     expect(v.costVat).toBe('0.00');
@@ -293,6 +305,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('0'),
       saleMarginPct: null,
       costMarkupPct: null,
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     // DEBIT 100 - CREDIT 40 = net 60 signed gross
     expect(v.shippingGross).toBe('60.00');
@@ -384,6 +398,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('0'),
       saleMarginPct: null,
       costMarkupPct: null,
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
 
     expect(v.saleGross).toBe('0.00');
@@ -428,6 +444,8 @@ describe('buildProfitBreakdown — GROSS view', () => {
       netVat: D('0'),
       saleMarginPct: null,
       costMarkupPct: null,
+      returnScenarioNetProfit: null,
+      returnScenarioMarginPct: null,
     });
     expect(v.costGross).toBe('60.00');
     expect(v.costVat).toBe('10.00'); // 60 × 20/120 = 10

@@ -263,6 +263,19 @@ export function OrdersTable({
         },
       },
       {
+        // İade senaryosu kârı: "tam iade gelirse tahmini kâr" (backend'de hesaplanır,
+        // frontend yalnız render eder). null → senaryo yok (kâr-dışı/zaten-iadeli).
+        // Renklendirme: forward saleMarginPct DEĞİL — senaryonun kendi işareti kullanılır
+        // (iade senaryosu aşağı-risk değeri; false-green önlemek için işaret-tonu yeterli).
+        id: 'returnScenarioNetProfit',
+        header: t('columns.returnScenarioProfit'),
+        cell: ({ row }) => {
+          const value = row.original.returnScenarioNetProfit;
+          if (value === null) return <span className="text-muted-foreground">—</span>;
+          return <Currency value={value} className={cn('tabular-nums', profitToneClass(value))} />;
+        },
+      },
+      {
         // Marj % — backend'de hesaplanıp persist edilen değer (settled ?? estimated).
         // accessorFn manualSorting altında getCanSort()'u açar (değer asla client-side
         // sıralama için OKUNMAZ — sıralama server-side); header buton olur. Render:
