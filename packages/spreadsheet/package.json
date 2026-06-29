@@ -1,0 +1,31 @@
+{
+  "name": "@pazarsync/spreadsheet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rm -rf .turbo"
+  },
+  "dependencies": {
+    "decimal.js": "catalog:",
+    "fflate": "^0.8.3",
+    "read-excel-file": "9.2.0",
+    "write-excel-file": "4.1.1"
+  },
+  "devDependencies": {
+    "@pazarsync/eslint-config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
