@@ -1,6 +1,13 @@
 import { readSheet, parseSheetData } from 'read-excel-file/node';
 import type { SheetData, ParseSheetDataError as LibError } from 'read-excel-file/node';
-import type { CellError, CellErrorCode, ParsedResult, ParsedRow, SheetSchema } from './types';
+import type {
+  CellError,
+  CellErrorCode,
+  ColumnDef,
+  ParsedResult,
+  ParsedRow,
+  SheetSchema,
+} from './types';
 import { coerceInbound } from './coerce';
 import { resolveHeaders, normalizeHeader } from './header-normalize';
 import { SpreadsheetFileError } from './errors';
@@ -11,6 +18,7 @@ import {
   ABSOLUTE_MAX_COLS,
   DEFAULT_MAX_BYTES,
   ABSOLUTE_MAX_BYTES,
+  MAX_ERROR_VALUE_LENGTH,
 } from './constants';
 import { assertValidUpload } from './guards';
 
@@ -106,18 +114,35 @@ export async function parseXlsx<TRow>(
   const ingestCols = schema.columns.filter(
     (c) => (c.role === 'key' || c.role === 'editable') && presentKeys.has(c.key),
   );
-  // Build as a plain Record; the value shape satisfies SchemaEntryForValue structurally
-  // when passed to parseSheetData (library resolves via structural typing at call site).
-  const libSchema: Record<string, LibSchemaEntry> = {};
-  for (const col of ingestCols) {
-    libSchema[col.key] = {
+
+  // Generic helper to build a LibSchemaEntry per column, preserving K so that
+  // `col.validate(value as TRow[K])` is expressible without widening K to keyof TRow & string.
+  function buildEntry<K extends keyof TRow & string>(col: ColumnDef<TRow, K>): LibSchemaEntry {
+    return {
       column: normalizeHeader(col.header),
       required: col.required ?? false,
       // Empty-cell short-circuit (spike B2): skip coerceInbound for null/undefined/'' cells.
       // The library handles required validation separately — required + empty still errors.
-      type: (raw: unknown): unknown =>
-        raw === null || raw === undefined || raw === '' ? null : coerceInbound(col, raw),
+      type: (raw: unknown): unknown => {
+        if (raw === null || raw === undefined || raw === '') return null;
+        const value = coerceInbound(col, raw);
+        if (col.validate !== undefined && value !== null && value !== undefined) {
+          // Generic-deserialization boundary: coerceInbound has produced the column's
+          // declared TRow[K] runtime type (enforced by defineColumn), but TS sees `unknown`.
+          // Same justified boundary as `obj as Partial<TRow>` elsewhere in this file.
+          const result = col.validate(value as TRow[K]);
+          if (result !== undefined) throw new Error(result.detail);
+        }
+        return value;
+      },
     };
+  }
+
+  // Build as a plain Record; the value shape satisfies SchemaEntryForValue structurally
+  // when passed to parseSheetData (library resolves via structural typing at call site).
+  const libSchema: Record<string, LibSchemaEntry> = {};
+  for (const col of ingestCols) {
+    libSchema[col.key] = buildEntry(col);
   }
 
   // Step 6: Replace the raw header row with canonical names so parseSheetData matches columns.
@@ -167,8 +192,12 @@ export async function parseXlsx<TRow>(
       columnKey: col?.key ?? e.column,
       columnHeader: e.column,
       code: mapErrorCode(e.error, e.reason),
-      // e.value is CellValue | null | undefined across the error union; normalise to undefined
-      value: e.value ?? undefined,
+      // e.value is CellValue | null | undefined across the error union; normalise to undefined.
+      // String values are truncated to MAX_ERROR_VALUE_LENGTH to prevent unbounded error payloads.
+      value:
+        typeof e.value === 'string'
+          ? e.value.slice(0, MAX_ERROR_VALUE_LENGTH)
+          : (e.value ?? undefined),
       rowKeys: rowKeysFor(e.row),
     };
   });

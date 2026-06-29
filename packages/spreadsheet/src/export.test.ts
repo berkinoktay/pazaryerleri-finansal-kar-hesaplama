@@ -3,6 +3,8 @@ import { Decimal } from 'decimal.js';
 import { readSheet } from 'read-excel-file/node';
 import { exportToXlsx } from './export';
 import { miniProductsSchema, type MiniProductsRow } from '../tests/fixtures/mini-schemas';
+import { defineColumn } from './define-column';
+import type { SheetSchema } from './types';
 
 const rows: MiniProductsRow[] = [
   {
@@ -46,5 +48,45 @@ describe('exportToXlsx', () => {
     const buf = await exportToXlsx(miniProductsSchema, evil);
     const grid = await readSheet(buf);
     expect(String(grid.at(1)?.at(2)).startsWith("'=")).toBe(true);
+  });
+
+  it('col.format — serializes a custom domain object to a string (not [object Object])', async () => {
+    interface RangeRow {
+      id: string;
+      range: { start: string; end: string };
+    }
+
+    const schema: SheetSchema<RangeRow> = {
+      options: { sheetName: 'RangeTest', rowCap: 100, colCap: 8 },
+      columns: [
+        defineColumn<RangeRow, 'id', 'string'>({
+          key: 'id',
+          header: 'ID',
+          type: 'string',
+          role: 'key',
+          stringifyLossless: true,
+        }),
+        defineColumn<RangeRow, 'range', 'custom'>({
+          key: 'range',
+          header: 'Range',
+          type: 'custom',
+          role: 'readonly',
+          // format is the export serializer; without it, String({...}) = '[object Object]'
+          format(value) {
+            return `${value.start}|${value.end}`;
+          },
+          parse(_raw: unknown): { start: string; end: string } {
+            return { start: '', end: '' };
+          },
+        }),
+      ],
+    };
+
+    const buf = await exportToXlsx(schema, [
+      { id: 'R1', range: { start: '2024-01-01', end: '2024-12-31' } },
+    ]);
+    const grid = await readSheet(buf);
+    // Without I1, the cell would be '[object Object]'. With I1, it is the formatted string.
+    expect(grid.at(1)?.at(1)).toBe('2024-01-01|2024-12-31');
   });
 });

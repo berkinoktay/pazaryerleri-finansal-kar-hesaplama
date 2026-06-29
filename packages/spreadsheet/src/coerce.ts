@@ -75,10 +75,17 @@ export function renderOutbound<TRow, K extends keyof TRow & string>(
 ): { value: string | number | boolean | Date | null; type: WriteCellType } {
   if (value === null || value === undefined) return { value: null, type: 'String' };
   switch (col.type) {
-    case 'decimal':
-    case 'percent': {
+    case 'decimal': {
       const d = value instanceof Decimal ? value : new Decimal(String(value));
       return { value: d.toNumber(), type: 'Number' };
+    }
+    case 'percent': {
+      const d = value instanceof Decimal ? value : new Decimal(String(value));
+      // Export is the inverse of parse: parse divides whole-percent by 100, so export multiplies
+      // back. fraction scale: write as-is (0.19 → 0.19). whole scale (default): multiply by 100
+      // so the round-trip is symmetric (0.19 → 19 → parse back to 0.19).
+      const scale: PercentScale = col.percentScale ?? 'whole';
+      return { value: scale === 'whole' ? d.mul(100).toNumber() : d.toNumber(), type: 'Number' };
     }
     case 'integer':
       return { value: Number(value), type: 'Number' };
