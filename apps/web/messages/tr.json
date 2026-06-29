@@ -779,6 +779,54 @@
       "intent": "Sepet kampanyalarının kârlılığı"
     }
   },
+  "commissionTariffsPage": {
+    "search": "Ürün, model veya barkod ara",
+    "actions": {
+      "upload": "Excel Yükle",
+      "saveExport": "Kaydet ve İndir"
+    },
+    "summary": {
+      "total": "Tarifedeki ürün",
+      "totalContext": "bu dönemde listelenen",
+      "selected": "Seçtiğin kademe",
+      "selectedValue": "{count}/{total}",
+      "selectedContext": "ürün için kademe belirledin",
+      "selectedProfit": "Seçili kademe kârı",
+      "selectedProfitContext": "seçtiğin ürünlerde tahmini toplam",
+      "bestProfit": "En iyi senaryo",
+      "bestProfitHint": "Her üründe en kârlı kademeyi seçersen elde edeceğin tahmini toplam kazanç.",
+      "applyBest": "Hepsine uygula"
+    },
+    "table": {
+      "product": "Ürün",
+      "current": "Güncel",
+      "currentPrice": "Güncel Fiyat",
+      "commission": "komisyon",
+      "stock": "Stok",
+      "band": "{n}. Kademe",
+      "best": "En iyi",
+      "yourChoice": "Seçimin",
+      "noChoice": "Kademe seç",
+      "customPrice": "Özel Fiyat",
+      "enterPrice": "Fiyat girin",
+      "customPriceHint": "Tahmini kâr kaydedince hesaplanır"
+    },
+    "noResults": {
+      "title": "Eşleşen ürün yok",
+      "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."
+    },
+    "upload": {
+      "title": "Komisyon tarifesi Excel'ini yükleyin",
+      "description": "Trendyol panelinden indirdiğiniz haftalık komisyon tarifesi dosyasını yükleyin; her ürün için fiyat aralıklarına göre kazancınızı hesaplayalım.",
+      "prompt": "Excel dosyasını sürükleyip bırakın",
+      "hint": "XLSX · en fazla 5 MB",
+      "cta": "Dosya seç",
+      "stepsTitle": "Nasıl çalışır?",
+      "step1": "Trendyol panelinden haftalık komisyon tarifesi Excel'ini indirin",
+      "step2": "Dosyayı buraya yükleyin",
+      "step3": "Her ürün için hangi fiyat aralığında ne kazanacağınızı görün"
+    }
+  },
   "featureStatus": {
     "draftLabel": "Taslak",
     "draftHint": "Bu bölümün arka ucu henüz bağlanmadı. Bu işaret yalnızca geliştirme ortamında görünür.",

@@ -2,8 +2,7 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { EmptyState } from '@/components/patterns/empty-state';
-import { PageHeader } from '@/components/patterns/page-header';
+import { CommissionTariffsPageClient } from '@/features/campaigns/components/commission-tariffs-page-client';
 import { routing } from '@/i18n/routing';
 
 export async function generateMetadata({
@@ -17,22 +16,6 @@ export async function generateMetadata({
   return { title: t('productCommissionTariffs.title') };
 }
 
-export default async function ProductCommissionTariffsPage({
-  params,
-}: {
-  params: Promise<{ locale: string }>;
-}): Promise<React.ReactElement> {
-  const { locale } = await params;
-  const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
-  const t = await getTranslations({ locale: effectiveLocale, namespace: 'campaignsPages' });
-  const tEmpty = await getTranslations({ locale: effectiveLocale, namespace: 'placeholderPage' });
-  return (
-    <>
-      <PageHeader
-        title={t('productCommissionTariffs.title')}
-        intent={t('productCommissionTariffs.intent')}
-      />
-      <EmptyState title={tEmpty('comingSoon')} description={tEmpty('description')} />
-    </>
-  );
+export default function ProductCommissionTariffsPage(): React.ReactElement {
+  return <CommissionTariffsPageClient />;
 }

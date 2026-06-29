@@ -779,6 +779,54 @@
       "intent": "Profitability of cart campaigns"
     }
   },
+  "commissionTariffsPage": {
+    "search": "Search product, model or barcode",
+    "actions": {
+      "upload": "Upload Excel",
+      "saveExport": "Save and Download"
+    },
+    "summary": {
+      "total": "Products in tariff",
+      "totalContext": "listed this period",
+      "selected": "Bands chosen",
+      "selectedValue": "{count}/{total}",
+      "selectedContext": "products with a chosen band",
+      "selectedProfit": "Chosen-band profit",
+      "selectedProfitContext": "estimated total for your chosen products",
+      "bestProfit": "Best case",
+      "bestProfitHint": "Estimated total earnings if you pick the most profitable band for every product.",
+      "applyBest": "Apply to all"
+    },
+    "table": {
+      "product": "Product",
+      "current": "Current",
+      "currentPrice": "Current Price",
+      "commission": "commission",
+      "stock": "Stock",
+      "band": "Band {n}",
+      "best": "Best",
+      "yourChoice": "Your choice",
+      "noChoice": "Choose a band",
+      "customPrice": "Custom Price",
+      "enterPrice": "Enter price",
+      "customPriceHint": "Estimated profit is computed when you save"
+    },
+    "noResults": {
+      "title": "No matching products",
+      "description": "Try changing your search or filters."
+    },
+    "upload": {
+      "title": "Upload the commission tariff Excel",
+      "description": "Upload the weekly commission tariff file you downloaded from the Trendyol panel; we'll calculate your profit per price band for each product.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · max 5 MB",
+      "cta": "Choose file",
+      "stepsTitle": "How it works",
+      "step1": "Download the weekly commission tariff Excel from the Trendyol panel",
+      "step2": "Upload the file here",
+      "step3": "See what you'll earn at each price band for every product"
+    }
+  },
   "featureStatus": {
     "draftLabel": "Draft",
     "draftHint": "This section's backend is not wired up yet. This marker only shows in development.",
