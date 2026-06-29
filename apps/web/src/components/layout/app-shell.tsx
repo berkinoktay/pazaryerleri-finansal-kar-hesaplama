@@ -5,7 +5,11 @@ import * as React from 'react';
 
 import { Wordmark } from '@/components/brand/wordmark';
 import { HelpMenu } from '@/components/layout/help-menu';
-import { HELP_MENU_ITEMS, NAV_GROUPS } from '@/components/layout/nav-config';
+import {
+  filterNavGroupsByPlatform,
+  HELP_MENU_ITEMS,
+  NAV_GROUPS,
+} from '@/components/layout/nav-config';
 import { BottomDock } from '@/components/patterns/bottom-dock';
 import { NavGroup, NAV_BADGE_TONE } from '@/components/patterns/nav-group';
 import { NotificationBell, type NotificationEntry } from '@/components/patterns/notification-bell';
@@ -221,6 +225,12 @@ function AppSidebar({
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
 
+  // Marketplace-specific groups (e.g. Campaigns) only render for the matching
+  // platform. Derive it from the active store rather than a separate hook so
+  // the sidebar stays in sync with the store the rest of the shell is showing.
+  const activePlatform = stores.find((store) => store.id === activeStoreId)?.platform ?? null;
+  const visibleGroups = filterNavGroupsByPlatform(NAV_GROUPS, activePlatform);
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-xs">
@@ -253,7 +263,7 @@ function AppSidebar({
         <SidebarSeparator className="bg-border/60 mt-2xs mx-0" />
       </SidebarHeader>
       <SidebarContent>
-        {NAV_GROUPS.map((group) => (
+        {visibleGroups.map((group) => (
           <SidebarGroup key={group.key}>
             <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel>
             <SidebarMenu>

@@ -275,11 +275,20 @@
     "tools": "Maliyet & Araçlar",
     "whatsNew": "Yenilikler",
     "livePerformance": "Canlı Performans",
+    "productCommissionTariffs": "Ürün Komisyon Tarifeleri",
+    "plusCommissionTariffs": "Plus Komisyon Tarifesi",
+    "productLabels": "Avantajlı Ürün Etiketleri",
+    "flashProducts": "Flaş Ürünler",
+    "discounts": "İndirimler",
+    "coupons": "Kuponlar",
+    "cartCampaigns": "Kampanyalar",
     "toggleSidebar": "Kenar çubuğunu aç/kapat",
     "groups": {
       "overview": "Özet",
       "operations": "Operasyon",
-      "financeTools": "Finans"
+      "finance": "Finans",
+      "tools": "Araçlar",
+      "campaigns": "Kampanyalar"
     },
     "help": {
       "label": "Yardım & Destek"
@@ -739,6 +748,36 @@
   "placeholderPage": {
     "comingSoon": "Yakında geliştirilecek",
     "description": "Bu sayfa henüz geliştirme aşamasında. İlerleyen güncellemelerde aktif olacak."
+  },
+  "campaignsPages": {
+    "productCommissionTariffs": {
+      "title": "Ürün Komisyon Tarifeleri",
+      "intent": "Trendyol komisyon tarifesindeki fiyat aralıklarına katılırsanız kazancınızın ne olacağını hesaplayın"
+    },
+    "plusCommissionTariffs": {
+      "title": "Plus Komisyon Tarifesi",
+      "intent": "Trendyol Plus komisyon tarifesi için kârlılık analizi"
+    },
+    "productLabels": {
+      "title": "Avantajlı Ürün Etiketleri",
+      "intent": "Avantajlı ürün etiketi fiyat kademelerinin kârlılığı"
+    },
+    "flashProducts": {
+      "title": "Flaş Ürünler",
+      "intent": "Flaş ürün tekliflerinin kârlılığı"
+    },
+    "discounts": {
+      "title": "İndirimler",
+      "intent": "İndirim kampanyalarının kârlılığı"
+    },
+    "coupons": {
+      "title": "Kuponlar",
+      "intent": "Kupon kampanyalarının kârlılığı"
+    },
+    "cartCampaigns": {
+      "title": "Kampanyalar",
+      "intent": "Sepet kampanyalarının kârlılığı"
+    }
   },
   "featureStatus": {
     "draftLabel": "Taslak",

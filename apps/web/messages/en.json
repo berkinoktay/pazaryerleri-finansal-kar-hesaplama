@@ -275,11 +275,20 @@
     "tools": "Tools & Pricing",
     "whatsNew": "What's New",
     "livePerformance": "Live Performance",
+    "productCommissionTariffs": "Product Commission Tariffs",
+    "plusCommissionTariffs": "Plus Commission Tariff",
+    "productLabels": "Advantaged Product Labels",
+    "flashProducts": "Flash Products",
+    "discounts": "Discounts",
+    "coupons": "Coupons",
+    "cartCampaigns": "Cart Campaigns",
     "toggleSidebar": "Toggle sidebar",
     "groups": {
       "overview": "Overview",
       "operations": "Operations",
-      "financeTools": "Finance"
+      "finance": "Finance",
+      "tools": "Tools",
+      "campaigns": "Campaigns"
     },
     "help": {
       "label": "Help & Support"
@@ -739,6 +748,36 @@
   "placeholderPage": {
     "comingSoon": "Coming soon",
     "description": "This page is still under development. It will be active in upcoming updates."
+  },
+  "campaignsPages": {
+    "productCommissionTariffs": {
+      "title": "Product Commission Tariffs",
+      "intent": "Calculate your profit if you join the price bands in the Trendyol commission tariff"
+    },
+    "plusCommissionTariffs": {
+      "title": "Plus Commission Tariff",
+      "intent": "Profitability analysis for the Trendyol Plus commission tariff"
+    },
+    "productLabels": {
+      "title": "Advantaged Product Labels",
+      "intent": "Profitability of advantaged product label price bands"
+    },
+    "flashProducts": {
+      "title": "Flash Products",
+      "intent": "Profitability of flash product offers"
+    },
+    "discounts": {
+      "title": "Discounts",
+      "intent": "Profitability of discount campaigns"
+    },
+    "coupons": {
+      "title": "Coupons",
+      "intent": "Profitability of coupon campaigns"
+    },
+    "cartCampaigns": {
+      "title": "Cart Campaigns",
+      "intent": "Profitability of cart campaigns"
+    }
   },
   "featureStatus": {
     "draftLabel": "Draft",
