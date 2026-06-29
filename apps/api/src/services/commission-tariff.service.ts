@@ -9,6 +9,8 @@
 // Every query is scoped by organizationId + storeId (tenant isolation). All money
 // is serialized to GROSS decimal strings; the frontend renders only.
 
+import { Decimal } from 'decimal.js';
+
 import { prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
@@ -217,6 +219,7 @@ export async function getTariffDetail(
       const computed: ComputedItemBands = computeItemBands(
         ctx,
         parseStoredBands(item.bands),
+        new Decimal(item.currentPrice.toString()),
         variant ?? null,
         cost,
         shipping,
@@ -238,6 +241,8 @@ export async function getTariffDetail(
         customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,
         bands: computed.bands.map((band) => ({
           key: band.key,
+          lowerLimit: band.lowerLimit,
+          upperLimit: band.upperLimit,
           price: band.price,
           commissionPct: band.commissionPct,
           netProfit: band.netProfit,

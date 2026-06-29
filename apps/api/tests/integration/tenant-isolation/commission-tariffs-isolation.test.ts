@@ -41,7 +41,7 @@ async function seedTariff(organizationId: string, storeId: string): Promise<stri
       productTitle: 'Ürün',
       currentPrice: '100.00',
       currentCommissionPct: '0.1900',
-      bands: [{ key: 'band1', threshold: '100.00', commissionPct: '0.19' }],
+      bands: [{ key: 'band1', upperLimit: '100.00', commissionPct: '19' }],
     },
   });
   return tariff.id;

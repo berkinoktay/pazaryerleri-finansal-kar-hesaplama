@@ -63,6 +63,8 @@ export const CommissionTariffListResponseSchema = z
 export const TariffBandResultSchema = z
   .object({
     key: z.string(),
+    lowerLimit: z.string().nullable(),
+    upperLimit: z.string().nullable(),
     price: z.string(),
     commissionPct: z.string(),
     netProfit: z.string().nullable(),
@@ -106,6 +108,29 @@ export const CommissionTariffDetailSchema = z
     periods: z.array(TariffPeriodSchema),
   })
   .openapi('CommissionTariffDetail');
+
+// ─── Import (multipart upload) ──────────────────────────────────────────────
+
+export const ImportTariffFormSchema = z.object({
+  file: z
+    .instanceof(File)
+    .openapi({ type: 'string', format: 'binary', description: 'Trendyol komisyon-tarifesi .xlsx' }),
+  name: z.string().optional().openapi({ description: 'İsteğe bağlı görünen ad; yoksa dosya adı.' }),
+});
+
+export const ImportTariffResponseSchema = z
+  .object({
+    tariffId: z.string().uuid(),
+    productCount: z.number().int(),
+    periodCount: z.number().int(),
+    itemCount: z.number().int(),
+    matched: z.number().int(),
+    unmatched: z.number().int(),
+    skippedRows: z.number().int(),
+  })
+  .openapi('ImportTariffResponse');
+
+export type ImportTariffResponse = z.infer<typeof ImportTariffResponseSchema>;
 
 // ─── Inferred TS types (consumed by the service layer) ──────────────────────
 

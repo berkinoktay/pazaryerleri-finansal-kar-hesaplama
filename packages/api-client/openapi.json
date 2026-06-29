@@ -4717,6 +4717,42 @@
         ],
         "description": "Dönem geçerliliği — tarihler parse edilemezse null."
       },
+      "ImportTariffResponse": {
+        "type": "object",
+        "properties": {
+          "tariffId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "periodCount": {
+            "type": "integer"
+          },
+          "itemCount": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "unmatched": {
+            "type": "integer"
+          },
+          "skippedRows": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tariffId",
+          "productCount",
+          "periodCount",
+          "itemCount",
+          "matched",
+          "unmatched",
+          "skippedRows"
+        ]
+      },
       "CommissionTariffDetail": {
         "type": "object",
         "properties": {
@@ -4875,6 +4911,18 @@
           "key": {
             "type": "string"
           },
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upperLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "price": {
             "type": "string"
           },
@@ -4896,6 +4944,8 @@
         },
         "required": [
           "key",
+          "lowerLimit",
+          "upperLimit",
           "price",
           "commissionPct",
           "netProfit",
@@ -12698,6 +12748,162 @@
           },
           "404": {
             "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/import": {
+      "post": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Import a Trendyol commission-tariff Excel",
+        "description": "Uploads Trendyol's 'Ürün Komisyon Tarifeleri' .xlsx (multipart `file`). The fixed-layout sheet is read by position (its commission columns share duplicate headers), each present period (3-day / 4-day) becomes a period, and each product row is joined to a ProductVariant by barcode. Stores one tariff with its periods + product rows; profit is computed later on read. Returns counts: products, periods, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Trendyol komisyon-tarifesi .xlsx"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tariff imported",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportTariffResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File missing, unreadable, or not the expected tariff format",
             "content": {
               "application/json": {
                 "schema": {

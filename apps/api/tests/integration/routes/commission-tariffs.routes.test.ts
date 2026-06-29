@@ -160,10 +160,10 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       currentPrice: '500.00',
       currentCommissionPct: '0.1900',
       bands: [
-        { key: 'band1', threshold: '500.00', commissionPct: '0.19' },
-        { key: 'band2', threshold: '450.00', commissionPct: '0.15' },
-        { key: 'band3', threshold: '400.00', commissionPct: '0.12' },
-        { key: 'band4', threshold: '350.00', commissionPct: '0.10' },
+        { key: 'band1', lowerLimit: '450.00', commissionPct: '19' },
+        { key: 'band2', lowerLimit: '400.00', upperLimit: '450.00', commissionPct: '15' },
+        { key: 'band3', lowerLimit: '350.00', upperLimit: '400.00', commissionPct: '12' },
+        { key: 'band4', upperLimit: '350.00', commissionPct: '10' },
       ],
       selectedBand: 'band2',
     },
@@ -177,7 +177,7 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       productTitle: 'Eşleşmeyen Ürün',
       currentPrice: '300.00',
       currentCommissionPct: '0.2000',
-      bands: [{ key: 'band1', threshold: '300.00', commissionPct: '0.20' }],
+      bands: [{ key: 'band1', upperLimit: '300.00', commissionPct: '20' }],
     },
   });
 
