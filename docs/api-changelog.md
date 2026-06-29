@@ -32,6 +32,12 @@ section "Versioning" for details.
   (Engine note: `@pazarsync/spreadsheet` now strips a bogus single-cell `<dimension>` that
   Trendyol writes, which otherwise made the reader drop every data row.)
 
+- **`PATCH /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections`** —
+  Persists the seller's chosen band (`band1`..`band4`, or null) and optional custom price per
+  item, in a single bulk update scoped to the tariff (items from another tariff/store are
+  ignored). Selection runs client-side over the backend-computed margins; this records the
+  result. Store-scoped (`DATA_WRITE`). Returns `{ updated }`.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs`** — Lists saved
   commission-tariff uploads for a store (master list): per tariff `name`, `productCount`,
   `selectedCount`, `exported`, overall `validity` (`active`/`upcoming`/`past`, or null when

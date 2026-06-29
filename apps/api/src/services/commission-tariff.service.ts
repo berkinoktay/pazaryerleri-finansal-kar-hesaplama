@@ -11,7 +11,7 @@
 
 import { Decimal } from 'decimal.js';
 
-import { prisma } from '@pazarsync/db';
+import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
@@ -32,6 +32,7 @@ import type {
   CommissionTariffListItem,
   TariffDetailItem,
   TariffPeriod,
+  TariffSelection,
 } from '../validators/commission-tariff.validator';
 
 // A variant the CTE/cost resolvers could not place degrades to not-calculable.
@@ -284,6 +285,53 @@ export async function deleteTariff(
 
   try {
     await prisma.commissionTariff.delete({ where: { id: tariffId } });
+  } catch (err) {
+    mapPrismaError(err);
+  }
+}
+
+// ─── Save selections ─────────────────────────────────────────────────────────
+
+/**
+ * Persists the seller's band selection + custom price for the given items in ONE
+ * bulk UPDATE (a VALUES join), so selecting across a large catalog stays a single
+ * round-trip rather than N. Throws `NotFoundError` when the tariff is not in this
+ * store. Each row is gated on `(organization_id, store_id, period ∈ tariff)`, so
+ * an itemId from another tariff/store is silently skipped (not updated) — the
+ * returned `updated` count reflects only rows that actually matched.
+ */
+export async function updateSelections(
+  orgId: string,
+  storeId: string,
+  tariffId: string,
+  selections: ReadonlyArray<TariffSelection>,
+): Promise<{ updated: number }> {
+  const tariff = await prisma.commissionTariff.findFirst({
+    where: { id: tariffId, organizationId: orgId, storeId },
+    select: { id: true },
+  });
+  if (tariff === null) {
+    throw new NotFoundError('CommissionTariff', tariffId);
+  }
+  if (selections.length === 0) return { updated: 0 };
+
+  const rows = selections.map(
+    (s) => Prisma.sql`(${s.itemId}::uuid, ${s.band}::text, ${s.customPrice}::numeric)`,
+  );
+
+  try {
+    const updated = await prisma.$executeRaw`
+      UPDATE commission_tariff_items AS i
+      SET selected_band = v.band, custom_price = v.custom_price, updated_at = now()
+      FROM (VALUES ${Prisma.join(rows)}) AS v(id, band, custom_price)
+      WHERE i.id = v.id
+        AND i.organization_id = ${orgId}::uuid
+        AND i.store_id = ${storeId}::uuid
+        AND i.period_id IN (
+          SELECT p.id FROM commission_tariff_periods p WHERE p.tariff_id = ${tariffId}::uuid
+        )
+    `;
+    return { updated };
   } catch (err) {
     mapPrismaError(err);
   }

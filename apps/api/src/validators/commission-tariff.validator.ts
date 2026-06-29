@@ -132,6 +132,29 @@ export const ImportTariffResponseSchema = z
 
 export type ImportTariffResponse = z.infer<typeof ImportTariffResponseSchema>;
 
+// ─── Selections (band + custom price) ───────────────────────────────────────
+
+export const TariffSelectionSchema = z.object({
+  itemId: z.string().uuid(),
+  band: z.enum(['band1', 'band2', 'band3', 'band4']).nullable(),
+  customPrice: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+    .nullable(),
+});
+
+export const UpdateSelectionsBodySchema = z
+  .object({
+    selections: z.array(TariffSelectionSchema).min(1).max(5000),
+  })
+  .openapi('UpdateSelectionsBody');
+
+export const UpdateSelectionsResponseSchema = z
+  .object({ updated: z.number().int() })
+  .openapi('UpdateSelectionsResponse');
+
+export type TariffSelection = z.infer<typeof TariffSelectionSchema>;
+
 // ─── Inferred TS types (consumed by the service layer) ──────────────────────
 
 export type CommissionTariffListItem = z.infer<typeof CommissionTariffListItemSchema>;

@@ -151,4 +151,50 @@ describe('commission-tariffs: route-layer authorization', () => {
     const stillThere = await prisma.commissionTariff.findUnique({ where: { id: tariffB } });
     expect(stillThere).not.toBeNull();
   });
+
+  it("Org A member saving selections on Org B's tariff via Org A's store returns 404", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    const tariffB = await seedTariff(orgB.id, storeB.id);
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/commission-tariffs/${tariffB}/selections`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(userA.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selections: [{ itemId: crypto.randomUUID(), band: 'band1', customPrice: null }],
+        }),
+      },
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
+  });
+
+  it('a non-member saving selections returns 403', async () => {
+    const outsider = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const tariff = await seedTariff(org.id, store.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff}/selections`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: bearer(outsider.accessToken),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          selections: [{ itemId: crypto.randomUUID(), band: 'band1', customPrice: null }],
+        }),
+      },
+    );
+    expect(res.status).toBe(403);
+  });
 });
