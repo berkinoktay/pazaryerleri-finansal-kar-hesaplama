@@ -21,6 +21,7 @@ import {
   MAX_ERROR_VALUE_LENGTH,
 } from './constants';
 import { assertValidUpload } from './guards';
+import { stripWorksheetDimensions } from './normalize-workbook';
 
 // Property bag for a parsed data row: contains only the key + editable fields
 // whose values were coerced by coerceInbound. The generic TRow is erased at runtime;
@@ -49,28 +50,58 @@ function mapErrorCode(error: string, reason: string | undefined): CellErrorCode 
   return 'INVALID_VALUE';
 }
 
-export async function parseXlsx<TRow>(
-  schema: SheetSchema<TRow>,
+export interface ReadGridOptions {
+  readonly sheetName?: string;
+  readonly rowCap?: number;
+  readonly colCap?: number;
+  readonly maxBytes?: number;
+}
+
+/**
+ * Runs the upload security guards, strips any bogus single-cell <dimension>, and
+ * returns the raw 2D cell grid for the named sheet (falling back to the first
+ * sheet). Throws `CORRUPT_FILE` if the workbook cannot be read. This is the
+ * shared reader behind `parseXlsx`; consumers parsing a fixed-layout vendor file
+ * with DUPLICATE column headers (which header matching cannot disambiguate) use
+ * it directly and map columns by position.
+ */
+export async function readWorkbookGrid(
   file: Buffer,
-): Promise<ParsedResult<TRow>> {
-  // Pre-read security guards: size, magic, streaming zip-bomb, structural, and dimension caps.
-  const rowCap = Math.min(schema.options.rowCap ?? DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS);
-  const colCap = Math.min(schema.options.colCap ?? DEFAULT_COL_CAP, ABSOLUTE_MAX_COLS);
-  const maxBytes = Math.min(DEFAULT_MAX_BYTES, ABSOLUTE_MAX_BYTES);
+  options: ReadGridOptions = {},
+): Promise<SheetData> {
+  const rowCap = Math.min(options.rowCap ?? DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS);
+  const colCap = Math.min(options.colCap ?? DEFAULT_COL_CAP, ABSOLUTE_MAX_COLS);
+  const maxBytes = Math.min(options.maxBytes ?? DEFAULT_MAX_BYTES, ABSOLUTE_MAX_BYTES);
+  // Pre-read security guards: size, magic, streaming zip-bomb, structural, dimension caps.
   assertValidUpload(file, { rowCap, colCap, maxBytes });
 
-  // Step 1: Read raw 2D grid, selecting the named sheet.
-  //   Fall back to the first sheet if the named sheet is absent; throw CORRUPT_FILE if unreadable.
-  let grid: SheetData;
+  // A bogus single-cell <dimension> is stripped first so exporters that mis-write
+  // it (e.g. Trendyol) don't make read-excel-file drop every data row.
+  const normalized = stripWorksheetDimensions(file);
   try {
-    grid = await readSheet(file, schema.options.sheetName);
+    return options.sheetName !== undefined
+      ? await readSheet(normalized, options.sheetName)
+      : await readSheet(normalized);
   } catch {
     try {
-      grid = await readSheet(file);
+      return await readSheet(normalized);
     } catch (e) {
       throw new SpreadsheetFileError('CORRUPT_FILE', 'Cannot read workbook', { cause: String(e) });
     }
   }
+}
+
+export async function parseXlsx<TRow>(
+  schema: SheetSchema<TRow>,
+  file: Buffer,
+): Promise<ParsedResult<TRow>> {
+  // Step 1: guards + read raw 2D grid (bogus dimensions stripped), via the shared reader.
+  const rowCap = Math.min(schema.options.rowCap ?? DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS);
+  const grid = await readWorkbookGrid(file, {
+    sheetName: schema.options.sheetName,
+    rowCap: schema.options.rowCap,
+    colCap: schema.options.colCap,
+  });
 
   // Step 2: Skip leading empty/banner rows up to headerLookahead to locate the header row.
   const lookahead = schema.options.headerLookahead ?? 0;
