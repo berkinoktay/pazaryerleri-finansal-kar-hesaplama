@@ -75,7 +75,7 @@ export function resolveHeaders<TRow>(
   if (missingRequired.length > 0) {
     throw new SpreadsheetFileError(
       'MISSING_REQUIRED_HEADERS',
-      `MISSING_REQUIRED_HEADERS: ${missingRequired.join(', ')}`,
+      `Missing required headers: ${missingRequired.join(', ')}`,
       { headers: missingRequired },
     );
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeHeader, resolveHeaders } from './header-normalize';
+import { SpreadsheetFileError } from './errors';
 import { miniProductsSchema } from '../tests/fixtures/mini-schemas';
 
 describe('normalizeHeader', () => {
@@ -46,9 +47,14 @@ describe('resolveHeaders', () => {
   });
 
   it('throws MISSING_REQUIRED_HEADERS when a columnRequired header is absent', () => {
-    // Key is absent (columnRequired: true)
-    expect(() =>
-      resolveHeaders(miniProductsSchema, ['Barcode', 'Cost', 'Price', 'Profit']),
-    ).toThrowError(/MISSING_REQUIRED_HEADERS/);
+    const call = () => resolveHeaders(miniProductsSchema, ['Barcode', 'Cost', 'Price', 'Profit']);
+    expect(call).toThrow(SpreadsheetFileError);
+    try {
+      call();
+    } catch (e) {
+      if (e instanceof SpreadsheetFileError) {
+        expect(e.code).toBe('MISSING_REQUIRED_HEADERS');
+      }
+    }
   });
 });
