@@ -21,6 +21,24 @@ section "Versioning" for details.
 
 ### Added
 
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs`** — Lists saved
+  commission-tariff uploads for a store (master list): per tariff `name`, `productCount`,
+  `selectedCount`, `exported`, overall `validity` (`active`/`upcoming`/`past`, or null when
+  period dates are unparseable) and `updatedAt`. Store-scoped (`requireStoreAccess`,
+  `DATA_READ`); newest first.
+
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`** — Returns
+  one tariff with its periods and, per product row, the four price bands with `netProfit` and
+  `marginPct` **computed on read** by the profit engine. The commission comes from the Excel
+  band; everything else (cost, shipping, PSF, stoppage, VAT) reuses the Ürün Fiyatlandırma
+  resolvers. Profit is never stored. When a row cannot be costed, `calculable=false`, `reason`
+  (`NO_PRODUCT`/`NO_COST`/`NO_SHIPPING`) explains why and band profits are null. `bestBandKey`
+  marks the most profitable band. Money is GROSS decimal strings. A cross-store/org id → `404`.
+
+- **`DELETE /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`** — Hard
+  deletes a tariff and (via cascade) its periods + items. Store-scoped (`DATA_WRITE`); a
+  cross-store id returns `404`, indistinguishable from missing. `204` on success.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/profit-settings`** — Returns the resolved
   per-store profit-formula toggles (`ProfitSettings`: `includeStopaj`, `includeNegativeNetVat`),
   with defaults applied (`includeStopaj=true`, `includeNegativeNetVat=false`). Store-scoped: the

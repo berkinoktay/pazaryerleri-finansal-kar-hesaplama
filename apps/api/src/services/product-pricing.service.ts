@@ -93,7 +93,7 @@ export type ProductPricingSort =
 
 // ─── Fee definitions resolved once per request (loop-invariant) ───────────────
 
-interface ResolvedFeeDefs {
+export interface ResolvedFeeDefs {
   /** Komisyon KDV oranı, yüzde (örn. 20). */
   commissionVatRate: Decimal;
   /** Stopaj oranı — NET satış üstüne KESİR (örn. 0.01). */
@@ -176,7 +176,7 @@ function shippingReasonToStatus(reason: EstimateUnavailableReason): ShippingEsti
  * `now`). COMMISSION_INVOICE/SHIPPING contribute only their VAT rate; STOPPAGE
  * its rateOfSale (fraction); PLATFORM_SERVICE its net fixed amount + VAT rate.
  */
-async function resolveFeeDefs(
+export async function resolveFeeDefs(
   tx: Prisma.TransactionClient,
   platform: Platform,
 ): Promise<ResolvedFeeDefs> {

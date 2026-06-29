@@ -13,6 +13,7 @@ import { problemDetailsForError } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
 import claimRoutes from './routes/claims/index';
 import commissionRateRoutes from './routes/commission-rates/index';
+import commissionTariffRoutes from './routes/commission-tariffs/index';
 import costProfileRoutes from './routes/cost-profiles/index';
 import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index';
 import fxRatesRoutes from './routes/fx-rates/index';
@@ -164,6 +165,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', variantRoutes);
   app.route('/', fxRatesRoutes);
   app.route('/', commissionRateRoutes);
+  app.route('/', commissionTariffRoutes);
   app.route('/', shippingRoutes);
   app.route('/', profitSettingsRoutes);
 
