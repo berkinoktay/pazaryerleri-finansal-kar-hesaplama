@@ -117,16 +117,19 @@ export function assertValidUpload(file: Buffer, opts: GuardOpts): void {
     f.start();
   };
 
-  // Feed in 64 KB chunks so that abortReason is checked between pushes and the
-  // loop breaks early (the first chunk boundary after the cap is hit).
+  // Feed the zip in small chunks: fflate's synchronous UnzipInflate finishes
+  // inflating the in-flight chunk before push() returns, so abortReason can only
+  // stop AT chunk boundaries. A small chunk bounds the worst-case inflation overshoot
+  // past the ceiling to ~ STREAM_CHUNK_BYTES x max-deflate-ratio (terminate() does not
+  // help here — inflation completes synchronously within push()).
   const bytes = new Uint8Array(file);
-  const CHUNK_SIZE = 64 * 1024;
+  const STREAM_CHUNK_BYTES = 8 * 1024;
   try {
-    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    for (let i = 0; i < bytes.length; i += STREAM_CHUNK_BYTES) {
       // Check BEFORE pushing the next chunk so we stop as soon as possible.
       if (abortReason !== null) break;
-      const isLast = i + CHUNK_SIZE >= bytes.length;
-      unzipper.push(bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length)), isLast);
+      const isLast = i + STREAM_CHUNK_BYTES >= bytes.length;
+      unzipper.push(bytes.subarray(i, Math.min(i + STREAM_CHUNK_BYTES, bytes.length)), isLast);
     }
   } catch (e) {
     // fflate itself threw (e.g. structural zip corruption not handled by ondata).
@@ -174,7 +177,7 @@ export function assertValidUpload(file: Buffer, opts: GuardOpts): void {
     }
     if (d.rows * d.cols > MAX_TOTAL_CELLS) {
       throw new SpreadsheetFileError(
-        'ROW_CAP_EXCEEDED',
+        'PAYLOAD_TOO_LARGE',
         `Sheet '${d.sheetPath}' total cells (${d.rows * d.cols}) exceeds cap ${MAX_TOTAL_CELLS}`,
         { cells: d.rows * d.cols, cap: MAX_TOTAL_CELLS },
       );

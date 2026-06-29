@@ -76,6 +76,31 @@ describe('assertValidUpload', () => {
     expect(err?.code).toBe('COL_CAP_EXCEEDED');
   });
 
+  it('rejects when dimension rows exceed rowCap as ROW_CAP_EXCEEDED', async () => {
+    const rows: MiniProductsRow[] = [
+      {
+        variantKey: 'V1',
+        barcode: '1',
+        title: 't',
+        cost: new Decimal('1'),
+        price: new Decimal('2'),
+        profit: new Decimal('1'),
+      },
+      {
+        variantKey: 'V2',
+        barcode: '2',
+        title: 't2',
+        cost: new Decimal('2'),
+        price: new Decimal('3'),
+        profit: new Decimal('1'),
+      },
+    ];
+    const buf = await exportToXlsx(miniProductsSchema, rows);
+    const err = catchGuard(buf, { ...opts, rowCap: 1 });
+    expect(err).toBeInstanceOf(SpreadsheetFileError);
+    expect(err?.code).toBe('ROW_CAP_EXCEEDED');
+  });
+
   it('fires streaming ceiling on a crafted zip-bomb payload', () => {
     // 300_000 bytes of repeating '0' compresses to ~300 bytes;
     // a tiny maxDecompressedBytes cap of 1_000 forces the streaming guard
