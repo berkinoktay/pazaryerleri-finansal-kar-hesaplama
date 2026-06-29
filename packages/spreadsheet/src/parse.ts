@@ -4,7 +4,15 @@ import type { CellError, CellErrorCode, ParsedResult, ParsedRow, SheetSchema } f
 import { coerceInbound } from './coerce';
 import { resolveHeaders, normalizeHeader } from './header-normalize';
 import { SpreadsheetFileError } from './errors';
-import { DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS } from './constants';
+import {
+  DEFAULT_ROW_CAP,
+  ABSOLUTE_MAX_ROWS,
+  DEFAULT_COL_CAP,
+  ABSOLUTE_MAX_COLS,
+  DEFAULT_MAX_BYTES,
+  ABSOLUTE_MAX_BYTES,
+} from './constants';
+import { assertValidUpload } from './guards';
 
 // Property bag for a parsed data row: contains only the key + editable fields
 // whose values were coerced by coerceInbound. The generic TRow is erased at runtime;
@@ -37,6 +45,12 @@ export async function parseXlsx<TRow>(
   schema: SheetSchema<TRow>,
   file: Buffer,
 ): Promise<ParsedResult<TRow>> {
+  // Pre-read security guards: size, magic, streaming zip-bomb, structural, and dimension caps.
+  const rowCap = Math.min(schema.options.rowCap ?? DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS);
+  const colCap = Math.min(schema.options.colCap ?? DEFAULT_COL_CAP, ABSOLUTE_MAX_COLS);
+  const maxBytes = Math.min(DEFAULT_MAX_BYTES, ABSOLUTE_MAX_BYTES);
+  assertValidUpload(file, { rowCap, colCap, maxBytes });
+
   // Step 1: Read raw 2D grid, selecting the named sheet.
   //   Fall back to the first sheet if the named sheet is absent; throw CORRUPT_FILE if unreadable.
   let grid: SheetData;
@@ -72,8 +86,8 @@ export async function parseXlsx<TRow>(
     rawHeaderRow,
   );
 
-  // Step 4: Row cap check (post-read guard; pre-read dimension and zip-bomb guards are Task 8).
-  const rowCap = Math.min(schema.options.rowCap ?? DEFAULT_ROW_CAP, ABSOLUTE_MAX_ROWS);
+  // Step 4: Post-read row cap check (defense in depth — pre-read dimension cap is the first line;
+  // this catches discrepancies between sheet dimensions and actual data rows parsed).
   const dataRowCount = grid.length - (headerIdx + 1);
   if (dataRowCount > rowCap) {
     throw new SpreadsheetFileError(
