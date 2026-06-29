@@ -349,6 +349,7 @@ model Store {
   webhookEvents          WebhookEvent[]
   defaultShippingCarrier ShippingCarrier?        @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
   ownShippingTariffs     OwnShippingTariff[]
+  commissionTariffs      CommissionTariff[]
   orgPeriodFees          OrgPeriodFee[]
   commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
@@ -1134,6 +1135,91 @@ model OwnShippingTariff {
   @@unique([storeId, desi])
   @@index([organizationId])
   @@map("own_shipping_tariffs")
+}
+
+// ─── Saved Commission Tariffs (campaign price-band tariff) ─────────────
+// The seller uploads Trendyol's weekly "Ürün Komisyon Tarifesi" Excel (we can't
+// auto-fetch it — Trendyol has no API for it). Each upload is kept as a
+// store-private, editable, deletable tariff. A tariff has one or more periods
+// (the date-range split, e.g. 3-day + 4-day — count/labels are data-driven, NOT
+// a fixed enum) and each period has product rows. Each row carries 4 price bands
+// (threshold + commission, parsed from the Excel) as JSON; profit per band is
+// COMPUTED on read via @pazarsync/profit (never stored — cost/fees can change).
+// The seller's chosen band + custom price are persisted on the item.
+model CommissionTariff {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
+  name           String
+  sourceFilename String?   @map("source_filename")
+  exportedAt     DateTime? @map("exported_at")
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  store   Store                    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  periods CommissionTariffPeriod[]
+
+  @@index([organizationId])
+  @@index([storeId])
+  @@map("commission_tariffs")
+}
+
+model CommissionTariffPeriod {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
+  tariffId       String    @map("tariff_id") @db.Uuid
+  // Raw human label straight from the Excel, e.g. "23 Haz 08.00 – 26 Haz 07.59".
+  dateRangeLabel String    @map("date_range_label")
+  // Best-effort parsed bounds (for active/upcoming/past validity); null if unparseable.
+  startsAt       DateTime? @map("starts_at")
+  endsAt         DateTime? @map("ends_at")
+  sortOrder      Int       @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  tariff CommissionTariff       @relation(fields: [tariffId], references: [id], onDelete: Cascade)
+  items  CommissionTariffItem[]
+
+  @@unique([tariffId, sortOrder])
+  @@index([organizationId])
+  @@index([tariffId])
+  @@map("commission_tariff_periods")
+}
+
+model CommissionTariffItem {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  storeId        String  @map("store_id") @db.Uuid
+  periodId       String  @map("period_id") @db.Uuid
+  // Matched seller variant (by barcode/stockCode at import); null = no catalog
+  // match → profit shown as "no cost". No FK: a deleted variant must not drop the
+  // tariff row (the seller still wants the tariff line).
+  productVariantId String?  @map("product_variant_id") @db.Uuid
+  barcode          String
+  stockCode        String?  @map("stock_code")
+  productTitle     String   @map("product_title")
+  category         String?
+  brand            String?
+  stock            Int?
+  currentPrice     Decimal  @map("current_price") @db.Decimal(12, 2)
+  // Current (band1) commission as a FRACTION (0.19 = %19), Excel-sourced.
+  currentCommissionPct Decimal @map("current_commission_pct") @db.Decimal(6, 4)
+  // The 4 price bands: [{ key, threshold, commissionPct }] (commissionPct fraction).
+  bands            Json
+  // The seller's chosen band (band1..band4) and optional custom price.
+  selectedBand     String?  @map("selected_band")
+  customPrice      Decimal? @map("custom_price") @db.Decimal(12, 2)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  period CommissionTariffPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([periodId])
+  @@index([storeId, barcode])
+  @@map("commission_tariff_items")
 }
 
 // ─── Profit Calculation V1 — Schema Foundation (PR-1) ──────────────────

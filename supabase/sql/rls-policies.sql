@@ -388,6 +388,29 @@ CREATE POLICY own_shipping_tariffs_org_member_read ON own_shipping_tariffs
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
+-- ─── commission_tariffs — store-scoped saved campaign tariffs ──────────
+-- The seller's uploaded Trendyol commission-tariff Excels (price-band promo
+-- tariffs) + their per-product band selections. Store-private competitive
+-- pricing intelligence — all three tables carry store_id and gate on
+-- can_access_store. Writes are API-only (service role bypasses RLS).
+ALTER TABLE commission_tariffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commission_tariffs_store_read ON commission_tariffs;
+CREATE POLICY commission_tariffs_store_read ON commission_tariffs
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE commission_tariff_periods ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commission_tariff_periods_store_read ON commission_tariff_periods;
+CREATE POLICY commission_tariff_periods_store_read ON commission_tariff_periods
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE commission_tariff_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commission_tariff_items_store_read ON commission_tariff_items;
+CREATE POLICY commission_tariff_items_store_read ON commission_tariff_items
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
 -- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
 -- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
 -- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md
