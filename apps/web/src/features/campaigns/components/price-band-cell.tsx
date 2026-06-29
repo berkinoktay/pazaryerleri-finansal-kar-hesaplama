@@ -3,10 +3,7 @@
 import { useFormatter } from 'next-intl';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
-import { Badge } from '@/components/ui/badge';
-import { marginBadgeStyle } from '@/lib/margin-color-style';
-import { useMarginColoring } from '@/lib/margin-coloring-context';
+import { MarginBadge } from '@/components/patterns/margin-badge';
 import { cn } from '@/lib/utils';
 
 import type { BandKey, PriceBand } from '../types';
@@ -19,25 +16,29 @@ export interface PriceBandCellProps {
   isBest?: boolean;
   /** Localized "best band" label shown when `isBest` — a non-color cue for a11y. */
   bestLabel?: string;
+  /** Whether this band is the product's current valid range (Trendyol's "Geçerli aralık"). */
+  isCurrent?: boolean;
+  /** Localized "current range" label shown when `isCurrent`. */
+  currentLabel?: string;
   onSelect: (key: BandKey) => void;
 }
 
 /**
  * One price band as a selectable cell: its threshold, commission rate, and a
- * margin-colored profit chip answering "if I join this band, what do I earn?".
- * Acts as a radio within the product's band group (one band per product).
+ * margin-colored profit chip ({@link MarginBadge}, fed by the user's settings
+ * scale) answering "if I join this band, what do I earn?". Acts as a radio
+ * within the product's band group (one band per product).
  */
 export function PriceBandCell({
   band,
   selected,
   isBest = false,
   bestLabel,
+  isCurrent = false,
+  currentLabel,
   onSelect,
 }: PriceBandCellProps): React.ReactElement {
   const format = useFormatter();
-  const scale = useMarginColoring();
-  // runtime-dynamic: margin-driven tinted fill/text/border on the profit chip
-  const profitStyle = marginBadgeStyle(band.marginPct, scale);
 
   return (
     <button
@@ -61,20 +62,16 @@ export function PriceBandCell({
         <span className="text-2xs text-muted-foreground truncate">{band.thresholdLabel}</span>
         {isBest && bestLabel !== undefined ? (
           <span className="text-2xs text-success shrink-0 font-semibold">{bestLabel}</span>
+        ) : isCurrent && currentLabel !== undefined ? (
+          <span className="text-2xs text-muted-foreground shrink-0 font-medium">
+            {currentLabel}
+          </span>
         ) : null}
       </span>
       <span className="text-sm font-semibold tabular-nums">
         {format.number(band.commissionPct.toNumber(), 'percent')}
       </span>
-      <Badge
-        tone="neutral"
-        variant="surface"
-        size="sm"
-        style={profitStyle}
-        className="tabular-nums"
-      >
-        <Currency value={band.profit} />
-      </Badge>
+      <MarginBadge value={band.profit} marginPct={band.marginPct} size="sm" />
     </button>
   );
 }

@@ -8,6 +8,7 @@ function makeBand(key: BandKey, profit: string): PriceBand {
   return {
     key,
     thresholdLabel: '',
+    threshold: new Decimal('0'),
     commissionPct: new Decimal('0.1'),
     profit: new Decimal(profit),
     marginPct: '0',
@@ -28,7 +29,9 @@ function makeRow(
     barcode: '',
     stock: 0,
     currentPrice: new Decimal('100'),
+    displayPrice: new Decimal('100'),
     currentCommissionPct: new Decimal('0.1'),
+    unitCost: new Decimal('80'),
     bands: [
       makeBand('band1', profits[0]),
       makeBand('band2', profits[1]),

@@ -11,6 +11,9 @@ export interface PriceBand {
   key: BandKey;
   /** Threshold label as shown to the seller, e.g. "777,09₺ ve altı". */
   thresholdLabel: string;
+  /** Numeric boundary of the band (the value in `thresholdLabel`). Used to map a
+   *  custom price to the band whose range it falls into. */
+  threshold: Decimal;
   /** Commission fraction, e.g. 0.131 = %13,1. */
   commissionPct: Decimal;
   /** Resulting net profit at this band (mocked; the real engine computes it). */
@@ -28,12 +31,20 @@ export interface CommissionTariffRow {
   barcode: string;
   stock: number;
   currentPrice: Decimal;
+  /** Price the customer sees (after any storefront discount). Mock: == currentPrice. */
+  displayPrice: Decimal;
   /** Current (off-tariff) commission fraction. */
   currentCommissionPct: Decimal;
+  /** Non-commission unit cost basis (product cost + shipping + other). Used to
+   *  estimate profit at a custom price: price − price·commission − unitCost. */
+  unitCost: Decimal;
   bands: readonly [PriceBand, PriceBand, PriceBand, PriceBand];
   /** The most profitable band — highlighted in the UI. */
   bestBand: BandKey;
 }
+
+/** A saved tariff's validity relative to today, for the list status column. */
+export type TariffValidity = 'active' | 'upcoming' | 'past';
 
 /**
  * A tariff period (one piece of a tariff). The number, labels, and structure
@@ -49,10 +60,20 @@ export interface TariffPeriod {
   rows: readonly CommissionTariffRow[];
 }
 
-/** A tariff view (e.g. this week / next week). Its label comes from the data. */
-export interface TariffWeek {
+/**
+ * A saved tariff set. The seller uploads a tariff Excel (we can't auto-fetch
+ * upcoming weeks — Trendyol has no such service), and each upload is kept as a
+ * separate, editable, deletable template. `name` defaults to the date range but
+ * is the human label shown on the tab. Each template owns its own band
+ * selections (held by the page, keyed by template id).
+ */
+export interface TariffTemplate {
   id: string;
-  label: string;
+  name: string;
   /** One period (single tariff) or several (split tariff) — data-driven. */
   periods: readonly TariffPeriod[];
+  /** Whether this tariff's date range is active / upcoming / past relative to today. */
+  validity: TariffValidity;
+  /** Human "last updated" label, e.g. "2 gün önce" (mock; real value from the row). */
+  updatedLabel: string;
 }

@@ -9,6 +9,7 @@ import { render, screen } from '../helpers/render';
 const band: PriceBand = {
   key: 'band2',
   thresholdLabel: '777,09₺ ve altı',
+  threshold: new Decimal('777.09'),
   commissionPct: new Decimal('0.131'),
   profit: new Decimal('70.79'),
   marginPct: '9.11',

@@ -785,6 +785,23 @@
       "upload": "Upload Excel",
       "saveExport": "Save and Download"
     },
+    "templates": {
+      "add": "New tariff",
+      "back": "Back to tariffs",
+      "delete": "Delete table",
+      "deleteTitle": "Delete tariff",
+      "deleteDescription": "This saved tariff and all of its band selections will be permanently deleted. This action cannot be undone.",
+      "deleteConfirm": "Delete tariff"
+    },
+    "list": {
+      "heading": "Your saved tariffs",
+      "subheading": "Click a tariff to open it, or upload a new one.",
+      "productCount": "{count} products",
+      "periodCount": "{count} periods",
+      "selectedCount": "{count} bands chosen",
+      "open": "Open",
+      "openAria": "Open the {name} tariff"
+    },
     "summary": {
       "total": "Products in tariff",
       "totalContext": "listed this period",
@@ -798,13 +815,17 @@
       "applyBest": "Apply to all"
     },
     "table": {
-      "product": "Product",
-      "current": "Current",
+      "product": "Product Details",
+      "current": "Current Price & Commission",
+      "salePrice": "Trendyol sale price",
+      "displayPrice": "Price the customer sees",
+      "currentCommission": "Current commission",
       "currentPrice": "Current Price",
       "commission": "commission",
       "stock": "Stock",
-      "band": "Band {n}",
+      "band": "Price Band {n}",
       "best": "Best",
+      "currentRange": "Current",
       "yourChoice": "Your choice",
       "noChoice": "Choose a band",
       "customPrice": "Custom Price",
@@ -825,6 +846,57 @@
       "step1": "Download the weekly commission tariff Excel from the Trendyol panel",
       "step2": "Upload the file here",
       "step3": "See what you'll earn at each price band for every product"
+    },
+    "customPriceModal": {
+      "title": "Estimated profit — custom price",
+      "openAria": "Open estimated profit detail",
+      "priceLabel": "Your price",
+      "bandLabel": "Matched range",
+      "commissionLabel": "Commission",
+      "costLabel": "Estimated cost",
+      "profitLabel": "Estimated profit"
+    },
+    "smartSelect": {
+      "label": "Smart select",
+      "bestAll": "Best band for all",
+      "profitableOnly": "Profitable products only",
+      "byTargetTitle": "Select by target margin",
+      "targetLabel": "Target margin %",
+      "strategyLabel": "Strategy",
+      "strategyLeastDrop": "Least price drop",
+      "strategyMaxProfit": "Highest profit",
+      "apply": "Apply",
+      "clear": "Clear selections",
+      "scopeHint": "Applies only to the visible products when a filter is active."
+    },
+    "filters": {
+      "label": "Filters",
+      "category": "Category",
+      "brand": "Brand",
+      "all": "All",
+      "minMargin": "Min. margin %",
+      "profit": "Profitability",
+      "profitAll": "All",
+      "profitProfitable": "Profitable",
+      "profitLoss": "Loss",
+      "selection": "Selection state",
+      "selectionAll": "All",
+      "selectionSelected": "Selected",
+      "selectionUnselected": "Unselected",
+      "clear": "Clear filters"
+    },
+    "actionBar": {
+      "selected": "{count}/{total} products selected",
+      "profitLabel": "chosen-band profit"
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
+    },
+    "validity": {
+      "active": "Active",
+      "upcoming": "Upcoming",
+      "past": "Past"
     }
   },
   "featureStatus": {

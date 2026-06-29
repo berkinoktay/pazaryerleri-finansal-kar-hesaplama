@@ -785,6 +785,23 @@
       "upload": "Excel Yükle",
       "saveExport": "Kaydet ve İndir"
     },
+    "templates": {
+      "add": "Yeni tarife",
+      "back": "Tarifelere dön",
+      "delete": "Tabloyu Sil",
+      "deleteTitle": "Tarifeyi sil",
+      "deleteDescription": "Bu kayıtlı tarife ve içindeki tüm kademe seçimlerin kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "deleteConfirm": "Tarifeyi sil"
+    },
+    "list": {
+      "heading": "Kayıtlı tarifelerin",
+      "subheading": "Bir tarifeyi açmak için üzerine tıkla ya da yeni bir tarife yükle.",
+      "productCount": "{count} ürün",
+      "periodCount": "{count} dönem",
+      "selectedCount": "{count} kademe seçildi",
+      "open": "Aç",
+      "openAria": "{name} tarifesini aç"
+    },
     "summary": {
       "total": "Tarifedeki ürün",
       "totalContext": "bu dönemde listelenen",
@@ -798,13 +815,17 @@
       "applyBest": "Hepsine uygula"
     },
     "table": {
-      "product": "Ürün",
-      "current": "Güncel",
+      "product": "Ürün Bilgileri",
+      "current": "Güncel Fiyat ve Komisyon",
+      "salePrice": "Trendyol satış fiyatı",
+      "displayPrice": "Müşterinin gördüğü fiyat",
+      "currentCommission": "Güncel komisyon",
       "currentPrice": "Güncel Fiyat",
       "commission": "komisyon",
       "stock": "Stok",
-      "band": "{n}. Kademe",
+      "band": "{n}. Fiyat Aralığı",
       "best": "En iyi",
+      "currentRange": "Geçerli",
       "yourChoice": "Seçimin",
       "noChoice": "Kademe seç",
       "customPrice": "Özel Fiyat",
@@ -825,6 +846,57 @@
       "step1": "Trendyol panelinden haftalık komisyon tarifesi Excel'ini indirin",
       "step2": "Dosyayı buraya yükleyin",
       "step3": "Her ürün için hangi fiyat aralığında ne kazanacağınızı görün"
+    },
+    "customPriceModal": {
+      "title": "Tahmini kâr — özel fiyat",
+      "openAria": "Tahmini kâr detayını aç",
+      "priceLabel": "Senin fiyatın",
+      "bandLabel": "Denk gelen aralık",
+      "commissionLabel": "Komisyon",
+      "costLabel": "Tahmini maliyet",
+      "profitLabel": "Tahmini kâr"
+    },
+    "smartSelect": {
+      "label": "Akıllı Seçim",
+      "bestAll": "Hepsine en iyi kademe",
+      "profitableOnly": "Sadece kârlı ürünler",
+      "byTargetTitle": "Hedef marja göre seç",
+      "targetLabel": "Hedef marj %",
+      "strategyLabel": "Strateji",
+      "strategyLeastDrop": "Fiyatı en az düşür",
+      "strategyMaxProfit": "En yüksek kâr",
+      "apply": "Uygula",
+      "clear": "Seçimleri temizle",
+      "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
+    },
+    "filters": {
+      "label": "Filtreler",
+      "category": "Kategori",
+      "brand": "Marka",
+      "all": "Tümü",
+      "minMargin": "Min. marj %",
+      "profit": "Kârlılık",
+      "profitAll": "Tümü",
+      "profitProfitable": "Kârda",
+      "profitLoss": "Zararda",
+      "selection": "Seçim durumu",
+      "selectionAll": "Tümü",
+      "selectionSelected": "Seçili",
+      "selectionUnselected": "Seçilmemiş",
+      "clear": "Filtreleri temizle"
+    },
+    "actionBar": {
+      "selected": "{count}/{total} ürün seçildi",
+      "profitLabel": "seçili kademe kârı"
+    },
+    "status": {
+      "exported": "İndirildi",
+      "pending": "Bekliyor"
+    },
+    "validity": {
+      "active": "Aktif",
+      "upcoming": "Yaklaşan",
+      "past": "Geçmiş"
     }
   },
   "featureStatus": {
