@@ -32,6 +32,15 @@ section "Versioning" for details.
   (Engine note: `@pazarsync/spreadsheet` now strips a bogus single-cell `<dimension>` that
   Trendyol writes, which otherwise made the reader drop every data row.)
 
+- **`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export`** —
+  Returns Trendyol's ORIGINAL uploaded file (kept at import) with the seller's choices patched in:
+  the chosen band price into "YENİ TSF (FİYAT GÜNCELLE)" and "{N} Günlük Fiyat" into "Tarife
+  Seçimi" for every selected product. Every other cell is byte-for-byte unchanged, so the file is
+  re-uploadable to Trendyol verbatim. Marks the tariff exported. Store-scoped (`DATA_WRITE`);
+  returns the `.xlsx` (`Content-Disposition: attachment`). `409` if no source file was stored.
+  (The import now reads the tariff layout by HEADER, not fixed positions, so it handles any period
+  count — 1-period (27-col), 2-period (35-col), … — and the column shift that comes with it.)
+
 - **`PATCH /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections`** —
   Persists the seller's chosen band (`band1`..`band4`, or null) and optional custom price per
   item, in a single bulk update scoped to the tariff (items from another tariff/store are

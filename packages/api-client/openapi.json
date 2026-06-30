@@ -12993,6 +12993,122 @@
         }
       }
     },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export": {
+      "post": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Export the tariff as a re-uploadable Trendyol Excel",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's choices patched in: the chosen band price into \"YENİ TSF (FİYAT GÜNCELLE)\" and \"{N} Günlük Fiyat\" into \"Tarife Seçimi\" for every product that has a selection. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The patched .xlsx, ready to re-upload to Trendyol",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Tariff has no stored source file to export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections": {
       "patch": {
         "tags": [
