@@ -23,7 +23,7 @@ import { summarizeSelection } from '../lib/commission-tariff-summary';
 import { MOCK_TARIFF_TEMPLATES } from '../lib/mock-commission-tariffs';
 import type { BandKey, TariffTemplate } from '../types';
 import { CommissionTariffsActionBar } from './commission-tariffs-action-bar';
-import { CommissionTariffsList } from './commission-tariffs-list';
+import { CommissionTariffsListView } from './commission-tariffs-list-view';
 import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards';
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
 import { CommissionTariffsTable } from './commission-tariffs-table';
@@ -63,9 +63,23 @@ export function CommissionTariffsPageClient(): React.ReactElement {
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [selections, setSelections] = React.useState<Record<string, SelectionMap>>(() => ({
-    'tpl-2026-06-23': { r1: 'band2', r2: 'band2' },
+    'tpl-2330-haz': { r1: 'band2', r2: 'band2' },
   }));
-  const [exportedIds, setExportedIds] = React.useState<Record<string, boolean>>({});
+  // Seed exported tariffs so the list's "exported" stat + indicator read
+  // realistically: the active week + most of the past history are downloaded;
+  // the upcoming week, the draft, and one older week stay pending.
+  const [exportedIds, setExportedIds] = React.useState<Record<string, boolean>>(() => ({
+    'tpl-2330-haz': true,
+    'tpl-1623-haz': true,
+    'tpl-0916-haz': true,
+    'tpl-0209-haz': true,
+    'tpl-2602-haz': true,
+    'tpl-1926-may': true,
+    'tpl-1219-may': true,
+    'tpl-2805-nis': true,
+    'tpl-2128-nis': true,
+    'tpl-1421-nis': true,
+  }));
   const [periodId, setPeriodId] = React.useState<string | null>(null);
   const [filters, setFilters] = React.useState<TariffFilterState>(EMPTY_FILTERS);
   const seqRef = React.useRef(MOCK_TARIFF_TEMPLATES.length);
@@ -113,6 +127,10 @@ export function CommissionTariffsPageClient(): React.ReactElement {
       return next;
     });
     setActiveId((prev) => (prev === id ? null : prev));
+  }, []);
+
+  const markExported = React.useCallback((id: string): void => {
+    setExportedIds((prev) => ({ ...prev, [id]: true }));
   }, []);
 
   const handleSelectBand = React.useCallback(
@@ -261,37 +279,25 @@ export function CommissionTariffsPageClient(): React.ReactElement {
     );
   }
 
-  // ---- CREATE ----
-  if (creating || templates.length === 0) {
+  // ---- CREATE (upload) ----
+  if (creating) {
     return (
       <div className="gap-lg flex flex-col">
         <PageHeader title={t('title')} intent={t('intent')} />
-        <CommissionTariffsUpload
-          onFile={addTemplate}
-          onBack={templates.length > 0 ? backToList : undefined}
-        />
+        <CommissionTariffsUpload onFile={addTemplate} onBack={backToList} />
       </div>
     );
   }
 
-  // ---- LIST ----
+  // ---- LIST (route-open screen; renders even with zero tariffs) ----
   return (
-    <div className="gap-lg flex flex-col">
-      <PageHeader title={t('title')} intent={t('intent')} />
-      <div className="gap-sm flex flex-col">
-        <div className="gap-3xs flex flex-col">
-          <h2 className="text-base font-semibold">{tPage('list.heading')}</h2>
-          <p className="text-muted-foreground text-sm">{tPage('list.subheading')}</p>
-        </div>
-        <CommissionTariffsList
-          templates={templates}
-          selections={selections}
-          exportedIds={exportedIds}
-          onOpen={openTemplate}
-          onDelete={deleteTemplate}
-          onCreate={startCreate}
-        />
-      </div>
-    </div>
+    <CommissionTariffsListView
+      templates={templates}
+      exportedIds={exportedIds}
+      onOpen={openTemplate}
+      onCreate={startCreate}
+      onExport={markExported}
+      onDelete={deleteTemplate}
+    />
   );
 }

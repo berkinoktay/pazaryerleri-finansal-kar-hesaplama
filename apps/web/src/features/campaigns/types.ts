@@ -43,7 +43,12 @@ export interface CommissionTariffRow {
   bestBand: BandKey;
 }
 
-/** A saved tariff's validity relative to today, for the list status column. */
+/**
+ * A saved tariff's validity relative to today, for the list status column.
+ * Mirrors the backend's derived `validity` (parsed from the period date range);
+ * `null` when no parseable dates exist yet — surfaced in the UI as a "Taslak"
+ * (draft) status alongside the separate `exported` signal.
+ */
 export type TariffValidity = 'active' | 'upcoming' | 'past';
 
 /**
@@ -69,11 +74,23 @@ export interface TariffPeriod {
  */
 export interface TariffTemplate {
   id: string;
+  /** Display name — the period's date range, e.g. "23 – 30 Haziran 2026". */
   name: string;
+  /** Source Excel file name, shown as the list row's secondary line. */
+  sourceFilename: string;
+  /**
+   * Human relative-period label for the list's "Dönem" column, e.g. "Bu hafta",
+   * "Geçen hafta", "2 hafta önce", "Tarih seçilmedi" (draft). Static in the mock
+   * to stay SSR-safe; the real value is derived from the period dates server-side.
+   */
+  relativeLabel: string;
   /** One period (single tariff) or several (split tariff) — data-driven. */
   periods: readonly TariffPeriod[];
-  /** Whether this tariff's date range is active / upcoming / past relative to today. */
-  validity: TariffValidity;
+  /**
+   * Whether this tariff's date range is active / upcoming / past relative to
+   * today, or `null` for a draft with no parseable dates yet (shown as "Taslak").
+   */
+  validity: TariffValidity | null;
   /** Human "last updated" label, e.g. "2 gün önce" (mock; real value from the row). */
   updatedLabel: string;
 }

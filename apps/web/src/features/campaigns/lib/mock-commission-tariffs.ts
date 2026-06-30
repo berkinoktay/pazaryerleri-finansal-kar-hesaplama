@@ -188,29 +188,160 @@ const r6 = makeRow(
 );
 
 /**
- * Pool of mock tariff templates an upload can "create". Successive uploads pull
- * the next one (the first is a 3+4 split tariff, the second a single-period one)
- * so both period shapes are demonstrable. Real templates come from the uploaded
- * Excel, parsed by the backend.
+ * The recent, richly-structured tariffs for the list screen. Covers every list
+ * status the UI must render — active / upcoming / past (×2) and a dateless draft
+ * — plus both period shapes (a 3+4 split and single-period tariffs). The older
+ * history is appended below so the list paginates. The list derives product
+ * counts and stats from these; `exported` is tracked separately by the page (a
+ * tariff becomes exported once it is saved & downloaded). Real templates come
+ * from the uploaded Excel, parsed by the backend.
  */
-export const MOCK_TARIFF_TEMPLATES: readonly TariffTemplate[] = [
+const RECENT_TEMPLATES: readonly TariffTemplate[] = [
   {
-    id: 'tpl-2026-06-23',
-    name: '23–30 Haziran',
+    id: 'tpl-2330-haz',
+    name: '23 – 30 Haziran 2026',
+    sourceFilename: 'komisyon_tarifesi_2330_haz.xlsx',
+    relativeLabel: 'Bu hafta',
     validity: 'active',
     updatedLabel: '2 gün önce',
     periods: [
-      { id: 'p-3day', dateRangeLabel: '23 Haz 08.00 – 26 Haz 07.59', rows: [r1, r2, r3] },
-      { id: 'p-4day', dateRangeLabel: '26 Haz 08.00 – 30 Haz 07.59', rows: [r1, r3, r4, r5] },
+      { id: 'p-2330-3day', dateRangeLabel: '23 Haz 08.00 – 26 Haz 07.59', rows: [r1, r2, r3] },
+      { id: 'p-2330-4day', dateRangeLabel: '26 Haz 08.00 – 30 Haz 07.59', rows: [r1, r3, r4, r5] },
     ],
   },
   {
-    id: 'tpl-2026-06-30',
-    name: '30 Haziran – 7 Temmuz',
+    id: 'tpl-3007-tem',
+    name: '30 Haziran – 7 Temmuz 2026',
+    sourceFilename: 'komisyon_tarifesi_3007_tem.xlsx',
+    relativeLabel: 'Gelecek hafta',
     validity: 'upcoming',
     updatedLabel: '5 saat önce',
     periods: [
-      { id: 'p-week', dateRangeLabel: '30 Haz 08.00 – 7 Tem 07.59', rows: [r1, r2, r4, r5, r6] },
+      {
+        id: 'p-3007-week',
+        dateRangeLabel: '30 Haz 08.00 – 7 Tem 07.59',
+        rows: [r1, r2, r4, r5, r6],
+      },
     ],
   },
+  {
+    id: 'tpl-1623-haz',
+    name: '16 – 23 Haziran 2026',
+    sourceFilename: 'komisyon_tarifesi_1623_haz.xlsx',
+    relativeLabel: 'Geçen hafta',
+    validity: 'past',
+    updatedLabel: '1 hafta önce',
+    periods: [
+      { id: 'p-1623', dateRangeLabel: '16 Haz 08.00 – 23 Haz 07.59', rows: [r1, r2, r3, r4] },
+    ],
+  },
+  {
+    id: 'tpl-0916-haz',
+    name: '9 – 16 Haziran 2026',
+    sourceFilename: 'komisyon_tarifesi_0916_haz.xlsx',
+    relativeLabel: '2 hafta önce',
+    validity: 'past',
+    updatedLabel: '2 hafta önce',
+    periods: [{ id: 'p-0916', dateRangeLabel: '9 Haz 08.00 – 16 Haz 07.59', rows: [r2, r3, r5] }],
+  },
+  {
+    id: 'tpl-taslak',
+    name: 'Yeni tarife taslağı',
+    sourceFilename: 'taslak.xlsx',
+    relativeLabel: 'Tarih seçilmedi',
+    validity: null,
+    updatedLabel: '3 hafta önce',
+    periods: [{ id: 'p-taslak', dateRangeLabel: 'Dönem belirlenmedi', rows: [r1, r6] }],
+  },
+];
+
+/**
+ * Older past tariffs — a season of prior weekly uploads — so the list paginates
+ * and the stats read like a real, accumulated history. Compact specs mapped to
+ * full templates; they reuse the product rows above and a single period each.
+ */
+interface PastTariffSpec {
+  id: string;
+  name: string;
+  filename: string;
+  relativeLabel: string;
+  rows: readonly CommissionTariffRow[];
+}
+
+const OLDER_PAST_SPECS: readonly PastTariffSpec[] = [
+  {
+    id: 'tpl-0209-haz',
+    name: '2 – 9 Haziran 2026',
+    filename: 'komisyon_tarifesi_0209_haz.xlsx',
+    relativeLabel: '3 hafta önce',
+    rows: [r1, r2, r4, r5],
+  },
+  {
+    id: 'tpl-2602-haz',
+    name: '26 Mayıs – 2 Haziran 2026',
+    filename: 'komisyon_tarifesi_2602_haz.xlsx',
+    relativeLabel: '4 hafta önce',
+    rows: [r2, r3, r6],
+  },
+  {
+    id: 'tpl-1926-may',
+    name: '19 – 26 Mayıs 2026',
+    filename: 'komisyon_tarifesi_1926_may.xlsx',
+    relativeLabel: '5 hafta önce',
+    rows: [r1, r3, r5],
+  },
+  {
+    id: 'tpl-1219-may',
+    name: '12 – 19 Mayıs 2026',
+    filename: 'komisyon_tarifesi_1219_may.xlsx',
+    relativeLabel: '6 hafta önce',
+    rows: [r1, r2, r3, r4, r5],
+  },
+  {
+    id: 'tpl-0512-may',
+    name: '5 – 12 Mayıs 2026',
+    filename: 'komisyon_tarifesi_0512_may.xlsx',
+    relativeLabel: '7 hafta önce',
+    rows: [r4, r5, r6],
+  },
+  {
+    id: 'tpl-2805-nis',
+    name: '28 Nisan – 5 Mayıs 2026',
+    filename: 'komisyon_tarifesi_2805_nis.xlsx',
+    relativeLabel: '8 hafta önce',
+    rows: [r1, r6],
+  },
+  {
+    id: 'tpl-2128-nis',
+    name: '21 – 28 Nisan 2026',
+    filename: 'komisyon_tarifesi_2128_nis.xlsx',
+    relativeLabel: '9 hafta önce',
+    rows: [r2, r4],
+  },
+  {
+    id: 'tpl-1421-nis',
+    name: '14 – 21 Nisan 2026',
+    filename: 'komisyon_tarifesi_1421_nis.xlsx',
+    relativeLabel: '10 hafta önce',
+    rows: [r1, r2, r3],
+  },
+];
+
+const OLDER_PAST_TEMPLATES: readonly TariffTemplate[] = OLDER_PAST_SPECS.map((spec) => ({
+  id: spec.id,
+  name: spec.name,
+  sourceFilename: spec.filename,
+  relativeLabel: spec.relativeLabel,
+  validity: 'past',
+  updatedLabel: spec.relativeLabel,
+  periods: [{ id: `${spec.id}-p`, dateRangeLabel: spec.name, rows: spec.rows }],
+}));
+
+/**
+ * Full saved-tariff list: the recent, structured tariffs first, then the older
+ * weekly history. Ordered newest-first so the list's default order is sensible.
+ */
+export const MOCK_TARIFF_TEMPLATES: readonly TariffTemplate[] = [
+  ...RECENT_TEMPLATES,
+  ...OLDER_PAST_TEMPLATES,
 ];

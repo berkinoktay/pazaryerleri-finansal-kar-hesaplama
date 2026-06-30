@@ -752,7 +752,7 @@
   "campaignsPages": {
     "productCommissionTariffs": {
       "title": "Ürün Komisyon Tarifeleri",
-      "intent": "Trendyol komisyon tarifesindeki fiyat aralıklarına katılırsanız kazancınızın ne olacağını hesaplayın"
+      "intent": "Yüklediğin haftalık Trendyol komisyon tarife Excel dosyalarını görüntüle, düzenle ve yönet."
     },
     "plusCommissionTariffs": {
       "title": "Plus Komisyon Tarifesi",
@@ -794,13 +794,43 @@
       "deleteConfirm": "Tarifeyi sil"
     },
     "list": {
-      "heading": "Kayıtlı tarifelerin",
-      "subheading": "Bir tarifeyi açmak için üzerine tıkla ya da yeni bir tarife yükle.",
-      "productCount": "{count} ürün",
-      "periodCount": "{count} dönem",
-      "selectedCount": "{count} kademe seçildi",
-      "open": "Aç",
-      "openAria": "{name} tarifesini aç"
+      "upload": "Excel Dosyası Yükle",
+      "search": "Tarife ara…",
+      "productUnit": "ürün",
+      "columns": {
+        "tariff": "Tarife",
+        "period": "Dönem",
+        "products": "Ürün",
+        "status": "Durum",
+        "exported": "Dışa aktarım"
+      },
+      "summary": {
+        "total": "Toplam tarife",
+        "activePeriod": "Aktif dönem",
+        "covered": "Kapsanan ürün",
+        "exported": "Dışa aktarılan",
+        "exportedValue": "{count} / {total}"
+      },
+      "empty": {
+        "title": "Henüz komisyon tarifesi yok",
+        "description": "İlk haftalık Trendyol komisyon tarifesi Excel dosyanı yükleyerek başla; her ürün için fiyat aralıklarına göre kazancını hesaplayalım.",
+        "cta": "Excel Dosyası Yükle"
+      },
+      "actions": {
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
+      },
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
+      "filterLabel": "Duruma göre filtrele",
+      "bulk": {
+        "selected": "{count} tarife seçili",
+        "delete": "Seçilenleri sil",
+        "deleteTitle": "Seçili tarifeleri sil",
+        "deleteDescription": "{count} tarife ve içindeki tüm kademe seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+        "deleteConfirm": "Tarifeleri sil"
+      }
     },
     "summary": {
       "total": "Tarifedeki ürün",
@@ -897,6 +927,12 @@
       "active": "Aktif",
       "upcoming": "Yaklaşan",
       "past": "Geçmiş"
+    },
+    "listStatus": {
+      "active": "Aktif",
+      "upcoming": "Planlandı",
+      "past": "Süresi doldu",
+      "draft": "Taslak"
     }
   },
   "featureStatus": {
