@@ -1152,6 +1152,9 @@ model CommissionTariff {
   storeId        String    @map("store_id") @db.Uuid
   name           String
   sourceFilename String?   @map("source_filename")
+  // The raw uploaded .xlsx bytes, kept so export can patch the seller's chosen
+  // price + tariff selection back into Trendyol's EXACT file (re-uploaded verbatim).
+  sourceFile     Bytes?    @map("source_file")
   exportedAt     DateTime? @map("exported_at")
   createdBy      String?   @map("created_by") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -1172,6 +1175,9 @@ model CommissionTariffPeriod {
   tariffId       String    @map("tariff_id") @db.Uuid
   // Raw human label straight from the Excel, e.g. "23 Haz 08.00 – 26 Haz 07.59".
   dateRangeLabel String    @map("date_range_label")
+  // The N from "Tarih aralığı (N Gün)" — drives the export's "{N} Günlük Fiyat"
+  // value written into the Tarife Seçimi column. Null if the header was unusual.
+  dayCount       Int?      @map("day_count")
   // Best-effort parsed bounds (for active/upcoming/past validity); null if unparseable.
   startsAt       DateTime? @map("starts_at")
   endsAt         DateTime? @map("ends_at")

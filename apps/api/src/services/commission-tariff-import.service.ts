@@ -1,16 +1,18 @@
 // Import service for Trendyol's "Ürün Komisyon Tarifeleri" Excel.
 //
-// The export is a FIXED-LAYOUT sheet (KomisyonTarifeleriÜrünleri) with DUPLICATE
-// column headers — "1.KOMİSYON".."4.KOMİSYON" appear once for the 3-day period
-// and again for the 4-day period — so header matching cannot disambiguate them.
-// We read the raw grid via `readWorkbookGrid` (which also fixes Trendyol's bogus
-// single-cell <dimension>) and map columns BY POSITION, validating a few header
-// cells so a format drift fails fast.
+// The export is a fixed-IDENTITY but variable-WIDTH sheet: columns A-N (product
+// identity + the 4 price brackets) are stable, but the GÜNCEL TSF / YENİ TSF /
+// Tarife Seçimi tail columns shift by how many "Tarih aralığı (N Gün)" period
+// blocks the file carries (1 period → 27 cols, 2 periods → 35). Its commission
+// headers ("1.KOMİSYON"..) also repeat per period, so header matching cannot
+// disambiguate them. We read the raw grid via `readWorkbookGrid` (which also
+// fixes Trendyol's bogus single-cell <dimension>) and resolve every column from
+// the header via `resolveTariffLayout`, then map by the resolved positions.
 //
-// Data model: each band is a PRICE RANGE [lower, upper] (shared across periods);
-// each present period (3-day / 4-day) contributes its own commission set. We
-// persist one period row per present period and one item per (product × period),
-// joining barcode → ProductVariant. Profit is computed later, on read.
+// Each band is a PRICE RANGE [lower, upper] (shared across periods); each present
+// period contributes its own commission set. We keep the raw file (for export to
+// patch verbatim) and persist one period row per present period and one item per
+// (product × period), joining barcode → ProductVariant. Profit is computed on read.
 
 import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
@@ -18,41 +20,9 @@ import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsy
 
 import { ValidationError } from '../lib/errors';
 import { parseTariffPeriodLabel } from './commission-tariff.types';
+import { resolveTariffLayout, type TariffLayout } from './commission-tariff-layout';
 
 const SHEET_NAME = 'KomisyonTarifeleriÜrünleri';
-
-// Fixed 0-based column layout of the Trendyol export.
-const COL = {
-  productTitle: 0,
-  barcode: 1,
-  sellerStockCode: 2,
-  size: 3,
-  modelCode: 4,
-  category: 5,
-  brand: 6,
-  stock: 7,
-  band1Lower: 8,
-  band2Upper: 9,
-  band2Lower: 10,
-  band3Upper: 11,
-  band3Lower: 12,
-  band4Upper: 13,
-  period3Label: 14,
-  comm3: [15, 16, 17, 18],
-  period4Label: 19,
-  comm4: [20, 21, 22, 23],
-  currentCommission: 25,
-  currentTsf: 26,
-} as const;
-
-// A few header cells verified against the file so a layout change fails fast
-// instead of silently importing garbage by position.
-const EXPECTED_HEADERS: ReadonlyArray<readonly [number, string]> = [
-  [COL.barcode, 'BARKOD'],
-  [COL.band1Lower, '1.Fiyat Alt Limit'],
-  [COL.period4Label, 'Tarih aralığı (4 Gün)'],
-  [COL.currentTsf, 'GÜNCEL TSF'],
-];
 
 // ─── Cell readers (grid cells are string | number | boolean | Date | null) ──
 
@@ -108,8 +78,8 @@ interface ParsedRow {
   currentPrice: string;
   currentCommissionPct: string;
   brackets: PriceBrackets;
-  comm3: ReadonlyArray<string | null>;
-  comm4: ReadonlyArray<string | null>;
+  // Commissions per layout period (parallel to layout.periods): [periodIdx][band].
+  periodComms: ReadonlyArray<ReadonlyArray<string | null>>;
 }
 
 /**
@@ -144,46 +114,38 @@ function bandsForPeriod(
   return bands;
 }
 
-function assertExpectedFormat(headerRow: readonly unknown[]): void {
-  for (const [idx, expected] of EXPECTED_HEADERS) {
-    const actual = cellText(headerRow, idx);
-    if (actual === null || actual.normalize('NFC') !== expected.normalize('NFC')) {
-      throw new ValidationError([{ field: 'file', code: 'INVALID_TARIFF_FORMAT' }]);
-    }
-  }
-}
-
-function parseRow(row: readonly unknown[]): ParsedRow | null {
-  const barcode = cellText(row, COL.barcode);
+function parseRow(row: readonly unknown[], layout: TariffLayout): ParsedRow | null {
+  const { fixed } = layout;
+  const barcode = cellText(row, fixed.barcode);
   if (barcode === null) return null;
   return {
     barcode,
-    stockCode: cellText(row, COL.modelCode) ?? cellText(row, COL.sellerStockCode),
-    productTitle: cellText(row, COL.productTitle) ?? barcode,
-    category: cellText(row, COL.category),
-    brand: cellText(row, COL.brand),
-    stock: cellInt(row, COL.stock),
-    currentPrice: cellDecimalString(row, COL.currentTsf) ?? '0',
-    currentCommissionPct: cellDecimalString(row, COL.currentCommission) ?? '0',
+    stockCode: cellText(row, fixed.modelCode) ?? cellText(row, fixed.sellerStockCode),
+    productTitle: cellText(row, fixed.productTitle) ?? barcode,
+    category: cellText(row, fixed.category),
+    brand: cellText(row, fixed.brand),
+    stock: cellInt(row, fixed.stock),
+    currentPrice: cellDecimalString(row, layout.currentPrice) ?? '0',
+    currentCommissionPct: cellDecimalString(row, layout.currentCommission) ?? '0',
     brackets: {
-      band1Lower: cellDecimalString(row, COL.band1Lower),
-      band2Lower: cellDecimalString(row, COL.band2Lower),
-      band2Upper: cellDecimalString(row, COL.band2Upper),
-      band3Lower: cellDecimalString(row, COL.band3Lower),
-      band3Upper: cellDecimalString(row, COL.band3Upper),
-      band4Upper: cellDecimalString(row, COL.band4Upper),
+      band1Lower: cellDecimalString(row, fixed.band1Lower),
+      band2Lower: cellDecimalString(row, fixed.band2Lower),
+      band2Upper: cellDecimalString(row, fixed.band2Upper),
+      band3Lower: cellDecimalString(row, fixed.band3Lower),
+      band3Upper: cellDecimalString(row, fixed.band3Upper),
+      band4Upper: cellDecimalString(row, fixed.band4Upper),
     },
-    comm3: COL.comm3.map((idx) => cellDecimalString(row, idx)),
-    comm4: COL.comm4.map((idx) => cellDecimalString(row, idx)),
+    periodComms: layout.periods.map((p) => p.commCols.map((c) => cellDecimalString(row, c))),
   };
 }
 
-interface PeriodSpec {
+interface PresentPeriod {
   label: string;
+  dayCount: number;
   startsAt: Date | null;
   endsAt: Date | null;
   sortOrder: number;
-  pick: (row: ParsedRow) => ReadonlyArray<string | null>;
+  layoutIndex: number;
 }
 
 // ─── Entry point ────────────────────────────────────────────────────────────
@@ -232,12 +194,15 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
   if (grid.length < 2) {
     throw new ValidationError([{ field: 'file', code: 'EMPTY_TARIFF_FILE' }]);
   }
-  assertExpectedFormat(grid[0] ?? []);
+  const layout = resolveTariffLayout(grid[0] ?? []);
+  if (layout === null) {
+    throw new ValidationError([{ field: 'file', code: 'INVALID_TARIFF_FORMAT' }]);
+  }
 
   const parsed: ParsedRow[] = [];
   let skippedRows = 0;
   for (const row of grid.slice(1)) {
-    const parsedRow = parseRow(row);
+    const parsedRow = parseRow(row, layout);
     if (parsedRow === null) {
       skippedRows += 1;
       continue;
@@ -248,33 +213,25 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
     throw new ValidationError([{ field: 'file', code: 'EMPTY_TARIFF_FILE' }]);
   }
 
-  // Period labels are tariff-level (identical on every row) — read from the first.
+  // A period block can exist in the header but carry no data (empty columns), so
+  // keep only periods whose date label is filled on the first row.
   const firstRow = grid[1] ?? [];
   const year = input.now.getUTCFullYear();
-  const periods: PeriodSpec[] = [];
-  const label3 = cellText(firstRow, COL.period3Label);
-  if (label3 !== null) {
-    const { startsAt, endsAt } = parseTariffPeriodLabel(label3, year);
-    periods.push({
-      label: label3,
+  const present: PresentPeriod[] = [];
+  layout.periods.forEach((period, layoutIndex) => {
+    const label = cellText(firstRow, period.labelCol);
+    if (label === null) return;
+    const { startsAt, endsAt } = parseTariffPeriodLabel(label, year);
+    present.push({
+      label,
+      dayCount: period.dayCount,
       startsAt,
       endsAt,
-      sortOrder: periods.length,
-      pick: (r) => r.comm3,
+      sortOrder: present.length,
+      layoutIndex,
     });
-  }
-  const label4 = cellText(firstRow, COL.period4Label);
-  if (label4 !== null) {
-    const { startsAt, endsAt } = parseTariffPeriodLabel(label4, year);
-    periods.push({
-      label: label4,
-      startsAt,
-      endsAt,
-      sortOrder: periods.length,
-      pick: (r) => r.comm4,
-    });
-  }
-  if (periods.length === 0) {
+  });
+  if (present.length === 0) {
     throw new ValidationError([{ field: 'file', code: 'NO_TARIFF_PERIOD' }]);
   }
 
@@ -287,7 +244,7 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
   const variantByBarcode = new Map(variants.map((v) => [v.barcode, v.id]));
   const matched = parsed.filter((p) => variantByBarcode.has(p.barcode)).length;
 
-  const name = deriveName(input, periods[0]?.label ?? null);
+  const name = deriveName(input, present[0]?.label ?? null);
 
   try {
     const { tariffId, itemCount } = await prisma.$transaction(async (tx) => {
@@ -297,18 +254,20 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
           storeId,
           name,
           sourceFilename: input.filename,
+          sourceFile: new Uint8Array(input.file),
           createdBy: input.createdBy,
         },
       });
 
       let items = 0;
-      for (const period of periods) {
+      for (const period of present) {
         const periodRow = await tx.commissionTariffPeriod.create({
           data: {
             organizationId,
             storeId,
             tariffId: tariff.id,
             dateRangeLabel: period.label,
+            dayCount: period.dayCount,
             startsAt: period.startsAt,
             endsAt: period.endsAt,
             sortOrder: period.sortOrder,
@@ -327,7 +286,7 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
           stock: p.stock,
           currentPrice: p.currentPrice,
           currentCommissionPct: p.currentCommissionPct,
-          bands: bandsForPeriod(p.brackets, period.pick(p)),
+          bands: bandsForPeriod(p.brackets, p.periodComms[period.layoutIndex] ?? []),
         }));
         await tx.commissionTariffItem.createMany({ data: itemsData });
         items += itemsData.length;
@@ -338,7 +297,7 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
     return {
       tariffId,
       productCount: parsed.length,
-      periodCount: periods.length,
+      periodCount: present.length,
       itemCount,
       matched,
       unmatched: parsed.length - matched,
