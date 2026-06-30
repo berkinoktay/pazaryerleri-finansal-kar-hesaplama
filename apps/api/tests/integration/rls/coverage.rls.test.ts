@@ -24,6 +24,10 @@ const TENANT_TABLES = [
   'settlement_items',
   'sync_logs',
   'own_shipping_tariffs',
+  // Saved commission tariffs (store-scoped campaign price-band tariffs)
+  'commission_tariffs',
+  'commission_tariff_periods',
+  'commission_tariff_items',
   // Profit Calculation V1 (PR-1)
   'order_fees',
   'order_claims',

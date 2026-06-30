@@ -21,6 +21,50 @@ section "Versioning" for details.
 
 ### Added
 
+- **`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/import`** — Imports
+  Trendyol's "Ürün Komisyon Tarifeleri" `.xlsx` (multipart `file`). The fixed-layout sheet is
+  read by position (its `1.KOMİSYON`..`4.KOMİSYON` headers repeat per period, so header matching
+  cannot disambiguate them); each present period (3-day / 4-day) becomes a period and each product
+  row joins to a `ProductVariant` by barcode. Persists one tariff with its periods + product rows;
+  profit is computed later, on read. Returns counts `{ tariffId, productCount, periodCount,
+  itemCount, matched, unmatched, skippedRows }`. Store-scoped (`DATA_WRITE`). A file whose header
+  layout does not match the expected export → `422 VALIDATION_ERROR` (`INVALID_TARIFF_FORMAT`).
+  (Engine note: `@pazarsync/spreadsheet` now strips a bogus single-cell `<dimension>` that
+  Trendyol writes, which otherwise made the reader drop every data row.)
+
+- **`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export`** —
+  Returns Trendyol's ORIGINAL uploaded file (kept at import) with the seller's choices patched in:
+  the chosen band price into "YENİ TSF (FİYAT GÜNCELLE)" and "{N} Günlük Fiyat" into "Tarife
+  Seçimi" for every selected product. Every other cell is byte-for-byte unchanged, so the file is
+  re-uploadable to Trendyol verbatim. Marks the tariff exported. Store-scoped (`DATA_WRITE`);
+  returns the `.xlsx` (`Content-Disposition: attachment`). `409` if no source file was stored.
+  (The import now reads the tariff layout by HEADER, not fixed positions, so it handles any period
+  count — 1-period (27-col), 2-period (35-col), … — and the column shift that comes with it.)
+
+- **`PATCH /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections`** —
+  Persists the seller's chosen band (`band1`..`band4`, or null) and optional custom price per
+  item, in a single bulk update scoped to the tariff (items from another tariff/store are
+  ignored). Selection runs client-side over the backend-computed margins; this records the
+  result. Store-scoped (`DATA_WRITE`). Returns `{ updated }`.
+
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs`** — Lists saved
+  commission-tariff uploads for a store (master list): per tariff `name`, `productCount`,
+  `selectedCount`, `exported`, overall `validity` (`active`/`upcoming`/`past`, or null when
+  period dates are unparseable) and `updatedAt`. Store-scoped (`requireStoreAccess`,
+  `DATA_READ`); newest first.
+
+- **`GET /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`** — Returns
+  one tariff with its periods and, per product row, the four price bands with `netProfit` and
+  `marginPct` **computed on read** by the profit engine. The commission comes from the Excel
+  band; everything else (cost, shipping, PSF, stoppage, VAT) reuses the Ürün Fiyatlandırma
+  resolvers. Profit is never stored. When a row cannot be costed, `calculable=false`, `reason`
+  (`NO_PRODUCT`/`NO_COST`/`NO_SHIPPING`) explains why and band profits are null. `bestBandKey`
+  marks the most profitable band. Money is GROSS decimal strings. A cross-store/org id → `404`.
+
+- **`DELETE /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}`** — Hard
+  deletes a tariff and (via cascade) its periods + items. Store-scoped (`DATA_WRITE`); a
+  cross-store id returns `404`, indistinguishable from missing. `204` on success.
+
 - **`GET /v1/organizations/{orgId}/stores/{storeId}/profit-settings`** — Returns the resolved
   per-store profit-formula toggles (`ProfitSettings`: `includeStopaj`, `includeNegativeNetVat`),
   with defaults applied (`includeStopaj=true`, `includeNegativeNetVat=false`). Store-scoped: the

@@ -4653,6 +4653,363 @@
           "fetchedAt"
         ]
       },
+      "CommissionTariffListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommissionTariffListItem"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "CommissionTariffListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "selectedCount": {
+            "type": "integer"
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "validity": {
+            "$ref": "#/components/schemas/TariffValidity"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "productCount",
+          "selectedCount",
+          "exported",
+          "validity",
+          "updatedAt"
+        ]
+      },
+      "TariffValidity": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "active",
+          "upcoming",
+          "past",
+          null
+        ],
+        "description": "Dönem geçerliliği — tarihler parse edilemezse null."
+      },
+      "ImportTariffResponse": {
+        "type": "object",
+        "properties": {
+          "tariffId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "periodCount": {
+            "type": "integer"
+          },
+          "itemCount": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "unmatched": {
+            "type": "integer"
+          },
+          "skippedRows": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tariffId",
+          "productCount",
+          "periodCount",
+          "itemCount",
+          "matched",
+          "unmatched",
+          "skippedRows"
+        ]
+      },
+      "UpdateSelectionsResponse": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated"
+        ]
+      },
+      "UpdateSelectionsBody": {
+        "type": "object",
+        "properties": {
+          "selections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "itemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "band": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "band1",
+                    "band2",
+                    "band3",
+                    "band4",
+                    null
+                  ]
+                },
+                "customPrice": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                }
+              },
+              "required": [
+                "itemId",
+                "band",
+                "customPrice"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 5000
+          }
+        },
+        "required": [
+          "selections"
+        ]
+      },
+      "CommissionTariffDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TariffPeriod"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "exported",
+          "periods"
+        ]
+      },
+      "TariffPeriod": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dateRangeLabel": {
+            "type": "string"
+          },
+          "validity": {
+            "$ref": "#/components/schemas/TariffValidity"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TariffDetailItem"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "dateRangeLabel",
+          "validity",
+          "items"
+        ]
+      },
+      "TariffDetailItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "stockCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productTitle": {
+            "type": "string"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currentPrice": {
+            "type": "string"
+          },
+          "currentCommissionPct": {
+            "type": "string"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/TariffItemReason"
+          },
+          "bestBandKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selectedBand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "customPrice": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TariffBandResult"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "barcode",
+          "stockCode",
+          "productTitle",
+          "category",
+          "brand",
+          "currentPrice",
+          "currentCommissionPct",
+          "calculable",
+          "reason",
+          "bestBandKey",
+          "selectedBand",
+          "customPrice",
+          "bands"
+        ]
+      },
+      "TariffItemReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "NO_PRODUCT",
+          "NO_COST",
+          "NO_SHIPPING",
+          null
+        ],
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok."
+      },
+      "TariffBandResult": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upperLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "type": "string"
+          },
+          "commissionPct": {
+            "type": "string"
+          },
+          "netProfit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "marginPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "lowerLimit",
+          "upperLimit",
+          "price",
+          "commissionPct",
+          "netProfit",
+          "marginPct"
+        ]
+      },
       "ShippingCarrier": {
         "type": "object",
         "properties": {
@@ -12327,6 +12684,778 @@
           },
           "422": {
             "description": "Invalid query params or sort=product_count:desc without productScope=active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs": {
+      "get": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "List saved commission tariffs for a store",
+        "description": "Returns one row per saved commission-tariff upload for the store, with the aggregates the master list shows: product count, how many products already have a band selected, the exported flag, the overall validity (active/upcoming/past, or null when the period dates could not be parsed) and the last-updated timestamp. Newest first.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved commission tariffs for the store",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommissionTariffListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/import": {
+      "post": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Import a Trendyol commission-tariff Excel",
+        "description": "Uploads Trendyol's 'Ürün Komisyon Tarifeleri' .xlsx (multipart `file`). The fixed-layout sheet is read by position (its commission columns share duplicate headers), each present period (3-day / 4-day) becomes a period, and each product row is joined to a ProductVariant by barcode. Stores one tariff with its periods + product rows; profit is computed later on read. Returns counts: products, periods, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected export (422 VALIDATION_ERROR).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Trendyol komisyon-tarifesi .xlsx"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tariff imported",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportTariffResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File missing, unreadable, or not the expected tariff format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export": {
+      "post": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Export the tariff as a re-uploadable Trendyol Excel",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's choices patched in: the chosen band price into \"YENİ TSF (FİYAT GÜNCELLE)\" and \"{N} Günlük Fiyat\" into \"Tarife Seçimi\" for every product that has a selection. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The patched .xlsx, ready to re-upload to Trendyol",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Tariff has no stored source file to export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/selections": {
+      "patch": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Save band selections + custom prices for tariff items",
+        "description": "Persists the seller's chosen band (`band1`..`band4`, or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSelectionsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Selections saved",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSelectionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid selection payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}": {
+      "get": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Get a saved commission tariff with computed per-band profit",
+        "description": "Returns the full tariff: its periods (date-range tabs) and, per product row, the four price bands with net profit and sale margin COMPUTED on read by the profit engine — the commission comes from the Excel band, everything else (cost, shipping, PSF, stoppage, VAT) from the same resolvers the Ürün Fiyatlandırma tool uses. Profit is never stored, so it always reflects the current cost / fee data. When a row cannot be costed (no catalog match, no cost profile, no shipping) `calculable` is false, `reason` explains why and every band profit is null. `bestBandKey` marks the most profitable band. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tariff with computed per-band profit",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommissionTariffDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Delete a saved commission tariff",
+        "description": "Hard-deletes the tariff and (via cascade) its periods and product rows. A tariff id from another store returns 404, indistinguishable from a missing one.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Tariff deleted"
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
             "content": {
               "application/json": {
                 "schema": {
