@@ -3,6 +3,7 @@
 import { ArrowLeft01Icon, Delete02Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
+import type { DateRange } from 'react-day-picker';
 
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
@@ -20,7 +21,7 @@ import {
   type TariffFilterState,
 } from '../lib/bulk-actions';
 import { summarizeSelection } from '../lib/commission-tariff-summary';
-import { MOCK_TARIFF_TEMPLATES } from '../lib/mock-commission-tariffs';
+import { MOCK_TARIFF_TEMPLATES, buildUploadOverrides } from '../lib/mock-commission-tariffs';
 import type { BandKey, TariffTemplate } from '../types';
 import { CommissionTariffsActionBar } from './commission-tariffs-action-bar';
 import { CommissionTariffsListView } from './commission-tariffs-list-view';
@@ -28,7 +29,7 @@ import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards'
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
 import { CommissionTariffsTable } from './commission-tariffs-table';
 import { CommissionTariffsToolbar } from './commission-tariffs-toolbar';
-import { CommissionTariffsUpload } from './commission-tariffs-upload';
+import { CommissionTariffUploadDialog } from './commission-tariff-upload-dialog';
 
 const EMPTY_FILTERS: TariffFilterState = {
   query: '',
@@ -47,12 +48,11 @@ function distinct(values: readonly string[]): string[] {
  * Product Commission Tariffs page — UI only, mock data, no backend.
  *
  * Master/detail: LIST of saved tariffs → open one → DETAIL (KPIs, action bar,
- * bulk tools, the band table / mobile cards) → back to list. CREATE (upload) is
- * shown when there are no tariffs yet or the seller adds another. Each tariff
- * owns its own band selections; "Kaydet ve İndir" marks it exported.
+ * bulk tools, the band table / mobile cards) → back to list. Uploading a new
+ * tariff happens in a dialog over the list. Each tariff owns its own band
+ * selections; "Kaydet ve İndir" marks it exported.
  */
 export function CommissionTariffsPageClient(): React.ReactElement {
-  const t = useTranslations('campaignsPages.productCommissionTariffs');
   const tPage = useTranslations('commissionTariffsPage');
 
   // Seed with the saved tariffs so the page opens on the LIST (the common case);
@@ -61,7 +61,7 @@ export function CommissionTariffsPageClient(): React.ReactElement {
     ...MOCK_TARIFF_TEMPLATES,
   ]);
   const [activeId, setActiveId] = React.useState<string | null>(null);
-  const [creating, setCreating] = React.useState(false);
+  const [uploadOpen, setUploadOpen] = React.useState(false);
   const [selections, setSelections] = React.useState<Record<string, SelectionMap>>(() => ({
     'tpl-2330-haz': { r1: 'band2', r2: 'band2' },
   }));
@@ -84,34 +84,31 @@ export function CommissionTariffsPageClient(): React.ReactElement {
   const [filters, setFilters] = React.useState<TariffFilterState>(EMPTY_FILTERS);
   const seqRef = React.useRef(MOCK_TARIFF_TEMPLATES.length);
 
-  const addTemplate = React.useCallback((): void => {
+  const addTemplate = React.useCallback((file?: File, range?: DateRange): void => {
     seqRef.current += 1;
     const sample = MOCK_TARIFF_TEMPLATES[(seqRef.current - 1) % MOCK_TARIFF_TEMPLATES.length];
     if (sample === undefined) return;
     const id = `tpl-${seqRef.current}`;
-    setTemplates((prev) => [...prev, { ...sample, id }]);
+    setTemplates((prev) => [...prev, { ...sample, id, ...buildUploadOverrides(file, range) }]);
     setSelections((prev) => ({ ...prev, [id]: {} }));
     setActiveId(id);
-    setCreating(false);
+    setUploadOpen(false);
     setPeriodId(null);
     setFilters(EMPTY_FILTERS);
   }, []);
 
   const openTemplate = React.useCallback((id: string): void => {
     setActiveId(id);
-    setCreating(false);
     setPeriodId(null);
     setFilters(EMPTY_FILTERS);
   }, []);
 
   const backToList = React.useCallback((): void => {
     setActiveId(null);
-    setCreating(false);
   }, []);
 
-  const startCreate = React.useCallback((): void => {
-    setActiveId(null);
-    setCreating(true);
+  const openUpload = React.useCallback((): void => {
+    setUploadOpen(true);
   }, []);
 
   const deleteTemplate = React.useCallback((id: string): void => {
@@ -279,25 +276,22 @@ export function CommissionTariffsPageClient(): React.ReactElement {
     );
   }
 
-  // ---- CREATE (upload) ----
-  if (creating) {
-    return (
-      <div className="gap-lg flex flex-col">
-        <PageHeader title={t('title')} intent={t('intent')} />
-        <CommissionTariffsUpload onFile={addTemplate} onBack={backToList} />
-      </div>
-    );
-  }
-
-  // ---- LIST (route-open screen; renders even with zero tariffs) ----
+  // ---- LIST (route-open screen) + upload dialog over it ----
   return (
-    <CommissionTariffsListView
-      templates={templates}
-      exportedIds={exportedIds}
-      onOpen={openTemplate}
-      onCreate={startCreate}
-      onExport={markExported}
-      onDelete={deleteTemplate}
-    />
+    <>
+      <CommissionTariffsListView
+        templates={templates}
+        exportedIds={exportedIds}
+        onOpen={openTemplate}
+        onCreate={openUpload}
+        onExport={markExported}
+        onDelete={deleteTemplate}
+      />
+      <CommissionTariffUploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onFile={addTemplate}
+      />
+    </>
   );
 }

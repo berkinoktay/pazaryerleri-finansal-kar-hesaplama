@@ -1,4 +1,7 @@
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
 import { Decimal } from 'decimal.js';
+import type { DateRange } from 'react-day-picker';
 
 import type { BandKey, CommissionTariffRow, PriceBand, TariffTemplate } from '../types';
 
@@ -345,3 +348,38 @@ export const MOCK_TARIFF_TEMPLATES: readonly TariffTemplate[] = [
   ...RECENT_TEMPLATES,
   ...OLDER_PAST_TEMPLATES,
 ];
+
+/**
+ * Builds the display overrides for a tariff created via the upload dialog: the
+ * source file name plus a name / validity / relative-label derived from the
+ * period the seller entered. `new Date()` is read at CALL time (an event
+ * handler), never at module scope, so this stays SSR-safe. The band data itself
+ * still comes from the mock sample the page clones.
+ */
+export function buildUploadOverrides(file?: File, range?: DateRange): Partial<TariffTemplate> {
+  const overrides: Partial<TariffTemplate> = {};
+  if (file !== undefined) overrides.sourceFilename = file.name;
+
+  if (range !== undefined && range.from !== undefined && range.to !== undefined) {
+    const from = range.from;
+    const to = range.to;
+    const sameMonth = from.getMonth() === to.getMonth() && from.getFullYear() === to.getFullYear();
+    overrides.name = sameMonth
+      ? `${format(from, 'd', { locale: tr })} – ${format(to, 'd MMMM yyyy', { locale: tr })}`
+      : `${format(from, 'd MMMM', { locale: tr })} – ${format(to, 'd MMMM yyyy', { locale: tr })}`;
+
+    const now = new Date();
+    if (to.getTime() < now.getTime()) {
+      overrides.validity = 'past';
+      overrides.relativeLabel = 'Geçen hafta';
+    } else if (from.getTime() > now.getTime()) {
+      overrides.validity = 'upcoming';
+      overrides.relativeLabel = 'Gelecek hafta';
+    } else {
+      overrides.validity = 'active';
+      overrides.relativeLabel = 'Bu hafta';
+    }
+  }
+
+  return overrides;
+}

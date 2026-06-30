@@ -875,7 +875,12 @@
       "stepsTitle": "How it works",
       "step1": "Download the weekly commission tariff Excel from the Trendyol panel",
       "step2": "Upload the file here",
-      "step3": "See what you'll earn at each price band for every product"
+      "step3": "See what you'll earn at each price band for every product",
+      "periodLabel": "Tariff period",
+      "startPlaceholder": "Start date",
+      "endPlaceholder": "End date",
+      "periodHint": "The Trendyol file's labels omit the year, so set the period start and end here.",
+      "submit": "Create tariff"
     },
     "customPriceModal": {
       "title": "Estimated profit — custom price",
