@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
+import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { formatPercentDisplay } from '@/lib/format-percent';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
@@ -45,14 +46,19 @@ export function CommissionTariffsMobileCards({
             className="border-border bg-card gap-sm p-md flex flex-col rounded-lg border"
           >
             <div className="gap-sm flex items-start justify-between">
-              <div className="min-w-0">
-                <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
-                <div className="text-2xs text-muted-foreground tabular-nums">
-                  {[categoryBrand, row.stockCode].filter((v) => v !== null && v !== '').join(' · ')}
+              <div className="gap-sm flex min-w-0 items-start">
+                <ProductImageCell url={row.imageUrl} alt={row.productTitle} size="lg" />
+                <div className="min-w-0">
+                  <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
+                  <div className="text-2xs text-muted-foreground tabular-nums">
+                    {[categoryBrand, row.stockCode]
+                      .filter((v) => v !== null && v !== '')
+                      .join(' · ')}
+                  </div>
+                  {!row.calculable && row.reason !== null ? (
+                    <div className="text-warning text-2xs">{reasonLabel(row.reason)}</div>
+                  ) : null}
                 </div>
-                {!row.calculable && row.reason !== null ? (
-                  <div className="text-warning text-2xs">{reasonLabel(row.reason)}</div>
-                ) : null}
               </div>
               <div className="shrink-0 text-right">
                 <div className="text-sm font-semibold tabular-nums">
@@ -63,7 +69,10 @@ export function CommissionTariffsMobileCards({
                 </div>
               </div>
             </div>
-            <div className="gap-2xs grid grid-cols-2">
+            {/* gap-y-md (not 2xs) leaves room for the "En iyi" ribbon that pokes
+                above each band card's top edge, so a bottom-row ribbon never
+                collides with the card above it. */}
+            <div className="gap-x-2xs gap-y-md grid grid-cols-2">
               {BAND_INDEXES.map((i) => {
                 const band = row.bands[i];
                 if (band === undefined) return null;

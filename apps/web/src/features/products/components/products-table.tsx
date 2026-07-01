@@ -42,7 +42,7 @@ import { DeliveryBadge } from './delivery-badge';
 import { DesiCell } from './desi-cell';
 import { DesiCellPopover } from './desi-cell-popover';
 import { ParentRowCostCell } from './parent-row-cost-cell';
-import { ProductImageCell } from './product-image-cell';
+import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
 import type { ProductRow } from './products-bulk-cost-action-bar.types';
 import { ProductsFacetChips } from './products-facet-chips';

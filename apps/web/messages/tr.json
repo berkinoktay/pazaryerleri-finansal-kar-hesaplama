@@ -1,6 +1,9 @@
 {
   "common": {
     "infoHint": "Bilgi",
+    "a11y": {
+      "viewImage": "Ürün görselini büyüt"
+    },
     "tableScale": {
       "label": "Tablo ölçeği",
       "decrease": "Küçült",
@@ -872,7 +875,7 @@
       "commission": "komisyon",
       "stock": "Stok",
       "band": "{n}. Fiyat Aralığı",
-      "best": "En iyi",
+      "best": "En kârlı",
       "profit": "Kâr",
       "loss": "Zarar",
       "yourChoice": "Seçimin",
@@ -1890,7 +1893,6 @@
       "expandRow": "Varyantları göster",
       "collapseRow": "Varyantları gizle",
       "openFilter": "Filtreyi aç",
-      "viewImage": "Ürün görselini büyüt",
       "selectAll": "Tüm ürünleri seç",
       "selectRow": "Bu ürünü seç"
     },

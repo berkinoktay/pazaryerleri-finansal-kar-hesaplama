@@ -7,13 +7,19 @@ import * as React from 'react';
 import { MoneyInput } from '@/components/patterns/money-input';
 import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
+import { cn } from '@/lib/utils';
 
+import type { EstimateItemPriceResult } from '../api/estimate-item-price.api';
 import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
 
 const DEBOUNCE_MS = 400;
+// What-if ceiling ≈10M TL — far above any real Trendyol price. Decimal-aware
+// (the old maxLength cap still let a separator-free ten-digit entry through at
+// ~10 billion, which stretched the profit badge past the cell).
+const MAX_WHAT_IF_PRICE = new Decimal('9999999.99');
 
 /**
  * Custom-price "what-if" field. Owns its own price state so typing never rebuilds
@@ -32,6 +38,13 @@ export function CustomPriceCell({ row }: { row: CommissionTariffRow }): React.Re
   const estimateMutate = estimate.mutate;
   const [price, setPrice] = React.useState<Decimal | null>(null);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  // Last SUCCESSFUL estimate. `mutate()` resets `estimate.data` to undefined,
+  // which unmounted the badge on every debounced keystroke and made the whole
+  // row jump; keeping the previous figures on screen (dimmed while the next
+  // request runs) kills that flicker. react-query fires a mutate-level
+  // onSuccess only for the LATEST call, so an out-of-order older response can
+  // never overwrite a newer estimate.
+  const [lastResult, setLastResult] = React.useState<EstimateItemPriceResult | null>(null);
 
   // Debounced what-if: fire the estimate ~400ms after the seller stops typing.
   // useEffect is correct here — it syncs an external system (the estimate API) to
@@ -40,15 +53,17 @@ export function CustomPriceCell({ row }: { row: CommissionTariffRow }): React.Re
     if (price === null || !price.greaterThan(0)) return undefined;
     const priceStr = price.toFixed(2);
     const handle = setTimeout(() => {
-      estimateMutate({ itemId: row.id, body: { price: priceStr } });
+      estimateMutate(
+        { itemId: row.id, body: { price: priceStr } },
+        { onSuccess: (data) => setLastResult(data) },
+      );
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(handle);
     };
   }, [price, row.id, estimateMutate]);
 
-  const result = estimate.data ?? null;
-  const showEstimate = price !== null && price.greaterThan(0) && result !== null;
+  const showEstimate = price !== null && price.greaterThan(0) && lastResult !== null;
 
   return (
     <div className="gap-3xs flex flex-col">
@@ -61,28 +76,33 @@ export function CustomPriceCell({ row }: { row: CommissionTariffRow }): React.Re
         value={price}
         onChange={setPrice}
         nonNegative
-        // Cap the digits so an absurd what-if price can't stretch the profit
-        // badge past the cell and break the row (≈10M TL — far above any real price).
-        maxLength={10}
+        max={MAX_WHAT_IF_PRICE}
         aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
         placeholder={t('table.enterPrice')}
         className="md:max-w-input-narrow w-full"
       />
-      {showEstimate && result !== null ? (
+      {showEstimate && lastResult !== null ? (
         <div className="gap-3xs flex flex-col">
           <span className="text-2xs text-muted-foreground">{tBreakdown('estimatedProfit')}</span>
           <ProfitBadge
-            value={result.breakdown?.netProfit ?? null}
-            marginPct={result.breakdown?.saleMarginPct ?? null}
+            value={lastResult.breakdown?.netProfit ?? null}
+            marginPct={lastResult.breakdown?.saleMarginPct ?? null}
             scale={scale}
             onOpen={() => setBreakdownOpen(true)}
-            className="self-start"
+            showMarginPct
+            // Dim (don't unmount) while the next estimate is in flight — the
+            // figures update in place with zero layout shift.
+            className={cn(
+              'duration-fast self-start transition-opacity',
+              estimate.isPending && 'opacity-60',
+            )}
           />
           <CommissionTariffBreakdown
             open={breakdownOpen}
             onOpenChange={setBreakdownOpen}
             productTitle={row.productTitle}
-            result={result}
+            imageUrl={row.imageUrl}
+            result={lastResult}
             loading={estimate.isPending}
             profitLabel={tBreakdown('estimatedProfit')}
           />

@@ -93,4 +93,29 @@ describe('<MoneyInput>', () => {
     const input = container.querySelector('input') as HTMLInputElement;
     expect(input.getAttribute('inputmode')).toBe('decimal');
   });
+
+  it('rejects keystrokes that would push the value above max (buffer + emit stay put)', async () => {
+    const onChange = vi.fn();
+    const { user, container } = render(
+      <MoneyInput max={new Decimal('999.99')} onChange={onChange} />,
+    );
+    const input = container.querySelector('input') as HTMLInputElement;
+    await user.type(input, '99999');
+    // The 4th digit would make 9999 > 999.99 — refused; display holds at "999".
+    expect(input.value).toBe('999');
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as Decimal | null;
+    expect(lastCall?.toString()).toBe('999');
+  });
+
+  it('still allows decimals under max after the integer part hits the ceiling', async () => {
+    const onChange = vi.fn();
+    const { user, container } = render(
+      <MoneyInput max={new Decimal('999.99')} onChange={onChange} />,
+    );
+    const input = container.querySelector('input') as HTMLInputElement;
+    await user.type(input, '999,5');
+    expect(input.value).toBe('999,5');
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as Decimal | null;
+    expect(lastCall?.toString()).toBe('999.5');
+  });
 });

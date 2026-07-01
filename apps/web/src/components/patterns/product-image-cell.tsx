@@ -24,14 +24,15 @@ interface ProductImageCellProps {
 }
 
 /**
- * Domain wrapper around `ImageCell` for the products table. Clicking
- * the thumbnail opens the shared `ImageModal` so the original image
- * fills the viewport for closer inspection.
+ * Shared product-thumbnail cell: an `ImageCell` whose click opens the
+ * shared `ImageModal` so the original image fills the viewport for closer
+ * inspection. Reused across product-facing surfaces (products table,
+ * commission-tariff detail) so a seller can always eyeball the SKU.
  *
- * Sizing rationale: 56px is the comfortable middle ground for a parent
- * row (40px lacked detail, 80px made rows feel image-heavy). Variant
- * sub-rows step down to 40px so the hierarchy is visible at a glance —
- * smaller image == nested.
+ * Sizing rationale: 56px ('lg') is the comfortable middle ground for a
+ * parent row (40px lacked detail, 80px made rows feel image-heavy). Dense
+ * or nested rows step down to 40px ('md') so the hierarchy is visible at a
+ * glance — smaller image == nested.
  *
  * Carries `data-row-action` so DataTable's row-click handler doesn't
  * also fire when the user opens the image. Disabled when `url` is
@@ -43,7 +44,7 @@ export function ProductImageCell({
   size = 'lg',
   className,
 }: ProductImageCellProps): React.ReactElement {
-  const t = useTranslations('products.a11y');
+  const t = useTranslations('common.a11y');
   const [open, setOpen] = React.useState(false);
   const hasImage = url !== null && url !== undefined && url.length > 0;
 

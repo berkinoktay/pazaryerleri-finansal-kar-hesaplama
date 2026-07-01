@@ -8,6 +8,7 @@ import * as React from 'react';
 import { Currency } from '@/components/patterns/currency';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { marginBadgeStyle } from '@/lib/margin-color-style';
 import { type MarginScale } from '@/lib/margin-coloring';
 import { cn } from '@/lib/utils';
@@ -23,6 +24,12 @@ export interface ProfitBadgeProps {
   scale: MarginScale | null;
   /** Opens the profit detail surface (the orders modal / live sheet). */
   onOpen: () => void;
+  /**
+   * Also print the margin % beside the amount ("₺534,28 · %9,11"). Opt-in for
+   * surfaces without a separate margin column (commission-tariff band cards);
+   * off by default so existing tables (orders, live) are unchanged.
+   */
+  showMarginPct?: boolean;
   className?: string;
 }
 
@@ -43,6 +50,7 @@ export function ProfitBadge({
   marginPct,
   scale,
   onOpen,
+  showMarginPct = false,
   className,
 }: ProfitBadgeProps): React.ReactElement {
   const t = useTranslations('profitBadge');
@@ -76,6 +84,11 @@ export function ProfitBadge({
             className="duration-fast ease-out-quart cursor-pointer tabular-nums transition-shadow group-hover:shadow-xs"
           >
             {value === null ? EMPTY_VALUE : <Currency value={value} />}
+            {showMarginPct && value !== null && marginPct !== null ? (
+              // whitespace-nowrap: the separator + pct must never line-break
+              // internally (a huge amount once pushed "%74,17" onto its own line).
+              <span className="whitespace-nowrap">· {formatPercentDisplay(marginPct)}</span>
+            ) : null}
           </Badge>
         </button>
       </TooltipTrigger>

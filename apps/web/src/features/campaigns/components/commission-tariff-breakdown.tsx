@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
+import { ImageCell } from '@/components/patterns/image-cell';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatPercentDisplay } from '@/lib/format-percent';
@@ -18,6 +19,8 @@ export interface CommissionTariffBreakdownProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   productTitle: string;
+  /** Product image URL (barcode-matched); null/undefined renders the icon fallback. */
+  imageUrl?: string | null;
   /** Backend estimate result — null before the first fetch. */
   result: EstimateItemPriceResult | null;
   /** True while the estimate request is in flight. */
@@ -53,6 +56,7 @@ export function CommissionTariffBreakdown({
   open,
   onOpenChange,
   productTitle,
+  imageUrl,
   result,
   loading,
   profitLabel,
@@ -68,7 +72,10 @@ export function CommissionTariffBreakdown({
         <DialogHeader>
           <DialogTitle>{t('title')}</DialogTitle>
         </DialogHeader>
-        <div className="text-muted-foreground text-sm">{productTitle}</div>
+        <div className="gap-xs flex items-center">
+          <ImageCell src={imageUrl} alt={productTitle} size="md" />
+          <div className="text-muted-foreground text-sm">{productTitle}</div>
+        </div>
 
         {loading ? (
           <div className="gap-2xs flex flex-col">

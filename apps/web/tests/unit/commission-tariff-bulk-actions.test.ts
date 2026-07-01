@@ -39,6 +39,7 @@ function row(
     barcode: id,
     stockCode: id,
     productTitle: id,
+    imageUrl: null,
     category: 'Cat',
     brand: 'Brand',
     currentPrice: '100',

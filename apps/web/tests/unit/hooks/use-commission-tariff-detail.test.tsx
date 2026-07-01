@@ -36,6 +36,7 @@ function detailItem() {
     barcode: '8681234567890',
     stockCode: 'SKU-1',
     productTitle: 'Test Ürün',
+    imageUrl: 'https://cdn.example/urun.jpg',
     category: 'Kategori A',
     brand: 'Marka B',
     currentPrice: '450.00',

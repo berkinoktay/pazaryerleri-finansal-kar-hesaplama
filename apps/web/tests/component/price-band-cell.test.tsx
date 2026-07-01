@@ -30,6 +30,7 @@ const row: CommissionTariffRow = {
   barcode: '123',
   stockCode: 'M1',
   productTitle: 'Test Ürün',
+  imageUrl: null,
   category: 'Bayrak',
   brand: 'Marka',
   currentPrice: '800.00',

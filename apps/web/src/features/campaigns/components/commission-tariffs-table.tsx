@@ -1,7 +1,6 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { PackageIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -10,8 +9,8 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
+import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
-import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
@@ -62,11 +61,7 @@ export function CommissionTariffsTable({
             size="md"
             titleLines={2}
             className="max-w-tariff-product"
-            leading={
-              <SoftSquareIcon tone="neutral" variant="soft" size="md">
-                <PackageIcon />
-              </SoftSquareIcon>
-            }
+            leading={<ProductImageCell url={r.imageUrl} alt={r.productTitle} size="lg" />}
             title={r.productTitle}
             meta={
               <span className="gap-3xs flex flex-col">

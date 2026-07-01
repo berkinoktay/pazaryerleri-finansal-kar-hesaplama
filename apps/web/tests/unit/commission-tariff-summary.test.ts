@@ -25,6 +25,7 @@ function makeRow(
     barcode: id,
     stockCode: null,
     productTitle: id,
+    imageUrl: null,
     category: null,
     brand: null,
     currentPrice: '100',

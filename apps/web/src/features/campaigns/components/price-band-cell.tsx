@@ -1,12 +1,13 @@
 'use client';
 
-import { CheckmarkCircle02Icon } from 'hugeicons-react';
+import { CheckmarkCircle02Icon, CircleIcon, SparklesIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
 
 import { ProfitBadge } from '@/components/patterns/profit-badge';
+import { Badge } from '@/components/ui/badge';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { cn } from '@/lib/utils';
@@ -80,7 +81,11 @@ export function PriceBandCell({
         // overlap); the 200px floor only applies in the desktop table (md+),
         // where the band columns scroll horizontally rather than squish.
         'p-xs md:min-w-tariff-band relative min-w-0 rounded-md border',
-        selected ? 'border-primary bg-primary-soft' : 'border-border',
+        // Selected state stays QUIET: a thin primary border + the checkmark carry
+        // the selection, over the muted `surface-row-selected` fill (chroma 0.012)
+        // rather than the loud brand `primary-soft` (chroma 0.04) — so the green/red
+        // profit badge remains the dominant color in the card, not the selection.
+        selected ? 'border-primary bg-surface-row-selected' : 'border-border',
       )}
     >
       {/* Stretched select button: covers the whole card so clicking anywhere
@@ -98,29 +103,24 @@ export function PriceBandCell({
       />
 
       {/* Content above the overlay; pointer-events-none lets clicks fall through
-          to the select button, except the badge (pointer-events-auto). */}
+          to the select button, except the profit badge (pointer-events-auto). */}
       <div className="gap-2xs pointer-events-none relative flex flex-col">
-        <span className="gap-2xs flex items-center justify-between">
-          <span className="gap-2xs flex min-w-0 items-center">
-            {selected ? (
-              <CheckmarkCircle02Icon className="text-primary size-4 shrink-0" aria-hidden />
-            ) : (
-              <span
-                className="border-border-strong size-4 shrink-0 rounded-full border-2"
-                aria-hidden
-              />
-            )}
-            {/* flex-wrap: when the "ve altı / ve üzeri" qualifier doesn't fit
-                beside the price (narrow band card / mobile), it drops to the next
-                line under the price rather than being truncated. */}
-            <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
-              <span className="text-base font-bold tabular-nums">{priceText}</span>
-              <span className="text-xs font-normal">{qualifier}</span>
-            </span>
+        <span className="gap-2xs flex min-w-0 items-center">
+          {/* Both states come from the same icon family so the toggle reads as
+              one control: an outlined circle that becomes a checked circle
+              (matching stroke weight — a border-2 span looked heavier/bigger). */}
+          {selected ? (
+            <CheckmarkCircle02Icon className="text-primary size-4 shrink-0" aria-hidden />
+          ) : (
+            <CircleIcon className="text-border-strong size-4 shrink-0" aria-hidden />
+          )}
+          {/* flex-wrap: when the "ve altı / ve üzeri" qualifier doesn't fit
+              beside the price (narrow band card / mobile), it drops to the next
+              line under the price rather than being truncated. */}
+          <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
+            <span className="text-base font-bold tabular-nums">{priceText}</span>
+            <span className="text-xs font-normal">{qualifier}</span>
           </span>
-          {isBest ? (
-            <span className="text-2xs text-success shrink-0 font-semibold">{t('best')}</span>
-          ) : null}
         </span>
 
         <span className="text-2xs text-muted-foreground tabular-nums">
@@ -132,14 +132,41 @@ export function PriceBandCell({
           marginPct={band.marginPct}
           scale={scale}
           onOpen={openBreakdown}
-          className="pointer-events-auto self-start"
+          showMarginPct
+          // mt-3xs on top of the column's gap-2xs: the seller flagged the badge
+          // sitting too close to the commission line above it.
+          className="mt-3xs pointer-events-auto self-start"
         />
       </div>
+
+      {/* "En kârlı" ribbon: absolutely pinned to the card's TOP edge (poking up
+          over the border) so it reads as a "featured" tab rather than taking a
+          slot in the content row. Solid BRAND tone — green stays reserved for the
+          profit badge, and a solid brand pill keeps its contrast on any row-hover
+          surface. pointer-events-none so a click still selects the band.
+          Stacking: rendered LAST with NO z-index — DOM order paints it above the
+          card's own button/content, while the table's pinned product column
+          (sticky z-10) still covers it when the bands scroll beneath. */}
+      {isBest ? (
+        <Badge
+          tone="primary"
+          variant="solid"
+          radius="full"
+          leadingIcon={<SparklesIcon />}
+          // Slim, compact ribbon: py-0 + a smaller icon + tight horizontal padding
+          // keep it short enough that its lower half tucks INTO the card's top
+          // padding instead of overlapping the price/checkmark row below it.
+          className="text-2xs px-2xs -top-xs right-xs gap-3xs pointer-events-none absolute py-0 font-medium shadow-xs [&_svg]:size-3"
+        >
+          {t('best')}
+        </Badge>
+      ) : null}
 
       <CommissionTariffBreakdown
         open={breakdownOpen}
         onOpenChange={setBreakdownOpen}
         productTitle={row.productTitle}
+        imageUrl={row.imageUrl}
         result={estimate.data ?? null}
         loading={estimate.isPending}
       />

@@ -1,6 +1,9 @@
 {
   "common": {
     "infoHint": "Info",
+    "a11y": {
+      "viewImage": "View product image at full size"
+    },
     "tableScale": {
       "label": "Table scale",
       "decrease": "Shrink",
@@ -872,7 +875,7 @@
       "commission": "commission",
       "stock": "Stock",
       "band": "Price Band {n}",
-      "best": "Best",
+      "best": "Most profitable",
       "profit": "Profit",
       "loss": "Loss",
       "yourChoice": "Your choice",
@@ -1890,7 +1893,6 @@
       "expandRow": "Show variants",
       "collapseRow": "Hide variants",
       "openFilter": "Open filter",
-      "viewImage": "View product image at full size",
       "selectAll": "Select all products",
       "selectRow": "Select this product"
     },
