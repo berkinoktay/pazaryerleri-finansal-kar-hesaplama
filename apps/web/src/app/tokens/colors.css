@@ -12,19 +12,23 @@
  */
 
 :root {
-  /* Surfaces — TWO-TONE LAYOUT pattern (Stripe / Brisval / Coursue /
-     Linear): the main content area sits on a soft tinted gray so the
+  /* Surfaces — TWO-TONE LAYOUT pattern (Stripe / Ramp / Mercury /
+     Linear): the main content area sits on a clearly tinted gray so the
      pure-white sidebar rail and pure-white cards both read as RAISED
      surfaces floating above the page. Without this contrast, every
      surface looks like the same paint — no depth, no hierarchy.
-     --background drops from 99% to 97% lightness; --sidebar (below)
-     and --card stay at pure white. */
-  --background: oklch(98% 0.005 265);
+     96.5% + chroma 0.008: the previous 98%/0.005 left only a 2-point
+     gap to the white card — panels read as "outlines drawn on the page"
+     instead of raised surfaces (2026-07-02 depth audit). The reference
+     products run their canvas 1.5–2 steps below white with a perceptible
+     brand tint; this is the restrained end of that range. */
+  --background: oklch(96.5% 0.008 265);
   --foreground: oklch(18% 0.02 265);
 
-  /* Muted shifts down to maintain its "darker than --background" semantic.
-     Was 96.5% when --background was 99%; now ~94% to keep a comfortable
-     drop from the new lighter --background while staying visibly distinct. */
+  /* Muted keeps its "darker than --background" semantic: 94% sits a clear
+     2.5 points under the 96.5% canvas. Most consumers paint it on the white
+     --card surface (chips, skeletons, segmented-control tracks), where the
+     6-point drop does the real work. */
   --muted: oklch(94% 0.006 265);
   --muted-foreground: oklch(46% 0.015 265);
   /* One step dimmer than muted-foreground for non-interactive out-of-scope
@@ -32,9 +36,11 @@
      avoids `text-muted-foreground/50` alpha shortcuts. */
   --muted-foreground-dim: oklch(60% 0.012 265);
 
-  /* Surface one step subtler than --muted; sits above --background but below
-     --muted. Use for static zones like table footers, code blocks, callouts,
-     placeholders. Avoid reaching for `bg-muted/50`. */
+  /* Surface one step subtler than --muted. Use for static zones like table
+     footers, code blocks, callouts, placeholders — practically always ON a
+     white --card surface, where the 4-point drop reads as a soft band.
+     (Against the 96.5% canvas it is near-invisible by design; don't use it
+     directly on --background.) Avoid reaching for `bg-muted/50`. */
   --surface-subtle: oklch(96% 0.005 265);
 
   /* Interactive row hover on a `bg-card` (or equivalent raised) surface.

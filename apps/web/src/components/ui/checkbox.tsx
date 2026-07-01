@@ -29,7 +29,9 @@ import { cn } from '@/lib/utils';
 
 const checkboxVariants = cva(
   [
-    'peer border-border-strong bg-background shrink-0 border shadow-xs',
+    // bg-input (pure white), not bg-background: form-control fill contract —
+    // on the tinted canvas a bg-background fill would read as a dirty-gray box.
+    'peer border-border-strong bg-input shrink-0 border shadow-xs',
     'transition duration-fast ease-out-quart',
     'hover:border-primary',
     'active:scale-[0.97]',
