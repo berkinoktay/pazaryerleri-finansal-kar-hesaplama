@@ -1,6 +1,7 @@
 // Route-layer authorization for the store-scoped commission-tariffs endpoints
-// (list / detail / delete). The storeId in the path MUST belong to the caller's
-// org, and a tariffId from another store must be indistinguishable from missing.
+// (list / detail / delete / selections / estimate). The storeId in the path MUST
+// belong to the caller's org, and a tariffId/itemId from another store must be
+// indistinguishable from missing.
 //
 // SECURITY.md §3 — existence non-disclosure: a cross-org storeId or tariffId
 // returns 404 (not 403), so an attacker cannot probe another tenant's ids. A
@@ -196,5 +197,63 @@ describe('commission-tariffs: route-layer authorization', () => {
       },
     );
     expect(res.status).toBe(403);
+  });
+
+  it("Org A member estimating on Org B's tariff via Org A's store returns 404", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    const tariffB = await seedTariff(orgB.id, storeB.id);
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/commission-tariffs/${tariffB}/items/${crypto.randomUUID()}/estimate`,
+      {
+        method: 'POST',
+        headers: { Authorization: bearer(userA.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: '100.00' }),
+      },
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
+  });
+
+  it('a non-member estimating returns 403', async () => {
+    const outsider = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const tariff = await seedTariff(org.id, store.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff}/items/${crypto.randomUUID()}/estimate`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: bearer(outsider.accessToken),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ price: '100.00' }),
+      },
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('an estimate request with no auth token returns 401', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const tariff = await seedTariff(org.id, store.id);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff}/items/${crypto.randomUUID()}/estimate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price: '100.00' }),
+      },
+    );
+    expect(res.status).toBe(401);
   });
 });
