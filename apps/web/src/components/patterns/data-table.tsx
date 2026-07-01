@@ -545,11 +545,11 @@ export function DataTable<TData, TValue>({
     // table rows → `pagination` (optional) all live inside one bordered,
     // rounded surface. Internal `border-b` / `border-t` dividers separate
     // the zones so the whole control surface reads as one panel instead
-    // of four floating siblings. The shell uses bg-card as the consistent
-    // surface; the recessed inset variant of the AppShell sidebar already
-    // gives the panel its outer lift.
+    // of four floating siblings. The shell uses bg-card + shadow-xs — the
+    // same standing-panel treatment as Card — so it reads as a raised
+    // surface on the tinted canvas rather than an outline drawn on it.
     <>
-      <div className="border-border bg-card overflow-hidden rounded-lg border">
+      <div className="border-border bg-card overflow-hidden rounded-lg border shadow-xs">
         {/* Polite live regions: a screen reader hears the selection count and
             the loading state change without a visible duplicate. One status per
             concern; both empty when inactive so nothing is announced at rest. */}

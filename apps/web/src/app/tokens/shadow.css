@@ -1,18 +1,24 @@
 /**
  * Shadow tokens
  *
- * Hairline-first: borders do the primary separation work, shadows only
- * layer when an element genuinely floats (popovers, dialogs, floating
+ * Hairline-first: borders do the primary separation work; shadows add a
+ * soft AMBIENT lift on standing panels (xs) and only get directional
+ * when an element genuinely floats (popovers, dialogs, floating
  * actions). Shadow chroma comes from brand hue at tiny alpha — the
  * effect is felt, not seen.
+ *
+ * xs was originally a bare 1px bottom edge; the 2026-07-02 depth audit
+ * found that against the tinted canvas it read as "no shadow at all",
+ * so xs now carries a whisper of blur (the Ramp/Mercury ambient recipe)
+ * and sm steps up a notch to keep the ladder monotonic.
  *
  * Do not paint cards with lg+ shadows. Cards are a flat surface with
  * a 1px border; reserve lg shadows for the top layer of UI only.
  */
 
 :root {
-  --shadow-xs: 0 1px 0 0 oklch(22% 0.02 265 / 0.04);
-  --shadow-sm: 0 1px 2px 0 oklch(22% 0.02 265 / 0.04), 0 1px 0 0 oklch(22% 0.02 265 / 0.03);
+  --shadow-xs: 0 1px 2px 0 oklch(22% 0.02 265 / 0.05), 0 1px 0 0 oklch(22% 0.02 265 / 0.04);
+  --shadow-sm: 0 2px 4px -1px oklch(22% 0.02 265 / 0.06), 0 1px 1px 0 oklch(22% 0.02 265 / 0.04);
   --shadow-md:
     0 4px 10px -2px oklch(22% 0.02 265 / 0.08), 0 2px 4px -2px oklch(22% 0.02 265 / 0.04);
   --shadow-lg:

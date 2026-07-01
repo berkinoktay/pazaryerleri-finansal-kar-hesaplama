@@ -30,7 +30,14 @@ const switchVariants = cva(
     // (still a visible focus affordance when unchecked, where there is no fill).
     'focus-visible:shadow-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:ring-ring',
     'disabled:cursor-not-allowed disabled:opacity-50',
-    'data-[state=unchecked]:bg-muted data-[state=unchecked]:hover:bg-surface-trigger-hover',
+    // Unchecked track: border-token FILL (precedent: Separator) + a hairline
+    // rim so the pill stays defined on any surface — bg-muted sat only ~3
+    // points above the dark card and the track read as "no background at all".
+    // The border/border-muted pair also fixes the hover direction in dark:
+    // surface-trigger-hover DARKENED the track there; border-muted lifts it
+    // in both modes (light 89→92, dark 24→28).
+    'data-[state=unchecked]:bg-border data-[state=unchecked]:hover:bg-border-muted',
+    'data-[state=unchecked]:border-border-strong',
     'data-[state=checked]:bg-primary data-[state=checked]:hover:bg-primary-hover',
     // Validation uses a 1px OFFSET ring, not an edge border — the same 1px
     // width as the other fields' border-destructive, but a plain border would
@@ -65,7 +72,14 @@ const switchVariants = cva(
 // Thumb dimension + checked travel scale with the track (travel = w − thumb − 4px).
 const switchThumbVariants = cva(
   [
-    'bg-background pointer-events-none block rounded-full shadow-sm ring-0',
+    // Light: bg-input (pure white) — the thumb stays the brightest element on
+    // both track states (bg-background would tint it gray on the tinted canvas).
+    // Dark: the tracks invert lightness (unchecked bg-border 24% is DARK,
+    // checked bg-primary 72% is LIGHT), so one thumb color can't clear both —
+    // pick per state: near-white on the dark track, near-black on the light
+    // track (the shadcn v4 switch recipe).
+    'bg-input pointer-events-none block rounded-full shadow-sm ring-0',
+    'dark:data-[state=unchecked]:bg-foreground dark:data-[state=checked]:bg-primary-foreground',
     'transition-transform duration-fast ease-out-quart',
     'data-[state=unchecked]:translate-x-0.5',
   ].join(' '),
