@@ -1,6 +1,12 @@
 {
   "common": {
     "infoHint": "Info",
+    "tableScale": {
+      "label": "Table scale",
+      "decrease": "Shrink",
+      "increase": "Enlarge",
+      "reset": "Reset to normal"
+    },
     "stat": {
       "loadError": "Couldn't load",
       "retry": "Retry",
@@ -861,7 +867,7 @@
       "noChoice": "Choose a band",
       "customPrice": "Custom Price",
       "enterPrice": "Enter price",
-      "customPriceHint": "Estimated profit is computed when you save"
+      "customPriceHint": "Enter a price to see the estimated profit"
     },
     "noResults": {
       "title": "No matching products",
@@ -922,9 +928,7 @@
       "clear": "Clear filters"
     },
     "actionBar": {
-      "selected": "{count}/{total} products selected",
-      "profitLabel": "chosen-band profit",
-      "headroom": "To best"
+      "selectedBands": "{count} bands selected"
     },
     "status": {
       "exported": "Downloaded",

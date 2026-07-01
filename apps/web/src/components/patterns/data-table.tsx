@@ -96,6 +96,16 @@ export interface DataTableProps<TData, TValue> {
    * inline a custom one for feature-specific footers.
    */
   pagination?: (table: TanstackTable<TData>) => React.ReactNode;
+  /**
+   * Density scale (CSS `zoom`) applied to the table body only — the tabs,
+   * toolbar, and pagination stay full size. `1` (default) is a no-op. Lets a
+   * seller shrink a wide table's rows/cells so it fits without horizontal
+   * scroll; pair with the `TableScaleControl` stepper. NOTE: the
+   * scroll-aware pinned-column offsets are measured in the zoomed frame, so
+   * this is only sound for tables with at most ONE pinned column per side
+   * (a single left/right pin sits at offset 0, unaffected by the scale).
+   */
+  scale?: number;
   /** Show loading skeletons in place of rows. */
   loading?: boolean;
   /**
@@ -302,6 +312,7 @@ export function DataTable<TData, TValue>({
   tabs,
   toolbar,
   pagination,
+  scale = 1,
   loading = false,
   empty,
   noResultsState,
@@ -558,7 +569,15 @@ export function DataTable<TData, TValue>({
             the scroll-position data attributes the pinned-edge shadows react
             to). No extra overflow wrapper — a second one would double-clip and
             steal the sticky-pinning scroll context. */}
-        <Table ref={tableRef} scrollAware aria-busy={loading || undefined}>
+        <Table
+          ref={tableRef}
+          scrollAware
+          aria-busy={loading || undefined}
+          // runtime-dynamic: seller-controlled density zoom on the table body
+          // only; the scroll container above stays full-width so scaling the
+          // content lets a wide table fit without horizontal scroll.
+          style={scale === 1 ? undefined : { zoom: scale }}
+        >
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>

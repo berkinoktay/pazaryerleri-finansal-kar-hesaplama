@@ -1,10 +1,11 @@
 'use client';
 
-import { ArrowLeft01Icon, Delete02Icon } from 'hugeicons-react';
+import { ArrowLeft01Icon, Delete02Icon, DownloadCircle01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import type { DateRange } from 'react-day-picker';
 
+import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -23,7 +24,6 @@ import {
 import { summarizeSelection } from '../lib/commission-tariff-summary';
 import { MOCK_TARIFF_TEMPLATES, buildUploadOverrides } from '../lib/mock-commission-tariffs';
 import type { BandKey, TariffTemplate } from '../types';
-import { CommissionTariffsActionBar } from './commission-tariffs-action-bar';
 import { CommissionTariffsListView } from './commission-tariffs-list-view';
 import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards';
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
@@ -274,13 +274,21 @@ export function CommissionTariffsPageClient(): React.ReactElement {
           />
         </div>
 
-        <CommissionTariffsActionBar
+        {/* Floating bar — appears only once the seller has chosen a band. No
+            clear (Escape/X could wipe hard-won picks; clearing lives in the
+            toolbar's smart-select). "Best to all" also lives there. */}
+        <BulkActionBar
           selectedCount={summary.selectedCount}
-          total={summary.total}
-          selectedProfit={summary.selectedProfit}
-          bestProfit={summary.bestProfit}
-          onBestAll={() => applyBulk(selectBestForAll)}
-          onSaveExport={onSaveExport}
+          countLabel={(count) => tPage('actionBar.selectedBands', { count })}
+          actions={[
+            {
+              id: 'save-export',
+              label: tPage('actions.saveExport'),
+              icon: <DownloadCircle01Icon aria-hidden />,
+              onClick: onSaveExport,
+              tone: 'primary',
+            },
+          ]}
         />
       </div>
     );

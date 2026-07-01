@@ -119,7 +119,9 @@ export const MoneyInput = React.forwardRef<HTMLInputElement, MoneyInputProps>(fu
   }, [value, scale, displayString]);
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const raw = event.target.value;
+    // Numeric-only: strip anything that isn't a digit, a tr-TR separator, or a
+    // sign, so letters/symbols never land in a money field (keyboard or paste).
+    const raw = event.target.value.replace(/[^0-9.,-]/g, '');
     setDisplayString(raw);
     const parsed = parseTrMoney(raw);
     if (parsed === null) {

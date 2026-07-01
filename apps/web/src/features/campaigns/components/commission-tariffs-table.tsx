@@ -11,7 +11,9 @@ import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
+import { TableScaleControl } from '@/components/patterns/table-scale-control';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
+import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import type { SelectionMap } from '../lib/bulk-actions';
 import type { BandKey, CommissionTariffRow } from '../types';
@@ -41,6 +43,9 @@ export function CommissionTariffsTable({
 }: CommissionTariffsTableProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
   const format = useFormatter();
+  // Local (not persisted): every tariff opens at its normal 100% size; the
+  // seller can shrink it to fit for that session.
+  const [scale, setScale] = React.useState(TABLE_SCALE_DEFAULT);
 
   const columns = React.useMemo<ColumnDef<CommissionTariffRow>[]>(() => {
     const productColumn: ColumnDef<CommissionTariffRow> = {
@@ -79,23 +84,30 @@ export function CommissionTariffsTable({
       cell: ({ row }) => {
         const r = row.original;
         return (
-          <div className="gap-2xs flex flex-col text-sm">
-            <div>
-              <div className="text-2xs text-muted-foreground">{t('table.salePrice')}</div>
+          <div className="gap-3xs flex flex-col text-sm">
+            {/* Sale price is the hero; the "Satış fiyatı" label only appears when a
+                distinct customer-facing price (storefront discount) must be told apart —
+                otherwise the "Güncel fiyat" column header already names it. */}
+            {r.displayPrice.equals(r.currentPrice) ? (
               <div className="font-semibold tabular-nums">
                 <Currency value={r.currentPrice} />
               </div>
-            </div>
-            {/* Only when the customer-facing price differs from the sale price
-                (a storefront discount) — otherwise it's a redundant duplicate row. */}
-            {!r.displayPrice.equals(r.currentPrice) ? (
-              <div>
-                <div className="text-2xs text-muted-foreground">{t('table.displayPrice')}</div>
-                <div className="tabular-nums">
-                  <Currency value={r.displayPrice} />
+            ) : (
+              <>
+                <div>
+                  <div className="text-2xs text-muted-foreground">{t('table.salePrice')}</div>
+                  <div className="font-semibold tabular-nums">
+                    <Currency value={r.currentPrice} />
+                  </div>
                 </div>
-              </div>
-            ) : null}
+                <div>
+                  <div className="text-2xs text-muted-foreground">{t('table.displayPrice')}</div>
+                  <div className="tabular-nums">
+                    <Currency value={r.displayPrice} />
+                  </div>
+                </div>
+              </>
+            )}
             <div className="text-2xs text-muted-foreground">
               {t('table.currentCommission')}{' '}
               <span className="text-foreground font-medium tabular-nums">
@@ -151,8 +163,14 @@ export function CommissionTariffsTable({
           embedded
         />
       }
-      toolbar={toolbar !== undefined ? () => toolbar : undefined}
-      pagination={(table) => <DataTablePagination table={table} pageSizes={[25, 50, 100]} />}
+      scale={scale}
+      toolbar={() => (
+        <div className="gap-sm flex flex-wrap items-center justify-between">
+          <div className="min-w-0 flex-1">{toolbar}</div>
+          <TableScaleControl value={scale} onChange={setScale} className="shrink-0" />
+        </div>
+      )}
+      pagination={(table) => <DataTablePagination table={table} />}
     />
   );
 }

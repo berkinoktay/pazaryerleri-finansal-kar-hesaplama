@@ -1,5 +1,4 @@
 import Decimal from 'decimal.js';
-import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MoneyInput, formatTrMoney, parseTrMoney } from '@/components/patterns/money-input';
@@ -59,6 +58,14 @@ describe('<MoneyInput>', () => {
     // Multiple onChange firings during type — assert the last one carries 12.5.
     const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as Decimal | null;
     expect(lastCall?.toString()).toBe('12.5');
+  });
+
+  it('strips non-numeric characters as the user types', async () => {
+    const { user, container } = render(<MoneyInput />);
+    const input = container.querySelector('input') as HTMLInputElement;
+    await user.type(input, '12a3b,5x');
+    // Letters never land in a money field — only digits + the tr-TR separator.
+    expect(input.value).toBe('123,5');
   });
 
   it('emits null via onChange when the input becomes empty / unparseable', async () => {

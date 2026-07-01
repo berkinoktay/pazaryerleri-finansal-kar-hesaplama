@@ -1,6 +1,12 @@
 {
   "common": {
     "infoHint": "Bilgi",
+    "tableScale": {
+      "label": "Tablo ölçeği",
+      "decrease": "Küçült",
+      "increase": "Büyüt",
+      "reset": "Normal boyut"
+    },
     "stat": {
       "loadError": "Yüklenemedi",
       "retry": "Yenile",
@@ -861,7 +867,7 @@
       "noChoice": "Kademe seç",
       "customPrice": "Özel Fiyat",
       "enterPrice": "Fiyat girin",
-      "customPriceHint": "Tahmini kâr kaydedince hesaplanır"
+      "customPriceHint": "Fiyat girince tahmini kârı görürsün"
     },
     "noResults": {
       "title": "Eşleşen ürün yok",
@@ -922,9 +928,7 @@
       "clear": "Filtreleri temizle"
     },
     "actionBar": {
-      "selected": "{count}/{total} ürün seçildi",
-      "profitLabel": "seçili kademe kârı",
-      "headroom": "En iyiye"
+      "selectedBands": "{count} kademe seçildi"
     },
     "status": {
       "exported": "İndirildi",

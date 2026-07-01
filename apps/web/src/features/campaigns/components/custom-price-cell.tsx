@@ -53,13 +53,14 @@ export function CustomPriceCell({ row }: { row: CommissionTariffRow }): React.Re
         className="max-w-input-narrow"
       />
       {estimate !== null && breakdown !== null ? (
-        <div className="gap-3xs flex items-center">
-          <span className="text-2xs text-muted-foreground">≈</span>
+        <div className="gap-3xs flex flex-col">
+          <span className="text-2xs text-muted-foreground">{tBreakdown('estimatedProfit')}</span>
           <ProfitBadge
             value={estimate.profit}
             marginPct={estimate.marginPct}
             scale={scale}
             onOpen={() => setBreakdownOpen(true)}
+            className="self-start"
           />
           <CommissionTariffBreakdown
             open={breakdownOpen}

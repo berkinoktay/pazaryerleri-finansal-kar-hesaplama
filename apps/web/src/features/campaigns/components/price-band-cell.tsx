@@ -91,9 +91,9 @@ export function PriceBandCell({
                 aria-hidden
               />
             )}
-            <span className="gap-3xs flex min-w-0 items-baseline">
+            <span className="gap-2xs flex min-w-0 items-baseline">
               <span className="text-base font-bold tabular-nums">{priceText}</span>
-              <span className="truncate text-xs font-medium">{qualifier}</span>
+              <span className="truncate text-xs font-normal">{qualifier}</span>
             </span>
           </span>
           {isBest ? (
