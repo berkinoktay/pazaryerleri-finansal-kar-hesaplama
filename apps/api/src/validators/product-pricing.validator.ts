@@ -245,7 +245,7 @@ export type QuoteInput = z.infer<typeof QuoteInputSchema>;
 
 // ─── Quote response ───────────────────────────────────────────────────────────
 
-const QuoteBreakdownSchema = z
+export const QuoteBreakdownSchema = z
   .object({
     listGross: moneyString,
     sellerDiscountGross: moneyString,

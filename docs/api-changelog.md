@@ -21,6 +21,18 @@ section "Versioning" for details.
 
 ### Added
 
+- **`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/items/{itemId}/estimate`**
+  — Computes the full profit breakdown for one tariff item at a given `price` (body `{ price,
+  bandKey? }`), reusing the same profit engine + resolvers (cost, shipping, fee definitions) the
+  detail view uses — so an estimate at a band's price equals that band's profit in the detail
+  response. Two modes: pass `bandKey` to use that band's commission verbatim (the band-click
+  breakdown modal, exact even on touching band boundaries), or omit it to derive the band from the
+  price (the custom-price what-if). Read-only (`DATA_READ`; POST only because it carries a body).
+  Returns `{ itemId, price, bandKey, commissionPct, calculable, reason, breakdown }` where
+  `breakdown` is the shared `QuoteBreakdown` (GROSS decimal strings) or `null` when the item is
+  unmatched / uncostable (`reason` explains). `404` for an item not in this tariff/store; `422`
+  (`INVALID_CUSTOM_PRICE`) for a malformed price.
+
 - **`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/import`** — Imports
   Trendyol's "Ürün Komisyon Tarifeleri" `.xlsx` (multipart `file`). The fixed-layout sheet is
   read by position (its `1.KOMİSYON`..`4.KOMİSYON` headers repeat per period, so header matching

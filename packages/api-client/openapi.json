@@ -4811,6 +4811,95 @@
           "selections"
         ]
       },
+      "EstimateItemPriceResult": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price": {
+            "type": "string"
+          },
+          "bandKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/TariffItemReason"
+          },
+          "breakdown": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuoteBreakdown"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "itemId",
+          "price",
+          "bandKey",
+          "commissionPct",
+          "calculable",
+          "reason",
+          "breakdown"
+        ]
+      },
+      "TariffItemReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "NO_PRODUCT",
+          "NO_COST",
+          "NO_SHIPPING",
+          null
+        ],
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok."
+      },
+      "EstimateItemPriceBody": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$",
+            "description": "Değerlendirilecek satış fiyatı (GROSS, TL).",
+            "example": "450.00"
+          },
+          "bandKey": {
+            "type": "string",
+            "enum": [
+              "band1",
+              "band2",
+              "band3",
+              "band4"
+            ],
+            "description": "Verilirse o band’ın komisyonu birebir kullanılır (band-tıklaması). Yoksa fiyatın düştüğü band bulunur (özel-fiyat what-if)."
+          }
+        },
+        "required": [
+          "price"
+        ]
+      },
       "CommissionTariffDetail": {
         "type": "object",
         "properties": {
@@ -4949,19 +5038,6 @@
           "customPrice",
           "bands"
         ]
-      },
-      "TariffItemReason": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "enum": [
-          "NO_PRODUCT",
-          "NO_COST",
-          "NO_SHIPPING",
-          null
-        ],
-        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok."
       },
       "TariffBandResult": {
         "type": "object",
@@ -13229,6 +13305,166 @@
           },
           "422": {
             "description": "Invalid selection payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/items/{itemId}/estimate": {
+      "post": {
+        "tags": [
+          "CommissionTariffs"
+        ],
+        "summary": "Estimate the profit breakdown for a tariff item at a given price",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE tariff item at the requested price, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses — so an estimate at a band’s price equals that band’s profit in the detail response. Two modes: pass `bandKey` to use that band’s commission verbatim (the band-click breakdown modal), or omit it to derive the band from the price (the custom-price what-if). Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, `calculable` is false, `reason` explains why and `breakdown` is null. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "itemId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateItemPriceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profit breakdown at the requested price",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateItemPriceResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item, tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid price payload",
             "content": {
               "application/json": {
                 "schema": {

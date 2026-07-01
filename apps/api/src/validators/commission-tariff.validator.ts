@@ -6,6 +6,8 @@
 
 import { z } from '@hono/zod-openapi';
 
+import { QuoteBreakdownSchema } from './product-pricing.validator';
+
 // ─── Shared enums ───────────────────────────────────────────────────────────
 
 export const TariffValiditySchema = z
@@ -13,6 +15,9 @@ export const TariffValiditySchema = z
   .openapi('TariffValidity', {
     description: 'Dönem geçerliliği — tarihler parse edilemezse null.',
   });
+
+// The four price bands, top-down: band1 (current tier) → band4 (lowest window).
+export const TariffBandKeySchema = z.enum(['band1', 'band2', 'band3', 'band4']);
 
 export const TariffItemReasonSchema = z
   .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING'])
@@ -136,7 +141,7 @@ export type ImportTariffResponse = z.infer<typeof ImportTariffResponseSchema>;
 
 export const TariffSelectionSchema = z.object({
   itemId: z.string().uuid(),
-  band: z.enum(['band1', 'band2', 'band3', 'band4']).nullable(),
+  band: TariffBandKeySchema.nullable(),
   customPrice: z
     .string()
     .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
@@ -154,6 +159,50 @@ export const UpdateSelectionsResponseSchema = z
   .openapi('UpdateSelectionsResponse');
 
 export type TariffSelection = z.infer<typeof TariffSelectionSchema>;
+
+// ─── Estimate (on-demand breakdown at an arbitrary price) ───────────────────
+//
+// One endpoint serves two frontend needs, both on-demand so the detail payload
+// stays light: (1) the band-click breakdown modal passes the band's price plus
+// its `bandKey` (exact commission, no boundary ambiguity); (2) the custom-price
+// what-if passes only a price and the applicable band is derived from it. The
+// full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
+
+export const TariffItemIdPathSchema = TariffIdPathSchema.extend({
+  itemId: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: 'itemId', in: 'path' } }),
+});
+
+export const EstimateItemPriceBodySchema = z
+  .object({
+    price: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+      .openapi({ description: 'Değerlendirilecek satış fiyatı (GROSS, TL).', example: '450.00' }),
+    bandKey: TariffBandKeySchema.optional().openapi({
+      description:
+        'Verilirse o band’ın komisyonu birebir kullanılır (band-tıklaması). ' +
+        'Yoksa fiyatın düştüğü band bulunur (özel-fiyat what-if).',
+    }),
+  })
+  .openapi('EstimateItemPriceBody');
+
+export const EstimateItemPriceResultSchema = z
+  .object({
+    itemId: z.string().uuid(),
+    price: z.string(),
+    bandKey: z.string().nullable(),
+    commissionPct: z.string().nullable(),
+    calculable: z.boolean(),
+    reason: TariffItemReasonSchema.nullable(),
+    breakdown: QuoteBreakdownSchema.nullable(),
+  })
+  .openapi('EstimateItemPriceResult');
+
+export type EstimateItemPriceBody = z.infer<typeof EstimateItemPriceBodySchema>;
+export type EstimateItemPriceResult = z.infer<typeof EstimateItemPriceResultSchema>;
 
 // ─── Inferred TS types (consumed by the service layer) ──────────────────────
 

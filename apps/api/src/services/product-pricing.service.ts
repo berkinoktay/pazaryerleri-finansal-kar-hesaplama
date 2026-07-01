@@ -768,7 +768,7 @@ export interface QuoteServiceInput {
   target: { type: 'margin' | 'markup' | 'profit'; value: string };
 }
 
-function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
+export function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
   return {
     listGross: bd.listGross.toFixed(2),
     sellerDiscountGross: bd.sellerDiscountGross.toFixed(2),
