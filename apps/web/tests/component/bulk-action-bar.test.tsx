@@ -58,6 +58,16 @@ describe('<BulkActionBar>', () => {
       await user.click(screen.getByRole('button', { name: 'Temizle' }));
       expect(onClear).toHaveBeenCalledOnce();
     });
+
+    it('renders no dismiss button when onClear is omitted', () => {
+      const { rerender } = render(
+        <BulkActionBar selectedCount={2} onClear={vi.fn()} actions={makeActions()} />,
+      );
+      const withClear = screen.getAllByRole('button').length;
+      rerender(<BulkActionBar selectedCount={2} actions={makeActions()} />);
+      // The clear (X) is gone — one fewer button, only the actions remain.
+      expect(screen.getAllByRole('button')).toHaveLength(withClear - 1);
+    });
   });
 
   describe('actions', () => {

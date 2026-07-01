@@ -77,7 +77,7 @@ export function formatTrMoney(value: Decimal, scale = 2): string {
 
 export interface MoneyInputProps extends Omit<
   InputProps,
-  'value' | 'defaultValue' | 'onChange' | 'type' | 'leading' | 'leadingIcon' | 'inputMode'
+  'value' | 'defaultValue' | 'onChange' | 'type' | 'leading' | 'leadingIcon' | 'inputMode' | 'max'
 > {
   /** Controlled value. `null` represents an empty field. */
   value?: Decimal | null;
@@ -89,12 +89,27 @@ export interface MoneyInputProps extends Omit<
   scale?: number;
   /** When true, negative input is auto-flipped to positive on emit. */
   nonNegative?: boolean;
+  /**
+   * Numeric ceiling. A keystroke that would push the parsed value above `max`
+   * is REJECTED (the field simply stops accepting digits, like `maxLength` but
+   * decimal-aware — `maxLength` can't tell `9999999,99` from `9999999999`).
+   */
+  max?: Decimal;
   /** Override the leading currency symbol. Defaults to ₺. */
   symbol?: string;
 }
 
 export const MoneyInput = React.forwardRef<HTMLInputElement, MoneyInputProps>(function MoneyInput(
-  { value, defaultValue, onChange, scale = 2, nonNegative = false, symbol = '₺', ...inputProps },
+  {
+    value,
+    defaultValue,
+    onChange,
+    scale = 2,
+    nonNegative = false,
+    max,
+    symbol = '₺',
+    ...inputProps
+  },
   ref,
 ) {
   const [displayString, setDisplayString] = React.useState<string>(() => {
@@ -119,14 +134,20 @@ export const MoneyInput = React.forwardRef<HTMLInputElement, MoneyInputProps>(fu
   }, [value, scale, displayString]);
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const raw = event.target.value;
-    setDisplayString(raw);
+    // Numeric-only: strip anything that isn't a digit, a tr-TR separator, or a
+    // sign, so letters/symbols never land in a money field (keyboard or paste).
+    const raw = event.target.value.replace(/[^0-9.,-]/g, '');
     const parsed = parseTrMoney(raw);
     if (parsed === null) {
+      setDisplayString(raw);
       onChange?.(null);
       return;
     }
-    onChange?.(nonNegative && parsed.isNegative() ? parsed.abs() : parsed);
+    const next = nonNegative && parsed.isNegative() ? parsed.abs() : parsed;
+    // Over the ceiling → refuse the keystroke: buffer and value both stay put.
+    if (max !== undefined && next.greaterThan(max)) return;
+    setDisplayString(raw);
+    onChange?.(next);
   };
 
   return (

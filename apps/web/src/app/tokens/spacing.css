@@ -50,6 +50,15 @@
   --size-tile-min: 280px;
   --size-tile-min-sm: 220px;
   --size-table-row-h: 44px;
+  /* Comfortable min width for one commission-tariff price-band card so its
+   * "777,10₺ ve üzeri" + "En iyi" line never truncates; the band table scrolls
+   * horizontally past this rather than squishing the cards (200px). */
+  --size-tariff-band: 200px;
+  /* Max width of the tariff detail table's pinned "product" column (256px). Caps
+   * the sticky identity column so it can't eat the viewport on a narrow/zoomed
+   * screen (blocking horizontal scroll to the bands); the product name wraps to
+   * two lines within it instead of forcing the column wide. */
+  --size-tariff-product: 16rem;
   /* Min-height for the DataTable body when it shows a single full-width state
    * (loading skeleton block, error, first-run empty, filtered no-results) so
    * the region never looks cramped and never jumps height as it transitions

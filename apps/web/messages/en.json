@@ -1,6 +1,15 @@
 {
   "common": {
     "infoHint": "Info",
+    "a11y": {
+      "viewImage": "View product image at full size"
+    },
+    "tableScale": {
+      "label": "Table scale",
+      "decrease": "Shrink",
+      "increase": "Enlarge",
+      "reset": "Reset to normal"
+    },
     "stat": {
       "loadError": "Couldn't load",
       "retry": "Retry",
@@ -275,11 +284,20 @@
     "tools": "Tools & Pricing",
     "whatsNew": "What's New",
     "livePerformance": "Live Performance",
+    "productCommissionTariffs": "Product Commission Tariffs",
+    "plusCommissionTariffs": "Plus Commission Tariff",
+    "productLabels": "Advantaged Product Labels",
+    "flashProducts": "Flash Products",
+    "discounts": "Discounts",
+    "coupons": "Coupons",
+    "cartCampaigns": "Cart Campaigns",
     "toggleSidebar": "Toggle sidebar",
     "groups": {
       "overview": "Overview",
       "operations": "Operations",
-      "financeTools": "Finance"
+      "finance": "Finance",
+      "tools": "Tools",
+      "campaigns": "Campaigns"
     },
     "help": {
       "label": "Help & Support"
@@ -739,6 +757,222 @@
   "placeholderPage": {
     "comingSoon": "Coming soon",
     "description": "This page is still under development. It will be active in upcoming updates."
+  },
+  "campaignsPages": {
+    "productCommissionTariffs": {
+      "title": "Product Commission Tariffs",
+      "intent": "View, edit and manage the weekly Trendyol commission tariff Excel files you upload."
+    },
+    "plusCommissionTariffs": {
+      "title": "Plus Commission Tariff",
+      "intent": "Profitability analysis for the Trendyol Plus commission tariff"
+    },
+    "productLabels": {
+      "title": "Advantaged Product Labels",
+      "intent": "Profitability of advantaged product label price bands"
+    },
+    "flashProducts": {
+      "title": "Flash Products",
+      "intent": "Profitability of flash product offers"
+    },
+    "discounts": {
+      "title": "Discounts",
+      "intent": "Profitability of discount campaigns"
+    },
+    "coupons": {
+      "title": "Coupons",
+      "intent": "Profitability of coupon campaigns"
+    },
+    "cartCampaigns": {
+      "title": "Cart Campaigns",
+      "intent": "Profitability of cart campaigns"
+    }
+  },
+  "commissionTariffsPage": {
+    "search": "Search product, model or barcode",
+    "actions": {
+      "upload": "Upload Excel",
+      "saveExport": "Save and Download"
+    },
+    "templates": {
+      "add": "New tariff",
+      "back": "Back to tariffs",
+      "delete": "Delete table",
+      "deleteTitle": "Delete tariff",
+      "deleteDescription": "This saved tariff and all of its band selections will be permanently deleted. This action cannot be undone.",
+      "deleteConfirm": "Delete tariff",
+      "notFoundTitle": "Tariff not found",
+      "notFoundDescription": "This tariff may have been deleted or may not belong to this store."
+    },
+    "noStore": {
+      "title": "Select a store first",
+      "description": "Connect a Trendyol store to view commission tariffs.",
+      "cta": "Go to stores"
+    },
+    "reason": {
+      "NO_PRODUCT": "No product match — this barcode isn't in your catalog.",
+      "NO_COST": "No cost — add a cost profile for this product.",
+      "NO_SHIPPING": "No shipping estimate — carrier or desi setup is missing."
+    },
+    "list": {
+      "upload": "Upload Excel File",
+      "search": "Search tariffs…",
+      "productUnit": "products",
+      "columns": {
+        "tariff": "Tariff",
+        "period": "Period",
+        "products": "Products",
+        "status": "Status",
+        "exported": "Export"
+      },
+      "summary": {
+        "total": "Total tariffs",
+        "activePeriod": "Active period",
+        "covered": "Covered products",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}"
+      },
+      "empty": {
+        "title": "No commission tariffs yet",
+        "description": "Upload your first weekly Trendyol commission tariff Excel file to start; we'll calculate your earnings per price band for each product.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
+      "selectAll": "Select all",
+      "selectRow": "Select row",
+      "filterLabel": "Filter by status",
+      "bulk": {
+        "selected": "{count} tariffs selected",
+        "delete": "Delete selected",
+        "deleteTitle": "Delete selected tariffs",
+        "deleteDescription": "{count} tariffs and all of their band selections will be permanently deleted. This action cannot be undone.",
+        "deleteConfirm": "Delete tariffs"
+      }
+    },
+    "summary": {
+      "total": "Products in tariff",
+      "totalContext": "listed this period",
+      "selected": "Bands chosen",
+      "selectedValue": "{count}/{total}",
+      "selectedContext": "products with a chosen band",
+      "selectedProfit": "Chosen-band profit",
+      "selectedProfitContext": "estimated total for your chosen products",
+      "bestProfit": "Best case",
+      "bestProfitHint": "Estimated total earnings if you pick the most profitable band for every product.",
+      "applyBest": "Apply to all"
+    },
+    "table": {
+      "product": "Product Details",
+      "current": "Current price",
+      "salePrice": "Sale price",
+      "displayPrice": "Price the customer sees",
+      "currentCommission": "Current commission",
+      "currentPrice": "Current Price",
+      "commission": "commission",
+      "stock": "Stock",
+      "band": "Price Band {n}",
+      "best": "Most profitable",
+      "profit": "Profit",
+      "loss": "Loss",
+      "yourChoice": "Your choice",
+      "noChoice": "Choose a band",
+      "customPrice": "Custom Price",
+      "enterPrice": "Enter price",
+      "customPriceHint": "Enter a price to see the estimated profit",
+      "aboveQualifier": "and above",
+      "belowQualifier": "and below"
+    },
+    "noResults": {
+      "title": "No matching products",
+      "description": "Try changing your search or filters."
+    },
+    "upload": {
+      "title": "Upload the commission tariff Excel",
+      "description": "Upload the weekly commission tariff file you downloaded from the Trendyol panel; we'll calculate your profit per price band for each product.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · max 5 MB",
+      "cta": "Choose file",
+      "stepsTitle": "How it works",
+      "step1": "Download the weekly commission tariff Excel from the Trendyol panel",
+      "step2": "Upload the file here",
+      "step3": "See what you'll earn at each price band for every product",
+      "submit": "Create tariff",
+      "errors": {
+        "notReadable": "Couldn't read the file — upload a valid .xlsx.",
+        "wrongFormat": "This isn't a Trendyol commission tariff file, or its format wasn't recognized.",
+        "empty": "No product rows found in the file.",
+        "noPeriod": "No tariff period found in the file.",
+        "tooLarge": "File is too large — upload a smaller file.",
+        "generic": "Couldn't upload the file. Please try again."
+      }
+    },
+    "breakdown": {
+      "title": "Profit breakdown",
+      "salePrice": "Sale price",
+      "sale": "Sale",
+      "commission": "Commission",
+      "unitCost": "Unit cost",
+      "cost": "Product cost",
+      "shipping": "Shipping",
+      "platformService": "Platform service fee",
+      "stoppage": "Withholding",
+      "netVat": "Net VAT",
+      "profit": "Profit",
+      "estimatedProfit": "Estimated profit",
+      "margin": "Margin",
+      "notCalculable": "Profit can't be computed for this product."
+    },
+    "smartSelect": {
+      "label": "Smart select",
+      "bestAll": "Best band for all",
+      "profitableOnly": "Profitable products only",
+      "byTargetTitle": "Select by target margin",
+      "targetLabel": "Target margin %",
+      "strategyLabel": "Strategy",
+      "strategyLeastDrop": "Least price drop",
+      "strategyMaxProfit": "Highest profit",
+      "apply": "Apply",
+      "clear": "Clear selections",
+      "scopeHint": "Applies only to the visible products when a filter is active."
+    },
+    "filters": {
+      "label": "Filters",
+      "category": "Category",
+      "brand": "Brand",
+      "all": "All",
+      "minMargin": "Min. margin %",
+      "profit": "Profitability",
+      "profitAll": "All",
+      "profitProfitable": "Profitable",
+      "profitLoss": "Loss",
+      "selection": "Selection state",
+      "selectionAll": "All",
+      "selectionSelected": "Selected",
+      "selectionUnselected": "Unselected",
+      "clear": "Clear filters"
+    },
+    "actionBar": {
+      "selectedBands": "{count} bands selected"
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
+    },
+    "validity": {
+      "active": "Active",
+      "upcoming": "Upcoming",
+      "past": "Past"
+    },
+    "listStatus": {
+      "active": "Active",
+      "upcoming": "Scheduled",
+      "past": "Expired",
+      "draft": "Draft"
+    }
   },
   "featureStatus": {
     "draftLabel": "Draft",
@@ -1659,7 +1893,6 @@
       "expandRow": "Show variants",
       "collapseRow": "Hide variants",
       "openFilter": "Open filter",
-      "viewImage": "View product image at full size",
       "selectAll": "Select all products",
       "selectRow": "Select this product"
     },

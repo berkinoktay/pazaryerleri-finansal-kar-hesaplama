@@ -2,16 +2,26 @@ import {
   Activity03Icon,
   Calculator01Icon,
   ChartLineData01Icon,
+  Coupon01Icon,
   DashboardSquare02Icon,
+  DiscountIcon,
+  FlashIcon,
   HelpCircleIcon,
   InvoiceIcon,
+  LabelIcon,
   Megaphone01Icon,
   PackageIcon,
+  PercentIcon,
+  PercentSquareIcon,
+  PlusSignSquareIcon,
   ReceiptDollarIcon,
   ReturnRequestIcon,
+  SaleTag01Icon,
   ShoppingBag01Icon,
   Tag01Icon,
 } from 'hugeicons-react';
+
+import type { Platform } from '@pazarsync/db/enums';
 
 import type { SubNavItem } from '@/components/patterns/sub-nav-list';
 
@@ -70,17 +80,24 @@ export interface NavGroupConfig {
   /** Section label shown above the group. */
   labelKey: SubNavItem['labelKey'];
   items: readonly NavItem[];
+  /**
+   * When set, this group is only shown if the active store's platform is in
+   * the list. Undefined = always shown (platform-agnostic). Used for
+   * marketplace-specific groups like Campaigns (Trendyol-only). Filtering
+   * happens in the app shell via `filterNavGroupsByPlatform`.
+   */
+  readonly platforms?: readonly Platform[];
 }
 
 /**
  * Primary sidebar navigation, grouped.
  *
  * Sub-navigation principle (see design spec): the sidebar holds DESTINATIONS
- * (distinct pages); same-entity VIEWS/FILTERS live in-page (FilterTabs). After
- * this epic the only domain that still carries sidebar sub-nav is
- * `Tools & Pricing` (its tools are genuinely distinct pages). Campaigns will
- * join the same `Finans & Araçlar` group as a destination-with-sub-nav once
- * its pages exist — the structure is ready.
+ * (distinct pages); same-entity VIEWS/FILTERS live in-page (FilterTabs). The
+ * tools (Araçlar) are flat destinations in their own top-level group. The
+ * Campaigns (Kampanyalar) group is marketplace-specific — it carries
+ * `platforms: ['TRENDYOL']` so it only renders when the active store is a
+ * Trendyol store (filtered in the app shell via `filterNavGroupsByPlatform`).
  */
 export const NAV_GROUPS: readonly NavGroupConfig[] = [
   {
@@ -100,6 +117,59 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         href: '/live-performance',
         icon: Activity03Icon,
         badge: { variant: 'new', label: 'Yeni' },
+      },
+    ],
+  },
+  {
+    // High-traffic for Trendyol sellers, so it sits right below the overview
+    // group rather than at the bottom. Trendyol-specific: the whole group is
+    // hidden when the active store is not a Trendyol store (see
+    // `filterNavGroupsByPlatform`).
+    key: 'campaigns',
+    labelKey: 'nav.groups.campaigns',
+    platforms: ['TRENDYOL'],
+    items: [
+      {
+        key: 'campaign-product-commission',
+        labelKey: 'nav.productCommissionTariffs',
+        href: '/campaigns/product-commission-tariffs',
+        icon: PercentSquareIcon,
+      },
+      {
+        key: 'campaign-plus-commission',
+        labelKey: 'nav.plusCommissionTariffs',
+        href: '/campaigns/plus-commission-tariffs',
+        icon: PlusSignSquareIcon,
+      },
+      {
+        key: 'campaign-product-labels',
+        labelKey: 'nav.productLabels',
+        href: '/campaigns/product-labels',
+        icon: LabelIcon,
+      },
+      {
+        key: 'campaign-flash-products',
+        labelKey: 'nav.flashProducts',
+        href: '/campaigns/flash-products',
+        icon: FlashIcon,
+      },
+      {
+        key: 'campaign-discounts',
+        labelKey: 'nav.discounts',
+        href: '/campaigns/discounts',
+        icon: DiscountIcon,
+      },
+      {
+        key: 'campaign-coupons',
+        labelKey: 'nav.coupons',
+        href: '/campaigns/coupons',
+        icon: Coupon01Icon,
+      },
+      {
+        key: 'campaign-cart-campaigns',
+        labelKey: 'nav.cartCampaigns',
+        href: '/campaigns/cart-campaigns',
+        icon: Megaphone01Icon,
       },
     ],
   },
@@ -135,7 +205,7 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
   },
   {
     key: 'finance',
-    labelKey: 'nav.groups.financeTools',
+    labelKey: 'nav.groups.finance',
     items: [
       {
         key: 'profitability',
@@ -155,44 +225,6 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         icon: InvoiceIcon,
       },
       {
-        key: 'tools',
-        labelKey: 'nav.tools',
-        // No overviewHref this epic: clicking the parent navigates to the first
-        // tool and expands the sub-list (NavGroup's navigate-on-click). Active
-        // across all /tools/* via activeMatch.
-        href: '/tools/commission-rates',
-        activeMatch: '/tools',
-        icon: Calculator01Icon,
-        sections: [
-          {
-            key: 'tools',
-            labelKey: 'navSections.tools.tools.title',
-            items: [
-              {
-                key: 'commission-rates',
-                labelKey: 'navSections.tools.tools.commissionRates',
-                href: '/tools/commission-rates',
-              },
-              {
-                key: 'commission-calculator',
-                labelKey: 'navSections.tools.tools.commissionCalculator',
-                href: '/tools/commission-calculator',
-              },
-              {
-                key: 'plus-commission-rates',
-                labelKey: 'navSections.tools.tools.plusCommissionRates',
-                href: '/tools/plus-commission-rates',
-              },
-              {
-                key: 'product-pricing',
-                labelKey: 'navSections.tools.tools.productPricing',
-                href: '/tools/product-pricing',
-              },
-            ],
-          },
-        ],
-      },
-      {
         key: 'expenses',
         labelKey: 'nav.expenses',
         href: '/expenses',
@@ -200,7 +232,47 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
       },
     ],
   },
+  {
+    key: 'tools',
+    labelKey: 'nav.groups.tools',
+    items: [
+      {
+        key: 'commission-rates',
+        labelKey: 'navSections.tools.tools.commissionRates',
+        href: '/tools/commission-rates',
+        icon: PercentIcon,
+      },
+      {
+        key: 'commission-calculator',
+        labelKey: 'navSections.tools.tools.commissionCalculator',
+        href: '/tools/commission-calculator',
+        icon: Calculator01Icon,
+      },
+      {
+        key: 'product-pricing',
+        labelKey: 'navSections.tools.tools.productPricing',
+        href: '/tools/product-pricing',
+        icon: SaleTag01Icon,
+      },
+    ],
+  },
 ] as const satisfies readonly NavGroupConfig[];
+
+/**
+ * Filter nav groups by the active store's platform. A group with no
+ * `platforms` restriction is always visible; a restricted group is shown only
+ * when `platform` is non-null and listed. With no active store (`null`),
+ * platform-restricted groups are hidden.
+ */
+export function filterNavGroupsByPlatform(
+  groups: readonly NavGroupConfig[],
+  platform: Platform | null,
+): readonly NavGroupConfig[] {
+  return groups.filter((group) => {
+    if (group.platforms === undefined) return true;
+    return platform !== null && group.platforms.includes(platform);
+  });
+}
 
 /**
  * Help menu entries (sidebar footer "Yardım & Destek" dropdown). Replaces the

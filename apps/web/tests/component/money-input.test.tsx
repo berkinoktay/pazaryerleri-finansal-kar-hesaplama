@@ -1,5 +1,4 @@
 import Decimal from 'decimal.js';
-import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MoneyInput, formatTrMoney, parseTrMoney } from '@/components/patterns/money-input';
@@ -61,6 +60,14 @@ describe('<MoneyInput>', () => {
     expect(lastCall?.toString()).toBe('12.5');
   });
 
+  it('strips non-numeric characters as the user types', async () => {
+    const { user, container } = render(<MoneyInput />);
+    const input = container.querySelector('input') as HTMLInputElement;
+    await user.type(input, '12a3b,5x');
+    // Letters never land in a money field — only digits + the tr-TR separator.
+    expect(input.value).toBe('123,5');
+  });
+
   it('emits null via onChange when the input becomes empty / unparseable', async () => {
     const onChange = vi.fn();
     const { user, container } = render(
@@ -85,5 +92,30 @@ describe('<MoneyInput>', () => {
     const { container } = render(<MoneyInput />);
     const input = container.querySelector('input') as HTMLInputElement;
     expect(input.getAttribute('inputmode')).toBe('decimal');
+  });
+
+  it('rejects keystrokes that would push the value above max (buffer + emit stay put)', async () => {
+    const onChange = vi.fn();
+    const { user, container } = render(
+      <MoneyInput max={new Decimal('999.99')} onChange={onChange} />,
+    );
+    const input = container.querySelector('input') as HTMLInputElement;
+    await user.type(input, '99999');
+    // The 4th digit would make 9999 > 999.99 — refused; display holds at "999".
+    expect(input.value).toBe('999');
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as Decimal | null;
+    expect(lastCall?.toString()).toBe('999');
+  });
+
+  it('still allows decimals under max after the integer part hits the ceiling', async () => {
+    const onChange = vi.fn();
+    const { user, container } = render(
+      <MoneyInput max={new Decimal('999.99')} onChange={onChange} />,
+    );
+    const input = container.querySelector('input') as HTMLInputElement;
+    await user.type(input, '999,5');
+    expect(input.value).toBe('999,5');
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as Decimal | null;
+    expect(lastCall?.toString()).toBe('999.5');
   });
 });

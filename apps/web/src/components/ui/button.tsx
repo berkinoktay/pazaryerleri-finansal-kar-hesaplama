@@ -43,8 +43,12 @@ const buttonVariants = cva(
       variant: {
         default: 'bg-primary text-primary-foreground hover:bg-primary-hover active:scale-[0.97]',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-accent active:scale-[0.97]',
+        // The secondary "surface" button: a white --card fill + hairline border so
+        // it reads as a raised, tactile control on the tinted --background canvas
+        // (matching inputs). bg-background would tint it the same as the page and
+        // make it blend in / float; on a white surface it stays a clean bordered button.
         outline:
-          'border border-border bg-background text-foreground hover:bg-muted hover:border-border-strong active:scale-[0.97]',
+          'border border-border bg-card text-foreground hover:bg-muted hover:border-border-strong active:scale-[0.97]',
         ghost: 'text-foreground hover:bg-muted active:scale-[0.97]',
         link: 'text-primary underline-offset-4 hover:underline',
         destructive:

@@ -5,7 +5,11 @@ import * as React from 'react';
 
 import { Wordmark } from '@/components/brand/wordmark';
 import { HelpMenu } from '@/components/layout/help-menu';
-import { HELP_MENU_ITEMS, NAV_GROUPS } from '@/components/layout/nav-config';
+import {
+  filterNavGroupsByPlatform,
+  HELP_MENU_ITEMS,
+  NAV_GROUPS,
+} from '@/components/layout/nav-config';
 import { BottomDock } from '@/components/patterns/bottom-dock';
 import { NavGroup, NAV_BADGE_TONE } from '@/components/patterns/nav-group';
 import { NotificationBell, type NotificationEntry } from '@/components/patterns/notification-bell';
@@ -173,7 +177,11 @@ export function AppShell({
         mobile-only inline header (hamburger + brand + bell + user menu),
         followed by the page content. The drawer mode covers small viewports.
       */}
-      <SidebarInset id="main">
+      {/* min-w-0: without it this flex-1 row item grows to fit wide content
+          (e.g. the commission-tariff band table), pushing the page past the
+          viewport and over the sidebar. min-w-0 lets it shrink so wide tables
+          scroll inside their own DataTable instead. */}
+      <SidebarInset id="main" className="min-w-0">
         <header className="border-border gap-xs px-sm py-3xs flex h-12 items-center justify-between border-b md:hidden">
           <div className="gap-xs flex items-center">
             <SidebarTrigger aria-label={t('nav.toggleSidebar')} />
@@ -189,7 +197,7 @@ export function AppShell({
           from filling wide viewports. Pages that need a reading-width cap opt
           in per-page (max-w-prose-max / max-w-form / …).
         */}
-        <div className="gap-lg px-md py-md md:px-2xl md:py-xl flex w-full flex-1 flex-col overflow-y-auto">
+        <div className="gap-lg px-md py-md md:px-2xl md:py-xl flex w-full min-w-0 flex-1 flex-col overflow-y-auto">
           {children}
         </div>
       </SidebarInset>
@@ -220,6 +228,12 @@ function AppSidebar({
   const pathname = usePathname();
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
+
+  // Marketplace-specific groups (e.g. Campaigns) only render for the matching
+  // platform. Derive it from the active store rather than a separate hook so
+  // the sidebar stays in sync with the store the rest of the shell is showing.
+  const activePlatform = stores.find((store) => store.id === activeStoreId)?.platform ?? null;
+  const visibleGroups = filterNavGroupsByPlatform(NAV_GROUPS, activePlatform);
 
   return (
     <Sidebar collapsible="icon">
@@ -253,7 +267,7 @@ function AppSidebar({
         <SidebarSeparator className="bg-border/60 mt-2xs mx-0" />
       </SidebarHeader>
       <SidebarContent>
-        {NAV_GROUPS.map((group) => (
+        {visibleGroups.map((group) => (
           <SidebarGroup key={group.key}>
             <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel>
             <SidebarMenu>

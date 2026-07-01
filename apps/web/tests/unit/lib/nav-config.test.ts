@@ -6,8 +6,14 @@ const allItems = NAV_GROUPS.flatMap((group) => group.items);
 const keys = allItems.map((item) => item.key);
 
 describe('nav-config', () => {
-  it('groups the primary nav into Özet / Operasyon / Finans & Araçlar', () => {
-    expect(NAV_GROUPS.map((group) => group.key)).toEqual(['overview', 'operations', 'finance']);
+  it('groups the primary nav: Özet · Kampanyalar · Operasyon · Finans · Araçlar', () => {
+    expect(NAV_GROUPS.map((group) => group.key)).toEqual([
+      'overview',
+      'campaigns',
+      'operations',
+      'finance',
+      'tools',
+    ]);
   });
 
   it('keeps every primary destination, drops Notifications + Settings from the rail', () => {
@@ -18,7 +24,9 @@ describe('nav-config', () => {
     expect(keys).toContain('costs');
     expect(keys).toContain('profitability');
     expect(keys).toContain('reconciliation');
-    expect(keys).toContain('tools');
+    // Tools is now its own group; its destinations are the individual tools.
+    expect(NAV_GROUPS.map((group) => group.key)).toContain('tools');
+    expect(keys).toContain('commission-rates');
     expect(keys).toContain('expenses');
     // Notifications now lives behind the footer bell + /notifications page.
     expect(keys).not.toContain('notifications');
@@ -26,9 +34,9 @@ describe('nav-config', () => {
     expect(keys).not.toContain('settings');
   });
 
-  it('only Tools keeps sidebar sub-nav — filter views moved to in-page tabs', () => {
+  it('has no sidebar sub-nav — every destination is flat (filter views are in-page tabs)', () => {
     const withSections = allItems.filter((item) => 'sections' in item && item.sections);
-    expect(withSections.map((item) => item.key)).toEqual(['tools']);
+    expect(withSections).toEqual([]);
   });
 
   it('carries the expected inline badges', () => {
@@ -42,12 +50,9 @@ describe('nav-config', () => {
     expect(dashboard?.badge).toBeUndefined();
   });
 
-  it('uses activeMatch so default-sub-route items stay highlighted across their section', () => {
+  it('uses activeMatch so a default-sub-route item stays highlighted across its section', () => {
     const profitability = allItems.find((item) => item.key === 'profitability');
     expect(profitability?.activeMatch).toBe('/profitability');
-
-    const tools = allItems.find((item) => item.key === 'tools');
-    expect(tools?.activeMatch).toBe('/tools');
   });
 
   it('groups whats-new + support into the footer Help menu', () => {

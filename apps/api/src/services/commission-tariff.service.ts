@@ -174,6 +174,9 @@ export async function getTariffDetail(
 
   // ─── Batch-resolve variants + cost + shipping once for the whole tariff ───
   const variantMap = new Map<string, TariffVariant>();
+  // Primary product image per matched variant, resolved alongside the variant
+  // fetch so the detail rows can show the same thumbnail as the products screen.
+  const imageMap = new Map<string, string | null>();
   let costMap = new Map<string, VariantCostAggregate>();
   let shippingMap = new Map<string, EstimateOutcome>();
 
@@ -189,13 +192,25 @@ export async function getTariffDetail(
           salePrice: true,
           vatRate: true,
           isDigital: true,
-          product: { select: { title: true, categoryId: true, brandId: true } },
+          product: {
+            select: {
+              title: true,
+              categoryId: true,
+              brandId: true,
+              // Position-0 image from our own catalog (barcode-matched); the
+              // Trendyol tariff file carries no images. Null when none attached.
+              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+            },
+          },
         },
       });
     } catch (err) {
       mapPrismaError(err);
     }
-    for (const variant of variants) variantMap.set(variant.id, variant);
+    for (const variant of variants) {
+      variantMap.set(variant.id, variant);
+      imageMap.set(variant.id, variant.product.images[0]?.url ?? null);
+    }
 
     [costMap, shippingMap] = await Promise.all([
       fetchCostAggregates(orgId, variantIds),
@@ -231,6 +246,8 @@ export async function getTariffDetail(
         barcode: item.barcode,
         stockCode: item.stockCode,
         productTitle: item.productTitle,
+        imageUrl:
+          item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
         category: item.category,
         brand: item.brand,
         currentPrice: item.currentPrice.toFixed(2),

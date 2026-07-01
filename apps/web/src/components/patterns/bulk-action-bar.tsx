@@ -64,8 +64,9 @@ export interface BulkAction {
   icon?: React.ReactNode;
   /** Fires on click. */
   onClick: () => void;
-  /** `destructive` switches the button to the danger variant. */
-  tone?: 'default' | 'destructive';
+  /** Button tone: `destructive` = danger, `primary` = the emphasised brand-filled
+   *  variant for a bar whose main action is a commit (e.g. Save). */
+  tone?: 'default' | 'destructive' | 'primary';
   /** Disable this individual action without hiding the whole bar. */
   disabled?: boolean;
   /**
@@ -81,8 +82,12 @@ export interface BulkAction {
 export interface BulkActionBarProps {
   /** Number of selected items. The bar is hidden below `minSelected`. */
   selectedCount: number;
-  /** Fires when the user clicks the X (or presses Escape) to clear. */
-  onClear: () => void;
+  /**
+   * Clear handler. When omitted, the bar shows NO dismiss control and Escape does
+   * NOT clear — for a bar the user builds toward (e.g. band selections) where an
+   * accidental wipe is costly and clearing lives elsewhere (a toolbar tool).
+   */
+  onClear?: () => void;
   /** Action buttons rendered on the right side of the bar. */
   actions: BulkAction[];
   /**
@@ -165,7 +170,7 @@ export function BulkActionBar({
   // races the optimistic update) and skipped when a child Radix overlay already
   // consumed the Escape (it calls preventDefault on its own).
   React.useEffect(() => {
-    if (!isOpen || busy) return;
+    if (!isOpen || busy || onClear === undefined) return;
     const handler = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       onClear();
@@ -203,17 +208,19 @@ export function BulkActionBar({
         className,
       )}
     >
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={onClear}
-        disabled={busy}
-        aria-label={resolvedClearLabel}
-        className="size-icon-lg p-0 pointer-coarse:size-11"
-      >
-        <Cancel01Icon className="size-icon-sm" />
-      </Button>
+      {onClear !== undefined ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onClear}
+          disabled={busy}
+          aria-label={resolvedClearLabel}
+          className="size-icon-lg p-0 pointer-coarse:size-11"
+        >
+          <Cancel01Icon className="size-icon-sm" />
+        </Button>
+      ) : null}
       <span className="text-foreground px-3xs gap-2xs flex items-center text-sm font-medium tabular-nums">
         {busy ? <Spinner size="sm" label={t('processing')} /> : null}
         {resolvedCountLabel}
@@ -229,7 +236,13 @@ export function BulkActionBar({
                 ) : null}
                 <Button
                   type="button"
-                  variant={action.tone === 'destructive' ? 'destructive' : 'ghost'}
+                  variant={
+                    action.tone === 'destructive'
+                      ? 'destructive'
+                      : action.tone === 'primary'
+                        ? 'default'
+                        : 'ghost'
+                  }
                   size="sm"
                   onClick={action.onClick}
                   disabled={busy || action.disabled}
@@ -241,7 +254,12 @@ export function BulkActionBar({
                 >
                   {action.icon}
                   {action.icon !== undefined ? (
-                    <span className="pointer-coarse:sr-only">{action.label}</span>
+                    // Icon-only on touch saves space — EXCEPT the primary commit
+                    // action, whose label stays visible so the bar's main CTA is
+                    // never a bare icon on mobile.
+                    <span className={cn(action.tone !== 'primary' && 'pointer-coarse:sr-only')}>
+                      {action.label}
+                    </span>
                   ) : (
                     action.label
                   )}

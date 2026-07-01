@@ -21,6 +21,11 @@ section "Versioning" for details.
 
 ### Added
 
+- **`imageUrl` on `TariffDetailItem`** (`GET .../commission-tariffs/{tariffId}`) — Nullable string
+  carrying the barcode-matched catalog product's position-0 image, so the tariff detail rows can
+  show the same product thumbnail as the products screen. `null` for items with no matched product
+  (or a matched product that has no image). Non-breaking additive field.
+
 - **`POST /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/items/{itemId}/estimate`**
   — Computes the full profit breakdown for one tariff item at a given `price` (body `{ price,
   bandKey? }`), reusing the same profit engine + resolvers (cost, shipping, fee definitions) the
