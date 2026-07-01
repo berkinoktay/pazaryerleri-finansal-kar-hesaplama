@@ -9,6 +9,12 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
    */
   intent?: string;
   /**
+   * Inline status / context badge rendered next to the title (e.g. a validity
+   * pill on a detail page). Keep it a single compact Badge — it shares the
+   * heading's eye-line, so anything larger competes with the title.
+   */
+  badge?: React.ReactNode;
+  /**
    * Top-row slot — typically a Breadcrumb, back-button, or store chip.
    * Renders ABOVE the title in a muted micro-row so the heading stays
    * the visual anchor. Use sparingly: flat list pages don't need a
@@ -60,6 +66,7 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
 export function PageHeader({
   title,
   intent,
+  badge,
   leading,
   actions,
   meta,
@@ -77,7 +84,10 @@ export function PageHeader({
       ) : null}
       <div className={cn('gap-md flex flex-col', 'sm:flex-row sm:items-start sm:justify-between')}>
         <div className="gap-3xs flex min-w-0 flex-col">
-          <h1 className="text-foreground text-3xl font-semibold tracking-tight">{title}</h1>
+          <div className="gap-sm flex flex-wrap items-center">
+            <h1 className="text-foreground text-3xl font-semibold tracking-tight">{title}</h1>
+            {badge ? <div className="shrink-0">{badge}</div> : null}
+          </div>
           {intent ? (
             <p className="text-muted-foreground max-w-prose-max text-sm">{intent}</p>
           ) : null}

@@ -24,6 +24,7 @@ import {
 import { summarizeSelection } from '../lib/commission-tariff-summary';
 import { MOCK_TARIFF_TEMPLATES, buildUploadOverrides } from '../lib/mock-commission-tariffs';
 import type { BandKey, TariffTemplate } from '../types';
+import { CommissionTariffStatusBadge } from './commission-tariff-status-badge';
 import { CommissionTariffsListView } from './commission-tariffs-list-view';
 import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards';
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
@@ -221,23 +222,28 @@ export function CommissionTariffsPageClient(): React.ReactElement {
         <PageHeader
           leading={
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={backToList}
               leadingIcon={<ArrowLeft01Icon aria-hidden />}
-              className="-ml-xs"
             >
               {tPage('templates.back')}
             </Button>
           }
           title={activeTemplate.name}
-          intent={activePeriod.dateRangeLabel}
+          badge={<CommissionTariffStatusBadge validity={activeTemplate.validity} />}
+          intent={`${activePeriod.dateRangeLabel} · ${activeTemplate.relativeLabel}`}
           // Borderless flow: the summary strip runs into the data panel below.
           className="gap-lg border-b-0 pb-0"
           actions={
             <ConfirmDialog
               trigger={
-                <Button variant="outline" size="sm" leadingIcon={<Delete02Icon aria-hidden />}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leadingIcon={<Delete02Icon aria-hidden />}
+                  className="text-destructive hover:border-destructive hover:bg-destructive-surface hover:text-destructive"
+                >
                   {tPage('templates.delete')}
                 </Button>
               }
