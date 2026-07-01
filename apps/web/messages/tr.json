@@ -897,10 +897,6 @@
       "step1": "Trendyol panelinden haftalık komisyon tarifesi Excel'ini indirin",
       "step2": "Dosyayı buraya yükleyin",
       "step3": "Her ürün için hangi fiyat aralığında ne kazanacağınızı görün",
-      "periodLabel": "Tarife dönemi",
-      "startPlaceholder": "Başlangıç tarihi",
-      "endPlaceholder": "Bitiş tarihi",
-      "periodHint": "Trendyol dosyasında yıl bilgisi olmadığından dönem başlangıç ve bitişini buradan belirt.",
       "submit": "Tarifeyi oluştur",
       "errors": {
         "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",

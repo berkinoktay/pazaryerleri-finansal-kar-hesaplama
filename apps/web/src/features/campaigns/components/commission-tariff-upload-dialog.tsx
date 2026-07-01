@@ -2,9 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
-import type { DateRange } from 'react-day-picker';
 
-import { DateInput } from '@/components/patterns/date-input';
 import { FileUpload } from '@/components/patterns/file-upload';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,8 +21,8 @@ const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 export interface CommissionTariffUploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Fires on submit with the chosen file + the period the seller entered. */
-  onFile: (file: File, range: DateRange | undefined) => void;
+  /** Fires on submit with the chosen file. */
+  onFile: (file: File) => void;
   /** True while the import request is in flight (drives the submit button). */
   submitting?: boolean;
   /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
@@ -65,10 +63,11 @@ function useFileErrorMessage(): (code: string | null | undefined) => string | nu
 
 /**
  * Excel-upload dialog over the tariff list. A focused mini-form that keeps the
- * list in context (vs a full-screen state): the dropzone, a period date-range
- * (the Trendyol file's labels omit the year, so the seller sets the dates here),
- * and a short "how it works" guide. Submitting creates the tariff and the caller
- * routes on to the detail screen.
+ * list in context (vs a full-screen state): the dropzone plus a short "how it
+ * works" guide. Submitting creates the tariff and the caller routes on to the
+ * detail screen. The period dates are read from the file itself by the backend
+ * (the labels' missing year is inferred from the upload time), so the dialog
+ * asks only for the file.
  */
 export function CommissionTariffUploadDialog({
   open,
@@ -83,22 +82,18 @@ export function CommissionTariffUploadDialog({
   const fileErrorMessage = useFileErrorMessage();
 
   const [file, setFile] = React.useState<File | null>(null);
-  const [startDate, setStartDate] = React.useState<Date | null>(null);
-  const [endDate, setEndDate] = React.useState<Date | null>(null);
 
   const handleOpenChange = (next: boolean): void => {
     // Reset the form when the dialog closes so reopening starts clean.
     if (!next) {
       setFile(null);
-      setStartDate(null);
-      setEndDate(null);
     }
     onOpenChange(next);
   };
 
   const handleSubmit = (): void => {
     if (file === null) return;
-    onFile(file, { from: startDate ?? undefined, to: endDate ?? undefined });
+    onFile(file);
   };
 
   return (
@@ -122,26 +117,6 @@ export function CommissionTariffUploadDialog({
             onResetError?.();
           }}
         />
-
-        <div className="gap-2xs flex flex-col">
-          <span className="text-foreground text-sm font-medium">{t('periodLabel')}</span>
-          <div className="gap-sm flex flex-col sm:flex-row">
-            <DateInput
-              value={startDate}
-              onChange={setStartDate}
-              placeholder={t('startPlaceholder')}
-              className="w-full"
-            />
-            <DateInput
-              value={endDate}
-              onChange={setEndDate}
-              placeholder={t('endPlaceholder')}
-              defaultMonth={startDate ?? undefined}
-              className="w-full"
-            />
-          </div>
-          <p className="text-2xs text-muted-foreground">{t('periodHint')}</p>
-        </div>
 
         <div className="border-border bg-surface-subtle gap-sm p-md flex flex-col rounded-lg border">
           <p className="text-2xs text-muted-foreground font-medium tracking-wide uppercase">
