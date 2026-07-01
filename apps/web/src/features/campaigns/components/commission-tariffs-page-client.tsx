@@ -133,10 +133,13 @@ export function CommissionTariffsPageClient(): React.ReactElement {
   const handleSelectBand = React.useCallback(
     (rowId: string, band: BandKey): void => {
       if (activeId === null) return;
-      setSelections((prev) => ({
-        ...prev,
-        [activeId]: { ...(prev[activeId] ?? {}), [rowId]: band },
-      }));
+      setSelections((prev) => {
+        const current = prev[activeId] ?? {};
+        // Toggle: re-clicking the already-selected band clears it. A band can be
+        // deselected (one OR none per product) — not a radio group.
+        const next: BandKey | null = current[rowId] === band ? null : band;
+        return { ...prev, [activeId]: { ...current, [rowId]: next } };
+      });
     },
     [activeId],
   );
@@ -229,6 +232,8 @@ export function CommissionTariffsPageClient(): React.ReactElement {
           }
           title={activeTemplate.name}
           intent={activePeriod.dateRangeLabel}
+          // Borderless flow: the summary strip runs into the data panel below.
+          className="gap-lg border-b-0 pb-0"
           actions={
             <ConfirmDialog
               trigger={
@@ -245,33 +250,38 @@ export function CommissionTariffsPageClient(): React.ReactElement {
           summary={<CommissionTariffsSummary summary={summary} />}
         />
 
-        <CommissionTariffsActionBar
-          selectedCount={summary.selectedCount}
-          total={summary.total}
-          selectedProfit={summary.selectedProfit}
-          onBestAll={() => applyBulk(selectBestForAll)}
-          onSaveExport={onSaveExport}
-        />
-
-        {periodTabs}
-        {toolbar}
-
-        <div className="hidden md:block">
+        {/* Desktop: period tabs + toolbar fold into the table's panel. min-w-0 so
+            the wide band table scrolls inside the DataTable, never widening the page. */}
+        <div className="hidden min-w-0 md:block">
           <CommissionTariffsTable
             rows={filteredRows}
             selection={selection}
             onSelectBand={handleSelectBand}
+            tabs={periodTabs}
+            toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={() => setFilters(EMPTY_FILTERS)}
           />
         </div>
-        <div className="md:hidden">
+        {/* Mobile: tabs + toolbar above the card list. */}
+        <div className="gap-sm flex flex-col md:hidden">
+          {periodTabs}
+          {toolbar}
           <CommissionTariffsMobileCards
             rows={filteredRows}
             selection={selection}
             onSelectBand={handleSelectBand}
           />
         </div>
+
+        <CommissionTariffsActionBar
+          selectedCount={summary.selectedCount}
+          total={summary.total}
+          selectedProfit={summary.selectedProfit}
+          bestProfit={summary.bestProfit}
+          onBestAll={() => applyBulk(selectBestForAll)}
+          onSaveExport={onSaveExport}
+        />
       </div>
     );
   }

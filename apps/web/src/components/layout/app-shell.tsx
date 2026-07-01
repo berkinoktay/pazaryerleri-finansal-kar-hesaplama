@@ -177,7 +177,11 @@ export function AppShell({
         mobile-only inline header (hamburger + brand + bell + user menu),
         followed by the page content. The drawer mode covers small viewports.
       */}
-      <SidebarInset id="main">
+      {/* min-w-0: without it this flex-1 row item grows to fit wide content
+          (e.g. the commission-tariff band table), pushing the page past the
+          viewport and over the sidebar. min-w-0 lets it shrink so wide tables
+          scroll inside their own DataTable instead. */}
+      <SidebarInset id="main" className="min-w-0">
         <header className="border-border gap-xs px-sm py-3xs flex h-12 items-center justify-between border-b md:hidden">
           <div className="gap-xs flex items-center">
             <SidebarTrigger aria-label={t('nav.toggleSidebar')} />
@@ -193,7 +197,7 @@ export function AppShell({
           from filling wide viewports. Pages that need a reading-width cap opt
           in per-page (max-w-prose-max / max-w-form / …).
         */}
-        <div className="gap-lg px-md py-md md:px-2xl md:py-xl flex w-full flex-1 flex-col overflow-y-auto">
+        <div className="gap-lg px-md py-md md:px-2xl md:py-xl flex w-full min-w-0 flex-1 flex-col overflow-y-auto">
           {children}
         </div>
       </SidebarInset>

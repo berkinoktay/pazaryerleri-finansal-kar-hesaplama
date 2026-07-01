@@ -192,6 +192,7 @@
   --spacing-page-header-h: var(--size-page-header-h);
   --spacing-tile-min: var(--size-tile-min);
   --spacing-tile-min-sm: var(--size-tile-min-sm);
+  --spacing-tariff-band: var(--size-tariff-band);
   --spacing-table-row-h: var(--size-table-row-h);
   --spacing-table-empty: var(--size-table-empty);
   --spacing-chart: var(--size-chart);

@@ -58,11 +58,10 @@ export function CommissionTariffsMobileCards({
               return (
                 <PriceBandCell
                   key={band.key}
+                  row={row}
                   band={band}
                   isBest={row.bestBand === band.key}
-                  bestLabel={t('table.best')}
                   isCurrent={i === 0}
-                  currentLabel={t('table.currentRange')}
                   selected={selection[row.id] === band.key}
                   onSelect={(key) => onSelectBand(row.id, key)}
                 />

@@ -1,77 +1,125 @@
 'use client';
 
-import { useFormatter } from 'next-intl';
+import { CheckmarkCircle02Icon } from 'hugeicons-react';
+import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { MarginBadge } from '@/components/patterns/margin-badge';
+import { ProfitBadge } from '@/components/patterns/profit-badge';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { cn } from '@/lib/utils';
 
-import type { BandKey, PriceBand } from '../types';
+import { buildBandBreakdown } from '../lib/build-band-breakdown';
+import type { BandKey, CommissionTariffRow, PriceBand } from '../types';
+import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
 
 export interface PriceBandCellProps {
+  row: CommissionTariffRow;
   band: PriceBand;
   /** Whether the seller has chosen this band for the product. */
   selected: boolean;
-  /** Whether this is the most profitable band (highlight + label, not color alone). */
+  /** Whether this is the most profitable band (a quiet "En iyi" label, not a colored surface). */
   isBest?: boolean;
-  /** Localized "best band" label shown when `isBest` — a non-color cue for a11y. */
-  bestLabel?: string;
-  /** Whether this band is the product's current valid range (Trendyol's "Geçerli aralık"). */
+  /** Whether this is the product's current range (band1) — drives the breakdown's
+   *  sale price (live `currentPrice` vs the band threshold). No longer a label. */
   isCurrent?: boolean;
-  /** Localized "current range" label shown when `isCurrent`. */
-  currentLabel?: string;
   onSelect: (key: BandKey) => void;
 }
 
 /**
- * One price band as a selectable cell: its threshold, commission rate, and a
- * margin-colored profit chip ({@link MarginBadge}, fed by the user's settings
- * scale) answering "if I join this band, what do I earn?". Acts as a radio
- * within the product's band group (one band per product).
+ * One price band as a selectable toggle card. The PRICE (with its "ve altı / ve
+ * üzeri" qualifier as one unit) is the hero — it is what the seller is choosing.
+ *
+ * Selection is a TOGGLE (one OR none per product): clicking a band selects it,
+ * clicking the selected band again clears it — not a radio group (the seller
+ * must be able to undo a choice). The parent owns the toggle logic.
+ *
+ * Interaction (stretched-button overlay): a full-card toggle `<button>` sits
+ * behind the content so clicking anywhere toggles the band; the content is
+ * `pointer-events-none` so clicks fall through, EXCEPT the shared {@link
+ * ProfitBadge} which re-enables pointer events and opens the income/expense
+ * breakdown modal. The badge is the SAME component the orders page uses.
  */
 export function PriceBandCell({
+  row,
   band,
   selected,
   isBest = false,
-  bestLabel,
   isCurrent = false,
-  currentLabel,
   onSelect,
 }: PriceBandCellProps): React.ReactElement {
   const format = useFormatter();
+  const t = useTranslations('commissionTariffsPage.table');
+  const scale = useMarginColoring();
+  const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+
+  // thresholdLabel is "<price>₺ <qualifier>" (e.g. "777,09₺ ve altı"); split so
+  // the price can be the hero while the qualifier sits right beside it as one unit.
+  const [priceText, ...qualifierParts] = band.thresholdLabel.split(' ');
+  const qualifier = qualifierParts.join(' ');
 
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={() => onSelect(band.key)}
+    <div
       className={cn(
-        'gap-3xs p-xs flex w-full flex-col rounded-md border text-left',
-        'duration-fast ease-out-quart transition-colors',
-        'pointer-coarse:min-h-11',
-        'focus-visible:shadow-focus focus-visible:outline-none',
-        selected
-          ? 'border-primary bg-accent'
-          : isBest
-            ? 'border-success bg-success-surface'
-            : 'border-border hover:bg-muted',
+        'p-xs min-w-tariff-band relative rounded-md border',
+        selected ? 'border-primary bg-primary-soft' : 'border-border',
       )}
     >
-      <span className="gap-3xs flex items-center justify-between">
-        <span className="text-2xs text-muted-foreground truncate">{band.thresholdLabel}</span>
-        {isBest && bestLabel !== undefined ? (
-          <span className="text-2xs text-success shrink-0 font-semibold">{bestLabel}</span>
-        ) : isCurrent && currentLabel !== undefined ? (
-          <span className="text-2xs text-muted-foreground shrink-0 font-medium">
-            {currentLabel}
+      {/* Stretched select button: covers the whole card so clicking anywhere
+          (except the profit badge above) picks this band. */}
+      <button
+        type="button"
+        aria-pressed={selected}
+        aria-label={`${priceText} ${qualifier}`}
+        onClick={() => onSelect(band.key)}
+        className={cn(
+          'duration-fast ease-out-quart absolute inset-0 cursor-pointer rounded-md transition-colors',
+          'focus-visible:shadow-focus focus-visible:outline-none',
+          !selected && 'hover:bg-muted',
+        )}
+      />
+
+      {/* Content above the overlay; pointer-events-none lets clicks fall through
+          to the select button, except the badge (pointer-events-auto). */}
+      <div className="gap-2xs pointer-events-none relative flex flex-col">
+        <span className="gap-2xs flex items-center justify-between">
+          <span className="gap-2xs flex min-w-0 items-center">
+            {selected ? (
+              <CheckmarkCircle02Icon className="text-primary size-4 shrink-0" aria-hidden />
+            ) : (
+              <span
+                className="border-border-strong size-4 shrink-0 rounded-full border-2"
+                aria-hidden
+              />
+            )}
+            <span className="gap-3xs flex min-w-0 items-baseline">
+              <span className="text-base font-bold tabular-nums">{priceText}</span>
+              <span className="truncate text-xs font-medium">{qualifier}</span>
+            </span>
           </span>
-        ) : null}
-      </span>
-      <span className="text-sm font-semibold tabular-nums">
-        {format.number(band.commissionPct.toNumber(), 'percent')}
-      </span>
-      <MarginBadge value={band.profit} marginPct={band.marginPct} size="sm" />
-    </button>
+          {isBest ? (
+            <span className="text-2xs text-success shrink-0 font-semibold">{t('best')}</span>
+          ) : null}
+        </span>
+
+        <span className="text-2xs text-muted-foreground tabular-nums">
+          {t('commission')} {format.number(band.commissionPct.toNumber(), 'percent')}
+        </span>
+
+        <ProfitBadge
+          value={band.profit}
+          marginPct={band.marginPct}
+          scale={scale}
+          onOpen={() => setBreakdownOpen(true)}
+          className="pointer-events-auto self-start"
+        />
+      </div>
+
+      <CommissionTariffBreakdown
+        open={breakdownOpen}
+        onOpenChange={setBreakdownOpen}
+        productTitle={row.productTitle}
+        breakdown={buildBandBreakdown(row, band, isCurrent)}
+      />
+    </div>
   );
 }

@@ -846,8 +846,8 @@
     },
     "table": {
       "product": "Ürün Bilgileri",
-      "current": "Güncel Fiyat ve Komisyon",
-      "salePrice": "Trendyol satış fiyatı",
+      "current": "Güncel fiyat",
+      "salePrice": "Satış fiyatı",
       "displayPrice": "Müşterinin gördüğü fiyat",
       "currentCommission": "Güncel komisyon",
       "currentPrice": "Güncel Fiyat",
@@ -855,7 +855,8 @@
       "stock": "Stok",
       "band": "{n}. Fiyat Aralığı",
       "best": "En iyi",
-      "currentRange": "Geçerli",
+      "profit": "Kâr",
+      "loss": "Zarar",
       "yourChoice": "Seçimin",
       "noChoice": "Kademe seç",
       "customPrice": "Özel Fiyat",
@@ -882,14 +883,14 @@
       "periodHint": "Trendyol dosyasında yıl bilgisi olmadığından dönem başlangıç ve bitişini buradan belirt.",
       "submit": "Tarifeyi oluştur"
     },
-    "customPriceModal": {
-      "title": "Tahmini kâr — özel fiyat",
-      "openAria": "Tahmini kâr detayını aç",
-      "priceLabel": "Senin fiyatın",
-      "bandLabel": "Denk gelen aralık",
-      "commissionLabel": "Komisyon",
-      "costLabel": "Tahmini maliyet",
-      "profitLabel": "Tahmini kâr"
+    "breakdown": {
+      "title": "Kâr dökümü",
+      "salePrice": "Satış fiyatı",
+      "commission": "Komisyon",
+      "unitCost": "Birim maliyet",
+      "profit": "Kâr",
+      "estimatedProfit": "Tahmini kâr",
+      "margin": "Marj"
     },
     "smartSelect": {
       "label": "Akıllı Seçim",
@@ -922,7 +923,8 @@
     },
     "actionBar": {
       "selected": "{count}/{total} ürün seçildi",
-      "profitLabel": "seçili kademe kârı"
+      "profitLabel": "seçili kademe kârı",
+      "headroom": "En iyiye"
     },
     "status": {
       "exported": "İndirildi",

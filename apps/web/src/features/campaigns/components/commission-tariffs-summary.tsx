@@ -1,57 +1,65 @@
 'use client';
 
+import { Coins01Icon, PackageIcon, SparklesIcon, TaskDone01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
-import { StatCard } from '@/components/patterns/stat-card';
-import { StatGroup } from '@/components/patterns/stat-group';
+import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
+import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
 import type { TariffSelectionSummary } from '../lib/commission-tariff-summary';
+
+const DASH = '—';
+
+const circleIcon = (icon: React.ReactNode): React.ReactElement => (
+  <SoftSquareIcon shape="circle" variant="outline" size="lg">
+    {icon}
+  </SoftSquareIcon>
+);
 
 export interface CommissionTariffsSummaryProps {
   summary: TariffSelectionSummary;
 }
 
 /**
- * Header KPI strip for the Product Commission Tariffs page. The headline is the
- * estimated profit of the seller's current band choices; the best-case tile is
- * the target the seller can reach via the action bar's "apply best to all".
+ * Header KPI strip for an open tariff: products in the period, how many bands the
+ * seller has chosen, the estimated profit of those choices, and the best-case
+ * target. Mirrors the list's StatStrip (circular icons); the "best vs selected"
+ * headroom is surfaced as a nudge in the sticky action bar rather than here.
  */
 export function CommissionTariffsSummary({
   summary,
 }: CommissionTariffsSummaryProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.summary');
-  const formatter = useFormatter();
-  // No tariff loaded yet: render the strip as a quiet scaffold (em-dashes).
+  const format = useFormatter();
   const empty = summary.total === 0;
-  const dash = '—';
 
-  return (
-    <StatGroup>
-      <StatCard
-        label={t('total')}
-        value={empty ? dash : formatter.number(summary.total, 'integer')}
-        context={t('totalContext')}
-      />
-      <StatCard
-        label={t('selected')}
-        value={
-          empty ? dash : t('selectedValue', { count: summary.selectedCount, total: summary.total })
-        }
-        context={t('selectedContext')}
-      />
-      <StatCard
-        label={t('selectedProfit')}
-        value={empty ? dash : <Currency value={summary.selectedProfit} />}
-        emphasis
-        context={t('selectedProfitContext')}
-      />
-      <StatCard
-        label={t('bestProfit')}
-        value={empty ? dash : <Currency value={summary.bestProfit} />}
-        hint={t('bestProfitHint')}
-      />
-    </StatGroup>
-  );
+  const items: StatStripItem[] = [
+    {
+      label: t('total'),
+      value: empty ? DASH : format.number(summary.total, 'integer'),
+      icon: circleIcon(<PackageIcon />),
+    },
+    {
+      label: t('selected'),
+      value: empty
+        ? DASH
+        : t('selectedValue', { count: summary.selectedCount, total: summary.total }),
+      icon: circleIcon(<TaskDone01Icon />),
+    },
+    {
+      label: t('selectedProfit'),
+      value: empty ? DASH : <Currency value={summary.selectedProfit} />,
+      icon: circleIcon(<Coins01Icon />),
+    },
+    {
+      label: t('bestProfit'),
+      value: empty ? DASH : <Currency value={summary.bestProfit} />,
+      hint: t('bestProfitHint'),
+      icon: circleIcon(<SparklesIcon />),
+    },
+  ];
+
+  return <StatStrip items={items} />;
 }

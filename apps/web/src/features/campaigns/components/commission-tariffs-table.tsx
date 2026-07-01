@@ -4,11 +4,14 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { PackageIcon } from 'hugeicons-react';
+
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
+import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
 import type { SelectionMap } from '../lib/bulk-actions';
 import type { BandKey, CommissionTariffRow } from '../types';
@@ -48,7 +51,11 @@ export function CommissionTariffsTable({
         return (
           <IdentityCell
             size="md"
-            leading={<div className="bg-muted size-9 shrink-0 rounded-md" aria-hidden />}
+            leading={
+              <SoftSquareIcon tone="neutral" variant="soft" size="md">
+                <PackageIcon />
+              </SoftSquareIcon>
+            }
             title={r.productTitle}
             meta={
               <span className="gap-3xs flex flex-col">
@@ -79,12 +86,16 @@ export function CommissionTariffsTable({
                 <Currency value={r.currentPrice} />
               </div>
             </div>
-            <div>
-              <div className="text-2xs text-muted-foreground">{t('table.displayPrice')}</div>
-              <div className="tabular-nums">
-                <Currency value={r.displayPrice} />
+            {/* Only when the customer-facing price differs from the sale price
+                (a storefront discount) — otherwise it's a redundant duplicate row. */}
+            {!r.displayPrice.equals(r.currentPrice) ? (
+              <div>
+                <div className="text-2xs text-muted-foreground">{t('table.displayPrice')}</div>
+                <div className="tabular-nums">
+                  <Currency value={r.displayPrice} />
+                </div>
               </div>
-            </div>
+            ) : null}
             <div className="text-2xs text-muted-foreground">
               {t('table.currentCommission')}{' '}
               <span className="text-foreground font-medium tabular-nums">
@@ -104,11 +115,10 @@ export function CommissionTariffsTable({
         const band = r.bands[i];
         return (
           <PriceBandCell
+            row={r}
             band={band}
             isBest={r.bestBand === band.key}
-            bestLabel={t('table.best')}
             isCurrent={i === 0}
-            currentLabel={t('table.currentRange')}
             selected={selection[r.id] === band.key}
             onSelect={(key) => onSelectBand(r.id, key)}
           />

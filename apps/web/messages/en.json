@@ -846,8 +846,8 @@
     },
     "table": {
       "product": "Product Details",
-      "current": "Current Price & Commission",
-      "salePrice": "Trendyol sale price",
+      "current": "Current price",
+      "salePrice": "Sale price",
       "displayPrice": "Price the customer sees",
       "currentCommission": "Current commission",
       "currentPrice": "Current Price",
@@ -855,7 +855,8 @@
       "stock": "Stock",
       "band": "Price Band {n}",
       "best": "Best",
-      "currentRange": "Current",
+      "profit": "Profit",
+      "loss": "Loss",
       "yourChoice": "Your choice",
       "noChoice": "Choose a band",
       "customPrice": "Custom Price",
@@ -882,14 +883,14 @@
       "periodHint": "The Trendyol file's labels omit the year, so set the period start and end here.",
       "submit": "Create tariff"
     },
-    "customPriceModal": {
-      "title": "Estimated profit — custom price",
-      "openAria": "Open estimated profit detail",
-      "priceLabel": "Your price",
-      "bandLabel": "Matched range",
-      "commissionLabel": "Commission",
-      "costLabel": "Estimated cost",
-      "profitLabel": "Estimated profit"
+    "breakdown": {
+      "title": "Profit breakdown",
+      "salePrice": "Sale price",
+      "commission": "Commission",
+      "unitCost": "Unit cost",
+      "profit": "Profit",
+      "estimatedProfit": "Estimated profit",
+      "margin": "Margin"
     },
     "smartSelect": {
       "label": "Smart select",
@@ -922,7 +923,8 @@
     },
     "actionBar": {
       "selected": "{count}/{total} products selected",
-      "profitLabel": "chosen-band profit"
+      "profitLabel": "chosen-band profit",
+      "headroom": "To best"
     },
     "status": {
       "exported": "Downloaded",

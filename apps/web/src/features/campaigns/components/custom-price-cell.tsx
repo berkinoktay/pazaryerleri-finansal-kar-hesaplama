@@ -1,51 +1,46 @@
 'use client';
 
 import type { Decimal } from 'decimal.js';
-import { useFormatter, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
-import { MarginBadge } from '@/components/patterns/margin-badge';
 import { MoneyInput } from '@/components/patterns/money-input';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { ProfitBadge } from '@/components/patterns/profit-badge';
+import { useMarginColoring } from '@/lib/margin-coloring-context';
 
+import type { TariffBreakdown } from '../lib/build-band-breakdown';
 import { estimateCustomPrice } from '../lib/estimate-custom-price';
 import type { CommissionTariffRow } from '../types';
-
-function BreakdownRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="tabular-nums">{value}</span>
-    </div>
-  );
-}
+import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
 
 /**
  * Custom-price "what-if" field. Owns its own price state so typing never
  * rebuilds the table column defs (which would steal focus). As the seller types,
- * we map the price to the band it falls into and show an estimated profit
- * (margin-colored); clicking it opens a detail modal — like the orders page.
- * MOCK estimate (the backend computes the authoritative value).
+ * we map the price to the band it falls into and show an estimated profit via the
+ * shared {@link ProfitBadge} (margin-colored, same chip as orders); clicking it
+ * opens the income/expense breakdown — like the band cards. MOCK estimate (the
+ * backend computes the authoritative value).
  */
 export function CustomPriceCell({ row }: { row: CommissionTariffRow }): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
-  const format = useFormatter();
+  const tBreakdown = useTranslations('commissionTariffsPage.breakdown');
+  const scale = useMarginColoring();
   const [price, setPrice] = React.useState<Decimal | null>(null);
+  const [breakdownOpen, setBreakdownOpen] = React.useState(false);
 
   const estimate = price !== null && price.greaterThan(0) ? estimateCustomPrice(row, price) : null;
+
+  const breakdown: TariffBreakdown | null =
+    price !== null && estimate !== null
+      ? {
+          price,
+          commissionPct: estimate.commissionPct,
+          commission: price.times(estimate.commissionPct),
+          unitCost: row.unitCost,
+          profit: estimate.profit,
+          marginPct: estimate.marginPct,
+        }
+      : null;
 
   return (
     <div className="gap-3xs flex flex-col">
@@ -57,47 +52,23 @@ export function CustomPriceCell({ row }: { row: CommissionTariffRow }): React.Re
         placeholder={t('table.enterPrice')}
         className="max-w-input-narrow"
       />
-      {price !== null && estimate !== null ? (
-        <Dialog>
-          <DialogTrigger asChild>
-            <button
-              type="button"
-              aria-label={t('customPriceModal.openAria')}
-              className="gap-3xs focus-visible:shadow-focus flex w-fit items-center rounded text-left focus-visible:outline-none"
-            >
-              <span className="text-2xs text-muted-foreground">≈</span>
-              <MarginBadge value={estimate.profit} marginPct={estimate.marginPct} size="sm" />
-            </button>
-          </DialogTrigger>
-          <DialogContent className="max-w-modal">
-            <DialogHeader>
-              <DialogTitle>{t('customPriceModal.title')}</DialogTitle>
-            </DialogHeader>
-            <div className="gap-sm flex flex-col text-sm">
-              <div className="text-muted-foreground">{row.productTitle}</div>
-              <BreakdownRow
-                label={t('customPriceModal.priceLabel')}
-                value={<Currency value={price} />}
-              />
-              <BreakdownRow
-                label={t('customPriceModal.bandLabel')}
-                value={estimate.band.thresholdLabel}
-              />
-              <BreakdownRow
-                label={t('customPriceModal.commissionLabel')}
-                value={format.number(estimate.commissionPct.toNumber(), 'percent')}
-              />
-              <BreakdownRow
-                label={t('customPriceModal.costLabel')}
-                value={<Currency value={row.unitCost} />}
-              />
-              <div className="border-border pt-sm flex items-center justify-between border-t">
-                <span className="font-medium">{t('customPriceModal.profitLabel')}</span>
-                <MarginBadge value={estimate.profit} marginPct={estimate.marginPct} />
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+      {estimate !== null && breakdown !== null ? (
+        <div className="gap-3xs flex items-center">
+          <span className="text-2xs text-muted-foreground">≈</span>
+          <ProfitBadge
+            value={estimate.profit}
+            marginPct={estimate.marginPct}
+            scale={scale}
+            onOpen={() => setBreakdownOpen(true)}
+          />
+          <CommissionTariffBreakdown
+            open={breakdownOpen}
+            onOpenChange={setBreakdownOpen}
+            productTitle={row.productTitle}
+            breakdown={breakdown}
+            profitLabel={tBreakdown('estimatedProfit')}
+          />
+        </div>
       ) : (
         <span className="text-2xs text-muted-foreground">{t('table.customPriceHint')}</span>
       )}
