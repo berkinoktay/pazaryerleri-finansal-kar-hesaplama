@@ -34,6 +34,12 @@ export interface IdentityCellProps {
   trailing?: React.ReactNode;
   /** Title text scale: `sm` (text-xs, default — list rows / trigger) or `md` (text-sm — identity headers). */
   size?: 'sm' | 'md';
+  /**
+   * How many lines the title may occupy. `1` (default) truncates to one line;
+   * `2` wraps to at most two lines (`line-clamp-2`) — use when the row must stay
+   * narrow (e.g. a width-capped column) but the full name matters.
+   */
+  titleLines?: 1 | 2;
   className?: string;
   /** Extra classes on the title span (weight/color overrides). */
   titleClassName?: string;
@@ -45,6 +51,7 @@ export function IdentityCell({
   meta,
   trailing,
   size = 'sm',
+  titleLines = 1,
   className,
   titleClassName,
 }: IdentityCellProps): React.ReactElement {
@@ -54,7 +61,8 @@ export function IdentityCell({
       <span className="gap-3xs flex min-w-0 flex-1 flex-col leading-tight">
         <span
           className={cn(
-            'text-foreground truncate text-left font-medium',
+            'text-foreground text-left font-medium',
+            titleLines === 2 ? 'line-clamp-2' : 'truncate',
             size === 'md' ? 'text-sm font-semibold' : 'text-xs',
             titleClassName,
           )}

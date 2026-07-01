@@ -1,15 +1,20 @@
 'use client';
 
 import { CheckmarkCircle02Icon } from 'hugeicons-react';
-import { useFormatter, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { formatCurrency } from '@pazarsync/utils';
+
 import { ProfitBadge } from '@/components/patterns/profit-badge';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { cn } from '@/lib/utils';
 
-import { buildBandBreakdown } from '../lib/build-band-breakdown';
-import type { BandKey, CommissionTariffRow, PriceBand } from '../types';
+import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
+import { asBandKey } from '../lib/band-key';
+import { useTariffScope } from '../lib/tariff-scope';
+import type { CommissionTariffRow, PriceBand } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
 
 export interface PriceBandCellProps {
@@ -19,10 +24,21 @@ export interface PriceBandCellProps {
   selected: boolean;
   /** Whether this is the most profitable band (a quiet "En iyi" label, not a colored surface). */
   isBest?: boolean;
-  /** Whether this is the product's current range (band1) — drives the breakdown's
-   *  sale price (live `currentPrice` vs the band threshold). No longer a label. */
-  isCurrent?: boolean;
-  onSelect: (key: BandKey) => void;
+  onSelect: (key: string) => void;
+}
+
+/** The band's boundary price + its "ve altı / ve üzeri" qualifier as one hero unit. */
+function useBandLabel(band: PriceBand): { priceText: string; qualifier: string } {
+  const t = useTranslations('commissionTariffsPage.table');
+  // band1 has no upper bound → show its lower bound + "ve üzeri"; every other band
+  // shows its upper bound + "ve altı" (the ceiling the seller drops the price to).
+  if (band.upperLimit !== null) {
+    return { priceText: formatCurrency(band.upperLimit), qualifier: t('belowQualifier') };
+  }
+  if (band.lowerLimit !== null) {
+    return { priceText: formatCurrency(band.lowerLimit), qualifier: t('aboveQualifier') };
+  }
+  return { priceText: formatCurrency(band.price), qualifier: '' };
 }
 
 /**
@@ -30,37 +46,40 @@ export interface PriceBandCellProps {
  * üzeri" qualifier as one unit) is the hero — it is what the seller is choosing.
  *
  * Selection is a TOGGLE (one OR none per product): clicking a band selects it,
- * clicking the selected band again clears it — not a radio group (the seller
- * must be able to undo a choice). The parent owns the toggle logic.
+ * clicking the selected band again clears it. The parent owns the toggle logic.
  *
  * Interaction (stretched-button overlay): a full-card toggle `<button>` sits
  * behind the content so clicking anywhere toggles the band; the content is
  * `pointer-events-none` so clicks fall through, EXCEPT the shared {@link
- * ProfitBadge} which re-enables pointer events and opens the income/expense
- * breakdown modal. The badge is the SAME component the orders page uses.
+ * ProfitBadge} which re-enables pointer events and opens the breakdown modal.
+ * The modal's figures come from the backend estimate at this band's price.
  */
 export function PriceBandCell({
   row,
   band,
   selected,
   isBest = false,
-  isCurrent = false,
   onSelect,
 }: PriceBandCellProps): React.ReactElement {
-  const format = useFormatter();
   const t = useTranslations('commissionTariffsPage.table');
   const scale = useMarginColoring();
+  const scope = useTariffScope();
+  const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const { priceText, qualifier } = useBandLabel(band);
 
-  // thresholdLabel is "<price>₺ <qualifier>" (e.g. "777,09₺ ve altı"); split so
-  // the price can be the hero while the qualifier sits right beside it as one unit.
-  const [priceText, ...qualifierParts] = band.thresholdLabel.split(' ');
-  const qualifier = qualifierParts.join(' ');
+  function openBreakdown(): void {
+    setBreakdownOpen(true);
+    estimate.mutate({ itemId: row.id, body: { price: band.price, bandKey: asBandKey(band.key) } });
+  }
 
   return (
     <div
       className={cn(
-        'p-xs min-w-tariff-band relative rounded-md border',
+        // min-w-0 on mobile so the card shrinks to fit its 2-col grid track (no
+        // overlap); the 200px floor only applies in the desktop table (md+),
+        // where the band columns scroll horizontally rather than squish.
+        'p-xs md:min-w-tariff-band relative min-w-0 rounded-md border',
         selected ? 'border-primary bg-primary-soft' : 'border-border',
       )}
     >
@@ -91,9 +110,12 @@ export function PriceBandCell({
                 aria-hidden
               />
             )}
-            <span className="gap-2xs flex min-w-0 items-baseline">
+            {/* flex-wrap: when the "ve altı / ve üzeri" qualifier doesn't fit
+                beside the price (narrow band card / mobile), it drops to the next
+                line under the price rather than being truncated. */}
+            <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
               <span className="text-base font-bold tabular-nums">{priceText}</span>
-              <span className="truncate text-xs font-normal">{qualifier}</span>
+              <span className="text-xs font-normal">{qualifier}</span>
             </span>
           </span>
           {isBest ? (
@@ -102,14 +124,14 @@ export function PriceBandCell({
         </span>
 
         <span className="text-2xs text-muted-foreground tabular-nums">
-          {t('commission')} {format.number(band.commissionPct.toNumber(), 'percent')}
+          {t('commission')} {formatPercentDisplay(band.commissionPct)}
         </span>
 
         <ProfitBadge
-          value={band.profit}
+          value={band.netProfit}
           marginPct={band.marginPct}
           scale={scale}
-          onOpen={() => setBreakdownOpen(true)}
+          onOpen={openBreakdown}
           className="pointer-events-auto self-start"
         />
       </div>
@@ -118,7 +140,8 @@ export function PriceBandCell({
         open={breakdownOpen}
         onOpenChange={setBreakdownOpen}
         productTitle={row.productTitle}
-        breakdown={buildBandBreakdown(row, band, isCurrent)}
+        result={estimate.data ?? null}
+        loading={estimate.isPending}
       />
     </div>
   );

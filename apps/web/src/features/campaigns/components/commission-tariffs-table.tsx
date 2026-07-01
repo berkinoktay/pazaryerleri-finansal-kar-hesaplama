@@ -1,10 +1,9 @@
 'use client';
 
 import type { ColumnDef } from '@tanstack/react-table';
-import { useFormatter, useTranslations } from 'next-intl';
-import * as React from 'react';
-
 import { PackageIcon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
+import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
@@ -13,10 +12,12 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
+import { useReasonLabel } from '../hooks/use-reason-label';
 import type { SelectionMap } from '../lib/bulk-actions';
-import type { BandKey, CommissionTariffRow } from '../types';
+import type { CommissionTariffRow } from '../types';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
 
@@ -25,7 +26,7 @@ const BAND_INDEXES = [0, 1, 2, 3] as const;
 export interface CommissionTariffsTableProps {
   rows: readonly CommissionTariffRow[];
   selection: SelectionMap;
-  onSelectBand: (rowId: string, band: BandKey) => void;
+  onSelectBand: (rowId: string, band: string) => void;
   tabs?: React.ReactNode;
   toolbar?: React.ReactNode;
   hasActiveFilters: boolean;
@@ -42,7 +43,7 @@ export function CommissionTariffsTable({
   onClearFilters,
 }: CommissionTariffsTableProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
-  const format = useFormatter();
+  const reasonLabel = useReasonLabel();
   // Local (not persisted): every tariff opens at its normal 100% size; the
   // seller can shrink it to fit for that session.
   const [scale, setScale] = React.useState(TABLE_SCALE_DEFAULT);
@@ -53,9 +54,14 @@ export function CommissionTariffsTable({
       header: t('table.product'),
       cell: ({ row }) => {
         const r = row.original;
+        const categoryBrand = [r.category, r.brand]
+          .filter((v): v is string => v !== null)
+          .join(' · ');
         return (
           <IdentityCell
             size="md"
+            titleLines={2}
+            className="max-w-tariff-product"
             leading={
               <SoftSquareIcon tone="neutral" variant="soft" size="md">
                 <PackageIcon />
@@ -64,12 +70,13 @@ export function CommissionTariffsTable({
             title={r.productTitle}
             meta={
               <span className="gap-3xs flex flex-col">
-                <span className="truncate">
-                  {r.category} · {r.brand}
-                </span>
-                <span className="truncate tabular-nums">
-                  {r.modelCode} · {t('table.stock')} {r.stock}
-                </span>
+                {categoryBrand !== '' ? <span className="truncate">{categoryBrand}</span> : null}
+                {r.stockCode !== null ? (
+                  <span className="truncate tabular-nums">{r.stockCode}</span>
+                ) : null}
+                {!r.calculable && r.reason !== null ? (
+                  <span className="text-warning">{reasonLabel(r.reason)}</span>
+                ) : null}
               </span>
             }
           />
@@ -85,33 +92,13 @@ export function CommissionTariffsTable({
         const r = row.original;
         return (
           <div className="gap-3xs flex flex-col text-sm">
-            {/* Sale price is the hero; the "Satış fiyatı" label only appears when a
-                distinct customer-facing price (storefront discount) must be told apart —
-                otherwise the "Güncel fiyat" column header already names it. */}
-            {r.displayPrice.equals(r.currentPrice) ? (
-              <div className="font-semibold tabular-nums">
-                <Currency value={r.currentPrice} />
-              </div>
-            ) : (
-              <>
-                <div>
-                  <div className="text-2xs text-muted-foreground">{t('table.salePrice')}</div>
-                  <div className="font-semibold tabular-nums">
-                    <Currency value={r.currentPrice} />
-                  </div>
-                </div>
-                <div>
-                  <div className="text-2xs text-muted-foreground">{t('table.displayPrice')}</div>
-                  <div className="tabular-nums">
-                    <Currency value={r.displayPrice} />
-                  </div>
-                </div>
-              </>
-            )}
+            <div className="font-semibold tabular-nums">
+              <Currency value={r.currentPrice} />
+            </div>
             <div className="text-2xs text-muted-foreground">
               {t('table.currentCommission')}{' '}
               <span className="text-foreground font-medium tabular-nums">
-                {format.number(r.currentCommissionPct.toNumber(), 'percent')}
+                {formatPercentDisplay(r.currentCommissionPct)}
               </span>
             </div>
           </div>
@@ -125,12 +112,12 @@ export function CommissionTariffsTable({
       cell: ({ row }) => {
         const r = row.original;
         const band = r.bands[i];
+        if (band === undefined) return null;
         return (
           <PriceBandCell
             row={r}
             band={band}
-            isBest={r.bestBand === band.key}
-            isCurrent={i === 0}
+            isBest={r.bestBandKey === band.key}
             selected={selection[r.id] === band.key}
             onSelect={(key) => onSelectBand(r.id, key)}
           />
@@ -145,7 +132,7 @@ export function CommissionTariffsTable({
     };
 
     return [productColumn, currentColumn, ...bandColumns, customPriceColumn];
-  }, [t, format, selection, onSelectBand]);
+  }, [t, selection, onSelectBand]);
 
   return (
     <DataTable<CommissionTariffRow, unknown>

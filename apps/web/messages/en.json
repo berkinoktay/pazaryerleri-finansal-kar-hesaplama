@@ -797,7 +797,19 @@
       "delete": "Delete table",
       "deleteTitle": "Delete tariff",
       "deleteDescription": "This saved tariff and all of its band selections will be permanently deleted. This action cannot be undone.",
-      "deleteConfirm": "Delete tariff"
+      "deleteConfirm": "Delete tariff",
+      "notFoundTitle": "Tariff not found",
+      "notFoundDescription": "This tariff may have been deleted or may not belong to this store."
+    },
+    "noStore": {
+      "title": "Select a store first",
+      "description": "Connect a Trendyol store to view commission tariffs.",
+      "cta": "Go to stores"
+    },
+    "reason": {
+      "NO_PRODUCT": "No product match — this barcode isn't in your catalog.",
+      "NO_COST": "No cost — add a cost profile for this product.",
+      "NO_SHIPPING": "No shipping estimate — carrier or desi setup is missing."
     },
     "list": {
       "upload": "Upload Excel File",
@@ -867,7 +879,9 @@
       "noChoice": "Choose a band",
       "customPrice": "Custom Price",
       "enterPrice": "Enter price",
-      "customPriceHint": "Enter a price to see the estimated profit"
+      "customPriceHint": "Enter a price to see the estimated profit",
+      "aboveQualifier": "and above",
+      "belowQualifier": "and below"
     },
     "noResults": {
       "title": "No matching products",
@@ -887,16 +901,31 @@
       "startPlaceholder": "Start date",
       "endPlaceholder": "End date",
       "periodHint": "The Trendyol file's labels omit the year, so set the period start and end here.",
-      "submit": "Create tariff"
+      "submit": "Create tariff",
+      "errors": {
+        "notReadable": "Couldn't read the file — upload a valid .xlsx.",
+        "wrongFormat": "This isn't a Trendyol commission tariff file, or its format wasn't recognized.",
+        "empty": "No product rows found in the file.",
+        "noPeriod": "No tariff period found in the file.",
+        "tooLarge": "File is too large — upload a smaller file.",
+        "generic": "Couldn't upload the file. Please try again."
+      }
     },
     "breakdown": {
       "title": "Profit breakdown",
       "salePrice": "Sale price",
+      "sale": "Sale",
       "commission": "Commission",
       "unitCost": "Unit cost",
+      "cost": "Product cost",
+      "shipping": "Shipping",
+      "platformService": "Platform service fee",
+      "stoppage": "Withholding",
+      "netVat": "Net VAT",
       "profit": "Profit",
       "estimatedProfit": "Estimated profit",
-      "margin": "Margin"
+      "margin": "Margin",
+      "notCalculable": "Profit can't be computed for this product."
     },
     "smartSelect": {
       "label": "Smart select",

@@ -797,7 +797,19 @@
       "delete": "Tabloyu Sil",
       "deleteTitle": "Tarifeyi sil",
       "deleteDescription": "Bu kayıtlı tarife ve içindeki tüm kademe seçimlerin kalıcı olarak silinecek. Bu işlem geri alınamaz.",
-      "deleteConfirm": "Tarifeyi sil"
+      "deleteConfirm": "Tarifeyi sil",
+      "notFoundTitle": "Tarife bulunamadı",
+      "notFoundDescription": "Bu tarife silinmiş veya bu mağazaya ait olmayabilir."
+    },
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "Komisyon tarifelerini görüntülemek için bağlı bir Trendyol mağazası gerekir.",
+      "cta": "Mağazalara git"
+    },
+    "reason": {
+      "NO_PRODUCT": "Ürün eşleşmedi — bu barkod ürün kataloğunuzda yok.",
+      "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
+      "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik."
     },
     "list": {
       "upload": "Excel Dosyası Yükle",
@@ -867,7 +879,9 @@
       "noChoice": "Kademe seç",
       "customPrice": "Özel Fiyat",
       "enterPrice": "Fiyat girin",
-      "customPriceHint": "Fiyat girince tahmini kârı görürsün"
+      "customPriceHint": "Fiyat girince tahmini kârı görürsün",
+      "aboveQualifier": "ve üzeri",
+      "belowQualifier": "ve altı"
     },
     "noResults": {
       "title": "Eşleşen ürün yok",
@@ -887,16 +901,31 @@
       "startPlaceholder": "Başlangıç tarihi",
       "endPlaceholder": "Bitiş tarihi",
       "periodHint": "Trendyol dosyasında yıl bilgisi olmadığından dönem başlangıç ve bitişini buradan belirt.",
-      "submit": "Tarifeyi oluştur"
+      "submit": "Tarifeyi oluştur",
+      "errors": {
+        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+        "wrongFormat": "Bu bir Trendyol komisyon tarifesi dosyası değil ya da biçimi tanınmadı.",
+        "empty": "Dosyada ürün satırı bulunamadı.",
+        "noPeriod": "Dosyada tarife dönemi bulunamadı.",
+        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      }
     },
     "breakdown": {
       "title": "Kâr dökümü",
       "salePrice": "Satış fiyatı",
+      "sale": "Satış",
       "commission": "Komisyon",
       "unitCost": "Birim maliyet",
+      "cost": "Ürün maliyeti",
+      "shipping": "Kargo",
+      "platformService": "Platform hizmet bedeli",
+      "stoppage": "Stopaj",
+      "netVat": "Net KDV",
       "profit": "Kâr",
       "estimatedProfit": "Tahmini kâr",
-      "margin": "Marj"
+      "margin": "Marj",
+      "notCalculable": "Bu ürün için kâr hesaplanamıyor."
     },
     "smartSelect": {
       "label": "Akıllı Seçim",

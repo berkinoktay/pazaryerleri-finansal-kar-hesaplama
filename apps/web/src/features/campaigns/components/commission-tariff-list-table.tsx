@@ -17,7 +17,6 @@ import {
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
 import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
@@ -122,33 +121,22 @@ export function CommissionTariffListTable({
               <div className="text-foreground truncate text-sm font-semibold">
                 {row.original.name}
               </div>
-              <div className="text-2xs text-muted-foreground truncate">
-                {row.original.sourceFilename}
-              </div>
             </div>
           </div>
         ),
       },
       {
-        id: 'period',
-        header: () => tCols('period'),
-        meta: { label: tCols('period') },
-        cell: ({ row }) => (
-          <Badge tone="neutral" variant="surface" size="sm">
-            {row.original.relativeLabel}
-          </Badge>
-        ),
-      },
-      {
         // accessorFn unlocks getCanSort() (a display column can't sort); the
-        // custom cell still renders the figure + unit.
+        // custom cell still renders the figure + unit. Shows selection progress
+        // (chosen / total) — the seller's core "how far am I" signal.
         id: 'products',
         accessorFn: (row) => row.productCount,
         header: () => tCols('products'),
         meta: { numeric: true, label: tCols('products') },
         cell: ({ row }) => (
           <span className="tabular-nums">
-            <span className="text-foreground font-semibold">{row.original.productCount}</span>{' '}
+            <span className="text-foreground font-semibold">{row.original.selectedCount}</span>
+            <span className="text-muted-foreground">/{row.original.productCount}</span>{' '}
             <span className="text-muted-foreground text-2xs">{tList('productUnit')}</span>
           </span>
         ),

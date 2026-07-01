@@ -1,44 +1,45 @@
-import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
 import { summarizeSelection } from '@/features/campaigns/lib/commission-tariff-summary';
-import type { BandKey, CommissionTariffRow, PriceBand } from '@/features/campaigns/types';
+import type { CommissionTariffRow, PriceBand } from '@/features/campaigns/types';
 
-function makeBand(key: BandKey, profit: string): PriceBand {
+function makeBand(key: string, netProfit: string): PriceBand {
   return {
     key,
-    thresholdLabel: '',
-    threshold: new Decimal('0'),
-    commissionPct: new Decimal('0.1'),
-    profit: new Decimal(profit),
+    lowerLimit: null,
+    upperLimit: null,
+    price: '100',
+    commissionPct: '10',
+    netProfit,
     marginPct: '0',
   };
 }
 
 function makeRow(
   id: string,
-  bestBand: BandKey,
+  bestBandKey: string,
   profits: [string, string, string, string],
 ): CommissionTariffRow {
   return {
     id,
+    barcode: id,
+    stockCode: null,
     productTitle: id,
-    category: '',
-    brand: '',
-    modelCode: '',
-    barcode: '',
-    stock: 0,
-    currentPrice: new Decimal('100'),
-    displayPrice: new Decimal('100'),
-    currentCommissionPct: new Decimal('0.1'),
-    unitCost: new Decimal('80'),
+    category: null,
+    brand: null,
+    currentPrice: '100',
+    currentCommissionPct: '10',
+    calculable: true,
+    reason: null,
+    bestBandKey,
+    selectedBand: null,
+    customPrice: null,
     bands: [
       makeBand('band1', profits[0]),
       makeBand('band2', profits[1]),
       makeBand('band3', profits[2]),
       makeBand('band4', profits[3]),
     ],
-    bestBand,
   };
 }
 

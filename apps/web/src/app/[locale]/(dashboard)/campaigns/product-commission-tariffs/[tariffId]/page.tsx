@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { CommissionTariffsListClient } from '@/features/campaigns/components/commission-tariffs-list-client';
+import { CommissionTariffDetailClient } from '@/features/campaigns/components/commission-tariff-detail-client';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
 import { getServerApiClient } from '@/lib/api-client/server';
@@ -11,7 +11,7 @@ import { routing } from '@/i18n/routing';
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ locale: string }>;
+  params: Promise<{ locale: string; tariffId: string }>;
 }): Promise<Metadata> {
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
@@ -20,11 +20,17 @@ export async function generateMetadata({
 }
 
 /**
- * Server shell for the Product Commission Tariffs LIST. Resolves the active org
- * then store (cookie or first, mirroring the dashboard layout) and hands the ids
- * to the client, which lists the saved tariffs and owns upload/export/delete.
+ * Server shell for one saved tariff's DETAIL. Reads the `tariffId` route param,
+ * resolves the active org + store (mirroring the list shell), and hands all three
+ * to the client, which loads the tariff, drives band selection, and saves/exports.
  */
-export default async function ProductCommissionTariffsPage(): Promise<React.ReactElement> {
+export default async function CommissionTariffDetailPage({
+  params,
+}: {
+  params: Promise<{ locale: string; tariffId: string }>;
+}): Promise<React.ReactElement> {
+  const { tariffId } = await params;
+
   const api = await getServerApiClient();
   const { data: orgsResponse } = await api.GET('/v1/organizations', {});
   const orgs = orgsResponse?.data ?? [];
@@ -40,6 +46,10 @@ export default async function ProductCommissionTariffsPage(): Promise<React.Reac
   }
 
   return (
-    <CommissionTariffsListClient orgId={activeOrgId ?? null} storeId={activeStoreId ?? null} />
+    <CommissionTariffDetailClient
+      orgId={activeOrgId ?? null}
+      storeId={activeStoreId ?? null}
+      tariffId={tariffId}
+    />
   );
 }

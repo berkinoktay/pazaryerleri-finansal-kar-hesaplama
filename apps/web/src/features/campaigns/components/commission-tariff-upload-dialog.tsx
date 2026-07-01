@@ -25,6 +25,42 @@ export interface CommissionTariffUploadDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Fires on submit with the chosen file + the period the seller entered. */
   onFile: (file: File, range: DateRange | undefined) => void;
+  /** True while the import request is in flight (drives the submit button). */
+  submitting?: boolean;
+  /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
+  errorCode?: string | null;
+  /** Clears the last import error when the seller picks a different file. */
+  onResetError?: () => void;
+}
+
+/** Maps a backend file-rejection code to its localized message key bucket. */
+function useFileErrorMessage(): (code: string | null | undefined) => string | null {
+  const t = useTranslations('commissionTariffsPage.upload.errors');
+  return (code) => {
+    switch (code) {
+      case null:
+      case undefined:
+        return null;
+      case 'NOT_XLSX':
+      case 'CORRUPT_FILE':
+        return t('notReadable');
+      case 'EMPTY_TARIFF_FILE':
+        return t('empty');
+      case 'NO_TARIFF_PERIOD':
+        return t('noPeriod');
+      case 'ROW_CAP_EXCEEDED':
+      case 'COL_CAP_EXCEEDED':
+      case 'PAYLOAD_TOO_LARGE':
+        return t('tooLarge');
+      case 'SHEET_NOT_FOUND':
+      case 'INVALID_TARIFF_FORMAT':
+      case 'MISSING_REQUIRED_HEADERS':
+      case 'AMBIGUOUS_HEADERS':
+        return t('wrongFormat');
+      default:
+        return t('generic');
+    }
+  };
 }
 
 /**
@@ -38,9 +74,13 @@ export function CommissionTariffUploadDialog({
   open,
   onOpenChange,
   onFile,
+  submitting = false,
+  errorCode,
+  onResetError,
 }: CommissionTariffUploadDialogProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.upload');
   const tCommon = useTranslations('common');
+  const fileErrorMessage = useFileErrorMessage();
 
   const [file, setFile] = React.useState<File | null>(null);
   const [startDate, setStartDate] = React.useState<Date | null>(null);
@@ -76,7 +116,11 @@ export function CommissionTariffUploadDialog({
           prompt={t('prompt')}
           hint={t('hint')}
           ctaLabel={t('cta')}
-          onChange={setFile}
+          error={fileErrorMessage(errorCode)}
+          onChange={(next) => {
+            setFile(next);
+            onResetError?.();
+          }}
         />
 
         <div className="gap-2xs flex flex-col">
@@ -119,7 +163,7 @@ export function CommissionTariffUploadDialog({
           <DialogClose asChild>
             <Button variant="ghost">{tCommon('cancel')}</Button>
           </DialogClose>
-          <Button onClick={handleSubmit} disabled={file === null}>
+          <Button onClick={handleSubmit} disabled={file === null} loading={submitting}>
             {t('submit')}
           </Button>
         </DialogFooter>

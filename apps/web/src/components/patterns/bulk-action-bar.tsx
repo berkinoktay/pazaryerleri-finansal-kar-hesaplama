@@ -254,7 +254,12 @@ export function BulkActionBar({
                 >
                   {action.icon}
                   {action.icon !== undefined ? (
-                    <span className="pointer-coarse:sr-only">{action.label}</span>
+                    // Icon-only on touch saves space — EXCEPT the primary commit
+                    // action, whose label stays visible so the bar's main CTA is
+                    // never a bare icon on mobile.
+                    <span className={cn(action.tone !== 'primary' && 'pointer-coarse:sr-only')}>
+                      {action.label}
+                    </span>
                   ) : (
                     action.label
                   )}

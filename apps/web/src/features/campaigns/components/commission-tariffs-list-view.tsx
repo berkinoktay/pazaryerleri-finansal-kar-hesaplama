@@ -10,13 +10,14 @@ import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
 import { Button } from '@/components/ui/button';
 
+import type { CommissionTariffListItem } from '../api/list-tariffs.api';
 import {
   matchesTariffQuery,
   summarizeTariffList,
   toListRows,
   type TariffListRow,
 } from '../lib/commission-tariff-list';
-import type { TariffTemplate, TariffValidity } from '../types';
+import type { TariffValidity } from '../types';
 
 import { CommissionTariffListSummary } from './commission-tariff-list-summary';
 import { CommissionTariffListTable } from './commission-tariff-list-table';
@@ -25,8 +26,7 @@ import { useTariffRowActions } from './use-tariff-row-actions';
 type StatusFilter = 'all' | TariffValidity | 'draft';
 
 export interface CommissionTariffsListViewProps {
-  templates: readonly TariffTemplate[];
-  exportedIds: Readonly<Record<string, boolean>>;
+  items: readonly CommissionTariffListItem[];
   onOpen: (id: string) => void;
   onCreate: () => void;
   onExport: (id: string) => void;
@@ -42,8 +42,7 @@ export interface CommissionTariffsListViewProps {
  * page. Search + status filtering are owned here so every control stays in sync.
  */
 export function CommissionTariffsListView({
-  templates,
-  exportedIds,
+  items,
   onOpen,
   onCreate,
   onExport,
@@ -59,7 +58,7 @@ export function CommissionTariffsListView({
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [deleteTarget, setDeleteTarget] = React.useState<TariffListRow | null>(null);
 
-  const rows = React.useMemo(() => toListRows(templates, exportedIds), [templates, exportedIds]);
+  const rows = React.useMemo(() => toListRows(items), [items]);
   const queryFiltered = React.useMemo(
     () => rows.filter((row) => matchesTariffQuery(row, query)),
     [rows, query],
@@ -94,10 +93,7 @@ export function CommissionTariffsListView({
     return next;
   }, [query, statusFilter]);
 
-  const stats = React.useMemo(
-    () => summarizeTariffList(templates, exportedIds),
-    [templates, exportedIds],
-  );
+  const stats = React.useMemo(() => summarizeTariffList(rows), [rows]);
 
   const requestDelete = React.useCallback((row: TariffListRow) => setDeleteTarget(row), []);
   const actions = useTariffRowActions({ onOpen, onExport, onRequestDelete: requestDelete });
