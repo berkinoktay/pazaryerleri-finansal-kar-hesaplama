@@ -83,6 +83,10 @@ export const TariffDetailItemSchema = z
     barcode: z.string(),
     stockCode: z.string().nullable(),
     productTitle: z.string(),
+    imageUrl: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Barkod-eşleşen ürünün birincil görseli; eşleşme yoksa null.' }),
     category: z.string().nullable(),
     brand: z.string().nullable(),
     currentPrice: z.string(),

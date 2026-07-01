@@ -4973,6 +4973,13 @@
           "productTitle": {
             "type": "string"
           },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Barkod-eşleşen ürünün birincil görseli; eşleşme yoksa null."
+          },
           "category": {
             "type": [
               "string",
@@ -5027,6 +5034,7 @@
           "barcode",
           "stockCode",
           "productTitle",
+          "imageUrl",
           "category",
           "brand",
           "currentPrice",

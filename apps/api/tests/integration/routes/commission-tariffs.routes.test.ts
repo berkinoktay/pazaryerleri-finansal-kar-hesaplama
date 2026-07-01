@@ -34,6 +34,7 @@ interface ItemWire {
   id: string;
   barcode: string;
   productTitle: string;
+  imageUrl: string | null;
   calculable: boolean;
   reason: string | null;
   bestBandKey: string | null;
@@ -118,6 +119,23 @@ async function setupTariffFixture(): Promise<TariffFixture> {
       vatRate: 20,
       dimensionalWeight: new Decimal('3.0'),
     },
+  });
+  // Two images: the detail must surface the position-0 one for the matched item.
+  await prisma.productImage.createMany({
+    data: [
+      {
+        organizationId: org.id,
+        productId: product.id,
+        url: 'https://cdn.example/tar-1.jpg',
+        position: 1,
+      },
+      {
+        organizationId: org.id,
+        productId: product.id,
+        url: 'https://cdn.example/tar-0.jpg',
+        position: 0,
+      },
+    ],
   });
 
   const profile = await prisma.costProfile.create({
@@ -227,6 +245,8 @@ describe('Commission Tariffs — list / detail / delete', () => {
     expect(matched?.calculable).toBe(true);
     expect(matched?.reason).toBeNull();
     expect(matched?.selectedBand).toBe('band2');
+    // The matched item surfaces its catalog product's position-0 image.
+    expect(matched?.imageUrl).toBe('https://cdn.example/tar-0.jpg');
     expect(matched?.bands).toHaveLength(4);
     // Every band has a real (non-null) net profit + margin, and a best band is marked.
     for (const band of matched?.bands ?? []) {
@@ -240,6 +260,8 @@ describe('Commission Tariffs — list / detail / delete', () => {
     expect(unmatched?.calculable).toBe(false);
     expect(unmatched?.reason).toBe('NO_PRODUCT');
     expect(unmatched?.bands[0]?.netProfit).toBeNull();
+    // An unmatched item has no catalog product, so no image.
+    expect(unmatched?.imageUrl).toBeNull();
   });
 
   it('deletes the tariff and then lists empty', async () => {
