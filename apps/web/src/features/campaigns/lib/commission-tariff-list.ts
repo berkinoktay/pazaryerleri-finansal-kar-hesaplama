@@ -50,6 +50,8 @@ export interface TariffListStats {
   coveredProducts: number | null;
   /** How many tariffs have been exported (saved & downloaded). */
   exportedCount: number;
+  /** ISO timestamp of the most recent change across all tariffs (trust stamp). */
+  lastUpdatedAt: string | null;
 }
 
 /** At-a-glance summary metrics for the list header strip. */
@@ -60,5 +62,9 @@ export function summarizeTariffList(rows: readonly TariffListRow[]): TariffListS
     activeLabel: active?.name ?? null,
     coveredProducts: active?.productCount ?? null,
     exportedCount: rows.filter((row) => row.exported).length,
+    lastUpdatedAt: rows.reduce<string | null>(
+      (latest, row) => (latest === null || row.updatedAt > latest ? row.updatedAt : latest),
+      null,
+    ),
   };
 }

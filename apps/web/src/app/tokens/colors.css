@@ -17,12 +17,27 @@
      pure-white sidebar rail and pure-white cards both read as RAISED
      surfaces floating above the page. Without this contrast, every
      surface looks like the same paint — no depth, no hierarchy.
-     96.5% + chroma 0.008: the previous 98%/0.005 left only a 2-point
-     gap to the white card — panels read as "outlines drawn on the page"
-     instead of raised surfaces (2026-07-02 depth audit). The reference
-     products run their canvas 1.5–2 steps below white with a perceptible
-     brand tint; this is the restrained end of that range. */
-  --background: oklch(96.5% 0.008 265);
+     97% + chroma 0.008: the original 98%/0.005 left only a 2-point gap
+     to the white card — panels read as "outlines drawn on the page"
+     instead of raised surfaces (2026-07-02 depth audit). A first pass
+     used 96.5%, calibrated BEFORE shadow-xs became a real ambient
+     shadow; with shadows now sharing the depth work the canvas eased
+     back half a step (Berkin: "biraz koyu kaçıyor"). The TINT (chroma
+     0.008), not the darkness, is what reads as designed.
+
+     LIGHTNESS LADDER (light mode, canvas → raised):
+       83.0  --border-strong      strongest hairline
+       89.0  --border             default hairline
+       92.0  --border-muted       incidental accents
+       93.0  --surface-row-selected
+       93.5  --secondary
+       94.0  --muted              chips/skeletons ON cards
+       95.0  --sidebar-accent     rail hover
+       96.0  --surface-subtle · --surface-row-hover   bands ON cards
+       96.5  --surface-trigger-hover                  ON muted containers
+       97.0  --background         THE CANVAS
+      100.0  --card · --sidebar · --input · --popover  raised whites */
+  --background: oklch(97% 0.008 265);
   --foreground: oklch(18% 0.02 265);
 
   /* Muted keeps its "darker than --background" semantic: 94% sits a clear

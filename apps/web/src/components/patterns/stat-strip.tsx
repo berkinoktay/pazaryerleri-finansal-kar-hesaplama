@@ -29,7 +29,14 @@ export interface StatStripItem {
   /** Explanation surfaced via an `InfoHint` (ⓘ) next to the title. */
   hint?: React.ReactNode;
   delta?: StatCardDelta;
-  /** Trailing circular icon (a `SoftSquareIcon shape="circle" variant="outline"`). */
+  /**
+   * Muted one-liner under the value that gives the number MEANING — a
+   * comparison, a nudge ("3 tarife dışa aktarım bekliyor") or, for an empty
+   * metric, real microcopy instead of a bare em-dash. Renders alongside
+   * `delta` when both are present.
+   */
+  context?: React.ReactNode;
+  /** Trailing circular icon (a `SoftSquareIcon shape="circle" variant="soft"`). */
   icon?: React.ReactNode;
 }
 
@@ -52,14 +59,19 @@ function StatStripCell({ item }: { item: StatStripItem }): React.ReactElement {
       <span className="text-foreground text-3xl leading-none font-semibold tracking-tight tabular-nums">
         {item.value}
       </span>
-      {item.delta ? (
+      {item.delta !== undefined || item.context !== undefined ? (
         <div className="gap-xs flex flex-wrap items-center">
-          {item.delta.period ? (
+          {item.delta?.period !== undefined && item.delta.period !== '' ? (
             <span className="text-2xs text-muted-foreground-dim tabular-nums">
               {item.delta.period}
             </span>
           ) : null}
-          <TrendDelta value={item.delta.percent} goodDirection={item.delta.goodDirection} />
+          {item.delta !== undefined ? (
+            <TrendDelta value={item.delta.percent} goodDirection={item.delta.goodDirection} />
+          ) : null}
+          {item.context !== undefined ? (
+            <span className="text-2xs text-muted-foreground">{item.context}</span>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -68,7 +80,13 @@ function StatStripCell({ item }: { item: StatStripItem }): React.ReactElement {
 
 export function StatStrip({ items, className, ...props }: StatStripProps): React.ReactElement {
   return (
-    <Card className={cn('grid grid-cols-1 lg:auto-cols-fr lg:grid-flow-col', className)} {...props}>
+    <Card
+      className={cn(
+        'animate-panel-enter grid grid-cols-1 lg:auto-cols-fr lg:grid-flow-col',
+        className,
+      )}
+      {...props}
+    >
       {items.map((item) => (
         <StatStripCell key={item.label} item={item} />
       ))}

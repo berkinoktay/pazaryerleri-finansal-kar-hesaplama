@@ -549,7 +549,10 @@ export function DataTable<TData, TValue>({
     // same standing-panel treatment as Card — so it reads as a raised
     // surface on the tinted canvas rather than an outline drawn on it.
     <>
-      <div className="border-border bg-card overflow-hidden rounded-lg border shadow-xs">
+      {/* animate-panel-enter-delayed: the shell follows the page's KPI strip
+          by one 50ms beat on mount (liveliness layer) — never replays on
+          re-render, collapses under prefers-reduced-motion. */}
+      <div className="border-border bg-card animate-panel-enter-delayed overflow-hidden rounded-lg border shadow-xs">
         {/* Polite live regions: a screen reader hears the selection count and
             the loading state change without a visible duplicate. One status per
             concern; both empty when inactive so nothing is announced at rest. */}

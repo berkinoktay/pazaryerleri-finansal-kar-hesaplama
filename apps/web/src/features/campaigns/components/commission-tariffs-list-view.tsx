@@ -1,7 +1,7 @@
 'use client';
 
 import { CloudUploadIcon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
@@ -105,6 +105,7 @@ export function CommissionTariffsListView({
   const hasActiveFilters = query.trim() !== '' || statusFilter !== 'all';
 
   const stats = React.useMemo(() => summarizeTariffList(rows), [rows]);
+  const format = useFormatter();
 
   const requestDelete = React.useCallback((row: TariffListRow) => setDeleteTarget(row), []);
   const actions = useTariffRowActions({ onOpen, onExport, onRequestDelete: requestDelete });
@@ -150,6 +151,13 @@ export function CommissionTariffsListView({
         // default gap-sm read as cramped); no bottom rule so the strip flows
         // into the data panel below rather than being fenced off by a separator.
         className="gap-lg border-b-0 pb-0"
+        meta={
+          stats.lastUpdatedAt !== null
+            ? tList('lastUpdated', {
+                date: format.dateTime(new Date(stats.lastUpdatedAt), 'short'),
+              })
+            : undefined
+        }
         summary={<CommissionTariffListSummary stats={stats} />}
       />
 

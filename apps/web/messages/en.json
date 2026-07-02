@@ -835,7 +835,11 @@
         "activePeriod": "Active period",
         "covered": "Covered products",
         "exported": "Exported",
-        "exportedValue": "{count} / {total}"
+        "exportedValue": "{count} / {total}",
+        "noActivePeriod": "No active period",
+        "coveredContext": "in the active period",
+        "exportedPending": "{count} tariffs awaiting export",
+        "exportedAllDone": "all exported"
       },
       "empty": {
         "title": "No commission tariffs yet",
@@ -856,7 +860,8 @@
         "deleteTitle": "Delete selected tariffs",
         "deleteDescription": "{count} tariffs and all of their band selections will be permanently deleted. This action cannot be undone.",
         "deleteConfirm": "Delete tariffs"
-      }
+      },
+      "lastUpdated": "Last updated: {date}"
     },
     "summary": {
       "total": "Products in tariff",

@@ -153,8 +153,52 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    /* Delays too: a staggered entrance (animation-delay + fill both) would
+       otherwise hold its from-state — invisible — for the delay window. */
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* Panel entrance — the liveliness layer's page-open moment. A standing panel
+   (KPI strip, table shell) fades in while rising 4px; `both` keeps the
+   from-state through any stagger delay so late panels don't flash before
+   animating. Fires once per MOUNT (CSS animation), so data refetches and
+   re-renders never replay it. The global prefers-reduced-motion rule above
+   freezes it to the end frame (fully visible, in place). */
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-panel-enter {
+  animation: panel-enter var(--duration-base) var(--ease-out-quart) both;
+}
+
+/* The staggered sibling: the table panel follows the KPI strip by one 50ms
+   beat, reading as a cascade rather than a simultaneous pop. */
+.animate-panel-enter-delayed {
+  animation: panel-enter var(--duration-base) var(--ease-out-quart) 50ms both;
+}
+
+/* Hover elevation for INTERACTIVE cards only (a static info card lifting on
+   hover falsely advertises clickability): resting shadow-xs rises to
+   shadow-sm. Pair with an existing cursor/selection affordance. The
+   (hover: hover) gate matches Tailwind v4's own hover: variant compilation —
+   without it, touch devices keep the lifted shadow stuck after a tap. */
+.hover-lift {
+  transition: box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+@media (hover: hover) {
+  .hover-lift:hover {
+    box-shadow: var(--shadow-sm);
   }
 }
