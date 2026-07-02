@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NextIntlClientProvider } from 'next-intl';
-import { NuqsAdapter } from 'nuqs/adapters/react';
+import { NuqsTestingAdapter } from 'nuqs/adapters/testing';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -27,11 +27,14 @@ const messages = {
 
 function renderList() {
   return render(
-    <NuqsAdapter>
+    // Testing adapter: synchronous, throttle-free URL-state — the react adapter's
+    // queued history flush can outlive teardown on a slow runner ("location is
+    // not defined", the exact CI crash use-products-filters hit).
+    <NuqsTestingAdapter rateLimitFactor={0}>
       <NextIntlClientProvider locale="tr" messages={messages}>
         <PeriodPresetList />
       </NextIntlClientProvider>
-    </NuqsAdapter>,
+    </NuqsTestingAdapter>,
   );
 }
 

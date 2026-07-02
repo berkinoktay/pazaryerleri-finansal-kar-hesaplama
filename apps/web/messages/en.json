@@ -1048,12 +1048,7 @@
     "intent": "Orders flowing from connected stores. Filter, watch reconciliation state, open the detail for the profit breakdown.",
     "toolbar": {
       "searchPlaceholder": "Search by order or package number",
-      "statusPlaceholder": "Order status",
-      "statusAll": "All statuses",
-      "reconciliationPlaceholder": "Reconciliation status",
-      "reconciliationAll": "All reconciliations",
-      "lossOnly": "Loss only",
-      "exportExcel": "Excel"
+      "lossOnly": "Loss only"
     },
     "kpis": {
       "revenue": "Total Revenue",
@@ -1119,6 +1114,16 @@
       "label": "Outside profit",
       "empty": "No orders are excluded from profit",
       "intro": "These orders count toward your revenue but not your profit. You can see the reason for each one below."
+    },
+    "advancedFilters": {
+      "groups": {
+        "status": "Status",
+        "flag": "Other"
+      },
+      "fields": {
+        "status": "Order status",
+        "reconciliationStatus": "Reconciliation status"
+      }
     }
   },
   "exclusionReasons": {
