@@ -1,58 +1,54 @@
 'use client';
 
-import { Alert02Icon, Cancel01Icon, DownloadSquare02Icon, Search01Icon } from 'hugeicons-react';
+import { type Table } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 import type { DateRange } from 'react-day-picker';
 
+import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
 import { DateRangePicker } from '@/components/patterns/date-range-picker';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { cn } from '@/lib/utils';
 
+import { orderFilterParamsFromRows, orderFilterRowsFromParams } from '../lib/orders-filter-fields';
 import {
-  ORDER_STATUSES,
-  RECONCILIATION_STATUSES,
   type OrderStatusValue,
   type ReconciliationStatusValue,
 } from '../lib/orders-filter-parsers';
+import { useOrderFilterFields } from '../hooks/use-order-filter-fields';
 
-// Sentinel value used by the Select primitives because Radix forbids empty
-// string as a SelectItem value (it conflicts with the "no selection" state).
-const ALL_VALUE = '__all__';
+/** Partial filter update emitted by the toolbar — the page client owns the URL state. */
+export interface OrdersToolbarChange {
+  q?: string;
+  status?: OrderStatusValue | null;
+  reconciliationStatus?: ReconciliationStatusValue | null;
+  lossOnly?: boolean;
+  from?: string;
+  to?: string;
+}
 
-export interface OrdersToolbarProps {
+export interface OrdersToolbarProps<TData> {
+  table: Table<TData>;
   q: string;
   status: OrderStatusValue | null;
   reconciliationStatus: ReconciliationStatusValue | null;
   lossOnly: boolean;
   from: string;
   to: string;
-  onChange: (next: {
-    q?: string;
-    status?: OrderStatusValue | null;
-    reconciliationStatus?: ReconciliationStatusValue | null;
-    lossOnly?: boolean;
-    from?: string;
-    to?: string;
-  }) => void;
-  className?: string;
+  onChange: (next: OrdersToolbarChange) => void;
 }
 
 /**
- * Filter row above the orders table. Search (debounce-free; orders list is
- * server-paginated and queries inexpensive), status select, reconciliation
- * status select, and a date range over orderDate. "Hepsi temizle" appears
- * when any filter is active.
+ * Orders toolbar as a thin composition over the shared DataTableToolbar:
+ * controlled search, the `advancedFilter` config (order status +
+ * reconciliation status as single-select chips, loss-only as a flag chip)
+ * and the orderDate DateRangePicker in the facets slot. The URL keeps its
+ * readable individual params — chips are DERIVED via the adapters in
+ * orders-filter-fields.ts, so this component owns no filter state.
+ *
+ * The export button is a placeholder (no Excel backend yet) — a no-op
+ * onExport keeps the standard control in place until the endpoint ships.
  */
-export function OrdersToolbar({
+export function OrdersToolbar<TData>({
+  table,
   q,
   status,
   reconciliationStatus,
@@ -60,10 +56,11 @@ export function OrdersToolbar({
   from,
   to,
   onChange,
-  className,
-}: OrdersToolbarProps): React.ReactElement {
+}: OrdersToolbarProps<TData>): React.ReactElement {
   const t = useTranslations('ordersPage');
-  const tCommon = useTranslations('common.dataTable.toolbar');
+  const filterFields = useOrderFilterFields();
+
+  const filterRows = orderFilterRowsFromParams({ status, reconciliationStatus, lossOnly });
 
   const range: DateRange | undefined =
     from.length > 0 || to.length > 0
@@ -80,6 +77,10 @@ export function OrdersToolbar({
     });
   };
 
+  // Server-mode clear: filters live in URL params (not columnFilters), so the
+  // toolbar's ghost needs to be told when ANY of the six dimensions is active
+  // and how to reset them all — search and the date range included, which the
+  // chip row's own "Tümünü temizle" doesn't cover.
   const hasAnyFilter =
     q.length > 0 ||
     status !== null ||
@@ -89,110 +90,39 @@ export function OrdersToolbar({
     to.length > 0;
 
   return (
-    <div className={cn('gap-sm flex flex-wrap items-center', className)}>
-      <div className="max-w-input relative flex-1">
-        <Search01Icon className="left-sm size-icon-sm text-muted-foreground pointer-events-none absolute top-1/2 -translate-y-1/2" />
-        <Input
-          value={q}
-          onChange={(event) => onChange({ q: event.target.value })}
-          placeholder={t('toolbar.searchPlaceholder')}
-          className="pl-2xl"
-        />
-      </div>
-
-      <Select
-        value={status ?? ALL_VALUE}
-        onValueChange={(value) =>
-          onChange({ status: value === ALL_VALUE ? null : (value as OrderStatusValue) })
-        }
-      >
-        <SelectTrigger className="w-44">
-          <SelectValue placeholder={t('toolbar.statusPlaceholder')} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL_VALUE}>{t('toolbar.statusAll')}</SelectItem>
-          {ORDER_STATUSES.map((value) => (
-            <SelectItem key={value} value={value}>
-              {t(`status.${value}`)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={reconciliationStatus ?? ALL_VALUE}
-        onValueChange={(value) =>
-          onChange({
-            reconciliationStatus: value === ALL_VALUE ? null : (value as ReconciliationStatusValue),
-          })
-        }
-      >
-        <SelectTrigger className="w-56">
-          <SelectValue placeholder={t('toolbar.reconciliationPlaceholder')} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL_VALUE}>{t('toolbar.reconciliationAll')}</SelectItem>
-          {RECONCILIATION_STATUSES.map((value) => (
-            <SelectItem key={value} value={value}>
-              {t(`reconciliationStatus.${value}`)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <DateRangePicker value={range} onChange={handleRangeChange} />
-
-      <Button
-        type="button"
-        variant={lossOnly ? 'default' : 'outline'}
-        size="sm"
-        aria-pressed={lossOnly}
-        onClick={() => onChange({ lossOnly: !lossOnly })}
-        className="gap-xs"
-      >
-        <Alert02Icon className="size-icon-sm" />
-        {t('toolbar.lossOnly')}
-      </Button>
-
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          // Excel dışa aktarma backend'i henüz yok — yalnız yerleşim (no-op).
-        }}
-        className="gap-xs"
-      >
-        <DownloadSquare02Icon className="size-icon-sm" />
-        {t('toolbar.exportExcel')}
-      </Button>
-
-      {hasAnyFilter ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() =>
-            onChange({
-              q: '',
-              status: null,
-              reconciliationStatus: null,
-              lossOnly: false,
-              from: '',
-              to: '',
-            })
-          }
-        >
-          {tCommon('clear')}
-          <Cancel01Icon className="ml-3xs size-icon-xs" />
-        </Button>
-      ) : null}
-    </div>
+    <DataTableToolbar
+      table={table}
+      searchValue={q}
+      onSearchChange={(next) => onChange({ q: next })}
+      searchPlaceholder={t('toolbar.searchPlaceholder')}
+      advancedFilter={{
+        fields: filterFields,
+        value: filterRows,
+        onApply: (rows) => onChange(orderFilterParamsFromRows(rows)),
+      }}
+      hasActiveFilters={hasAnyFilter}
+      onClearFilters={() =>
+        onChange({
+          q: '',
+          status: null,
+          reconciliationStatus: null,
+          lossOnly: false,
+          from: '',
+          to: '',
+        })
+      }
+      facets={<DateRangePicker value={range} onChange={handleRangeChange} />}
+      onExport={() => {
+        // Excel dışa aktarma backend'i henüz yok — yalnız yerleşim (no-op).
+      }}
+    />
   );
 }
 
 function toIsoDate(date: Date): string {
   // Use UTC components so the backend's `coerce.date()` lands on the intended
   // calendar day regardless of the user's tz (orders.orderDate is a UTC ts).
+  // Mirrors returns-toolbar — promote to a shared util on the third copy.
   const year = date.getUTCFullYear().toString();
   const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
   const day = date.getUTCDate().toString().padStart(2, '0');

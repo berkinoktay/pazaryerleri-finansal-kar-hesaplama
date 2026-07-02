@@ -68,6 +68,19 @@ export interface DataTableToolbarProps<TData> {
    * config instead of hand-rolling filter Selects/Popovers in `facets`.
    */
   advancedFilter?: DataTableToolbarAdvancedFilter;
+  /**
+   * Server-mode counterpart of the built-in clear ghost (which only reads
+   * TanStack columnFilters): a server-filtered page whose filters live in
+   * URL params passes its own "any filter active?" here — mirrors the
+   * DataTable `hasActiveFilters` contract. ORed with the client check.
+   */
+  hasActiveFilters?: boolean;
+  /**
+   * Fired by the clear ghost alongside `table.resetColumnFilters()` so a
+   * server-filtered page can reset its URL params (search, dates, chips —
+   * the whole set) in one click.
+   */
+  onClearFilters?: () => void;
   /** Slot for faceted filter popovers (multi-select chips). */
   facets?: React.ReactNode;
 }
@@ -92,10 +105,12 @@ export function DataTableToolbar<TData>({
   onImport,
   onExport,
   advancedFilter,
+  hasActiveFilters,
+  onClearFilters,
   facets,
 }: DataTableToolbarProps<TData>): React.ReactElement {
   const t = useTranslations('common.dataTable.toolbar');
-  const isFiltered = table.getState().columnFilters.length > 0;
+  const isFiltered = table.getState().columnFilters.length > 0 || hasActiveFilters === true;
 
   const isColumnSearch = searchColumn !== undefined;
   const isControlledSearch =
@@ -141,7 +156,14 @@ export function DataTableToolbar<TData>({
           {advancedFilter !== undefined ? <AdvancedFilterAddButton {...advancedFilter} /> : null}
           {facets}
           {isFiltered ? (
-            <Button variant="ghost" size="sm" onClick={() => table.resetColumnFilters()}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                table.resetColumnFilters();
+                onClearFilters?.();
+              }}
+            >
               {t('clear')}
               <Cancel01Icon className="ml-3xs size-icon-xs" />
             </Button>

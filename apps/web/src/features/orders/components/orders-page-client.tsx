@@ -16,10 +16,6 @@ import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
 import { useOrdersSummary } from '../hooks/use-orders-summary';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
-import {
-  type OrderStatusValue,
-  type ReconciliationStatusValue,
-} from '../lib/orders-filter-parsers';
 
 import { OrderDetailModal, type OrderDetailModalSelection } from './order-detail-modal';
 import { OrdersEmptyState } from './orders-empty-state';
@@ -207,14 +203,9 @@ export function OrdersPageClient({
           onFiltersChange={(next) =>
             setFilters({
               ...(next.q !== undefined ? { q: next.q } : {}),
-              ...(next.status !== undefined
-                ? { status: next.status as OrderStatusValue | null }
-                : {}),
+              ...(next.status !== undefined ? { status: next.status } : {}),
               ...(next.reconciliationStatus !== undefined
-                ? {
-                    reconciliationStatus:
-                      next.reconciliationStatus as ReconciliationStatusValue | null,
-                  }
+                ? { reconciliationStatus: next.reconciliationStatus }
                 : {}),
               ...(next.lossOnly !== undefined ? { lossOnly: next.lossOnly } : {}),
               ...(next.from !== undefined ? { from: next.from } : {}),

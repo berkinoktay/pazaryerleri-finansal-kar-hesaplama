@@ -33,10 +33,8 @@ import {
 import { ExcludedReasonCell } from './excluded-reason-cell';
 import { OrderStatusBadge } from './order-status-badge';
 import { OrdersCostStatusTabs } from './orders-cost-status-tabs';
-import { OrdersToolbar } from './orders-toolbar';
+import { OrdersToolbar, type OrdersToolbarChange } from './orders-toolbar';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
-
-type OrdersToolbarProps = React.ComponentProps<typeof OrdersToolbar>;
 
 export interface OrdersTableProps {
   rows: OrderListItem[];
@@ -69,7 +67,7 @@ export interface OrdersTableProps {
   counts: { calculated: number; excluded: number };
   tabsLoading?: boolean;
   onCostStatusChange: (next: CostStatusValue) => void;
-  onFiltersChange: OrdersToolbarProps['onChange'];
+  onFiltersChange: (next: OrdersToolbarChange) => void;
   onPaginationChange: (next: { page?: number; perPage?: number }) => void;
   /** Commits a new server-side sort key when the user toggles the margin header. */
   onSortChange: (next: OrderSortValue) => void;
@@ -424,8 +422,9 @@ export function OrdersTable({
         </div>
       }
       empty={empty ?? emptyState}
-      toolbar={() => (
+      toolbar={(table) => (
         <OrdersToolbar
+          table={table}
           q={filters.q}
           status={filters.status}
           reconciliationStatus={filters.reconciliationStatus}

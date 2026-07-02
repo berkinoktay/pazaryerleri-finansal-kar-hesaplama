@@ -25,6 +25,9 @@ export function useOrdersFilters(): {
       'status' in next ||
       'reconciliationStatus' in next ||
       'costStatus' in next ||
+      // lossOnly was missing here — toggling it on page 4 used to leave the
+      // user on a page that may no longer exist.
+      'lossOnly' in next ||
       'from' in next ||
       'to' in next ||
       'sort' in next;

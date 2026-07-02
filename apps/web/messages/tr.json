@@ -1048,12 +1048,7 @@
     "intent": "Bağlı mağazalardan akan siparişler. Filtrele, mutabakat durumunu izle, detayda kâr dökümünü gör.",
     "toolbar": {
       "searchPlaceholder": "Sipariş no veya paket no ara",
-      "statusPlaceholder": "Sipariş durumu",
-      "statusAll": "Tüm durumlar",
-      "reconciliationPlaceholder": "Mutabakat durumu",
-      "reconciliationAll": "Tüm mutabakatlar",
-      "lossOnly": "Sadece zararlı",
-      "exportExcel": "Excel"
+      "lossOnly": "Sadece zararlı"
     },
     "kpis": {
       "revenue": "Toplam Ciro",
@@ -1119,6 +1114,16 @@
       "label": "Kâr hesabı dışı",
       "empty": "Kâr hesabı dışında kalan sipariş yok",
       "intro": "Bu siparişler cironuza dâhildir ama kâr hesabına girmez. Her birinin nedenini aşağıda görebilirsiniz."
+    },
+    "advancedFilters": {
+      "groups": {
+        "status": "Durum",
+        "flag": "Diğer"
+      },
+      "fields": {
+        "status": "Sipariş durumu",
+        "reconciliationStatus": "Mutabakat durumu"
+      }
     }
   },
   "exclusionReasons": {
