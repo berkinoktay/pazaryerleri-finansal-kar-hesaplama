@@ -2,6 +2,7 @@
 
 import { type ColumnDef } from '@tanstack/react-table';
 import { useFormatter, useTranslations } from 'next-intl';
+import { parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
@@ -42,7 +43,14 @@ export function LiveOrdersTable({
   const formatter = useFormatter();
   // Read once at the component level — never inside cell render functions.
   const scale = useMarginColoring();
-  const [filter, setFilter] = React.useState<LiveOrdersFilter>('all');
+  // URL state (nuqs) — the selected tab survives reload/share; distinct param
+  // name because the products table on the same page owns its own tab/search.
+  const [{ ordersFilter: filter }, setUrlState] = useQueryStates({
+    ordersFilter: parseAsStringEnum<LiveOrdersFilter>(['all', 'calculated', 'pending']).withDefault(
+      'all',
+    ),
+  });
+  const setFilter = (next: LiveOrdersFilter): void => void setUrlState({ ordersFilter: next });
   const query = useLiveOrders(orgId, storeId, filter);
 
   const counts = query.data?.counts ?? EMPTY_COUNTS;

@@ -1,3 +1,4 @@
+import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { describe, expect, it } from 'vitest';
 
 import { LiveTodayProducts } from '@/features/live-performance/components/live-today-products';
@@ -70,7 +71,11 @@ describe('LiveTodayProducts', () => {
   it('renders one row per product with a podium medal on the top seller, copyable identifiers, costed unit cost and a cost-missing CTA', async () => {
     server.use(http.get(URL, () => HttpResponse.json(response)));
 
-    render(<LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />);
+    render(
+      <NuqsTestHarness>
+        <LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />
+      </NuqsTestHarness>,
+    );
 
     await waitFor(() => expect(screen.getByText('En Çok Satan')).toBeInTheDocument());
     // Top seller (highest units) gets rank 1 — the medal exposes its rank to AT.
@@ -112,7 +117,11 @@ describe('LiveTodayProducts', () => {
     };
     server.use(http.get(URL, () => HttpResponse.json(unresolvedResponse)));
 
-    render(<LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />);
+    render(
+      <NuqsTestHarness>
+        <LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />
+      </NuqsTestHarness>,
+    );
 
     // Kimlik ham barkoda düşer + rozet — satır asla sessizce kaybolmaz
     // (görünürlük sözleşmesi, spec 2026-06-12 §7).
@@ -128,7 +137,11 @@ describe('LiveTodayProducts', () => {
   it('filters to cost-missing products when the "Maliyet bekleyen" tab is selected', async () => {
     server.use(http.get(URL, () => HttpResponse.json(response)));
 
-    const { user } = render(<LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />);
+    const { user } = render(
+      <NuqsTestHarness>
+        <LiveTodayProducts orgId={ORG_ID} storeId={STORE_ID} />
+      </NuqsTestHarness>,
+    );
 
     await waitFor(() => expect(screen.getByText('En Çok Satan')).toBeInTheDocument());
 

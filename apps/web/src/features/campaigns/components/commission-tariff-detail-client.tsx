@@ -2,6 +2,7 @@
 
 import { ArrowLeft01Icon, Delete02Icon, DownloadCircle01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
+import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
 import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
@@ -39,15 +40,6 @@ import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards'
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
 import { CommissionTariffsTable } from './commission-tariffs-table';
 import { CommissionTariffsToolbar } from './commission-tariffs-toolbar';
-
-const EMPTY_FILTERS: TariffFilterState = {
-  query: '',
-  category: null,
-  brand: null,
-  minMarginPct: null,
-  profit: 'all',
-  selection: 'all',
-};
 
 const LIST_PATH = '/campaigns/product-commission-tariffs';
 
@@ -87,8 +79,53 @@ export function CommissionTariffDetailClient({
 
   const [selection, setSelection] = React.useState<SelectionMap>({});
   const [seededTariffId, setSeededTariffId] = React.useState<string | null>(null);
-  const [periodId, setPeriodId] = React.useState<string | null>(null);
-  const [filters, setFilters] = React.useState<TariffFilterState>(EMPTY_FILTERS);
+  // View state (filters + active period tab) is URL-owned via nuqs: reload /
+  // share / back-forward reproduce the exact view. The tri-states encode
+  // 'all' as an absent param; minMargin is a float param. The SELECTION
+  // buffer below stays local — it is edit state, not view state.
+  const [urlState, setUrlState] = useQueryStates(
+    {
+      q: parseAsString.withDefault(''),
+      category: parseAsString,
+      brand: parseAsString,
+      minMargin: parseAsFloat,
+      profit: parseAsStringEnum<'profitable' | 'loss'>(['profitable', 'loss']),
+      selection: parseAsStringEnum<'selected' | 'unselected'>(['selected', 'unselected']),
+      period: parseAsString,
+    },
+    { history: 'push' },
+  );
+  const periodId = urlState.period;
+  const setPeriodId = (next: string): void => void setUrlState({ period: next });
+  const filters: TariffFilterState = {
+    query: urlState.q,
+    category: urlState.category,
+    brand: urlState.brand,
+    minMarginPct: urlState.minMargin,
+    profit: urlState.profit ?? 'all',
+    selection: urlState.selection ?? 'all',
+  };
+  const applyFilters = (next: Partial<TariffFilterState>): void => {
+    void setUrlState({
+      ...(next.query !== undefined ? { q: next.query } : {}),
+      ...(next.category !== undefined ? { category: next.category } : {}),
+      ...(next.brand !== undefined ? { brand: next.brand } : {}),
+      ...(next.minMarginPct !== undefined ? { minMargin: next.minMarginPct } : {}),
+      ...(next.profit !== undefined ? { profit: next.profit === 'all' ? null : next.profit } : {}),
+      ...(next.selection !== undefined
+        ? { selection: next.selection === 'all' ? null : next.selection }
+        : {}),
+    });
+  };
+  const resetFilters = (): void =>
+    void setUrlState({
+      q: '',
+      category: null,
+      brand: null,
+      minMargin: null,
+      profit: null,
+      selection: null,
+    });
 
   // Seed the editable selection buffer from the server-authoritative
   // `selectedBand` the first time this tariff's data arrives. Adjusting state
@@ -224,11 +261,12 @@ export function CommissionTariffDetailClient({
   const toolbar = (
     <CommissionTariffsToolbar
       searchValue={filters.query}
-      onSearchChange={(next) => setFilters((prev) => ({ ...prev, query: next }))}
+      // Per-keystroke q writes REPLACE (no letter-by-letter Back history).
+      onSearchChange={(next) => void setUrlState({ q: next }, { history: 'replace' })}
       categories={categories}
       brands={brands}
       filters={filters}
-      onFiltersChange={(next) => setFilters((prev) => ({ ...prev, ...next }))}
+      onFiltersChange={applyFilters}
       onBestAll={() => applyBulk(selectBestForAll)}
       onProfitableOnly={() => applyBulk(selectProfitableOnly)}
       onTargetMargin={onTargetMargin}
@@ -287,7 +325,7 @@ export function CommissionTariffDetailClient({
             tabs={periodTabs}
             toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
-            onClearFilters={() => setFilters(EMPTY_FILTERS)}
+            onClearFilters={resetFilters}
           />
         </div>
         <div className="gap-sm flex flex-col md:hidden">

@@ -1,8 +1,8 @@
 'use client';
 
-import { type ColumnFiltersState } from '@tanstack/react-table';
 import { CloudUploadIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
+import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
@@ -54,8 +54,26 @@ export function CommissionTariffsListView({
   const tFilters = useTranslations('commissionTariffsPage.filters');
   const tStatus = useTranslations('commissionTariffsPage.listStatus');
 
-  const [query, setQuery] = React.useState('');
-  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
+  // URL state (nuqs): search + status tab survive reload/share.
+  const [urlFilters, setUrlFilters] = useQueryStates(
+    {
+      q: parseAsString.withDefault(''),
+      status: parseAsStringEnum<StatusFilter>([
+        'all',
+        'active',
+        'upcoming',
+        'past',
+        'draft',
+      ]).withDefault('all'),
+    },
+    { history: 'push' },
+  );
+  const query = urlFilters.q;
+  const statusFilter = urlFilters.status;
+  // Per-keystroke q writes REPLACE (no letter-by-letter Back history);
+  // the status tab keeps the hook-level push.
+  const setQuery = (next: string): void => void setUrlFilters({ q: next }, { history: 'replace' });
+  const setStatusFilter = (next: StatusFilter): void => void setUrlFilters({ status: next });
   const [deleteTarget, setDeleteTarget] = React.useState<TariffListRow | null>(null);
 
   const rows = React.useMemo(() => toListRows(items), [items]);
@@ -84,24 +102,17 @@ export function CommissionTariffsListView({
     return counts;
   }, [queryFiltered]);
 
-  // Mirror the active filters as column filters so the table's isFiltered /
-  // no-results / Clear logic lights up (the data itself is filtered here).
-  const columnFilters = React.useMemo<ColumnFiltersState>(() => {
-    const next: ColumnFiltersState = [];
-    if (query.trim() !== '') next.push({ id: 'tariff', value: query });
-    if (statusFilter !== 'all') next.push({ id: 'status', value: statusFilter });
-    return next;
-  }, [query, statusFilter]);
+  const hasActiveFilters = query.trim() !== '' || statusFilter !== 'all';
 
   const stats = React.useMemo(() => summarizeTariffList(rows), [rows]);
 
   const requestDelete = React.useCallback((row: TariffListRow) => setDeleteTarget(row), []);
   const actions = useTariffRowActions({ onOpen, onExport, onRequestDelete: requestDelete });
 
-  const clearFilters = React.useCallback(() => {
-    setQuery('');
-    setStatusFilter('all');
-  }, []);
+  const clearFilters = React.useCallback(
+    () => void setUrlFilters({ q: '', status: 'all' }),
+    [setUrlFilters],
+  );
   const deleteMany = React.useCallback(
     (ids: string[]) => ids.forEach((id) => onDelete(id)),
     [onDelete],
@@ -148,7 +159,7 @@ export function CommissionTariffsListView({
         tabsNode={tabsRow}
         searchValue={query}
         onSearchChange={setQuery}
-        columnFilters={columnFilters}
+        hasActiveFilters={hasActiveFilters}
         onClearFilters={clearFilters}
         onOpen={onOpen}
         onUpload={onCreate}

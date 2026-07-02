@@ -1,3 +1,4 @@
+import { NuqsTestHarness } from '../../../helpers/nuqs';
 import { describe, expect, it } from 'vitest';
 
 import { LiveOrdersTable } from '@/features/live-performance/components/live-orders-table';
@@ -40,7 +41,11 @@ describe('LiveOrdersTable', () => {
   it('renders the union feed with calculated / pending status badges and tab counts', async () => {
     server.use(http.get(ORDERS_URL, () => HttpResponse.json(response)));
 
-    render(<LiveOrdersTable orgId={ORG_ID} storeId={STORE_ID} />);
+    render(
+      <NuqsTestHarness>
+        <LiveOrdersTable orgId={ORG_ID} storeId={STORE_ID} />
+      </NuqsTestHarness>,
+    );
 
     await waitFor(() => expect(screen.getByText('TY-1001')).toBeInTheDocument());
     // Status badges from `source` (scoped to the table, since "Bekliyor" is also
@@ -64,7 +69,11 @@ describe('LiveOrdersTable', () => {
       }),
     );
 
-    const { user } = render(<LiveOrdersTable orgId={ORG_ID} storeId={STORE_ID} />);
+    const { user } = render(
+      <NuqsTestHarness>
+        <LiveOrdersTable orgId={ORG_ID} storeId={STORE_ID} />
+      </NuqsTestHarness>,
+    );
 
     await waitFor(() => expect(screen.getByText('TY-1001')).toBeInTheDocument());
 

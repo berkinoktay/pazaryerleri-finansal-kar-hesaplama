@@ -11,7 +11,7 @@ export const COSTS_FILTER_FIELDS = {
 } as const;
 
 export interface CostsAdvancedParams {
-  typeFilter: string;
+  typeFilter: CostProfileType | '';
   showArchived: boolean;
 }
 
@@ -48,6 +48,7 @@ export function costsFilterRowsFromParams(params: CostsAdvancedParams): FilterRo
  */
 export function costsFilterParamsFromRows(rows: FilterRow[]): CostsAdvancedParams {
   const params: CostsAdvancedParams = { typeFilter: '', showArchived: false };
+
   for (const filterRow of rows) {
     const scalar = Array.isArray(filterRow.value) ? filterRow.value[0] : filterRow.value;
     switch (filterRow.field) {

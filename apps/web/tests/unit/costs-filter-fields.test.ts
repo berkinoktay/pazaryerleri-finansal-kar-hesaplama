@@ -7,7 +7,7 @@ import {
 
 describe('costs filter adapters', () => {
   it('round-trips type + archived', () => {
-    const params = { typeFilter: 'SHIPPING', showArchived: true };
+    const params = { typeFilter: 'SHIPPING' as const, showArchived: true };
     expect(costsFilterParamsFromRows(costsFilterRowsFromParams(params))).toEqual(params);
   });
 
