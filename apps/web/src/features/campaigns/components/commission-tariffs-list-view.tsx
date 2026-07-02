@@ -31,6 +31,12 @@ export interface CommissionTariffsListViewProps {
   onCreate: () => void;
   onExport: (id: string) => void;
   onDelete: (id: string) => void;
+  /**
+   * List query in flight: the full chrome (header, summary strip, tab strip,
+   * table shell) stays mounted while the summary cells, tab counts, and table
+   * body swap to skeletons — no generic gray-bar page.
+   */
+  loading?: boolean;
 }
 
 /**
@@ -47,6 +53,7 @@ export function CommissionTariffsListView({
   onCreate,
   onExport,
   onDelete,
+  loading = false,
 }: CommissionTariffsListViewProps): React.ReactElement {
   const t = useTranslations('campaignsPages.productCommissionTariffs');
   const tList = useTranslations('commissionTariffsPage.list');
@@ -127,6 +134,7 @@ export function CommissionTariffsListView({
       <FilterTabs
         value={statusFilter}
         onValueChange={setStatusFilter}
+        loading={loading}
         aria-label={tList('filterLabel')}
         options={[
           { value: 'all', label: tFilters('all'), count: statusCounts.all },
@@ -158,11 +166,12 @@ export function CommissionTariffsListView({
               })
             : undefined
         }
-        summary={<CommissionTariffListSummary stats={stats} />}
+        summary={<CommissionTariffListSummary stats={stats} loading={loading} />}
       />
 
       <CommissionTariffListTable
         rows={filtered}
+        loading={loading}
         actions={actions}
         tabsNode={tabsRow}
         searchValue={query}

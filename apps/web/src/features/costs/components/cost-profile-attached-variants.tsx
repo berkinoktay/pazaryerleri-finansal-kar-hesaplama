@@ -17,8 +17,9 @@ import { useDetachCostProfiles } from '../hooks/use-detach-cost-profiles';
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 function AttachedVariantsSkeleton(): React.ReactElement {
+  const tCommon = useTranslations('common');
   return (
-    <div className="gap-xs flex flex-col" role="status" aria-label="Yükleniyor">
+    <div className="gap-xs flex flex-col" role="status" aria-busy aria-label={tCommon('loading')}>
       {[0, 1, 2].map((i) => (
         <div key={i} className="gap-sm flex items-center py-3">
           <Skeleton className="size-thumb-lg shrink-0 rounded-md" />

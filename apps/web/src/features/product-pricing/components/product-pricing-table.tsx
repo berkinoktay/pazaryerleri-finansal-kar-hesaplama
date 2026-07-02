@@ -170,7 +170,9 @@ export function ProductPricingTable({
       id: 'title',
       accessorFn: (row) => row.productName,
       header: () => t('columns.product'),
-      meta: { label: t('columns.product') },
+      // Loaded cell is image + name + identifier lines — preview the same
+      // footprint so rows keep their height while loading.
+      meta: { label: t('columns.product'), skeleton: 'identity' },
       cell: ({ row }) => {
         const item = row.original;
         return (
@@ -240,7 +242,9 @@ export function ProductPricingTable({
     const actionColumn: ColumnDef<ProductPricingItem> = {
       id: 'actions',
       header: () => <span className="sr-only">{t('action.price')}</span>,
-      meta: { label: t('action.price') },
+      // Row-action column (sr-only header): an empty loading cell beats a
+      // stray text bar where the "Fiyatla" button will appear.
+      meta: { label: t('action.price'), skeleton: 'none' },
       cell: ({ row }) => {
         // Mobile → Sheet (parent owns the open state). Desktop → toggle the
         // inline row-expand, so a second click collapses it.
@@ -304,8 +308,10 @@ export function ProductPricingTable({
   const getRowCanExpand = React.useCallback(() => !isMobile, [isMobile]);
 
   const renderSubComponent = React.useCallback(
+    // No background here: DataTable's expanded cell already paints bg-muted
+    // (one surface for the whole expanded zone, parent row included).
     (row: Row<ProductPricingItem>): React.ReactNode => (
-      <div className="bg-surface-subtle p-lg">
+      <div className="p-lg">
         <PricingCalculator
           item={row.original}
           orgId={orgId}

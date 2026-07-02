@@ -42,7 +42,9 @@ export function CommissionTariffsSummary({
     {
       label: t('total'),
       value: empty ? DASH : format.number(summary.total, 'integer'),
-      icon: circleIcon(<PackageIcon />, 'neutral'),
+      // primary, NOT neutral — same call as the list strip's headline count:
+      // a gray bg-muted chip beside three tinted siblings reads broken.
+      icon: circleIcon(<PackageIcon />, 'primary'),
     },
     {
       label: t('selected'),

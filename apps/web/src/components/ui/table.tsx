@@ -93,6 +93,11 @@ export const TableHeader = React.forwardRef<
     // header and footer read as symmetric light bands bracketing the rows.
     className={cn(
       'bg-surface-subtle [&_tr]:border-border sticky top-0 z-10 [&_tr]:border-b',
+      // Header rows are TableRow instances and would inherit the body-row
+      // hover tint. Today the coincidence of tones hid it; now that row
+      // hover sits below the band tone, neutralize it structurally —
+      // header rows are not interactive surfaces.
+      '[&_tr]:hover:bg-transparent',
       className,
     )}
     {...props}
@@ -133,8 +138,26 @@ export const TableRow = React.forwardRef<
     // pinned cells (which need an opaque bg of their own to keep
     // unpinned content from showing through) can mirror the row state
     // via group-hover/row:* and group-data-[state=selected]/row:*.
+    //
+    // State ladder (all named tokens, see colors.css LIGHTNESS LADDER):
+    //   hover           → --surface-row-hover
+    //   selected        → --surface-row-selected
+    //   selected+hover  → --surface-row-selected-hover (EXPLICIT compound
+    //                     rule — without it the winner between hover and
+    //                     selected was Tailwind's internal variant sort
+    //                     order, an implementation detail)
+    //   expanded parent → bg-muted, matching the expanded sub-panel below
+    //                     it so parent + panel read as one opened zone
     className={cn(
-      'group/row border-border duration-fast hover:bg-surface-row-hover data-[state=selected]:bg-surface-row-selected border-b transition-colors',
+      'group/row border-border duration-fast border-b transition-colors',
+      'hover:bg-surface-row-hover',
+      // Press acknowledgment, gated on data-clickable (set by DataTable for
+      // onRowClick rows) so plain rows don't flash while selecting text.
+      // Doubly important on touch, where hover feedback never fires.
+      'data-[clickable]:active:bg-surface-row-active',
+      'data-[state=selected]:bg-surface-row-selected',
+      'data-[state=selected]:hover:bg-surface-row-selected-hover',
+      'data-[expanded]:bg-muted',
       className,
     )}
     {...props}
@@ -198,11 +221,16 @@ export const TableCell = React.forwardRef<
       'h-table-row-h px-sm py-sm text-foreground duration-fast align-middle text-sm transition',
       'data-[numeric=true]:text-right data-[numeric=true]:tabular-nums',
       // Pinned body cells stay opaque so unpinned columns scrolling
-      // beneath them don't show through; mirror the row's hover +
-      // selected state via group/row variants on TableRow.
+      // beneath them don't show through; mirror the FULL row state ladder
+      // via group/row variants on TableRow — every compound state the row
+      // can paint must have a pinned mirror, or the pinned edge visibly
+      // disagrees with the rest of the row.
       'data-[pinned-side]:bg-card data-[pinned-side]:sticky data-[pinned-side]:z-10',
       'data-[pinned-side]:group-hover/row:bg-surface-row-hover',
+      'data-[pinned-side]:group-data-[clickable]/row:group-active/row:bg-surface-row-active',
       'data-[pinned-side]:group-data-[state=selected]/row:bg-surface-row-selected',
+      'data-[pinned-side]:group-data-[state=selected]/row:group-hover/row:bg-surface-row-selected-hover',
+      'data-[pinned-side]:group-data-[expanded]/row:bg-muted',
       // Edge shadow is SCROLL-AWARE and lives in tokens/components.css as an
       // ::after overlay, NOT here: a box-shadow set on a <td>/<th> is silently
       // dropped under border-collapse: collapse (the table default), so a cell

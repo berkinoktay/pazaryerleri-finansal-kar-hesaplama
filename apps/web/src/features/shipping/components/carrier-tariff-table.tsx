@@ -4,6 +4,7 @@ import { Decimal } from 'decimal.js';
 import { useFormatter, useTranslations } from 'next-intl';
 
 import { Currency } from '@/components/patterns/currency';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
   TableBody,
@@ -49,7 +50,33 @@ export function CarrierTariffTable({
     format.number(new Decimal(decimalStr).toNumber(), 'amount');
 
   if (query.isLoading) {
-    return <p className="text-muted-foreground text-xs">{t('loading')}</p>;
+    // Table-shaped mirror of the loaded layout: the real section header plus
+    // two bordered table stubs (section label + header row + a few body rows)
+    // so the two tariff tables don't pop in mid-form when data lands.
+    return (
+      <section role="status" aria-busy aria-label={t('loading')} className="gap-sm flex flex-col">
+        <header className="gap-3xs flex flex-col">
+          <h3 className="text-foreground text-sm font-semibold">{t('title')}</h3>
+          <p className="text-muted-foreground text-xs">{t('subtitle')}</p>
+        </header>
+        {[0, 1].map((section) => (
+          <div key={section} className="gap-2xs flex flex-col">
+            <Skeleton className="h-3 w-24" />
+            <div className="border-border bg-card overflow-hidden rounded-md border">
+              {[0, 1, 2, 3].map((row) => (
+                <div
+                  key={row}
+                  className="border-border px-md py-sm flex items-center justify-between border-b last:border-b-0"
+                >
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-4 w-20" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </section>
+    );
   }
   if (query.isError || query.data === undefined) {
     return <p className="text-destructive text-xs">{t('error')}</p>;

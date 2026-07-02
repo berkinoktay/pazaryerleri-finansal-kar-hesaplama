@@ -107,7 +107,11 @@ export function FilterTabs<V extends string = string>({
               <span>{option.label}</span>
               {option.count !== undefined ? (
                 loading ? (
-                  <Skeleton className="h-xs inline-block w-sm rounded-sm" />
+                  // Same footprint as the loaded chip below: text-2xs line
+                  // (16px) + py-3xs (2+2px) + 1px borders = 22px tall (h-5.5),
+                  // and a mid-range count width (~2-3 digits) so tabs don't
+                  // widen when the numbers land.
+                  <Skeleton className="inline-block h-5.5 w-8" />
                 ) : (
                   <span
                     className={cn(

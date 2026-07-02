@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { DOMAIN_ICONS } from '@/lib/domain-icons';
 import {
@@ -154,7 +155,9 @@ function BucketRow({
  */
 export function MarginColoringSettings(): React.ReactElement {
   const t = useTranslations('settings.marginColoring');
-  const { data: preferences } = useMyPreferences();
+  const tCommon = useTranslations('common');
+  const preferencesQuery = useMyPreferences();
+  const preferences = preferencesQuery.data;
   const updateMutation = useUpdateMyPreferences();
 
   const [initialized, setInitialized] = React.useState(false);
@@ -166,6 +169,52 @@ export function MarginColoringSettings(): React.ReactElement {
     setInitialized(true);
     setEnabled(preferences.marginColoring?.enabled ?? false);
     setBuckets(Array.from(preferences.marginColoring?.buckets ?? DEFAULT_MARGIN_BUCKETS));
+  }
+
+  // GUARD (data-loss bug): while the stored preferences are still in flight the
+  // card must NOT be editable — a save issued before the seed lands would PATCH
+  // the defaults over the user's stored buckets. Render a skeleton mirror of
+  // the card instead (all hooks above already ran, so the early return is safe).
+  // Belt-and-braces: the submit button below also stays disabled until
+  // `initialized`, which covers the query-error path (data never arrives).
+  if (preferencesQuery.isPending) {
+    return (
+      <Card>
+        <SettingsCardHeader
+          icon={<DOMAIN_ICONS.theme />}
+          title={t('title')}
+          description={t('description')}
+        />
+        <CardContent
+          role="status"
+          aria-busy
+          aria-label={tCommon('loading')}
+          className="gap-lg flex flex-col"
+        >
+          {/* Enable-toggle row mirror */}
+          <div className="gap-sm flex items-center justify-between">
+            <div className="gap-2xs flex flex-col">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-64" />
+            </div>
+            <Skeleton radius="full" className="h-5 w-9" />
+          </div>
+          {/* Bucket rows mirror (swatch + threshold input + range label) */}
+          <div className="gap-2xs flex flex-col">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="gap-sm flex items-center">
+                <Skeleton radius="full" className="size-6" />
+                <Skeleton className="h-8 w-20" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+        <CardFooter className="justify-end">
+          <Skeleton className="h-9 w-20" />
+        </CardFooter>
+      </Card>
+    );
   }
 
   function patchBucket(index: number, patch: Partial<MarginBucket>): void {
@@ -345,7 +394,9 @@ export function MarginColoringSettings(): React.ReactElement {
         </CardContent>
 
         <CardFooter className="justify-end">
-          <Button type="submit" disabled={updateMutation.isPending}>
+          {/* !initialized covers the query-error path: without the stored
+              preferences a save would overwrite them with the defaults. */}
+          <Button type="submit" disabled={updateMutation.isPending || !initialized}>
             {t('save')}
           </Button>
         </CardFooter>

@@ -103,6 +103,26 @@ describe('DataTable expandable rows', () => {
     expect(expandedRow).not.toBeNull();
   });
 
+  it('marks the expanded PARENT row with data-expanded (anchors it to its open panel)', async () => {
+    const { container, user } = renderWithIntl(
+      <DataTable
+        columns={COLUMNS}
+        data={ROWS}
+        getRowId={(r) => r.id}
+        getRowCanExpand={(row) => row.original.expandable}
+        renderSubComponent={(row) => <div>Sub: {row.original.name}</div>}
+      />,
+    );
+    expect(container.querySelector('tr[data-expanded]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Aç' }));
+    const parentRow = container.querySelector('tr[data-expanded]');
+    expect(parentRow).not.toBeNull();
+    // The attribute belongs to the data row, not the sub-content row.
+    expect(parentRow?.getAttribute('data-expanded-content')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Kapat' }));
+    expect(container.querySelector('tr[data-expanded]')).toBeNull();
+  });
+
   it('does not render any sub-component when renderSubComponent is omitted', () => {
     renderWithIntl(
       <DataTable

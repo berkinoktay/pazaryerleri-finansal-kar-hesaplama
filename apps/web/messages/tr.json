@@ -839,7 +839,12 @@
         "noActivePeriod": "Aktif dönem yok",
         "coveredContext": "aktif dönemde",
         "exportedPending": "{count} tarife dışa aktarım bekliyor",
-        "exportedAllDone": "tümü dışa aktarıldı"
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "activeNow": "şu an geçerli",
+        "bucketActive": "{count} aktif",
+        "bucketUpcoming": "{count} planlı",
+        "bucketPast": "{count} süresi dolmuş",
+        "bucketDraft": "{count} taslak"
       },
       "empty": {
         "title": "Henüz komisyon tarifesi yok",

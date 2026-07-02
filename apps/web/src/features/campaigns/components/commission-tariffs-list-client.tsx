@@ -5,7 +5,6 @@ import * as React from 'react';
 
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Link, useRouter } from '@/i18n/navigation';
 
 import { useCommissionTariffList } from '../hooks/use-commission-tariff-list';
@@ -93,16 +92,6 @@ export function CommissionTariffsListClient({
     );
   }
 
-  if (list.isLoading) {
-    return (
-      <div className="gap-lg flex flex-col">
-        <Skeleton className="h-9 w-64" />
-        <Skeleton className="h-16 w-full" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    );
-  }
-
   // A failed fetch is NOT an empty catalog — show a retry affordance rather than
   // the "no tariffs yet" empty state the list view renders on `items: []`.
   if (list.isError) {
@@ -120,8 +109,12 @@ export function CommissionTariffsListClient({
 
   return (
     <>
+      {/* While the list query is in flight the REAL chrome renders with
+          skeleton data (summary cells, tab counts, table rows) instead of a
+          generic gray-bar page — PageHeader title/intent are static i18n. */}
       <CommissionTariffsListView
         items={items}
+        loading={list.isLoading}
         onOpen={openDetail}
         onCreate={() => setUploadOpen(true)}
         onExport={handleExport}

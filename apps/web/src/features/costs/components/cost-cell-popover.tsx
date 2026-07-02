@@ -66,6 +66,7 @@ export function CostCellPopover({
   children,
 }: CostCellPopoverProps): React.ReactElement {
   const t = useTranslations('products.costCell.popover');
+  const tCommon = useTranslations('common');
   const [open, setOpen] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
 
@@ -123,7 +124,9 @@ export function CostCellPopover({
 
           {/* Attached profiles list / loading / empty */}
           {isInitialLoading ? (
-            <div className="px-sm pb-sm gap-3xs flex flex-col">
+            // px-xs/pb-xs matches the loaded <ul> container below, so the rows
+            // don't shift horizontally when the data lands.
+            <div className="px-xs pb-xs gap-3xs flex flex-col">
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-4/5" />
             </div>
@@ -154,9 +157,24 @@ export function CostCellPopover({
               wrapperClassName="border-0 shadow-none rounded-none m-0 border-b border-border h-9 px-md"
             />
             <CommandList className="max-h-48">
-              <CommandEmpty className="text-muted-foreground px-md py-sm text-xs">
-                {t('noResults')}
-              </CommandEmpty>
+              {allProfilesQuery.isLoading ? (
+                // Loading is NOT an empty catalog: skeleton option rows keep
+                // CommandEmpty ("no results") for genuinely empty responses.
+                <div
+                  role="status"
+                  aria-busy
+                  aria-label={tCommon('loading')}
+                  className="p-xs gap-3xs flex flex-col"
+                >
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-4/5" />
+                  <Skeleton className="h-8 w-full" />
+                </div>
+              ) : (
+                <CommandEmpty className="text-muted-foreground px-md py-sm text-xs">
+                  {t('noResults')}
+                </CommandEmpty>
+              )}
               {availableProfiles.length > 0 ? (
                 <CommandGroup className="p-xs">
                   {availableProfiles.map((profile) => (

@@ -6,6 +6,7 @@ import * as React from 'react';
 
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { PageHeader } from '@/components/patterns/page-header';
+import { PageSkeleton } from '@/components/patterns/page-skeleton';
 import { TimeAgo } from '@/components/patterns/time-ago';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -62,6 +63,7 @@ export function CostProfileDetail({
   profileId,
 }: CostProfileDetailProps): React.ReactElement {
   const tDetail = useTranslations('costs.detail');
+  const tCommon = useTranslations('common');
 
   // ─── State ─────────────────────────────────────────────────────────────
   const [archiveConfirmOpen, setArchiveConfirmOpen] = React.useState(false);
@@ -123,6 +125,14 @@ export function CostProfileDetail({
     });
   }
 
+  // The whole screen (header title/meta/actions, tab counts, form) hangs off
+  // the profile query, so a full page-anatomy placeholder beats a '…' title
+  // with three generic bars. Rendered after all hooks, so this early return
+  // is safe; tab state resets only if the component unmounts, not here.
+  if (profileLoading) {
+    return <PageSkeleton label={tCommon('loading')} withBackLink />;
+  }
+
   // ─── Header slots ───────────────────────────────────────────────────────
 
   const headerLeading = (
@@ -174,7 +184,7 @@ export function CostProfileDetail({
   return (
     <div className="gap-lg flex flex-col">
       <PageHeader
-        title={profileLoading ? '…' : (profile?.name ?? profileId)}
+        title={profile?.name ?? profileId}
         leading={headerLeading}
         meta={headerMeta}
         actions={headerActions}
@@ -219,7 +229,9 @@ export function CostProfileDetail({
               <p className="text-muted-foreground text-xs">{tDetail('detailTab.description')}</p>
             </CardHeader>
             <CardContent>
-              {profileLoading || profile === undefined ? (
+              {/* Loading early-returns above; this fallback only covers a
+                  resolved-but-missing profile (e.g. a failed fetch). */}
+              {profile === undefined ? (
                 <div className="gap-md flex flex-col">
                   <Skeleton className="max-w-form h-10 w-full" />
                   <Skeleton className="max-w-form h-10 w-full" />

@@ -62,6 +62,7 @@ export function CommissionTariffBreakdown({
   profitLabel,
 }: CommissionTariffBreakdownProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.breakdown');
+  const tCommon = useTranslations('common');
   const reasonLabel = useReasonLabel();
   const scale = useMarginColoring();
   const breakdown = result?.breakdown ?? null;
@@ -78,11 +79,7 @@ export function CommissionTariffBreakdown({
         </div>
 
         {loading ? (
-          <div className="gap-2xs flex flex-col">
-            <Skeleton className="h-5 w-full" />
-            <Skeleton className="h-5 w-full" />
-            <Skeleton className="h-5 w-2/3" />
-          </div>
+          <BreakdownSkeleton label={tCommon('loading')} />
         ) : breakdown === null ? (
           <p className="text-muted-foreground text-sm">
             {result?.reason != null ? reasonLabel(result.reason) : t('notCalculable')}
@@ -133,6 +130,36 @@ export function CommissionTariffBreakdown({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* Mirrors the loaded <dl> anatomy — sale + the 5 deduction rows + net VAT —
+   plus the bordered profit/margin footer, so the modal holds its loaded height
+   instead of tripling when the estimate lands. Label widths cycle so the rows
+   read as labels of differing length, not a barcode wall. */
+const SKELETON_LABEL_WIDTHS = ['w-16', 'w-24', 'w-20', 'w-28', 'w-20', 'w-16', 'w-24'] as const;
+
+function SkeletonRow({ labelWidth }: { labelWidth: string }): React.ReactElement {
+  // h-5 matches the loaded text-sm row's line box, so nothing shifts on load.
+  return (
+    <div className="flex h-5 items-center justify-between gap-4">
+      <Skeleton className={cn('h-4', labelWidth)} />
+      <Skeleton className="h-4 w-16" />
+    </div>
+  );
+}
+
+function BreakdownSkeleton({ label }: { label: string }): React.ReactElement {
+  return (
+    <div role="status" aria-busy aria-label={label} className="gap-2xs flex flex-col">
+      {SKELETON_LABEL_WIDTHS.map((width, idx) => (
+        <SkeletonRow key={idx} labelWidth={width} />
+      ))}
+      <div className="border-border pt-xs mt-3xs gap-2xs flex flex-col border-t">
+        <SkeletonRow labelWidth="w-20" />
+        <SkeletonRow labelWidth="w-16" />
+      </div>
+    </div>
   );
 }
 

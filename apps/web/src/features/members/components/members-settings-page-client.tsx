@@ -35,10 +35,6 @@ export function MembersSettingsPageClient({
     );
   }
 
-  if (membersQuery.isPending) {
-    return <p className="text-muted-foreground p-md text-sm">{t('loading')}</p>;
-  }
-
   if (membersQuery.isError) {
     return (
       <EmptyState
@@ -49,5 +45,14 @@ export function MembersSettingsPageClient({
     );
   }
 
-  return <MembersTable orgId={orgId} members={membersQuery.data} stores={stores} />;
+  // While the roster loads, the table keeps its real header and renders
+  // skeleton rows in place — no bare loading text, no layout swap.
+  return (
+    <MembersTable
+      orgId={orgId}
+      members={membersQuery.data ?? []}
+      stores={stores}
+      loading={membersQuery.isPending}
+    />
+  );
 }

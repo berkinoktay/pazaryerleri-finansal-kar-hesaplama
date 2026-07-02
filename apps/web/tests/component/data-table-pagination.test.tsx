@@ -8,6 +8,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';
 import { describe, expect, it } from 'vitest';
 
+import { DataTableLoadingContext } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 
 import trMessages from '../../messages/tr.json';
@@ -78,6 +79,27 @@ function renderWithIntl(ui: React.ReactElement) {
 }
 
 describe('<DataTablePagination>', () => {
+  describe('loading (via DataTableLoadingContext)', () => {
+    // A cold server-paginated load: the table instance reports 0 rows / 1 page
+    // as if they were facts. The footer must show placeholders, not assert them.
+    it('swaps the count labels for placeholders and holds navigation', () => {
+      renderWithIntl(
+        <DataTableLoadingContext.Provider value={true}>
+          <Harness rows={[]} manualPagination pageCount={1} rowCount={0} />
+        </DataTableLoadingContext.Provider>,
+      );
+      expect(screen.queryByText(/satır/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Sayfa 1' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Önceki sayfa' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Sonraki sayfa' })).toBeDisabled();
+    });
+
+    it('renders real figures again once loading ends (default context)', () => {
+      renderWithIntl(<Harness rows={makeRows(50)} />);
+      expect(screen.getByText(/1.+10.+\/.+50.+satır/)).toBeInTheDocument();
+    });
+  });
+
   describe('client-side rendering (50 rows, pageSize 10)', () => {
     it('shows "1–10 / 50 satır" on the first page', () => {
       renderWithIntl(<Harness rows={makeRows(50)} />);

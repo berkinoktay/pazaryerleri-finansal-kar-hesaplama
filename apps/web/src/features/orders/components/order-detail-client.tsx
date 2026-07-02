@@ -12,6 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api-error';
+import { cn } from '@/lib/utils';
 
 import { useOrder } from '../hooks/use-order';
 
@@ -72,7 +73,7 @@ export function OrderDetailClient({
   }
 
   if (orderQuery.isLoading) {
-    return <LoadingState />;
+    return <LoadingState chrome={chrome} />;
   }
 
   if (orderQuery.error !== null) {
@@ -99,7 +100,7 @@ export function OrderDetailClient({
 
   const order = orderQuery.data;
   if (order === undefined) {
-    return <LoadingState />;
+    return <LoadingState chrome={chrome} />;
   }
 
   const headerTitle = order.platformOrderNumber ?? order.platformOrderId;
@@ -190,12 +191,20 @@ export function OrderDetailClient({
   );
 }
 
-function LoadingState(): React.ReactElement {
+function LoadingState({ chrome }: { chrome: 'page' | 'modal' }): React.ReactElement {
   return (
     <div className="gap-lg flex flex-col">
-      <Skeleton className="h-10 w-48" />
+      {/* Back-nav block exists only in page chrome — the modal host (Sheet)
+          owns its own header + close, so the skeleton must not preview one. */}
+      {chrome === 'page' ? <Skeleton className="h-10 w-48" /> : null}
       <Skeleton className="h-24 w-full" />
-      <div className="gap-md grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Mirrors OrderKpiGrid: dense (modal) stays 2-col, page widens to 4-col. */}
+      <div
+        className={cn(
+          'gap-md grid grid-cols-1 sm:grid-cols-2',
+          chrome === 'page' && 'lg:grid-cols-4',
+        )}
+      >
         <Skeleton className="h-32" />
         <Skeleton className="h-32" />
         <Skeleton className="h-32" />

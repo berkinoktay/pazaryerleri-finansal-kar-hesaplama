@@ -101,6 +101,44 @@
   animation: progress-indeterminate 1.3s var(--ease-in-out-quad) infinite;
 }
 
+/* Skeleton shimmer — a light sweep crossing the placeholder, replacing the
+   stock opacity pulse (which halved the bar's already-thin dark-mode contrast
+   at its trough). The host keeps a solid --surface-skeleton fill; only the
+   ::after overlay moves, so the bar never dims. Keyframes park the sweep
+   off-screen for the last 40% of the cycle — a breath between passes reads
+   calmer than a metronome. Sweep color is --skeleton-highlight (per-mode
+   alpha lives in the token). Under prefers-reduced-motion the global rule
+   below collapses it to a single 0.01ms iteration ending at the final frame
+   (sweep parked off-screen): a clean static bar. */
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  60%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--skeleton-highlight), transparent);
+  /* `both` is load-bearing for reduced-motion: the global rule truncates this
+     to one 0.01ms iteration but does NOT touch fill-mode, so with the default
+     `none` the sweep reverts to its base transform (translateX(0)) — parking
+     the bright band CENTERED over every bar. `both` holds the final keyframe
+     (translateX(100%), off-screen) instead, giving the intended clean static
+     bar. Mirrors the `.animate-panel-enter` idiom; no effect during normal
+     infinite playback. */
+  animation: skeleton-shimmer 2s var(--ease-in-out-quad) infinite both;
+}
+
 /* Caret blink for the InputOTP active slot. A real text caret blinks HARD
    (step-end on/off), unlike animate-pulse which fades and reads as a loading
    shimmer. prefers-reduced-motion collapses it via the global rule below. */

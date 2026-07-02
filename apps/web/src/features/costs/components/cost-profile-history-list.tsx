@@ -101,8 +101,9 @@ const EVENT_DOT_CLASS: Record<HistoryEvent, string> = {
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 function HistorySkeleton(): React.ReactElement {
+  const tCommon = useTranslations('common');
   return (
-    <div className="gap-md flex flex-col" role="status" aria-label="Yükleniyor">
+    <div className="gap-md flex flex-col" role="status" aria-busy aria-label={tCommon('loading')}>
       {[0, 1, 2].map((i) => (
         <div key={i} className="gap-sm flex items-start">
           <Skeleton className="mt-1 size-7 rounded-full" />

@@ -34,6 +34,11 @@ const circleIcon = (
 
 export interface CommissionTariffListSummaryProps {
   stats: TariffListStats;
+  /**
+   * Render the strip's per-cell skeletons (real labels/icons stay mounted)
+   * while the list query is in flight — avoids a misleading flash of zeros.
+   */
+  loading?: boolean;
 }
 
 /**
@@ -44,16 +49,34 @@ export interface CommissionTariffListSummaryProps {
  */
 export function CommissionTariffListSummary({
   stats,
+  loading = false,
 }: CommissionTariffListSummaryProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.list.summary');
+  const tCommon = useTranslations('common');
   const format = useFormatter();
 
   const pendingExports = stats.total - stats.exportedCount;
+
+  // Only the NON-ZERO validity buckets, so the line always reconciles with the
+  // total ("Toplam 5 — 1 aktif · 0 taslak" hid 4 expired tariffs; all-expired
+  // read as if the tariffs vanished). Order: what's live, what's next, what
+  // needs work, then history.
+  const bucketParts = (
+    [
+      ['bucketActive', stats.activeCount],
+      ['bucketUpcoming', stats.upcomingCount],
+      ['bucketDraft', stats.draftCount],
+      ['bucketPast', stats.pastCount],
+    ] as const
+  )
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => t(key, { count }));
 
   const items: StatStripItem[] = [
     {
       label: t('total'),
       value: format.number(stats.total, 'integer'),
+      context: bucketParts.length > 0 ? bucketParts.join(' · ') : undefined,
       icon: circleIcon(<DocumentValidationIcon />, 'primary'),
     },
     {
@@ -61,7 +84,7 @@ export function CommissionTariffListSummary({
       // keeps the em-dash for scan-ability, but the reader learns WHY.
       label: t('activePeriod'),
       value: stats.activeLabel ?? DASH,
-      context: stats.activeLabel === null ? t('noActivePeriod') : undefined,
+      context: stats.activeLabel === null ? t('noActivePeriod') : t('activeNow'),
       icon: circleIcon(<Calendar01Icon />, 'info'),
     },
     {
@@ -69,7 +92,10 @@ export function CommissionTariffListSummary({
       value:
         stats.coveredProducts === null ? DASH : format.number(stats.coveredProducts, 'integer'),
       context: stats.coveredProducts === null ? t('noActivePeriod') : t('coveredContext'),
-      icon: circleIcon(<PackageIcon />, 'neutral'),
+      // primary, NOT neutral: a gray bg-muted chip beside three tinted
+      // siblings read as broken/unfinished (self-reviewed live). The strip
+      // now alternates primary / info / primary / semantic.
+      icon: circleIcon(<PackageIcon />, 'primary'),
     },
     {
       // Export progress carries the semantic signal: all-done reads success,
@@ -91,5 +117,5 @@ export function CommissionTariffListSummary({
     },
   ];
 
-  return <StatStrip items={items} />;
+  return <StatStrip items={items} loading={loading} loadingLabel={tCommon('loading')} />;
 }

@@ -85,6 +85,17 @@ describe('summarizeTariffList', () => {
     expect(stats.exportedCount).toBe(2);
   });
 
+  it('buckets every row into exactly one validity count (context line reconciles with total)', () => {
+    const stats = summarizeTariffList(toListRows(items));
+    expect(stats.activeCount).toBe(1);
+    expect(stats.upcomingCount).toBe(0);
+    expect(stats.pastCount).toBe(1);
+    expect(stats.draftCount).toBe(1);
+    expect(stats.activeCount + stats.upcomingCount + stats.pastCount + stats.draftCount).toBe(
+      stats.total,
+    );
+  });
+
   it('returns null active fields when no tariff is live', () => {
     const stats = summarizeTariffList(toListRows([makeItem({ id: 'c', name: 'Taslak' })]));
     expect(stats.total).toBe(1);

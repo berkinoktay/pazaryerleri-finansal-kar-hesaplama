@@ -5,6 +5,7 @@ import { ArrowLeft01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { DataTableLoadingContext } from '@/components/patterns/data-table';
 import {
   Pagination,
   PaginationContent,
@@ -12,6 +13,7 @@ import {
   PaginationItem,
   PaginationLink,
 } from '@/components/ui/pagination';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
   SelectContent,
@@ -65,6 +67,10 @@ export function DataTablePagination<TData>({
   const t = useTranslations('common.dataTable.pagination');
   const tNav = useTranslations('common.pagination');
   const formatter = useFormatter();
+  // While the body loads, the table instance reports 0 rows / 1 page as if
+  // they were facts. Swap the figures for placeholders and hold navigation —
+  // never assert numbers we don't have yet.
+  const loading = React.useContext(DataTableLoadingContext);
 
   const { pageIndex, pageSize } = table.getState().pagination;
   // pageCount can be 0 when nothing matches the filter — clamp to 1 so the
@@ -96,7 +102,7 @@ export function DataTablePagination<TData>({
   return (
     <div className={cn('gap-md flex flex-wrap items-center justify-between', className)}>
       <span className="text-2xs text-muted-foreground hidden tabular-nums sm:inline">
-        {rowsLabel}
+        {loading ? <Skeleton className="inline-block h-3 w-24 align-middle" /> : rowsLabel}
       </span>
 
       <div className="gap-md flex flex-wrap items-center">
@@ -107,6 +113,7 @@ export function DataTablePagination<TData>({
           <Select
             value={String(pageSize)}
             onValueChange={(value) => table.setPageSize(Number(value))}
+            disabled={loading}
           >
             <SelectTrigger size="sm" className="w-pagesize-select">
               <SelectValue />
@@ -127,7 +134,7 @@ export function DataTablePagination<TData>({
               <PaginationLink
                 aria-label={tNav('previousPage')}
                 onClick={() => table.previousPage()}
-                disabled={!canPrev}
+                disabled={!canPrev || loading}
               >
                 <ArrowLeft01Icon className="size-icon-sm" />
               </PaginationLink>
@@ -136,34 +143,46 @@ export function DataTablePagination<TData>({
             {/* Narrow viewport: a compact caption instead of the full strip. */}
             <PaginationItem className="sm:hidden">
               <span className="px-sm text-2xs text-muted-foreground tabular-nums">
-                {pageOfLabel}
+                {loading ? (
+                  <Skeleton className="inline-block h-3 w-12 align-middle" />
+                ) : (
+                  pageOfLabel
+                )}
               </span>
             </PaginationItem>
 
-            {/* Wide viewport: numbered pages with collapsed-range ellipsis. */}
-            {pageItems.map((item) =>
-              typeof item === 'number' ? (
-                <PaginationItem key={item} className="hidden sm:flex">
-                  <PaginationLink
-                    isActive={item === currentPage}
-                    aria-label={tNav('page', { page: formatter.number(item, 'integer') })}
-                    onClick={() => table.setPageIndex(item - 1)}
-                  >
-                    {formatter.number(item, 'integer')}
-                  </PaginationLink>
-                </PaginationItem>
-              ) : (
-                <PaginationItem key={item} className="hidden sm:flex">
-                  <PaginationEllipsis />
-                </PaginationItem>
-              ),
+            {/* Wide viewport: numbered pages with collapsed-range ellipsis.
+                While loading, a single placeholder holds the strip's spot —
+                a confident lone "1" would be a guess, not a fact. */}
+            {loading ? (
+              <PaginationItem className="hidden sm:flex">
+                <Skeleton className="mx-xs h-3 w-12" />
+              </PaginationItem>
+            ) : (
+              pageItems.map((item) =>
+                typeof item === 'number' ? (
+                  <PaginationItem key={item} className="hidden sm:flex">
+                    <PaginationLink
+                      isActive={item === currentPage}
+                      aria-label={tNav('page', { page: formatter.number(item, 'integer') })}
+                      onClick={() => table.setPageIndex(item - 1)}
+                    >
+                      {formatter.number(item, 'integer')}
+                    </PaginationLink>
+                  </PaginationItem>
+                ) : (
+                  <PaginationItem key={item} className="hidden sm:flex">
+                    <PaginationEllipsis />
+                  </PaginationItem>
+                ),
+              )
             )}
 
             <PaginationItem>
               <PaginationLink
                 aria-label={tNav('nextPage')}
                 onClick={() => table.nextPage()}
-                disabled={!canNext}
+                disabled={!canNext || loading}
               >
                 <ArrowRight01Icon className="size-icon-sm" />
               </PaginationLink>

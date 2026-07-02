@@ -15,6 +15,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   CostProfileTypeIconSquare,
   ProfileAmount,
@@ -98,6 +99,7 @@ export interface ParentRowCostCellProps {
 export function ParentRowCostCell({ orgId, product }: ParentRowCostCellProps): React.ReactElement {
   const t = useTranslations('products.costCell');
   const tParent = useTranslations('products.parentCostCell');
+  const tCommon = useTranslations('common');
   const formatter = useFormatter();
   const [open, setOpen] = React.useState(false);
 
@@ -197,9 +199,24 @@ export function ParentRowCostCell({ orgId, product }: ParentRowCostCellProps): R
             wrapperClassName="border-0 shadow-none rounded-none m-0 border-b border-border h-9 px-md"
           />
           <CommandList className="max-h-56">
-            <CommandEmpty className="text-muted-foreground px-md py-sm text-xs">
-              {tParent('applyToAllEmpty')}
-            </CommandEmpty>
+            {allProfilesQuery.isLoading ? (
+              // Loading is NOT an empty catalog: skeleton option rows keep
+              // CommandEmpty ("no results") for genuinely empty responses.
+              <div
+                role="status"
+                aria-busy
+                aria-label={tCommon('loading')}
+                className="p-xs gap-3xs flex flex-col"
+              >
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-4/5" />
+                <Skeleton className="h-8 w-full" />
+              </div>
+            ) : (
+              <CommandEmpty className="text-muted-foreground px-md py-sm text-xs">
+                {tParent('applyToAllEmpty')}
+              </CommandEmpty>
+            )}
             {availableProfiles.length > 0 ? (
               <CommandGroup className="p-xs">
                 {availableProfiles.map((profile) => (

@@ -120,6 +120,12 @@ function setupDefaultHandlers() {
   );
 }
 
+// The tabs mount only after the profile query resolves (loading shows a
+// PageSkeleton), so by first paint the versions query has resolved too and the
+// history tab's accessible name includes its count chip ("Gecmis 1"). Match by
+// prefix. Unicode escapes spell G-e-cedilla-m-i-s-with-cedilla in ASCII source.
+const HISTORY_TAB_NAME = /^Ge\u00e7mi\u015f/;
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('CostProfileDetail', () => {
@@ -133,7 +139,7 @@ describe('CostProfileDetail', () => {
     setupDefaultHandlers();
     renderWithIntl(<CostProfileDetail orgId={ORG_ID} profileId={PROFILE_ID} />);
     expect(await screen.findByRole('tab', { name: 'Detay' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Geçmiş' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: HISTORY_TAB_NAME })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Bağlı varyantlar' })).toBeInTheDocument();
   });
 
@@ -147,8 +153,8 @@ describe('CostProfileDetail', () => {
   it('switches to the Geçmiş tab and shows history content', async () => {
     setupDefaultHandlers();
     const { user } = renderWithIntl(<CostProfileDetail orgId={ORG_ID} profileId={PROFILE_ID} />);
-    await screen.findByRole('tab', { name: 'Geçmiş' });
-    await user.click(screen.getByRole('tab', { name: 'Geçmiş' }));
+    await screen.findByRole('tab', { name: HISTORY_TAB_NAME });
+    await user.click(screen.getByRole('tab', { name: HISTORY_TAB_NAME }));
     // The history timeline classifies version 1 as the "created" event and
     // renders its label (costs.detail.history.event.created) — not a "v1" string.
     expect(await screen.findByText('Oluşturuldu')).toBeInTheDocument();

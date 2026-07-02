@@ -838,8 +838,13 @@
         "exportedValue": "{count} / {total}",
         "noActivePeriod": "No active period",
         "coveredContext": "in the active period",
-        "exportedPending": "{count} tariffs awaiting export",
-        "exportedAllDone": "all exported"
+        "exportedPending": "{count, plural, one {# tariff} other {# tariffs}} awaiting export",
+        "exportedAllDone": "all exported",
+        "activeNow": "in effect now",
+        "bucketActive": "{count} active",
+        "bucketUpcoming": "{count} scheduled",
+        "bucketPast": "{count} expired",
+        "bucketDraft": "{count, plural, one {# draft} other {# drafts}}"
       },
       "empty": {
         "title": "No commission tariffs yet",
