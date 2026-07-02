@@ -19,7 +19,6 @@
 
 import { Decimal } from 'decimal.js';
 
-import type { Platform, Prisma } from '@pazarsync/db';
 import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
 
 import {
@@ -27,15 +26,21 @@ import {
   serializeBreakdown,
   type AssemblyInputs,
   type QuoteBreakdown,
-  type ResolvedFeeDefs,
 } from './product-pricing.service';
-import type { ResolvedCommissionRate } from './commission-rate-resolver';
+import {
+  deriveReason,
+  tariffCommission,
+  type TariffAssemblyContext,
+  type TariffItemReason,
+  type TariffVariant,
+} from './tariff-compute-commons';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type { StoredBand } from './commission-tariff.types';
 
-// ─── Why an item cannot be costed (no band profit) ──────────────────────────
-
-export type TariffItemReason = 'NO_PRODUCT' | 'NO_COST' | 'NO_SHIPPING';
+// Re-exported so existing consumers (commission-tariff.service, estimate route)
+// keep importing these shared types from here. Their single source is
+// `tariff-compute-commons`, shared with the Plus tariff feature.
+export type { TariffAssemblyContext, TariffItemReason, TariffVariant };
 
 // ─── Computed result shapes (serialized — strings, never float) ─────────────
 
@@ -59,34 +64,6 @@ export interface ComputedItemBands {
   readonly bestBandKey: string | null;
 }
 
-// The exact variant columns `assembleUnitEconomics` reads (mirrors its private
-// `VariantForAssembly`). Supplied by the caller after the barcode → variant join.
-export interface TariffVariant {
-  readonly id: string;
-  readonly stockCode: string;
-  readonly barcode: string;
-  readonly salePrice: Prisma.Decimal;
-  readonly vatRate: number | null;
-  readonly isDigital: boolean;
-  readonly product: { title: string; categoryId: bigint | null; brandId: bigint | null };
-}
-
-export interface TariffAssemblyContext {
-  readonly platform: Platform;
-  readonly feeDefs: ResolvedFeeDefs;
-}
-
-/**
- * Synthesizes the `ResolvedCommissionRate` the pure assembly consumes from a raw
- * percent. The tariff sources its commission from the Excel band, not the rate
- * table, so `ruleSource` / `paymentTermDays` / `segmentApplied` are inert here —
- * `assembleUnitEconomics` reads only `.rate`. Kept explicit (no assertion) so the
- * shape stays in lockstep with the resolver's interface.
- */
-function bandCommission(ratePercent: Decimal): ResolvedCommissionRate {
-  return { rate: ratePercent, paymentTermDays: 0, ruleSource: 'category', segmentApplied: null };
-}
-
 /** A band's representative price: bracket upper limit, or current price for band 1 (no upper). */
 function bandPrice(band: StoredBand, currentPrice: Decimal): Decimal {
   return band.upperLimit !== null ? new Decimal(band.upperLimit) : currentPrice;
@@ -105,15 +82,6 @@ function nullBandResults(
     netProfit: null,
     marginPct: null,
   }));
-}
-
-/** Cost gates first (margin/profit would be wrong at cost=0), then shipping. */
-function deriveReason(costOk: boolean, shippingOk: boolean): TariffItemReason {
-  if (!costOk) return 'NO_COST';
-  if (!shippingOk) return 'NO_SHIPPING';
-  // Commission is always supplied from the band, so calculability can only fail
-  // on cost or shipping; default defensively to NO_COST.
-  return 'NO_COST';
 }
 
 /**
@@ -142,7 +110,7 @@ export function computeItemBands(
 
   const inputs: AssemblyInputs = {
     costAggregate,
-    commission: bandCommission(new Decimal(firstBand.commissionPct)),
+    commission: tariffCommission(new Decimal(firstBand.commissionPct)),
     shipping,
   };
   const probe = assembleUnitEconomics(ctx, variant, inputs);
@@ -248,7 +216,7 @@ export function computeItemEstimate(
 
   const inputs: AssemblyInputs = {
     costAggregate,
-    commission: bandCommission(new Decimal(band.commissionPct)),
+    commission: tariffCommission(new Decimal(band.commissionPct)),
     shipping,
   };
   const probe = assembleUnitEconomics(ctx, variant, inputs);

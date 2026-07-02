@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  parsePeriodPart,
-  parseTariffPeriodLabel,
-  resolveValidity,
-} from '@/services/commission-tariff.types';
+import { parsePeriodPart, parseTariffPeriodLabel, resolveValidity } from '@/lib/tariff-period';
 
 describe('parsePeriodPart', () => {
   it('parses "DD Ay HH.MM" with a Turkish month name', () => {

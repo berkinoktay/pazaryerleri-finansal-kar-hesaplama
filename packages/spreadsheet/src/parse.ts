@@ -21,7 +21,7 @@ import {
   MAX_ERROR_VALUE_LENGTH,
 } from './constants';
 import { assertValidUpload } from './guards';
-import { stripWorksheetDimensions } from './normalize-workbook';
+import { normalizeWorkbookForRead } from './normalize-workbook';
 
 // Property bag for a parsed data row: contains only the key + editable fields
 // whose values were coerced by coerceInbound. The generic TRow is erased at runtime;
@@ -77,7 +77,7 @@ export async function readWorkbookGrid(
 
   // A bogus single-cell <dimension> is stripped first so exporters that mis-write
   // it (e.g. Trendyol) don't make read-excel-file drop every data row.
-  const normalized = stripWorksheetDimensions(file);
+  const normalized = normalizeWorkbookForRead(file);
   try {
     return options.sheetName !== undefined
       ? await readSheet(normalized, options.sheetName)

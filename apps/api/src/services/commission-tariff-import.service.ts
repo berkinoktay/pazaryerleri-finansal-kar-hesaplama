@@ -19,43 +19,11 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
 
 import { ValidationError } from '../lib/errors';
-import { parseTariffPeriodLabel } from './commission-tariff.types';
+import { parseTariffPeriodLabel } from '../lib/tariff-period';
+import { cellDecimalString, cellInt, cellText } from '../lib/xlsx-grid-cells';
 import { resolveTariffLayout, type TariffLayout } from './commission-tariff-layout';
 
 const SHEET_NAME = 'KomisyonTarifeleriÜrünleri';
-
-// ─── Cell readers (grid cells are string | number | boolean | Date | null) ──
-
-function cellText(row: readonly unknown[], idx: number): string | null {
-  const value = row[idx];
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed === '' ? null : trimmed;
-  }
-  if (typeof value === 'number') return String(value);
-  return null;
-}
-
-function cellDecimalString(row: readonly unknown[], idx: number): string | null {
-  const value = row[idx];
-  if (typeof value === 'number') return value.toString();
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed === '') return null;
-    // Turkish formatted strings ("1.234,56") are rare here (cells are numeric),
-    // but coerce them defensively; a plain "777.1" keeps its dot decimal.
-    const normalized = trimmed.includes(',')
-      ? trimmed.replace(/\./g, '').replace(',', '.')
-      : trimmed;
-    return /^-?\d+(\.\d+)?$/.test(normalized) ? normalized : null;
-  }
-  return null;
-}
-
-function cellInt(row: readonly unknown[], idx: number): number | null {
-  const decimal = cellDecimalString(row, idx);
-  return decimal === null ? null : Math.trunc(Number(decimal));
-}
 
 // ─── Parsed row + band assembly ─────────────────────────────────────────────
 
