@@ -1,6 +1,6 @@
 'use client';
 
-import { type ColumnDef, type ColumnFiltersState } from '@tanstack/react-table';
+import { type ColumnDef } from '@tanstack/react-table';
 import { CloudUploadIcon, Delete02Icon, DocumentValidationIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -45,8 +45,13 @@ export interface CommissionTariffListTableProps {
   tabsNode: React.ReactNode;
   searchValue: string;
   onSearchChange: (next: string) => void;
-  /** Controlled filter mirror — drives isFiltered + the toolbar's Clear button. */
-  columnFilters: ColumnFiltersState;
+  /**
+   * Parent-computed "any filter active?" — search/status live OUTSIDE
+   * TanStack columnFilters (the parent pre-filters `rows`), so both the
+   * no-results body and the toolbar's clear ghost read this server-mode
+   * signal instead of a synthetic columnFilters mirror.
+   */
+  hasActiveFilters: boolean;
   onClearFilters: () => void;
   onOpen: (id: string) => void;
   onUpload: () => void;
@@ -66,7 +71,7 @@ export function CommissionTariffListTable({
   tabsNode,
   searchValue,
   onSearchChange,
-  columnFilters,
+  hasActiveFilters,
   onClearFilters,
   onOpen,
   onUpload,
@@ -168,13 +173,7 @@ export function CommissionTariffListTable({
         getRowId={(row) => row.id}
         enableRowSelection
         onRowClick={(row) => onOpen(row.id)}
-        columnFilters={columnFilters}
-        onColumnFiltersChange={(updater) => {
-          // Search is controlled (searchValue) and status lives in the parent, so
-          // the only writer of column filters is the toolbar's "Clear" (reset → []).
-          const next = typeof updater === 'function' ? updater(columnFilters) : updater;
-          if (next.length === 0) onClearFilters();
-        }}
+        hasActiveFilters={hasActiveFilters}
         onClearFilters={onClearFilters}
         initialColumnPinning={{ right: [ROW_ACTIONS_COLUMN_ID] }}
         tabs={tabsNode}
@@ -184,6 +183,8 @@ export function CommissionTariffListTable({
             searchValue={searchValue}
             onSearchChange={onSearchChange}
             searchPlaceholder={tList('search')}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={onClearFilters}
           />
         )}
         pagination={(table) => <DataTablePagination table={table} />}

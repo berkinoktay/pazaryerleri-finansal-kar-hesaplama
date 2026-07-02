@@ -2,13 +2,14 @@
 
 import { PlusSignIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
+import { parseAsBoolean, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { PageHeader } from '@/components/patterns/page-header';
 import { Button } from '@/components/ui/button';
 
-import type { CostProfile } from '../types/cost-profile.types';
+import { CostProfileType, type CostProfile } from '../types/cost-profile.types';
 import { useCostProfilesInfinite } from '../hooks/use-cost-profiles';
 import { useCostsFilterFields } from '../hooks/use-costs-filter-fields';
 import { costsFilterParamsFromRows, costsFilterRowsFromParams } from '../lib/costs-filter-fields';
@@ -33,10 +34,28 @@ interface CostsPageClientProps {
 export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactElement {
   const t = useTranslations('costs');
 
-  // ─── Filter state (local for now; could be URL-driven in a follow-up) ──
-  const [q, setQ] = React.useState('');
-  const [showArchived, setShowArchived] = React.useState(false);
-  const [typeFilter, setTypeFilter] = React.useState('');
+  // ─── Filter state — URL-owned (nuqs): reload/share reproduces the view. ──
+  const [filters, setFilters] = useQueryStates(
+    {
+      q: parseAsString.withDefault(''),
+      type: parseAsStringEnum<CostProfileType>([...Object.values(CostProfileType)]),
+      archived: parseAsBoolean.withDefault(false),
+    },
+    { history: 'push' },
+  );
+  const q = filters.q;
+  const typeFilter: CostProfileType | '' = filters.type ?? '';
+  const showArchived = filters.archived;
+
+  // Search keeps a local echo so each keystroke doesn't push a history entry;
+  // the settled value lands in the URL (and the server query) after ~250ms
+  // idle. Mirrors the products page pattern.
+  const [qInput, setQInput] = React.useState(q);
+  React.useEffect(() => {
+    if (qInput === q) return;
+    const handle = window.setTimeout(() => void setFilters({ q: qInput }), 250);
+    return () => window.clearTimeout(handle);
+  }, [qInput, q, setFilters]);
 
   // ─── Dialog state ───────────────────────────────────────────────────────
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -49,6 +68,7 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
       ? {
           orgId,
           filters: {
+            ...(q.length > 0 ? { q } : {}),
             ...(showArchived ? { archived: 'true' as const } : {}),
             ...(typeFilter.length > 0 ? { type: typeFilter } : {}),
           },
@@ -58,21 +78,12 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
   const isLoading = query.isLoading;
   const profiles = query.data?.pages.flatMap((page) => page.data) ?? [];
 
-  // Client-side name search over the loaded pages (the list is small; the
-  // pattern mirrors campaigns-list: parent pre-filters, DataTable renders).
-  const trimmedQuery = q.trim().toLocaleLowerCase('tr');
-  const visibleProfiles =
-    trimmedQuery.length > 0
-      ? profiles.filter((profile) => profile.name.toLocaleLowerCase('tr').includes(trimmedQuery))
-      : profiles;
-
   const filterFields = useCostsFilterFields();
   const filterRows = costsFilterRowsFromParams({ typeFilter, showArchived });
   const hasActiveFilters = q.length > 0 || typeFilter.length > 0 || showArchived;
   const handleClearFilters = (): void => {
-    setQ('');
-    setTypeFilter('');
-    setShowArchived(false);
+    setQInput('');
+    void setFilters({ q: '', type: null, archived: false });
   };
 
   // ─── Mutations ──────────────────────────────────────────────────────────
@@ -120,18 +131,20 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
           INSIDE the table body instead of a full-page takeover that left the
           right side barren. Mirrors the Returns/Products gold standard. */}
       <CostProfileTable
-        data={visibleProfiles}
+        data={profiles}
         loading={isLoading}
         empty={<CostProfileEmptyState onCreateClick={() => setCreateOpen(true)} />}
-        q={q}
-        onSearchChange={setQ}
+        q={qInput}
+        onSearchChange={setQInput}
         advancedFilter={{
           fields: filterFields,
           value: filterRows,
           onApply: (rows) => {
             const next = costsFilterParamsFromRows(rows);
-            setTypeFilter(next.typeFilter);
-            setShowArchived(next.showArchived);
+            void setFilters({
+              type: next.typeFilter === '' ? null : next.typeFilter,
+              archived: next.showArchived,
+            });
           },
         }}
         hasActiveFilters={hasActiveFilters}

@@ -8,6 +8,7 @@ import {
   MedalThirdPlaceIcon,
 } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
+import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
 import { CopyableValue } from '@/components/patterns/copyable-value';
@@ -65,8 +66,15 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
   const queryRows = query.data?.data;
   const allRows = React.useMemo(() => queryRows ?? [], [queryRows]);
 
-  const [tab, setTab] = React.useState<ProductsTab>('all');
-  const [search, setSearch] = React.useState('');
+  // URL state (nuqs) — tab + search survive reload/share; param names are
+  // products-prefixed because the orders table on the same page owns
+  // `ordersFilter`.
+  const [{ productsTab: tab, productsQ: search }, setUrlState] = useQueryStates({
+    productsTab: parseAsStringEnum<ProductsTab>(['all', 'missing']).withDefault('all'),
+    productsQ: parseAsString.withDefault(''),
+  });
+  const setTab = (next: ProductsTab): void => void setUrlState({ productsTab: next });
+  const setSearch = (next: string): void => void setUrlState({ productsQ: next });
 
   const missingCount = React.useMemo(
     () => allRows.filter((row) => row.costStatus === 'missing').length,
@@ -88,10 +96,10 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
 
   const hasActiveFilters = tab !== 'all' || search.trim() !== '';
 
-  const clearFilters = React.useCallback(() => {
-    setTab('all');
-    setSearch('');
-  }, []);
+  const clearFilters = React.useCallback(
+    () => void setUrlState({ productsTab: 'all', productsQ: '' }),
+    [setUrlState],
+  );
 
   const columns = React.useMemo<ColumnDef<TodayProductRow>[]>(
     () => [
