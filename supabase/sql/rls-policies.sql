@@ -411,6 +411,22 @@ CREATE POLICY commission_tariff_items_store_read ON commission_tariff_items
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
+-- ─── plus_commission_tariffs — store-scoped saved Plus tariffs ─────────
+-- Sibling of commission_tariffs: the seller's uploaded Trendyol "Plus Komisyon"
+-- Excels + their per-product opt-ins. Same store-private isolation — both tables
+-- carry store_id and gate on can_access_store. Writes are API-only.
+ALTER TABLE plus_commission_tariffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plus_commission_tariffs_store_read ON plus_commission_tariffs;
+CREATE POLICY plus_commission_tariffs_store_read ON plus_commission_tariffs
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE plus_commission_tariff_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plus_commission_tariff_items_store_read ON plus_commission_tariff_items;
+CREATE POLICY plus_commission_tariff_items_store_read ON plus_commission_tariff_items
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
 -- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
 -- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
 -- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md

@@ -350,6 +350,7 @@ model Store {
   defaultShippingCarrier ShippingCarrier?        @relation(fields: [defaultShippingCarrierId], references: [id], onDelete: SetNull)
   ownShippingTariffs     OwnShippingTariff[]
   commissionTariffs      CommissionTariff[]
+  plusCommissionTariffs  PlusCommissionTariff[]
   orgPeriodFees          OrgPeriodFee[]
   commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
@@ -1226,6 +1227,96 @@ model CommissionTariffItem {
   @@index([periodId])
   @@index([storeId, barcode])
   @@map("commission_tariff_items")
+}
+
+// ─── Saved Plus Commission Tariffs (Trendyol "Plus" commission offer) ───
+// Sibling of CommissionTariff, but the Trendyol "Plus Komisyon" Excel is a
+// SIMPLER shape: a SINGLE 7-day period (no 3/4-day split) and a SINGLE reduced
+// commission OFFER per product (e.g. 15.4% vs the current 19%) if the seller
+// opts the product into Plus — no 4-band price ladder. So the two-level
+// tariff→items hierarchy is enough (the single period is folded onto the
+// tariff), and each item holds flat current-vs-Plus columns instead of a bands
+// JSON. Profit under Plus is COMPUTED on read via @pazarsync/profit (never
+// stored). The seller's per-product opt-in (+ optional custom price) is
+// persisted on the item. `source_file` keeps the raw .xlsx so export can patch
+// the seller's opt-in back into Trendyol's exact file (re-uploaded verbatim).
+model PlusCommissionTariff {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
+  name           String
+  sourceFilename String?   @map("source_filename")
+  sourceFile     Bytes?    @map("source_file")
+  // The single "Tarih Aralığı (7 Gün)" period, folded onto the tariff (all rows
+  // share it). Raw label + parsed bounds drive the validity badge; dayCount is
+  // the N from "Tarih Aralığı (N Gün)" (7) used by export. Label is NOT NULL
+  // (always present in the Excel, mirrors CommissionTariffPeriod.dateRangeLabel);
+  // dayCount stays nullable — the N extraction can fail on an unusual header.
+  dateRangeLabel String    @map("date_range_label")
+  dayCount       Int?      @map("day_count")
+  startsAt       DateTime? @map("starts_at")
+  endsAt         DateTime? @map("ends_at")
+  exportedAt     DateTime? @map("exported_at")
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  store Store                      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items PlusCommissionTariffItem[]
+
+  @@index([organizationId])
+  @@index([storeId])
+  @@map("plus_commission_tariffs")
+}
+
+model PlusCommissionTariffItem {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  tariffId       String @map("tariff_id") @db.Uuid
+  // Matched seller variant (by barcode/stockCode at import); null = no catalog
+  // match → profit shown as "no cost". No FK: a deleted variant must not drop
+  // the tariff row.
+  productVariantId String? @map("product_variant_id") @db.Uuid
+  barcode          String
+  stockCode        String? @map("stock_code")
+  productTitle     String  @map("product_title")
+  category         String?
+  brand            String?
+  size             String?
+  modelCode        String? @map("model_code")
+  stock            Int?
+  // Güncel TSF (current sale price) + Komisyona Esas Fiyat (commission base).
+  currentPrice         Decimal @map("current_price") @db.Decimal(12, 2)
+  commissionBasePrice  Decimal @map("commission_base_price") @db.Decimal(12, 2)
+  // Güncel Komisyon as a FRACTION (0.19 = %19), Excel-sourced (import ÷100).
+  currentCommissionPct Decimal @map("current_commission_pct") @db.Decimal(6, 4)
+  // Plus Fiyat Üst Limiti (price ceiling to qualify for Plus).
+  plusPriceUpperLimit  Decimal @map("plus_price_upper_limit") @db.Decimal(12, 2)
+  // Plus Komisyon Teklifi as a FRACTION (0.154 = %15.4), the reduced offer.
+  plusCommissionPct    Decimal @map("plus_commission_pct") @db.Decimal(6, 4)
+  // Plus Komisyona Esas Fiyatı (commission base under Plus).
+  plusCommissionBasePrice Decimal @map("plus_commission_base_price") @db.Decimal(12, 2)
+  // Passthrough Trendyol identifiers kept for export fidelity / grouping.
+  externalId  String?  @map("external_id")
+  tariffGroup String?  @map("tariff_group")
+  cancelled   Boolean  @default(false)
+  // The seller's opt-in (Plus Fiyat Seçimi / Tarife Seçimi = join Plus yes/no)
+  // and an optional custom price for the what-if preview.
+  plusSelected Boolean  @default(false) @map("plus_selected")
+  customPrice  Decimal? @map("custom_price") @db.Decimal(12, 2)
+  // Preserves the Excel row order so export patches the right rows.
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tariff PlusCommissionTariff @relation(fields: [tariffId], references: [id], onDelete: Cascade)
+
+  @@unique([tariffId, sortOrder])
+  @@index([organizationId])
+  @@index([tariffId])
+  @@index([storeId, barcode])
+  @@map("plus_commission_tariff_items")
 }
 
 // ─── Profit Calculation V1 — Schema Foundation (PR-1) ──────────────────
