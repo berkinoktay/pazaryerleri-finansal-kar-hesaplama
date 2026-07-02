@@ -6,6 +6,7 @@ import {
   getBusinessDate,
   getBusinessDateAnchor,
   getBusinessDayRange,
+  toUtcIsoDate,
   getBusinessHour,
 } from '../src/timezone';
 
@@ -103,5 +104,17 @@ describe('businessZoneEpochToInstant', () => {
     const instant = businessZoneEpochToInstant(gmt3Epoch);
     expect(getBusinessDate(instant)).toBe('2026-06-05');
     expect(getBusinessHour(instant)).toBe(23);
+  });
+});
+
+describe('toUtcIsoDate', () => {
+  it('extracts the UTC calendar day regardless of local wall-clock', () => {
+    // 23:30 UTC — in İstanbul (UTC+3) this is already the NEXT local day;
+    // the backend's coerce.date() expects the UTC day.
+    expect(toUtcIsoDate(new Date('2026-07-02T23:30:00Z'))).toBe('2026-07-02');
+  });
+
+  it('zero-pads single-digit months and days', () => {
+    expect(toUtcIsoDate(new Date('2026-01-05T00:00:00Z'))).toBe('2026-01-05');
   });
 });

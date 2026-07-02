@@ -118,3 +118,16 @@ export function getBusinessHour(at: Date): number {
   const hour = formatter.formatToParts(at).find((part) => part.type === 'hour')?.value ?? '0';
   return Number(hour);
 }
+
+/**
+ * The UTC calendar day of `date` as `YYYY-MM-DD`. For date-range query params
+ * whose backend counterpart is a UTC timestamp coerced with `coerce.date()` —
+ * local wall-clock components would shift the day for evening picks in
+ * UTC+3. Promoted from the orders/returns toolbars (third-copy rule).
+ */
+export function toUtcIsoDate(date: Date): string {
+  const year = date.getUTCFullYear().toString();
+  const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+  const day = date.getUTCDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}

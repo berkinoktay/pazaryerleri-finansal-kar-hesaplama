@@ -1,5 +1,6 @@
 'use client';
 
+import { toUtcIsoDate } from '@pazarsync/utils';
 import { type Table } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -72,8 +73,8 @@ export function OrdersToolbar<TData>({
 
   const handleRangeChange = (next: DateRange | undefined): void => {
     onChange({
-      from: next?.from !== undefined ? toIsoDate(next.from) : '',
-      to: next?.to !== undefined ? toIsoDate(next.to) : '',
+      from: next?.from !== undefined ? toUtcIsoDate(next.from) : '',
+      to: next?.to !== undefined ? toUtcIsoDate(next.to) : '',
     });
   };
 
@@ -117,14 +118,4 @@ export function OrdersToolbar<TData>({
       }}
     />
   );
-}
-
-function toIsoDate(date: Date): string {
-  // Use UTC components so the backend's `coerce.date()` lands on the intended
-  // calendar day regardless of the user's tz (orders.orderDate is a UTC ts).
-  // Mirrors returns-toolbar — promote to a shared util on the third copy.
-  const year = date.getUTCFullYear().toString();
-  const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-  const day = date.getUTCDate().toString().padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }

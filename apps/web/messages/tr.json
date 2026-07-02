@@ -2012,14 +2012,16 @@
       "filters": {
         "searchPlaceholder": "Maliyet ara…",
         "showArchived": "Arşivlenenleri göster",
-        "typeLabel": "Tür"
+        "typeLabel": "Tür",
+        "groupLabel": "Filtreler"
       },
       "actions": {
         "edit": "Düzenle",
         "archive": "Arşivle",
         "restore": "Geri yükle"
       },
-      "archived": "Arşivlendi"
+      "archived": "Arşivlendi",
+      "loadMore": "Daha fazla yükle"
     },
     "types": {
       "COGS": "Hammadde",
