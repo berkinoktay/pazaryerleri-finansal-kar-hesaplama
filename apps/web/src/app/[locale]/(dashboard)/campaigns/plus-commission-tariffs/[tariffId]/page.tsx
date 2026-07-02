@@ -2,16 +2,16 @@ import type { Metadata } from 'next';
 import { hasLocale } from 'next-intl';
 import { getTranslations } from 'next-intl/server';
 
-import { PlusTariffsListClient } from '@/features/campaigns/components/plus-tariffs-list-client';
+import { PlusTariffDetailClient } from '@/features/campaigns/components/plus-tariff-detail-client';
+import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
 import { getServerApiClient } from '@/lib/api-client/server';
-import { routing } from '@/i18n/routing';
 
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ locale: string }>;
+  params: Promise<{ locale: string; tariffId: string }>;
 }): Promise<Metadata> {
   const { locale } = await params;
   const effectiveLocale = hasLocale(routing.locales, locale) ? locale : routing.defaultLocale;
@@ -20,11 +20,17 @@ export async function generateMetadata({
 }
 
 /**
- * Server shell for the Plus Commission Tariffs LIST. Resolves the active org
- * then store (cookie or first, mirroring the dashboard layout) and hands the ids
- * to the client, which lists the saved tariffs and owns upload/export/delete.
+ * Server shell for one saved Plus tariff's DETAIL. Reads the `tariffId` route
+ * param, resolves the active org + store (mirroring the list shell), and hands all
+ * three to the client, which loads the tariff, drives Plus opt-in, and saves/exports.
  */
-export default async function PlusCommissionTariffsPage(): Promise<React.ReactElement> {
+export default async function PlusTariffDetailPage({
+  params,
+}: {
+  params: Promise<{ locale: string; tariffId: string }>;
+}): Promise<React.ReactElement> {
+  const { tariffId } = await params;
+
   const api = await getServerApiClient();
   const { data: orgsResponse } = await api.GET('/v1/organizations', {});
   const orgs = orgsResponse?.data ?? [];
@@ -39,5 +45,11 @@ export default async function PlusCommissionTariffsPage(): Promise<React.ReactEl
     activeStoreId = await resolveActiveStoreId(stores);
   }
 
-  return <PlusTariffsListClient orgId={activeOrgId ?? null} storeId={activeStoreId ?? null} />;
+  return (
+    <PlusTariffDetailClient
+      orgId={activeOrgId ?? null}
+      storeId={activeStoreId ?? null}
+      tariffId={tariffId}
+    />
+  );
 }

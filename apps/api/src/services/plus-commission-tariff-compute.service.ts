@@ -161,12 +161,14 @@ export interface ComputedPlusEstimate {
 
 /**
  * Computes the full profit breakdown for ONE Plus item at an arbitrary price
- * under its reduced Plus commission (the free-form what-if the detail modal
- * drives). Same assembly + not-calculable semantics as `computePlusItem`.
+ * under a GIVEN commission percent (the caller picks the scenario's commission:
+ * current or Plus). This is the free-form what-if the detail modal drives. Same
+ * assembly + not-calculable semantics as `computePlusItem`. Commission is applied
+ * as a PERCENT, exactly like the detail scenarios.
  */
 export function computePlusEstimate(
   ctx: TariffAssemblyContext,
-  inputs: Pick<PlusItemInputs, 'currentCommissionPct' | 'plusCommissionPct'>,
+  applyCommissionPct: Decimal,
   variant: TariffVariant | null,
   costAggregate: VariantCostAggregate | undefined,
   shipping: EstimateOutcome,
@@ -178,7 +180,7 @@ export function computePlusEstimate(
 
   const probeInputs: AssemblyInputs = {
     costAggregate,
-    commission: tariffCommission(inputs.currentCommissionPct),
+    commission: tariffCommission(applyCommissionPct),
     shipping,
   };
   const probe = assembleUnitEconomics(ctx, variant, probeInputs);
@@ -187,16 +189,16 @@ export function computePlusEstimate(
     return {
       calculable: false,
       reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
-      commissionPct: inputs.plusCommissionPct.toString(),
+      commissionPct: applyCommissionPct.toString(),
       breakdown: null,
     };
   }
 
-  const econ: UnitEconomics = { ...probe.econ, commissionRate: inputs.plusCommissionPct };
+  const econ: UnitEconomics = { ...probe.econ, commissionRate: applyCommissionPct };
   return {
     calculable: true,
     reason: null,
-    commissionPct: inputs.plusCommissionPct.toString(),
+    commissionPct: applyCommissionPct.toString(),
     breakdown: serializeBreakdown(computeUnitProfit(econ, price)),
   };
 }

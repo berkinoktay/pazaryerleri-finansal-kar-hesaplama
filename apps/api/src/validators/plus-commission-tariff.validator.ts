@@ -174,10 +174,11 @@ export type PlusTariffSelection = z.infer<typeof PlusTariffSelectionSchema>;
 
 // ─── Estimate (on-demand breakdown at an arbitrary Plus price) ──────────────
 //
-// The custom-price what-if: the full profit breakdown at an arbitrary Plus price
-// under the item's reduced Plus commission. The detail already carries both
-// computed scenarios, so this exists only for the seller's free-form what-if. The
-// breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
+// The custom-price what-if: the full profit breakdown at an arbitrary price under
+// the commission the `scenario` field selects — 'current' (the seller's current
+// rate) or 'plus' (the reduced Plus rate, the default). The detail already carries
+// both computed scenarios, so this exists only for the seller's free-form what-if.
+// The breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const EstimatePlusPriceBodySchema = z
   .object({
@@ -185,8 +186,16 @@ export const EstimatePlusPriceBodySchema = z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
       .openapi({
-        description: 'Değerlendirilecek Plus satış fiyatı (GROSS, TL).',
+        description: 'Değerlendirilecek satış fiyatı (GROSS, TL).',
         example: '350.00',
+      }),
+    scenario: z
+      .enum(['current', 'plus'])
+      .optional()
+      .openapi({
+        description:
+          "Dökümün hesaplanacağı komisyon senaryosu: 'current' (güncel komisyon) ya da " +
+          "'plus' (indirimli Plus komisyonu, varsayılan).",
       }),
   })
   .openapi('EstimatePlusPriceBody');
