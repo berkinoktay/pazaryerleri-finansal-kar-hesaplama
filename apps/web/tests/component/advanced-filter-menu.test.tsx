@@ -49,6 +49,17 @@ const FIELDS: FilterFieldDef[] = [
       { value: 'archived', label: 'Arşivde' },
     ],
   },
+  {
+    // Restricted operator list: the fresh row must be born with the FIELD's
+    // operator (gte), not the percent dataType default (between) — with one
+    // operator the Select is hidden, so a between-born chip is uncorrectable.
+    key: 'minMargin',
+    label: 'Min. marj',
+    groupLabel: 'Aralık',
+    dataType: 'percent',
+    operators: ['gte'],
+    unit: '%',
+  },
 ];
 
 function priceRow(value: [string, string]): FilterRow {
@@ -195,6 +206,24 @@ describe('AdvancedFilterMenu', () => {
     // …but the already-applied salePrice is NOT a second time: only the chip
     // carries "Satış fiyatı", not also a selectable menu item.
     expect(screen.getAllByText(/Satış fiyatı/)).toHaveLength(1);
+  });
+
+  it('a gte-only field is born with the FIELD operator, not the dataType default', async () => {
+    const onApply = vi.fn();
+    const { user } = render(<AdvancedFilterMenu fields={FIELDS} value={[]} onApply={onApply} />);
+    await user.click(screen.getByRole('button', { name: /Filtre ekle/ }));
+    await user.click(await screen.findByText('Min. marj'));
+
+    // gte → a single bound input (placeholder-labelled); the between-shaped
+    // labelled max input must NOT exist.
+    const input = await screen.findByPlaceholderText('En az');
+    expect(screen.queryByRole('textbox', { name: 'En çok' })).not.toBeInTheDocument();
+    await user.type(input, '10');
+    await user.click(screen.getByRole('button', { name: 'Uygula' }));
+
+    expect(onApply).toHaveBeenCalledWith([
+      expect.objectContaining({ field: 'minMargin', operator: 'gte', value: '10' }),
+    ]);
   });
 
   it('enumSingle commits a single value and picking another REPLACES it (radio semantics)', async () => {

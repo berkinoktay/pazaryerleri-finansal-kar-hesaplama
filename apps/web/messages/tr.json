@@ -945,20 +945,17 @@
       "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
     },
     "filters": {
-      "label": "Filtreler",
       "category": "Kategori",
       "brand": "Marka",
-      "all": "Tümü",
       "minMargin": "Min. marj %",
       "profit": "Kârlılık",
-      "profitAll": "Tümü",
       "profitProfitable": "Kârda",
       "profitLoss": "Zararda",
       "selection": "Seçim durumu",
-      "selectionAll": "Tümü",
       "selectionSelected": "Seçili",
       "selectionUnselected": "Seçilmemiş",
-      "clear": "Filtreleri temizle"
+      "groupLabel": "Filtreler",
+      "all": "Tümü"
     },
     "actionBar": {
       "selectedBands": "{count} kademe seçildi"
@@ -2230,13 +2227,16 @@
       "toolbar": {
         "searchPlaceholder": "Ürün, SKU veya barkod ara",
         "categoryLabel": "Kategori",
-        "categoryAll": "Tüm kategoriler",
         "brandLabel": "Marka",
-        "brandAll": "Tüm markalar",
         "marginRangeLabel": "Marj aralığı",
-        "marginMin": "En az",
-        "marginMax": "En çok",
-        "lossOnly": "Sadece zarar edenleri göster"
+        "lossOnly": "Sadece zarar edenleri göster",
+        "advancedFilters": {
+          "groups": {
+            "attribute": "Özellik",
+            "range": "Aralık",
+            "flag": "Diğer"
+          }
+        }
       },
       "action": {
         "price": "Fiyatla",

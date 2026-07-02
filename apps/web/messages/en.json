@@ -945,20 +945,17 @@
       "scopeHint": "Applies only to the visible products when a filter is active."
     },
     "filters": {
-      "label": "Filters",
       "category": "Category",
       "brand": "Brand",
-      "all": "All",
       "minMargin": "Min. margin %",
       "profit": "Profitability",
-      "profitAll": "All",
       "profitProfitable": "Profitable",
       "profitLoss": "Loss",
       "selection": "Selection state",
-      "selectionAll": "All",
       "selectionSelected": "Selected",
       "selectionUnselected": "Unselected",
-      "clear": "Clear filters"
+      "groupLabel": "Filters",
+      "all": "All"
     },
     "actionBar": {
       "selectedBands": "{count} bands selected"
@@ -2165,13 +2162,16 @@
       "toolbar": {
         "searchPlaceholder": "Search product, SKU or barcode",
         "categoryLabel": "Category",
-        "categoryAll": "All categories",
         "brandLabel": "Brand",
-        "brandAll": "All brands",
         "marginRangeLabel": "Margin range",
-        "marginMin": "Min",
-        "marginMax": "Max",
-        "lossOnly": "Show loss-making only"
+        "lossOnly": "Show loss-making only",
+        "advancedFilters": {
+          "groups": {
+            "attribute": "Attribute",
+            "range": "Range",
+            "flag": "Other"
+          }
+        }
       },
       "action": {
         "price": "Price",

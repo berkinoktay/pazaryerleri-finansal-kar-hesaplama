@@ -42,13 +42,11 @@ export function ProductPricingPageClient({
   // this state only drives the mobile Sheet.
   const [panelItem, setPanelItem] = React.useState<ProductPricingItem | null>(null);
 
-  // Free-text inputs (search + margin bounds) keep local state so each
-  // keystroke doesn't push a URL update; the URL write is debounced to ~250ms
-  // idle. Seeded from the URL once on mount — handleClearFilters resets both
-  // layers together.
+  // The search input keeps local state so each keystroke doesn't push a URL
+  // update; the URL write is debounced to ~250ms idle. Seeded from the URL
+  // once on mount — handleClearFilters resets both layers together. (Margin
+  // bounds no longer need this: the chip editor commits explicitly.)
   const [qInput, setQInput] = React.useState(filters.q);
-  const [marginMinInput, setMarginMinInput] = React.useState(filters.marginMin);
-  const [marginMaxInput, setMarginMaxInput] = React.useState(filters.marginMax);
 
   React.useEffect(() => {
     if (qInput === filters.q) return;
@@ -57,14 +55,6 @@ export function ProductPricingPageClient({
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
   }, [qInput, filters.q, setFilters]);
-
-  React.useEffect(() => {
-    if (marginMinInput === filters.marginMin && marginMaxInput === filters.marginMax) return;
-    const handle = window.setTimeout(() => {
-      void setFilters({ marginMin: marginMinInput, marginMax: marginMaxInput });
-    }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [marginMinInput, marginMaxInput, filters.marginMin, filters.marginMax, setFilters]);
 
   const query = useProductPricingList(
     noStoreSelected
@@ -114,18 +104,12 @@ export function ProductPricingPageClient({
     void setFilters({ sortBy: next });
   };
 
-  const handleLossOnlyChange = (next: boolean): void => {
-    void setFilters({ lossOnly: next });
-  };
-
   const handlePaginationChange = (next: { page: number; perPage: number }): void => {
     void setFilters({ page: next.page, perPage: next.perPage });
   };
 
   const handleClearFilters = (): void => {
     setQInput('');
-    setMarginMinInput('');
-    setMarginMaxInput('');
     void setFilters({
       sortBy: PRODUCT_PRICING_DEFAULT_SORT,
       q: '',
@@ -152,24 +136,24 @@ export function ProductPricingPageClient({
         orgId={orgId}
         storeId={storeId}
         isMobile={isMobile}
-        toolbar={
+        toolbar={(table) => (
           <ProductPricingToolbar
+            table={table}
             q={qInput}
             onSearchChange={setQInput}
-            marginMin={marginMinInput}
-            marginMax={marginMaxInput}
-            onMarginMinChange={setMarginMinInput}
-            onMarginMaxChange={setMarginMaxInput}
-            categoryId={filters.categoryId}
-            brandId={filters.brandId}
-            onCategoryChange={(next) => void setFilters({ categoryId: next })}
-            onBrandChange={(next) => void setFilters({ brandId: next })}
-            lossOnly={filters.lossOnly}
-            onLossOnlyChange={handleLossOnlyChange}
+            params={{
+              categoryId: filters.categoryId,
+              brandId: filters.brandId,
+              marginMin: filters.marginMin,
+              marginMax: filters.marginMax,
+              lossOnly: filters.lossOnly,
+            }}
+            onParamsApply={(next) => void setFilters(next)}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={handleClearFilters}
             facets={facetsQuery.data}
-            facetsLoading={facetsQuery.isLoading}
           />
-        }
+        )}
         empty={<ProductPricingEmptyState variant="no-products" />}
         noResultsState={
           <ProductPricingEmptyState variant="no-matches" onClearFilters={handleClearFilters} />

@@ -1,6 +1,12 @@
 'use client';
 
-import type { ColumnDef, PaginationState, Row, SortingState } from '@tanstack/react-table';
+import type {
+  ColumnDef,
+  PaginationState,
+  Row,
+  SortingState,
+  Table as TanstackTable,
+} from '@tanstack/react-table';
 import { Tag01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
@@ -38,8 +44,8 @@ interface ProductPricingTableProps {
    * `onOpenPanel`. Rows are only expandable on desktop.
    */
   isMobile: boolean;
-  /** Search + facet + margin filter row, mounted in the toolbar zone. */
-  toolbar?: React.ReactNode;
+  /** Search + advanced-filter row, mounted in the toolbar zone (receives the table instance). */
+  toolbar?: (table: TanstackTable<ProductPricingItem>) => React.ReactNode;
   /** First-run empty (store connected, no approved products). */
   empty?: React.ReactNode;
   /** No-results empty (sort/filter narrowed the set to zero). */
@@ -331,7 +337,7 @@ export function ProductPricingTable({
       columns={columns}
       data={rows}
       loading={loading}
-      toolbar={toolbar !== undefined ? () => toolbar : undefined}
+      toolbar={toolbar}
       empty={empty}
       noResultsState={noResultsState}
       hasActiveFilters={hasActiveFilters}

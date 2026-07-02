@@ -229,8 +229,6 @@ export function CommissionTariffDetailClient({
       brands={brands}
       filters={filters}
       onFiltersChange={(next) => setFilters((prev) => ({ ...prev, ...next }))}
-      onClearFilters={() => setFilters(EMPTY_FILTERS)}
-      hasActiveFilters={hasActiveFilters}
       onBestAll={() => applyBulk(selectBestForAll)}
       onProfitableOnly={() => applyBulk(selectProfitableOnly)}
       onTargetMargin={onTargetMargin}
