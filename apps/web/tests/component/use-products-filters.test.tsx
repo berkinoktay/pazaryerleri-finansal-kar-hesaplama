@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { NuqsAdapter } from 'nuqs/adapters/react';
+import { NuqsTestingAdapter } from 'nuqs/adapters/testing';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -43,9 +43,13 @@ function FilterHarness(): React.ReactElement {
 
 function renderHarness() {
   return render(
-    <NuqsAdapter>
+    // Testing adapter: synchronous URL-state application with throttling off.
+    // The plain react adapter queues history updates on a timer — on a slow
+    // runner the flush can fire AFTER environment teardown and crash the run
+    // with "location is not defined" (exactly what CI hit).
+    <NuqsTestingAdapter rateLimitFactor={0}>
       <FilterHarness />
-    </NuqsAdapter>,
+    </NuqsTestingAdapter>,
   );
 }
 
