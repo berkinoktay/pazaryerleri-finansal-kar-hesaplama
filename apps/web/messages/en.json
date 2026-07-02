@@ -2013,14 +2013,16 @@
       "filters": {
         "searchPlaceholder": "Search costs…",
         "showArchived": "Show archived",
-        "typeLabel": "Type"
+        "typeLabel": "Type",
+        "groupLabel": "Filters"
       },
       "actions": {
         "edit": "Edit",
         "archive": "Archive",
         "restore": "Restore"
       },
-      "archived": "Archived"
+      "archived": "Archived",
+      "loadMore": "Load more"
     },
     "types": {
       "COGS": "COGS",

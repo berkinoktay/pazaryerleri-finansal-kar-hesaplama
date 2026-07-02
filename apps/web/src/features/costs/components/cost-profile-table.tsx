@@ -9,7 +9,11 @@ import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { createRowActionsColumn } from '@/components/patterns/data-table-row-actions';
 import { TableNoResultsState } from '@/components/patterns/data-table-states';
-import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
+import {
+  DataTableToolbar,
+  type DataTableToolbarAdvancedFilter,
+} from '@/components/patterns/data-table-toolbar';
+import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 import { useIsMounted } from '@/lib/use-is-mounted';
 
@@ -23,18 +27,20 @@ export interface CostProfileTableProps {
   data: CostProfile[];
   loading?: boolean;
   empty?: React.ReactNode;
-  /** Pagination state for cursor-based nav (the list endpoint uses cursor, not offset). */
+  /** Cursor pagination: renders the load-more footer while more pages exist. */
   hasMore?: boolean;
   onLoadMore?: () => void;
+  loadingMore?: boolean;
 
-  // Filter state — URL-driven
+  // Filter state — client search + the advanced-filter chip config
+  // (type single-select + archived flag). The parent PRE-FILTERS `data` by
+  // the search text (client-side, campaigns-list pattern) and owns the
+  // combined active-filter signal + full clear.
   q: string;
-  showArchived: boolean;
-  typeFilter: string;
-
   onSearchChange: (next: string) => void;
-  onShowArchivedChange: (next: boolean) => void;
-  onTypeFilterChange: (next: string) => void;
+  advancedFilter: DataTableToolbarAdvancedFilter;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
 
   // Row actions
   onEditClick: (profile: CostProfile) => void;
@@ -182,21 +188,53 @@ export function CostProfileTable(props: CostProfileTableProps): React.ReactEleme
       data={props.data}
       loading={props.loading}
       empty={props.empty}
-      // `empty` is the genuine first-run body (zero profiles, no search). When a
-      // client-side name search excludes everything the table resolves to the
-      // no-results state instead — without this explicit slot `empty` would fall
-      // through and wrongly show the "create first profile" CTA over a search miss.
-      noResultsState={<TableNoResultsState onClearFilters={() => props.onSearchChange('')} />}
+      // hasActiveFilters covers BOTH the client search and the server-side
+      // type/archived chips (invisible to columnFilters) — a filtered-to-zero
+      // view must resolve to the no-results state, never the first-run
+      // "create your first profile" CTA. The explicit noResultsState is
+      // REQUIRED here: the body ladder is `noResultsState ?? empty ?? default`,
+      // so with only `empty` set the create-CTA would win over no-results.
+      hasActiveFilters={props.hasActiveFilters}
+      onClearFilters={props.onClearFilters}
+      noResultsState={<TableNoResultsState onClearFilters={props.onClearFilters} />}
       getRowId={(row) => row.id}
-      columnFilters={props.q.length > 0 ? [{ id: 'name', value: props.q }] : []}
+      // Controlled pagination with a page as large as the loaded set: flips
+      // TanStack to manualPagination so it renders EVERY row the cursor pages
+      // have accumulated. Uncontrolled mode silently sliced to its internal
+      // pageSize of 10 — even the first server page (25) was cut short.
+      paginationState={{ pageIndex: 0, pageSize: Math.max(props.data.length, 1) }}
+      onPaginationChange={() => undefined}
+      pageCount={1}
+      rowCount={props.data.length}
       toolbar={(table) => (
         <DataTableToolbar
           table={table}
           searchValue={props.q}
           onSearchChange={props.onSearchChange}
           searchPlaceholder={t('table.filters.searchPlaceholder')}
+          advancedFilter={props.advancedFilter}
         />
       )}
+      // Cursor-based load-more footer. Consuming hasMore/onLoadMore here fixes
+      // the unreachable-second-page bug: the props existed but nothing rendered
+      // them, so profiles beyond the first cursor page could never be shown.
+      pagination={
+        props.hasMore === true
+          ? () => (
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={props.onLoadMore}
+                  disabled={props.loadingMore === true}
+                >
+                  {t('table.loadMore')}
+                </Button>
+              </div>
+            )
+          : undefined
+      }
     />
   );
 }

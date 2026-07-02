@@ -15,9 +15,7 @@ import { RETURNS_PER_PAGE_OPTIONS, type ClaimStatusTabValue } from '../lib/retur
 import { ClaimScopeBadge } from './claim-scope-badge';
 import { ClaimStatusBadge } from './claim-status-badge';
 import { ReturnsStatusTabs } from './returns-status-tabs';
-import { ReturnsToolbar } from './returns-toolbar';
-
-type ReturnsToolbarProps = React.ComponentProps<typeof ReturnsToolbar>;
+import { ReturnsToolbar, type ReturnsToolbarChange } from './returns-toolbar';
 
 export interface ReturnsTableProps {
   rows: ClaimListItem[];
@@ -37,7 +35,7 @@ export interface ReturnsTableProps {
   counts: { all: number; open: number; resolved: number };
   tabsLoading?: boolean;
   onStatusChange: (next: ClaimStatusTabValue) => void;
-  onFiltersChange: ReturnsToolbarProps['onChange'];
+  onFiltersChange: (next: ReturnsToolbarChange) => void;
   onPaginationChange: (next: { page?: number; perPage?: number }) => void;
 }
 
@@ -182,8 +180,9 @@ export function ReturnsTable({
           description={tPage('empty.noReturns.description')}
         />
       }
-      toolbar={() => (
+      toolbar={(table) => (
         <ReturnsToolbar
+          table={table}
           q={filters.q}
           from={filters.from}
           to={filters.to}
