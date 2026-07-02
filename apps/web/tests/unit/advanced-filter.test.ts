@@ -4,8 +4,12 @@ import {
   filterRowsToProductParams,
   PRODUCT_FILTER_FIELDS,
 } from '@/features/products/lib/products-filter-fields';
+import { parseProductFilterRows } from '@/features/products/lib/products-filter-parsers';
 import {
   convertRowValue,
+  DATATYPE_OPERATORS,
+  defaultOperatorFor,
+  emptyValueFor,
   isFilterRowComplete,
   parseFilterRows,
   rangeBounds,
@@ -49,6 +53,22 @@ describe('rangeBounds', () => {
 });
 
 describe('filterRowsToProductParams', () => {
+  it('maps a status enumSingle row to the single-value status param', () => {
+    expect(
+      filterRowsToProductParams([
+        row({ field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value: 'archived' }),
+      ]),
+    ).toEqual({ status: 'archived' });
+  });
+
+  it('drops a status row whose value is not a known variant status', () => {
+    expect(
+      filterRowsToProductParams([
+        row({ field: PRODUCT_FILTER_FIELDS.status, operator: 'eq', value: 'bogus' }),
+      ]),
+    ).toEqual({});
+  });
+
   it('maps a salePrice between to min+max decimal strings', () => {
     expect(
       filterRowsToProductParams([
@@ -165,6 +185,38 @@ describe('isFilterRowComplete', () => {
     expect(
       isFilterRowComplete(row({ field: 'd', operator: 'gte', value: '2026-01-01' }), 'date'),
     ).toBe(true);
+  });
+
+  it('single-select is complete only with a non-empty scalar', () => {
+    expect(
+      isFilterRowComplete(row({ field: 'f', operator: 'eq', value: 'archived' }), 'enumSingle'),
+    ).toBe(true);
+    expect(isFilterRowComplete(row({ field: 'f', operator: 'eq', value: '' }), 'enumSingle')).toBe(
+      false,
+    );
+  });
+});
+
+describe('parseProductFilterRows (products URL reviver)', () => {
+  it('drops a status row with an enum-invalid value so the chip cannot lie', () => {
+    expect(
+      parseProductFilterRows([
+        { id: 'a', field: 'status', operator: 'eq', value: 'Archived' },
+        { id: 'b', field: 'status', operator: 'eq', value: 'archived' },
+        { id: 'c', field: 'brand', operator: 'in', value: ['2032'] },
+      ]),
+    ).toEqual([
+      { id: 'b', field: 'status', operator: 'eq', value: 'archived' },
+      { id: 'c', field: 'brand', operator: 'in', value: ['2032'] },
+    ]);
+  });
+});
+
+describe('enumSingle dataType contract', () => {
+  it('offers only the eq operator and starts from an empty scalar', () => {
+    expect(DATATYPE_OPERATORS.enumSingle).toEqual(['eq']);
+    expect(defaultOperatorFor('enumSingle')).toBe('eq');
+    expect(emptyValueFor('enumSingle')).toBe('');
   });
 });
 

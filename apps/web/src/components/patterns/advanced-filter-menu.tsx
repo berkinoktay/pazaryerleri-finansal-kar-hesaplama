@@ -1,9 +1,10 @@
 'use client';
 
-import { Cancel01Icon, PlusSignIcon, Tick02Icon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
+import { PlusSignIcon, Tick02Icon } from 'hugeicons-react';
+import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { FilterChipGroup, type FilterChip } from '@/components/patterns/filter-chip-group';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -37,8 +38,10 @@ import { cn } from '@/lib/utils';
 
 /**
  * Generic Advanced Filtering surface (Option A). Given a per-table catalog of
- * FilterFieldDef[], it renders a `+ Filtre ekle` menu and one interactive pill
- * per applied filter. The interaction follows the approved mockup:
+ * FilterFieldDef[], it renders a `+ Filtre ekle` menu and one interactive chip
+ * per applied filter. Chip rendering is delegated to `FilterChipGroup` (the
+ * single chip surface); this file owns the add menu and the value editors.
+ * The interaction follows the approved mockup:
  *
  *  - The add menu is a TWO-CARD popover: a field list on the left, and — the
  *    moment a field is picked — the value editor opens as a SEPARATE card right
@@ -82,48 +85,150 @@ export interface AdvancedFilterMenuProps {
   onApply: (rows: FilterRow[]) => void;
 }
 
+/**
+ * Standalone composition: applied chips + the add button in one flex row.
+ * Inside a DataTable, prefer the toolbar's `advancedFilter` prop, which
+ * mounts `AdvancedFilterAddButton` in the control row and
+ * `AdvancedFilterChips` as its own row beneath it.
+ */
 export function AdvancedFilterMenu({
   fields,
   value,
   onApply,
 }: AdvancedFilterMenuProps): React.ReactElement {
+  return (
+    <div className="gap-xs flex flex-wrap items-center">
+      <AdvancedFilterChips fields={fields} value={value} onApply={onApply} />
+      <AdvancedFilterAddButton fields={fields} value={value} onApply={onApply} />
+    </div>
+  );
+}
+
+// Add (append) or replace a row by id, producing the full next set.
+function withRow(value: FilterRow[], row: FilterRow): FilterRow[] {
+  const exists = value.some((existing) => existing.id === row.id);
+  return exists
+    ? value.map((existing) => (existing.id === row.id ? row : existing))
+    : [...value, row];
+}
+
+/** The `+ Filtre ekle` trigger alone — the toolbar mounts this in its control row. */
+export function AdvancedFilterAddButton({
+  fields,
+  value,
+  onApply,
+}: AdvancedFilterMenuProps): React.ReactElement {
+  const usedKeys = new Set(value.map((row) => row.field));
+  return (
+    <AddFilterButton
+      fields={fields}
+      usedKeys={usedKeys}
+      onCommit={(row) => onApply(withRow(value, row))}
+    />
+  );
+}
+
+export interface AdvancedFilterChipsProps extends AdvancedFilterMenuProps {
+  /** Renders the "Clear all" link at the end of the chip row. */
+  onClearAll?: () => void;
+  className?: string;
+}
+
+/**
+ * Applied filters as a FilterChipGroup row — the single chip surface.
+ * Each non-flag chip is click-to-edit: the body opens the same value
+ * editor card as the add flow; ✕ removes the row. Editing state lives
+ * here (one editor open at a time), the committed value stays with the
+ * caller (URL via nuqs).
+ */
+export function AdvancedFilterChips({
+  fields,
+  value,
+  onApply,
+  onClearAll,
+  className,
+}: AdvancedFilterChipsProps): React.ReactElement | null {
+  const t = useTranslations('common.advancedFilter');
+  const formatter = useFormatter();
   const fieldByKey = React.useMemo(
     () => new Map(fields.map((field) => [field.key, field])),
     [fields],
   );
-  const usedKeys = new Set(value.map((row) => row.field));
 
-  // Add (append) or replace a row by id, then commit the whole set.
-  function commitRow(row: FilterRow): void {
-    const exists = value.some((existing) => existing.id === row.id);
-    onApply(
-      exists ? value.map((existing) => (existing.id === row.id ? row : existing)) : [...value, row],
-    );
+  // One chip edits at a time. The draft buffers the in-progress edit so
+  // İptal / Escape discards it; it re-seeds from the committed row on open.
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [draft, setDraft] = React.useState<FilterRow | null>(null);
+
+  function closeEditor(): void {
+    setEditingId(null);
+    setDraft(null);
   }
 
-  function removeRow(id: string): void {
-    onApply(value.filter((row) => row.id !== id));
+  // Reconcile: if the edited row left `value` WITHOUT a close event (e.g.
+  // browser Back on a page whose filters are URL-owned via nuqs), Radix never
+  // fires onOpenChange(false) — the chip just unmounts — and editingId/draft
+  // would leak. When the same row id later returns (browser Forward), the
+  // editor would spontaneously reopen carrying the abandoned draft, and Uygula
+  // would commit it. Drop the leaked state during render (React's "adjusting
+  // state when props change" pattern — an effect would flash the open editor
+  // for a frame first).
+  if (editingId !== null && !value.some((row) => row.id === editingId)) {
+    setEditingId(null);
+    setDraft(null);
   }
 
-  return (
-    <div className="gap-xs flex flex-wrap items-center">
-      {value.map((row) => {
-        const def = fieldByKey.get(row.field);
-        if (def === undefined) return null;
-        return (
-          <FilterChip
-            key={row.id}
-            field={def}
-            row={row}
-            onCommit={commitRow}
-            onRemove={() => removeRow(row.id)}
-          />
-        );
-      })}
+  const chips: FilterChip[] = value.flatMap((row) => {
+    const field = fieldByKey.get(row.field);
+    if (field === undefined) return [];
+    const isFlag = field.dataType === 'flag';
+    const editedRow = editingId === row.id && draft !== null ? draft : row;
 
-      <AddFilterButton fields={fields} usedKeys={usedKeys} onCommit={commitRow} />
-    </div>
-  );
+    return [
+      {
+        id: row.id,
+        group: isFlag ? undefined : field.label,
+        label: isFlag ? field.label : chipSummary(field, row, t, formatter),
+        onRemove: () => onApply(value.filter((existing) => existing.id !== row.id)),
+        removeLabel: t('removeFilter'),
+        // Flags carry no value — nothing to edit, the chip stays static.
+        editor: isFlag
+          ? undefined
+          : {
+              open: editingId === row.id,
+              onOpenChange: (next: boolean) => {
+                if (next) {
+                  setDraft(row);
+                  setEditingId(row.id);
+                } else {
+                  closeEditor();
+                }
+              },
+              // Chromeless shell + the shared EDITOR_CARD — identical to the
+              // add flow, so the chip-edit popover matches it pixel-for-pixel.
+              contentClassName: 'w-auto border-0 bg-transparent p-0 shadow-none',
+              content: (
+                <div className={EDITOR_CARD}>
+                  <FilterEditor
+                    field={field}
+                    row={editedRow}
+                    onChange={(patch) =>
+                      setDraft((current) => (current !== null ? { ...current, ...patch } : current))
+                    }
+                    onCommit={() => {
+                      if (draft !== null) onApply(withRow(value, draft));
+                      closeEditor();
+                    }}
+                    onCancel={closeEditor}
+                  />
+                </div>
+              ),
+            },
+      },
+    ];
+  });
+
+  return <FilterChipGroup chips={chips} onClearAll={onClearAll} className={className} />;
 }
 
 // ─── Add-filter: field list + adjacent value-editor card (two cards) ─────────
@@ -229,102 +334,6 @@ function AddFilterButton({ fields, usedKeys, onCommit }: AddFilterButtonProps): 
   );
 }
 
-// ─── Interactive applied chip (Badge shell + clickable body + remove) ────────
-
-interface FilterChipProps {
-  field: FilterFieldDef;
-  row: FilterRow;
-  onCommit: (row: FilterRow) => void;
-  onRemove: () => void;
-}
-
-function FilterChip({ field, row, onCommit, onRemove }: FilterChipProps): React.ReactElement {
-  const t = useTranslations('common.advancedFilter');
-  const isFlag = field.dataType === 'flag';
-
-  // Local draft so İptal / closing the popover discards an in-progress edit;
-  // re-seeded from the committed row each time the editor opens.
-  const [open, setOpen] = React.useState(false);
-  const [draft, setDraft] = React.useState<FilterRow>(row);
-
-  const removeButton = (
-    <button
-      type="button"
-      onClick={onRemove}
-      aria-label={t('removeFilter')}
-      className={cn(
-        'flex h-full w-6 shrink-0 cursor-pointer items-center justify-center',
-        'text-muted-foreground hover:text-foreground hover:bg-muted',
-        'duration-fast transition-colors',
-        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
-        '[&_svg]:size-icon-xs',
-      )}
-    >
-      <Cancel01Icon aria-hidden />
-    </button>
-  );
-
-  // Flags have no value — a static labelled pill with just the remove control.
-  if (isFlag) {
-    return (
-      <span className="bg-primary-soft text-primary-soft-foreground inline-flex h-8 items-center overflow-hidden rounded-md text-xs font-medium">
-        <span className="px-xs flex h-full items-center">{field.label}</span>
-        <span className="bg-border h-full w-px shrink-0" aria-hidden />
-        {removeButton}
-      </span>
-    );
-  }
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        if (next) setDraft(row);
-        setOpen(next);
-      }}
-    >
-      {/* Filled surface-subtle pill with a hairline border (the approved mockup
-          chip): muted key + emphasized value in the clickable body, a divider,
-          then the remove control — each hit area carries its own hover. A plain
-          span rather than Badge: an interactive two-hit-area chip (clickable
-          body + a separate remove control) is a composite, not a display Badge. */}
-      <span className="border-border bg-surface-subtle inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              'gap-2xs px-xs flex h-full cursor-pointer items-center',
-              'duration-fast hover:bg-muted transition-colors',
-              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
-            )}
-          >
-            <span className="text-muted-foreground">{field.label}:</span>
-            <span className="text-foreground font-medium">{chipSummary(field, row, t)}</span>
-          </button>
-        </PopoverTrigger>
-        <span className="bg-border h-full w-px shrink-0" aria-hidden />
-        {removeButton}
-      </span>
-      {/* Chromeless shell + the shared EDITOR_CARD — identical to the add flow,
-          so the chip-edit popover matches it pixel-for-pixel. */}
-      <PopoverContent className="w-auto border-0 bg-transparent p-0 shadow-none" align="start">
-        <div className={EDITOR_CARD}>
-          <FilterEditor
-            field={field}
-            row={draft}
-            onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
-            onCommit={() => {
-              onCommit(draft);
-              setOpen(false);
-            }}
-            onCancel={() => setOpen(false)}
-          />
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 // ─── Editor: header (label + operator) · value body · İptal / Uygula footer ──
 // Uniform p-sm padding on every zone so the card reads as one tidy, roomy stack.
 
@@ -345,9 +354,10 @@ function FilterEditor({
 }: FilterEditorProps): React.ReactElement {
   const t = useTranslations('common.advancedFilter');
   const isEnum = field.dataType === 'enumMulti' || field.dataType === 'enumFixed';
+  const isEnumSingle = field.dataType === 'enumSingle';
   const isRange =
     field.dataType === 'money' || field.dataType === 'number' || field.dataType === 'percent';
-  const showOperator = !isEnum && field.operators.length > 1;
+  const showOperator = !isEnum && !isEnumSingle && field.operators.length > 1;
   const complete = isFilterRowComplete(row, field.dataType);
 
   return (
@@ -379,6 +389,8 @@ function FilterEditor({
 
       {isEnum ? (
         <MultiSelectEditor field={field} row={row} onChange={onChange} />
+      ) : isEnumSingle ? (
+        <SingleSelectEditor field={field} row={row} onChange={onChange} />
       ) : (
         <div className="p-sm gap-xs flex flex-col">
           <RangeOrTextEditor field={field} row={row} onChange={onChange} />
@@ -453,6 +465,50 @@ function RangeOrTextEditor({ field, row, onChange }: ValueEditorProps): React.Re
   );
 }
 
+/**
+ * Radio-semantics counterpart of MultiSelectEditor for `enumSingle` fields —
+ * picking an option REPLACES the previous one (the backend param accepts a
+ * single value, e.g. product status). Picking the current option clears it.
+ */
+function SingleSelectEditor({ field, row, onChange }: ValueEditorProps): React.ReactElement {
+  const t = useTranslations('common.advancedFilter');
+  const current = asString(row.value);
+  const options = field.enumValues ?? [];
+
+  return (
+    <Command>
+      <CommandInput placeholder={t('selectValues')} wrapperClassName={SEARCH_WRAPPER} />
+      <CommandList>
+        <CommandEmpty>{t('noValues')}</CommandEmpty>
+        <CommandGroup>
+          {options.map((option) => {
+            const checked = current === option.value;
+            return (
+              <CommandItem
+                key={option.value}
+                value={option.label}
+                onSelect={() => onChange({ value: checked ? '' : option.value })}
+                aria-selected={checked}
+                className="cursor-pointer"
+              >
+                <span
+                  className={cn(
+                    'border-border mr-xs flex size-4 shrink-0 items-center justify-center rounded-full border',
+                    checked && 'border-primary bg-primary text-primary-foreground',
+                  )}
+                >
+                  {checked ? <Tick02Icon className="size-3" aria-hidden /> : null}
+                </span>
+                <span className="flex-1">{option.label}</span>
+              </CommandItem>
+            );
+          })}
+        </CommandGroup>
+      </CommandList>
+    </Command>
+  );
+}
+
 function MultiSelectEditor({ field, row, onChange }: ValueEditorProps): React.ReactElement {
   const t = useTranslations('common.advancedFilter');
   const selected = new Set(asArray(row.value));
@@ -523,10 +579,29 @@ function asPair(value: FilterRow['value']): [string, string] {
   return [value, ''];
 }
 
+/**
+ * A numeric bound rendered with its unit, matching the app-wide display
+ * conventions: money through the shared `currency` format preset (`₺250,00` —
+ * the same output as the `Currency` cells in the table below the chips, never
+ * a hand-built `250 ₺`), percent with the Turkish prefix (`%10`). A bound the
+ * user is still typing (not yet numeric) falls back to the raw text.
+ */
+function formatBound(
+  bound: string,
+  unit: FilterFieldDef['unit'],
+  formatter: ReturnType<typeof useFormatter>,
+): string {
+  if (unit === undefined) return bound;
+  if (unit === '%') return `%${bound}`;
+  const numeric = Number(bound);
+  return Number.isNaN(numeric) ? `${bound} ${unit}` : formatter.number(numeric, 'currency');
+}
+
 function chipSummary(
   field: FilterFieldDef,
   row: FilterRow,
   t: ReturnType<typeof useTranslations<'common.advancedFilter'>>,
+  formatter: ReturnType<typeof useFormatter>,
 ): string {
   if (!isFilterRowComplete(row, field.dataType)) return t('chooseValue');
 
@@ -540,21 +615,25 @@ function chipSummary(
     return t('valuesSelected', { count: values.length });
   }
 
-  const unit = field.unit !== undefined ? ` ${field.unit}` : '';
+  if (field.dataType === 'enumSingle') {
+    const value = asString(row.value);
+    return field.enumValues?.find((option) => option.value === value)?.label ?? value;
+  }
+
   const [min, max] = rangeBounds(row);
   // The unit (₺ / %) rides on each numeric bound so the value the seller typed
   // always carries its symbol; an open bound shows the infinity glyph instead.
-  const lo = min !== undefined ? `${min}${unit}` : '−∞';
-  const hi = max !== undefined ? `${max}${unit}` : '∞';
+  const lo = min !== undefined ? formatBound(min, field.unit, formatter) : '−∞';
+  const hi = max !== undefined ? formatBound(max, field.unit, formatter) : '∞';
   switch (row.operator) {
     case 'between':
       return `${lo} – ${hi}`;
     case 'gte':
-      return `≥ ${min ?? ''}${unit}`;
+      return `≥ ${min !== undefined ? formatBound(min, field.unit, formatter) : ''}`;
     case 'lte':
-      return `≤ ${max ?? ''}${unit}`;
+      return `≤ ${max !== undefined ? formatBound(max, field.unit, formatter) : ''}`;
     case 'eq':
-      return `= ${min ?? ''}${unit}`;
+      return `= ${min !== undefined ? formatBound(min, field.unit, formatter) : ''}`;
     default:
       return asString(row.value);
   }

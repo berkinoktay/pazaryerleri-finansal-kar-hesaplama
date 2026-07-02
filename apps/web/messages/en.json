@@ -172,6 +172,11 @@
     "networkStatus": {
       "offline": "No internet connection. Your changes may not be saved."
     },
+    "filterChips": {
+      "appliedFilters": "Applied filters",
+      "clearAll": "Clear all",
+      "remove": "Remove filter"
+    },
     "errors": {
       "UNAUTHENTICATED": "Your session expired. Please sign in again.",
       "FORBIDDEN": "You don't have permission for this action.",
@@ -1791,18 +1796,13 @@
         "stock": "Stock",
         "vatRate": "VAT rate",
         "brand": "Brand",
-        "category": "Category"
+        "category": "Category",
+        "status": "Status"
       },
       "vatRateOption": "{rate}%"
     },
     "filters": {
       "searchPlaceholder": "Search by product name, model code, stock code, barcode…",
-      "status": "Status",
-      "brand": "Brand",
-      "category": "Category",
-      "allBrands": "All brands",
-      "allCategories": "All categories",
-      "clear": "Clear filters",
       "statusOptions": {
         "onSale": "On sale",
         "archived": "Archived",
@@ -1814,27 +1814,6 @@
       "all": "All",
       "missingCost": "Missing cost",
       "missingVat": "Missing VAT rate"
-    },
-    "facets": {
-      "brand": {
-        "trigger": "+ Brand",
-        "active": "Brand: {name}",
-        "clear": "Clear brand",
-        "search": "Search brand…",
-        "noResults": "No results"
-      },
-      "category": {
-        "trigger": "+ Category",
-        "active": "Category: {name}",
-        "clear": "Clear category",
-        "search": "Search category…",
-        "noResults": "No results"
-      },
-      "status": {
-        "trigger": "+ Status",
-        "active": "Status: {label}",
-        "clear": "Clear status"
-      }
     },
     "columns": {
       "image": "Image",
@@ -1905,7 +1884,8 @@
       "totalContext": "Approved · synced",
       "missingCost": "Missing cost",
       "missingVat": "Missing VAT rate",
-      "ofCatalog": "{pct}% of catalog"
+      "ofCatalog": "Share of catalog: {pct}%",
+      "noneMissing": "None missing"
     },
     "missingCostBanner": {
       "title": "{count} products missing cost — profit cannot be calculated.",
@@ -2332,8 +2312,10 @@
       },
       "banner": {
         "title": "{count} product can't compute estimated profit",
-        "breakdown": "missing desi ({noDesi}) · no carrier ({noCarrier}) · high desi ({overflow})",
-        "filterCta": "Apply filter"
+        "filterCta": "Filter affected products",
+        "reasonNoDesi": "missing desi ({count})",
+        "reasonNoCarrier": "no carrier ({count})",
+        "reasonOverflow": "high desi ({count})"
       }
     }
   },

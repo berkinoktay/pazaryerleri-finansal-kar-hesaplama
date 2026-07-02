@@ -4,7 +4,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DataTableToolbar } from '@/components/patterns/data-table-toolbar';
+import {
+  DataTableToolbar,
+  type DataTableToolbarAdvancedFilter,
+} from '@/components/patterns/data-table-toolbar';
+import type { FilterFieldDef, FilterRow } from '@/lib/advanced-filter';
 
 import trMessages from '../../messages/tr.json';
 import { FORMATS } from '../../src/i18n/formats';
@@ -65,6 +69,92 @@ describe('DataTableToolbar controlled-search mode', () => {
     const { user } = renderWithIntl(<Harness searchValue="" onSearchChange={onSearchChange} />);
     await user.type(screen.getByPlaceholderText('Ara…'), 'a');
     expect(onSearchChange).toHaveBeenCalledWith('a');
+  });
+});
+
+describe('DataTableToolbar advancedFilter mode', () => {
+  const FIELDS: FilterFieldDef[] = [
+    {
+      key: 'salePrice',
+      label: 'Satış fiyatı',
+      groupLabel: 'Aralık',
+      dataType: 'money',
+      operators: ['between', 'gte', 'lte', 'eq'],
+      unit: '₺',
+    },
+    {
+      key: 'missingCost',
+      label: 'Maliyeti boş',
+      groupLabel: 'Bayrak',
+      dataType: 'flag',
+      operators: ['isTrue'],
+    },
+  ];
+  const PRICE_ROW: FilterRow = {
+    id: 'r-price',
+    field: 'salePrice',
+    operator: 'between',
+    value: ['20', ''],
+  };
+  const FLAG_ROW: FilterRow = { id: 'r-flag', field: 'missingCost', operator: 'isTrue', value: '' };
+
+  function AdvancedHarness({
+    value,
+    onApply,
+  }: Pick<DataTableToolbarAdvancedFilter, 'value' | 'onApply'>): React.ReactElement {
+    const table = useReactTable({
+      data: DATA,
+      columns: COLUMNS,
+      getCoreRowModel: getCoreRowModel(),
+    });
+    return <DataTableToolbar table={table} advancedFilter={{ fields: FIELDS, value, onApply }} />;
+  }
+
+  it('mounts the add-filter button in the control row', () => {
+    renderWithIntl(<AdvancedHarness value={[]} onApply={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /Filtre ekle/ })).toBeInTheDocument();
+  });
+
+  it('renders no chip row while no filter is applied', () => {
+    renderWithIntl(<AdvancedHarness value={[]} onApply={vi.fn()} />);
+    expect(screen.queryByRole('group', { name: 'Uygulanan filtreler' })).not.toBeInTheDocument();
+  });
+
+  it('derives the auto chip row from the applied rows', () => {
+    renderWithIntl(<AdvancedHarness value={[PRICE_ROW, FLAG_ROW]} onApply={vi.fn()} />);
+    const group = screen.getByRole('group', { name: 'Uygulanan filtreler' });
+    expect(within(group).getByText('Satış fiyatı:')).toBeInTheDocument();
+    expect(within(group).getByText('Maliyeti boş')).toBeInTheDocument();
+  });
+
+  it('removing a chip commits the remaining set', async () => {
+    const onApply = vi.fn();
+    const { user } = renderWithIntl(
+      <AdvancedHarness value={[PRICE_ROW, FLAG_ROW]} onApply={onApply} />,
+    );
+    const removeButtons = screen.getAllByRole('button', { name: 'Filtreyi kaldır' });
+    await user.click(removeButtons[0]!);
+    expect(onApply).toHaveBeenCalledWith([FLAG_ROW]);
+  });
+
+  it('the clear-all link commits an empty set', async () => {
+    const onApply = vi.fn();
+    const { user } = renderWithIntl(
+      <AdvancedHarness value={[PRICE_ROW, FLAG_ROW]} onApply={onApply} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Tümünü temizle' }));
+    expect(onApply).toHaveBeenCalledWith([]);
+  });
+
+  it('a chip body opens the editor and Uygula commits the edited row', async () => {
+    const onApply = vi.fn();
+    const { user } = renderWithIntl(<AdvancedHarness value={[PRICE_ROW]} onApply={onApply} />);
+    await user.click(screen.getByRole('button', { name: /Satış fiyatı/ }));
+    await user.type(await screen.findByRole('textbox', { name: 'En çok' }), '400');
+    await user.click(screen.getByRole('button', { name: 'Uygula' }));
+    expect(onApply).toHaveBeenCalledWith([
+      { id: 'r-price', field: 'salePrice', operator: 'between', value: ['20', '400'] },
+    ]);
   });
 });
 

@@ -9,7 +9,6 @@ import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { AdvancedFilterMenu } from '@/components/patterns/advanced-filter-menu';
 import type { FilterFieldDef, FilterRow } from '@/lib/advanced-filter';
 import { CopyableValue } from '@/components/patterns/copyable-value';
 import { Currency } from '@/components/patterns/currency';
@@ -32,7 +31,6 @@ import {
 import {
   type ProductListSortExtended,
   type ProductOverrideMissing,
-  type ProductVariantStatus,
 } from '../lib/products-filter-parsers';
 
 import { ColorAttribute } from './color-attribute';
@@ -45,7 +43,6 @@ import { ParentRowCostCell } from './parent-row-cost-cell';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
 import type { ProductRow } from './products-bulk-cost-action-bar.types';
-import { ProductsFacetChips } from './products-facet-chips';
 import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
 
 function projectRows(products: ProductWithVariants[]): ProductRow[] {
@@ -69,15 +66,10 @@ interface ProductsTableProps {
   pagination?: { page: number; perPage: number; total: number; totalPages: number };
 
   // URL-driven filter state — passed in so the toolbar's controlled-search
-  // input + the facet chips stay in sync with the URL.
+  // input stays in sync with the URL.
   q: string;
-  status: ProductVariantStatus;
-  brandId: string;
-  categoryId: string;
   overrideMissing: ProductOverrideMissing | null;
   sort: ProductListSortExtended;
-
-  facets?: ProductFacetsResponse;
 
   // Override-state tab strip props — the strip lives INSIDE the DataTable
   // shell now (top zone, above the toolbar), so the table owns rendering
@@ -87,17 +79,15 @@ interface ProductsTableProps {
   facetsLoading?: boolean;
   onOverrideTabChange: (next: ProductsOverrideTab) => void;
 
-  // Advanced Filtering (PR-F1) — the per-table catalog, the committed
-  // FilterRow[], and the Apply commit handler. Rendered as the `+ Filtre ekle`
-  // menu in the toolbar alongside the quick facet chips.
+  // Advanced Filtering — the per-table catalog, the committed FilterRow[],
+  // and the Apply commit handler. The toolbar's `advancedFilter` config is
+  // the SINGLE filter system (status/brand/category included); the old quick
+  // facet chips were retired.
   filterFields: FilterFieldDef[];
   filterRows: FilterRow[];
   onFiltersApply: (rows: FilterRow[]) => void;
 
   onSearchChange: (next: string) => void;
-  onStatusChange: (next: ProductVariantStatus) => void;
-  onBrandChange: (next: string) => void;
-  onCategoryChange: (next: string) => void;
   onSortChange: (next: ProductListSortExtended) => void;
   onPageChange: (next: number) => void;
   onPerPageChange: (next: number) => void;
@@ -563,33 +553,11 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           searchValue={props.q}
           onSearchChange={props.onSearchChange}
           searchPlaceholder={t('filters.searchPlaceholder')}
-          facets={
-            <>
-              <ProductsFacetChips
-                brand={props.brandId}
-                category={props.categoryId}
-                status={props.status}
-                brandOptions={(props.facets?.brands ?? []).map((b) => ({
-                  value: b.id,
-                  label: b.name,
-                  count: b.count,
-                }))}
-                categoryOptions={(props.facets?.categories ?? []).map((c) => ({
-                  value: c.id,
-                  label: c.name,
-                  count: c.count,
-                }))}
-                onBrandChange={props.onBrandChange}
-                onCategoryChange={props.onCategoryChange}
-                onStatusChange={props.onStatusChange}
-              />
-              <AdvancedFilterMenu
-                fields={props.filterFields}
-                value={props.filterRows}
-                onApply={props.onFiltersApply}
-              />
-            </>
-          }
+          advancedFilter={{
+            fields: props.filterFields,
+            value: props.filterRows,
+            onApply: props.onFiltersApply,
+          }}
         />
       )}
       pagination={(table) => <DataTablePagination table={table} />}

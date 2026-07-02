@@ -19,15 +19,21 @@ function FilterHarness(): React.ReactElement {
   const { filters, setFilters } = useProductsFilters();
   return (
     <div>
-      <p data-testid="status">{filters.status}</p>
-      <p data-testid="brand">{filters.brandId}</p>
+      <p data-testid="filters">{filters.filters.map((row) => row.field).join(',')}</p>
       <p data-testid="page">{filters.page.toString()}</p>
       <p data-testid="perPage">{filters.perPage.toString()}</p>
       <p data-testid="overrideMissing">{filters.overrideMissing ?? 'null'}</p>
       <p data-testid="sort">{filters.sort}</p>
       <button onClick={() => void setFilters({ page: 4 })}>jump-to-4</button>
-      <button onClick={() => void setFilters({ status: 'archived' })}>archive</button>
-      <button onClick={() => void setFilters({ brandId: '2032' })}>filter-modline</button>
+      <button
+        onClick={() =>
+          void setFilters({
+            filters: [{ id: 'r-status', field: 'status', operator: 'eq', value: 'archived' }],
+          })
+        }
+      >
+        add-status-chip
+      </button>
       <button onClick={() => void setFilters({ overrideMissing: 'cost' })}>missing-cost</button>
       <button onClick={() => void setFilters({ overrideMissing: null })}>clear-override</button>
       <button onClick={() => void setFilters({ sort: '-salePrice' })}>sort-desc-price</button>
@@ -46,8 +52,7 @@ function renderHarness() {
 describe('useProductsFilters', () => {
   it('exposes the documented defaults when no URL params are present', () => {
     renderHarness();
-    expect(screen.getByTestId('status').textContent).toBe('onSale');
-    expect(screen.getByTestId('brand').textContent).toBe('');
+    expect(screen.getByTestId('filters').textContent).toBe('');
     expect(screen.getByTestId('page').textContent).toBe('1');
     expect(screen.getByTestId('perPage').textContent).toBe('25');
   });
@@ -58,21 +63,13 @@ describe('useProductsFilters', () => {
     expect(screen.getByTestId('page').textContent).toBe('4');
   });
 
-  it('resets `page` to 1 when status changes', async () => {
+  it('resets `page` to 1 when an advanced-filter chip is added', async () => {
     const { user } = renderHarness();
     await user.click(screen.getByText('jump-to-4'));
     expect(screen.getByTestId('page').textContent).toBe('4');
 
-    await user.click(screen.getByText('archive'));
-    expect(screen.getByTestId('status').textContent).toBe('archived');
-    expect(screen.getByTestId('page').textContent).toBe('1');
-  });
-
-  it('resets `page` to 1 when a brand filter is added', async () => {
-    const { user } = renderHarness();
-    await user.click(screen.getByText('jump-to-4'));
-    await user.click(screen.getByText('filter-modline'));
-    expect(screen.getByTestId('brand').textContent).toBe('2032');
+    await user.click(screen.getByText('add-status-chip'));
+    expect(screen.getByTestId('filters').textContent).toBe('status');
     expect(screen.getByTestId('page').textContent).toBe('1');
   });
 

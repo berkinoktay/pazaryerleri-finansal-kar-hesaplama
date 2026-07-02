@@ -13,6 +13,25 @@ export type ProductVariantStatus = (typeof PRODUCT_VARIANT_STATUSES)[number];
 export const PRODUCT_OVERRIDE_MISSING = ['cost', 'vat'] as const;
 export type ProductOverrideMissing = (typeof PRODUCT_OVERRIDE_MISSING)[number];
 
+/**
+ * Products-specific FilterRow reviver on top of the generic shape guard: a
+ * status row whose value is not a known variant status is dropped ENTIRELY at
+ * URL ingestion. Without this, a hand-edited/stale link like
+ * `value: "Archived"` would render an applied-looking chip while
+ * filterRowsToProductParams silently discards it — the chip would lie about
+ * the visible product set. ('status' mirrors PRODUCT_FILTER_FIELDS.status in
+ * products-filter-fields.ts, inlined here to avoid an import cycle.)
+ */
+export function parseProductFilterRows(value: unknown): FilterRow[] {
+  return parseFilterRows(value).filter((filterRow) => {
+    if (filterRow.field !== 'status') return true;
+    return (
+      typeof filterRow.value === 'string' &&
+      (PRODUCT_VARIANT_STATUSES as readonly string[]).includes(filterRow.value)
+    );
+  });
+}
+
 export const PRODUCT_LIST_SORTS_EXTENDED = [
   // Default — newest listings first, matching the Trendyol seller-panel
   // ordering. See apps/api/src/validators/product.validator.ts for the
@@ -34,11 +53,9 @@ export const PRODUCT_PER_PAGE_OPTIONS = [10, 25, 50, 100] as const;
 
 export const productsFiltersParsers = {
   q: parseAsString.withDefault(''),
-  status: parseAsStringEnum<ProductVariantStatus>([...PRODUCT_VARIANT_STATUSES]).withDefault(
-    'onSale',
-  ),
-  brandId: parseAsString.withDefault(''),
-  categoryId: parseAsString.withDefault(''),
+  // Status / brand / category ride the advanced-filter FilterRow[] below —
+  // the quick facet chips (and their brandId/categoryId/status URL params)
+  // were retired in favor of the single `+ Filtre ekle` system.
   // Deep-link filter — empty string means "no productId filter active".
   // Set from feature pages (cost-profile detail → "Bağlı varyantlar") so
   // the seller lands on the products page with a single product visible.
@@ -48,10 +65,10 @@ export const productsFiltersParsers = {
   // — we want null as the "no override-tab active" signal, distinct from
   // the implicit default for required fields.
   overrideMissing: parseAsStringEnum<ProductOverrideMissing>([...PRODUCT_OVERRIDE_MISSING]),
-  // Advanced Filtering (PR-F1): the whole FilterRow[] rides one URL param as
-  // JSON, separate from the single-value facet params above. parseFilterRows
-  // drops malformed entries so a stale/hostile URL degrades to "no filters".
-  filters: parseAsJson<FilterRow[]>(parseFilterRows).withDefault([]),
+  // Advanced Filtering: the whole FilterRow[] rides one URL param as JSON.
+  // parseProductFilterRows drops malformed entries AND enum-invalid status
+  // rows so a stale/hostile URL degrades to "no filters".
+  filters: parseAsJson<FilterRow[]>(parseProductFilterRows).withDefault([]),
   page: parseAsInteger.withDefault(1),
   perPage: parseAsInteger.withDefault(25),
   sort: parseAsStringEnum<ProductListSortExtended>([...PRODUCT_LIST_SORTS_EXTENDED]).withDefault(
@@ -61,9 +78,6 @@ export const productsFiltersParsers = {
 
 export interface ProductsFilters {
   q: string;
-  status: ProductVariantStatus;
-  brandId: string;
-  categoryId: string;
   productId: string;
   overrideMissing: ProductOverrideMissing | null;
   filters: FilterRow[];
