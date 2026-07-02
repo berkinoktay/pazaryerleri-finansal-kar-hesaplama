@@ -40,8 +40,21 @@ describe('MissingShippingBanner', () => {
         onFilterApply={onFilterApply}
       />,
     );
-    const btn = screen.getByRole('button', { name: 'Filtreyi uygula' });
+    const btn = screen.getByRole('button', { name: 'Etkilenen ürünleri filtrele' });
     await user.click(btn);
     expect(onFilterApply).toHaveBeenCalledOnce();
+  });
+
+  it('lists only the reasons that actually occur (zero counts are noise)', () => {
+    render(
+      <MissingShippingBanner
+        counts={{ total: 1, noDesi: 0, noCarrier: 1, overflow: 0 }}
+        onFilterApply={vi.fn()}
+      />,
+    );
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('kargo firması seçilmemiş (1)');
+    expect(alert).not.toHaveTextContent('desi eksik');
+    expect(alert).not.toHaveTextContent('yüksek desi');
   });
 });

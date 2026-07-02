@@ -172,6 +172,11 @@
     "networkStatus": {
       "offline": "İnternet bağlantın yok. Değişikliklerin kaydedilmeyebilir."
     },
+    "filterChips": {
+      "appliedFilters": "Uygulanan filtreler",
+      "clearAll": "Tümünü temizle",
+      "remove": "Filtreyi kaldır"
+    },
     "errors": {
       "UNAUTHENTICATED": "Oturumun sona erdi. Lütfen tekrar giriş yap.",
       "FORBIDDEN": "Bu işleme yetkin yok.",
@@ -1791,18 +1796,13 @@
         "stock": "Stok",
         "vatRate": "KDV oranı",
         "brand": "Marka",
-        "category": "Kategori"
+        "category": "Kategori",
+        "status": "Durum"
       },
       "vatRateOption": "%{rate}"
     },
     "filters": {
       "searchPlaceholder": "Ürün adı, model kodu, stok kodu, barkod ile ara…",
-      "status": "Durum",
-      "brand": "Marka",
-      "category": "Kategori",
-      "allBrands": "Tüm markalar",
-      "allCategories": "Tüm kategoriler",
-      "clear": "Filtreleri temizle",
       "statusOptions": {
         "onSale": "Satışta",
         "archived": "Arşivde",
@@ -1814,27 +1814,6 @@
       "all": "Tümü",
       "missingCost": "Maliyeti girilmemiş",
       "missingVat": "KDV girilmemiş"
-    },
-    "facets": {
-      "brand": {
-        "trigger": "+ Marka",
-        "active": "Marka: {name}",
-        "clear": "Markayı temizle",
-        "search": "Marka ara…",
-        "noResults": "Sonuç yok"
-      },
-      "category": {
-        "trigger": "+ Kategori",
-        "active": "Kategori: {name}",
-        "clear": "Kategoriyi temizle",
-        "search": "Kategori ara…",
-        "noResults": "Sonuç yok"
-      },
-      "status": {
-        "trigger": "+ Durum",
-        "active": "Durum: {label}",
-        "clear": "Durumu temizle"
-      }
     },
     "columns": {
       "image": "Görsel",
@@ -1905,7 +1884,8 @@
       "totalContext": "Onaylı · senkron edilmiş",
       "missingCost": "Maliyeti eksik",
       "missingVat": "KDV oranı eksik",
-      "ofCatalog": "Katalogun %{pct} kadarı"
+      "ofCatalog": "Katalog payı: %{pct}",
+      "noneMissing": "Eksik ürün yok"
     },
     "missingCostBanner": {
       "title": "Maliyetsiz {count} ürün — kâr hesabı yapılamıyor.",
@@ -2396,9 +2376,11 @@
         }
       },
       "banner": {
-        "title": "{count} üründe tahmini kar hesaplanamıyor",
-        "breakdown": "desi eksik ({noDesi}) · kargo firması seçilmemiş ({noCarrier}) · yüksek desi ({overflow})",
-        "filterCta": "Filtreyi uygula"
+        "title": "{count} üründe tahmini kâr hesaplanamıyor",
+        "filterCta": "Etkilenen ürünleri filtrele",
+        "reasonNoDesi": "desi eksik ({count})",
+        "reasonNoCarrier": "kargo firması seçilmemiş ({count})",
+        "reasonOverflow": "yüksek desi ({count})"
       }
     }
   },

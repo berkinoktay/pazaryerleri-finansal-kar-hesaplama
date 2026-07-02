@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FilterChipGroup, type FilterChip } from '@/components/patterns/filter-chip-group';
@@ -101,6 +102,49 @@ describe('<FilterChipGroup>', () => {
     it('omits the clear-all link when onClearAll is not provided', () => {
       render(<FilterChipGroup chips={CHIPS} />);
       expect(screen.queryByRole('button', { name: 'Tümünü temizle' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('editor popover (click-to-edit chips)', () => {
+    function EditableHarness({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <FilterChipGroup
+          chips={[
+            {
+              id: 'price',
+              group: 'Satış fiyatı',
+              label: '20 ₺ – ∞',
+              onRemove: vi.fn(),
+              editor: {
+                open,
+                onOpenChange: (next) => {
+                  setOpen(next);
+                  onOpenChange(next);
+                },
+                content: <div>Editör içeriği</div>,
+              },
+            },
+          ]}
+        />
+      );
+    }
+
+    it('renders the chip body as a button that opens the editor content', async () => {
+      const onOpenChange = vi.fn();
+      const { user } = render(<EditableHarness onOpenChange={onOpenChange} />);
+
+      const body = screen.getByRole('button', { name: /Satış fiyatı/ });
+      await user.click(body);
+      expect(onOpenChange).toHaveBeenCalledWith(true);
+      expect(await screen.findByText('Editör içeriği')).toBeInTheDocument();
+    });
+
+    it('keeps an editorless chip body non-interactive', () => {
+      render(<FilterChipGroup chips={[{ id: 'a', label: 'Statik', onRemove: vi.fn() }]} />);
+      // The only button on a static chip is the remove X — the body is a span.
+      expect(screen.getAllByRole('button')).toHaveLength(1);
+      expect(screen.getByRole('button', { name: 'Filtreyi kaldır' })).toBeInTheDocument();
     });
   });
 

@@ -1,32 +1,51 @@
 'use client';
 
 import { Cancel01Icon } from 'hugeicons-react';
+import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 
 /**
  * Horizontal row of applied filter chips with per-chip remove and an
  * optional "Clear all" link at the end. The standard surface for
  * showing the current filter state above a list / table — DataTable
- * toolbar's filter row, products page filter rail, dashboard period
- * scope.
+ * toolbar's auto chip row (via the `advancedFilter` prop), dashboard
+ * period scope, any feature filter rail.
  *
  * Each chip is a pill (icon? + group label? + value + X) that fires
  * its own `onRemove` handler. The group label is optional and
  * separates the filter dimension from its value (`Durum: Aktif`)
  * when filters from multiple categories are mixed in the same row.
  *
+ * A chip may also carry an `editor`: the chip body then becomes a
+ * button that opens the given popover content (click-to-edit — the
+ * AdvancedFilterMenu delegation). Editorless chips stay static.
+ *
  * The component renders nothing when `chips.length === 0` so the
  * caller doesn't have to gate it explicitly — drop it above any
  * list and it becomes visible only when filters are applied.
  *
  * For non-removable status chips use `Badge` directly; for the
- * filter-input UI itself (the dropdowns / popovers that produce
- * these chips) use the per-feature filter-bar composition.
+ * filter-input UI itself (the add menu / editors that produce these
+ * chips) use `AdvancedFilterMenu` / `AdvancedFilterAddButton`.
  *
  * @useWhen surfacing applied filters above a list with per-chip remove and an optional clear-all (use Badge for non-removable status chips, DataTableToolbar for the filter-input UI)
  */
+
+export interface FilterChipEditor {
+  /** Controlled popover state — the owner decides which chip is being edited. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Editor UI rendered inside the popover anchored to the chip body. */
+  content: React.ReactNode;
+  /**
+   * Optional PopoverContent class override — e.g. the advanced-filter
+   * chromeless shell whose inner card supplies its own surface.
+   */
+  contentClassName?: string;
+}
 
 export interface FilterChip {
   /** Stable React key. */
@@ -43,8 +62,10 @@ export interface FilterChip {
   icon?: React.ReactNode;
   /** Per-chip remove handler. */
   onRemove?: () => void;
-  /** Localized aria-label for the X button (defaults to "Filtreyi kaldır"). */
+  /** Override the localized aria-label of the X button. */
   removeLabel?: string;
+  /** When set, the chip body opens this editor popover on click. */
+  editor?: FilterChipEditor;
 }
 
 export interface FilterChipGroupProps {
@@ -58,7 +79,7 @@ export interface FilterChipGroupProps {
    * link renders at the end of the chip row.
    */
   onClearAll?: () => void;
-  /** Localized "Clear all" CTA label (defaults to "Tümünü temizle"). */
+  /** Override the localized "Clear all" CTA label. */
   clearAllLabel?: string;
   className?: string;
 }
@@ -66,15 +87,16 @@ export interface FilterChipGroupProps {
 export function FilterChipGroup({
   chips,
   onClearAll,
-  clearAllLabel = 'Tümünü temizle',
+  clearAllLabel,
   className,
 }: FilterChipGroupProps): React.ReactElement | null {
+  const t = useTranslations('common.filterChips');
   if (chips.length === 0) return null;
 
   return (
     <div
       role="group"
-      aria-label="Uygulanan filtreler"
+      aria-label={t('appliedFilters')}
       className={cn('gap-xs flex flex-wrap items-center', className)}
     >
       {chips.map((chip) => (
@@ -90,7 +112,7 @@ export function FilterChipGroup({
             'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
           )}
         >
-          {clearAllLabel}
+          {clearAllLabel ?? t('clearAll')}
         </button>
       ) : null}
     </div>
@@ -102,13 +124,10 @@ interface FilterChipPillProps {
 }
 
 function FilterChipPill({ chip }: FilterChipPillProps): React.ReactElement {
-  return (
-    <span
-      className={cn(
-        'gap-xs border-border bg-card px-xs py-3xs text-2xs text-foreground inline-flex items-center rounded-full border',
-        'shadow-xs',
-      )}
-    >
+  const t = useTranslations('common.filterChips');
+
+  const bodyContent = (
+    <>
       {chip.icon !== undefined ? (
         <span className="text-muted-foreground [&_svg]:size-icon-xs flex shrink-0 items-center">
           {chip.icon}
@@ -124,11 +143,40 @@ function FilterChipPill({ chip }: FilterChipPillProps): React.ReactElement {
           <span className="text-foreground">{chip.label}</span>
         )}
       </span>
+    </>
+  );
+
+  const pill = (
+    <span
+      className={cn(
+        'gap-xs border-border bg-card py-3xs text-2xs text-foreground inline-flex items-center rounded-full border',
+        'shadow-xs',
+        // The clickable body carries its own horizontal padding when editable;
+        // static chips pad the pill itself.
+        chip.editor !== undefined ? 'pr-xs' : 'px-xs',
+      )}
+    >
+      {chip.editor !== undefined ? (
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'gap-xs px-xs -my-3xs py-3xs flex cursor-pointer items-center rounded-l-full',
+              'duration-fast hover:bg-muted transition-colors',
+              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+            )}
+          >
+            {bodyContent}
+          </button>
+        </PopoverTrigger>
+      ) : (
+        bodyContent
+      )}
       {chip.onRemove !== undefined ? (
         <button
           type="button"
           onClick={chip.onRemove}
-          aria-label={chip.removeLabel ?? 'Filtreyi kaldır'}
+          aria-label={chip.removeLabel ?? t('remove')}
           className={cn(
             'text-muted-foreground hover:text-foreground p-3xs -mr-3xs rounded-full',
             'duration-fast transition-colors',
@@ -140,5 +188,16 @@ function FilterChipPill({ chip }: FilterChipPillProps): React.ReactElement {
         </button>
       ) : null}
     </span>
+  );
+
+  if (chip.editor === undefined) return pill;
+
+  return (
+    <Popover open={chip.editor.open} onOpenChange={chip.editor.onOpenChange}>
+      {pill}
+      <PopoverContent className={chip.editor.contentClassName} align="start">
+        {chip.editor.content}
+      </PopoverContent>
+    </Popover>
   );
 }

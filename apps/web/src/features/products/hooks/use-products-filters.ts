@@ -26,13 +26,7 @@ export function useProductsFilters(): {
 
   const setFilters = async (next: FiltersUpdater): Promise<URLSearchParams> => {
     const touchesNonPaginationFilter =
-      'q' in next ||
-      'status' in next ||
-      'brandId' in next ||
-      'categoryId' in next ||
-      'overrideMissing' in next ||
-      'filters' in next ||
-      'sort' in next;
+      'q' in next || 'overrideMissing' in next || 'filters' in next || 'sort' in next;
     // Any deliberate filter change clears a deep-link productId — landing
     // on /products?productId=X is meant as a starting view, not a sticky
     // pin. If the caller is itself setting productId (e.g. the deep link

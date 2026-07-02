@@ -38,6 +38,17 @@ const FIELDS: FilterFieldDef[] = [
     dataType: 'flag',
     operators: ['isTrue'],
   },
+  {
+    key: 'status',
+    label: 'Durum',
+    groupLabel: 'Özellik',
+    dataType: 'enumSingle',
+    operators: ['eq'],
+    enumValues: [
+      { value: 'onSale', label: 'Satışta' },
+      { value: 'archived', label: 'Arşivde' },
+    ],
+  },
 ];
 
 function priceRow(value: [string, string]): FilterRow {
@@ -48,10 +59,11 @@ describe('AdvancedFilterMenu', () => {
   it('renders the add button and one chip per committed filter', () => {
     render(<AdvancedFilterMenu fields={FIELDS} value={[priceRow(['20', ''])]} onApply={vi.fn()} />);
     expect(screen.getByRole('button', { name: /Filtre ekle/ })).toBeInTheDocument();
-    // The chip body reads "key: value": the unit rides on the entered bound and
-    // the open bound shows the infinity glyph.
+    // The chip body reads "key: value": money bounds render through the shared
+    // `currency` preset (matching the table's Currency cells), and the open
+    // bound shows the infinity glyph.
     const chip = screen.getByRole('button', { name: /Satış fiyatı/ });
-    expect(chip).toHaveTextContent('20 ₺');
+    expect(chip).toHaveTextContent('₺20,00');
     expect(chip).toHaveTextContent('∞');
   });
 
@@ -183,6 +195,50 @@ describe('AdvancedFilterMenu', () => {
     // …but the already-applied salePrice is NOT a second time: only the chip
     // carries "Satış fiyatı", not also a selectable menu item.
     expect(screen.getAllByText(/Satış fiyatı/)).toHaveLength(1);
+  });
+
+  it('enumSingle commits a single value and picking another REPLACES it (radio semantics)', async () => {
+    const onApply = vi.fn();
+    const { user } = render(<AdvancedFilterMenu fields={FIELDS} value={[]} onApply={onApply} />);
+    await user.click(screen.getByRole('button', { name: /Filtre ekle/ }));
+    await user.click(await screen.findByText('Durum'));
+
+    const apply = screen.getByRole('button', { name: 'Uygula' });
+    expect(apply).toBeDisabled();
+    await user.click(await screen.findByText('Arşivde'));
+    // Picking a second option replaces the first — no multi-select set.
+    await user.click(screen.getByText('Satışta'));
+    expect(apply).toBeEnabled();
+    await user.click(apply);
+
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ field: 'status', operator: 'eq', value: 'onSale' }),
+    ]);
+  });
+
+  it('drops leaked editing state when the edited row leaves value externally (browser Back/Forward)', async () => {
+    const onApply = vi.fn();
+    const { user, rerender } = render(
+      <AdvancedFilterMenu fields={FIELDS} value={[priceRow(['20', ''])]} onApply={onApply} />,
+    );
+    // Open the editor and buffer an uncommitted draft.
+    await user.click(screen.getByRole('button', { name: /Satış fiyatı/ }));
+    await user.type(screen.getByRole('textbox', { name: 'En çok' }), '999');
+
+    // The row disappears without any in-page pointer event (browser Back with
+    // URL-owned filters), then returns with the SAME id (browser Forward).
+    rerender(<AdvancedFilterMenu fields={FIELDS} value={[]} onApply={onApply} />);
+    rerender(
+      <AdvancedFilterMenu fields={FIELDS} value={[priceRow(['20', ''])]} onApply={onApply} />,
+    );
+
+    // The editor must NOT spontaneously reopen with the abandoned draft.
+    expect(screen.queryByRole('button', { name: 'Uygula' })).not.toBeInTheDocument();
+
+    // Reopening seeds from the committed row — the stale '999' draft is gone.
+    await user.click(screen.getByRole('button', { name: /Satış fiyatı/ }));
+    expect(screen.getByRole('textbox', { name: 'En çok' })).toHaveValue('');
   });
 
   it('discards an in-progress chip edit when the popover is dismissed with Escape', async () => {

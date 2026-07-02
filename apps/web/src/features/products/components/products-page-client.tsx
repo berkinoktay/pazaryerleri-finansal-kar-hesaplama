@@ -36,16 +36,17 @@ interface ProductsPageClientProps {
 
 /**
  * Top-level client component for the products page. Owns:
- *   - URL state (via useProductsFilters / nuqs) — q, status, brand,
- *     category, overrideMissing, page, perPage, sort.
+ *   - URL state (via useProductsFilters / nuqs) — q, filters (FilterRow[]
+ *     carrying status/brand/category and the range dimensions),
+ *     overrideMissing, productId, page, perPage, sort.
  *   - Server state (via useProducts / useProductFacets — React Query).
  *   - Sync surface (active sync logs via REST + Realtime overlay,
  *     manual trigger via mutation).
  *   - Composition of header + tab strip + table + sync center.
  *
- * The toolbar (search input + facet chips) and pagination footer are
- * mounted inside ProductsTable's render-prop slots so the table-bordered
- * card frames the whole control surface visually.
+ * The toolbar (search input + the advancedFilter add-button/chip row) and
+ * pagination footer are mounted inside ProductsTable's render-prop slots so
+ * the table-bordered card frames the whole control surface visually.
  */
 export function ProductsPageClient({
   orgId,
@@ -67,12 +68,13 @@ export function ProductsPageClient({
           orgId,
           storeId,
           q: filters.q.length > 0 ? filters.q : undefined,
-          status: filters.status,
-          brandId: filters.brandId.length > 0 ? filters.brandId : undefined,
-          categoryId: filters.categoryId.length > 0 ? filters.categoryId : undefined,
+          // Default view scope: on-sale products. A status chip in the
+          // advanced filters overrides it via the spread below.
+          status: 'onSale',
           productId: filters.productId.length > 0 ? filters.productId : undefined,
           overrideMissing: filters.overrideMissing ?? undefined,
-          // Advanced Filtering chips (FilterRow[]) → the PR-B2 query params.
+          // Advanced Filtering chips (FilterRow[]) → query params — since the
+          // facet chips retired, this carries brand/category/status too.
           ...filterRowsToProductParams(filters.filters),
           page: filters.page,
           perPage: filters.perPage,
@@ -111,15 +113,9 @@ export function ProductsPageClient({
 
   const isInitialLoad = productsQuery.isLoading;
   const isEmptyAfterLoad = !isInitialLoad && data.length === 0;
-  const hasActiveSearchOrFilter =
-    filters.q.length > 0 ||
-    filters.status !== 'onSale' ||
-    filters.brandId.length > 0 ||
-    filters.categoryId.length > 0 ||
-    // Advanced-filter chips (PR-F1) are a filter dimension too — without this a
-    // table filtered to zero by ONLY advanced chips was misclassified as
-    // genuinely-empty ("no products") instead of filtered ("no matches").
-    filters.filters.length > 0;
+  // Advanced-filter chips are the single filter system now (search aside) —
+  // status/brand/category all live inside filters.filters.
+  const hasActiveSearchOrFilter = filters.q.length > 0 || filters.filters.length > 0;
 
   const productSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
@@ -207,30 +203,17 @@ export function ProductsPageClient({
             emptyVariant !== undefined ? (
               <ProductsEmptyState
                 variant={emptyVariant}
-                onClearFilters={() =>
-                  void setFilters({
-                    q: '',
-                    status: 'onSale',
-                    brandId: '',
-                    categoryId: '',
-                    filters: [],
-                    page: 1,
-                  })
-                }
+                onClearFilters={() => void setFilters({ q: '', filters: [], page: 1 })}
               />
             ) : undefined
           }
           pagination={pagination}
           q={filters.q}
-          status={filters.status}
-          brandId={filters.brandId}
-          categoryId={filters.categoryId}
           overrideMissing={filters.overrideMissing}
           sort={filters.sort}
-          facets={facetsQuery.data}
           filterFields={filterFields}
           filterRows={filters.filters}
-          onFiltersApply={(rows) => void setFilters({ filters: rows })}
+          onFiltersApply={(rows) => void setFilters({ filters: rows, page: 1 })}
           overrideTab={tabValue}
           overrideCounts={facetsQuery.data?.overrideCounts}
           facetsLoading={facetsQuery.isLoading}
@@ -241,9 +224,6 @@ export function ProductsPageClient({
             })
           }
           onSearchChange={(next) => void setFilters({ q: next, page: 1 })}
-          onStatusChange={(next) => void setFilters({ status: next, page: 1 })}
-          onBrandChange={(next) => void setFilters({ brandId: next, page: 1 })}
-          onCategoryChange={(next) => void setFilters({ categoryId: next, page: 1 })}
           onSortChange={(next) => void setFilters({ sort: next })}
           onPageChange={(next) => void setFilters({ page: next })}
           onPerPageChange={(next) => void setFilters({ perPage: next, page: 1 })}

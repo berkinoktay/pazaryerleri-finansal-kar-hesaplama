@@ -54,15 +54,25 @@ export function ProductsSummary({ counts }: ProductsSummaryProps): React.ReactEl
         value={formatter.number(counts.total, 'integer')}
         context={t('totalContext')}
       />
+      {/* Zero is good news on these tiles — "Katalog payı: %0" reads like a
+          problem statistic, so the context line switches to an all-clear. */}
       <StatCard
         label={t('missingCost')}
         value={formatter.number(counts.missingCost, 'integer')}
-        context={t('ofCatalog', { pct: shareOfCatalog(counts.missingCost) })}
+        context={
+          counts.missingCost === 0
+            ? t('noneMissing')
+            : t('ofCatalog', { pct: shareOfCatalog(counts.missingCost) })
+        }
       />
       <StatCard
         label={t('missingVat')}
         value={formatter.number(counts.missingVat, 'integer')}
-        context={t('ofCatalog', { pct: shareOfCatalog(counts.missingVat) })}
+        context={
+          counts.missingVat === 0
+            ? t('noneMissing')
+            : t('ofCatalog', { pct: shareOfCatalog(counts.missingVat) })
+        }
       />
     </StatGroup>
   );

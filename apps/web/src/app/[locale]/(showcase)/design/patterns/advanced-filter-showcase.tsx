@@ -3,7 +3,6 @@
 import { type ColumnDef } from '@tanstack/react-table';
 import * as React from 'react';
 
-import { AdvancedFilterMenu } from '@/components/patterns/advanced-filter-menu';
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
@@ -33,6 +32,11 @@ const CATEGORIES = [
 
 const VAT_RATES = [0, 1, 10, 20];
 
+const STATUSES = [
+  { value: 'onSale', label: 'Satışta' },
+  { value: 'archived', label: 'Arşivde' },
+];
+
 interface MockProduct {
   id: string;
   title: string;
@@ -43,6 +47,7 @@ interface MockProduct {
   brandName: string;
   categoryId: string;
   categoryName: string;
+  status: string;
 }
 
 const MOCK_PRODUCTS: MockProduct[] = Array.from({ length: 28 }, (_, i) => {
@@ -58,6 +63,9 @@ const MOCK_PRODUCTS: MockProduct[] = Array.from({ length: 28 }, (_, i) => {
     brandName: brand.name,
     categoryId: category.id,
     categoryName: category.name,
+    // Every 5th product is archived — enough spread to make the enumSingle
+    // status filter visibly change the row set.
+    status: i % 5 === 0 ? 'archived' : 'onSale',
   };
 });
 
@@ -101,6 +109,16 @@ const SHOWCASE_FIELDS: FilterFieldDef[] = [
     operators: [...DATATYPE_OPERATORS.enumMulti],
     enumValues: CATEGORIES.map((category) => ({ value: category.id, label: category.name })),
   },
+  {
+    // enumSingle living reference — radio semantics: picking an option
+    // replaces the previous one (single-value backend params, e.g. status).
+    key: 'status',
+    label: 'Durum',
+    groupLabel: 'Özellik',
+    dataType: 'enumSingle',
+    operators: [...DATATYPE_OPERATORS.enumSingle],
+    enumValues: STATUSES,
+  },
 ];
 
 // ─── Client-side matcher (mirrors what the backend does server-side) ──────────
@@ -133,6 +151,10 @@ function matchesFilters(product: MockProduct, rows: FilterRow[]): boolean {
       case 'category': {
         const selected = asSet(row.value);
         return selected.size === 0 || selected.has(product.categoryId);
+      }
+      case 'status': {
+        const value = Array.isArray(row.value) ? row.value[0] : row.value;
+        return value === undefined || value.length === 0 || product.status === value;
       }
       default:
         return true;
@@ -195,9 +217,10 @@ export function AdvancedFilterShowcase(): React.ReactElement {
           table={table}
           searchColumn="title"
           searchPlaceholder="Ürün ara..."
-          facets={
-            <AdvancedFilterMenu fields={SHOWCASE_FIELDS} value={filters} onApply={setFilters} />
-          }
+          // The standard wiring: the toolbar mounts the add button in its
+          // control row and the auto chip row (click-to-edit + clear-all)
+          // beneath it — features pass the config, never assemble the JSX.
+          advancedFilter={{ fields: SHOWCASE_FIELDS, value: filters, onApply: setFilters }}
         />
       )}
       pagination={(table) => <DataTablePagination table={table} />}

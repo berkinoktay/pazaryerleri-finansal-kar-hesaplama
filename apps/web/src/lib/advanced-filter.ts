@@ -23,8 +23,10 @@ export function isFilterOperator(value: unknown): value is FilterOperator {
 }
 
 // Drives operator set + value editor. money/percent/number → RangeInput;
-// text → Input; date → DateRangePicker; enumMulti → multi-select Command;
-// enumFixed → Select; flag → toggle chip (no editor).
+// text → Input; date → DateRangePicker; enumMulti/enumFixed → multi-select
+// Command; enumSingle → single-select Command (radio semantics — for backend
+// params that accept ONE value, e.g. product status); flag → toggle chip
+// (no editor).
 export type FilterDataType =
   | 'money'
   | 'percent'
@@ -33,6 +35,7 @@ export type FilterDataType =
   | 'date'
   | 'enumMulti'
   | 'enumFixed'
+  | 'enumSingle'
   | 'flag';
 
 // A single applied filter. `value` shape follows the operator:
@@ -93,6 +96,7 @@ export const DATATYPE_OPERATORS: Record<FilterDataType, readonly FilterOperator[
   date: ['between', 'gte', 'lte'],
   enumMulti: ['in'],
   enumFixed: ['in'],
+  enumSingle: ['eq'],
   flag: ['isTrue'],
 };
 
@@ -167,13 +171,14 @@ function isNumericBound(value: string): boolean {
 }
 
 // A chip is "complete" (worth sending to the API) when it carries a usable
-// value — at least one range bound, a non-empty multi-select, or a set flag.
+// value — at least one range bound, a non-empty (multi- or single-)select,
+// or a set flag.
 export function isFilterRowComplete(row: FilterRow, dataType: FilterDataType): boolean {
   if (dataType === 'flag') return row.operator === 'isTrue';
   if (dataType === 'enumMulti' || dataType === 'enumFixed') {
     return Array.isArray(row.value) && row.value.length > 0;
   }
-  if (dataType === 'text') {
+  if (dataType === 'text' || dataType === 'enumSingle') {
     const v = Array.isArray(row.value) ? row.value[0] : row.value;
     return (v?.trim().length ?? 0) > 0;
   }

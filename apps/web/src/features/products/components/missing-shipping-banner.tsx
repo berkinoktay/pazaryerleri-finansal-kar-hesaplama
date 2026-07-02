@@ -41,18 +41,24 @@ export function MissingShippingBanner({
     return null;
   }
 
+  // Only the reasons that actually occur — a "desi eksik (0)" entry is noise
+  // and reads as a problem where there is none.
+  const reasons = [
+    { key: 'reasonNoDesi', count: counts.noDesi },
+    { key: 'reasonNoCarrier', count: counts.noCarrier },
+    { key: 'reasonOverflow', count: counts.overflow },
+  ] as const;
+  const breakdown = reasons
+    .filter((reason) => reason.count > 0)
+    .map((reason) => t(reason.key, { count: reason.count }))
+    .join(' · ');
+
   return (
     <Alert tone="warning">
       <div className="gap-sm flex flex-wrap items-center justify-between">
         <div>
           <AlertTitle>{t('title', { count: counts.total })}</AlertTitle>
-          <AlertDescription>
-            {t('breakdown', {
-              noDesi: counts.noDesi,
-              noCarrier: counts.noCarrier,
-              overflow: counts.overflow,
-            })}
-          </AlertDescription>
+          {breakdown.length > 0 ? <AlertDescription>{breakdown}</AlertDescription> : null}
         </div>
         <Button type="button" size="sm" variant="outline" onClick={onFilterApply}>
           {t('filterCta')}
