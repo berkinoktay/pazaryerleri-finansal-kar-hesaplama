@@ -558,10 +558,15 @@ function MultiSelectEditor({ field, row, onChange }: ValueEditorProps): React.Re
 // ─── value helpers + chip summary ────────────────────────────────────────────
 
 function freshRow(field: FilterFieldDef): FilterRow {
+  // The FIELD's first operator, not the dataType default: a catalog may
+  // restrict the list (e.g. a gte-only percent bound). With one operator the
+  // editor hides the operator Select entirely, so a fresh row born with the
+  // dataType default ('between') would be uncorrectable — its max input a
+  // silent no-op against a gte-shaped adapter.
   return {
     id: crypto.randomUUID(),
     field: field.key,
-    operator: defaultOperatorFor(field.dataType),
+    operator: field.operators[0] ?? defaultOperatorFor(field.dataType),
     value: emptyValueFor(field.dataType),
   };
 }
