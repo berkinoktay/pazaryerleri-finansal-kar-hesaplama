@@ -56,6 +56,8 @@ export interface CommissionTariffListTableProps {
   onOpen: (id: string) => void;
   onUpload: () => void;
   onDeleteMany: (ids: string[]) => void;
+  /** Forwarded to DataTable: skeleton rows while the list query is in flight. */
+  loading?: boolean;
 }
 
 /**
@@ -76,6 +78,7 @@ export function CommissionTariffListTable({
   onOpen,
   onUpload,
   onDeleteMany,
+  loading = false,
 }: CommissionTariffListTableProps): React.ReactElement {
   const tCols = useTranslations('commissionTariffsPage.list.columns');
   const tList = useTranslations('commissionTariffsPage.list');
@@ -170,6 +173,7 @@ export function CommissionTariffListTable({
       <DataTable<TariffListRow, unknown>
         columns={columns}
         data={rows}
+        loading={loading}
         getRowId={(row) => row.id}
         enableRowSelection
         onRowClick={(row) => onOpen(row.id)}

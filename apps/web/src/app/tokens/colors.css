@@ -17,12 +17,30 @@
      pure-white sidebar rail and pure-white cards both read as RAISED
      surfaces floating above the page. Without this contrast, every
      surface looks like the same paint — no depth, no hierarchy.
-     96.5% + chroma 0.008: the previous 98%/0.005 left only a 2-point
-     gap to the white card — panels read as "outlines drawn on the page"
-     instead of raised surfaces (2026-07-02 depth audit). The reference
-     products run their canvas 1.5–2 steps below white with a perceptible
-     brand tint; this is the restrained end of that range. */
-  --background: oklch(96.5% 0.008 265);
+     97% + chroma 0.008: the original 98%/0.005 left only a 2-point gap
+     to the white card — panels read as "outlines drawn on the page"
+     instead of raised surfaces (2026-07-02 depth audit). A first pass
+     used 96.5%, calibrated BEFORE shadow-xs became a real ambient
+     shadow; with shadows now sharing the depth work the canvas eased
+     back half a step (Berkin: "biraz koyu kaçıyor"). The TINT (chroma
+     0.008), not the darkness, is what reads as designed.
+
+     LIGHTNESS LADDER (light mode, canvas → raised):
+       83.0  --border-strong      strongest hairline
+       89.0  --border             default hairline
+       91.5  --surface-row-selected-hover   selected row under the pointer
+       92.0  --border-muted       incidental accents
+       93.0  --surface-row-selected
+       93.5  --secondary
+       94.0  --muted · --surface-skeleton   chips/skeletons ON cards
+       94.0  --surface-row-active           row press feedback
+       95.0  --sidebar-accent     rail hover
+       95.5  --surface-row-hover  row hover ON cards
+       96.0  --surface-subtle     bands ON cards
+       96.5  --surface-trigger-hover        ON muted containers
+       97.0  --background         THE CANVAS
+      100.0  --card · --sidebar · --input · --popover  raised whites */
+  --background: oklch(97% 0.008 265);
   --foreground: oklch(18% 0.02 265);
 
   /* Muted keeps its "darker than --background" semantic: 94% sits a clear
@@ -46,8 +64,16 @@
   /* Interactive row hover on a `bg-card` (or equivalent raised) surface.
      Used in tables, list rows. Drops slightly below --card in light, lifts
      slightly above --card in dark — comparable perceived contrast in both
-     modes. Replaces `bg-muted/50` (a dark-mode trap). */
-  --surface-row-hover: oklch(96% 0.006 265);
+     modes. Replaces `bg-muted/50` (a dark-mode trap). Half a step BELOW
+     --surface-subtle so a hovered row no longer melts into the header/footer
+     band it used to coincide with (both were 96%). */
+  --surface-row-hover: oklch(95.5% 0.007 265);
+
+  /* Row press feedback (active state on clickable rows) — one step deeper
+     than hover so a tap/click acknowledges before navigation. Matters most
+     on touch, where hover: hover rules never fire and a tapped row was
+     previously silent. */
+  --surface-row-active: oklch(94% 0.008 265);
 
   /* Selected table row — a calm low-chroma neutral, deliberately NOT the brand
      --primary-soft used for toggles / active nav. At bulk scale (many rows
@@ -56,6 +82,20 @@
      states. Sits a step below --surface-row-hover so a selected row still reads
      as selected even while hovered. */
   --surface-row-selected: oklch(93% 0.012 265);
+
+  /* Selected row UNDER the pointer — selection must never lose its tint on
+     hover (that read as "selection dropped"), but a static selected row and a
+     hovered one shouldn't be identical either. One step deeper than selected. */
+  --surface-row-selected-hover: oklch(91.5% 0.014 265);
+
+  /* Skeleton placeholder base. Light mode simply matches --muted (the 6-point
+     drop on a white card does the work); in dark mode it takes its own, higher
+     lift because --muted (20%) over --card (17%) left bars near-invisible at
+     the animation trough and permanently faint under reduced motion. */
+  --surface-skeleton: oklch(94% 0.006 265);
+  /* Shimmer sweep highlight over --surface-skeleton (alpha lives here, per
+     token discipline — not in component code). */
+  --skeleton-highlight: oklch(100% 0 0 / 0.5);
 
   /* Inactive trigger hover on a `bg-muted` container (segmented controls /
      pill tabs). Lifts toward the active state without becoming active.
@@ -235,10 +275,24 @@
      Comparable visual lift to the light-mode drop. */
   --surface-row-hover: oklch(20% 0.012 265);
 
+  /* Dark row press: one step past hover (raised = lighter in dark). */
+  --surface-row-active: oklch(23% 0.014 265);
+
   /* Dark selected row: lifts above --card (17%) and above --surface-row-hover
      (20%) — raised = lighter in dark mode — staying low-chroma/neutral, NOT the
      brand --primary-soft. */
   --surface-row-selected: oklch(26% 0.015 265);
+
+  /* Dark selected row under the pointer: one step past selected. */
+  --surface-row-selected-hover: oklch(28% 0.017 265);
+
+  /* Dark skeleton: --muted (20%) over --card (17%) was a 3-point lift —
+     near-invisible at the pulse trough and permanently faint under reduced
+     motion. 23% gives the bar its own clear rung. */
+  --surface-skeleton: oklch(23% 0.012 265);
+  /* Dark shimmer: a faint light catch, mirroring the shadow tokens' inset
+     top-highlight idiom — NOT the light mode's strong white sweep. */
+  --skeleton-highlight: oklch(100% 0 0 / 0.06);
 
   /* Dark: drops below --muted container (20%) toward --card (17%) by ~2%.
      Matches the light-mode "lift toward active" semantics in reverse. */

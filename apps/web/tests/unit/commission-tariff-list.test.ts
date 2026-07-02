@@ -64,6 +64,18 @@ describe('toListRows', () => {
   });
 });
 
+describe('summarizeTariffList — lastUpdatedAt trust stamp', () => {
+  it('picks the most recent updatedAt across rows and null for an empty list', () => {
+    const rows = toListRows([
+      makeItem({ id: 'a', updatedAt: '2026-07-01T10:00:00Z' }),
+      makeItem({ id: 'b', updatedAt: '2026-07-02T09:00:00Z' }),
+      makeItem({ id: 'c', updatedAt: '2026-06-30T23:59:00Z' }),
+    ]);
+    expect(summarizeTariffList(rows).lastUpdatedAt).toBe('2026-07-02T09:00:00Z');
+    expect(summarizeTariffList([]).lastUpdatedAt).toBeNull();
+  });
+});
+
 describe('summarizeTariffList', () => {
   it('summarises totals, the active tariff, coverage and export count', () => {
     const stats = summarizeTariffList(toListRows(items));
@@ -71,6 +83,17 @@ describe('summarizeTariffList', () => {
     expect(stats.activeLabel).toBe('23 – 30 Haziran 2026');
     expect(stats.coveredProducts).toBe(5);
     expect(stats.exportedCount).toBe(2);
+  });
+
+  it('buckets every row into exactly one validity count (context line reconciles with total)', () => {
+    const stats = summarizeTariffList(toListRows(items));
+    expect(stats.activeCount).toBe(1);
+    expect(stats.upcomingCount).toBe(0);
+    expect(stats.pastCount).toBe(1);
+    expect(stats.draftCount).toBe(1);
+    expect(stats.activeCount + stats.upcomingCount + stats.pastCount + stats.draftCount).toBe(
+      stats.total,
+    );
   });
 
   it('returns null active fields when no tariff is live', () => {

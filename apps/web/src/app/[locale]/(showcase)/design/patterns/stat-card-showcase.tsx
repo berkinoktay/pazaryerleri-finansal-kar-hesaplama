@@ -35,6 +35,22 @@ const circleIcon = (icon: React.ReactNode): React.ReactElement => (
   </SoftSquareIcon>
 );
 
+/** Loading strip — same config, `loading` swaps values/context for skeletons. */
+export function StatStripLoadingShowcase(): React.ReactElement {
+  return (
+    <StatStrip
+      loading
+      loadingLabel="Yükleniyor"
+      items={[
+        { label: 'Sipariş', value: null, icon: circleIcon(<ShoppingBag01Icon />) },
+        { label: 'Ciro', value: null, icon: circleIcon(<PackageIcon />) },
+        { label: 'Net Kâr', value: null, icon: circleIcon(<Analytics01Icon />) },
+        { label: 'Gider', value: null, icon: circleIcon(<Coins01Icon />) },
+      ]}
+    />
+  );
+}
+
 /** Segmented strip — at-a-glance KPI header band (StatStrip + outline icons). */
 export function StatStripShowcase(): React.ReactElement {
   return (

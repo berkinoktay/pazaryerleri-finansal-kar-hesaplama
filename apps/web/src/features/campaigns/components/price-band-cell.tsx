@@ -80,7 +80,9 @@ export function PriceBandCell({
         // min-w-0 on mobile so the card shrinks to fit its 2-col grid track (no
         // overlap); the 200px floor only applies in the desktop table (md+),
         // where the band columns scroll horizontally rather than squish.
-        'p-xs md:min-w-tariff-band relative min-w-0 rounded-md border',
+        // hover-lift: the whole card is a click target (stretched select
+        // button), so the shadow rise honestly advertises interactivity.
+        'p-xs md:min-w-tariff-band hover-lift relative min-w-0 rounded-md border',
         // Selected state stays QUIET: a thin primary border + the checkmark carry
         // the selection, over the muted `surface-row-selected` fill (chroma 0.012)
         // rather than the loud brand `primary-soft` (chroma 0.04) — so the green/red

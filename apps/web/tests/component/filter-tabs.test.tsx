@@ -139,9 +139,9 @@ describe('<FilterTabs>', () => {
       for (const tab of screen.getAllByRole('tab')) {
         expect(tab.textContent ?? '').not.toMatch(/\d/);
       }
-      // Skeletons share the `animate-pulse` class — assert at least one is
+      // Skeletons share the `skeleton-shimmer` class — assert at least one is
       // mounted inside the tablist.
-      expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+      expect(container.querySelectorAll('.skeleton-shimmer').length).toBeGreaterThan(0);
     });
   });
 });

@@ -46,6 +46,16 @@ import { cn } from '@/lib/utils';
 const SELECT_COLUMN_ID = 'select';
 
 /**
+ * Lets the pagination slot know the body is loading WITHOUT threading a prop
+ * through every consumer's render function. On a cold server-paginated load
+ * the table instance confidently reports 0 rows / 1 page; DataTablePagination
+ * reads this context to show placeholders instead of asserting fake figures
+ * (a small trust wobble in a financial product). Provided by DataTable around
+ * the `pagination` slot; defaults to false so standalone use is unaffected.
+ */
+export const DataTableLoadingContext = React.createContext(false);
+
+/**
  * useLayoutEffect on the client so measured pin offsets are corrected BEFORE
  * paint (no visible jump); useEffect on the server where there is nothing to
  * measure — sidesteps React's "useLayoutEffect does nothing on the server"
@@ -549,7 +559,10 @@ export function DataTable<TData, TValue>({
     // same standing-panel treatment as Card — so it reads as a raised
     // surface on the tinted canvas rather than an outline drawn on it.
     <>
-      <div className="border-border bg-card overflow-hidden rounded-lg border shadow-xs">
+      {/* animate-panel-enter-delayed: the shell follows the page's KPI strip
+          by one 50ms beat on mount (liveliness layer) — never replays on
+          re-render, collapses under prefers-reduced-motion. */}
+      <div className="border-border bg-card animate-panel-enter-delayed overflow-hidden rounded-lg border shadow-xs">
         {/* Polite live regions: a screen reader hears the selection count and
             the loading state change without a visible duplicate. One status per
             concern; both empty when inactive so nothing is announced at rest. */}
@@ -671,16 +684,35 @@ export function DataTable<TData, TValue>({
           <TableBody>
             {bodyState === 'loading' ? (
               Array.from({ length: skeletonRowCount }).map((_, rowIdx) => (
-                <TableRow key={`skeleton-${rowIdx}`}>
-                  {visibleLeafColumns.map((column) => {
+                // pointer-events-none makes the skeleton row truly
+                // non-interactive: no :hover fires, so neither the row's own
+                // hover tint NOR the pinned-cell mirror
+                // (group-hover/row:bg-surface-row-hover on the td, which a
+                // row-level hover:bg-transparent cannot cancel) can light up a
+                // row that cannot be clicked. hover:bg-transparent is kept as a
+                // belt-and-braces no-op for the unpinned cells.
+                <TableRow
+                  key={`skeleton-${rowIdx}`}
+                  className="pointer-events-none hover:bg-transparent"
+                >
+                  {visibleLeafColumns.map((column, colIdx) => {
                     const isNumeric = column.columnDef.meta?.numeric === true;
+                    // Pinned columns keep their sticky/opaque treatment while
+                    // loading so a horizontally-scrolled skeleton behaves like
+                    // the loaded table (headers stick — bodies must too).
+                    const pinning = computePinningProps(column, pinOffsets);
                     return (
                       <TableCell
                         key={column.id}
                         data-numeric={isNumeric || undefined}
                         className={cn(isNumeric && 'text-right')}
+                        {...pinning}
                       >
-                        <Skeleton className={cn('h-4', isNumeric ? 'ml-auto w-12' : 'w-full')} />
+                        <CellSkeleton
+                          shape={column.columnDef.meta?.skeleton}
+                          numeric={isNumeric}
+                          seed={rowIdx + colIdx}
+                        />
                       </TableCell>
                     );
                   })}
@@ -737,6 +769,15 @@ export function DataTable<TData, TValue>({
                     <TableRow
                       data-state={row.getIsSelected() ? 'selected' : undefined}
                       data-depth={row.depth || undefined}
+                      // Anchors the parent visually to its open sub-panel:
+                      // both paint bg-muted (ui/table.tsx) so they read as one
+                      // opened zone in a long table.
+                      data-expanded={
+                        (row.getIsExpanded() && renderSubComponent !== undefined) || undefined
+                      }
+                      // Gates the :active press tint to rows that actually
+                      // navigate (see ui/table.tsx state ladder).
+                      data-clickable={onRowClick !== undefined || undefined}
                       role={onRowClick ? 'button' : undefined}
                       tabIndex={onRowClick ? 0 : undefined}
                       onClick={handleRowClick}
@@ -787,7 +828,11 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
         {pagination ? (
-          <div className="border-border px-md py-sm border-t">{pagination(table)}</div>
+          <div className="border-border px-md py-sm border-t">
+            <DataTableLoadingContext.Provider value={bodyState === 'loading'}>
+              {pagination(table)}
+            </DataTableLoadingContext.Provider>
+          </div>
         ) : null}
       </div>
       {fab ? fab(table) : null}
@@ -870,6 +915,57 @@ function computePinningProps<TData, TValue>(
   };
 }
 
+/* Deterministic per-cell width variation so the loading table previews "text
+   of differing lengths" instead of a rigid barcode wall of identical bars.
+   Cycled by (rowIdx + colIdx) — a pure function of indices, byte-identical
+   between server and client render (Math.random would break hydration). */
+const TEXT_SKELETON_WIDTHS = ['w-4/5', 'w-3/5', 'w-2/3'] as const;
+const NUMERIC_SKELETON_WIDTHS = ['w-16', 'w-12', 'w-14'] as const;
+
+function CellSkeleton({
+  shape,
+  numeric,
+  seed,
+}: {
+  shape: 'checkbox' | 'thumb' | 'identity' | 'none' | undefined;
+  numeric: boolean;
+  seed: number;
+}): React.ReactElement | null {
+  switch (shape) {
+    case 'checkbox':
+      return <Skeleton className="size-4" />;
+    case 'thumb':
+      return <Skeleton radius="md" className="size-thumb-lg" />;
+    case 'identity':
+      return (
+        <div className="gap-sm flex items-center">
+          <Skeleton radius="md" className="size-thumb-lg shrink-0" />
+          <div className="gap-2xs flex min-w-0 flex-1 flex-col">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+      );
+    case 'none':
+      return null;
+    case undefined:
+      return (
+        <Skeleton
+          className={cn(
+            'h-4',
+            numeric
+              ? cn('ml-auto', NUMERIC_SKELETON_WIDTHS[seed % NUMERIC_SKELETON_WIDTHS.length])
+              : TEXT_SKELETON_WIDTHS[seed % TEXT_SKELETON_WIDTHS.length],
+          )}
+        />
+      );
+    default: {
+      const _exhaustive: never = shape;
+      throw new Error(`Unhandled skeleton shape: ${String(_exhaustive)}`);
+    }
+  }
+}
+
 /**
  * Extend TanStack's ColumnMeta so `meta: { numeric: true }` type-checks
  * and drives right-alignment + tabular-nums styling via data attributes.
@@ -886,5 +982,16 @@ declare module '@tanstack/react-table' {
      * See `resolveColumnLabel` in data-table-toolbar.tsx.
      */
     label?: string;
+    /**
+     * Skeleton shape for the loading state. Without a hint every cell renders
+     * a text bar — fine for text/numbers, but a 56px product-image column
+     * previewed as a 16px bar means every row grows ~2.5× when data lands.
+     *   'checkbox' → selection-checkbox square
+     *   'thumb'    → product-image square (--size-thumb-lg)
+     *   'identity' → thumb + two stacked text lines (image-and-name cells)
+     *   'none'     → empty cell (e.g. a hover-only actions column)
+     * Text/numeric columns need no hint; they derive from `numeric`.
+     */
+    skeleton?: 'checkbox' | 'thumb' | 'identity' | 'none';
   }
 }

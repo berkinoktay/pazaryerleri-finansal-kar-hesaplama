@@ -50,6 +50,19 @@ export interface TariffListStats {
   coveredProducts: number | null;
   /** How many tariffs have been exported (saved & downloaded). */
   exportedCount: number;
+  /** ISO timestamp of the most recent change across all tariffs (trust stamp). */
+  lastUpdatedAt: string | null;
+  /**
+   * Per-validity bucket counts for the total cell's context line. Every row
+   * falls into exactly one bucket, so the non-zero buckets always reconcile
+   * with `total` — a context line that doesn't add up reads as broken.
+   * Note: activeCount can exceed 1 when uploaded periods overlap;
+   * activeLabel/coveredProducts still follow "first active wins" above.
+   */
+  activeCount: number;
+  upcomingCount: number;
+  pastCount: number;
+  draftCount: number;
 }
 
 /** At-a-glance summary metrics for the list header strip. */
@@ -60,5 +73,13 @@ export function summarizeTariffList(rows: readonly TariffListRow[]): TariffListS
     activeLabel: active?.name ?? null,
     coveredProducts: active?.productCount ?? null,
     exportedCount: rows.filter((row) => row.exported).length,
+    lastUpdatedAt: rows.reduce<string | null>(
+      (latest, row) => (latest === null || row.updatedAt > latest ? row.updatedAt : latest),
+      null,
+    ),
+    activeCount: rows.filter((row) => row.validity === 'active').length,
+    upcomingCount: rows.filter((row) => row.validity === 'upcoming').length,
+    pastCount: rows.filter((row) => row.validity === 'past').length,
+    draftCount: rows.filter((row) => row.validity === null).length,
   };
 }

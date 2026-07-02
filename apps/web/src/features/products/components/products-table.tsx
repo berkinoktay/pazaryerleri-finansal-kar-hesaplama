@@ -143,6 +143,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         // need independent selection; selecting the parent is the intent.
         id: 'select',
         enableSorting: false,
+        meta: { skeleton: 'checkbox' },
         header: ({ table }) => (
           <Checkbox
             checked={
@@ -172,6 +173,9 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
       {
         id: 'expand',
         enableSorting: false,
+        // Expand affordance is a chip, not text — an empty loading cell beats
+        // a misleading text bar in this narrow control column.
+        meta: { skeleton: 'none' },
         cell: ({ row }) => {
           if (row.depth > 0) {
             // SVG-drawn branch connector. The previous CSS-border L
@@ -240,6 +244,9 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         id: 'title',
         accessorFn: (row) => (row.kind === 'parent' ? row.product.title : ''),
         header: () => tCols('title'),
+        // Loaded cell is a 56px image + stacked identifier lines — preview the
+        // same footprint so rows don't grow when data lands.
+        meta: { skeleton: 'identity' },
         enableSorting: true,
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {

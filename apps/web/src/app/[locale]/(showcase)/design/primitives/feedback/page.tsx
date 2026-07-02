@@ -301,11 +301,11 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
 
       <ShowcaseSection
         title="Skeleton"
-        description="İlk yüklemede spinner yerine içerik iskeleti. radius varsayılan sm (input/text-line köşeleri); şekli className ile ez (avatar=rounded-full). animated=false statik placeholder; label region'ı role=status aria-busy yapar. Perceived performance'ı artırır."
+        description="İlk yüklemede spinner yerine içerik iskeleti. Dolgu --surface-skeleton (dark modda kendi basamağı — bg-muted'ın 3 puanlık kaybolan farkı değil); animasyon opaklık pulse'ı değil shimmer süpürmesi: çubuk hiç sönmez, üzerinden ışık geçer. radius varsayılan sm; şekli className ile ez (avatar=rounded-full). animated=false statik placeholder; label region'ı role=status aria-busy yapar."
       >
         <Preview
           title="Skeleton — şekil · animated"
-          description="Boyut/şekil className ile gelen içeriği taklit eder (layout stability). animated=false statik placeholder verir; aksi takdirde pulse (reduced-motion'da otomatik kapanır)."
+          description="Boyut/şekil className ile gelen içeriği taklit eder (layout stability). animated=false statik placeholder verir; aksi takdirde shimmer (reduced-motion'da global kural kapatır). Alttaki tuval sathı, kontrastın iki temada da yaşadığını denetlemek için."
         >
           <div className="max-w-form gap-sm grid">
             <div className="gap-sm flex items-center">
@@ -327,6 +327,15 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
               </span>
               <Skeleton animated={false} className="h-3 w-full" />
               <Skeleton animated={false} className="h-3 w-2/3" />
+            </div>
+            <div className="border-border mt-sm gap-3xs pt-sm grid border-t">
+              <span className="text-2xs text-muted-foreground font-mono">
+                tuval üzerinde (bg-background)
+              </span>
+              <div className="bg-background border-border p-sm gap-3xs grid rounded-md border">
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-3/5" />
+              </div>
             </div>
           </div>
         </Preview>

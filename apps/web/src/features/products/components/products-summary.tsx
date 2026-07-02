@@ -5,7 +5,6 @@ import * as React from 'react';
 
 import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
-import { Skeleton } from '@/components/ui/skeleton';
 
 interface OverrideCounts {
   total: number;
@@ -35,10 +34,13 @@ export function ProductsSummary({ counts }: ProductsSummaryProps): React.ReactEl
   const formatter = useFormatter();
 
   if (counts === undefined) {
+    // Canonical loading route: StatCard's own `status='loading'` skeleton
+    // (role="status" aria-busy per card), mirroring LiveKpiRow. Real labels
+    // keep the card API consistent with the loaded render below.
     return (
-      <StatGroup aria-hidden>
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-32 rounded-xl" />
+      <StatGroup>
+        {(['totalProducts', 'missingCost', 'missingVat'] as const).map((key) => (
+          <StatCard key={key} label={t(key)} value={null} status="loading" />
         ))}
       </StatGroup>
     );

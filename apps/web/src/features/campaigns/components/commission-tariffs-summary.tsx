@@ -12,8 +12,11 @@ import type { TariffSelectionSummary } from '../lib/commission-tariff-summary';
 
 const DASH = '—';
 
-const circleIcon = (icon: React.ReactNode): React.ReactElement => (
-  <SoftSquareIcon shape="circle" variant="outline" size="lg">
+const circleIcon = (
+  icon: React.ReactNode,
+  tone: React.ComponentProps<typeof SoftSquareIcon>['tone'],
+): React.ReactElement => (
+  <SoftSquareIcon shape="circle" variant="soft" tone={tone} size="lg">
     {icon}
   </SoftSquareIcon>
 );
@@ -25,7 +28,7 @@ export interface CommissionTariffsSummaryProps {
 /**
  * Header KPI strip for an open tariff: products in the period, how many bands the
  * seller has chosen, the estimated profit of those choices, and the best-case
- * target. Mirrors the list's StatStrip (circular icons); the "best vs selected"
+ * target. Mirrors the list's StatStrip (soft-toned circular icons); the "best vs selected"
  * headroom is surfaced as a nudge in the sticky action bar rather than here.
  */
 export function CommissionTariffsSummary({
@@ -39,25 +42,27 @@ export function CommissionTariffsSummary({
     {
       label: t('total'),
       value: empty ? DASH : format.number(summary.total, 'integer'),
-      icon: circleIcon(<PackageIcon />),
+      // primary, NOT neutral — same call as the list strip's headline count:
+      // a gray bg-muted chip beside three tinted siblings reads broken.
+      icon: circleIcon(<PackageIcon />, 'primary'),
     },
     {
       label: t('selected'),
       value: empty
         ? DASH
         : t('selectedValue', { count: summary.selectedCount, total: summary.total }),
-      icon: circleIcon(<TaskDone01Icon />),
+      icon: circleIcon(<TaskDone01Icon />, 'info'),
     },
     {
       label: t('selectedProfit'),
       value: empty ? DASH : <Currency value={summary.selectedProfit} />,
-      icon: circleIcon(<Coins01Icon />),
+      icon: circleIcon(<Coins01Icon />, 'success'),
     },
     {
       label: t('bestProfit'),
       value: empty ? DASH : <Currency value={summary.bestProfit} />,
       hint: t('bestProfitHint'),
-      icon: circleIcon(<SparklesIcon />),
+      icon: circleIcon(<SparklesIcon />, 'primary'),
     },
   ];
 

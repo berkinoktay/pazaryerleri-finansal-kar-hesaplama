@@ -56,8 +56,9 @@ describe('<MarginColoringSettings>', () => {
 
     it('shows the enable toggle switch', async () => {
       setup({});
-      // The switch for enabling coloring should be present.
-      const toggle = screen.getByRole('switch', { name: /renklendirme/i });
+      // The card renders a skeleton until the preferences seed lands (data-loss
+      // guard) — wait for the interactive switch to appear.
+      const toggle = await screen.findByRole('switch', { name: /renklendirme/i });
       expect(toggle).toBeInTheDocument();
     });
 
@@ -73,7 +74,7 @@ describe('<MarginColoringSettings>', () => {
   describe('enable toggle', () => {
     it('toggles the enabled state', async () => {
       const { user } = setup({});
-      const toggle = screen.getByRole('switch', { name: /renklendirme/i });
+      const toggle = await screen.findByRole('switch', { name: /renklendirme/i });
       expect(toggle).not.toBeChecked();
 
       await user.click(toggle);
@@ -188,8 +189,9 @@ describe('<MarginColoringSettings>', () => {
   describe('live preview', () => {
     it('renders the preview section', async () => {
       setup({});
-      // "Onizleme" / "Önizleme" — match by partial word.
-      expect(screen.getByText(/nizleme/)).toBeInTheDocument();
+      // "Onizleme" / "Önizleme" — match by partial word. The preview only
+      // renders after the preferences seed lands (skeleton until then).
+      expect(await screen.findByText(/nizleme/)).toBeInTheDocument();
     });
   });
 
@@ -209,7 +211,9 @@ describe('<MarginColoringSettings>', () => {
         }),
       );
 
-      const saveBtn = screen.getByRole('button', { name: /kaydet/i });
+      // Save appears (and becomes enabled) only after the seed lands — the
+      // pending-state skeleton guards against saving defaults over stored prefs.
+      const saveBtn = await screen.findByRole('button', { name: /kaydet/i });
       await user.click(saveBtn);
 
       await waitFor(() => {
@@ -228,7 +232,7 @@ describe('<MarginColoringSettings>', () => {
         }),
       );
 
-      const saveBtn = screen.getByRole('button', { name: /kaydet/i });
+      const saveBtn = await screen.findByRole('button', { name: /kaydet/i });
       // Click and immediately check for disabled state.
       void user.click(saveBtn);
       await waitFor(() => {

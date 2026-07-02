@@ -6,6 +6,7 @@ import { useState, type ReactElement } from 'react';
 
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
   TableBody,
@@ -32,13 +33,22 @@ const ROLE_BADGE: Record<
   VIEWER: { tone: 'neutral', variant: 'outline' },
 };
 
+const LOADING_ROW_COUNT = 3;
+
 interface MembersTableProps {
   orgId: string;
   members: Member[];
   stores: Store[];
+  /** Renders skeleton rows under the real header while the roster loads. */
+  loading?: boolean;
 }
 
-export function MembersTable({ orgId, members, stores }: MembersTableProps): ReactElement {
+export function MembersTable({
+  orgId,
+  members,
+  stores,
+  loading = false,
+}: MembersTableProps): ReactElement {
   const t = useTranslations('settings.members');
   const tRoles = useTranslations('settings.members.roles');
   const canManageRoles = useCan(CAPABILITIES.MEMBERS_MANAGE_ROLES);
@@ -49,7 +59,14 @@ export function MembersTable({ orgId, members, stores }: MembersTableProps): Rea
 
   return (
     <>
-      <Table>
+      {/* Mirrors DataTable's loading a11y: a polite sr-only announcement plus
+          aria-busy on the table while the skeleton rows are shown. */}
+      {loading ? (
+        <div role="status" aria-live="polite" className="sr-only">
+          {t('loading')}
+        </div>
+      ) : null}
+      <Table aria-busy={loading || undefined}>
         <TableHeader>
           <TableRow>
             <TableHead>{t('table.columns.member')}</TableHead>
@@ -59,6 +76,29 @@ export function MembersTable({ orgId, members, stores }: MembersTableProps): Rea
           </TableRow>
         </TableHeader>
         <TableBody>
+          {loading
+            ? Array.from({ length: LOADING_ROW_COUNT }).map((_, i) => (
+                <TableRow key={`skeleton-${i}`} className="hover:bg-transparent">
+                  <TableCell>
+                    <div className="gap-2xs flex flex-col">
+                      <Skeleton className="h-4 w-3/5" />
+                      <Skeleton className="h-3 w-2/5" />
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton radius="full" className="h-5 w-16" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <Skeleton className="h-4 w-20" />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            : null}
           {members.map((member) => {
             // accessibleStoreIds === null means "all stores" (OWNER/ADMIN by role),
             // for whom per-store editing is meaningless.

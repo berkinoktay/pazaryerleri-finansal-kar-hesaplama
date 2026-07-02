@@ -10,8 +10,8 @@ import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
+import { PageSkeleton } from '@/components/patterns/page-skeleton';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useRouter } from '@/i18n/navigation';
 import { ApiError } from '@/lib/api-error';
 import { cn } from '@/lib/utils';
@@ -147,13 +147,9 @@ export function CommissionTariffDetailClient({
   }, []);
 
   if (detail.isLoading) {
-    return (
-      <div className="gap-lg flex flex-col">
-        <Skeleton className="h-9 w-64" />
-        <Skeleton className="h-16 w-full" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    );
+    // Full page-anatomy placeholder (back link + header + 4-cell summary strip
+    // + data panel) mirroring the loaded layout below.
+    return <PageSkeleton label={tCommon('loading')} withBackLink statCells={4} />;
   }
 
   // Distinguish a genuine 404 (deleted / cross-tenant — non-disclosure convention

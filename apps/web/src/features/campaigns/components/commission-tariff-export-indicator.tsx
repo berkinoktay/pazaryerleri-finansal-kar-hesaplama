@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckmarkCircle02Icon } from 'hugeicons-react';
+import { CheckmarkCircle02Icon, Clock01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -19,7 +19,14 @@ export function CommissionTariffExportIndicator({
   const t = useTranslations('commissionTariffsPage.status');
 
   if (!exported) {
-    return <span className="text-muted-foreground text-2xs">{t('pending')}</span>;
+    // Icon pair with the exported state (neutral clock ↔ green check) so the
+    // column reads as a STATUS at a glance, not a bare gray word.
+    return (
+      <span className="text-muted-foreground gap-2xs text-2xs inline-flex items-center">
+        <Clock01Icon className="size-icon-xs shrink-0" aria-hidden />
+        {t('pending')}
+      </span>
+    );
   }
   return (
     <span className="text-success gap-2xs text-2xs inline-flex items-center font-medium">

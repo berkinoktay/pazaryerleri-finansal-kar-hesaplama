@@ -10,10 +10,14 @@ import { type RadiusKey, radiusClass } from '@/lib/variants';
  * shape with `className` (e.g. `rounded-full` for an avatar).
  *
  * `radius` defaults to `sm` (matches input + text-line corners, the most
- * common case). `animated` (default true) drives the pulse — pass `false` for
- * a static placeholder. The pulse is automatically disabled under
- * `prefers-reduced-motion`. Pass `label` on the OUTER skeleton of a region to
- * mark it `role="status" aria-busy` with a translated "loading" name.
+ * common case). `animated` (default true) drives a shimmer sweep (a light
+ * pass over a solid `--surface-skeleton` fill — the bar itself never dims,
+ * which kept the old opacity pulse near-invisible in dark mode) — pass
+ * `false` for a static placeholder. The shimmer is disabled under
+ * `prefers-reduced-motion` by the GLOBAL rule in `tokens/motion.css` (there
+ * is deliberately no `motion-reduce:` variant here — don't remove that rule
+ * without re-covering this). Pass `label` on the OUTER skeleton of a region
+ * to mark it `role="status" aria-busy` with a translated "loading" name.
  *
  * Skeleton screens beat spinners for first-load dashboards: with 6+ tiles
  * populating async, a single page-level spinner hides the structure;
@@ -24,7 +28,7 @@ import { type RadiusKey, radiusClass } from '@/lib/variants';
 export interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Corner radius. Defaults to `sm`. Override per element (e.g. `radius="full"` for an avatar). */
   radius?: RadiusKey;
-  /** Pulse animation. Defaults to true; pass `false` for a static placeholder. */
+  /** Shimmer animation. Defaults to true; pass `false` for a static placeholder. */
   animated?: boolean;
   /** When set, marks this element `role="status" aria-busy` with the translated label — use on a region's outer skeleton. */
   label?: string;
@@ -42,7 +46,12 @@ export function Skeleton({
       role={label !== undefined ? 'status' : undefined}
       aria-busy={label !== undefined ? true : undefined}
       aria-label={label}
-      className={cn('bg-muted', radiusClass[radius], animated && 'animate-pulse', className)}
+      className={cn(
+        'bg-surface-skeleton',
+        radiusClass[radius],
+        animated && 'skeleton-shimmer',
+        className,
+      )}
       {...props}
     />
   );

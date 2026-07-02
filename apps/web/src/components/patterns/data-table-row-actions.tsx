@@ -123,6 +123,9 @@ export function createRowActionsColumn<TData>(
     id: options?.id ?? ROW_ACTIONS_COLUMN_ID,
     enableSorting: false,
     enableHiding: false,
+    // Kebab column (sr-only header): render nothing while loading — a text
+    // bar would misrepresent the icon-button that appears here.
+    meta: { skeleton: 'none' },
     header: () => <RowActionsColumnHeader />,
     cell: ({ row }) => (
       <DataTableRowActions

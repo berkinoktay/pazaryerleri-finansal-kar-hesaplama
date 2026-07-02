@@ -26,6 +26,7 @@ import {
   StatCardRichShowcase,
   StatCardStatesShowcase,
   StatCardTilesShowcase,
+  StatStripLoadingShowcase,
   StatStripShowcase,
 } from '../stat-card-showcase';
 import { TimeAgoShowcase } from '../time-ago-showcase';
@@ -66,6 +67,13 @@ export default function DisplayPatternsPage(): React.ReactElement {
           description="Tek hairline konteyner, ince ayraçlar; her hücre başlık (+ opsiyonel ⓘ) + sağ-üst dairesel outline ikon + büyük değer + dönem + delta pill. Sayfa başı özet bandı — mobilde stacked (border-t), lg'de tek satır (border-l). Ciro ve Net Kâr'ın ⓘ'sine gel."
         >
           <StatStripShowcase />
+        </Preview>
+
+        <Preview
+          title="StatStrip — loading"
+          description="Aynı item konfigürasyonu, `loading` ile: gerçek başlıklar ve ikonlar kalır, yalnız değer + bağlam satırı iskelete döner — sayı gelince hiçbir şey zıplamaz, sahte sıfır da parlamaz. Etiketleri henüz bilinmeyen rota-düzeyi yer tutucular için `StatStripSkeleton` / `PageSkeleton` var."
+        >
+          <StatStripLoadingShowcase />
         </Preview>
 
         <Preview

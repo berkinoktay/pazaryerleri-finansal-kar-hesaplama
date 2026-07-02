@@ -1,7 +1,7 @@
 'use client';
 
 import { CloudUploadIcon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
@@ -31,6 +31,12 @@ export interface CommissionTariffsListViewProps {
   onCreate: () => void;
   onExport: (id: string) => void;
   onDelete: (id: string) => void;
+  /**
+   * List query in flight: the full chrome (header, summary strip, tab strip,
+   * table shell) stays mounted while the summary cells, tab counts, and table
+   * body swap to skeletons — no generic gray-bar page.
+   */
+  loading?: boolean;
 }
 
 /**
@@ -47,6 +53,7 @@ export function CommissionTariffsListView({
   onCreate,
   onExport,
   onDelete,
+  loading = false,
 }: CommissionTariffsListViewProps): React.ReactElement {
   const t = useTranslations('campaignsPages.productCommissionTariffs');
   const tList = useTranslations('commissionTariffsPage.list');
@@ -105,6 +112,7 @@ export function CommissionTariffsListView({
   const hasActiveFilters = query.trim() !== '' || statusFilter !== 'all';
 
   const stats = React.useMemo(() => summarizeTariffList(rows), [rows]);
+  const format = useFormatter();
 
   const requestDelete = React.useCallback((row: TariffListRow) => setDeleteTarget(row), []);
   const actions = useTariffRowActions({ onOpen, onExport, onRequestDelete: requestDelete });
@@ -126,6 +134,7 @@ export function CommissionTariffsListView({
       <FilterTabs
         value={statusFilter}
         onValueChange={setStatusFilter}
+        loading={loading}
         aria-label={tList('filterLabel')}
         options={[
           { value: 'all', label: tFilters('all'), count: statusCounts.all },
@@ -150,11 +159,19 @@ export function CommissionTariffsListView({
         // default gap-sm read as cramped); no bottom rule so the strip flows
         // into the data panel below rather than being fenced off by a separator.
         className="gap-lg border-b-0 pb-0"
-        summary={<CommissionTariffListSummary stats={stats} />}
+        meta={
+          stats.lastUpdatedAt !== null
+            ? tList('lastUpdated', {
+                date: format.dateTime(new Date(stats.lastUpdatedAt), 'short'),
+              })
+            : undefined
+        }
+        summary={<CommissionTariffListSummary stats={stats} loading={loading} />}
       />
 
       <CommissionTariffListTable
         rows={filtered}
+        loading={loading}
         actions={actions}
         tabsNode={tabsRow}
         searchValue={query}

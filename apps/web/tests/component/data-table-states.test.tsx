@@ -103,6 +103,22 @@ describe('<DataTable> body states', () => {
       expect(screen.queryByText(ERROR_TITLE)).not.toBeInTheDocument();
       expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true');
     });
+
+    it('honors meta.skeleton shapes per column', () => {
+      const shapedColumns: ColumnDef<Row>[] = [
+        { id: 'select', header: '', meta: { skeleton: 'checkbox' } },
+        { accessorKey: 'name', header: 'Ad', meta: { skeleton: 'identity' } },
+        { id: 'actions', header: '', meta: { skeleton: 'none' } },
+      ];
+      const { container } = render(<DataTable columns={shapedColumns} data={[]} loading />);
+      const cells = container.querySelectorAll('tbody td');
+      expect(cells).toHaveLength(30); // 10 skeleton rows (default pageSize) × 3 columns
+      // 'identity' renders a thumb square + two text lines (3 skeleton divs);
+      // 'checkbox' renders exactly one; 'none' renders an empty cell.
+      expect(cells[0]?.querySelectorAll('.bg-surface-skeleton')).toHaveLength(1);
+      expect(cells[1]?.querySelectorAll('.bg-surface-skeleton')).toHaveLength(3);
+      expect(cells[2]?.querySelectorAll('.bg-surface-skeleton')).toHaveLength(0);
+    });
   });
 
   describe('rows present', () => {

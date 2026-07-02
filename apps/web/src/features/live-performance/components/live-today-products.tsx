@@ -127,7 +127,9 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
       {
         accessorKey: 'productName',
         header: () => t('columns.product'),
-        meta: { label: t('columns.product') },
+        // Loaded cell is image + name + identifier line — preview the same
+        // footprint so rows keep their height while loading.
+        meta: { label: t('columns.product'), skeleton: 'identity' },
         cell: ({ row }) => {
           const product = row.original;
           // Çözülemeyen satır (görünürlük sözleşmesi, spec 2026-06-12 §7):

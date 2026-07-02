@@ -33,13 +33,21 @@ export function BufferOrderDetail({
   bufferId,
 }: BufferOrderDetailProps): React.ReactElement {
   const t = useTranslations('livePerformance.orderDetail.buffer');
+  const tCommon = useTranslations('common');
   const query = useBufferDetail(orgId, storeId, bufferId);
 
   if (query.isLoading) {
+    // Mirrors the loaded layout: a single-line Alert bar, then a table stub
+    // (one header line + a few row-height lines) so nothing shifts on load.
     return (
-      <div className="gap-md flex flex-col">
-        <Skeleton className="h-16 w-full" />
-        <Skeleton className="h-40 w-full" />
+      <div role="status" aria-busy aria-label={tCommon('loading')} className="gap-md flex flex-col">
+        <Skeleton radius="lg" className="h-12 w-full" />
+        <div className="gap-sm flex flex-col">
+          <Skeleton className="h-4 w-2/5" />
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
       </div>
     );
   }
