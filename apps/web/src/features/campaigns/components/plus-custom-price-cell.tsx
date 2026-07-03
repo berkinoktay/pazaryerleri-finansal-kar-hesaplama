@@ -92,7 +92,6 @@ export function PlusCustomPriceCell({
     if (isSelected) onDeselect();
   }
 
-  const showEstimate = price !== null && price.greaterThan(0) && lastResult !== null;
   // "Seç" is only meaningful once the estimate for the CURRENT typed price is back
   // and calculable — otherwise there is no confirmed profit to commit.
   const canSelect =
@@ -143,35 +142,38 @@ export function PlusCustomPriceCell({
           })}
         />
       </div>
-      {showEstimate && lastResult !== null ? (
-        // Same profit block as the Plus offer: "Hesaplanan kâr" + badge + delta,
-        // aligned identically (the badge dimmed-while-loading looked off next to the
-        // static Plus-offer badge, so it renders the same here).
-        <div className={cn('gap-3xs flex flex-col', items)}>
-          <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
-          <ProfitBadge
-            value={lastResult.breakdown?.netProfit ?? null}
-            marginPct={lastResult.breakdown?.saleMarginPct ?? null}
-            scale={scale}
-            onOpen={() => setBreakdownOpen(true)}
-            showMarginPct
-            className={self}
-          />
-          <ProfitDelta
-            optionNetProfit={lastResult.breakdown?.netProfit ?? null}
-            currentNetProfit={row.current.netProfit}
-          />
-          <PlusTariffBreakdown
-            open={breakdownOpen}
-            onOpenChange={setBreakdownOpen}
-            productTitle={row.productTitle}
-            imageUrl={row.imageUrl}
-            result={lastResult}
-            loading={estimate.isPending}
-            profitLabel={tBreakdown('estimatedProfit')}
-          />
-        </div>
-      ) : null}
+      {/* Profit block is ALWAYS visible — same as the Plus offer: a neutral em-dash
+          badge until the seller types a price, then the estimated profit + "vs
+          current" delta. Same "Hesaplanan kâr" + badge + delta structure and
+          alignment as the offer, so the two columns read identically. */}
+      <div className={cn('gap-3xs flex flex-col', items)}>
+        <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
+        <ProfitBadge
+          value={lastResult?.breakdown?.netProfit ?? null}
+          marginPct={lastResult?.breakdown?.saleMarginPct ?? null}
+          scale={scale}
+          onOpen={() => {
+            // The empty em-dash badge has no breakdown to open; only open once a
+            // typed price has an estimate.
+            if (lastResult !== null) setBreakdownOpen(true);
+          }}
+          showMarginPct
+          className={self}
+        />
+        <ProfitDelta
+          optionNetProfit={lastResult?.breakdown?.netProfit ?? null}
+          currentNetProfit={row.current.netProfit}
+        />
+        <PlusTariffBreakdown
+          open={breakdownOpen}
+          onOpenChange={setBreakdownOpen}
+          productTitle={row.productTitle}
+          imageUrl={row.imageUrl}
+          result={lastResult}
+          loading={estimate.isPending}
+          profitLabel={tBreakdown('estimatedProfit')}
+        />
+      </div>
 
       {/* SELECT control — a separate target from the input, so typing never selects.
           Enabled only once a calculable estimate for the typed price is in. Shares the
