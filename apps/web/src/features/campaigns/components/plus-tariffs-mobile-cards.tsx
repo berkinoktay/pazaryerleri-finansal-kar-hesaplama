@@ -44,7 +44,10 @@ export function PlusTariffsMobileCards({
         return (
           <div
             key={row.id}
-            className="border-border bg-card gap-sm p-md flex flex-col rounded-lg border"
+            // gap-md (not gap-sm) so the three zones — product info, the Plus offer,
+            // the custom-price field — read as distinct blocks instead of one dense
+            // stack (the seller flagged the mobile card as cramped/hard to parse).
+            className="border-border bg-card gap-md p-md flex flex-col rounded-lg border"
           >
             <div className="gap-sm flex items-start justify-between">
               <div className="gap-sm flex min-w-0 items-start">
@@ -74,6 +77,7 @@ export function PlusTariffsMobileCards({
               row={row}
               selected={selection[row.id] === true}
               onToggle={() => onToggleJoin(row.id)}
+              showJoinLabel
             />
             <PlusCustomPriceCell row={row} />
           </div>

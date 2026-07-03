@@ -23,6 +23,14 @@ export interface PlusBandCellProps {
   selected: boolean;
   /** Toggle the join state (re-tap un-joins). */
   onToggle: () => void;
+  /**
+   * Show an explicit "Plus'e Katıl / Katıldın" action word beside the radio (and
+   * drop the price to its own line). ON for the mobile cards — there is no column
+   * header there to say what the box is, so the action word makes the toggle's
+   * purpose obvious at a glance. OFF (default) in the desktop table, where the
+   * "trendyol plus Fiyat Aralığı" column header already labels the offer.
+   */
+  showJoinLabel?: boolean;
 }
 
 /**
@@ -39,7 +47,12 @@ export interface PlusBandCellProps {
  * through, EXCEPT the profit badge (`pointer-events-auto`) which opens the
  * breakdown modal (figures from the backend estimate at the Plus price).
  */
-export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): React.ReactElement {
+export function PlusBandCell({
+  row,
+  selected,
+  onToggle,
+  showJoinLabel = false,
+}: PlusBandCellProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage.table');
   const scale = useMarginColoring();
   const scope = useTariffScope();
@@ -50,6 +63,16 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
     setBreakdownOpen(true);
     estimate.mutate({ itemId: row.id, body: { price: row.plus.price } });
   }
+
+  // The Plus ceiling price + its "ve altı" qualifier as one unit — the hero when
+  // the offer stands alone (desktop), or the second line under the join action
+  // word (mobile). flex-wrap drops the qualifier under the price on a narrow card.
+  const priceUnit = (
+    <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
+      <span className="text-base font-bold tabular-nums">{formatCurrency(row.plus.price)}</span>
+      <span className="text-xs font-normal">{t('ceilingQualifier')}</span>
+    </span>
+  );
 
   return (
     <div
@@ -87,15 +110,15 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
           ) : (
             <CircleIcon className="text-border-strong size-4 shrink-0" aria-hidden />
           )}
-          {/* flex-wrap: when the "ve altı" qualifier doesn't fit beside the price
-              (narrow card / mobile) it drops under the price rather than truncating. */}
-          <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
-            <span className="text-base font-bold tabular-nums">
-              {formatCurrency(row.plus.price)}
-            </span>
-            <span className="text-xs font-normal">{t('ceilingQualifier')}</span>
-          </span>
+          {showJoinLabel ? (
+            <span className="text-sm font-medium">{selected ? t('joined') : t('join')}</span>
+          ) : (
+            priceUnit
+          )}
         </span>
+
+        {/* Mobile: the price sits on its own line under the join action word. */}
+        {showJoinLabel ? priceUnit : null}
 
         <span className="text-2xs text-muted-foreground tabular-nums">
           {t('plusCommission')} {formatPercentDisplay(row.plus.commissionPct)}
