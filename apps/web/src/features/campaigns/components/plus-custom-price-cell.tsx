@@ -1,7 +1,6 @@
 'use client';
 
 import { Decimal } from 'decimal.js';
-import { CheckmarkCircle02Icon, CircleIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -16,6 +15,7 @@ import type { PlusCustomChoice } from '../lib/plus-bulk-actions';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { PlusTariffDetailItem } from '../types';
 import { PlusTariffBreakdown } from './plus-tariff-breakdown';
+import { TariffSelectControl } from './tariff-select-control';
 
 const DEBOUNCE_MS = 400;
 
@@ -111,21 +111,25 @@ export function PlusCustomPriceCell({
   }
 
   return (
-    <div className="gap-3xs flex flex-col">
-      {/* On mobile the field has no column header, so label it here; the desktop
-          table's "Plus Fiyatı" column header hides this (md:hidden). */}
-      <span className="text-2xs text-muted-foreground font-medium md:hidden">
-        {t('table.customPrice')}
-      </span>
-      <MoneyInput
-        value={price}
-        onChange={handleChange}
-        nonNegative
-        max={ceiling}
-        aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
-        placeholder={t('table.enterPrice')}
-        className="md:max-w-input-narrow w-full"
-      />
+    <div className="gap-sm flex flex-col">
+      {/* Label + input as one tight group so the roomy outer gap-sm sits between
+          the input, the estimate, and the select control — not inside the field. */}
+      <div className="gap-3xs flex flex-col">
+        {/* On mobile the field has no column header, so label it here; the desktop
+            table's "Plus Fiyatı" column header hides this (md:hidden). */}
+        <span className="text-2xs text-muted-foreground font-medium md:hidden">
+          {t('table.customPrice')}
+        </span>
+        <MoneyInput
+          value={price}
+          onChange={handleChange}
+          nonNegative
+          max={ceiling}
+          aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
+          placeholder={t('table.enterPrice')}
+          className="md:max-w-input-narrow w-full"
+        />
+      </div>
       {showEstimate && lastResult !== null ? (
         <div className="gap-3xs flex flex-col">
           <span className="text-2xs text-muted-foreground">{tBreakdown('estimatedProfit')}</span>
@@ -155,27 +159,15 @@ export function PlusCustomPriceCell({
       )}
 
       {/* SELECT control — a separate target from the input, so typing never selects.
-          Enabled only once a calculable estimate for the typed price is in. */}
-      <button
-        type="button"
-        aria-pressed={isSelected}
+          Enabled only once a calculable estimate for the typed price is in. Shares the
+          exact affordance the Plus offer uses (no click-anywhere overlay). */}
+      <TariffSelectControl
+        selected={isSelected}
         disabled={!isSelected && !canSelect}
-        onClick={handleToggleSelect}
-        className={cn(
-          'gap-2xs mt-3xs text-2xs duration-fast ease-out-quart px-2xs py-3xs flex items-center self-start rounded-md font-medium transition-colors',
-          'focus-visible:shadow-focus focus-visible:outline-none',
-          isSelected
-            ? 'border-primary text-primary bg-surface-row-selected border'
-            : 'border-border text-foreground hover:bg-muted border disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
-        )}
-      >
-        {isSelected ? (
-          <CheckmarkCircle02Icon className="text-primary size-4 shrink-0" aria-hidden />
-        ) : (
-          <CircleIcon className="text-border-strong size-4 shrink-0" aria-hidden />
-        )}
-        {isSelected ? t('table.customSelected') : t('table.selectCustom')}
-      </button>
+        onToggle={handleToggleSelect}
+        label={t('table.selectCustom')}
+        selectedLabel={t('table.customSelected')}
+      />
     </div>
   );
 }

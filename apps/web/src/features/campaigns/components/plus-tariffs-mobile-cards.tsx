@@ -96,12 +96,11 @@ export function PlusTariffsMobileCards({
               </div>
             </div>
 
-            {/* Zone 3: the Plus offer — the only bordered box, and the action. */}
+            {/* Zone 3: the Plus offer — flat, with its own "Plus'e Katıl" control. */}
             <PlusBandCell
               row={row}
               selected={selection[row.id] === true}
               onToggle={() => onToggleJoin(row.id)}
-              showJoinLabel
             />
 
             {/* Zone 4: custom Plus price — a what-if AND a selectable choice. */}
