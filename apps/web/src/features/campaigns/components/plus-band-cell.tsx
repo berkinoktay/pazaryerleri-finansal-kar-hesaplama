@@ -8,6 +8,7 @@ import { formatCurrency } from '@pazarsync/utils';
 import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
+import { cn } from '@/lib/utils';
 
 import { useEstimatePlusItemPrice } from '../hooks/use-estimate-plus-item-price';
 import { useTariffScope } from '../lib/tariff-scope';
@@ -22,17 +23,25 @@ export interface PlusBandCellProps {
   selected: boolean;
   /** Toggle the ceiling join (re-tap un-joins). */
   onToggle: () => void;
+  /**
+   * Center the cell's content — used in the desktop table column (all non-product
+   * columns are centered). Off (left-aligned) for the mobile card zone.
+   */
+  centered?: boolean;
 }
 
 /**
- * The Plus offer as a flat, un-boxed choice: the ceiling price + reduced commission
- * + estimated profit, then a single explicit {@link TariffSelectControl} ("Plus'e
- * Katıl") to opt in. There is NO click-anywhere card overlay — every selectable
- * option on the row (this offer and the custom price) shares the same distinct
- * radio-button affordance, so the interaction is consistent and never fights an
- * input. Elements are generously spaced (gap-sm) for a clean, roomy read.
+ * The Plus offer as a flat, un-boxed choice: the ceiling price + reduced commission,
+ * the calculated profit + "vs current" delta, then a single explicit {@link
+ * TariffSelectControl} ("Tavan fiyata katıl"). No click-anywhere overlay — every
+ * selectable option on the row shares the same distinct radio-button affordance.
  */
-export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): React.ReactElement {
+export function PlusBandCell({
+  row,
+  selected,
+  onToggle,
+  centered = false,
+}: PlusBandCellProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage.table');
   const scale = useMarginColoring();
   const scope = useTariffScope();
@@ -44,11 +53,19 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
     estimate.mutate({ itemId: row.id, body: { price: row.plus.price } });
   }
 
+  const items = centered ? 'items-center' : 'items-start';
+  const self = centered ? 'self-center' : 'self-start';
+
   return (
-    <div className="gap-sm flex min-w-0 flex-col">
-      <div className="gap-3xs flex min-w-0 flex-col">
+    <div className={cn('gap-sm flex min-w-0 flex-col', items, centered && 'w-full text-center')}>
+      <div className={cn('gap-3xs flex min-w-0 flex-col', items)}>
         {/* Price ceiling + its "ve altı" qualifier as one hero unit. */}
-        <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
+        <span
+          className={cn(
+            'gap-x-2xs flex min-w-0 flex-wrap items-baseline',
+            centered && 'justify-center',
+          )}
+        >
           <span className="text-base font-bold tabular-nums">{formatCurrency(row.plus.price)}</span>
           <span className="text-xs font-normal">{t('ceilingQualifier')}</span>
         </span>
@@ -57,7 +74,7 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
         </span>
       </div>
 
-      <div className="gap-3xs flex flex-col">
+      <div className={cn('gap-3xs flex flex-col', items)}>
         <span className="text-2xs text-muted-foreground">{t('calculatedProfit')}</span>
         <ProfitBadge
           value={row.plus.netProfit}
@@ -65,10 +82,9 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
           scale={scale}
           onOpen={openBreakdown}
           showMarginPct
-          className="self-start"
+          className={self}
         />
-        {/* "Güncele göre +₺X" — the quantitative replacement for the old qualitative
-            "Plus daha kârlı" chip; how much joining beats doing nothing. */}
+        {/* "Güncele göre +₺X" — how much joining beats doing nothing. */}
         <ProfitDelta
           optionNetProfit={row.plus.netProfit}
           currentNetProfit={row.current.netProfit}
@@ -80,6 +96,7 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
         onToggle={onToggle}
         label={t('join')}
         selectedLabel={t('joined')}
+        className={self}
       />
 
       <PlusTariffBreakdown

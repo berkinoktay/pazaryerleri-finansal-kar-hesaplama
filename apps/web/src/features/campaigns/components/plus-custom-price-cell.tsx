@@ -29,6 +29,8 @@ export interface PlusCustomPriceCellProps {
   onSelect: (choice: PlusCustomChoice) => void;
   /** Un-commit the custom price for this row. */
   onDeselect: () => void;
+  /** Center the content (desktop table column) vs left-align (mobile card, default). */
+  centered?: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ export function PlusCustomPriceCell({
   isSelected,
   onSelect,
   onDeselect,
+  centered = false,
 }: PlusCustomPriceCellProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage');
   const tBreakdown = useTranslations('plusCommissionTariffsPage.breakdown');
@@ -113,10 +116,10 @@ export function PlusCustomPriceCell({
   }
 
   return (
-    <div className="gap-sm flex flex-col">
+    <div className={cn('gap-sm flex flex-col', centered && 'w-full items-center text-center')}>
       {/* Label + input as one tight group so the roomy outer gap-sm sits between
           the input, the estimate, and the select control — not inside the field. */}
-      <div className="gap-3xs flex flex-col">
+      <div className={cn('gap-3xs flex flex-col', centered && 'w-full items-center')}>
         {/* On mobile the field has no column header, so label it here; the desktop
             table's "Plus Fiyatı" column header hides this (md:hidden). */}
         <span className="text-2xs text-muted-foreground font-medium md:hidden">
@@ -130,17 +133,15 @@ export function PlusCustomPriceCell({
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
           className="md:max-w-input-narrow w-full"
-        />
-        {/* Any price at/below the ceiling still earns the reduced Plus commission —
-            spell it out so the seller knows the custom price keeps the Plus rate. */}
-        <span className="text-2xs text-muted-foreground">
-          {t('table.plusCommissionApplies', {
+          // Any price at/below the ceiling still earns the reduced Plus commission —
+          // the Input's help-text slot spells this out under the field with an info icon.
+          helpText={t('table.plusCommissionApplies', {
             pct: formatPercentDisplay(row.plus.commissionPct),
           })}
-        </span>
+        />
       </div>
       {showEstimate && lastResult !== null ? (
-        <div className="gap-3xs flex flex-col">
+        <div className={cn('gap-3xs flex flex-col', centered && 'items-center')}>
           <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
           <ProfitBadge
             value={lastResult.breakdown?.netProfit ?? null}
@@ -167,9 +168,7 @@ export function PlusCustomPriceCell({
             profitLabel={tBreakdown('estimatedProfit')}
           />
         </div>
-      ) : (
-        <span className="text-2xs text-muted-foreground">{t('table.customPriceHint')}</span>
-      )}
+      ) : null}
 
       {/* SELECT control — a separate target from the input, so typing never selects.
           Enabled only once a calculable estimate for the typed price is in. Shares the
@@ -180,6 +179,7 @@ export function PlusCustomPriceCell({
         onToggle={handleToggleSelect}
         label={t('table.selectCustom')}
         selectedLabel={t('table.customSelected')}
+        className={cn(centered && 'self-center')}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import { cva, type VariantProps } from 'class-variance-authority';
-import { Cancel01Icon, ViewIcon, ViewOffIcon } from 'hugeicons-react';
+import { Cancel01Icon, InformationCircleIcon, ViewIcon, ViewOffIcon } from 'hugeicons-react';
 import * as React from 'react';
 
 import { Spinner } from '@/components/ui/spinner';
@@ -128,6 +128,13 @@ export interface InputProps
    * generated toggle.
    */
   reveal?: { show: string; hide: string };
+  /**
+   * Hint/help text rendered BELOW the field, prefixed with an info icon — for
+   * "here's what this input means / accepts" copy you want under the control.
+   * Opt-in: when omitted the Input renders exactly as before (no extra wrapper),
+   * so existing consumers are untouched.
+   */
+  helpText?: React.ReactNode;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forwardedRef) => {
@@ -149,6 +156,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     showCount,
     maxLength,
     reveal,
+    helpText,
     value,
     defaultValue,
     onChange,
@@ -156,6 +164,22 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     readOnly,
     ...rest
   } = props;
+
+  // Opt-in help text below the field. When absent, returns the field untouched so
+  // existing consumers keep their exact DOM; when present, stacks the field + an
+  // info-icon hint in a column wrapper.
+  const withHelpText = (field: React.ReactElement): React.ReactElement => {
+    if (helpText === undefined) return field;
+    return (
+      <div className="gap-3xs flex w-full flex-col">
+        {field}
+        <span className="text-2xs text-muted-foreground gap-3xs flex items-start">
+          <InformationCircleIcon className="mt-px size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0">{helpText}</span>
+        </span>
+      </div>
+    );
+  };
 
   const [revealed, setRevealed] = React.useState(false);
   const revealActive = reveal !== undefined && type === 'password';
@@ -225,7 +249,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     onClear !== undefined && hasValue && disabled !== true && readOnly !== true;
 
   if (!needsWrapper) {
-    return (
+    return withHelpText(
       <input
         ref={inputRef}
         type={effectiveType}
@@ -240,7 +264,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
         aria-busy={loading ?? undefined}
         className={cn(inputVariants({ size, radius, className }))}
         {...rest}
-      />
+      />,
     );
   }
 
@@ -258,7 +282,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
     inputRef.current?.focus();
   };
 
-  return (
+  return withHelpText(
     <div
       data-invalid={invalid ? 'true' : undefined}
       data-valid={valid ? 'true' : undefined}
@@ -321,7 +345,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>((props, forw
           ) : null}
         </div>
       ) : null}
-    </div>
+    </div>,
   );
 });
 Input.displayName = 'Input';

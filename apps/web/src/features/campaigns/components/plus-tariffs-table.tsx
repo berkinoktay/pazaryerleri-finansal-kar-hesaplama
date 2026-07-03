@@ -90,12 +90,13 @@ export function PlusTariffsTable({
 
     const currentColumn: ColumnDef<PlusTariffDetailItem> = {
       id: 'current',
-      header: t('table.current'),
+      // Every non-product column centers its header + content (seller preference).
+      header: () => <span className="block w-full text-center">{t('table.current')}</span>,
       meta: { label: t('table.current') },
       cell: ({ row }) => {
         const r = row.original;
         return (
-          <div className="gap-3xs flex flex-col text-sm">
+          <div className="gap-3xs flex w-full flex-col items-center text-center text-sm">
             <div className="font-semibold tabular-nums">
               <Currency value={r.current.price} />
             </div>
@@ -119,7 +120,7 @@ export function PlusTariffsTable({
       // centers the label with the wordmark. `meta.label` stays plain text
       // ("Plus Fiyat Aralığı") for the column-visibility menu + a11y.
       header: () => (
-        <span className="gap-2xs inline-flex items-center">
+        <span className="gap-2xs flex w-full items-center justify-center">
           <TrendyolPlusLockup className="h-3.5" />
           <span className="leading-none">{t('table.priceRange')}</span>
         </span>
@@ -132,6 +133,7 @@ export function PlusTariffsTable({
             row={r}
             selected={selection[r.id] === true}
             onToggle={() => onToggleJoin(r.id)}
+            centered
           />
         );
       },
@@ -139,13 +141,14 @@ export function PlusTariffsTable({
 
     const customPriceColumn: ColumnDef<PlusTariffDetailItem> = {
       id: 'customPrice',
-      header: t('table.customPrice'),
+      header: () => <span className="block w-full text-center">{t('table.customPrice')}</span>,
       cell: ({ row }) => (
         <PlusCustomPriceCell
           row={row.original}
           isSelected={customPrices[row.original.id] != null}
           onSelect={(choice) => onSelectCustom(row.original.id, choice)}
           onDeselect={() => onDeselectCustom(row.original.id)}
+          centered
         />
       ),
     };
