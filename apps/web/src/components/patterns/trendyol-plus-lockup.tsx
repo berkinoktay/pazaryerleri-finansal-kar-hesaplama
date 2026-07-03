@@ -1,43 +1,169 @@
-import Image from 'next/image';
-
 import { cn } from '@/lib/utils';
 
 /**
  * Full "trendyol plus" horizontal brand lockup (flame mark + "trendyol plus"
- * wordmark). Loaded from `public/brands/trendyol-plus-lockup.webp` so the vendor's
- * brand colors are preserved — dashboard tokens intentionally don't carry vendor
- * colors, exactly like {@link MarketplaceLogo} and {@link TrendyolPlusLogo}.
+ * wordmark), inlined so the wordmark adapts to the theme. The flame and "plus"
+ * keep their fixed brand gradients (correct on light AND dark), while the
+ * "trendyol" letters use `currentColor` (via `text-foreground`) — dark on the
+ * light dashboard, light in dark mode — exactly how Trendyol renders the wordmark.
+ * This is why it is inline (not next/image): an <img> could not pick up the page
+ * text color for the wordmark. Mirrors the currentColor approach of brand/logo.tsx.
  *
- * Used to brand a Plus screen's PAGE HEADER (beside the title). Height comes from
- * `className` (default `h-6`); width auto-scales to the source aspect ratio (~5:1).
- * Decorative (`alt=""`) — always paired with a visible title.
+ * Height comes from `className` (default `h-6`); width auto-scales to the source
+ * aspect ratio (114×24). Decorative (`aria-hidden`) — always paired with a visible
+ * title. Gradient ids are static (the lockup renders once per page header).
  *
- * NOTE (dark mode): the lockup's "trendyol" word is BLACK, so on a dark background
- * it loses contrast (only the flame + gradient "plus" stay legible). The asset has
- * a transparent background (no white box), but a dark-safe variant would need a
- * light-text version of the wordmark. Flagged for the owner.
- *
- * @useWhen branding a Trendyol-Plus page header with the full "trendyol plus" lockup
+ * @useWhen branding a Trendyol-Plus page header with the full theme-adaptive "trendyol plus" lockup
  */
-const SRC = '/brands/trendyol-plus-lockup.webp';
-
-// Intrinsic aspect-ratio hint for next/image (real height is CSS-driven; this
-// only prevents layout shift on paint). Matches the source dimensions (248×49).
-const INTRINSIC = { width: 248, height: 49 } as const;
-
 export interface TrendyolPlusLockupProps {
   className?: string;
 }
 
 export function TrendyolPlusLockup({ className }: TrendyolPlusLockupProps): React.ReactElement {
   return (
-    <Image
-      src={SRC}
-      alt=""
-      width={INTRINSIC.width}
-      height={INTRINSIC.height}
-      unoptimized
-      className={cn('h-6 w-auto shrink-0', className)}
-    />
+    <svg
+      viewBox="0 0 114 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+      className={cn('text-foreground h-6 w-auto shrink-0', className)}
+    >
+      <path
+        d="M7.22662 15.4757C7.79371 15.5294 8.07725 15.5563 8.26047 15.7395C8.44369 15.9228 8.47056 16.2063 8.52431 16.7734L8.94596 21.2218C9.0654 22.4818 9.12512 23.1119 9.51797 23.5157C9.56337 23.5624 9.61158 23.6062 9.66233 23.647C10.1014 24 10.7343 24 12 24C13.2657 24 13.8986 24 14.3377 23.647C14.3884 23.6062 14.4366 23.5624 14.482 23.5157C14.8749 23.1119 14.9346 22.4818 15.054 21.2218L15.4757 16.7734C15.5294 16.2063 15.5563 15.9228 15.7395 15.7395C15.9228 15.5563 16.2063 15.5294 16.7734 15.4757L21.2218 15.054C22.4818 14.9346 23.1119 14.8749 23.5157 14.482C23.5624 14.4366 23.6062 14.3884 23.647 14.3377C24 13.8986 24 13.2657 24 12C24 10.7343 24 10.1014 23.647 9.66233C23.6062 9.61158 23.5624 9.56337 23.5157 9.51797C23.1119 9.12512 22.4818 9.0654 21.2218 8.94596L16.7734 8.52431C16.2063 8.47056 15.9228 8.44369 15.7395 8.26047C15.5563 8.07725 15.5294 7.79371 15.4757 7.22662L15.054 2.77825C14.9346 1.51818 14.8749 0.888141 14.482 0.484316C14.4366 0.437646 14.3884 0.39379 14.3377 0.352994C13.8986 0 13.2657 0 12 0C10.7343 0 10.1014 0 9.66233 0.352994C9.61158 0.39379 9.56337 0.437645 9.51797 0.484316C9.12512 0.888141 9.0654 1.51818 8.94596 2.77824L8.52431 7.22662C8.47056 7.79371 8.44369 8.07725 8.26047 8.26047C8.07725 8.44369 7.79371 8.47056 7.22662 8.52431L2.77825 8.94596C1.51818 9.0654 0.888141 9.12512 0.484316 9.51797C0.437645 9.56337 0.39379 9.61158 0.352994 9.66233C0 10.1014 0 10.7343 0 12C0 13.2657 0 13.8986 0.352994 14.3377C0.39379 14.3884 0.437646 14.4366 0.484316 14.482C0.888141 14.8749 1.51818 14.9346 2.77824 15.054L7.22662 15.4757Z"
+        fill="url(#paint0_linear_28362_11193)"
+      />
+      <path
+        d="M88.3913 18V11.6347C88.3913 9.41466 89.8075 7.98004 92.0017 7.98004C94.1959 7.98004 95.6688 9.45535 95.6688 11.649C95.6688 13.8426 94.0196 15.145 92.3887 15.145C91.5843 15.145 90.9785 14.7807 90.5146 14.2496C90.3383 14.0482 90.2127 13.9098 90.2127 13.9098V18H88.3913ZM92.0159 9.66291C90.9542 9.66291 90.2127 10.4423 90.2127 11.5615C90.2127 12.6807 90.9542 13.4601 92.0159 13.4601C93.0775 13.4601 93.8191 12.6807 93.8191 11.5615C93.8191 10.4423 93.0775 9.66291 92.0159 9.66291Z"
+        fill="#9600D8"
+      />
+      <path d="M98.6754 6.00201H96.854V15.1449H98.6754V6.00201Z" fill="#9600D8" />
+      <path
+        d="M103.483 15.1429C101.362 15.1429 100.146 13.8853 100.146 11.6896V8.16516H101.968V11.6896C101.968 13.228 102.918 13.458 103.483 13.458C104.048 13.458 104.998 13.228 104.998 11.6896V8.16516H106.82V11.6896C106.82 13.8833 105.604 15.1429 103.483 15.1429Z"
+        fill="#9600D8"
+      />
+      <path
+        d="M110.639 15.1431C109.028 15.1431 107.906 14.3393 107.786 13.1265H109.59C109.675 13.4989 110.017 13.6881 110.611 13.6881C111.472 13.6881 111.652 13.3076 111.652 12.9881C111.652 12.4 111.075 12.3125 110.463 12.223L110.335 12.2046C109.099 12.0215 107.892 11.7224 107.892 10.2654C107.892 8.89994 108.99 7.98016 110.625 7.98016C112.12 7.98016 113.212 8.78192 113.346 9.95403H111.555C111.435 9.62641 111.109 9.43513 110.651 9.43513C109.977 9.43513 109.738 9.82786 109.738 10.1636C109.738 10.7212 110.335 10.8107 110.967 10.9064L111.057 10.9206C112.24 11.0875 113.5 11.3907 113.5 12.8619C113.5 14.2497 112.375 15.1471 110.637 15.1471L110.639 15.1431Z"
+        fill="#9600D8"
+      />
+      <path
+        d="M88.3913 17.9999V11.6347C88.3913 9.41457 89.8075 7.97995 92.0017 7.97995C94.1959 7.97995 95.6688 9.45527 95.6688 11.6489C95.6688 13.8425 94.0196 15.1449 92.3887 15.1449C91.5843 15.1449 90.9785 14.7806 90.5146 14.2495C90.3383 14.0481 90.2127 13.9097 90.2127 13.9097V17.9999H88.3913ZM92.0159 9.66283C90.9542 9.66283 90.2127 10.4422 90.2127 11.5614C90.2127 12.6806 90.9542 13.46 92.0159 13.46C93.0775 13.46 93.8191 12.6806 93.8191 11.5614C93.8191 10.4422 93.0775 9.66283 92.0159 9.66283Z"
+        fill="url(#paint1_linear_28362_11193)"
+      />
+      <path
+        d="M98.6755 6.00201H96.8541V15.1449H98.6755V6.00201Z"
+        fill="url(#paint2_linear_28362_11193)"
+      />
+      <path
+        d="M103.483 15.1429C101.362 15.1429 100.146 13.8853 100.146 11.6896V8.16513H101.968V11.6896C101.968 13.228 102.918 13.4579 103.483 13.4579C104.049 13.4579 104.999 13.228 104.999 11.6896V8.16513H106.82V11.6896C106.82 13.8832 105.605 15.1429 103.483 15.1429Z"
+        fill="url(#paint3_linear_28362_11193)"
+      />
+      <path
+        d="M110.639 15.1429C109.029 15.1429 107.906 14.3391 107.787 13.1263H109.59C109.675 13.4986 110.017 13.6879 110.611 13.6879C111.472 13.6879 111.652 13.3074 111.652 12.9879C111.652 12.3998 111.075 12.3123 110.463 12.2228L110.335 12.2044C109.099 12.0213 107.892 11.7222 107.892 10.2652C107.892 8.89973 108.99 7.97995 110.625 7.97995C112.12 7.97995 113.212 8.78171 113.346 9.95382H111.555C111.435 9.6262 111.109 9.43492 110.651 9.43492C109.977 9.43492 109.738 9.82765 109.738 10.1634C109.738 10.721 110.335 10.8105 110.967 10.9062L111.057 10.9204C112.24 11.0873 113.5 11.3905 113.5 12.8617C113.5 14.2495 112.376 15.1469 110.637 15.1469L110.639 15.1429Z"
+        fill="url(#paint4_linear_28362_11193)"
+      />
+      <path
+        d="M53.7181 12.1557H48.1059C48.3633 13.2118 49.1696 14.038 50.2819 14.038C50.91 14.038 51.5725 13.7409 51.9838 13.2769L53.3412 13.3054C52.7435 14.447 51.6009 15.1897 50.2819 15.1897C48.3491 15.1897 46.8336 13.4926 46.8336 11.59C46.8336 9.68733 48.3248 8.01666 50.3062 8.01666C52.2877 8.01666 53.7545 9.60186 53.7545 11.5167C53.7545 11.7263 53.7424 11.9461 53.7181 12.1557ZM50.2941 9.18267C49.1939 9.18267 48.1789 10.0557 48.1059 11.1728H52.4842C52.4113 10.0557 51.3962 9.18267 50.2961 9.18267H50.2941Z"
+        fill="currentColor"
+      />
+      <path
+        d="M59.3398 15.1918V11.3091C59.3398 10.1553 58.9975 9.18468 57.6522 9.18468C56.4062 9.18468 55.8672 10.1553 55.8672 11.2969V15.1918H54.5949V8.20182H55.7801V8.92625H55.8044C56.2927 8.27507 57.0038 8.01868 57.7859 8.01868C58.7523 8.01868 59.6559 8.39921 60.1827 9.23352C60.5129 9.75039 60.6102 10.3751 60.6102 10.9774V15.1918H59.3378H59.3398Z"
+        fill="currentColor"
+      />
+      <path
+        d="M72.2277 17.2775H70.9068L71.8975 14.8702L69.1948 8.20178H70.5644L72.556 13.4824L74.5982 8.20178H75.9698L72.2277 17.2775Z"
+        fill="currentColor"
+      />
+      <path
+        d="M79.5885 15.1918C77.5949 15.1918 75.9315 13.5699 75.9315 11.5554C75.9315 9.54079 77.6313 8.01868 79.5885 8.01868C81.5456 8.01868 83.2455 9.56521 83.2455 11.5798C83.2455 13.5943 81.6429 15.1918 79.5885 15.1918ZM79.5885 9.18265C78.2675 9.18265 77.2038 10.2632 77.2038 11.59C77.2038 12.9167 78.2675 14.0257 79.5885 14.0257C80.9095 14.0257 81.9731 12.9045 81.9731 11.5777C81.9731 10.251 80.9095 9.18265 79.5885 9.18265Z"
+        fill="currentColor"
+      />
+      <path
+        d="M67.3735 15.1917V14.0359H67.3492C66.7859 14.8214 65.8945 15.1917 64.9524 15.1917C62.9223 15.1917 61.4291 13.6554 61.4291 11.6286C61.4291 9.6018 62.8959 8.0166 64.9524 8.0166C65.8073 8.0166 66.713 8.3483 67.2519 9.0361H67.2762V6H68.5486V15.1897H67.3735V15.1917ZM65.0253 9.18261C63.68 9.18261 62.7014 10.2876 62.7014 11.6143C62.7014 12.9411 63.7165 14.0216 65.0131 14.0216C66.3098 14.0216 67.3735 12.9309 67.3735 11.6143C67.3735 10.2977 66.4071 9.18261 65.0253 9.18261Z"
+        fill="currentColor"
+      />
+      <path d="M84.2827 15.1917V6.00201H85.5551V15.1917H84.2827Z" fill="currentColor" />
+      <path
+        d="M37.2561 13.7551C37.3108 13.9708 37.3818 14.1478 37.4628 14.2801C37.5438 14.4123 37.6492 14.5344 37.7748 14.6423C38.176 14.9964 38.6865 15.1897 39.2923 15.1897C39.8981 15.1897 40.4492 15.031 40.9577 14.7461V13.5272C40.433 13.8365 39.9264 14.0115 39.4544 14.0115C38.8081 14.0115 38.4799 13.6004 38.4799 12.819V9.39831H40.6133V8.19974H38.4799V6H37.2237V8.19974H36V9.39831H37.1731V12.5077C37.1731 13.1181 37.2014 13.5373 37.2561 13.753V13.7551Z"
+        fill="currentColor"
+      />
+      <path
+        d="M44.951 9.34134C45.3441 9.34134 45.7777 9.56111 46.2376 9.99658L46.9264 8.84278C46.3652 8.32388 45.6865 8.08783 45.2874 8.08783H45.2023C44.7484 8.08783 43.9866 8.08783 43.3646 9.09511L43.3383 9.13785L43.3444 8.20178H42.0295V15.1917H43.3444V11.4393C43.3444 10.8736 43.5044 10.3791 43.8205 9.96605C44.1366 9.55093 44.5175 9.34134 44.949 9.34134H44.951Z"
+        fill="currentColor"
+      />
+      <defs>
+        <linearGradient
+          id="paint0_linear_28362_11193"
+          x1="4.69787"
+          y1="19.3021"
+          x2="19.7243"
+          y2="4.27574"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#FF16B8" />
+          <stop offset="0.64" stopColor="#FF6720" />
+          <stop offset="0.86" stopColor="#FF9129" />
+        </linearGradient>
+        <linearGradient
+          id="paint1_linear_28362_11193"
+          x1="199.332"
+          y1="3.15118"
+          x2="121.091"
+          y2="70.6041"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="white" />
+          <stop offset="0.26" stopColor="#FF9025" />
+          <stop offset="0.41" stopColor="#FF5317" />
+          <stop offset="0.63" stopColor="#FF256C" />
+          <stop offset="0.83" stopColor="#FF15B8" />
+          <stop offset="0.92" stopColor="#BA20AB" />
+        </linearGradient>
+        <linearGradient
+          id="paint2_linear_28362_11193"
+          x1="415"
+          y1="5.47328"
+          x2="364.908"
+          y2="162.92"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="white" />
+          <stop offset="0.26" stopColor="#FF9025" />
+          <stop offset="0.41" stopColor="#FF5317" />
+          <stop offset="0.63" stopColor="#FF256C" />
+          <stop offset="0.83" stopColor="#FF15B8" />
+          <stop offset="0.92" stopColor="#BA20AB" />
+        </linearGradient>
+        <linearGradient
+          id="paint3_linear_28362_11193"
+          x1="165.143"
+          y1="1.58985"
+          x2="61.0325"
+          y2="69.7488"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="white" />
+          <stop offset="0.26" stopColor="#FF9025" />
+          <stop offset="0.41" stopColor="#FF5317" />
+          <stop offset="0.63" stopColor="#FF256C" />
+          <stop offset="0.83" stopColor="#FF15B8" />
+          <stop offset="0.92" stopColor="#BA20AB" />
+        </linearGradient>
+        <linearGradient
+          id="paint4_linear_28362_11193"
+          x1="120.547"
+          y1="5.5991"
+          x2="84.2624"
+          y2="16.4555"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="white" />
+          <stop offset="0.26" stopColor="#FF9025" />
+          <stop offset="0.41" stopColor="#FF5317" />
+          <stop offset="0.63" stopColor="#FF256C" />
+          <stop offset="0.83" stopColor="#FF15B8" />
+          <stop offset="0.92" stopColor="#BA20AB" />
+        </linearGradient>
+      </defs>
+    </svg>
   );
 }
