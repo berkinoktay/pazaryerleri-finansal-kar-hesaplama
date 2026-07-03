@@ -3,11 +3,42 @@ import { Decimal } from 'decimal.js';
 import type { PlusScenario, PlusTariffDetailItem } from '../types';
 
 /**
- * Per-item Plus opt-in map: `true` = the seller joined Plus for the product,
- * `false`/absent = not joined. Unlike the commission tariff (a band KEY per row),
- * the Plus model is a single boolean per row — join or don't.
+ * Per-item Plus opt-in map: `true` = the seller joined Plus AT THE CEILING price,
+ * `false`/absent = not joined at the ceiling. Unlike the commission tariff (a band
+ * KEY per row), the Plus model is a single boolean per row.
+ *
+ * This pairs with {@link PlusCustomPriceMap}: the two maps are MUTUALLY EXCLUSIVE
+ * per row — a row is either ceiling-joined (`selection[id] === true`), custom-joined
+ * (`customPrices[id] != null`), or not joined. Setting one clears the other.
  */
 export type PlusSelectionMap = Record<string, boolean>;
+
+/**
+ * A committed custom Plus price for one product: the seller typed a price at/below
+ * the ceiling and confirmed it with "Seç". The estimated profit/margin are captured
+ * at confirm time so the header summary can total the joined products without
+ * re-estimating. `price` is a GROSS decimal string.
+ */
+export interface PlusCustomChoice {
+  price: string;
+  netProfit: string | null;
+  marginPct: string | null;
+}
+
+/** Per-item committed custom price, or null/absent when the row is not custom-joined. */
+export type PlusCustomPriceMap = Record<string, PlusCustomChoice | null>;
+
+/**
+ * Whether the seller has joined Plus for this row — at the ceiling OR at a custom
+ * price. The single "is joined" predicate for export, summary, and filtering.
+ */
+export function isJoinedRow(
+  selection: PlusSelectionMap,
+  customPrices: PlusCustomPriceMap,
+  itemId: string,
+): boolean {
+  return selection[itemId] === true || customPrices[itemId] != null;
+}
 
 /** Plus-scenario profit filter (based on the PLUS offer's net profit sign). */
 export type PlusProfitFilter = 'all' | 'profitable' | 'loss';
@@ -36,53 +67,72 @@ function scenarioProfit(scenario: PlusScenario): Decimal | null {
   return scenario.netProfit !== null ? new Decimal(scenario.netProfit) : null;
 }
 
-/** Whether the seller has joined Plus for this row. */
-export function isJoined(selection: PlusSelectionMap, itemId: string): boolean {
-  return selection[itemId] === true;
-}
-
-/** Join every listed calculable product to Plus (uncalculable rows cannot join). */
-export function joinAll(
-  rows: readonly PlusTariffDetailItem[],
-  prev: PlusSelectionMap,
-): PlusSelectionMap {
-  const next = { ...prev };
-  for (const row of rows) {
-    if (row.calculable) next[row.id] = true;
-  }
-  return next;
+/** The full per-row join state: ceiling opt-ins + custom-price opt-ins. */
+export interface PlusSelectionState {
+  selection: PlusSelectionMap;
+  customPrices: PlusCustomPriceMap;
 }
 
 /**
- * Join only the rows where Plus nets more than the current price/commission
- * (`plusIsBetter`). This is the useful default: often the lower Plus-ceiling
- * price hurts more than the reduced commission helps, so joining every product
- * is a mistake — this joins only the ones that genuinely win.
+ * Join every listed calculable product to Plus AT THE CEILING (uncalculable rows
+ * cannot join). Joining at the ceiling clears any per-row custom price, keeping the
+ * two maps mutually exclusive.
+ */
+export function joinAll(
+  rows: readonly PlusTariffDetailItem[],
+  state: PlusSelectionState,
+): PlusSelectionState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
+  for (const row of rows) {
+    if (row.calculable) {
+      selection[row.id] = true;
+      customPrices[row.id] = null;
+    }
+  }
+  return { selection, customPrices };
+}
+
+/**
+ * Join (at the ceiling) only the rows where Plus nets more than the current
+ * price/commission (`plusIsBetter`). This is the useful default: often the lower
+ * Plus-ceiling price hurts more than the reduced commission helps, so joining every
+ * product is a mistake — this joins only the ones that genuinely win. Custom-priced
+ * rows it touches switch to the ceiling; rows it does not touch keep their choice.
  */
 export function joinProfitable(
   rows: readonly PlusTariffDetailItem[],
-  prev: PlusSelectionMap,
-): PlusSelectionMap {
-  const next = { ...prev };
+  state: PlusSelectionState,
+): PlusSelectionState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    if (row.calculable && row.plusIsBetter) next[row.id] = true;
+    if (row.calculable && row.plusIsBetter) {
+      selection[row.id] = true;
+      customPrices[row.id] = null;
+    }
   }
-  return next;
+  return { selection, customPrices };
 }
 
-/** Un-join the listed rows. */
+/** Un-join the listed rows entirely (both ceiling and custom). */
 export function clearJoins(
   rows: readonly PlusTariffDetailItem[],
-  prev: PlusSelectionMap,
-): PlusSelectionMap {
-  const next = { ...prev };
-  for (const row of rows) next[row.id] = false;
-  return next;
+  state: PlusSelectionState,
+): PlusSelectionState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
+  for (const row of rows) {
+    selection[row.id] = false;
+    customPrices[row.id] = null;
+  }
+  return { selection, customPrices };
 }
 
 export function filterPlusRows(
   rows: readonly PlusTariffDetailItem[],
   selection: PlusSelectionMap,
+  customPrices: PlusCustomPriceMap,
   filters: PlusTariffFilterState,
 ): PlusTariffDetailItem[] {
   const query = filters.query.trim().toLocaleLowerCase('tr');
@@ -113,7 +163,7 @@ export function filterPlusRows(
       return false;
     }
 
-    const joined = isJoined(selection, row.id);
+    const joined = isJoinedRow(selection, customPrices, row.id);
     if (filters.selection === 'selected' && !joined) return false;
     if (filters.selection === 'unselected' && joined) return false;
 

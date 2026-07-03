@@ -1095,6 +1095,8 @@
       "customPrice": "Plus Price",
       "enterPrice": "Enter price",
       "customPriceHint": "Try a Plus price below the ceiling",
+      "selectCustom": "Select this price",
+      "customSelected": "This price selected",
       "ceilingQualifier": "and below"
     },
     "noResults": {

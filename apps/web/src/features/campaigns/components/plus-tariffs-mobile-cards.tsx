@@ -8,7 +8,11 @@ import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { formatPercentDisplay } from '@/lib/format-percent';
 
 import { usePlusReasonLabel } from '../hooks/use-plus-reason-label';
-import type { PlusSelectionMap } from '../lib/plus-bulk-actions';
+import type {
+  PlusCustomChoice,
+  PlusCustomPriceMap,
+  PlusSelectionMap,
+} from '../lib/plus-bulk-actions';
 import type { PlusTariffDetailItem } from '../types';
 import { PlusBandCell } from './plus-band-cell';
 import { PlusCustomPriceCell } from './plus-custom-price-cell';
@@ -16,7 +20,10 @@ import { PlusCustomPriceCell } from './plus-custom-price-cell';
 export interface PlusTariffsMobileCardsProps {
   rows: readonly PlusTariffDetailItem[];
   selection: PlusSelectionMap;
+  customPrices: PlusCustomPriceMap;
   onToggleJoin: (rowId: string) => void;
+  onSelectCustom: (rowId: string, choice: PlusCustomChoice) => void;
+  onDeselectCustom: (rowId: string) => void;
 }
 
 /**
@@ -34,7 +41,10 @@ export interface PlusTariffsMobileCardsProps {
 export function PlusTariffsMobileCards({
   rows,
   selection,
+  customPrices,
   onToggleJoin,
+  onSelectCustom,
+  onDeselectCustom,
 }: PlusTariffsMobileCardsProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage');
   const reasonLabel = usePlusReasonLabel();
@@ -94,8 +104,13 @@ export function PlusTariffsMobileCards({
               showJoinLabel
             />
 
-            {/* Zone 4: custom Plus price what-if (self-labelled "Plus Fiyatı"). */}
-            <PlusCustomPriceCell row={row} />
+            {/* Zone 4: custom Plus price — a what-if AND a selectable choice. */}
+            <PlusCustomPriceCell
+              row={row}
+              isSelected={customPrices[row.id] != null}
+              onSelect={(choice) => onSelectCustom(row.id, choice)}
+              onDeselect={() => onDeselectCustom(row.id)}
+            />
           </div>
         );
       })}

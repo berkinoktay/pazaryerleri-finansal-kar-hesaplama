@@ -26,7 +26,10 @@ import {
   filterPlusRows,
   joinAll,
   joinProfitable,
+  type PlusCustomChoice,
+  type PlusCustomPriceMap,
   type PlusSelectionMap,
+  type PlusSelectionState,
   type PlusTariffFilterState,
 } from '../lib/plus-bulk-actions';
 import { summarizePlusSelection } from '../lib/plus-tariff-summary';
@@ -75,7 +78,11 @@ export function PlusTariffDetailClient({
     [detail.data],
   );
 
+  // Two MUTUALLY EXCLUSIVE per-row join buffers: `selection` = joined at the ceiling
+  // price; `customPrices` = joined at a confirmed custom price. A row is in at most
+  // one. Both stay local (edit state) and save together on "Kaydet ve İndir".
   const [selection, setSelection] = React.useState<PlusSelectionMap>({});
+  const [customPrices, setCustomPrices] = React.useState<PlusCustomPriceMap>({});
   const [seededTariffId, setSeededTariffId] = React.useState<string | null>(null);
   // View state (filters) is URL-owned via nuqs: reload / share / back-forward
   // reproduce the exact view. The tri-states encode 'all' as an absent param;
@@ -126,14 +133,41 @@ export function PlusTariffDetailClient({
   // the tariff id, so it fires once per tariff) is the React-recommended alternative
   // to a setState-in-effect — no cascading renders.
   if (view !== null && view.id !== seededTariffId) {
-    const seed: PlusSelectionMap = {};
-    for (const row of view.rows) seed[row.id] = row.selected;
-    setSelection(seed);
+    const seedSelection: PlusSelectionMap = {};
+    const seedCustom: PlusCustomPriceMap = {};
+    for (const row of view.rows) {
+      if (row.customPrice !== null) {
+        // Custom-joined: restore the confirmed price. The custom price's exact
+        // profit isn't in the detail payload, so approximate the summary with the
+        // ceiling profit until the seller re-confirms (which captures the estimate).
+        seedCustom[row.id] = {
+          price: row.customPrice,
+          netProfit: row.plus.netProfit,
+          marginPct: row.plus.marginPct,
+        };
+      } else if (row.selected) {
+        seedSelection[row.id] = true;
+      }
+    }
+    setSelection(seedSelection);
+    setCustomPrices(seedCustom);
     setSeededTariffId(view.id);
   }
 
   const handleToggleJoin = React.useCallback((rowId: string): void => {
+    // Joining/leaving at the ceiling; clears any custom price (mutually exclusive).
     setSelection((prev) => ({ ...prev, [rowId]: prev[rowId] !== true }));
+    setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
+  }, []);
+
+  const handleSelectCustom = React.useCallback((rowId: string, choice: PlusCustomChoice): void => {
+    // A confirmed custom price replaces any ceiling join (mutually exclusive).
+    setCustomPrices((prev) => ({ ...prev, [rowId]: choice }));
+    setSelection((prev) => (prev[rowId] ? { ...prev, [rowId]: false } : prev));
+  }, []);
+
+  const handleDeselectCustom = React.useCallback((rowId: string): void => {
+    setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
   }, []);
 
   if (detail.isLoading) {
@@ -181,8 +215,8 @@ export function PlusTariffDetailClient({
   }
 
   const rows = view.rows;
-  const summary = summarizePlusSelection(rows, selection);
-  const filteredRows = filterPlusRows(rows, selection, filters);
+  const summary = summarizePlusSelection(rows, selection, customPrices);
+  const filteredRows = filterPlusRows(rows, selection, customPrices, filters);
   const categories = distinct(rows.map((row) => row.category));
   const brands = distinct(rows.map((row) => row.brand));
   const hasActiveFilters =
@@ -194,17 +228,24 @@ export function PlusTariffDetailClient({
     filters.selection !== 'all';
 
   const applyBulk = (
-    fn: (rows: typeof filteredRows, prev: PlusSelectionMap) => PlusSelectionMap,
+    fn: (rows: typeof filteredRows, state: PlusSelectionState) => PlusSelectionState,
   ): void => {
-    setSelection((prev) => fn(filteredRows, prev));
+    const next = fn(filteredRows, { selection, customPrices });
+    setSelection(next.selection);
+    setCustomPrices(next.customPrices);
   };
 
   const onSaveExport = (): void => {
-    const selections = rows.map((row) => ({
-      itemId: row.id,
-      selected: selection[row.id] === true,
-      customPrice: row.customPrice,
-    }));
+    // A row exports its custom price when custom-joined, else the ceiling when
+    // ceiling-joined; `selected` (plusSelected) is true for either.
+    const selections = rows.map((row) => {
+      const custom = customPrices[row.id];
+      return {
+        itemId: row.id,
+        selected: custom != null || selection[row.id] === true,
+        customPrice: custom != null ? custom.price : null,
+      };
+    });
     updateSelections.mutate(
       { selections },
       {
@@ -279,7 +320,10 @@ export function PlusTariffDetailClient({
           <PlusTariffsTable
             rows={filteredRows}
             selection={selection}
+            customPrices={customPrices}
             onToggleJoin={handleToggleJoin}
+            onSelectCustom={handleSelectCustom}
+            onDeselectCustom={handleDeselectCustom}
             toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={resetFilters}
@@ -290,7 +334,10 @@ export function PlusTariffDetailClient({
           <PlusTariffsMobileCards
             rows={filteredRows}
             selection={selection}
+            customPrices={customPrices}
             onToggleJoin={handleToggleJoin}
+            onSelectCustom={handleSelectCustom}
+            onDeselectCustom={handleDeselectCustom}
           />
         </div>
 

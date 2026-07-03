@@ -16,15 +16,24 @@ import { formatPercentDisplay } from '@/lib/format-percent';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { usePlusReasonLabel } from '../hooks/use-plus-reason-label';
-import type { PlusSelectionMap } from '../lib/plus-bulk-actions';
+import type {
+  PlusCustomChoice,
+  PlusCustomPriceMap,
+  PlusSelectionMap,
+} from '../lib/plus-bulk-actions';
 import type { PlusTariffDetailItem } from '../types';
 import { PlusBandCell } from './plus-band-cell';
 import { PlusCustomPriceCell } from './plus-custom-price-cell';
 
 export interface PlusTariffsTableProps {
   rows: readonly PlusTariffDetailItem[];
+  /** Ceiling opt-ins (rowId → joined-at-ceiling). */
   selection: PlusSelectionMap;
+  /** Custom-price opt-ins (rowId → confirmed custom choice), mutually exclusive with `selection`. */
+  customPrices: PlusCustomPriceMap;
   onToggleJoin: (rowId: string) => void;
+  onSelectCustom: (rowId: string, choice: PlusCustomChoice) => void;
+  onDeselectCustom: (rowId: string) => void;
   toolbar?: React.ReactNode;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
@@ -33,7 +42,10 @@ export interface PlusTariffsTableProps {
 export function PlusTariffsTable({
   rows,
   selection,
+  customPrices,
   onToggleJoin,
+  onSelectCustom,
+  onDeselectCustom,
   toolbar,
   hasActiveFilters,
   onClearFilters,
@@ -128,11 +140,18 @@ export function PlusTariffsTable({
     const customPriceColumn: ColumnDef<PlusTariffDetailItem> = {
       id: 'customPrice',
       header: t('table.customPrice'),
-      cell: ({ row }) => <PlusCustomPriceCell row={row.original} />,
+      cell: ({ row }) => (
+        <PlusCustomPriceCell
+          row={row.original}
+          isSelected={customPrices[row.original.id] != null}
+          onSelect={(choice) => onSelectCustom(row.original.id, choice)}
+          onDeselect={() => onDeselectCustom(row.original.id)}
+        />
+      ),
     };
 
     return [productColumn, currentColumn, offerColumn, customPriceColumn];
-  }, [t, reasonLabel, selection, onToggleJoin]);
+  }, [t, reasonLabel, selection, customPrices, onToggleJoin, onSelectCustom, onDeselectCustom]);
 
   return (
     <DataTable<PlusTariffDetailItem, unknown>

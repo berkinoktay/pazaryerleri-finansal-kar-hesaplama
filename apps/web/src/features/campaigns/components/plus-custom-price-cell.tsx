@@ -1,6 +1,7 @@
 'use client';
 
 import { Decimal } from 'decimal.js';
+import { CheckmarkCircle02Icon, CircleIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -11,46 +12,60 @@ import { cn } from '@/lib/utils';
 
 import type { EstimatePlusPriceResult } from '../api/estimate-plus-item-price.api';
 import { useEstimatePlusItemPrice } from '../hooks/use-estimate-plus-item-price';
+import type { PlusCustomChoice } from '../lib/plus-bulk-actions';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { PlusTariffDetailItem } from '../types';
 import { PlusTariffBreakdown } from './plus-tariff-breakdown';
 
 const DEBOUNCE_MS = 400;
 
+export interface PlusCustomPriceCellProps {
+  row: PlusTariffDetailItem;
+  /** Whether THIS row's custom price is the seller's active selection. */
+  isSelected: boolean;
+  /** Commit the typed custom price as the selection (carrying its estimated profit). */
+  onSelect: (choice: PlusCustomChoice) => void;
+  /** Un-commit the custom price for this row. */
+  onDeselect: () => void;
+}
+
 /**
- * Custom Plus-price "what-if" field. The seller tries a Plus price at or below the
- * ceiling (`plus.price`); a debounced backend estimate maps it to the reduced Plus
- * commission and returns the real profit — shown via the shared {@link ProfitBadge}
- * (margin-colored, same chip as orders); clicking it opens the full breakdown
- * modal. The input is capped at the ceiling so the seller cannot enter a price the
- * Plus program would reject. No client-side math: the engine computes the
- * authoritative value (feedback_no_frontend_financial_calculation). Owns its own
- * price state so typing never rebuilds the table column defs (which would steal
- * focus).
+ * Custom Plus-price "what-if" AND a selectable choice. The seller types a price at
+ * or below the ceiling; a debounced backend estimate returns the real profit at the
+ * reduced Plus commission (shown via the shared {@link ProfitBadge}). When they are
+ * sure, an EXPLICIT "Bu fiyatı seç" control commits that price as the row's Plus
+ * selection — the export then writes the custom amount instead of the ceiling.
+ *
+ * Click-conflict resolution (three separate, non-overlapping targets): the INPUT
+ * only types, the badge opens the breakdown, and the SELECT control commits. There
+ * is no stretched-overlay here (unlike the band card) precisely because the input
+ * would fight it. Editing a committed price un-commits it, so the selected amount is
+ * always the last value the seller confirmed with "Seç". No client-side math — the
+ * engine computes the authoritative value (feedback_no_frontend_financial_calculation).
  */
-export function PlusCustomPriceCell({ row }: { row: PlusTariffDetailItem }): React.ReactElement {
+export function PlusCustomPriceCell({
+  row,
+  isSelected,
+  onSelect,
+  onDeselect,
+}: PlusCustomPriceCellProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage');
   const tBreakdown = useTranslations('plusCommissionTariffsPage.breakdown');
   const scale = useMarginColoring();
   const scope = useTariffScope();
   const estimate = useEstimatePlusItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
-  const [price, setPrice] = React.useState<Decimal | null>(null);
+  // Seed the input from any persisted custom price so reopening a tariff shows it.
+  const [price, setPrice] = React.useState<Decimal | null>(
+    row.customPrice !== null ? new Decimal(row.customPrice) : null,
+  );
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   // The Plus offer's ceiling: the seller may try any price up to (and including)
   // it, never above — that is the whole point of the ceiling.
   const ceiling = React.useMemo(() => new Decimal(row.plus.price), [row.plus.price]);
-  // Last SUCCESSFUL estimate. `mutate()` resets `estimate.data` to undefined,
-  // which would unmount the badge on every debounced keystroke and make the row
-  // jump; keeping the previous figures on screen (dimmed while the next request
-  // runs) kills that flicker. react-query fires a mutate-level onSuccess only for
-  // the LATEST call, so an out-of-order older response can never overwrite a newer
-  // estimate.
   const [lastResult, setLastResult] = React.useState<EstimatePlusPriceResult | null>(null);
 
   // Debounced what-if: fire the estimate ~400ms after the seller stops typing.
-  // useEffect is correct here — it syncs an external system (the estimate API) to
-  // the typed price, and the cleanup cancels the pending call on each keystroke.
   React.useEffect(() => {
     if (price === null || !price.greaterThan(0)) return undefined;
     const priceStr = price.toFixed(2);
@@ -65,18 +80,46 @@ export function PlusCustomPriceCell({ row }: { row: PlusTariffDetailItem }): Rea
     };
   }, [price, row.id, estimateMutate]);
 
+  function handleChange(next: Decimal | null): void {
+    setPrice(next);
+    // Editing a committed custom price un-commits it — the seller re-confirms the
+    // new value with "Seç", so the selected amount is always the last confirmed one.
+    if (isSelected) onDeselect();
+  }
+
   const showEstimate = price !== null && price.greaterThan(0) && lastResult !== null;
+  // "Seç" is only meaningful once the estimate for the CURRENT typed price is back
+  // and calculable — otherwise there is no confirmed profit to commit.
+  const canSelect =
+    price !== null &&
+    lastResult !== null &&
+    lastResult.calculable &&
+    lastResult.price === price.toFixed(2);
+
+  function handleToggleSelect(): void {
+    if (isSelected) {
+      onDeselect();
+      return;
+    }
+    if (canSelect && lastResult?.breakdown != null && price !== null) {
+      onSelect({
+        price: price.toFixed(2),
+        netProfit: lastResult.breakdown.netProfit ?? null,
+        marginPct: lastResult.breakdown.saleMarginPct ?? null,
+      });
+    }
+  }
 
   return (
     <div className="gap-3xs flex flex-col">
       {/* On mobile the field has no column header, so label it here; the desktop
-          table's "Plus Fiyati" column header hides this (md:hidden). */}
+          table's "Plus Fiyatı" column header hides this (md:hidden). */}
       <span className="text-2xs text-muted-foreground font-medium md:hidden">
         {t('table.customPrice')}
       </span>
       <MoneyInput
         value={price}
-        onChange={setPrice}
+        onChange={handleChange}
         nonNegative
         max={ceiling}
         aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
@@ -92,8 +135,6 @@ export function PlusCustomPriceCell({ row }: { row: PlusTariffDetailItem }): Rea
             scale={scale}
             onOpen={() => setBreakdownOpen(true)}
             showMarginPct
-            // Dim (don't unmount) while the next estimate is in flight — the
-            // figures update in place with zero layout shift.
             className={cn(
               'duration-fast self-start transition-opacity',
               estimate.isPending && 'opacity-60',
@@ -112,6 +153,29 @@ export function PlusCustomPriceCell({ row }: { row: PlusTariffDetailItem }): Rea
       ) : (
         <span className="text-2xs text-muted-foreground">{t('table.customPriceHint')}</span>
       )}
+
+      {/* SELECT control — a separate target from the input, so typing never selects.
+          Enabled only once a calculable estimate for the typed price is in. */}
+      <button
+        type="button"
+        aria-pressed={isSelected}
+        disabled={!isSelected && !canSelect}
+        onClick={handleToggleSelect}
+        className={cn(
+          'gap-2xs mt-3xs text-2xs duration-fast ease-out-quart px-2xs py-3xs flex items-center self-start rounded-md font-medium transition-colors',
+          'focus-visible:shadow-focus focus-visible:outline-none',
+          isSelected
+            ? 'border-primary text-primary bg-surface-row-selected border'
+            : 'border-border text-foreground hover:bg-muted border disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+        )}
+      >
+        {isSelected ? (
+          <CheckmarkCircle02Icon className="text-primary size-4 shrink-0" aria-hidden />
+        ) : (
+          <CircleIcon className="text-border-strong size-4 shrink-0" aria-hidden />
+        )}
+        {isSelected ? t('table.customSelected') : t('table.selectCustom')}
+      </button>
     </div>
   );
 }

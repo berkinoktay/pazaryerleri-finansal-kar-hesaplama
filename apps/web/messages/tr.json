@@ -1095,6 +1095,8 @@
       "customPrice": "Plus Fiyatı",
       "enterPrice": "Fiyat girin",
       "customPriceHint": "Üst limitin altında bir Plus fiyatı dene",
+      "selectCustom": "Bu fiyatı seç",
+      "customSelected": "Bu fiyat seçildi",
       "ceilingQualifier": "ve altı"
     },
     "noResults": {

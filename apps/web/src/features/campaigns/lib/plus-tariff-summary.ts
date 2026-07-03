@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 
 import type { PlusScenario, PlusTariffDetailItem } from '../types';
-import { isJoined, type PlusSelectionMap } from './plus-bulk-actions';
+import { type PlusCustomPriceMap, type PlusSelectionMap } from './plus-bulk-actions';
 
 export interface PlusTariffSummary {
   /** Products listed in this Plus window. */
@@ -19,15 +19,25 @@ function profitOrZero(scenario: PlusScenario): Decimal {
   return scenario.netProfit !== null ? new Decimal(scenario.netProfit) : new Decimal(0);
 }
 
+/** A raw net-profit string as a Decimal, or zero when null. */
+function stringProfitOrZero(netProfit: string | null): Decimal {
+  return netProfit !== null ? new Decimal(netProfit) : new Decimal(0);
+}
+
 /**
  * Aggregate the seller's Plus opt-in choices for the header KPI strip. This only
- * SUMS already-computed per-scenario profit figures for display — it does not
- * calculate profit/commission/VAT (that is the backend engine's job, per the no
+ * SUMS already-computed profit figures for display — it does not calculate
+ * profit/commission/VAT (that is the backend engine's job, per the no
  * frontend-financial-calculation rule). Uncalculable scenarios contribute zero.
+ *
+ * A row is joined either at the CEILING (`selection[id] === true`, whose profit is
+ * `row.plus.netProfit`) or at a CUSTOM price (`customPrices[id] != null`, whose
+ * profit was captured from the estimate at confirm time) — never both.
  */
 export function summarizePlusSelection(
   rows: readonly PlusTariffDetailItem[],
   selection: PlusSelectionMap,
+  customPrices: PlusCustomPriceMap,
 ): PlusTariffSummary {
   let joinedCount = 0;
   let joinedProfit = new Decimal(0);
@@ -35,7 +45,11 @@ export function summarizePlusSelection(
 
   for (const row of rows) {
     currentProfit = currentProfit.add(profitOrZero(row.current));
-    if (isJoined(selection, row.id)) {
+    const custom = customPrices[row.id];
+    if (custom != null) {
+      joinedCount += 1;
+      joinedProfit = joinedProfit.add(stringProfitOrZero(custom.netProfit));
+    } else if (selection[row.id] === true) {
       joinedCount += 1;
       joinedProfit = joinedProfit.add(profitOrZero(row.plus));
     }
