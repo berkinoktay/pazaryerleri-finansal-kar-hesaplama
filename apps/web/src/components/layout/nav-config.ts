@@ -13,6 +13,7 @@ import {
   PackageIcon,
   PercentIcon,
   PercentSquareIcon,
+  PlusSignSquareIcon,
   ReceiptDollarIcon,
   ReturnRequestIcon,
   SaleTag01Icon,
@@ -63,6 +64,12 @@ export interface NavItemBase {
   activeMatch?: string;
   /** Optional inline badge — Yeni / Beta / count indicator. */
   badge?: NavItemBadge;
+  /**
+   * Optional brand mark rendered in the trailing slot (where the badge sits),
+   * instead of a text badge — e.g. the Trendyol Plus wordmark on the Plus
+   * commission tariffs item. Hidden when the sidebar collapses to icon-only.
+   */
+  trailingMark?: React.ComponentType<{ className?: string }>;
 }
 
 export type NavItem =
@@ -139,7 +146,8 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         key: 'campaign-plus-commission',
         labelKey: 'nav.plusCommissionTariffs',
         href: '/campaigns/plus-commission-tariffs',
-        icon: TrendyolPlusLogo,
+        icon: PlusSignSquareIcon,
+        trailingMark: TrendyolPlusLogo,
       },
       {
         key: 'campaign-product-labels',

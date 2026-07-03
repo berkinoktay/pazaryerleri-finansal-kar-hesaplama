@@ -8,7 +8,7 @@ import * as React from 'react';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
-import { TrendyolPlusLogo } from '@/components/patterns/trendyol-plus-logo';
+import { TrendyolPlusLockup } from '@/components/patterns/trendyol-plus-lockup';
 import { Button } from '@/components/ui/button';
 
 import type { PlusTariffListItem } from '../api/list-plus-tariffs.api';
@@ -148,9 +148,9 @@ export function PlusTariffsListView({
     <div className="gap-lg flex flex-col">
       <PageHeader
         title={t('title')}
-        // Trendyol Plus brand wordmark on the title eye-line — the same mark used
-        // for this section's sidebar nav item, so the screen reads as "Plus".
-        badge={<TrendyolPlusLogo className="h-6" />}
+        // Full "trendyol plus" brand lockup on the title eye-line, so the screen
+        // reads as the Trendyol Plus program at a glance.
+        badge={<TrendyolPlusLockup className="h-6" />}
         intent={t('intent')}
         // `gap-lg` so the title/intent breathe above the summary strip; no bottom
         // rule so the strip flows into the data panel below rather than being

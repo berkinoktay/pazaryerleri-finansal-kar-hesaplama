@@ -10,6 +10,7 @@ import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
 import { PageSkeleton } from '@/components/patterns/page-skeleton';
+import { TrendyolPlusLockup } from '@/components/patterns/trendyol-plus-lockup';
 import { Button } from '@/components/ui/button';
 import { useRouter } from '@/i18n/navigation';
 import { ApiError } from '@/lib/api-error';
@@ -249,7 +250,12 @@ export function PlusTariffDetailClient({
             </Button>
           }
           title={view.name}
-          badge={<PlusTariffStatusBadge validity={view.validity} />}
+          badge={
+            <span className="gap-xs flex items-center">
+              <TrendyolPlusLockup className="h-6" />
+              <PlusTariffStatusBadge validity={view.validity} />
+            </span>
+          }
           intent={view.dateRangeLabel}
           className="gap-lg border-b-0 pb-0"
           actions={

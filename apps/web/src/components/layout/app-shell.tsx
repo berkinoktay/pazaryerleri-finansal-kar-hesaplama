@@ -275,6 +275,7 @@ function AppSidebar({
                 const match = entry.activeMatch ?? entry.href;
                 const isActive = pathname === match || pathname.startsWith(`${match}/`);
                 const Icon = entry.icon;
+                const TrailingMark = entry.trailingMark;
 
                 if ('sections' in entry && entry.sections) {
                   return (
@@ -333,6 +334,9 @@ function AppSidebar({
                           >
                             {entry.badge.label}
                           </Badge>
+                        ) : null}
+                        {TrailingMark ? (
+                          <TrailingMark className="h-3.5 w-auto shrink-0 group-data-[collapsible=icon]:hidden" />
                         ) : null}
                       </Link>
                     </SidebarMenuButton>
