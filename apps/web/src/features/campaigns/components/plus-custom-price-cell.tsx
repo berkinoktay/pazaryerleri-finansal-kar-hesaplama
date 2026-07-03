@@ -6,6 +6,7 @@ import * as React from 'react';
 
 import { MoneyInput } from '@/components/patterns/money-input';
 import { ProfitBadge } from '@/components/patterns/profit-badge';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +16,7 @@ import type { PlusCustomChoice } from '../lib/plus-bulk-actions';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { PlusTariffDetailItem } from '../types';
 import { PlusTariffBreakdown } from './plus-tariff-breakdown';
+import { ProfitDelta } from './profit-delta';
 import { TariffSelectControl } from './tariff-select-control';
 
 const DEBOUNCE_MS = 400;
@@ -129,6 +131,13 @@ export function PlusCustomPriceCell({
           placeholder={t('table.enterPrice')}
           className="md:max-w-input-narrow w-full"
         />
+        {/* Any price at/below the ceiling still earns the reduced Plus commission —
+            spell it out so the seller knows the custom price keeps the Plus rate. */}
+        <span className="text-2xs text-muted-foreground">
+          {t('table.plusCommissionApplies', {
+            pct: formatPercentDisplay(row.plus.commissionPct),
+          })}
+        </span>
       </div>
       {showEstimate && lastResult !== null ? (
         <div className="gap-3xs flex flex-col">
@@ -143,6 +152,10 @@ export function PlusCustomPriceCell({
               'duration-fast self-start transition-opacity',
               estimate.isPending && 'opacity-60',
             )}
+          />
+          <ProfitDelta
+            optionNetProfit={lastResult.breakdown?.netProfit ?? null}
+            currentNetProfit={row.current.netProfit}
           />
           <PlusTariffBreakdown
             open={breakdownOpen}

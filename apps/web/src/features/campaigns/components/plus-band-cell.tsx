@@ -13,6 +13,7 @@ import { useEstimatePlusItemPrice } from '../hooks/use-estimate-plus-item-price'
 import { useTariffScope } from '../lib/tariff-scope';
 import type { PlusTariffDetailItem } from '../types';
 import { PlusTariffBreakdown } from './plus-tariff-breakdown';
+import { ProfitDelta } from './profit-delta';
 import { TariffSelectControl } from './tariff-select-control';
 
 export interface PlusBandCellProps {
@@ -46,17 +47,10 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
   return (
     <div className="gap-sm flex min-w-0 flex-col">
       <div className="gap-3xs flex min-w-0 flex-col">
-        {/* Price ceiling + its "ve altı" qualifier as one hero unit, with a subtle
-            inline "Plus daha kârlı" chip when joining beats the current terms. */}
+        {/* Price ceiling + its "ve altı" qualifier as one hero unit. */}
         <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
           <span className="text-base font-bold tabular-nums">{formatCurrency(row.plus.price)}</span>
           <span className="text-xs font-normal">{t('ceilingQualifier')}</span>
-          {row.plusIsBetter ? (
-            <span className="text-2xs text-success bg-success-surface px-2xs py-3xs gap-3xs inline-flex items-center rounded-full font-medium">
-              <span className="bg-success size-1.5 shrink-0 rounded-full" aria-hidden />
-              {t('plusIsBetter')}
-            </span>
-          ) : null}
         </span>
         <span className="text-2xs text-muted-foreground tabular-nums">
           {t('plusCommission')} {formatPercentDisplay(row.plus.commissionPct)}
@@ -72,6 +66,12 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
           onOpen={openBreakdown}
           showMarginPct
           className="self-start"
+        />
+        {/* "Güncele göre +₺X" — the quantitative replacement for the old qualitative
+            "Plus daha kârlı" chip; how much joining beats doing nothing. */}
+        <ProfitDelta
+          optionNetProfit={row.plus.netProfit}
+          currentNetProfit={row.current.netProfit}
         />
       </div>
 

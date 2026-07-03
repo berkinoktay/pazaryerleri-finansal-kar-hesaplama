@@ -1088,6 +1088,8 @@
       "profit": "Kâr",
       "loss": "Zarar",
       "calculatedProfit": "Hesaplanan kâr",
+      "vsCurrent": "Güncele göre",
+      "plusCommissionApplies": "Plus komisyonu {pct} uygulanır",
       "join": "Plus'e Katıl",
       "joined": "Katıldın",
       "joinHint": "Fiyatını üst limite çekip Plus komisyonundan yararlanırsın",

@@ -1088,6 +1088,8 @@
       "profit": "Profit",
       "loss": "Loss",
       "calculatedProfit": "Calculated profit",
+      "vsCurrent": "vs. current",
+      "plusCommissionApplies": "Plus commission {pct} applies",
       "join": "Join Plus",
       "joined": "Joined",
       "joinHint": "Drop your price to the ceiling and earn the Plus commission",
