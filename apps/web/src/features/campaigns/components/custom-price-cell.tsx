@@ -17,6 +17,7 @@ import type { CustomChoice } from '../lib/bulk-actions';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
+import { ProfitDelta } from './profit-delta';
 import { TariffSelectControl } from './tariff-select-control';
 
 const DEBOUNCE_MS = 400;
@@ -176,6 +177,12 @@ export function CustomPriceCell({
           }}
           showMarginPct
           className={self}
+        />
+        {/* "Güncele göre +₺X" — how much this custom price beats doing nothing. */}
+        <ProfitDelta
+          optionNetProfit={lastResult?.breakdown?.netProfit ?? null}
+          currentNetProfit={row.currentNetProfit}
+          label={t('table.vsCurrent')}
         />
         {/* Which commission the typed price earns (the derived band's rate) —
             parallel to each band card's "komisyon %X" line. */}

@@ -117,19 +117,17 @@ export function CommissionTariffsTable({
         const r = row.original;
         const band = r.bands[i];
         if (band === undefined) return null;
-        // Center the band card in its column cell so all non-product columns align.
         return (
-          <div className="flex w-full justify-center">
-            <PriceBandCell
-              row={r}
-              band={band}
-              isBest={r.bestBandKey === band.key}
-              // A band card reflects only a PLAIN boundary choice — when a custom
-              // price is active it drives the derived band, so no card lights up.
-              selected={selection[r.id] === band.key && customPrices[r.id] == null}
-              onSelect={(key) => onSelectBand(r.id, key)}
-            />
-          </div>
+          <PriceBandCell
+            row={r}
+            band={band}
+            isBest={r.bestBandKey === band.key}
+            // A band reflects only a PLAIN boundary choice — when a custom price is
+            // active it drives the derived band, so no band lights up.
+            selected={selection[r.id] === band.key && customPrices[r.id] == null}
+            onSelect={(key) => onSelectBand(r.id, key)}
+            centered
+          />
         );
       },
     }));

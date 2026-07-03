@@ -163,6 +163,7 @@ export function PlusCustomPriceCell({
         <ProfitDelta
           optionNetProfit={lastResult?.breakdown?.netProfit ?? null}
           currentNetProfit={row.current.netProfit}
+          label={t('table.vsCurrent')}
         />
         <PlusTariffBreakdown
           open={breakdownOpen}

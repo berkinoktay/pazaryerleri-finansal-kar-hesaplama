@@ -56,13 +56,26 @@ export interface ComputedBandResult {
   readonly marginPct: string | null;
 }
 
+/** The "do nothing" baseline: profit at the current price + current (regular) commission. */
+export interface ComputedCurrentScenario {
+  readonly netProfit: string | null;
+  readonly marginPct: string | null;
+}
+
 export interface ComputedItemBands {
   readonly calculable: boolean;
   readonly reason: TariffItemReason | null;
   readonly bands: ReadonlyArray<ComputedBandResult>;
   /** Key of the band with the highest net profit, or null if none calculable. */
   readonly bestBandKey: string | null;
+  /**
+   * Profit at the seller's CURRENT price + current commission — the baseline the
+   * band/custom "vs current" delta compares against. Null when not calculable.
+   */
+  readonly current: ComputedCurrentScenario;
 }
+
+const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
 /** A band's representative price: bracket upper limit, or current price for band 1 (no upper). */
 function bandPrice(band: StoredBand, currentPrice: Decimal): Decimal {
@@ -94,6 +107,7 @@ export function computeItemBands(
   ctx: TariffAssemblyContext,
   bands: ReadonlyArray<StoredBand>,
   currentPrice: Decimal,
+  currentCommissionPct: Decimal,
   variant: TariffVariant | null,
   costAggregate: VariantCostAggregate | undefined,
   shipping: EstimateOutcome,
@@ -105,6 +119,7 @@ export function computeItemBands(
       reason: 'NO_PRODUCT',
       bands: nullBandResults(bands, currentPrice),
       bestBandKey: null,
+      current: NULL_CURRENT,
     };
   }
 
@@ -121,10 +136,24 @@ export function computeItemBands(
       reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
       bands: nullBandResults(bands, currentPrice),
       bestBandKey: null,
+      current: NULL_CURRENT,
     };
   }
 
   const baseEcon: UnitEconomics = probe.econ;
+
+  // Baseline ("do nothing"): reuse the assembled econ, override only the commission
+  // to the seller's CURRENT (regular) rate, and run the engine at the current price.
+  const currentBreakdown = computeUnitProfit(
+    { ...baseEcon, commissionRate: currentCommissionPct },
+    currentPrice,
+  );
+  const current: ComputedCurrentScenario = {
+    netProfit: currentBreakdown.netProfit.toFixed(2),
+    marginPct:
+      currentBreakdown.saleMarginPct !== null ? currentBreakdown.saleMarginPct.toFixed(2) : null,
+  };
+
   let bestBandKey: string | null = null;
   let bestProfit: Decimal | null = null;
 
@@ -147,7 +176,7 @@ export function computeItemBands(
     };
   });
 
-  return { calculable: true, reason: null, bands: results, bestBandKey };
+  return { calculable: true, reason: null, bands: results, bestBandKey, current };
 }
 
 // ─── Single-price estimate (band-click breakdown + custom-price what-if) ─────

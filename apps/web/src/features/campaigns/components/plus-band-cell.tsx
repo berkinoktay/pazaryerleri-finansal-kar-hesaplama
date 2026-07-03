@@ -88,6 +88,7 @@ export function PlusBandCell({
         <ProfitDelta
           optionNetProfit={row.plus.netProfit}
           currentNetProfit={row.current.netProfit}
+          label={t('vsCurrent')}
         />
       </div>
 

@@ -30,6 +30,8 @@ function makeRow(
     brand: null,
     currentPrice: '100',
     currentCommissionPct: '10',
+    currentNetProfit: '5',
+    currentMarginPct: '5',
     calculable: true,
     reason: null,
     bestBandKey,

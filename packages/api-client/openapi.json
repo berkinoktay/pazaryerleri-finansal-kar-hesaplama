@@ -4998,6 +4998,19 @@
           "currentCommissionPct": {
             "type": "string"
           },
+          "currentNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Güncel fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null."
+          },
+          "currentMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "calculable": {
             "type": "boolean"
           },
@@ -5039,6 +5052,8 @@
           "brand",
           "currentPrice",
           "currentCommissionPct",
+          "currentNetProfit",
+          "currentMarginPct",
           "calculable",
           "reason",
           "bestBandKey",

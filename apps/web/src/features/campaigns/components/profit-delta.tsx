@@ -1,7 +1,6 @@
 'use client';
 
 import { Decimal } from 'decimal.js';
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
@@ -9,10 +8,12 @@ import { formatCurrency } from '@pazarsync/utils';
 import { cn } from '@/lib/utils';
 
 export interface ProfitDeltaProps {
-  /** The option's net profit (the Plus scenario / the custom-price estimate). */
+  /** The option's net profit (the Plus/band scenario, or the custom-price estimate). */
   optionNetProfit: string | null;
   /** The current-scenario net profit — the "do nothing" baseline to compare against. */
   currentNetProfit: string | null;
+  /** The "vs current" prefix, localized by the caller (e.g. "Güncele göre"). */
+  label: string;
   className?: string;
 }
 
@@ -30,9 +31,9 @@ export interface ProfitDeltaProps {
 export function ProfitDelta({
   optionNetProfit,
   currentNetProfit,
+  label,
   className,
 }: ProfitDeltaProps): React.ReactElement | null {
-  const t = useTranslations('plusCommissionTariffsPage.table');
   if (optionNetProfit === null || currentNetProfit === null) return null;
   const delta = new Decimal(optionNetProfit).sub(currentNetProfit);
   if (delta.isZero()) return null;
@@ -45,7 +46,7 @@ export function ProfitDelta({
         className,
       )}
     >
-      {t('vsCurrent')} {positive ? '+' : '−'}
+      {label} {positive ? '+' : '−'}
       {formatCurrency(delta.abs())}
     </span>
   );
