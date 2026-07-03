@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
-import { TrendyolPlusLogo } from '@/components/patterns/trendyol-plus-logo';
+import { TrendyolPlusLockup } from '@/components/patterns/trendyol-plus-lockup';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
@@ -100,13 +100,13 @@ export function PlusTariffsTable({
 
     const offerColumn: ColumnDef<PlusTariffDetailItem> = {
       id: 'offer',
-      // Column header carries the Trendyol Plus wordmark next to the label so the
-      // offer column is unmistakably the Plus program. `meta.label` stays plain
-      // text for the column-visibility menu + a11y.
+      // Column header: the full "trendyol plus" lockup + "Fiyat Aralığı", so the
+      // offer column reads as the Trendyol Plus price range. `meta.label` stays
+      // plain text ("Plus Fiyat Aralığı") for the column-visibility menu + a11y.
       header: () => (
         <span className="gap-2xs inline-flex items-center">
-          {t('table.plus')}
-          <TrendyolPlusLogo className="h-3.5" />
+          <TrendyolPlusLockup className="h-4" />
+          {t('table.priceRange')}
         </span>
       ),
       meta: { label: t('table.plus') },
