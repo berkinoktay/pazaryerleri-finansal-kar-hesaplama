@@ -64,12 +64,19 @@ export function PlusTariffsMobileCards({
                   ) : null}
                 </div>
               </div>
-              <div className="shrink-0 text-right">
+              {/* Right block = the product's CURRENT price + commission (the "do
+                  nothing" baseline the Plus offer is compared against). On mobile
+                  there is no "Güncel fiyat" column header, so an explicit eyebrow +
+                  "Güncel komisyon" label spell out what these figures are. */}
+              <div className="gap-3xs flex shrink-0 flex-col text-right">
+                <div className="text-2xs text-muted-foreground font-medium">
+                  {t('table.current')}
+                </div>
                 <div className="text-sm font-semibold tabular-nums">
                   <Currency value={row.current.price} />
                 </div>
                 <div className="text-2xs text-muted-foreground tabular-nums">
-                  {formatPercentDisplay(row.current.commissionPct)} {t('table.commission')}
+                  {t('table.currentCommission')} {formatPercentDisplay(row.current.commissionPct)}
                 </div>
               </div>
             </div>
