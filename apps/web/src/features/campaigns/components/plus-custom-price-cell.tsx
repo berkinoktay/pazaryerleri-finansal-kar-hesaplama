@@ -115,11 +115,14 @@ export function PlusCustomPriceCell({
     }
   }
 
+  const items = centered ? 'items-center' : 'items-start';
+  const self = centered ? 'self-center' : 'self-start';
+
   return (
-    <div className={cn('gap-sm flex flex-col', centered && 'w-full items-center text-center')}>
+    <div className={cn('gap-sm flex flex-col', items, centered && 'w-full text-center')}>
       {/* Label + input as one tight group so the roomy outer gap-sm sits between
           the input, the estimate, and the select control — not inside the field. */}
-      <div className={cn('gap-3xs flex flex-col', centered && 'w-full items-center')}>
+      <div className={cn('gap-3xs flex flex-col', items, centered && 'w-full')}>
         {/* On mobile the field has no column header, so label it here; the desktop
             table's "Plus Fiyatı" column header hides this (md:hidden). */}
         <span className="text-2xs text-muted-foreground font-medium md:hidden">
@@ -141,7 +144,10 @@ export function PlusCustomPriceCell({
         />
       </div>
       {showEstimate && lastResult !== null ? (
-        <div className={cn('gap-3xs flex flex-col', centered && 'items-center')}>
+        // Same profit block as the Plus offer: "Hesaplanan kâr" + badge + delta,
+        // aligned identically (the badge dimmed-while-loading looked off next to the
+        // static Plus-offer badge, so it renders the same here).
+        <div className={cn('gap-3xs flex flex-col', items)}>
           <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
           <ProfitBadge
             value={lastResult.breakdown?.netProfit ?? null}
@@ -149,10 +155,7 @@ export function PlusCustomPriceCell({
             scale={scale}
             onOpen={() => setBreakdownOpen(true)}
             showMarginPct
-            className={cn(
-              'duration-fast self-start transition-opacity',
-              estimate.isPending && 'opacity-60',
-            )}
+            className={self}
           />
           <ProfitDelta
             optionNetProfit={lastResult.breakdown?.netProfit ?? null}
