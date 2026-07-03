@@ -13,7 +13,6 @@ import {
   PackageIcon,
   PercentIcon,
   PercentSquareIcon,
-  PlusSignSquareIcon,
   ReceiptDollarIcon,
   ReturnRequestIcon,
   SaleTag01Icon,
@@ -23,6 +22,7 @@ import {
 
 import type { Platform } from '@pazarsync/db/enums';
 
+import { TrendyolPlusLogo } from '@/components/patterns/trendyol-plus-logo';
 import type { SubNavItem } from '@/components/patterns/sub-nav-list';
 
 /**
@@ -139,7 +139,7 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         key: 'campaign-plus-commission',
         labelKey: 'nav.plusCommissionTariffs',
         href: '/campaigns/plus-commission-tariffs',
-        icon: PlusSignSquareIcon,
+        icon: TrendyolPlusLogo,
       },
       {
         key: 'campaign-product-labels',
