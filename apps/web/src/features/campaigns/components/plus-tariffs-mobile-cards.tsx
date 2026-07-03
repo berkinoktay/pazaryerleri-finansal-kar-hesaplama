@@ -20,11 +20,15 @@ export interface PlusTariffsMobileCardsProps {
 }
 
 /**
- * Mobile layout: each product is a card with the current price/commission in the
- * header (right) and the single Plus offer as a full-width join card below, so
- * there is no horizontal scroll and the Plus card stays a large tap target.
- * Mirrors the commission mobile card (product header + current + band + custom
- * price); only the campaign logic differs (one Plus band vs a 2×2 band grid).
+ * Mobile layout: one card per product as a single TOP-TO-BOTTOM flow, so nothing
+ * competes horizontally — the seller flagged the old image-left / price-right
+ * header as cramped and hard to parse. Four labelled zones, generously spaced
+ * (gap-md), mirroring the desktop column philosophy (current = plain, Plus = the
+ * one bordered selectable card):
+ *   1. Product identity — image + title + meta + not-calculable reason.
+ *   2. Current baseline — "Güncel fiyat" / "Güncel komisyon" as label→value rows.
+ *   3. Plus offer — the selectable join card (the only box, and the action).
+ *   4. Custom Plus price — the what-if input (self-labelled "Plus Fiyatı").
  * Shown below the `md` breakpoint; the desktop table is hidden there.
  */
 export function PlusTariffsMobileCards({
@@ -38,54 +42,59 @@ export function PlusTariffsMobileCards({
   return (
     <div className="gap-sm flex flex-col">
       {rows.map((row) => {
-        const categoryBrand = [row.category, row.brand]
-          .filter((v): v is string => v !== null)
+        const meta = [
+          [row.category, row.brand].filter((v): v is string => v !== null).join(' · '),
+          row.stockCode,
+        ]
+          .filter((v) => v !== null && v !== '')
           .join(' · ');
         return (
           <div
             key={row.id}
-            // gap-md (not gap-sm) so the three zones — product info, the Plus offer,
-            // the custom-price field — read as distinct blocks instead of one dense
-            // stack (the seller flagged the mobile card as cramped/hard to parse).
             className="border-border bg-card gap-md p-md flex flex-col rounded-lg border"
           >
-            <div className="gap-sm flex items-start justify-between">
-              <div className="gap-sm flex min-w-0 items-start">
-                <ProductImageCell url={row.imageUrl} alt={row.productTitle} size="lg" />
-                <div className="min-w-0">
-                  <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
-                  <div className="text-2xs text-muted-foreground tabular-nums">
-                    {[categoryBrand, row.stockCode]
-                      .filter((v) => v !== null && v !== '')
-                      .join(' · ')}
-                  </div>
-                  {!row.calculable && row.reason !== null ? (
-                    <div className="text-warning text-2xs">{reasonLabel(row.reason)}</div>
-                  ) : null}
-                </div>
-              </div>
-              {/* Right block = the product's CURRENT price + commission (the "do
-                  nothing" baseline the Plus offer is compared against). On mobile
-                  there is no "Güncel fiyat" column header, so an explicit eyebrow +
-                  "Güncel komisyon" label spell out what these figures are. */}
-              <div className="gap-3xs flex shrink-0 flex-col text-right">
-                <div className="text-2xs text-muted-foreground font-medium">
-                  {t('table.current')}
-                </div>
-                <div className="text-sm font-semibold tabular-nums">
-                  <Currency value={row.current.price} />
-                </div>
-                <div className="text-2xs text-muted-foreground tabular-nums">
-                  {t('table.currentCommission')} {formatPercentDisplay(row.current.commissionPct)}
-                </div>
+            {/* Zone 1: product identity — full width, no competing right column. */}
+            <div className="gap-sm flex min-w-0 items-start">
+              <ProductImageCell url={row.imageUrl} alt={row.productTitle} size="lg" />
+              <div className="min-w-0 flex-1">
+                <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
+                {meta !== '' ? (
+                  <div className="text-2xs text-muted-foreground tabular-nums">{meta}</div>
+                ) : null}
+                {!row.calculable && row.reason !== null ? (
+                  <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>
+                ) : null}
               </div>
             </div>
+
+            {/* Zone 2: current baseline — plain label→value rows (no box), the
+                "do nothing" reference the Plus offer is compared against. */}
+            <div className="gap-2xs flex flex-col">
+              <div className="gap-sm flex items-baseline justify-between">
+                <span className="text-2xs text-muted-foreground">{t('table.current')}</span>
+                <span className="text-sm font-semibold tabular-nums">
+                  <Currency value={row.current.price} />
+                </span>
+              </div>
+              <div className="gap-sm flex items-baseline justify-between">
+                <span className="text-2xs text-muted-foreground">
+                  {t('table.currentCommission')}
+                </span>
+                <span className="text-2xs font-medium tabular-nums">
+                  {formatPercentDisplay(row.current.commissionPct)}
+                </span>
+              </div>
+            </div>
+
+            {/* Zone 3: the Plus offer — the only bordered box, and the action. */}
             <PlusBandCell
               row={row}
               selected={selection[row.id] === true}
               onToggle={() => onToggleJoin(row.id)}
               showJoinLabel
             />
+
+            {/* Zone 4: custom Plus price what-if (self-labelled "Plus Fiyatı"). */}
             <PlusCustomPriceCell row={row} />
           </div>
         );
