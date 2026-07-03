@@ -86,7 +86,31 @@ export function PriceBandCell({
   const self = centered ? 'self-center' : 'self-start';
 
   return (
-    <div className={cn('gap-sm flex min-w-0 flex-col', items, centered && 'w-full text-center')}>
+    <div
+      className={cn(
+        'gap-sm flex min-w-0 flex-col md:min-w-tariff-band',
+        items,
+        centered && 'w-full text-center',
+      )}
+    >
+      {/* "En kârlı" rides a reserved top slot — shown only for the best band, but its
+          height is held in EVERY band (invisible) so all four prices stay aligned
+          across the columns. A featured marker at the top reads clearly now that
+          there is no card edge to pin a ribbon to. */}
+      <div className={cn('flex w-full', centered ? 'justify-center' : 'justify-start')}>
+        <Badge
+          tone="primary"
+          variant="solid"
+          radius="full"
+          leadingIcon={<SparklesIcon />}
+          className={cn(
+            'text-2xs px-2xs gap-3xs py-0 font-medium [&_svg]:size-3',
+            !isBest && 'invisible',
+          )}
+        >
+          {t('best')}
+        </Badge>
+      </div>
       <div className={cn('gap-3xs flex min-w-0 flex-col', items)}>
         {/* Price boundary + its "ve altı / ve üzeri" qualifier as one hero unit. */}
         <span
@@ -104,28 +128,7 @@ export function PriceBandCell({
       </div>
 
       <div className={cn('gap-3xs flex flex-col', items)}>
-        {/* "En kârlı" rides the profit label (it IS the highest-profit band). Placing
-            it here — not above the price — keeps every band's price row aligned across
-            the columns; only the best band's label line grows slightly. */}
-        <span
-          className={cn(
-            'gap-2xs text-2xs text-muted-foreground flex items-center',
-            centered && 'justify-center',
-          )}
-        >
-          {t('calculatedProfit')}
-          {isBest ? (
-            <Badge
-              tone="primary"
-              variant="solid"
-              radius="full"
-              leadingIcon={<SparklesIcon />}
-              className="text-2xs px-2xs gap-3xs py-0 font-medium [&_svg]:size-3"
-            >
-              {t('best')}
-            </Badge>
-          ) : null}
-        </span>
+        <span className="text-2xs text-muted-foreground">{t('calculatedProfit')}</span>
         <ProfitBadge
           value={band.netProfit}
           marginPct={band.marginPct}

@@ -155,7 +155,9 @@ export function CustomPriceCell({
           max={MAX_WHAT_IF_PRICE}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
-          className="md:max-w-input-narrow w-full"
+          // Narrow price field so the custom column stays compact (the bands get
+          // the freed width). Full width on mobile where the card is wide.
+          className="md:max-w-input-price w-full"
           // The applied commission depends on which band the price lands in —
           // the Input's help-text slot spells this out under the field.
           helpText={t('table.customCommissionHint')}
