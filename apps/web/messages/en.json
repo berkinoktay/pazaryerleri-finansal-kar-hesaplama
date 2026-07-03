@@ -1090,7 +1090,7 @@
       "calculatedProfit": "Calculated profit",
       "vsCurrent": "vs. current",
       "plusCommissionApplies": "Plus commission {pct} applies",
-      "join": "Join Plus",
+      "join": "Join at ceiling price",
       "joined": "Joined",
       "joinHint": "Drop your price to the ceiling and earn the Plus commission",
       "plusIsBetter": "Plus is better",
@@ -1098,8 +1098,8 @@
       "customPrice": "Plus Price",
       "enterPrice": "Enter price",
       "customPriceHint": "Try a Plus price below the ceiling",
-      "selectCustom": "Select this price",
-      "customSelected": "This price selected",
+      "selectCustom": "Join at this price",
+      "customSelected": "Joined",
       "ceilingQualifier": "and below"
     },
     "noResults": {

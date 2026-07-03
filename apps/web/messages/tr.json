@@ -1090,7 +1090,7 @@
       "calculatedProfit": "Hesaplanan kâr",
       "vsCurrent": "Güncele göre",
       "plusCommissionApplies": "Plus komisyonu {pct} uygulanır",
-      "join": "Plus'e Katıl",
+      "join": "Tavan fiyata katıl",
       "joined": "Katıldın",
       "joinHint": "Fiyatını üst limite çekip Plus komisyonundan yararlanırsın",
       "plusIsBetter": "Plus daha kârlı",
@@ -1098,8 +1098,8 @@
       "customPrice": "Plus Fiyatı",
       "enterPrice": "Fiyat girin",
       "customPriceHint": "Üst limitin altında bir Plus fiyatı dene",
-      "selectCustom": "Bu fiyatı seç",
-      "customSelected": "Bu fiyat seçildi",
+      "selectCustom": "Bu fiyatla katıl",
+      "customSelected": "Katıldın",
       "ceilingQualifier": "ve altı"
     },
     "noResults": {
