@@ -101,13 +101,14 @@ export function PlusTariffsTable({
     const offerColumn: ColumnDef<PlusTariffDetailItem> = {
       id: 'offer',
       // Column header: the flame-less "trendyol plus" wordmark + "Fiyat Aralığı".
-      // The wordmark's viewBox is cropped tight, so h-4 renders it at ~16px — a
-      // step above the text-xs label so the brand name leads and "Fiyat Aralığı"
-      // reads as its descriptor. leading-none centers the label with the wordmark.
-      // `meta.label` stays plain text ("Plus Fiyat Aralığı") for the menu + a11y.
+      // The wordmark's viewBox is cropped tight, so h-3.5 renders it at ~14px —
+      // just a hair above the text-xs (12px) label so the two read as one line,
+      // brand name leading and "Fiyat Aralığı" as its descriptor. leading-none
+      // centers the label with the wordmark. `meta.label` stays plain text
+      // ("Plus Fiyat Aralığı") for the column-visibility menu + a11y.
       header: () => (
         <span className="gap-2xs inline-flex items-center">
-          <TrendyolPlusLockup className="h-4" />
+          <TrendyolPlusLockup className="h-3.5" />
           <span className="leading-none">{t('table.priceRange')}</span>
         </span>
       ),
