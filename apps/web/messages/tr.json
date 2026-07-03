@@ -1087,6 +1087,7 @@
       "stock": "Stok",
       "profit": "Kâr",
       "loss": "Zarar",
+      "calculatedProfit": "Hesaplanan kâr",
       "join": "Plus'e Katıl",
       "joined": "Katıldın",
       "joinHint": "Fiyatını üst limite çekip Plus komisyonundan yararlanırsın",

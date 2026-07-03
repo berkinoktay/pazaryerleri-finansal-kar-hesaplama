@@ -1087,6 +1087,7 @@
       "stock": "Stock",
       "profit": "Profit",
       "loss": "Loss",
+      "calculatedProfit": "Calculated profit",
       "join": "Join Plus",
       "joined": "Joined",
       "joinHint": "Drop your price to the ceiling and earn the Plus commission",

@@ -63,14 +63,17 @@ export function PlusBandCell({ row, selected, onToggle }: PlusBandCellProps): Re
         </span>
       </div>
 
-      <ProfitBadge
-        value={row.plus.netProfit}
-        marginPct={row.plus.marginPct}
-        scale={scale}
-        onOpen={openBreakdown}
-        showMarginPct
-        className="self-start"
-      />
+      <div className="gap-3xs flex flex-col">
+        <span className="text-2xs text-muted-foreground">{t('calculatedProfit')}</span>
+        <ProfitBadge
+          value={row.plus.netProfit}
+          marginPct={row.plus.marginPct}
+          scale={scale}
+          onOpen={openBreakdown}
+          showMarginPct
+          className="self-start"
+        />
+      </div>
 
       <TariffSelectControl
         selected={selected}

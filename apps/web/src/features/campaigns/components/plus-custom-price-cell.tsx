@@ -132,7 +132,7 @@ export function PlusCustomPriceCell({
       </div>
       {showEstimate && lastResult !== null ? (
         <div className="gap-3xs flex flex-col">
-          <span className="text-2xs text-muted-foreground">{tBreakdown('estimatedProfit')}</span>
+          <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
           <ProfitBadge
             value={lastResult.breakdown?.netProfit ?? null}
             marginPct={lastResult.breakdown?.saleMarginPct ?? null}

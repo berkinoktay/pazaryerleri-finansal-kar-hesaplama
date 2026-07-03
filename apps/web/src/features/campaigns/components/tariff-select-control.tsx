@@ -41,11 +41,12 @@ export function TariffSelectControl({
       disabled={disabled}
       onClick={onToggle}
       className={cn(
-        'gap-2xs text-2xs duration-fast ease-out-quart px-xs py-2xs flex items-center self-start rounded-md border font-medium transition-colors',
+        'gap-2xs text-2xs duration-fast ease-out-quart px-xs py-2xs flex cursor-pointer items-center self-start rounded-md border font-medium transition-colors',
         'focus-visible:shadow-focus focus-visible:outline-none',
+        'disabled:cursor-not-allowed',
         selected
           ? 'border-primary text-primary bg-surface-row-selected'
-          : 'border-border text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+          : 'border-border text-foreground hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent',
         className,
       )}
     >

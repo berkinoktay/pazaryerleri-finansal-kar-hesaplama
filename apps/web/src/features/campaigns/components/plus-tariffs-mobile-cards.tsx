@@ -29,14 +29,14 @@ export interface PlusTariffsMobileCardsProps {
 /**
  * Mobile layout: one card per product as a single TOP-TO-BOTTOM flow, so nothing
  * competes horizontally — the seller flagged the old image-left / price-right
- * header as cramped and hard to parse. Four labelled zones, generously spaced
- * (gap-md), mirroring the desktop column philosophy (current = plain, Plus = the
- * one bordered selectable card):
+ * header as cramped and hard to parse. Four zones, each opened by a top divider rule
+ * (border-t) + gap-md so the flat sections read as distinct blocks, not one list:
  *   1. Product identity — image + title + meta + not-calculable reason.
  *   2. Current baseline — "Güncel fiyat" / "Güncel komisyon" as label→value rows.
- *   3. Plus offer — the selectable join card (the only box, and the action).
- *   4. Custom Plus price — the what-if input (self-labelled "Plus Fiyatı").
- * Shown below the `md` breakpoint; the desktop table is hidden there.
+ *   3. Plus offer — flat, with its own "Plus'e Katıl" select control.
+ *   4. Custom Plus price — a what-if input AND a selectable "Bu fiyatı seç" choice.
+ * Every selectable option shares the one TariffSelectControl affordance. Shown below
+ * the `md` breakpoint; the desktop table is hidden there.
  */
 export function PlusTariffsMobileCards({
   rows,
