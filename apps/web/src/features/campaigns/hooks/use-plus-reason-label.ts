@@ -7,9 +7,9 @@ import type { TariffItemReason } from './use-reason-label';
 /**
  * Returns a mapper from the backend not-calculable `reason` to a human sentence
  * (e.g. "Maliyet yok - bu urune bir maliyet profili ekleyin."), scoped to the
- * Plus tariff namespace. Shared by the offer cell, the table, the mobile cards,
- * and the breakdown modal so the seller always learns WHY a product's profit is
- * missing. Concrete keys per branch - next-intl's typed `t` cannot take a union.
+ * Plus tariff namespace. Shared by the table, the mobile cards, and the breakdown
+ * modal so the seller always learns WHY a product's profit is missing. Concrete
+ * keys per branch - next-intl's typed `t` cannot take a union.
  */
 export function usePlusReasonLabel(): (reason: TariffItemReason) => string {
   const t = useTranslations('plusCommissionTariffsPage.reason');

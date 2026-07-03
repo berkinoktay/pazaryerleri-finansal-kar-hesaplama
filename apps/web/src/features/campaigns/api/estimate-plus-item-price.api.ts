@@ -19,11 +19,9 @@ export type EstimatePlusPriceResult = Omit<RawEstimatePlusPriceResult, 'breakdow
 /**
  * POST /v1/.../plus-commission-tariffs/{tariffId}/items/{itemId}/estimate
  *
- * Full profit breakdown for one Plus tariff item at a given price. The `scenario`
- * field on the body selects which commission to apply — `'current'` (the seller's
- * current rate) or `'plus'` (the reduced Plus rate, the default) — so each badge's
- * breakdown matches its own profit. Unlike the commission estimate there is no band
- * (POST-only because it carries a body; read-only).
+ * Full profit breakdown for one Plus tariff item at a given price, using the item's
+ * reduced Plus commission. Unlike the commission estimate there is no band — the
+ * price alone drives the what-if (POST-only because it carries a body; read-only).
  *
  * A `calculable:false` response is a normal 200 (not an error): the item is
  * unmatched or uncostable and `breakdown` is null. Callers MUST check

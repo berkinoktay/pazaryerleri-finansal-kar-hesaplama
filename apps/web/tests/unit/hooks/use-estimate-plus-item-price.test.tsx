@@ -96,7 +96,7 @@ describe('useEstimatePlusItemPrice', () => {
     expect(result.current.isError).toBe(false);
   });
 
-  it('sends the typed price + scenario in the request body (scenario what-if mode)', async () => {
+  it('sends the typed price in the request body (custom Plus-price what-if)', async () => {
     let capturedBody: unknown;
     server.use(
       http.post(ENDPOINT, async ({ request }) => {
@@ -105,7 +105,7 @@ describe('useEstimatePlusItemPrice', () => {
           {
             itemId: ITEM_ID,
             price: '400.00',
-            commissionPct: '20.00',
+            commissionPct: '15.40',
             calculable: true,
             reason: null,
             breakdown: CALCULABLE_BREAKDOWN,
@@ -118,9 +118,9 @@ describe('useEstimatePlusItemPrice', () => {
     const { result } = renderHook(() => useEstimatePlusItemPrice(ORG_ID, STORE_ID, TARIFF_ID), {
       wrapper,
     });
-    result.current.mutate({ itemId: ITEM_ID, body: { price: '400.00', scenario: 'current' } });
+    result.current.mutate({ itemId: ITEM_ID, body: { price: '400.00' } });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(capturedBody).toEqual({ price: '400.00', scenario: 'current' });
+    expect(capturedBody).toEqual({ price: '400.00' });
   });
 });

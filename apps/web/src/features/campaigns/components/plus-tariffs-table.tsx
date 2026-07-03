@@ -4,18 +4,21 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
+import { usePlusReasonLabel } from '../hooks/use-plus-reason-label';
 import type { PlusSelectionMap } from '../lib/plus-bulk-actions';
 import type { PlusTariffDetailItem } from '../types';
+import { PlusBandCell } from './plus-band-cell';
 import { PlusCustomPriceCell } from './plus-custom-price-cell';
-import { PlusOfferCell } from './plus-offer-cell';
 
 export interface PlusTariffsTableProps {
   rows: readonly PlusTariffDetailItem[];
@@ -35,6 +38,7 @@ export function PlusTariffsTable({
   onClearFilters,
 }: PlusTariffsTableProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage');
+  const reasonLabel = usePlusReasonLabel();
   // Local (not persisted): every tariff opens at its normal 100% size; the seller
   // can shrink it to fit for that session.
   const [scale, setScale] = React.useState(TABLE_SCALE_DEFAULT);
@@ -61,9 +65,34 @@ export function PlusTariffsTable({
                 {r.stockCode !== null ? (
                   <span className="truncate tabular-nums">{r.stockCode}</span>
                 ) : null}
+                {!r.calculable && r.reason !== null ? (
+                  <span className="text-warning">{reasonLabel(r.reason)}</span>
+                ) : null}
               </span>
             }
           />
+        );
+      },
+    };
+
+    const currentColumn: ColumnDef<PlusTariffDetailItem> = {
+      id: 'current',
+      header: t('table.current'),
+      meta: { label: t('table.current') },
+      cell: ({ row }) => {
+        const r = row.original;
+        return (
+          <div className="gap-3xs flex flex-col text-sm">
+            <div className="font-semibold tabular-nums">
+              <Currency value={r.current.price} />
+            </div>
+            <div className="text-2xs text-muted-foreground">
+              {t('table.currentCommission')}{' '}
+              <span className="text-foreground font-medium tabular-nums">
+                {formatPercentDisplay(r.current.commissionPct)}
+              </span>
+            </div>
+          </div>
         );
       },
     };
@@ -75,7 +104,7 @@ export function PlusTariffsTable({
       cell: ({ row }) => {
         const r = row.original;
         return (
-          <PlusOfferCell
+          <PlusBandCell
             row={r}
             selected={selection[r.id] === true}
             onToggle={() => onToggleJoin(r.id)}
@@ -90,8 +119,8 @@ export function PlusTariffsTable({
       cell: ({ row }) => <PlusCustomPriceCell row={row.original} />,
     };
 
-    return [productColumn, offerColumn, customPriceColumn];
-  }, [t, selection, onToggleJoin]);
+    return [productColumn, currentColumn, offerColumn, customPriceColumn];
+  }, [t, reasonLabel, selection, onToggleJoin]);
 
   return (
     <DataTable<PlusTariffDetailItem, unknown>

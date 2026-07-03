@@ -5304,14 +5304,6 @@
             "pattern": "^\\d+(\\.\\d{1,2})?$",
             "description": "Değerlendirilecek satış fiyatı (GROSS, TL).",
             "example": "350.00"
-          },
-          "scenario": {
-            "type": "string",
-            "enum": [
-              "current",
-              "plus"
-            ],
-            "description": "Dökümün hesaplanacağı komisyon senaryosu: 'current' (güncel komisyon) ya da 'plus' (indirimli Plus komisyonu, varsayılan)."
           }
         },
         "required": [
@@ -14650,7 +14642,7 @@
           "PlusCommissionTariffs"
         ],
         "summary": "Estimate the profit breakdown for a Plus tariff item at a given price",
-        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Plus tariff item at the requested price, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a scenario's price equals that scenario's profit in the detail response. The optional scenario field selects the commission to apply: 'current' (the seller's current rate) or 'plus' (the reduced Plus rate, the default). Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Plus tariff item at the requested price, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a scenario's price equals that scenario's profit in the detail response. Uses the item's reduced Plus commission. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
         "security": [
           {
             "bearerAuth": []

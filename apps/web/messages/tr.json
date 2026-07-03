@@ -1074,7 +1074,7 @@
     },
     "table": {
       "product": "Ürün Bilgileri",
-      "current": "Güncel",
+      "current": "Güncel fiyat",
       "salePrice": "Satış fiyatı",
       "displayPrice": "Müşterinin gördüğü fiyat",
       "currentCommission": "Güncel komisyon",

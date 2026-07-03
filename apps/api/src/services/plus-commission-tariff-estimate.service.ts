@@ -28,15 +28,11 @@ import {
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type { EstimatePlusPriceResult } from '../validators/plus-commission-tariff.validator';
 
-/** Which commission the breakdown is computed under: the seller's current rate, or the reduced Plus rate. */
-export type EstimateScenario = 'current' | 'plus';
-
 /**
- * Computes the full profit breakdown for one Plus item at `price` under the
- * chosen scenario's commission (`current` = the seller's current rate, `plus` =
- * the reduced Plus rate — the default). Throws `NotFoundError` when the item does
- * not belong to this tariff/store. When the item is unmatched or uncostable the
- * result carries `calculable: false` + a `reason` and a null breakdown.
+ * Computes the full profit breakdown for one Plus item at `price` under the item's
+ * reduced Plus commission. Throws `NotFoundError` when the item does not belong to
+ * this tariff/store. When the item is unmatched or uncostable the result carries
+ * `calculable: false` + a `reason` and a null breakdown.
  */
 export async function estimatePlusItemPrice(
   orgId: string,
@@ -45,7 +41,6 @@ export async function estimatePlusItemPrice(
   tariffId: string,
   itemId: string,
   price: Decimal,
-  scenario: EstimateScenario = 'plus',
 ): Promise<EstimatePlusPriceResult> {
   let item;
   try {
@@ -54,7 +49,6 @@ export async function estimatePlusItemPrice(
       select: {
         id: true,
         productVariantId: true,
-        currentCommissionPct: true,
         plusCommissionPct: true,
       },
     });
@@ -102,9 +96,7 @@ export async function estimatePlusItemPrice(
   const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
   const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
 
-  const applyCommissionPct = new Decimal(
-    (scenario === 'current' ? item.currentCommissionPct : item.plusCommissionPct).toString(),
-  );
+  const applyCommissionPct = new Decimal(item.plusCommissionPct.toString());
   const computed = computePlusEstimate(ctx, applyCommissionPct, variant, cost, shipping, price);
 
   return {

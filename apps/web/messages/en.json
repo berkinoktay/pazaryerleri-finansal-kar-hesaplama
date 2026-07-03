@@ -1074,7 +1074,7 @@
     },
     "table": {
       "product": "Product Info",
-      "current": "Current",
+      "current": "Current price",
       "salePrice": "Sale price",
       "displayPrice": "Price the customer sees",
       "currentCommission": "Current commission",

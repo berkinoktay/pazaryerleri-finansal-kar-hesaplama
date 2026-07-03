@@ -25,11 +25,10 @@ const estimateRoute = createRoute({
     'Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, ' +
     'stoppage, VAT) for ONE Plus tariff item at the requested price, reusing the same profit engine ' +
     'and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a ' +
-    "scenario's price equals that scenario's profit in the detail response. The optional scenario " +
-    "field selects the commission to apply: 'current' (the seller's current rate) or 'plus' (the " +
-    'reduced Plus rate, the default). Read-only (POST only because it carries a body); no state ' +
-    'changes. When the item is unmatched or uncostable, calculable is false, reason explains why ' +
-    'and breakdown is null. Money fields are GROSS decimal strings.',
+    "scenario's price equals that scenario's profit in the detail response. Uses the item's reduced " +
+    'Plus commission. Read-only (POST only because it carries a body); no state changes. When the ' +
+    'item is unmatched or uncostable, calculable is false, reason explains why and breakdown is ' +
+    'null. Money fields are GROSS decimal strings.',
   security: [{ bearerAuth: [] }],
   request: {
     params: PlusTariffItemIdPathSchema,
@@ -67,7 +66,7 @@ const estimateRoute = createRoute({
 app.openapi(estimateRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId, tariffId, itemId } = c.req.valid('param');
-  const { price, scenario } = c.req.valid('json');
+  const { price } = c.req.valid('json');
   const { store, role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.DATA_READ);
 
@@ -78,7 +77,6 @@ app.openapi(estimateRoute, async (c) => {
     tariffId,
     itemId,
     new Decimal(price),
-    scenario,
   );
   return c.json(result, 200);
 });
