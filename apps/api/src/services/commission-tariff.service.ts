@@ -17,6 +17,7 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
+import { resolveValidity } from '../lib/tariff-period';
 import { fetchCostAggregates } from './products-list.service';
 import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
@@ -25,7 +26,7 @@ import {
   type TariffAssemblyContext,
   type TariffVariant,
 } from './commission-tariff-compute.service';
-import { parseStoredBands, resolveValidity } from './commission-tariff.types';
+import { parseStoredBands } from './commission-tariff.types';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type {
   CommissionTariffDetail,
@@ -236,6 +237,7 @@ export async function getTariffDetail(
         ctx,
         parseStoredBands(item.bands),
         new Decimal(item.currentPrice.toString()),
+        new Decimal(item.currentCommissionPct.toString()),
         variant ?? null,
         cost,
         shipping,
@@ -252,6 +254,8 @@ export async function getTariffDetail(
         brand: item.brand,
         currentPrice: item.currentPrice.toFixed(2),
         currentCommissionPct: item.currentCommissionPct.toFixed(4),
+        currentNetProfit: computed.current.netProfit,
+        currentMarginPct: computed.current.marginPct,
         calculable: computed.calculable,
         reason: computed.reason,
         bestBandKey: computed.bestBandKey,

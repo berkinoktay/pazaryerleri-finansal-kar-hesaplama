@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 
+import type { CustomPriceMap } from './bulk-actions';
 import type { CommissionTariffRow, PriceBand } from '../types';
 
 export interface TariffSelectionSummary {
@@ -32,6 +33,7 @@ function bandProfitOrZero(band: PriceBand | undefined): Decimal {
 export function summarizeSelection(
   rows: readonly CommissionTariffRow[],
   selection: Readonly<Record<string, string | null>>,
+  customPrices: Readonly<CustomPriceMap>,
 ): TariffSelectionSummary {
   let selectedCount = 0;
   let selectedProfit = new Decimal(0);
@@ -44,8 +46,14 @@ export function summarizeSelection(
     const chosen = selection[row.id];
     if (chosen === undefined || chosen === null) continue;
     const band = findBand(row, chosen);
-    if (band !== undefined) {
-      selectedCount += 1;
+    if (band === undefined) continue;
+    selectedCount += 1;
+    // A custom price overrides the band's boundary price — total its captured
+    // estimate instead of the band's boundary profit.
+    const custom = customPrices[row.id];
+    if (custom != null && custom.netProfit !== null) {
+      selectedProfit = selectedProfit.add(new Decimal(custom.netProfit));
+    } else {
       selectedProfit = selectedProfit.add(bandProfitOrZero(band));
     }
   }

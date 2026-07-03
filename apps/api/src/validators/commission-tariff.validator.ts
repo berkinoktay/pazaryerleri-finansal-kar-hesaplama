@@ -91,6 +91,11 @@ export const TariffDetailItemSchema = z
     brand: z.string().nullable(),
     currentPrice: z.string(),
     currentCommissionPct: z.string(),
+    currentNetProfit: z
+      .string()
+      .nullable()
+      .openapi({ description: 'Güncel fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null.' }),
+    currentMarginPct: z.string().nullable(),
     calculable: z.boolean(),
     reason: TariffItemReasonSchema.nullable(),
     bestBandKey: z.string().nullable(),

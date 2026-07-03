@@ -35,6 +35,8 @@ interface ItemWire {
   barcode: string;
   productTitle: string;
   imageUrl: string | null;
+  currentNetProfit: string | null;
+  currentMarginPct: string | null;
   calculable: boolean;
   reason: string | null;
   bestBandKey: string | null;
@@ -255,11 +257,17 @@ describe('Commission Tariffs — list / detail / delete', () => {
     }
     expect(matched?.bestBandKey).not.toBeNull();
     expect(matched?.bands.map((b) => b.key)).toContain(matched?.bestBandKey);
+    // The "do nothing" baseline (current price + current commission) is computed
+    // for a calculable item — it backs the "Güncele göre" delta on the frontend.
+    expect(matched?.currentNetProfit).not.toBeNull();
+    expect(matched?.currentMarginPct).not.toBeNull();
 
     const unmatched = period?.items.find((i) => i.barcode === 'BC-UNKNOWN');
     expect(unmatched?.calculable).toBe(false);
     expect(unmatched?.reason).toBe('NO_PRODUCT');
     expect(unmatched?.bands[0]?.netProfit).toBeNull();
+    // An uncalculable item has no baseline profit either.
+    expect(unmatched?.currentNetProfit).toBeNull();
     // An unmatched item has no catalog product, so no image.
     expect(unmatched?.imageUrl).toBeNull();
   });

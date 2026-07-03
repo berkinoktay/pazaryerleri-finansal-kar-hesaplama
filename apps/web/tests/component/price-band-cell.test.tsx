@@ -35,6 +35,8 @@ const row: CommissionTariffRow = {
   brand: 'Marka',
   currentPrice: '800.00',
   currentCommissionPct: '19',
+  currentNetProfit: '50.00',
+  currentMarginPct: '6.25',
   calculable: true,
   reason: null,
   bestBandKey: 'band2',
@@ -52,33 +54,63 @@ function renderCell(props: React.ComponentProps<typeof PriceBandCell>) {
 }
 
 describe('PriceBandCell', () => {
-  it('renders a toggle button with the band price, commission, and profit', () => {
+  it('renders the band price, commission, profit, and a select toggle', () => {
     renderCell({ row, band, selected: false, onSelect: vi.fn() });
-    // A toggle (aria-pressed), NOT a radio — a band can be deselected.
-    const toggle = screen.getByRole('button', { name: /777,09/ });
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    // Price hero + its "ve altı" qualifier.
+    expect(screen.getByText(/777,09/)).toBeInTheDocument();
     // Commission, tr-TR percent formatting of the "13.1" percent string.
     expect(screen.getByText(/13,1/)).toBeInTheDocument();
     // Profit amount via the shared ProfitBadge.
     expect(screen.getByText(/70,79/)).toBeInTheDocument();
+    // The one selection affordance — a toggle (aria-pressed), NOT a radio.
+    const toggle = screen.getByRole('button', { name: /aralığı seç/i });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('reports the click so the parent can toggle selection', async () => {
     const onSelect = vi.fn();
     const { user } = renderCell({ row, band, selected: false, onSelect });
-    await user.click(screen.getByRole('button', { name: /777,09/ }));
+    await user.click(screen.getByRole('button', { name: /aralığı seç/i }));
     expect(onSelect).toHaveBeenCalledWith('band2');
   });
 
-  it('marks the toggle pressed only when selected', () => {
+  it('shows the selected label + pressed state when selected', () => {
     const { rerender } = renderCell({ row, band, selected: false, onSelect: vi.fn() });
-    expect(screen.getByRole('button', { name: /777,09/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /aralığı seç/i })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
     rerender(
       <TariffScopeProvider scope={SCOPE}>
         <PriceBandCell row={row} band={band} selected onSelect={vi.fn()} />
       </TariffScopeProvider>,
     );
-    expect(screen.getByRole('button', { name: /777,09/ })).toHaveAttribute('aria-pressed', 'true');
+    // Selected → the "Seçildi" label + pressed state.
+    expect(screen.getByRole('button', { name: /seçildi/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('shows the "En kârlı" marker only for the best band (space is reserved otherwise)', () => {
+    // The marker is rendered in every band so its height is held (prices stay aligned
+    // across the columns), but it is hidden via `invisible` unless this is the best
+    // band. (Tailwind classes aren't computed in the test DOM, so assert the class,
+    // not computed visibility.)
+    const { rerender } = renderCell({
+      row,
+      band,
+      selected: false,
+      isBest: false,
+      onSelect: vi.fn(),
+    });
+    expect(screen.getByText(/en kârlı/i)).toHaveClass('invisible');
+    rerender(
+      <TariffScopeProvider scope={SCOPE}>
+        <PriceBandCell row={row} band={band} selected={false} isBest onSelect={vi.fn()} />
+      </TariffScopeProvider>,
+    );
+    expect(screen.getByText(/en kârlı/i)).not.toHaveClass('invisible');
   });
 
   it('opens the profit breakdown from the badge without toggling the band', async () => {
@@ -99,8 +131,8 @@ describe('PriceBandCell', () => {
     );
     const onSelect = vi.fn();
     const { user } = renderCell({ row, band, selected: false, onSelect });
-    const toggle = screen.getByRole('button', { name: /777,09/ });
-    // The badge is the other button in the card (the shared ProfitBadge).
+    const toggle = screen.getByRole('button', { name: /aralığı seç/i });
+    // The badge is the other button in the cell (the shared ProfitBadge).
     const badge = screen.getAllByRole('button').find((b) => b !== toggle);
     if (badge === undefined) throw new Error('profit badge button not found');
     await user.click(badge);

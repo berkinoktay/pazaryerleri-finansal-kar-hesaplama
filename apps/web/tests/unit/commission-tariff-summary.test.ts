@@ -30,6 +30,8 @@ function makeRow(
     brand: null,
     currentPrice: '100',
     currentCommissionPct: '10',
+    currentNetProfit: '5',
+    currentMarginPct: '5',
     calculable: true,
     reason: null,
     bestBandKey,
@@ -51,7 +53,7 @@ const rows: CommissionTariffRow[] = [
 
 describe('summarizeSelection', () => {
   it('sums best-case profit and reports zero chosen when selection is empty', () => {
-    const summary = summarizeSelection(rows, {});
+    const summary = summarizeSelection(rows, {}, {});
     expect(summary.total).toBe(2);
     expect(summary.selectedCount).toBe(0);
     expect(summary.selectedProfit.toString()).toBe('0');
@@ -60,7 +62,7 @@ describe('summarizeSelection', () => {
   });
 
   it('sums the chosen bands and keeps best-case independent of the choice', () => {
-    const summary = summarizeSelection(rows, { a: 'band1', b: 'band3' });
+    const summary = summarizeSelection(rows, { a: 'band1', b: 'band3' }, {});
     expect(summary.selectedCount).toBe(2);
     // a.band1 (10) + b.band3 (8)
     expect(summary.selectedProfit.toString()).toBe('18');
@@ -68,8 +70,21 @@ describe('summarizeSelection', () => {
   });
 
   it('ignores null choices', () => {
-    const summary = summarizeSelection(rows, { a: null, b: 'band2' });
+    const summary = summarizeSelection(rows, { a: null, b: 'band2' }, {});
     expect(summary.selectedCount).toBe(1);
     expect(summary.selectedProfit.toString()).toBe('12');
+  });
+
+  it('totals a custom price with its captured profit instead of the band boundary', () => {
+    // a is chosen at band1 (boundary profit 10) but via a custom price whose
+    // captured estimate is 25 → the summary must total 25, not 10.
+    const summary = summarizeSelection(
+      rows,
+      { a: 'band1', b: 'band3' },
+      { a: { price: '95', netProfit: '25', marginPct: '18' } },
+    );
+    expect(summary.selectedCount).toBe(2);
+    // a custom (25) + b.band3 (8)
+    expect(summary.selectedProfit.toString()).toBe('33');
   });
 });

@@ -898,6 +898,13 @@
       "customPrice": "Özel Fiyat",
       "enterPrice": "Fiyat girin",
       "customPriceHint": "Fiyat girince tahmini kârı görürsün",
+      "calculatedProfit": "Hesaplanan kâr",
+      "vsCurrent": "Güncele göre",
+      "customCommissionHint": "Fiyatınıza karşılık gelen aralığın komisyonu uygulanır",
+      "selectBand": "Bu aralığı seç",
+      "bandSelected": "Seçildi",
+      "selectCustom": "Bu fiyatı seç",
+      "customSelected": "Seçildi",
       "aboveQualifier": "ve üzeri",
       "belowQualifier": "ve altı"
     },
@@ -984,6 +991,200 @@
       "upcoming": "Planlandı",
       "past": "Süresi doldu",
       "draft": "Taslak"
+    }
+  },
+  "plusCommissionTariffsPage": {
+    "search": "Ürün, model veya barkod ara",
+    "actions": {
+      "upload": "Excel Yükle",
+      "saveExport": "Kaydet ve İndir"
+    },
+    "templates": {
+      "add": "Yeni tarife",
+      "back": "Tarifelere dön",
+      "delete": "Tabloyu Sil",
+      "deleteTitle": "Tarifeyi sil",
+      "deleteDescription": "Bu kayıtlı Plus tarifesi ve içindeki tüm katılım seçimlerin kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "deleteConfirm": "Tarifeyi sil",
+      "notFoundTitle": "Tarife bulunamadı",
+      "notFoundDescription": "Bu tarife silinmiş veya bu mağazaya ait olmayabilir."
+    },
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "Plus komisyon tarifelerini görüntülemek için bağlı bir Trendyol mağazası gerekir.",
+      "cta": "Mağazalara git"
+    },
+    "reason": {
+      "NO_PRODUCT": "Ürün eşleşmedi — bu barkod ürün kataloğunuzda yok.",
+      "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
+      "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik."
+    },
+    "list": {
+      "upload": "Excel Dosyası Yükle",
+      "search": "Tarife ara…",
+      "productUnit": "ürün",
+      "columns": {
+        "tariff": "Tarife",
+        "period": "Dönem",
+        "products": "Ürün",
+        "status": "Durum",
+        "exported": "Dışa aktarım"
+      },
+      "summary": {
+        "total": "Toplam tarife",
+        "activePeriod": "Aktif dönem",
+        "joined": "Katılınan ürün",
+        "exported": "Dışa aktarılan",
+        "exportedValue": "{count} / {total}",
+        "noActivePeriod": "Aktif dönem yok",
+        "joinedContext": "Plus'a katıldın",
+        "noJoined": "henüz katılım yok",
+        "exportedPending": "{count} tarife dışa aktarım bekliyor",
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "activeNow": "şu an geçerli",
+        "bucketActive": "{count} aktif",
+        "bucketUpcoming": "{count} planlı",
+        "bucketPast": "{count} süresi dolmuş"
+      },
+      "empty": {
+        "title": "Henüz Plus tarifesi yok",
+        "description": "Trendyol panelinden indirdiğin Plus komisyon Excel dosyanı yükleyerek başla; her ürün için Plus'a katılmanın kârını gör.",
+        "cta": "Excel Dosyası Yükle"
+      },
+      "actions": {
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
+      },
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
+      "filterLabel": "Duruma göre filtrele",
+      "bulk": {
+        "selected": "{count} tarife seçili",
+        "delete": "Seçilenleri sil",
+        "deleteTitle": "Seçili tarifeleri sil",
+        "deleteDescription": "{count} tarife ve içindeki tüm katılım seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+        "deleteConfirm": "Tarifeleri sil"
+      },
+      "lastUpdated": "Son güncelleme: {date}"
+    },
+    "summary": {
+      "total": "Tarifedeki ürün",
+      "totalContext": "bu dönemde listelenen",
+      "joined": "Plus'a katılan",
+      "joinedValue": "{count}/{total}",
+      "joinedContext": "ürün için katıldın",
+      "joinedProfit": "Plus kârı",
+      "joinedProfitContext": "katıldığın ürünlerde tahmini toplam",
+      "currentProfit": "Mevcut kâr",
+      "currentProfitHint": "Hiçbir ürüne Plus uygulamazsan bugünkü tahmini toplam kâr."
+    },
+    "table": {
+      "product": "Ürün Bilgileri",
+      "current": "Güncel fiyat",
+      "salePrice": "Satış fiyatı",
+      "displayPrice": "Müşterinin gördüğü fiyat",
+      "currentCommission": "Güncel komisyon",
+      "currentPrice": "Güncel Fiyat",
+      "plus": "Plus Fiyat Aralığı",
+      "priceRange": "Fiyat Aralığı",
+      "plusCeiling": "Plus fiyat üst limiti",
+      "plusCommission": "Plus komisyon",
+      "commission": "komisyon",
+      "stock": "Stok",
+      "profit": "Kâr",
+      "loss": "Zarar",
+      "calculatedProfit": "Hesaplanan kâr",
+      "vsCurrent": "Güncele göre",
+      "plusCommissionApplies": "Plus komisyonu {pct} uygulanır",
+      "join": "Tavan fiyata katıl",
+      "joined": "Katıldın",
+      "joinHint": "Fiyatını üst limite çekip Plus komisyonundan yararlanırsın",
+      "plusIsBetter": "Plus daha kârlı",
+      "plusIsWorse": "Plus daha az kârlı",
+      "customPrice": "Plus Fiyatı",
+      "enterPrice": "Fiyat girin",
+      "customPriceHint": "Üst limitin altında bir Plus fiyatı dene",
+      "selectCustom": "Bu fiyatla katıl",
+      "customSelected": "Katıldın",
+      "ceilingQualifier": "ve altı"
+    },
+    "noResults": {
+      "title": "Eşleşen ürün yok",
+      "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."
+    },
+    "upload": {
+      "title": "Plus komisyon Excel'ini yükleyin",
+      "description": "Trendyol panelinden indirdiğiniz Plus komisyon dosyasını yükleyin; her ürün için Plus'a katılmanın kârını görün.",
+      "prompt": "Excel dosyasını sürükleyip bırakın",
+      "hint": "XLSX · en fazla 5 MB",
+      "cta": "Dosya seç",
+      "stepsTitle": "Nasıl çalışır?",
+      "step1": "Trendyol panelinden Plus komisyon Excel'ini indirin",
+      "step2": "Dosyayı buraya yükleyin",
+      "step3": "Her ürün için Plus'a katılmanın kârlı olup olmadığını görün",
+      "submit": "Tarifeyi oluştur",
+      "errors": {
+        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+        "wrongFormat": "Bu bir Trendyol Plus komisyon dosyası değil ya da biçimi tanınmadı.",
+        "empty": "Dosyada ürün satırı bulunamadı.",
+        "noPeriod": "Dosyada tarife dönemi bulunamadı.",
+        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      }
+    },
+    "breakdown": {
+      "title": "Kâr dökümü",
+      "salePrice": "Satış fiyatı",
+      "sale": "Satış",
+      "commission": "Komisyon",
+      "unitCost": "Birim maliyet",
+      "cost": "Ürün maliyeti",
+      "shipping": "Kargo",
+      "platformService": "Platform hizmet bedeli",
+      "stoppage": "Stopaj",
+      "netVat": "Net KDV",
+      "profit": "Kâr",
+      "estimatedProfit": "Tahmini kâr",
+      "margin": "Marj",
+      "notCalculable": "Bu ürün için kâr hesaplanamıyor."
+    },
+    "smartSelect": {
+      "label": "Akıllı Seçim",
+      "joinAll": "Tümünü Plus'a kat",
+      "joinProfitable": "Sadece Plus'ın kârlı olduğu ürünler",
+      "clear": "Seçimleri temizle",
+      "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
+    },
+    "filters": {
+      "category": "Kategori",
+      "brand": "Marka",
+      "minMargin": "Min. marj %",
+      "profit": "Kârlılık",
+      "profitProfitable": "Plus kârlı",
+      "profitLoss": "Plus zararlı",
+      "selection": "Katılım durumu",
+      "selectionSelected": "Katıldın",
+      "selectionUnselected": "Katılmadın",
+      "groupLabel": "Filtreler",
+      "all": "Tümü"
+    },
+    "actionBar": {
+      "joined": "{count} ürün Plus'a katıldı"
+    },
+    "status": {
+      "exported": "İndirildi",
+      "pending": "Bekliyor"
+    },
+    "validity": {
+      "active": "Aktif",
+      "upcoming": "Yaklaşan",
+      "past": "Geçmiş"
+    },
+    "listStatus": {
+      "active": "Aktif",
+      "upcoming": "Planlandı",
+      "past": "Süresi doldu"
     }
   },
   "featureStatus": {

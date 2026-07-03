@@ -19,7 +19,6 @@
 
 import { Decimal } from 'decimal.js';
 
-import type { Platform, Prisma } from '@pazarsync/db';
 import { computeUnitProfit, type EstimateOutcome, type UnitEconomics } from '@pazarsync/profit';
 
 import {
@@ -27,15 +26,21 @@ import {
   serializeBreakdown,
   type AssemblyInputs,
   type QuoteBreakdown,
-  type ResolvedFeeDefs,
 } from './product-pricing.service';
-import type { ResolvedCommissionRate } from './commission-rate-resolver';
+import {
+  deriveReason,
+  tariffCommission,
+  type TariffAssemblyContext,
+  type TariffItemReason,
+  type TariffVariant,
+} from './tariff-compute-commons';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type { StoredBand } from './commission-tariff.types';
 
-// ─── Why an item cannot be costed (no band profit) ──────────────────────────
-
-export type TariffItemReason = 'NO_PRODUCT' | 'NO_COST' | 'NO_SHIPPING';
+// Re-exported so existing consumers (commission-tariff.service, estimate route)
+// keep importing these shared types from here. Their single source is
+// `tariff-compute-commons`, shared with the Plus tariff feature.
+export type { TariffAssemblyContext, TariffItemReason, TariffVariant };
 
 // ─── Computed result shapes (serialized — strings, never float) ─────────────
 
@@ -51,41 +56,26 @@ export interface ComputedBandResult {
   readonly marginPct: string | null;
 }
 
+/** The "do nothing" baseline: profit at the current price + current (regular) commission. */
+export interface ComputedCurrentScenario {
+  readonly netProfit: string | null;
+  readonly marginPct: string | null;
+}
+
 export interface ComputedItemBands {
   readonly calculable: boolean;
   readonly reason: TariffItemReason | null;
   readonly bands: ReadonlyArray<ComputedBandResult>;
   /** Key of the band with the highest net profit, or null if none calculable. */
   readonly bestBandKey: string | null;
+  /**
+   * Profit at the seller's CURRENT price + current commission — the baseline the
+   * band/custom "vs current" delta compares against. Null when not calculable.
+   */
+  readonly current: ComputedCurrentScenario;
 }
 
-// The exact variant columns `assembleUnitEconomics` reads (mirrors its private
-// `VariantForAssembly`). Supplied by the caller after the barcode → variant join.
-export interface TariffVariant {
-  readonly id: string;
-  readonly stockCode: string;
-  readonly barcode: string;
-  readonly salePrice: Prisma.Decimal;
-  readonly vatRate: number | null;
-  readonly isDigital: boolean;
-  readonly product: { title: string; categoryId: bigint | null; brandId: bigint | null };
-}
-
-export interface TariffAssemblyContext {
-  readonly platform: Platform;
-  readonly feeDefs: ResolvedFeeDefs;
-}
-
-/**
- * Synthesizes the `ResolvedCommissionRate` the pure assembly consumes from a raw
- * percent. The tariff sources its commission from the Excel band, not the rate
- * table, so `ruleSource` / `paymentTermDays` / `segmentApplied` are inert here —
- * `assembleUnitEconomics` reads only `.rate`. Kept explicit (no assertion) so the
- * shape stays in lockstep with the resolver's interface.
- */
-function bandCommission(ratePercent: Decimal): ResolvedCommissionRate {
-  return { rate: ratePercent, paymentTermDays: 0, ruleSource: 'category', segmentApplied: null };
-}
+const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
 /** A band's representative price: bracket upper limit, or current price for band 1 (no upper). */
 function bandPrice(band: StoredBand, currentPrice: Decimal): Decimal {
@@ -107,15 +97,6 @@ function nullBandResults(
   }));
 }
 
-/** Cost gates first (margin/profit would be wrong at cost=0), then shipping. */
-function deriveReason(costOk: boolean, shippingOk: boolean): TariffItemReason {
-  if (!costOk) return 'NO_COST';
-  if (!shippingOk) return 'NO_SHIPPING';
-  // Commission is always supplied from the band, so calculability can only fail
-  // on cost or shipping; default defensively to NO_COST.
-  return 'NO_COST';
-}
-
 /**
  * Computes every band's net profit for one tariff item. `variant` is null for an
  * unmatched barcode → not calculable, reason NO_PRODUCT. Otherwise the variant's
@@ -126,6 +107,7 @@ export function computeItemBands(
   ctx: TariffAssemblyContext,
   bands: ReadonlyArray<StoredBand>,
   currentPrice: Decimal,
+  currentCommissionPct: Decimal,
   variant: TariffVariant | null,
   costAggregate: VariantCostAggregate | undefined,
   shipping: EstimateOutcome,
@@ -137,12 +119,13 @@ export function computeItemBands(
       reason: 'NO_PRODUCT',
       bands: nullBandResults(bands, currentPrice),
       bestBandKey: null,
+      current: NULL_CURRENT,
     };
   }
 
   const inputs: AssemblyInputs = {
     costAggregate,
-    commission: bandCommission(new Decimal(firstBand.commissionPct)),
+    commission: tariffCommission(new Decimal(firstBand.commissionPct)),
     shipping,
   };
   const probe = assembleUnitEconomics(ctx, variant, inputs);
@@ -153,10 +136,24 @@ export function computeItemBands(
       reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
       bands: nullBandResults(bands, currentPrice),
       bestBandKey: null,
+      current: NULL_CURRENT,
     };
   }
 
   const baseEcon: UnitEconomics = probe.econ;
+
+  // Baseline ("do nothing"): reuse the assembled econ, override only the commission
+  // to the seller's CURRENT (regular) rate, and run the engine at the current price.
+  const currentBreakdown = computeUnitProfit(
+    { ...baseEcon, commissionRate: currentCommissionPct },
+    currentPrice,
+  );
+  const current: ComputedCurrentScenario = {
+    netProfit: currentBreakdown.netProfit.toFixed(2),
+    marginPct:
+      currentBreakdown.saleMarginPct !== null ? currentBreakdown.saleMarginPct.toFixed(2) : null,
+  };
+
   let bestBandKey: string | null = null;
   let bestProfit: Decimal | null = null;
 
@@ -179,7 +176,7 @@ export function computeItemBands(
     };
   });
 
-  return { calculable: true, reason: null, bands: results, bestBandKey };
+  return { calculable: true, reason: null, bands: results, bestBandKey, current };
 }
 
 // ─── Single-price estimate (band-click breakdown + custom-price what-if) ─────
@@ -248,7 +245,7 @@ export function computeItemEstimate(
 
   const inputs: AssemblyInputs = {
     costAggregate,
-    commission: bandCommission(new Decimal(band.commissionPct)),
+    commission: tariffCommission(new Decimal(band.commissionPct)),
     shipping,
   };
   const probe = assembleUnitEconomics(ctx, variant, inputs);

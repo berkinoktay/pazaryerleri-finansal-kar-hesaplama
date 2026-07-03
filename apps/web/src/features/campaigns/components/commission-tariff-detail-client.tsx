@@ -27,12 +27,15 @@ import {
   selectBestForAll,
   selectByTargetMargin,
   selectProfitableOnly,
+  type CommissionSelectionState,
+  type CustomChoice,
+  type CustomPriceMap,
   type SelectionMap,
   type TargetStrategy,
   type TariffFilterState,
 } from '../lib/bulk-actions';
 import { toDetailTemplate } from '../lib/adapt-tariff';
-import { summarizeSelection } from '../lib/commission-tariff-summary';
+import { findBand, summarizeSelection } from '../lib/commission-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
 import { CommissionTariffStatusBadge } from './commission-tariff-status-badge';
@@ -77,7 +80,12 @@ export function CommissionTariffDetailClient({
     [detail.data],
   );
 
+  // `selection` = the chosen band per row; `customPrices` = the optional custom
+  // amount overriding that band's boundary price. Choosing a band clears the row's
+  // custom price; committing a custom price sets both. Both stay local (edit state)
+  // and save together on "Kaydet ve İndir".
   const [selection, setSelection] = React.useState<SelectionMap>({});
+  const [customPrices, setCustomPrices] = React.useState<CustomPriceMap>({});
   const [seededTariffId, setSeededTariffId] = React.useState<string | null>(null);
   // View state (filters + active period tab) is URL-owned via nuqs: reload /
   // share / back-forward reproduce the exact view. The tri-states encode
@@ -133,17 +141,57 @@ export function CommissionTariffDetailClient({
   // React-recommended alternative to a setState-in-effect — no cascading renders.
   if (template !== null && template.id !== seededTariffId) {
     const seed: SelectionMap = {};
+    const seedCustom: CustomPriceMap = {};
     for (const period of template.periods) {
       for (const row of period.rows) {
-        if (row.selectedBand !== null) seed[row.id] = row.selectedBand;
+        if (row.selectedBand === null) continue;
+        seed[row.id] = row.selectedBand;
+        if (row.customPrice !== null) {
+          // Custom-priced: restore the confirmed amount. Its exact profit isn't in
+          // the detail payload, so approximate the summary with the derived band's
+          // profit until the seller re-confirms (which captures the estimate).
+          const band = findBand(row, row.selectedBand);
+          seedCustom[row.id] = {
+            price: row.customPrice,
+            netProfit: band?.netProfit ?? null,
+            marginPct: band?.marginPct ?? null,
+          };
+        }
       }
     }
     setSelection(seed);
+    setCustomPrices(seedCustom);
     setSeededTariffId(template.id);
   }
 
-  const handleSelectBand = React.useCallback((rowId: string, band: string): void => {
-    setSelection((prev) => ({ ...prev, [rowId]: prev[rowId] === band ? null : band }));
+  const handleSelectBand = React.useCallback(
+    (rowId: string, band: string): void => {
+      // Toggle off only when re-clicking the PLAIN boundary selection; when a custom
+      // price is active, clicking a band replaces it (never toggles off). Either way,
+      // choosing a band clears the row's custom price — a row has one choice.
+      setSelection((prev) => {
+        const isBoundarySelected = prev[rowId] === band && customPrices[rowId] == null;
+        return { ...prev, [rowId]: isBoundarySelected ? null : band };
+      });
+      setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
+    },
+    [customPrices],
+  );
+
+  const handleSelectCustom = React.useCallback(
+    (rowId: string, band: string, choice: CustomChoice): void => {
+      // A confirmed custom price sets both the derived band and the amount.
+      setSelection((prev) => ({ ...prev, [rowId]: band }));
+      setCustomPrices((prev) => ({ ...prev, [rowId]: choice }));
+    },
+    [],
+  );
+
+  const handleDeselectCustom = React.useCallback((rowId: string): void => {
+    // Un-committing a custom price clears the whole row choice (the band was only
+    // there because of the custom price).
+    setSelection((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
+    setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
   }, []);
 
   if (detail.isLoading) {
@@ -207,7 +255,7 @@ export function CommissionTariffDetailClient({
   }
 
   const periodRows = activePeriod.rows;
-  const summary = summarizeSelection(periodRows, selection);
+  const summary = summarizeSelection(periodRows, selection, customPrices);
   const filteredRows = filterRows(periodRows, selection, filters);
   const categories = distinct(periodRows.map((row) => row.category));
   const brands = distinct(periodRows.map((row) => row.brand));
@@ -219,11 +267,22 @@ export function CommissionTariffDetailClient({
     filters.profit !== 'all' ||
     filters.selection !== 'all';
 
-  const applyBulk = (fn: (rows: typeof filteredRows, prev: SelectionMap) => SelectionMap): void => {
-    setSelection((prev) => fn(filteredRows, prev));
+  const applyBulk = (
+    fn: (rows: typeof filteredRows, state: CommissionSelectionState) => CommissionSelectionState,
+  ): void => {
+    const next = fn(filteredRows, { selection, customPrices });
+    setSelection(next.selection);
+    setCustomPrices(next.customPrices);
   };
   const onTargetMargin = (targetPct: number, strategy: TargetStrategy): void => {
-    setSelection((prev) => selectByTargetMargin(filteredRows, prev, targetPct, strategy));
+    const next = selectByTargetMargin(
+      filteredRows,
+      { selection, customPrices },
+      targetPct,
+      strategy,
+    );
+    setSelection(next.selection);
+    setCustomPrices(next.customPrices);
   };
 
   const onSaveExport = (): void => {
@@ -231,7 +290,9 @@ export function CommissionTariffDetailClient({
     const selections = allRows.map((row) => ({
       itemId: row.id,
       band: asBandKey(selection[row.id] ?? null) ?? null,
-      customPrice: row.customPrice,
+      // The locally-edited custom price overrides the persisted one; null when the
+      // row's choice is a plain band.
+      customPrice: customPrices[row.id]?.price ?? null,
     }));
     updateSelections.mutate(
       { selections },
@@ -317,7 +378,10 @@ export function CommissionTariffDetailClient({
           <CommissionTariffsTable
             rows={filteredRows}
             selection={selection}
+            customPrices={customPrices}
             onSelectBand={handleSelectBand}
+            onSelectCustom={handleSelectCustom}
+            onDeselectCustom={handleDeselectCustom}
             tabs={periodTabs}
             toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
@@ -330,7 +394,10 @@ export function CommissionTariffDetailClient({
           <CommissionTariffsMobileCards
             rows={filteredRows}
             selection={selection}
+            customPrices={customPrices}
             onSelectBand={handleSelectBand}
+            onSelectCustom={handleSelectCustom}
+            onDeselectCustom={handleDeselectCustom}
           />
         </div>
 

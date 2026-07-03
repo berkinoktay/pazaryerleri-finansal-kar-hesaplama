@@ -207,6 +207,7 @@
   /* Domain-specific max-width tokens. Using role names (form, modal,
      sheet, headline) avoids collision with the xs/sm/md/lg/xl spacing
      scale, which Tailwind v4 also uses for max-w-* utilities. */
+  --spacing-input-price: var(--size-input-price);
   --spacing-input-narrow: var(--size-input-narrow);
   --spacing-input: var(--size-input);
   --spacing-form: var(--size-form);

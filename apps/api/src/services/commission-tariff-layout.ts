@@ -8,6 +8,8 @@
 // Shared by the import (read) and export (patch) paths so both agree on where a
 // given column lives for any period configuration.
 
+import { findHeader, normalizeHeader } from '../lib/xlsx-grid-cells';
+
 // ─── Fixed columns A-N (identical across every export we have seen) ──────────
 
 export const FIXED_COLUMNS = {
@@ -54,29 +56,16 @@ export interface TariffLayout {
 
 const PERIOD_HEADER_RE = /^Tarih aralığı \((\d+) Gün\)$/;
 
-// Collapse whitespace (JS \s already covers NBSP U+00A0) + NFC-normalize so header
-// comparisons are exact regardless of stray spacing.
-function norm(value: unknown): string {
-  return String(value ?? '')
-    .normalize('NFC')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-function findHeader(headers: readonly string[], target: string): number {
-  return headers.indexOf(norm(target));
-}
-
 /**
  * Resolves the layout from the header row, or returns null when the sheet is not
  * a recognizable Trendyol tariff export (missing fixed columns, no period block,
  * or a missing tail column). The caller turns null into INVALID_TARIFF_FORMAT.
  */
 export function resolveTariffLayout(headerRow: readonly unknown[]): TariffLayout | null {
-  const headers = headerRow.map(norm);
+  const headers = headerRow.map(normalizeHeader);
 
   for (const [idx, expected] of FIXED_HEADERS) {
-    if (headers[idx] !== norm(expected)) return null;
+    if (headers[idx] !== normalizeHeader(expected)) return null;
   }
 
   const periods: PeriodColumns[] = [];

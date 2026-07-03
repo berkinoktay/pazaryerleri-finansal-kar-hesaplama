@@ -23,6 +23,7 @@ import {
 
 import type { Platform } from '@pazarsync/db/enums';
 
+import { TrendyolPlusLogo } from '@/components/patterns/trendyol-plus-logo';
 import type { SubNavItem } from '@/components/patterns/sub-nav-list';
 
 /**
@@ -63,6 +64,12 @@ export interface NavItemBase {
   activeMatch?: string;
   /** Optional inline badge — Yeni / Beta / count indicator. */
   badge?: NavItemBadge;
+  /**
+   * Optional brand mark rendered in the trailing slot (where the badge sits),
+   * instead of a text badge — e.g. the Trendyol Plus wordmark on the Plus
+   * commission tariffs item. Hidden when the sidebar collapses to icon-only.
+   */
+  trailingMark?: React.ComponentType<{ className?: string }>;
 }
 
 export type NavItem =
@@ -140,6 +147,7 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         labelKey: 'nav.plusCommissionTariffs',
         href: '/campaigns/plus-commission-tariffs',
         icon: PlusSignSquareIcon,
+        trailingMark: TrendyolPlusLogo,
       },
       {
         key: 'campaign-product-labels',

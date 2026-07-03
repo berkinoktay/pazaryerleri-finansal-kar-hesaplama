@@ -898,6 +898,13 @@
       "customPrice": "Custom Price",
       "enterPrice": "Enter price",
       "customPriceHint": "Enter a price to see the estimated profit",
+      "calculatedProfit": "Calculated profit",
+      "vsCurrent": "vs current",
+      "customCommissionHint": "The commission of the range matching your price applies",
+      "selectBand": "Select this range",
+      "bandSelected": "Selected",
+      "selectCustom": "Select this price",
+      "customSelected": "Selected",
       "aboveQualifier": "and above",
       "belowQualifier": "and below"
     },
@@ -984,6 +991,200 @@
       "upcoming": "Scheduled",
       "past": "Expired",
       "draft": "Draft"
+    }
+  },
+  "plusCommissionTariffsPage": {
+    "search": "Search product, model or barcode",
+    "actions": {
+      "upload": "Upload Excel",
+      "saveExport": "Save & Download"
+    },
+    "templates": {
+      "add": "New tariff",
+      "back": "Back to tariffs",
+      "delete": "Delete Table",
+      "deleteTitle": "Delete tariff",
+      "deleteDescription": "This saved Plus tariff and all its join selections will be permanently deleted. This cannot be undone.",
+      "deleteConfirm": "Delete tariff",
+      "notFoundTitle": "Tariff not found",
+      "notFoundDescription": "This tariff may have been deleted or does not belong to this store."
+    },
+    "noStore": {
+      "title": "Select a store first",
+      "description": "A connected Trendyol store is required to view Plus commission tariffs.",
+      "cta": "Go to stores"
+    },
+    "reason": {
+      "NO_PRODUCT": "No product match — this barcode is not in your catalog.",
+      "NO_COST": "No cost — add a cost profile for this product.",
+      "NO_SHIPPING": "No shipping estimate — carrier or desi setting is missing."
+    },
+    "list": {
+      "upload": "Upload Excel File",
+      "search": "Search tariffs…",
+      "productUnit": "products",
+      "columns": {
+        "tariff": "Tariff",
+        "period": "Period",
+        "products": "Products",
+        "status": "Status",
+        "exported": "Export"
+      },
+      "summary": {
+        "total": "Total tariffs",
+        "activePeriod": "Active period",
+        "joined": "Joined products",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "noActivePeriod": "No active period",
+        "joinedContext": "joined to Plus",
+        "noJoined": "none joined yet",
+        "exportedPending": "{count, plural, one {# tariff} other {# tariffs}} awaiting export",
+        "exportedAllDone": "all exported",
+        "activeNow": "in effect now",
+        "bucketActive": "{count} active",
+        "bucketUpcoming": "{count} scheduled",
+        "bucketPast": "{count} expired"
+      },
+      "empty": {
+        "title": "No Plus tariffs yet",
+        "description": "Start by uploading the Plus commission Excel you downloaded from the Trendyol panel; see the profit of joining Plus per product.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
+      "selectAll": "Select all",
+      "selectRow": "Select row",
+      "filterLabel": "Filter by status",
+      "bulk": {
+        "selected": "{count} tariffs selected",
+        "delete": "Delete selected",
+        "deleteTitle": "Delete selected tariffs",
+        "deleteDescription": "{count} tariffs and all their join selections will be permanently deleted. This cannot be undone.",
+        "deleteConfirm": "Delete tariffs"
+      },
+      "lastUpdated": "Last updated: {date}"
+    },
+    "summary": {
+      "total": "Products in tariff",
+      "totalContext": "listed this period",
+      "joined": "Joined to Plus",
+      "joinedValue": "{count}/{total}",
+      "joinedContext": "products joined",
+      "joinedProfit": "Plus profit",
+      "joinedProfitContext": "estimated total on joined products",
+      "currentProfit": "Current profit",
+      "currentProfitHint": "Estimated total profit today if you apply Plus to nothing."
+    },
+    "table": {
+      "product": "Product Info",
+      "current": "Current price",
+      "salePrice": "Sale price",
+      "displayPrice": "Price the customer sees",
+      "currentCommission": "Current commission",
+      "currentPrice": "Current Price",
+      "plus": "Plus price range",
+      "priceRange": "Price range",
+      "plusCeiling": "Plus price ceiling",
+      "plusCommission": "Plus commission",
+      "commission": "commission",
+      "stock": "Stock",
+      "profit": "Profit",
+      "loss": "Loss",
+      "calculatedProfit": "Calculated profit",
+      "vsCurrent": "vs. current",
+      "plusCommissionApplies": "Plus commission {pct} applies",
+      "join": "Join at ceiling price",
+      "joined": "Joined",
+      "joinHint": "Drop your price to the ceiling and earn the Plus commission",
+      "plusIsBetter": "Plus is better",
+      "plusIsWorse": "Plus is worse",
+      "customPrice": "Plus Price",
+      "enterPrice": "Enter price",
+      "customPriceHint": "Try a Plus price below the ceiling",
+      "selectCustom": "Join at this price",
+      "customSelected": "Joined",
+      "ceilingQualifier": "and below"
+    },
+    "noResults": {
+      "title": "No matching products",
+      "description": "Try adjusting your search or filters."
+    },
+    "upload": {
+      "title": "Upload the Plus commission Excel",
+      "description": "Upload the Plus commission file you downloaded from the Trendyol panel; see the profit of joining Plus per product.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · 5 MB max",
+      "cta": "Choose file",
+      "stepsTitle": "How it works",
+      "step1": "Download the Plus commission Excel from the Trendyol panel",
+      "step2": "Upload the file here",
+      "step3": "See whether joining Plus is profitable for each product",
+      "submit": "Create tariff",
+      "errors": {
+        "notReadable": "Could not read the file — upload a valid .xlsx.",
+        "wrongFormat": "This is not a Trendyol Plus commission file, or the format is unrecognized.",
+        "empty": "No product rows found in the file.",
+        "noPeriod": "No tariff period found in the file.",
+        "tooLarge": "File too large — upload a smaller file.",
+        "generic": "Could not upload the file. Please try again."
+      }
+    },
+    "breakdown": {
+      "title": "Profit breakdown",
+      "salePrice": "Sale price",
+      "sale": "Sale",
+      "commission": "Commission",
+      "unitCost": "Unit cost",
+      "cost": "Product cost",
+      "shipping": "Shipping",
+      "platformService": "Platform service fee",
+      "stoppage": "Withholding",
+      "netVat": "Net VAT",
+      "profit": "Profit",
+      "estimatedProfit": "Estimated profit",
+      "margin": "Margin",
+      "notCalculable": "Profit cannot be computed for this product."
+    },
+    "smartSelect": {
+      "label": "Smart Select",
+      "joinAll": "Join all to Plus",
+      "joinProfitable": "Only products where Plus wins",
+      "clear": "Clear selections",
+      "scopeHint": "Applies only to visible products when a filter is active."
+    },
+    "filters": {
+      "category": "Category",
+      "brand": "Brand",
+      "minMargin": "Min margin %",
+      "profit": "Profitability",
+      "profitProfitable": "Plus profitable",
+      "profitLoss": "Plus unprofitable",
+      "selection": "Join status",
+      "selectionSelected": "Joined",
+      "selectionUnselected": "Not joined",
+      "groupLabel": "Filters",
+      "all": "All"
+    },
+    "actionBar": {
+      "joined": "{count} products joined to Plus"
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
+    },
+    "validity": {
+      "active": "Active",
+      "upcoming": "Upcoming",
+      "past": "Past"
+    },
+    "listStatus": {
+      "active": "Active",
+      "upcoming": "Scheduled",
+      "past": "Expired"
     }
   },
   "featureStatus": {

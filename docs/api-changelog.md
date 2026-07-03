@@ -11,6 +11,18 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Added
+
+- **Plus Commission Tariffs API** (`/v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs`)
+  — Sibling of the commission-tariffs endpoints for Trendyol's "Plus Komisyon" Excel. Seven routes:
+  `GET` (list), `POST /import` (multipart .xlsx → 201 with counts), `GET /{tariffId}` (detail with
+  per-item CURRENT vs PLUS profit computed on read — the Plus deal is a reduced commission for
+  dropping the price to the Plus ceiling), `PATCH /{tariffId}/selections` (boolean opt-in + optional
+  custom price), `POST /{tariffId}/export` (byte-preserving re-uploadable .xlsx), `POST
+  /{tariffId}/items/{itemId}/estimate` (custom-price what-if), `DELETE /{tariffId}`. Store-scoped +
+  RLS; profit never stored. Simpler than the product tariff (single 7-day period, single offer, no
+  band ladder). NOTE: the export's exact opt-in cell format is pending vendor verification.
+
 ### Removed
 
 - **`returnScenarioNetProfit` (order list + `ProfitBreakdown`) and `returnScenarioMarginPct`

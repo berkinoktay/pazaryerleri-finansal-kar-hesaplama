@@ -5,6 +5,33 @@ import type { CommissionTariffRow, PriceBand } from '../types';
 /** Chosen band key per row (`band1`..`band4`), or null when none is chosen. */
 export type SelectionMap = Record<string, string | null>;
 
+/**
+ * A committed custom price for one product: the seller typed a price, the backend
+ * derived its band, and they confirmed it. The estimated profit/margin are captured
+ * at confirm time so the header summary can total the chosen products without
+ * re-estimating. `price` is a GROSS decimal string.
+ */
+export interface CustomChoice {
+  price: string;
+  netProfit: string | null;
+  marginPct: string | null;
+}
+
+/** Per-item committed custom price, or null/absent when the row's choice is a plain band. */
+export type CustomPriceMap = Record<string, CustomChoice | null>;
+
+/**
+ * The full per-row choice state. `selection` holds the chosen band key (a custom
+ * price ALSO sets it, to the band the price derives into); `customPrices` holds the
+ * optional custom amount that overrides that band's boundary price. The two are kept
+ * consistent: choosing a band directly clears the row's custom price, and committing
+ * a custom price sets both.
+ */
+export interface CommissionSelectionState {
+  selection: SelectionMap;
+  customPrices: CustomPriceMap;
+}
+
 /** Target-margin selection strategy. */
 export type TargetStrategy = 'least-drop' | 'max-profit';
 
@@ -38,30 +65,38 @@ function bestBand(row: CommissionTariffRow): PriceBand | undefined {
   return best ?? row.bands[0];
 }
 
-/** Apply the most profitable (server-marked) band to every row. */
+/** Apply the most profitable (server-marked) band to every row. Choosing a band clears the row's custom price. */
 export function selectBestForAll(
   rows: readonly CommissionTariffRow[],
-  prev: SelectionMap,
-): SelectionMap {
-  const next = { ...prev };
+  state: CommissionSelectionState,
+): CommissionSelectionState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    if (row.bestBandKey !== null) next[row.id] = row.bestBandKey;
+    if (row.bestBandKey !== null) {
+      selection[row.id] = row.bestBandKey;
+      customPrices[row.id] = null;
+    }
   }
-  return next;
+  return { selection, customPrices };
 }
 
 /** Apply the best band only to rows whose best band is profitable (skip losers). */
 export function selectProfitableOnly(
   rows: readonly CommissionTariffRow[],
-  prev: SelectionMap,
-): SelectionMap {
-  const next = { ...prev };
+  state: CommissionSelectionState,
+): CommissionSelectionState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
   for (const row of rows) {
     const best = bestBand(row);
     const profit = best !== undefined ? bandProfit(best) : null;
-    if (best !== undefined && profit !== null && profit.greaterThan(0)) next[row.id] = best.key;
+    if (best !== undefined && profit !== null && profit.greaterThan(0)) {
+      selection[row.id] = best.key;
+      customPrices[row.id] = null;
+    }
   }
-  return next;
+  return { selection, customPrices };
 }
 
 /**
@@ -72,11 +107,12 @@ export function selectProfitableOnly(
  */
 export function selectByTargetMargin(
   rows: readonly CommissionTariffRow[],
-  prev: SelectionMap,
+  state: CommissionSelectionState,
   targetPct: number,
   strategy: TargetStrategy,
-): SelectionMap {
-  const next = { ...prev };
+): CommissionSelectionState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
   for (const row of rows) {
     let chosen: PriceBand | undefined;
     for (const band of row.bands) {
@@ -91,19 +127,26 @@ export function selectByTargetMargin(
           : (bandProfit(band) ?? new Decimal(0)).greaterThan(bandProfit(chosen) ?? new Decimal(0));
       if (better) chosen = band;
     }
-    if (chosen !== undefined) next[row.id] = chosen.key;
+    if (chosen !== undefined) {
+      selection[row.id] = chosen.key;
+      customPrices[row.id] = null;
+    }
   }
-  return next;
+  return { selection, customPrices };
 }
 
-/** Clear the chosen band for the given rows. */
+/** Clear the chosen band AND any custom price for the given rows. */
 export function clearSelections(
   rows: readonly CommissionTariffRow[],
-  prev: SelectionMap,
-): SelectionMap {
-  const next = { ...prev };
-  for (const row of rows) delete next[row.id];
-  return next;
+  state: CommissionSelectionState,
+): CommissionSelectionState {
+  const selection = { ...state.selection };
+  const customPrices = { ...state.customPrices };
+  for (const row of rows) {
+    delete selection[row.id];
+    delete customPrices[row.id];
+  }
+  return { selection, customPrices };
 }
 
 export interface TariffFilterState {

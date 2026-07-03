@@ -1,3 +1,5 @@
+import type { components } from '@pazarsync/api-client';
+
 import type { TariffBandResult, TariffDetailItem } from './api/get-tariff-detail.api';
 
 /**
@@ -51,3 +53,21 @@ export interface TariffTemplate {
   exported: boolean;
   periods: readonly TariffPeriod[];
 }
+
+/**
+ * Component-facing Plus commission-tariff shapes, re-exported from the api layer so
+ * the UI has one import site. Money is a GROSS decimal STRING and `commissionPct` a
+ * PERCENT string, exactly as the backend serializes — the frontend renders, never
+ * computes. Uncalculable rows carry `null` profit/margin, so every consumer must
+ * null-guard. Unlike the commission detail there are NO periods: a Plus tariff is a
+ * single 7-day window whose product rows are consumed directly.
+ */
+export type {
+  PlusTariffDetail,
+  PlusTariffDetailItem,
+  PlusScenario,
+} from './api/get-plus-tariff-detail.api';
+export type { PlusTariffListItem } from './api/list-plus-tariffs.api';
+
+/** A Plus tariff's validity relative to today (null when the period dates are unparseable). */
+export type PlusTariffValidity = components['schemas']['PlusTariffValidity'];
