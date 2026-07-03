@@ -1,19 +1,19 @@
 import { cn } from '@/lib/utils';
 
 /**
- * Full "trendyol plus" horizontal brand lockup (flame mark + "trendyol plus"
- * wordmark), inlined so the wordmark adapts to the theme. The flame and "plus"
- * keep their fixed brand gradients (correct on light AND dark), while the
- * "trendyol" letters use `currentColor` (via `text-foreground`) — dark on the
- * light dashboard, light in dark mode — exactly how Trendyol renders the wordmark.
- * This is why it is inline (not next/image): an <img> could not pick up the page
- * text color for the wordmark. Mirrors the currentColor approach of brand/logo.tsx.
+ * "trendyol plus" brand wordmark (flame-less), inlined so the wordmark adapts to
+ * the theme. The "plus" keeps its fixed brand gradient (correct on light AND
+ * dark); the "trendyol" letters use `currentColor` (via `text-foreground`) —
+ * dark on the light dashboard, light in dark mode — exactly how Trendyol renders
+ * the wordmark. Inline (not next/image) so it can pick up the page text color;
+ * mirrors the currentColor approach of brand/logo.tsx.
  *
- * Height comes from `className` (default `h-6`); width auto-scales to the source
- * aspect ratio (114×24). Decorative (`aria-hidden`) — always paired with a visible
- * title. Gradient ids are static (the lockup renders once per page header).
+ * The viewBox is cropped tight to the wordmark (the source flame is dropped), so
+ * the glyphs fill the box and height maps 1:1 to the visible text: `className` sets
+ * the height (default `h-4`), width auto-scales to the ~6.5:1 aspect. Decorative
+ * (`aria-hidden`) — always paired with a visible title/label.
  *
- * @useWhen branding a Trendyol-Plus page header with the full theme-adaptive "trendyol plus" lockup
+ * @useWhen branding a Trendyol-Plus surface (page headers, offer column header) with the theme-adaptive flame-less "trendyol plus" wordmark
  */
 export interface TrendyolPlusLockupProps {
   className?: string;
@@ -22,16 +22,12 @@ export interface TrendyolPlusLockupProps {
 export function TrendyolPlusLockup({ className }: TrendyolPlusLockupProps): React.ReactElement {
   return (
     <svg
-      viewBox="0 0 114 24"
+      viewBox="36 6 77.5 12"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden
-      className={cn('text-foreground h-6 w-auto shrink-0', className)}
+      className={cn('text-foreground h-4 w-auto shrink-0', className)}
     >
-      <path
-        d="M7.22662 15.4757C7.79371 15.5294 8.07725 15.5563 8.26047 15.7395C8.44369 15.9228 8.47056 16.2063 8.52431 16.7734L8.94596 21.2218C9.0654 22.4818 9.12512 23.1119 9.51797 23.5157C9.56337 23.5624 9.61158 23.6062 9.66233 23.647C10.1014 24 10.7343 24 12 24C13.2657 24 13.8986 24 14.3377 23.647C14.3884 23.6062 14.4366 23.5624 14.482 23.5157C14.8749 23.1119 14.9346 22.4818 15.054 21.2218L15.4757 16.7734C15.5294 16.2063 15.5563 15.9228 15.7395 15.7395C15.9228 15.5563 16.2063 15.5294 16.7734 15.4757L21.2218 15.054C22.4818 14.9346 23.1119 14.8749 23.5157 14.482C23.5624 14.4366 23.6062 14.3884 23.647 14.3377C24 13.8986 24 13.2657 24 12C24 10.7343 24 10.1014 23.647 9.66233C23.6062 9.61158 23.5624 9.56337 23.5157 9.51797C23.1119 9.12512 22.4818 9.0654 21.2218 8.94596L16.7734 8.52431C16.2063 8.47056 15.9228 8.44369 15.7395 8.26047C15.5563 8.07725 15.5294 7.79371 15.4757 7.22662L15.054 2.77825C14.9346 1.51818 14.8749 0.888141 14.482 0.484316C14.4366 0.437646 14.3884 0.39379 14.3377 0.352994C13.8986 0 13.2657 0 12 0C10.7343 0 10.1014 0 9.66233 0.352994C9.61158 0.39379 9.56337 0.437645 9.51797 0.484316C9.12512 0.888141 9.0654 1.51818 8.94596 2.77824L8.52431 7.22662C8.47056 7.79371 8.44369 8.07725 8.26047 8.26047C8.07725 8.44369 7.79371 8.47056 7.22662 8.52431L2.77825 8.94596C1.51818 9.0654 0.888141 9.12512 0.484316 9.51797C0.437645 9.56337 0.39379 9.61158 0.352994 9.66233C0 10.1014 0 10.7343 0 12C0 13.2657 0 13.8986 0.352994 14.3377C0.39379 14.3884 0.437646 14.4366 0.484316 14.482C0.888141 14.8749 1.51818 14.9346 2.77824 15.054L7.22662 15.4757Z"
-        fill="url(#paint0_linear_28362_11193)"
-      />
       <path
         d="M88.3913 18V11.6347C88.3913 9.41466 89.8075 7.98004 92.0017 7.98004C94.1959 7.98004 95.6688 9.45535 95.6688 11.649C95.6688 13.8426 94.0196 15.145 92.3887 15.145C91.5843 15.145 90.9785 14.7807 90.5146 14.2496C90.3383 14.0482 90.2127 13.9098 90.2127 13.9098V18H88.3913ZM92.0159 9.66291C90.9542 9.66291 90.2127 10.4423 90.2127 11.5615C90.2127 12.6807 90.9542 13.4601 92.0159 13.4601C93.0775 13.4601 93.8191 12.6807 93.8191 11.5615C93.8191 10.4423 93.0775 9.66291 92.0159 9.66291Z"
         fill="#9600D8"
@@ -91,18 +87,6 @@ export function TrendyolPlusLockup({ className }: TrendyolPlusLockupProps): Reac
         fill="currentColor"
       />
       <defs>
-        <linearGradient
-          id="paint0_linear_28362_11193"
-          x1="4.69787"
-          y1="19.3021"
-          x2="19.7243"
-          y2="4.27574"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#FF16B8" />
-          <stop offset="0.64" stopColor="#FF6720" />
-          <stop offset="0.86" stopColor="#FF9129" />
-        </linearGradient>
         <linearGradient
           id="paint1_linear_28362_11193"
           x1="199.332"

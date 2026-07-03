@@ -148,9 +148,9 @@ export function PlusTariffsListView({
     <div className="gap-lg flex flex-col">
       <PageHeader
         title={t('title')}
-        // Full "trendyol plus" brand lockup on the title eye-line, so the screen
+        // "trendyol plus" brand wordmark on the title eye-line, so the screen
         // reads as the Trendyol Plus program at a glance.
-        badge={<TrendyolPlusLockup className="h-6" />}
+        badge={<TrendyolPlusLockup className="h-5" />}
         intent={t('intent')}
         // `gap-lg` so the title/intent breathe above the summary strip; no bottom
         // rule so the strip flows into the data panel below rather than being

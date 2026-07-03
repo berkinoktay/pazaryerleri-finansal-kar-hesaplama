@@ -252,7 +252,7 @@ export function PlusTariffDetailClient({
           title={view.name}
           badge={
             <span className="gap-xs flex items-center">
-              <TrendyolPlusLockup className="h-6" />
+              <TrendyolPlusLockup className="h-5" />
               <PlusTariffStatusBadge validity={view.validity} />
             </span>
           }

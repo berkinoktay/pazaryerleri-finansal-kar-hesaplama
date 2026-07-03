@@ -100,16 +100,14 @@ export function PlusTariffsTable({
 
     const offerColumn: ColumnDef<PlusTariffDetailItem> = {
       id: 'offer',
-      // Column header: the full "trendyol plus" lockup + "Fiyat Aralığı", so the
-      // offer column reads as the Trendyol Plus price range. `meta.label` stays
-      // plain text ("Plus Fiyat Aralığı") for the column-visibility menu + a11y.
-      // h-6: the lockup's wordmark is ~half its box height, so h-6 (24px) lands
-      // the "trendyol plus" text at ~12px — matching the text-xs header label so
-      // the two read as one line. leading-none tightens the label's line box so
-      // it optically centers with the lockup rather than floating.
+      // Column header: the flame-less "trendyol plus" wordmark + "Fiyat Aralığı".
+      // The wordmark's viewBox is cropped tight, so h-4 renders it at ~16px — a
+      // step above the text-xs label so the brand name leads and "Fiyat Aralığı"
+      // reads as its descriptor. leading-none centers the label with the wordmark.
+      // `meta.label` stays plain text ("Plus Fiyat Aralığı") for the menu + a11y.
       header: () => (
         <span className="gap-2xs inline-flex items-center">
-          <TrendyolPlusLockup className="h-6" />
+          <TrendyolPlusLockup className="h-4" />
           <span className="leading-none">{t('table.priceRange')}</span>
         </span>
       ),
