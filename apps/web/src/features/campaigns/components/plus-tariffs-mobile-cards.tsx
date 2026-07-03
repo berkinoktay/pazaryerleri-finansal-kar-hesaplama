@@ -78,8 +78,9 @@ export function PlusTariffsMobileCards({
             </div>
 
             {/* Zone 2: current baseline — plain label→value rows (no box), the
-                "do nothing" reference the Plus offer is compared against. */}
-            <div className="gap-2xs flex flex-col">
+                "do nothing" reference the Plus offer is compared against. A top rule
+                separates each zone so the flat sections don't read as one block. */}
+            <div className="gap-2xs border-border pt-md flex flex-col border-t">
               <div className="gap-sm flex items-baseline justify-between">
                 <span className="text-2xs text-muted-foreground">{t('table.current')}</span>
                 <span className="text-sm font-semibold tabular-nums">
@@ -97,19 +98,23 @@ export function PlusTariffsMobileCards({
             </div>
 
             {/* Zone 3: the Plus offer — flat, with its own "Plus'e Katıl" control. */}
-            <PlusBandCell
-              row={row}
-              selected={selection[row.id] === true}
-              onToggle={() => onToggleJoin(row.id)}
-            />
+            <div className="border-border pt-md border-t">
+              <PlusBandCell
+                row={row}
+                selected={selection[row.id] === true}
+                onToggle={() => onToggleJoin(row.id)}
+              />
+            </div>
 
             {/* Zone 4: custom Plus price — a what-if AND a selectable choice. */}
-            <PlusCustomPriceCell
-              row={row}
-              isSelected={customPrices[row.id] != null}
-              onSelect={(choice) => onSelectCustom(row.id, choice)}
-              onDeselect={() => onDeselectCustom(row.id)}
-            />
+            <div className="border-border pt-md border-t">
+              <PlusCustomPriceCell
+                row={row}
+                isSelected={customPrices[row.id] != null}
+                onSelect={(choice) => onSelectCustom(row.id, choice)}
+                onDeselect={() => onDeselectCustom(row.id)}
+              />
+            </div>
           </div>
         );
       })}
