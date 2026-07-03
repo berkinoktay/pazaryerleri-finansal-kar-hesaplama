@@ -8,7 +8,7 @@ import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { formatPercentDisplay } from '@/lib/format-percent';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
-import type { SelectionMap } from '../lib/bulk-actions';
+import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
 import type { CommissionTariffRow } from '../types';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
@@ -18,7 +18,10 @@ const BAND_INDEXES = [0, 1, 2, 3] as const;
 export interface CommissionTariffsMobileCardsProps {
   rows: readonly CommissionTariffRow[];
   selection: SelectionMap;
+  customPrices: CustomPriceMap;
   onSelectBand: (rowId: string, band: string) => void;
+  onSelectCustom: (rowId: string, band: string, choice: CustomChoice) => void;
+  onDeselectCustom: (rowId: string) => void;
 }
 
 /**
@@ -29,7 +32,10 @@ export interface CommissionTariffsMobileCardsProps {
 export function CommissionTariffsMobileCards({
   rows,
   selection,
+  customPrices,
   onSelectBand,
+  onSelectCustom,
+  onDeselectCustom,
 }: CommissionTariffsMobileCardsProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
   const reasonLabel = useReasonLabel();
@@ -82,13 +88,20 @@ export function CommissionTariffsMobileCards({
                     row={row}
                     band={band}
                     isBest={row.bestBandKey === band.key}
-                    selected={selection[row.id] === band.key}
+                    // Only a PLAIN boundary choice lights a band card; a custom price
+                    // drives the derived band without highlighting it.
+                    selected={selection[row.id] === band.key && customPrices[row.id] == null}
                     onSelect={(key) => onSelectBand(row.id, key)}
                   />
                 );
               })}
             </div>
-            <CustomPriceCell row={row} />
+            <CustomPriceCell
+              row={row}
+              isSelected={customPrices[row.id] != null}
+              onSelect={(band, choice) => onSelectCustom(row.id, band, choice)}
+              onDeselect={() => onDeselectCustom(row.id)}
+            />
           </div>
         );
       })}

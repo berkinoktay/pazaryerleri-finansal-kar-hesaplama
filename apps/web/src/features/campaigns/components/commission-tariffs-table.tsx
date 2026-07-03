@@ -15,7 +15,7 @@ import { formatPercentDisplay } from '@/lib/format-percent';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
-import type { SelectionMap } from '../lib/bulk-actions';
+import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
 import type { CommissionTariffRow } from '../types';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
@@ -25,7 +25,11 @@ const BAND_INDEXES = [0, 1, 2, 3] as const;
 export interface CommissionTariffsTableProps {
   rows: readonly CommissionTariffRow[];
   selection: SelectionMap;
+  /** Custom-price opt-ins (rowId → confirmed custom choice). */
+  customPrices: CustomPriceMap;
   onSelectBand: (rowId: string, band: string) => void;
+  onSelectCustom: (rowId: string, band: string, choice: CustomChoice) => void;
+  onDeselectCustom: (rowId: string) => void;
   tabs?: React.ReactNode;
   toolbar?: React.ReactNode;
   hasActiveFilters: boolean;
@@ -35,7 +39,10 @@ export interface CommissionTariffsTableProps {
 export function CommissionTariffsTable({
   rows,
   selection,
+  customPrices,
   onSelectBand,
+  onSelectCustom,
+  onDeselectCustom,
   tabs,
   toolbar,
   hasActiveFilters,
@@ -81,12 +88,13 @@ export function CommissionTariffsTable({
 
     const currentColumn: ColumnDef<CommissionTariffRow> = {
       id: 'current',
-      header: t('table.current'),
+      // Every non-product column centers its header + content (seller preference).
+      header: () => <span className="block w-full text-center">{t('table.current')}</span>,
       meta: { label: t('table.current') },
       cell: ({ row }) => {
         const r = row.original;
         return (
-          <div className="gap-3xs flex flex-col text-sm">
+          <div className="gap-3xs flex w-full flex-col items-center text-center text-sm">
             <div className="font-semibold tabular-nums">
               <Currency value={r.currentPrice} />
             </div>
@@ -103,31 +111,45 @@ export function CommissionTariffsTable({
 
     const bandColumns: ColumnDef<CommissionTariffRow>[] = BAND_INDEXES.map((i) => ({
       id: `band${i + 1}`,
-      header: t('table.band', { n: i + 1 }),
+      header: () => <span className="block w-full text-center">{t('table.band', { n: i + 1 })}</span>,
+      meta: { label: t('table.band', { n: i + 1 }) },
       cell: ({ row }) => {
         const r = row.original;
         const band = r.bands[i];
         if (band === undefined) return null;
+        // Center the band card in its column cell so all non-product columns align.
         return (
-          <PriceBandCell
-            row={r}
-            band={band}
-            isBest={r.bestBandKey === band.key}
-            selected={selection[r.id] === band.key}
-            onSelect={(key) => onSelectBand(r.id, key)}
-          />
+          <div className="flex w-full justify-center">
+            <PriceBandCell
+              row={r}
+              band={band}
+              isBest={r.bestBandKey === band.key}
+              // A band card reflects only a PLAIN boundary choice — when a custom
+              // price is active it drives the derived band, so no card lights up.
+              selected={selection[r.id] === band.key && customPrices[r.id] == null}
+              onSelect={(key) => onSelectBand(r.id, key)}
+            />
+          </div>
         );
       },
     }));
 
     const customPriceColumn: ColumnDef<CommissionTariffRow> = {
       id: 'customPrice',
-      header: t('table.customPrice'),
-      cell: ({ row }) => <CustomPriceCell row={row.original} />,
+      header: () => <span className="block w-full text-center">{t('table.customPrice')}</span>,
+      cell: ({ row }) => (
+        <CustomPriceCell
+          row={row.original}
+          isSelected={customPrices[row.original.id] != null}
+          onSelect={(band, choice) => onSelectCustom(row.original.id, band, choice)}
+          onDeselect={() => onDeselectCustom(row.original.id)}
+          centered
+        />
+      ),
     };
 
     return [productColumn, currentColumn, ...bandColumns, customPriceColumn];
-  }, [t, selection, onSelectBand]);
+  }, [t, reasonLabel, selection, customPrices, onSelectBand, onSelectCustom, onDeselectCustom]);
 
   return (
     <DataTable<CommissionTariffRow, unknown>

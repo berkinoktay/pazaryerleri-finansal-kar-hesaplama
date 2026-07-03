@@ -898,6 +898,10 @@
       "customPrice": "Özel Fiyat",
       "enterPrice": "Fiyat girin",
       "customPriceHint": "Fiyat girince tahmini kârı görürsün",
+      "calculatedProfit": "Hesaplanan kâr",
+      "customCommissionHint": "Fiyatınıza karşılık gelen aralığın komisyonu uygulanır",
+      "selectCustom": "Bu fiyatı seç",
+      "customSelected": "Seçildi",
       "aboveQualifier": "ve üzeri",
       "belowQualifier": "ve altı"
     },
