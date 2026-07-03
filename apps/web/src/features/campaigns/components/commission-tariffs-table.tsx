@@ -111,7 +111,9 @@ export function CommissionTariffsTable({
 
     const bandColumns: ColumnDef<CommissionTariffRow>[] = BAND_INDEXES.map((i) => ({
       id: `band${i + 1}`,
-      header: () => <span className="block w-full text-center">{t('table.band', { n: i + 1 })}</span>,
+      header: () => (
+        <span className="block w-full text-center">{t('table.band', { n: i + 1 })}</span>
+      ),
       meta: { label: t('table.band', { n: i + 1 }) },
       cell: ({ row }) => {
         const r = row.original;

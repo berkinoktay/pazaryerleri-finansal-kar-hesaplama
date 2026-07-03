@@ -88,7 +88,7 @@ export function PriceBandCell({
   return (
     <div
       className={cn(
-        'gap-sm flex min-w-0 flex-col md:min-w-tariff-band',
+        'gap-sm md:min-w-tariff-band flex min-w-0 flex-col',
         items,
         centered && 'w-full text-center',
       )}

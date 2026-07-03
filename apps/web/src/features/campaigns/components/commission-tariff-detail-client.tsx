@@ -275,7 +275,12 @@ export function CommissionTariffDetailClient({
     setCustomPrices(next.customPrices);
   };
   const onTargetMargin = (targetPct: number, strategy: TargetStrategy): void => {
-    const next = selectByTargetMargin(filteredRows, { selection, customPrices }, targetPct, strategy);
+    const next = selectByTargetMargin(
+      filteredRows,
+      { selection, customPrices },
+      targetPct,
+      strategy,
+    );
     setSelection(next.selection);
     setCustomPrices(next.customPrices);
   };

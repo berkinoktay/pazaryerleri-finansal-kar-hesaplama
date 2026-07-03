@@ -86,7 +86,10 @@ describe('PriceBandCell', () => {
       </TariffScopeProvider>,
     );
     // Selected → the "Seçildi" label + pressed state.
-    expect(screen.getByRole('button', { name: /seçildi/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /seçildi/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('shows the "En kârlı" marker only for the best band (space is reserved otherwise)', () => {
@@ -94,7 +97,13 @@ describe('PriceBandCell', () => {
     // across the columns), but it is hidden via `invisible` unless this is the best
     // band. (Tailwind classes aren't computed in the test DOM, so assert the class,
     // not computed visibility.)
-    const { rerender } = renderCell({ row, band, selected: false, isBest: false, onSelect: vi.fn() });
+    const { rerender } = renderCell({
+      row,
+      band,
+      selected: false,
+      isBest: false,
+      onSelect: vi.fn(),
+    });
     expect(screen.getByText(/en kârlı/i)).toHaveClass('invisible');
     rerender(
       <TariffScopeProvider scope={SCOPE}>

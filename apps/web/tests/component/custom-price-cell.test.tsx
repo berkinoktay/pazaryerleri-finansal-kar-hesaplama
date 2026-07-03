@@ -76,7 +76,10 @@ describe('CustomPriceCell', () => {
 
   it('shows the selected label + pressed state for the active custom choice', () => {
     renderCell({ row, isSelected: true, onSelect: vi.fn(), onDeselect: vi.fn() });
-    expect(screen.getByRole('button', { name: /seçildi/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /seçildi/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('un-commits when the select control is clicked while selected', async () => {
