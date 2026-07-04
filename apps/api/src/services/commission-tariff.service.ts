@@ -101,6 +101,8 @@ export async function listTariffs(
       selectedCount,
       exported: tariff.exportedAt !== null,
       validity: resolveValidity(minStart, maxEnd, now),
+      weekStartsAt: minStart !== null ? minStart.toISOString() : null,
+      weekEndsAt: maxEnd !== null ? maxEnd.toISOString() : null,
       updatedAt: tariff.updatedAt.toISOString(),
     };
   });

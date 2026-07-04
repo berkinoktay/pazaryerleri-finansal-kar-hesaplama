@@ -57,7 +57,13 @@ export function PlusBandCell({
   const self = centered ? 'self-center' : 'self-start';
 
   return (
-    <div className={cn('gap-sm flex min-w-0 flex-col', items, centered && 'w-full text-center')}>
+    <div
+      className={cn(
+        'gap-sm md:min-w-tariff-band flex min-w-0 flex-col',
+        items,
+        centered && 'w-full text-center',
+      )}
+    >
       <div className={cn('gap-3xs flex min-w-0 flex-col', items)}>
         {/* Price ceiling + its "ve altı" qualifier as one hero unit. */}
         <span

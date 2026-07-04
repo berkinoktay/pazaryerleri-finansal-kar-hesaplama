@@ -27,3 +27,18 @@ export const plusCommissionTariffKeys = {
   detail: (orgId: string, storeId: string, tariffId: string) =>
     [...plusCommissionTariffKeys.details(orgId, storeId), tariffId] as const,
 };
+
+// Advantage product-label tariffs (Avantajlı Ürün Etiketleri) are their own
+// saved-upload family: each product picks one of three star tiers and the reduced
+// commission is READ from the store's commission-tariff data. They get an
+// independent key namespace — same shape as the plus family, only the root segment
+// differs — so invalidating one family never touches the others.
+export const advantageTariffKeys = {
+  all: ['advantage-tariffs'] as const,
+  lists: (orgId: string, storeId: string) =>
+    [...advantageTariffKeys.all, 'list', orgId, storeId] as const,
+  details: (orgId: string, storeId: string) =>
+    [...advantageTariffKeys.all, 'detail', orgId, storeId] as const,
+  detail: (orgId: string, storeId: string, tariffId: string) =>
+    [...advantageTariffKeys.details(orgId, storeId), tariffId] as const,
+};

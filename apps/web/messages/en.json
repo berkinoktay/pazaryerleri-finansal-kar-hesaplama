@@ -929,7 +929,8 @@
         "empty": "No product rows found in the file.",
         "noPeriod": "No tariff period found in the file.",
         "tooLarge": "File is too large — upload a smaller file.",
-        "generic": "Couldn't upload the file. Please try again."
+        "generic": "Couldn't upload the file. Please try again.",
+        "DUPLICATE_TARIFF_WEEK": "A commission tariff already exists for this date range."
       }
     },
     "breakdown": {
@@ -1185,6 +1186,217 @@
       "active": "Active",
       "upcoming": "Scheduled",
       "past": "Expired"
+    }
+  },
+  "productLabelsPage": {
+    "search": "Search product, model or barcode",
+    "actions": {
+      "upload": "Upload Excel",
+      "saveExport": "Save & Download"
+    },
+    "actionBar": {
+      "joined": "{count} products have a chosen tier"
+    },
+    "templates": {
+      "back": "Back to tariffs",
+      "delete": "Delete Table",
+      "deleteTitle": "Delete tariff",
+      "deleteDescription": "This saved advantage-label tariff and all its tier selections will be permanently deleted. This cannot be undone.",
+      "deleteConfirm": "Delete tariff",
+      "detailIntent": "Pick an advantage-label tier per product and see your profit at that price.",
+      "notFoundTitle": "Tariff not found",
+      "notFoundDescription": "This tariff may have been deleted or does not belong to this store."
+    },
+    "noStore": {
+      "title": "Select a store first",
+      "description": "A connected Trendyol store is required to view advantage product labels.",
+      "cta": "Go to stores"
+    },
+    "reason": {
+      "NO_PRODUCT": "Product not matched — this barcode is not in your catalog.",
+      "NO_COST": "No cost — add a cost profile for this product.",
+      "NO_SHIPPING": "No shipping estimate — carrier or desi setting is missing.",
+      "NO_COMMISSION": "Commission rate unresolved — no commission tariff band or category rate found for this product."
+    },
+    "list": {
+      "upload": "Upload Excel File",
+      "search": "Search tariff…",
+      "productUnit": "products",
+      "columns": {
+        "tariff": "Tariff",
+        "products": "Products",
+        "status": "Status",
+        "exported": "Export"
+      },
+      "summary": {
+        "total": "Total tariffs",
+        "products": "Products",
+        "productsContext": "across uploaded tariffs",
+        "selected": "Tier chosen",
+        "selectedContext": "products with a chosen tier",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "exportedPending": "{count} tariffs pending export",
+        "exportedAllDone": "all exported",
+        "noSelected": "no selection yet"
+      },
+      "empty": {
+        "title": "No advantage-label tariffs yet",
+        "description": "Start by uploading the Advantage Product Labels Excel you downloaded from the Trendyol panel; see which badge tier is profitable for each product.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
+      "selectAll": "Select all",
+      "selectRow": "Select row",
+      "filterLabel": "Filter by status",
+      "bulk": {
+        "selected": "{count} tariffs selected",
+        "delete": "Delete selected",
+        "deleteTitle": "Delete selected tariffs",
+        "deleteDescription": "{count} tariffs and all their tier selections will be permanently deleted. This cannot be undone.",
+        "deleteConfirm": "Delete tariffs"
+      },
+      "lastUpdated": "Last updated: {date}",
+      "listStatus": {
+        "all": "All",
+        "exported": "Downloaded",
+        "pending": "Pending"
+      }
+    },
+    "summary": {
+      "total": "Products in tariff",
+      "totalContext": "listed in this tariff",
+      "joined": "Tier chosen",
+      "joinedValue": "{count}/{total}",
+      "joinedContext": "products with a chosen tier",
+      "joinedProfit": "Selected profit",
+      "joinedProfitContext": "estimated total across chosen tiers",
+      "currentProfit": "Current profit",
+      "currentProfitHint": "Estimated total profit today if you choose no tier."
+    },
+    "table": {
+      "product": "Product Info",
+      "current": "Current price",
+      "salePrice": "Sale price",
+      "displayPrice": "Price the customer sees",
+      "calculatedProfit": "Calculated profit",
+      "vsCurrent": "vs current",
+      "bestTier": "Best",
+      "tierCommission": "commission",
+      "tierQualifier": "and below",
+      "tierSelected": "Selected",
+      "selectTier": "Select this tier",
+      "customPrice": "Custom Price",
+      "enterPrice": "Enter price",
+      "selectCustom": "Select this price",
+      "customSelected": "Selected",
+      "customCommissionApplies": "Your price is calculated at the commission of the band it falls into."
+    },
+    "tier": {
+      "tier1": "Advantage",
+      "tier2": "Great Advantage",
+      "tier3": "Super Advantage"
+    },
+    "commissionSource": {
+      "label": "Commission source",
+      "sourceValue": "{period} tariff",
+      "noSource": "No commission source found",
+      "auto": "Automatic (active period)",
+      "autoHint": "The commission tariff covering today's date is used automatically.",
+      "pinnedHint": "This commission tariff is pinned.",
+      "change": "Change",
+      "menuTitle": "Select commission source",
+      "category": "Category commission",
+      "categoryHint": "No commission tariff selected; using category commission."
+    },
+    "commissionWarning": {
+      "title": "Upload Your Product Commissions",
+      "description": "To get the most out of advantage products, upload this period's Product Commission Excel.",
+      "cta": "Go to Product Commission Tariff page",
+      "dismiss": "Continue with category commission"
+    },
+    "noResults": {
+      "title": "No matching products",
+      "description": "Try changing your search or filters."
+    },
+    "upload": {
+      "title": "Upload the Advantage Product Labels Excel",
+      "description": "Upload the Advantage Product Labels file you downloaded from the Trendyol panel; see which badge tier is profitable for each product.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · max 5 MB",
+      "cta": "Choose file",
+      "stepsTitle": "How it works",
+      "step1": "Download the Advantage Product Labels Excel from the Trendyol panel",
+      "step2": "Upload the file here",
+      "step3": "See which badge tier is profitable for each product",
+      "submit": "Create tariff",
+      "empty": "No product rows found in the file.",
+      "generic": "Could not upload the file. Please try again.",
+      "notReadable": "Could not read the file — upload a valid .xlsx file.",
+      "tooLarge": "File is too large — upload a smaller file.",
+      "wrongFormat": "This is not a Trendyol Advantage Product Labels file, or its format was not recognized.",
+      "errors": {
+        "notReadable": "Could not read the file — upload a valid .xlsx file.",
+        "wrongFormat": "This is not a Trendyol Advantage Product Labels file, or its format was not recognized.",
+        "empty": "No product rows found in the file.",
+        "tooLarge": "File is too large — upload a smaller file.",
+        "generic": "Could not upload the file. Please try again."
+      },
+      "commissionSource": {
+        "title": "Where should tier commissions be calculated from?",
+        "intro": "The Advantage Excel carries no commission. We can calculate tier profits two ways:",
+        "tariffOption": "From a Product Commission Tariff",
+        "recommended": "Recommended",
+        "tariffHint": "Tier commissions are read from that week's real reduced rates — the most accurate profit.",
+        "placeholder": "Which week?",
+        "empty": "You have no commission tariff for this period. Upload one for the most accurate profit.",
+        "uploadCta": "Upload a Product Commission Tariff",
+        "uploadNew": "Upload another week",
+        "or": "or",
+        "categoryOption": "Continue with category commission",
+        "categoryHint": "No commission tariff needed; a rougher estimate using the product's category commission.",
+        "required": "Choose a method to continue.",
+        "label": "Which commission tariff (week) is this advantage for?",
+        "hint": "Tier commissions are read from the commission tariff of the week you pick.",
+        "category": "Category commission"
+      }
+    },
+    "breakdown": {
+      "title": "Profit breakdown",
+      "sale": "Sale",
+      "commission": "Commission",
+      "netVat": "Net VAT",
+      "profit": "Profit",
+      "estimatedProfit": "Estimated profit",
+      "margin": "Margin",
+      "notCalculable": "Profit cannot be calculated for this product."
+    },
+    "smartSelect": {
+      "label": "Smart Select",
+      "selectBest": "Best tier for each product",
+      "selectProfitable": "Only profitable tiers",
+      "clear": "Clear selections",
+      "scopeHint": "If a filter is applied, only visible products are affected."
+    },
+    "filters": {
+      "category": "Category",
+      "brand": "Brand",
+      "minMargin": "Min. margin %",
+      "profit": "Profitability",
+      "profitProfitable": "Profitable",
+      "profitLoss": "Loss",
+      "selection": "Selection status",
+      "selectionSelected": "Tier chosen",
+      "selectionUnselected": "Not chosen",
+      "groupLabel": "Filters"
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
     }
   },
   "featureStatus": {
@@ -2574,7 +2786,7 @@
   },
   "profitBadge": {
     "open": "View profit detail",
-    "tooltip": "Click to open this order's profit breakdown"
+    "tooltip": "Click to open the profit breakdown"
   },
   "promotionIndicator": {
     "label": "Discount",

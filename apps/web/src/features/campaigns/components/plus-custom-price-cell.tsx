@@ -118,7 +118,13 @@ export function PlusCustomPriceCell({
   const self = centered ? 'self-center' : 'self-start';
 
   return (
-    <div className={cn('gap-sm flex flex-col', items, centered && 'w-full text-center')}>
+    <div
+      className={cn(
+        'gap-sm md:min-w-tariff-band flex flex-col',
+        items,
+        centered && 'w-full text-center',
+      )}
+    >
       {/* Label + input as one tight group so the roomy outer gap-sm sits between
           the input, the estimate, and the select control — not inside the field. */}
       <div className={cn('gap-3xs flex flex-col', items, centered && 'w-full')}>

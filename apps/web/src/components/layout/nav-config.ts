@@ -153,6 +153,9 @@ export const NAV_GROUPS: readonly NavGroupConfig[] = [
         key: 'campaign-product-labels',
         labelKey: 'nav.productLabels',
         href: '/campaigns/product-labels',
+        // The [tariffId] detail sub-route should keep this item highlighted, so
+        // match the whole section rather than only the exact list path.
+        activeMatch: '/campaigns/product-labels',
         icon: LabelIcon,
       },
       {

@@ -351,6 +351,7 @@ model Store {
   ownShippingTariffs     OwnShippingTariff[]
   commissionTariffs      CommissionTariff[]
   plusCommissionTariffs  PlusCommissionTariff[]
+  advantageTariffs       AdvantageTariff[]
   orgPeriodFees          OrgPeriodFee[]
   commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
@@ -1156,6 +1157,15 @@ model CommissionTariff {
   // The raw uploaded .xlsx bytes, kept so export can patch the seller's chosen
   // price + tariff selection back into Trendyol's EXACT file (re-uploaded verbatim).
   sourceFile     Bytes?    @map("source_file")
+  // The tariff's overall week window = min(period.startsAt) … max(period.endsAt),
+  // full datetime (consecutive weeks touch at a 1-minute gap, e.g. 07.59 → 08.00,
+  // so DATE alone is not unique — the time matters). Enforces ONE tariff per week
+  // per store: `@@unique([storeId, weekStartsAt])`. Postgres treats NULLs as
+  // DISTINCT, so unparseable-date uploads (null) are not blocked. Import rejects a
+  // duplicate week with DUPLICATE_COMMISSION_TARIFF_WEEK; the Advantage upload
+  // picks a tariff BY this week.
+  weekStartsAt   DateTime? @map("week_starts_at")
+  weekEndsAt     DateTime? @map("week_ends_at")
   exportedAt     DateTime? @map("exported_at")
   createdBy      String?   @map("created_by") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -1163,7 +1173,10 @@ model CommissionTariff {
 
   store   Store                    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   periods CommissionTariffPeriod[]
+  // Advantage-label tariffs that read their commission from this record (§ advantage-labels design).
+  advantageTariffSources AdvantageTariff[] @relation("AdvantageCommissionSource")
 
+  @@unique([storeId, weekStartsAt])
   @@index([organizationId])
   @@index([storeId])
   @@map("commission_tariffs")
@@ -1319,6 +1332,92 @@ model PlusCommissionTariffItem {
   @@index([tariffId])
   @@index([storeId, barcode])
   @@map("plus_commission_tariff_items")
+}
+
+// ─── Advantage Product Labels ("Avantajlı/Yıldızlı Ürün Etiketleri") ──────────
+// Trendyol's "Advantage Product Labels" campaign: pricing a product at/below a
+// tier threshold earns an Avantaj / Çok Avantaj / Süper Avantaj badge. UNLIKE the
+// other two tariff verticals, the reduced commission is NOT in this Excel — the
+// price a seller sets here lands the product into a band of their COMMISSION
+// TARIFF, and that band's rate is the commission. So compute READS the store's
+// active-period CommissionTariff bands (via bandForPrice), falling back to the
+// category rate. Profit is COMPUTED on read (never stored). 2-level (tariff →
+// item), no periods (this Excel carries no dates). See
+// docs/plans/2026-07-03-advantage-labels-design.md.
+model AdvantageTariff {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
+  name           String
+  sourceFilename String?   @map("source_filename")
+  // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
+  sourceFile     Bytes?    @map("source_file")
+  // Commission source override: null = auto (the store's active-period commission
+  // tariff at read time); set = the seller pinned a specific CommissionTariff.
+  // SetNull so deleting the commission tariff falls back to auto, never orphans.
+  commissionSourceTariffId String? @map("commission_source_tariff_id") @db.Uuid
+  exportedAt     DateTime? @map("exported_at")
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  store            Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  commissionSource CommissionTariff? @relation("AdvantageCommissionSource", fields: [commissionSourceTariffId], references: [id], onDelete: SetNull)
+  items            AdvantageTariffItem[]
+
+  @@index([organizationId])
+  @@index([storeId])
+  @@index([commissionSourceTariffId])
+  @@map("advantage_tariffs")
+}
+
+model AdvantageTariffItem {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  tariffId       String @map("tariff_id") @db.Uuid
+  // Matched seller variant (by barcode at import); null = no catalog match →
+  // profit shown as "no product". No FK: a deleted variant must not drop the row.
+  productVariantId String? @map("product_variant_id") @db.Uuid
+  barcode          String
+  stockCode        String? @map("stock_code")
+  productTitle     String  @map("product_title")
+  category         String?
+  brand            String?
+  size             String?
+  modelCode        String? @map("model_code")
+  stock            Int?
+  // Trendyol Satış Fiyatı (current sale price) + Müşterinin Gördüğü Fiyat (info).
+  currentPrice  Decimal @map("current_price") @db.Decimal(12, 2)
+  customerPrice Decimal @map("customer_price") @db.Decimal(12, 2)
+  // KOMİSYON TARİFESİ column ("Var" ⇒ true): does the product have a commission
+  // tariff? Drives whether compute looks up a band vs. uses the category rate.
+  hasCommissionTariff Boolean @map("has_commission_tariff")
+  // The three star tiers as JSON: [{ key:'tier1', upperLimit, lowerLimit },
+  // { key:'tier2', upperLimit, lowerLimit }, { key:'tier3', upperLimit, lowerLimit:null }].
+  // Decimal STRINGS; NO commission (looked up from the commission tariff on read).
+  starTiers Json @map("star_tiers")
+  // "Tarife Sonuna Kadar Uygula" column (Evet ⇒ true).
+  applyUntilEnd Boolean @map("apply_until_end")
+  // Passthrough Trendyol identifiers kept for export fidelity / grouping.
+  externalId  String? @map("external_id")
+  tariffGroup String? @map("tariff_group")
+  // The seller's chosen badge tier (tier1|tier2|tier3) or null, + optional custom
+  // price for the what-if preview.
+  selectedTier String?  @map("selected_tier")
+  customPrice  Decimal? @map("custom_price") @db.Decimal(12, 2)
+  // Preserves the Excel row order so export patches the right rows.
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tariff AdvantageTariff @relation(fields: [tariffId], references: [id], onDelete: Cascade)
+
+  @@unique([tariffId, sortOrder])
+  @@index([organizationId])
+  @@index([tariffId])
+  @@index([storeId, barcode])
+  @@map("advantage_tariff_items")
 }
 
 // ─── Profit Calculation V1 — Schema Foundation (PR-1) ──────────────────

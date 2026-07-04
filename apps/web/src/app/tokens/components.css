@@ -46,6 +46,17 @@ table tr[data-depth='1'] > td:first-child {
   max-height: var(--size-modal-tall);
 }
 
+/* Advantage upload modal — a two-column (Excel upload | commission-source) form
+   that needs more width than the default max-w-modal but less than modal-wide,
+   plus a height cap so a long body scrolls internally (header + footer stay
+   fixed). Unlayered so it overrides DialogContent's base max-w-modal, the same
+   documented escape hatch as .order-detail-modal / .image-modal-img. */
+.advantage-upload-modal {
+  width: 100%;
+  max-width: var(--size-modal-md);
+  max-height: var(--size-modal-tall);
+}
+
 /* Sidebar visual identity — applied to BOTH the desktop sidebar inner
    AND the BottomDock so they share one continuous surface. Two layered
    treatments give the rail its distinctive PazarSync character:

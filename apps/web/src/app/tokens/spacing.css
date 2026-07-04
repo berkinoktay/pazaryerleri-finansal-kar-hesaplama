@@ -93,6 +93,7 @@
   --size-sheet: 24rem; /* sheet panel default (384px) */
   --size-sheet-wide: 28rem; /* sheet on ≥sm viewports (448px) */
   --size-modal: 32rem; /* dialog content (512px) */
+  --size-modal-md: 46rem; /* medium dialog — two-column forms (e.g. Advantage upload), 736px */
   --size-modal-wide: min(64rem, 90vw); /* wide dialog (order detail) — caps at 1024px, else 90vw */
   --size-modal-tall: 85vh; /* wide dialog max height before the inner body scrolls */
   --size-dropdown-popover: 24rem; /* org+store switcher dropdown panel (384px) */
