@@ -77,9 +77,18 @@ export interface ComputedItemBands {
 
 const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
-/** A band's representative price: bracket upper limit, or current price for band 1 (no upper). */
-function bandPrice(band: StoredBand, currentPrice: Decimal): Decimal {
-  return band.upperLimit !== null ? new Decimal(band.upperLimit) : currentPrice;
+/**
+ * A band's representative price = the boundary the seller SEES in that column: the upper
+ * limit for the bounded bands (2-4, "X ve altı"), else the LOWER limit for the open-topped
+ * band 1 ("X ve üzeri" — the cheapest price still in the top band). Trendyol's own panel
+ * pins the price-update field to exactly this boundary regardless of the current price, and
+ * the band's shown profit is computed at it — so selection, profit, and export all use one
+ * number. currentPrice is only a defensive fallback for a band with neither limit.
+ */
+export function bandPrice(band: StoredBand, currentPrice: Decimal): Decimal {
+  if (band.upperLimit !== null) return new Decimal(band.upperLimit);
+  if (band.lowerLimit !== null) return new Decimal(band.lowerLimit);
+  return currentPrice;
 }
 
 function nullBandResults(
