@@ -55,6 +55,10 @@ export const CommissionTariffListItemSchema = z
     selectedCount: z.number().int(),
     exported: z.boolean(),
     validity: TariffValiditySchema.nullable(),
+    // The tariff's week window (min period start … max period end), for the Advantage
+    // upload's date-based commission-source picker. Null when dates were unparseable.
+    weekStartsAt: z.string().datetime().nullable(),
+    weekEndsAt: z.string().datetime().nullable(),
     updatedAt: z.string().datetime(),
   })
   .openapi('CommissionTariffListItem');

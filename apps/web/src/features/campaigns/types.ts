@@ -71,3 +71,29 @@ export type { PlusTariffListItem } from './api/list-plus-tariffs.api';
 
 /** A Plus tariff's validity relative to today (null when the period dates are unparseable). */
 export type PlusTariffValidity = components['schemas']['PlusTariffValidity'];
+
+/**
+ * Component-facing Advantage product-label shapes, re-exported from the api layer so
+ * the UI has one import site. Money is a GROSS decimal STRING and `commissionPct` a
+ * PERCENT string, exactly as the backend serializes — the frontend renders, never
+ * computes. Uncalculable rows carry `null` profit/margin, so every consumer must
+ * null-guard. Unlike the commission/Plus detail there are NO periods and NO validity:
+ * an Advantage file carries no dates, and each product picks one of three star tiers
+ * whose reduced commission is READ from the store's commission-tariff data.
+ */
+export type {
+  AdvantageTariffDetail,
+  AdvantageTariffDetailItem,
+  AdvantageTier,
+  AdvantageCurrentScenario,
+  AdvantageCommissionSource,
+  CommissionSourceMode,
+  CommissionSourceKind,
+  StarTierKey,
+} from './api/get-advantage-tariff-detail.api';
+export type { AdvantageTariffListItem } from './api/list-advantage-tariffs.api';
+
+/** Why an Advantage row cannot be costed (mirrors the backend `reason` enum; adds NO_COMMISSION). */
+export type AdvantageTariffItemReason = NonNullable<
+  components['schemas']['AdvantageTariffItemReason']
+>;

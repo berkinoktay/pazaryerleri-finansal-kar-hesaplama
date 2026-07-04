@@ -16,6 +16,8 @@ function makeItem(overrides: Partial<CommissionTariffListItem>): CommissionTarif
     selectedCount: 0,
     exported: false,
     validity: null,
+    weekStartsAt: null,
+    weekEndsAt: null,
     updatedAt: '2026-06-30T00:00:00Z',
     ...overrides,
   };

@@ -2,7 +2,7 @@
 
 import { type ColumnDef } from '@tanstack/react-table';
 import { CloudUploadIcon, Delete02Icon, DocumentValidationIcon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
@@ -26,6 +26,8 @@ import type { TariffValidity } from '../types';
 
 import { CommissionTariffExportIndicator } from './commission-tariff-export-indicator';
 import { CommissionTariffStatusBadge } from './commission-tariff-status-badge';
+
+const DASH = '—';
 
 /** Sort weight so the Status column orders active → upcoming → past → draft. */
 const STATUS_SORT_WEIGHT: Record<TariffValidity, number> = {
@@ -84,6 +86,21 @@ export function CommissionTariffListTable({
   const tList = useTranslations('commissionTariffsPage.list');
   const tEmpty = useTranslations('commissionTariffsPage.list.empty');
   const tBulk = useTranslations('commissionTariffsPage.list.bulk');
+  const format = useFormatter();
+
+  // The tariff's WEEK WINDOW, in a compact numeric form (`23.06.2026 –
+  // 30.06.2026`) so the range fits a table cell — the picker/detail/summary
+  // keep the long "30 Temmuz 2026 08:00" stamp. Draft tariffs (no dates) read
+  // an em-dash; the status column already flags them as "Taslak".
+  const formatWeekRange = React.useCallback(
+    (row: TariffListRow): string => {
+      if (row.weekStartsAt === null || row.weekEndsAt === null) return DASH;
+      const start = format.dateTime(new Date(row.weekStartsAt), 'date');
+      const end = format.dateTime(new Date(row.weekEndsAt), 'date');
+      return `${start} – ${end}`;
+    },
+    [format],
+  );
 
   // Holds the ids to bulk-delete plus a reset bound to the live table instance,
   // so confirming the delete also clears row selection (the raw rowSelection
@@ -134,6 +151,20 @@ export function CommissionTariffListTable({
         ),
       },
       {
+        // The week window the tariff covers. accessorFn (week-start epoch, 0 for
+        // draft) unlocks sorting and column visibility; the cell renders the
+        // compact date range.
+        id: 'period',
+        accessorFn: (row) => (row.weekStartsAt !== null ? new Date(row.weekStartsAt).getTime() : 0),
+        header: () => tCols('period'),
+        meta: { label: tCols('period') },
+        cell: ({ row }) => (
+          <span className="text-foreground text-sm whitespace-nowrap tabular-nums">
+            {formatWeekRange(row.original)}
+          </span>
+        ),
+      },
+      {
         // accessorFn unlocks getCanSort() (a display column can't sort); the
         // custom cell still renders the figure + unit. Shows selection progress
         // (chosen / total) — the seller's core "how far am I" signal.
@@ -165,7 +196,7 @@ export function CommissionTariffListTable({
       },
       createRowActionsColumn<TariffListRow>(actions),
     ],
-    [tCols, tList, actions],
+    [tCols, tList, actions, formatWeekRange],
   );
 
   return (

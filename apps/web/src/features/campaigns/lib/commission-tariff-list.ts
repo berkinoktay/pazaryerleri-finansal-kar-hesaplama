@@ -17,6 +17,10 @@ export interface TariffListRow {
   selectedCount: number;
   validity: TariffValidity | null;
   exported: boolean;
+  /** ISO start of the tariff's week window, or `null` when unparseable (draft). */
+  weekStartsAt: string | null;
+  /** ISO end of the tariff's week window, or `null` when unparseable (draft). */
+  weekEndsAt: string | null;
   /** ISO timestamp of the last change (formatted in the row via next-intl). */
   updatedAt: string;
 }
@@ -30,6 +34,8 @@ export function toListRows(items: readonly CommissionTariffListItem[]): TariffLi
     selectedCount: item.selectedCount,
     validity: item.validity,
     exported: item.exported,
+    weekStartsAt: item.weekStartsAt,
+    weekEndsAt: item.weekEndsAt,
     updatedAt: item.updatedAt,
   }));
 }
@@ -46,6 +52,10 @@ export interface TariffListStats {
   total: number;
   /** Name of the currently-active tariff, or `null` when none is live. */
   activeLabel: string | null;
+  /** ISO week start of the active tariff, or `null` when none is live / unparseable. */
+  activeWeekStartsAt: string | null;
+  /** ISO week end of the active tariff, or `null` when none is live / unparseable. */
+  activeWeekEndsAt: string | null;
   /** Product count of the active tariff, or `null` when none is live. */
   coveredProducts: number | null;
   /** How many tariffs have been exported (saved & downloaded). */
@@ -71,6 +81,8 @@ export function summarizeTariffList(rows: readonly TariffListRow[]): TariffListS
   return {
     total: rows.length,
     activeLabel: active?.name ?? null,
+    activeWeekStartsAt: active?.weekStartsAt ?? null,
+    activeWeekEndsAt: active?.weekEndsAt ?? null,
     coveredProducts: active?.productCount ?? null,
     exportedCount: rows.filter((row) => row.exported).length,
     lastUpdatedAt: rows.reduce<string | null>(

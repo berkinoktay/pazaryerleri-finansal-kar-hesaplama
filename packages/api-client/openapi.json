@@ -4689,6 +4689,20 @@
           "validity": {
             "$ref": "#/components/schemas/TariffValidity"
           },
+          "weekStartsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "weekEndsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "updatedAt": {
             "type": "string",
             "format": "date-time"
@@ -4701,6 +4715,8 @@
           "selectedCount",
           "exported",
           "validity",
+          "weekStartsAt",
+          "weekEndsAt",
           "updatedAt"
         ]
       },
@@ -5465,6 +5481,544 @@
         "required": [
           "price",
           "commissionPct",
+          "netProfit",
+          "marginPct"
+        ]
+      },
+      "AdvantageTariffListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdvantageTariffListItem"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "AdvantageTariffListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "selectedCount": {
+            "type": "integer"
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "productCount",
+          "selectedCount",
+          "exported",
+          "updatedAt"
+        ]
+      },
+      "ImportAdvantageTariffResponse": {
+        "type": "object",
+        "properties": {
+          "tariffId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "itemCount": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "unmatched": {
+            "type": "integer"
+          },
+          "skippedRows": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tariffId",
+          "productCount",
+          "itemCount",
+          "matched",
+          "unmatched",
+          "skippedRows"
+        ]
+      },
+      "UpdateAdvantageSelectionsResponse": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated"
+        ]
+      },
+      "UpdateAdvantageSelectionsBody": {
+        "type": "object",
+        "properties": {
+          "selections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "itemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "tier": {
+                  "$ref": "#/components/schemas/StarTierKey"
+                },
+                "customPrice": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                }
+              },
+              "required": [
+                "itemId",
+                "tier",
+                "customPrice"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 5000
+          }
+        },
+        "required": [
+          "selections"
+        ]
+      },
+      "StarTierKey": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "tier1",
+          "tier2",
+          "tier3",
+          null
+        ],
+        "description": "Yıldız kademesi: tier1 = Avantaj, tier2 = Çok Avantaj, tier3 = Süper Avantaj."
+      },
+      "UpdateAdvantageCommissionSourceResponse": {
+        "type": "object",
+        "properties": {
+          "commissionSourceTariffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commissionSourceTariffId"
+        ]
+      },
+      "UpdateAdvantageCommissionSourceBody": {
+        "type": "object",
+        "properties": {
+          "commissionSourceTariffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Sabitlenecek komisyon tarifesi; null = otomatik (aktif dönem)."
+          }
+        },
+        "required": [
+          "commissionSourceTariffId"
+        ]
+      },
+      "EstimateAdvantagePriceResult": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price": {
+            "type": "string"
+          },
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionSource": {
+            "$ref": "#/components/schemas/CommissionSourceKind"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/AdvantageTariffItemReason"
+          },
+          "breakdown": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuoteBreakdown"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "itemId",
+          "price",
+          "commissionPct",
+          "commissionSource",
+          "calculable",
+          "reason",
+          "breakdown"
+        ]
+      },
+      "CommissionSourceKind": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "band",
+          "category",
+          null
+        ],
+        "description": "Kademe komisyonu nereden geldi: komisyon tarifesi bandı / kategori oranı."
+      },
+      "AdvantageTariffItemReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "NO_PRODUCT",
+          "NO_COST",
+          "NO_SHIPPING",
+          "NO_COMMISSION",
+          null
+        ],
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon oranı çözülemedi."
+      },
+      "EstimateAdvantagePriceBody": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$",
+            "description": "Değerlendirilecek satış fiyatı (GROSS, TL).",
+            "example": "250.00"
+          }
+        },
+        "required": [
+          "price"
+        ]
+      },
+      "AdvantageTariffDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "commissionSourceMode": {
+            "$ref": "#/components/schemas/CommissionSourceMode"
+          },
+          "commissionSource": {
+            "$ref": "#/components/schemas/AdvantageCommissionSource"
+          },
+          "hasUnmatchedCommissionProducts": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdvantageTariffDetailItem"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "exported",
+          "commissionSourceMode",
+          "commissionSource",
+          "hasUnmatchedCommissionProducts",
+          "items"
+        ]
+      },
+      "CommissionSourceMode": {
+        "type": "string",
+        "enum": [
+          "pinned",
+          "category"
+        ],
+        "description": "Komisyon kaynağı: kullanıcının seçtiği komisyon tarifesi (pinned) / kategori komisyonu (category)."
+      },
+      "AdvantageCommissionSource": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "tariffId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tariffName": {
+            "type": "string"
+          },
+          "periodLabel": {
+            "type": "string"
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "tariffId",
+          "tariffName",
+          "periodLabel",
+          "startsAt",
+          "endsAt"
+        ]
+      },
+      "AdvantageTariffDetailItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "stockCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productTitle": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Barkod-eşleşen ürünün birincil görseli; eşleşme yoksa null."
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stock": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "currentPrice": {
+            "type": "string"
+          },
+          "customerPrice": {
+            "type": "string"
+          },
+          "hasCommissionTariff": {
+            "type": "boolean"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/AdvantageTariffItemReason"
+          },
+          "current": {
+            "$ref": "#/components/schemas/AdvantageCurrentScenario"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdvantageTier"
+            }
+          },
+          "bestTierKey": {
+            "$ref": "#/components/schemas/StarTierKey"
+          },
+          "selectedTier": {
+            "$ref": "#/components/schemas/StarTierKey"
+          },
+          "customPrice": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "barcode",
+          "stockCode",
+          "productTitle",
+          "imageUrl",
+          "category",
+          "brand",
+          "size",
+          "stock",
+          "currentPrice",
+          "customerPrice",
+          "hasCommissionTariff",
+          "calculable",
+          "reason",
+          "current",
+          "tiers",
+          "bestTierKey",
+          "selectedTier",
+          "customPrice"
+        ]
+      },
+      "AdvantageCurrentScenario": {
+        "type": "object",
+        "properties": {
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "netProfit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "marginPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isBest": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "commissionPct",
+          "netProfit",
+          "marginPct",
+          "isBest"
+        ]
+      },
+      "AdvantageTier": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/StarTierKey"
+          },
+          "upperLimit": {
+            "type": "string"
+          },
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "type": "string"
+          },
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionSource": {
+            "$ref": "#/components/schemas/CommissionSourceKind"
+          },
+          "netProfit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "marginPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "upperLimit",
+          "lowerLimit",
+          "price",
+          "commissionPct",
+          "commissionSource",
           "netProfit",
           "marginPct"
         ]
@@ -14947,6 +15501,1093 @@
         ],
         "summary": "Delete a saved Plus commission tariff",
         "description": "Hard-deletes the tariff and (via cascade) its periods and product rows. A tariff id from another store returns 404, indistinguishable from a missing one.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Tariff deleted"
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs": {
+      "get": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "List saved Advantage product-label tariffs for a store",
+        "description": "Returns one row per saved Advantage product-label upload for the store, with the aggregates the master list shows: product count, how many products already have a chosen star tier, the exported flag and the last-updated timestamp. Newest first.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved Advantage tariffs for the store",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvantageTariffListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/import": {
+      "post": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "Import a Trendyol Advantage product-label Excel",
+        "description": "Uploads Trendyol's Avantajlı Ürün Etiketleri .xlsx (multipart `file`). Every column is resolved by header name; unlike the commission/Plus exports this file carries NO commission and NO dates. Each product row exposes three star tiers whose reduced commission is READ from the store's Commission Tariff at compute time, and is joined to a ProductVariant by barcode. Stores one tariff with its product rows; profit is computed later on read. Returns counts: products, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected Advantage export (422 VALIDATION_ERROR).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Trendyol Avantajlı Ürün Etiketleri .xlsx"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
+                  },
+                  "commissionSourceTariffId": {
+                    "type": "string",
+                    "description": "Bu avantajlının komisyonunu okuyacağı komisyon tarifesi (hafta). Boş = kategori komisyonu."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tariff imported",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportAdvantageTariffResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File missing, unreadable, or not the expected tariff format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/export": {
+      "post": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "Export the Advantage tariff as a re-uploadable Trendyol Excel",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's chosen tier price patched into the \"YENİ TSF\" column for every product that has a selected tier. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. Marks the tariff exported. Returns 409 if the tariff has no stored source file (or it is unreadable / lacks the writable column).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The patched .xlsx, ready to re-upload to Trendyol",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Tariff has no stored source file to export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/selections": {
+      "patch": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "Save star-tier choice + custom prices for tariff items",
+        "description": "Persists the seller's chosen star tier (or null to clear) and optional custom price per item, in a single bulk update. Items not belonging to this tariff/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdvantageSelectionsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Selections saved",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateAdvantageSelectionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid selection payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/commission-source": {
+      "patch": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "Pin (or clear → auto) the commission tariff that supplies the reduced rates",
+        "description": "Pins which Commission Tariff supplies each tier's reduced commission for this Advantage tariff, or clears the pin (null) to fall back to automatic resolution (the active period). The pinned tariff must belong to this store. Every tier profit in the detail view is then recomputed from the pinned source's bands. Returns the resolved commissionSourceTariffId.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdvantageCommissionSourceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Commission source updated",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateAdvantageCommissionSourceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff, commission source, or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid commission source payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/items/{itemId}/estimate": {
+      "post": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "Estimate the profit breakdown for an Advantage tariff item at a given price",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Advantage tariff item at the requested price, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a tier's target price equals that tier's profit in the detail response. The reduced commission is resolved from the price band the requested price lands in. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "itemId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateAdvantagePriceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profit breakdown at the requested price",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateAdvantagePriceResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item, tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid price payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}": {
+      "get": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "Get a saved Advantage tariff with computed per-tier profit",
+        "description": "Returns the full Advantage tariff: per product row, the current price scenario and each star tier (Avantaj / Çok Avantaj / Süper Avantaj) with net profit and sale margin COMPUTED on read by the profit engine. Each tier's reduced commission is resolved from the store's Commission Tariff (a tier target price lands into a commission band) or falls back to the category rate; the detail also surfaces WHICH commission tariff/period supplied the rates (commissionSource). Profit is never stored, so it always reflects the current cost / fee data. When a row cannot be costed (no catalog match, no cost profile, no shipping, no commission) calculable is false, reason explains why and every scenario profit is null. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tariffId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tariff with computed per-tier profit",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvantageTariffDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "AdvantageTariffs"
+        ],
+        "summary": "Delete a saved Advantage tariff",
+        "description": "Hard-deletes the tariff and (via cascade) its product rows. A tariff id from another store returns 404, indistinguishable from a missing one.",
         "security": [
           {
             "bearerAuth": []

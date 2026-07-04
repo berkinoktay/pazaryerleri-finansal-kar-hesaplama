@@ -12,6 +12,7 @@ import * as React from 'react';
 import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
 import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 
+import { useCommissionTariffLabel } from '../hooks/use-commission-tariff-label';
 import type { TariffListStats } from '../lib/commission-tariff-list';
 
 const DASH = '—';
@@ -54,8 +55,22 @@ export function CommissionTariffListSummary({
   const t = useTranslations('commissionTariffsPage.list.summary');
   const tCommon = useTranslations('common');
   const format = useFormatter();
+  const commissionTariffLabel = useCommissionTariffLabel();
 
   const pendingExports = stats.total - stats.exportedCount;
+
+  // The "Aktif dönem" cell shows the live tariff's WEEK WINDOW (the same long
+  // stamp the upload picker and detail header use), not its file name — the
+  // seller reads which period is in effect. Falls back to the name when the
+  // dates are unparseable, and to an em-dash when nothing is live.
+  const activePeriodLabel =
+    stats.activeLabel === null
+      ? DASH
+      : commissionTariffLabel({
+          weekStartsAt: stats.activeWeekStartsAt,
+          weekEndsAt: stats.activeWeekEndsAt,
+          name: stats.activeLabel,
+        });
 
   // Only the NON-ZERO validity buckets, so the line always reconciles with the
   // total ("Toplam 5 — 1 aktif · 0 taslak" hid 4 expired tariffs; all-expired
@@ -83,7 +98,7 @@ export function CommissionTariffListSummary({
       // An empty metric gets real microcopy in the CONTEXT line — the value
       // keeps the em-dash for scan-ability, but the reader learns WHY.
       label: t('activePeriod'),
-      value: stats.activeLabel ?? DASH,
+      value: activePeriodLabel,
       context: stats.activeLabel === null ? t('noActivePeriod') : t('activeNow'),
       icon: circleIcon(<Calendar01Icon />, 'info'),
     },

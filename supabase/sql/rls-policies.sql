@@ -427,6 +427,24 @@ CREATE POLICY plus_commission_tariff_items_store_read ON plus_commission_tariff_
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
+-- ─── advantage_tariffs — store-scoped saved Advantage Label tariffs ────
+-- Sibling of plus_commission_tariffs: the seller's uploaded Trendyol "Avantajlı
+-- Ürün Etiketleri" Excels + their per-product tier selections. Store-private;
+-- both tables carry store_id and gate on can_access_store. Writes are API-only.
+-- (Commission is read cross-vertically from commission_tariffs, which has its own
+-- store-scoped policy — no extra policy needed here.)
+ALTER TABLE advantage_tariffs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS advantage_tariffs_store_read ON advantage_tariffs;
+CREATE POLICY advantage_tariffs_store_read ON advantage_tariffs
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
+ALTER TABLE advantage_tariff_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS advantage_tariff_items_store_read ON advantage_tariff_items;
+CREATE POLICY advantage_tariff_items_store_read ON advantage_tariff_items
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
 -- ─── Profit Calculation V1 — PR-1 ──────────────────────────────────────
 -- design: docs/plans/2026-05-18-profit-calculation-design.md §3, §8
 -- guide:  docs/plans/2026-05-19-profit-calc-implementation-guide.md

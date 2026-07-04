@@ -203,6 +203,40 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
     throw new ValidationError([{ field: 'file', code: 'NO_TARIFF_PERIOD' }]);
   }
 
+  // The tariff's week window = earliest start … latest end across its periods.
+  const startTimes = present
+    .map((p) => p.startsAt)
+    .filter((d): d is Date => d !== null)
+    .map((d) => d.getTime());
+  const endTimes = present
+    .map((p) => p.endsAt)
+    .filter((d): d is Date => d !== null)
+    .map((d) => d.getTime());
+  const weekStartsAt = startTimes.length > 0 ? new Date(Math.min(...startTimes)) : null;
+  const weekEndsAt = endTimes.length > 0 ? new Date(Math.max(...endTimes)) : null;
+
+  // One tariff per week per store — reject a new tariff whose date range OVERLAPS
+  // any existing one (not just an exact-start match: a 6 Temmuz start would fall
+  // INSIDE a 30 Haz–7 Tem week). Two ranges overlap iff existing.start < new.end
+  // AND existing.end > new.start. Back-to-back weeks touch at a 1-minute gap
+  // (…07.59 vs …08.00) so they do NOT overlap → allowed. Only enforced when both
+  // bounds are known; unparseable dates fall through. Surfaced through the
+  // file-error channel so the upload dialog shows a specific message.
+  if (weekStartsAt !== null && weekEndsAt !== null) {
+    const overlapping = await prisma.commissionTariff.findFirst({
+      where: {
+        organizationId,
+        storeId,
+        weekStartsAt: { lt: weekEndsAt },
+        weekEndsAt: { gt: weekStartsAt },
+      },
+      select: { id: true },
+    });
+    if (overlapping !== null) {
+      throw new ValidationError([{ field: 'file', code: 'DUPLICATE_TARIFF_WEEK' }]);
+    }
+  }
+
   // Match barcode → variant (store-scoped).
   const barcodes = [...new Set(parsed.map((p) => p.barcode))];
   const variants = await prisma.productVariant.findMany({
@@ -223,6 +257,8 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
           name,
           sourceFilename: input.filename,
           sourceFile: new Uint8Array(input.file),
+          weekStartsAt,
+          weekEndsAt,
           createdBy: input.createdBy,
         },
       });

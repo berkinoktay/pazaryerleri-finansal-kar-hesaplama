@@ -50,10 +50,11 @@
   --size-tile-min: 280px;
   --size-tile-min-sm: 220px;
   --size-table-row-h: 44px;
-  /* Comfortable min width for one commission-tariff price-band card so its
-   * "777,10₺ ve üzeri" + "En iyi" line never truncates; the band table scrolls
-   * horizontally past this rather than squishing the cards (200px). */
-  --size-tariff-band: 200px;
+  /* Comfortable min width for one tariff price column — shared by the commission,
+   * plus-commission, and advantage verticals so each priced column's number +
+   * commission + badge line never truncates; the table scrolls horizontally past
+   * this rather than squishing the columns (224px). */
+  --size-tariff-band: 224px;
   /* Max width of the tariff detail table's pinned "product" column (256px). Caps
    * the sticky identity column so it can't eat the viewport on a narrow/zoomed
    * screen (blocking horizontal scroll to the bands); the product name wraps to
@@ -93,6 +94,7 @@
   --size-sheet: 24rem; /* sheet panel default (384px) */
   --size-sheet-wide: 28rem; /* sheet on ≥sm viewports (448px) */
   --size-modal: 32rem; /* dialog content (512px) */
+  --size-modal-md: 46rem; /* medium dialog — two-column forms (e.g. Advantage upload), 736px */
   --size-modal-wide: min(64rem, 90vw); /* wide dialog (order detail) — caps at 1024px, else 90vw */
   --size-modal-tall: 85vh; /* wide dialog max height before the inner body scrolls */
   --size-dropdown-popover: 24rem; /* org+store switcher dropdown panel (384px) */

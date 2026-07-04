@@ -929,7 +929,8 @@
         "empty": "Dosyada ürün satırı bulunamadı.",
         "noPeriod": "Dosyada tarife dönemi bulunamadı.",
         "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin.",
+        "DUPLICATE_TARIFF_WEEK": "Bu tarih aralığı için zaten bir komisyon tarifesi var."
       }
     },
     "breakdown": {
@@ -1185,6 +1186,216 @@
       "active": "Aktif",
       "upcoming": "Planlandı",
       "past": "Süresi doldu"
+    }
+  },
+  "productLabelsPage": {
+    "search": "Ürün, model veya barkod ara",
+    "actions": {
+      "upload": "Excel Yükle",
+      "saveExport": "Kaydet ve İndir"
+    },
+    "actionBar": {
+      "joined": "{count} ürün için kademe seçildi"
+    },
+    "templates": {
+      "back": "Tarifelere dön",
+      "delete": "Tabloyu Sil",
+      "deleteTitle": "Tarifeyi sil",
+      "deleteDescription": "Bu kayıtlı avantajlı etiket tarifesi ve içindeki tüm kademe seçimlerin kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "deleteConfirm": "Tarifeyi sil",
+      "detailIntent": "Her ürün için avantajlı etiket kademesini seç ve o fiyattaki kârını gör.",
+      "notFoundTitle": "Tarife bulunamadı",
+      "notFoundDescription": "Bu tarife silinmiş veya bu mağazaya ait olmayabilir."
+    },
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "Avantajlı ürün etiketlerini görüntülemek için bağlı bir Trendyol mağazası gerekir.",
+      "cta": "Mağazalara git"
+    },
+    "reason": {
+      "NO_PRODUCT": "Ürün eşleşmedi — bu barkod ürün kataloğunuzda yok.",
+      "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
+      "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik.",
+      "NO_COMMISSION": "Komisyon oranı çözülemedi — bu ürün için komisyon tarifesi bandı veya kategori komisyonu bulunamadı."
+    },
+    "list": {
+      "upload": "Excel Dosyası Yükle",
+      "search": "Tarife ara…",
+      "productUnit": "ürün",
+      "columns": {
+        "tariff": "Tarife",
+        "products": "Ürün",
+        "status": "Durum",
+        "exported": "Dışa aktarım"
+      },
+      "summary": {
+        "total": "Toplam tarife",
+        "products": "Ürün",
+        "productsContext": "yüklü tarifelerde",
+        "selected": "Kademe seçilen",
+        "selectedContext": "ürün için kademe seçtin",
+        "exported": "Dışa aktarılan",
+        "exportedValue": "{count} / {total}",
+        "exportedPending": "{count} tarife dışa aktarım bekliyor",
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "noSelected": "henüz seçim yok"
+      },
+      "empty": {
+        "title": "Henüz avantajlı etiket tarifesi yok",
+        "description": "Trendyol panelinden indirdiğin Avantajlı Ürün Etiketleri Excel dosyanı yükleyerek başla; her ürün için hangi rozet kademesinin kârlı olduğunu gör.",
+        "cta": "Excel Dosyası Yükle"
+      },
+      "actions": {
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
+      },
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
+      "filterLabel": "Duruma göre filtrele",
+      "bulk": {
+        "selected": "{count} tarife seçili",
+        "delete": "Seçilenleri sil",
+        "deleteTitle": "Seçili tarifeleri sil",
+        "deleteDescription": "{count} tarife ve içindeki tüm kademe seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+        "deleteConfirm": "Tarifeleri sil"
+      },
+      "lastUpdated": "Son güncelleme: {date}",
+      "listStatus": {
+        "all": "Tümü",
+        "exported": "İndirildi",
+        "pending": "Bekliyor"
+      }
+    },
+    "summary": {
+      "total": "Tarifedeki ürün",
+      "totalContext": "bu tarifede listelenen",
+      "joined": "Kademe seçilen",
+      "joinedValue": "{count}/{total}",
+      "joinedContext": "ürün için kademe seçtin",
+      "joinedProfit": "Seçili kâr",
+      "joinedProfitContext": "seçtiğin kademelerde tahmini toplam",
+      "currentProfit": "Mevcut kâr",
+      "currentProfitHint": "Hiçbir kademe seçmezsen bugünkü tahmini toplam kâr."
+    },
+    "table": {
+      "product": "Ürün Bilgileri",
+      "current": "Güncel fiyat",
+      "displayPrice": "Müşterinin gördüğü fiyat",
+      "calculatedProfit": "Hesaplanan kâr",
+      "vsCurrent": "Güncele göre",
+      "bestTier": "En kârlı",
+      "tierCommission": "komisyon",
+      "tierQualifier": "ve altı",
+      "tierSelected": "Seçildi",
+      "selectTier": "Bu kademeyi seç",
+      "customPrice": "Özel Fiyat",
+      "enterPrice": "Fiyat girin",
+      "selectCustom": "Bu fiyatı seç",
+      "customSelected": "Seçildi",
+      "customCommissionApplies": "Girdiğiniz fiyat, düştüğü komisyon bandının oranıyla hesaplanır."
+    },
+    "tier": {
+      "tier1": "Avantaj",
+      "tier2": "Çok Avantaj",
+      "tier3": "Süper Avantaj"
+    },
+    "commissionSource": {
+      "label": "Komisyon kaynağı",
+      "sourceValue": "{period} tarifesi",
+      "noSource": "Komisyon kaynağı bulunamadı",
+      "auto": "Otomatik (aktif dönem)",
+      "autoHint": "Bugünün tarihine denk gelen komisyon tarifesi otomatik kullanılır.",
+      "pinnedHint": "Bu komisyon tarifesi sabitlendi.",
+      "change": "Değiştir",
+      "menuTitle": "Komisyon kaynağı seç",
+      "category": "Kategori komisyonu",
+      "categoryHint": "Komisyon tarifesi seçilmedi; kategori komisyonu kullanılıyor."
+    },
+    "commissionWarning": {
+      "title": "Ürün Komisyonlarınızı Yükleyin",
+      "description": "Avantajlı ürünlerden en iyi şekilde yararlanabilmeniz için bu döneme ait Ürün Komisyon Excel'ini yüklemeniz gerekir.",
+      "cta": "Ürün Komisyon Tarifesi sayfasına git",
+      "dismiss": "Kategori komisyonuyla devam et"
+    },
+    "noResults": {
+      "title": "Eşleşen ürün yok",
+      "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."
+    },
+    "upload": {
+      "title": "Avantajlı Ürün Etiketleri Excel'ini yükleyin",
+      "description": "Trendyol panelinden indirdiğiniz Avantajlı Ürün Etiketleri dosyasını yükleyin; her ürün için hangi rozet kademesinin kârlı olduğunu görün.",
+      "prompt": "Excel dosyasını sürükleyip bırakın",
+      "hint": "XLSX · en fazla 5 MB",
+      "cta": "Dosya seç",
+      "stepsTitle": "Nasıl çalışır?",
+      "step1": "Trendyol panelinden Avantajlı Ürün Etiketleri Excel'ini indirin",
+      "step2": "Dosyayı buraya yükleyin",
+      "step3": "Her ürün için hangi rozet kademesinin kârlı olduğunu görün",
+      "submit": "Tarifeyi oluştur",
+      "empty": "Dosyada ürün satırı bulunamadı.",
+      "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin.",
+      "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+      "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+      "wrongFormat": "Bu bir Trendyol Avantajlı Ürün Etiketleri dosyası değil ya da biçimi tanınmadı.",
+      "errors": {
+        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+        "wrongFormat": "Bu bir Trendyol Avantajlı Ürün Etiketleri dosyası değil ya da biçimi tanınmadı.",
+        "empty": "Dosyada ürün satırı bulunamadı.",
+        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      },
+      "commissionSource": {
+        "title": "Kademe komisyonları nereden hesaplansın?",
+        "intro": "Avantajlı Excel'inde komisyon yer almaz. Kademe kârlarını iki şekilde hesaplayabiliriz:",
+        "tariffOption": "Ürün Komisyon Tarifesi ile",
+        "recommended": "Önerilen",
+        "tariffHint": "Kademe komisyonları, seçtiğin haftanın tarifesindeki gerçek indirimli oranlardan okunur — en doğru kâr.",
+        "placeholder": "Hangi haftaya ait?",
+        "empty": "Bu döneme ait komisyon tarifen yok. Yükleyerek en doğru kârı gör.",
+        "uploadCta": "Ürün Komisyon Tarifesi yükle",
+        "uploadNew": "Başka hafta yükle",
+        "or": "ya da",
+        "categoryOption": "Kategori komisyonuyla devam et",
+        "categoryHint": "Komisyon tarifesi gerekmez; ürünün kategori komisyonuyla daha kaba bir tahmin yapılır.",
+        "required": "Devam etmek için bir yöntem seç.",
+        "label": "Bu avantajlı hangi komisyon tarifesine (haftaya) ait?",
+        "hint": "Kademe komisyonları, seçtiğin haftanın komisyon tarifesinden okunur.",
+        "category": "Kategori komisyonu"
+      }
+    },
+    "breakdown": {
+      "title": "Kâr dökümü",
+      "sale": "Satış",
+      "commission": "Komisyon",
+      "netVat": "Net KDV",
+      "profit": "Kâr",
+      "estimatedProfit": "Tahmini kâr",
+      "margin": "Marj",
+      "notCalculable": "Bu ürün için kâr hesaplanamıyor."
+    },
+    "smartSelect": {
+      "label": "Akıllı Seçim",
+      "selectBest": "Her ürüne en kârlı kademe",
+      "selectProfitable": "Sadece kârlı kademeler",
+      "clear": "Seçimleri temizle",
+      "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
+    },
+    "filters": {
+      "category": "Kategori",
+      "brand": "Marka",
+      "minMargin": "Min. marj %",
+      "profit": "Kârlılık",
+      "profitProfitable": "Kârlı",
+      "profitLoss": "Zararlı",
+      "selection": "Seçim durumu",
+      "selectionSelected": "Kademe seçildi",
+      "selectionUnselected": "Seçilmedi",
+      "groupLabel": "Filtreler"
+    },
+    "status": {
+      "exported": "İndirildi",
+      "pending": "Bekliyor"
     }
   },
   "featureStatus": {
@@ -2639,7 +2850,7 @@
   },
   "profitBadge": {
     "open": "Kâr detayını gör",
-    "tooltip": "Tıklayınca bu siparişin kâr dökümü açılır"
+    "tooltip": "Tıklayınca kâr dökümü açılır"
   },
   "promotionIndicator": {
     "label": "İndirim",

@@ -10,6 +10,7 @@ import type { Formats } from 'next-intl';
  *     formatter.dateTime(date, 'date')       →  21.04.2026
  *     formatter.dateTime(date, 'time')       →  01:32
  *     formatter.dateTime(date, 'long')       →  21 Nisan 2026 Salı 01:32
+ *     formatter.dateTime(date, 'dayTime')    →  21 Nisan 2026 01:32  (no weekday)
  *     formatter.dateTime(date, 'weekday')    →  Salı
  *     formatter.number(value, 'integer')     →  284.390
  *     formatter.number(value, 'currency')    →  ₺284.390,45
@@ -30,6 +31,15 @@ export const FORMATS = {
     date: { dateStyle: 'short' },
     time: { timeStyle: 'short' },
     long: { dateStyle: 'full', timeStyle: 'short' },
+    // Trendyol-style campaign period stamp — "30 Temmuz 2026 08:00" (day + month
+    // name + year + time, NO weekday) for commission-tariff week windows.
+    dayTime: {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    },
     weekday: { weekday: 'long' },
     month: { year: 'numeric', month: 'long' },
   },
