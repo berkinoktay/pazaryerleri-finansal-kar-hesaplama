@@ -4953,6 +4953,12 @@
           "dateRangeLabel": {
             "type": "string"
           },
+          "dayCount": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "validity": {
             "$ref": "#/components/schemas/TariffValidity"
           },
@@ -4966,6 +4972,7 @@
         "required": [
           "id",
           "dateRangeLabel",
+          "dayCount",
           "validity",
           "items"
         ]
@@ -14012,7 +14019,7 @@
           "CommissionTariffs"
         ],
         "summary": "Export the tariff as a re-uploadable Trendyol Excel",
-        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's choices patched in: the chosen band price into \"YENİ TSF (FİYAT GÜNCELLE)\" and \"{N} Günlük Fiyat\" into \"Tarife Seçimi\" for every product that has a selection. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's choices patched in: the chosen band price into \"YENİ TSF (FİYAT GÜNCELLE)\" and \"{N} Günlük Fiyat\" into \"Tarife Seçimi\" for every product that has a selection. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. A split week yields up to three window files (a whole-week \"7 Günlük Fiyat\" file for products priced the same in both sub-periods, plus \"3 Günlük Fiyat\" / \"4 Günlük Fiyat\" files for period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
         "security": [
           {
             "bearerAuth": []
@@ -14049,9 +14056,15 @@
         ],
         "responses": {
           "200": {
-            "description": "The patched .xlsx, ready to re-upload to Trendyol",
+            "description": "The patched .xlsx (single file), or a .zip of both window files when a product is priced differently across sub-periods, ready to re-upload to Trendyol",
             "content": {
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "type": "string",
                   "format": "binary"

@@ -113,6 +113,9 @@ export const TariffPeriodSchema = z
   .object({
     id: z.string().uuid(),
     dateRangeLabel: z.string(),
+    // The N from "Tarih aralığı (N Gün)" — lets the UI label the sub-period tabs
+    // "3 Gün" / "4 Gün" (vs a full-week "7 Gün"). Null if the header lacked it.
+    dayCount: z.number().int().nullable(),
     validity: TariffValiditySchema.nullable(),
     items: z.array(TariffDetailItemSchema),
   })

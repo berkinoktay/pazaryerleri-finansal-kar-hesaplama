@@ -38,6 +38,13 @@ export interface CustomPriceCellProps {
   onSelect: (band: string, choice: CustomChoice) => void;
   /** Un-commit the custom price for this row. */
   onDeselect: () => void;
+  /**
+   * The custom price currently held in the edit buffer for this row (a decimal
+   * string), if any. Seeds the input over the persisted `row.customPrice` so a
+   * "7 günlük" copy from another sub-period shows here too; null → fall back to the
+   * server value.
+   */
+  committedPrice?: string | null;
   /** Center the content (desktop table column) vs left-align (mobile card, default). */
   centered?: boolean;
 }
@@ -64,6 +71,7 @@ export function CustomPriceCell({
   isSelected,
   onSelect,
   onDeselect,
+  committedPrice = null,
   centered = false,
 }: CustomPriceCellProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
@@ -72,9 +80,12 @@ export function CustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
-  // Seed the input from any persisted custom price so reopening a tariff shows it.
+  // Seed the input from the edit-buffer's custom price (so a "7 günlük" copy from
+  // another sub-period shows here), falling back to the persisted value so reopening
+  // a tariff shows it. The debounced effect then re-estimates for THIS period's item.
+  const seededPrice = committedPrice ?? row.customPrice;
   const [price, setPrice] = React.useState<Decimal | null>(
-    row.customPrice !== null ? new Decimal(row.customPrice) : null,
+    seededPrice !== null ? new Decimal(seededPrice) : null,
   );
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   // Last SUCCESSFUL estimate. `mutate()` resets `estimate.data` to undefined,

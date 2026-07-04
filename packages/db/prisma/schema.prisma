@@ -1223,6 +1223,10 @@ model CommissionTariffItem {
   category         String?
   brand            String?
   stock            Int?
+  // 0-based Excel row order within the period. The detail screen lists products in
+  // this order so it matches the uploaded file (and Trendyol's screen), and stays
+  // identical across sub-period tabs (same product → same sortOrder in every period).
+  sortOrder        Int      @default(0) @map("sort_order")
   currentPrice     Decimal  @map("current_price") @db.Decimal(12, 2)
   // Current (band1) commission as a FRACTION (0.19 = %19), Excel-sourced.
   currentCommissionPct Decimal @map("current_commission_pct") @db.Decimal(6, 4)

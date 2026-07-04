@@ -277,7 +277,7 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
             sortOrder: period.sortOrder,
           },
         });
-        const itemsData = parsed.map((p) => ({
+        const itemsData = parsed.map((p, index) => ({
           organizationId,
           storeId,
           periodId: periodRow.id,
@@ -288,6 +288,9 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
           category: p.category,
           brand: p.brand,
           stock: p.stock,
+          // Excel row order (`parsed` is built top-to-bottom); every period reuses the
+          // same order so the detail lists products as in the file, identically per tab.
+          sortOrder: index,
           currentPrice: p.currentPrice,
           currentCommissionPct: p.currentCommissionPct,
           bands: bandsForPeriod(p.brackets, p.periodComms[period.layoutIndex] ?? []),

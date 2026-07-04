@@ -51,7 +51,13 @@ export function createApp(): OpenAPIHono {
   // error responses can reference the same correlation id.
   app.use('*', requestIdMiddleware);
   app.use('*', logger());
-  app.use('*', cors());
+  // `exposeHeaders`: by default the browser hides all but the CORS-safelisted
+  // response headers from cross-origin JS (the web app is a different origin than
+  // this API). File-download routes set `Content-Disposition` with the filename;
+  // without exposing it the frontend reads `null` and mis-names the download (e.g.
+  // a `.zip` saved as `.xlsx` → "corrupt file"). `X-Request-Id` is exposed so the
+  // client can surface the support/correlation id.
+  app.use('*', cors({ exposeHeaders: ['Content-Disposition', 'X-Request-Id'] }));
 
   app.openAPIRegistry.registerComponent('securitySchemes', 'bearerAuth', bearerAuthScheme);
 

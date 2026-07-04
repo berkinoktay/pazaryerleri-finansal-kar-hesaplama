@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
-import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
@@ -14,7 +13,6 @@ import { PageSkeleton } from '@/components/patterns/page-skeleton';
 import { Button } from '@/components/ui/button';
 import { useRouter } from '@/i18n/navigation';
 import { ApiError } from '@/lib/api-error';
-import { cn } from '@/lib/utils';
 
 import { useCommissionTariffDetail } from '../hooks/use-commission-tariff-detail';
 import { useDeleteTariff } from '../hooks/use-delete-tariff';
@@ -38,11 +36,22 @@ import { toDetailTemplate } from '../lib/adapt-tariff';
 import { findBand, summarizeSelection } from '../lib/commission-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
+import {
+  buildWholeWeekIndex,
+  choiceSignature,
+  computeExportPreview,
+  isWholeWeek,
+  siblingRowIds,
+  spreadToWeek,
+  unlinkWeek,
+  type WholeWeekControls,
+} from '../lib/whole-week';
 import { CommissionTariffStatusBadge } from './commission-tariff-status-badge';
 import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards';
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
 import { CommissionTariffsTable } from './commission-tariffs-table';
 import { CommissionTariffsToolbar } from './commission-tariffs-toolbar';
+import { ExportTariffDialog } from './export-tariff-dialog';
 
 const LIST_PATH = '/campaigns/product-commission-tariffs';
 
@@ -86,6 +95,7 @@ export function CommissionTariffDetailClient({
   // and save together on "Kaydet ve İndir".
   const [selection, setSelection] = React.useState<SelectionMap>({});
   const [customPrices, setCustomPrices] = React.useState<CustomPriceMap>({});
+  const [exportOpen, setExportOpen] = React.useState(false);
   const [seededTariffId, setSeededTariffId] = React.useState<string | null>(null);
   // View state (filters + active period tab) is URL-owned via nuqs: reload /
   // share / back-forward reproduce the exact view. The tri-states encode
@@ -256,6 +266,16 @@ export function CommissionTariffDetailClient({
 
   const periodRows = activePeriod.rows;
   const summary = summarizeSelection(periodRows, selection, customPrices);
+  // The floating save/export bar is GLOBAL: one click saves + downloads every window
+  // file (3/4/7-günlük) across ALL sub-periods, so its count spans all periods — not
+  // just the active tab (whose per-period figures the summary strip already shows).
+  const globalSelectedCount = periods.reduce(
+    (total, period) => total + period.rows.filter((row) => selection[row.id] != null).length,
+    0,
+  );
+  // Which window files (3/4/7-günlük) the export will produce + their product counts —
+  // the pre-download preview shown in the export dialog. Mirrors the backend bucketing.
+  const previewFiles = computeExportPreview(periods, selection, customPrices);
   const filteredRows = filterRows(periodRows, selection, filters);
   const categories = distinct(periodRows.map((row) => row.category));
   const brands = distinct(periodRows.map((row) => row.brand));
@@ -299,19 +319,54 @@ export function CommissionTariffDetailClient({
       {
         onSuccess: () => {
           exportTariff.mutate(tariffId, {
-            onSuccess: (blob) => downloadBlob(blob, `${template.name}.xlsx`),
+            // Filename comes from the server (a split week downloads a `.zip`); fall
+            // back to the tariff name only if the header was absent.
+            onSuccess: (file) => {
+              downloadBlob(file.blob, file.filename ?? `${template.name}.xlsx`);
+              setExportOpen(false);
+            },
           });
         },
       },
     );
   };
+  const isExporting = updateSelections.isPending || exportTariff.isPending;
+
+  // "7 günlük" spread: link/unlink a product's choice across sub-periods. Only when
+  // the tariff is split (a single-period tariff has nothing to spread over). Rebuilt
+  // each render so the closures read the live selection buffers.
+  const wholeWeekIndex = buildWholeWeekIndex(periods);
+  const wholeWeek: WholeWeekControls | null =
+    periods.length > 1
+      ? {
+          isActive: (rowId) =>
+            isWholeWeek(siblingRowIds(rowId, wholeWeekIndex), selection, customPrices),
+          canApply: (rowId) => choiceSignature(rowId, selection, customPrices) !== null,
+          onToggle: (rowId) => {
+            const ids = siblingRowIds(rowId, wholeWeekIndex);
+            const next = isWholeWeek(ids, selection, customPrices)
+              ? unlinkWeek({ selection, customPrices }, ids, rowId)
+              : spreadToWeek({ selection, customPrices }, ids, rowId);
+            setSelection(next.selection);
+            setCustomPrices(next.customPrices);
+          },
+        }
+      : null;
 
   const periodTabs =
     periods.length > 1 ? (
       <FilterTabs
         value={activePeriod.id}
         onValueChange={(next) => setPeriodId(next)}
-        options={periods.map((period) => ({ value: period.id, label: period.dateRangeLabel }))}
+        options={periods.map((period) => ({
+          value: period.id,
+          // Prefix the raw date range with "3 Gün" / "4 Gün" so the seller can tell the
+          // sub-periods apart at a glance (only the commission differs between them).
+          label:
+            period.dayCount !== null
+              ? `${tPage('periodDayLabel', { count: period.dayCount })} · ${period.dateRangeLabel}`
+              : period.dateRangeLabel,
+        }))}
       />
     ) : null;
 
@@ -333,9 +388,7 @@ export function CommissionTariffDetailClient({
 
   return (
     <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
-      {/* Reserve space for the floating save bar while a band is selected, so the
-          last product row scrolls clear of it (esp. on mobile). */}
-      <div className={cn('gap-lg flex flex-col', summary.selectedCount > 0 && 'pb-4xl')}>
+      <div className="gap-lg flex flex-col">
         <PageHeader
           leading={
             <Button
@@ -352,24 +405,36 @@ export function CommissionTariffDetailClient({
           intent={activePeriod.dateRangeLabel}
           className="gap-lg border-b-0 pb-0"
           actions={
-            <ConfirmDialog
-              trigger={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  leadingIcon={<Delete02Icon aria-hidden />}
-                  className="text-destructive hover:border-destructive hover:bg-destructive-surface hover:text-destructive"
-                >
-                  {tPage('templates.delete')}
-                </Button>
-              }
-              title={tPage('templates.deleteTitle')}
-              description={tPage('templates.deleteDescription')}
-              confirmLabel={tPage('templates.deleteConfirm')}
-              onConfirm={() =>
-                deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
-              }
-            />
+            <div className="gap-sm flex items-center">
+              <ConfirmDialog
+                trigger={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leadingIcon={<Delete02Icon aria-hidden />}
+                    className="text-destructive hover:border-destructive hover:bg-destructive-surface hover:text-destructive"
+                  >
+                    {tPage('templates.delete')}
+                  </Button>
+                }
+                title={tPage('templates.deleteTitle')}
+                description={tPage('templates.deleteDescription')}
+                confirmLabel={tPage('templates.deleteConfirm')}
+                onConfirm={() =>
+                  deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
+                }
+              />
+              {/* Fixed export button (replaces the floating bar): opens a preview modal
+                  of which window files will download before the seller confirms. */}
+              <Button
+                size="sm"
+                onClick={() => setExportOpen(true)}
+                disabled={globalSelectedCount === 0}
+                leadingIcon={<DownloadCircle01Icon aria-hidden />}
+              >
+                {tPage('actions.export')}
+              </Button>
+            </div>
           }
           summary={<CommissionTariffsSummary summary={summary} />}
         />
@@ -382,6 +447,7 @@ export function CommissionTariffDetailClient({
             onSelectBand={handleSelectBand}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
+            wholeWeek={wholeWeek}
             tabs={periodTabs}
             toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
@@ -398,21 +464,16 @@ export function CommissionTariffDetailClient({
             onSelectBand={handleSelectBand}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
+            wholeWeek={wholeWeek}
           />
         </div>
 
-        <BulkActionBar
-          selectedCount={summary.selectedCount}
-          countLabel={(count) => tPage('actionBar.selectedBands', { count })}
-          actions={[
-            {
-              id: 'save-export',
-              label: tPage('actions.saveExport'),
-              icon: <DownloadCircle01Icon aria-hidden />,
-              onClick: onSaveExport,
-              tone: 'primary',
-            },
-          ]}
+        <ExportTariffDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          files={previewFiles}
+          isExporting={isExporting}
+          onConfirm={onSaveExport}
         />
       </div>
     </TariffScopeProvider>

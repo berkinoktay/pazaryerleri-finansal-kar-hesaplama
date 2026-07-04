@@ -797,7 +797,18 @@
     "search": "Search product, model or barcode",
     "actions": {
       "upload": "Upload Excel",
-      "saveExport": "Save and Download"
+      "saveExport": "Save and Download",
+      "export": "Export"
+    },
+    "exportDialog": {
+      "title": "Export tariff",
+      "description": "Your selections will be exported to the files below and downloaded.",
+      "fileName": "{days}-day price",
+      "productCount": "{count} products",
+      "zipNote": "{count} files will download as a single ZIP.",
+      "cancel": "Cancel",
+      "download": "Download",
+      "exporting": "Downloading…"
     },
     "templates": {
       "add": "New tariff",
@@ -906,8 +917,11 @@
       "selectCustom": "Select this price",
       "customSelected": "Selected",
       "aboveQualifier": "and above",
-      "belowQualifier": "and below"
+      "belowQualifier": "and below",
+      "applyWholeWeek": "Apply to 7 days",
+      "wholeWeekApplied": "Applied to 7 days"
     },
+    "periodDayLabel": "{count} days",
     "noResults": {
       "title": "No matching products",
       "description": "Try changing your search or filters."

@@ -59,6 +59,7 @@ function detailResponse() {
       {
         id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
         dateRangeLabel: '30 Haz - 2 Tem',
+        dayCount: 3,
         validity: 'active',
         items: [detailItem()],
       },

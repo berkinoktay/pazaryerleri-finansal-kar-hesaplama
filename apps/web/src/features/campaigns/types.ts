@@ -39,6 +39,8 @@ export type TariffValidity = 'active' | 'upcoming' | 'past';
 export interface TariffPeriod {
   id: string;
   dateRangeLabel: string;
+  /** The N from "Tarih aralığı (N Gün)" — labels the sub-period tabs ("3 Gün"/"4 Gün"). */
+  dayCount: number | null;
   validity: TariffValidity | null;
   rows: readonly CommissionTariffRow[];
 }
