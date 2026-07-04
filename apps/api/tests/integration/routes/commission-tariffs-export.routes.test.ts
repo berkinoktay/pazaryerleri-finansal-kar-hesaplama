@@ -135,4 +135,40 @@ describe('commission-tariff export + variable periods', () => {
     const listed = await prisma.commissionTariff.findUnique({ where: { id: tariffId } });
     expect(listed?.exportedAt).not.toBeNull();
   });
+
+  it('exports band 1 lower limit ("ve üzeri" boundary), not the current price', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx, FIXTURE_2P, 'tariff.xlsx');
+
+    // band1 is open-topped ("X ve üzeri", no upper limit). Give the matched item a band1
+    // whose lower limit (600) sits ABOVE its current price (285), then select band1: the
+    // export must write band1's shown floor (600) — the boundary the seller sees — NOT the
+    // current price. Writing the current price here was the bug.
+    const item = await prisma.commissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: MATCHED_BARCODE },
+    });
+    expect(item).not.toBeNull();
+    await prisma.commissionTariffItem.update({
+      where: { id: item?.id },
+      data: {
+        currentPrice: '285.00',
+        selectedBand: 'band1',
+        bands: [{ key: 'band1', lowerLimit: '600.00', commissionPct: '19' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${tariffId}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+
+    const out = Buffer.from(await res.arrayBuffer());
+    const grid = await readWorkbookGrid(out);
+    const layout = resolveLayout(grid[0] ?? []);
+    expect(layout).not.toBeNull();
+    if (layout === null) return;
+    const patched = grid.slice(1).find((r) => text(r, layout.fixed.barcode) === MATCHED_BARCODE);
+    expect(Number(text(patched, layout.newTsf))).toBe(600.0);
+  });
 });

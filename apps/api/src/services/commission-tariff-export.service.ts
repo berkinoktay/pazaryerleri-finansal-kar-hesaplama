@@ -8,6 +8,8 @@
 // e.g. the melontik sample). The byte-preserving cell patching lives in the
 // shared `lib/xlsx-patch` helper; here we only decide WHICH cells get WHICH value.
 
+import { Decimal } from 'decimal.js';
+
 import { prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { readWorkbookGrid } from '@pazarsync/spreadsheet';
@@ -15,6 +17,7 @@ import { readWorkbookGrid } from '@pazarsync/spreadsheet';
 import { ConflictError, NotFoundError } from '../lib/errors';
 import { cellText } from '../lib/xlsx-grid-cells';
 import { patchXlsxCells, type XlsxCellValue } from '../lib/xlsx-patch';
+import { bandPrice } from './commission-tariff-compute.service';
 import { resolveTariffLayout } from './commission-tariff-layout';
 import { parseStoredBands } from './commission-tariff.types';
 
@@ -88,8 +91,13 @@ export async function exportTariff(
     for (const item of period.items) {
       if (item.selectedBand === null) continue;
       const band = parseStoredBands(item.bands).find((b) => b.key === item.selectedBand);
-      const bandPrice = band?.upperLimit ?? item.currentPrice.toFixed(2);
-      const newPrice = item.customPrice !== null ? item.customPrice.toFixed(2) : bandPrice;
+      // Selecting a band means "set my price to the price shown in that column" — the band
+      // boundary the seller sees (upper limit for bands 2-4, lower limit for the open-topped
+      // band 1), via the shared bandPrice() so the export matches the profit shown on screen.
+      const chosenBandPrice = band
+        ? bandPrice(band, new Decimal(item.currentPrice.toString())).toFixed(2)
+        : item.currentPrice.toFixed(2);
+      const newPrice = item.customPrice !== null ? item.customPrice.toFixed(2) : chosenBandPrice;
       const selection =
         period.dayCount !== null ? `${period.dayCount} Günlük Fiyat` : 'Günlük Fiyat';
       patchByBarcode.set(item.barcode, { newPrice, selection });
