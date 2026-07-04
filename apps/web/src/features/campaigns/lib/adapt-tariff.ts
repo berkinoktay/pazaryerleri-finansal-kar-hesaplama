@@ -16,6 +16,7 @@ export function toDetailTemplate(detail: CommissionTariffDetail): TariffTemplate
     periods: detail.periods.map((period) => ({
       id: period.id,
       dateRangeLabel: period.dateRangeLabel,
+      dayCount: period.dayCount,
       validity: period.validity,
       rows: period.items,
     })),

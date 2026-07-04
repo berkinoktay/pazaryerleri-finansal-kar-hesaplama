@@ -67,7 +67,9 @@ export function CommissionTariffsListClient({
     (id: string): void => {
       const name = items.find((item) => item.id === id)?.name ?? id;
       exportTariff.mutate(id, {
-        onSuccess: (blob) => downloadBlob(blob, `${name}.xlsx`),
+        // Filename comes from the server (a split week downloads a `.zip`); fall back
+        // to the tariff name only if the header was absent.
+        onSuccess: (file) => downloadBlob(file.blob, file.filename ?? `${name}.xlsx`),
       });
     },
     [exportTariff, items],

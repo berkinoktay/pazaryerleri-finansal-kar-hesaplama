@@ -11,6 +11,25 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Changed
+
+- **Commission tariff export is now window-bucketed** (`POST
+  /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export`) — Replaces the
+  old single-file "last period wins" combine (a latent data-loss bug). A split week (3-Gün + 4-Gün)
+  is bucketed into up to **three** window files, only the non-empty ones: a whole-week
+  `"7 Günlük Fiyat"` file for products priced the same in both sub-periods, plus `"3 Günlük Fiyat"`
+  and `"4 Günlük Fiyat"` files for period-specific prices (a product priced differently across the
+  windows lands in both). The seller re-uploads each file to its Trendyol tab. When more than one
+  file is produced they are delivered as a single `.zip`. The `200` response advertises **two**
+  content types — `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (a lone file:
+  a full-week single-period tariff, or a split week where only one bucket is non-empty) and
+  `application/zip` (multiple buckets) — and the download name comes from `Content-Disposition`.
+  Non-breaking for clients that read the response as a binary blob + `Content-Disposition`.
+- **CORS now exposes `Content-Disposition` and `X-Request-Id`** — Cross-origin browser JS could not
+  read these response headers (the default CORS allowlist hides them), so the file-download routes'
+  server-chosen filename was invisible to the frontend and a `.zip` export was mis-saved as `.xlsx`
+  ("corrupt file"). `Access-Control-Expose-Headers` now lists both.
+
 ### Added
 
 - **Plus Commission Tariffs API** (`/v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs`)

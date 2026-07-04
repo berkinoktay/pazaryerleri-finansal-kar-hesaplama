@@ -136,10 +136,16 @@ export async function getTariffDetail(
           select: {
             id: true,
             dateRangeLabel: true,
+            dayCount: true,
             startsAt: true,
             endsAt: true,
             items: {
-              orderBy: { createdAt: 'asc' },
+              // Excel row order (`sortOrder`, set at import) so the detail lists products
+              // exactly as in the uploaded file — matching Trendyol's own screen — and
+              // identically across sub-period tabs (same product → same sortOrder in every
+              // period). Barcode breaks any tie (e.g. legacy rows imported before the
+              // column existed, all defaulting to 0).
+              orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }],
               select: {
                 id: true,
                 productVariantId: true,
@@ -278,6 +284,7 @@ export async function getTariffDetail(
     return {
       id: period.id,
       dateRangeLabel: period.dateRangeLabel,
+      dayCount: period.dayCount,
       validity: resolveValidity(period.startsAt, period.endsAt, new Date()),
       items,
     };

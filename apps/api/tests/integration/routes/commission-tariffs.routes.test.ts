@@ -272,6 +272,87 @@ describe('Commission Tariffs — list / detail / delete', () => {
     expect(unmatched?.imageUrl).toBeNull();
   });
 
+  it('orders products by Excel row order (sortOrder), identically across sub-periods', async () => {
+    // The detail must list products in the uploaded file's order (`sortOrder`, set at
+    // import) — matching Trendyol's screen — and identically in both sub-period tabs
+    // (the same product carries the same sortOrder in every period). NOT alphabetical
+    // and NOT Postgres heap order (which diverged between the periods' item sets).
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Order Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'order-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Sıralama Tarifesi' },
+    });
+    // Excel/sortOrder order Gama(0), Alfa(1), Beta(2) — deliberately NOT alphabetical.
+    const GAMA = { barcode: 'BC-G', title: 'Gama Ürün', sortOrder: 0 };
+    const ALFA = { barcode: 'BC-A', title: 'Alfa Ürün', sortOrder: 1 };
+    const BETA = { barcode: 'BC-B', title: 'Beta Ürün', sortOrder: 2 };
+    const bands = [{ key: 'band1', upperLimit: '300.00', commissionPct: '20' }];
+    const makePeriod = async (
+      dayCount: number,
+      periodSort: number,
+      insertOrder: ReadonlyArray<{ barcode: string; title: string; sortOrder: number }>,
+    ): Promise<void> => {
+      const period = await prisma.commissionTariffPeriod.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          tariffId: tariff.id,
+          dateRangeLabel: `${dayCount} gün`,
+          dayCount,
+          sortOrder: periodSort,
+        },
+      });
+      for (const p of insertOrder) {
+        await prisma.commissionTariffItem.create({
+          data: {
+            organizationId: org.id,
+            storeId: store.id,
+            periodId: period.id,
+            barcode: p.barcode,
+            productTitle: p.title,
+            sortOrder: p.sortOrder,
+            currentPrice: '300.00',
+            currentCommissionPct: '0.2000',
+            bands,
+          },
+        });
+      }
+    };
+    // Same products, DIFFERENT insertion order per period — sortOrder must still drive output.
+    await makePeriod(3, 0, [BETA, GAMA, ALFA]);
+    await makePeriod(4, 1, [ALFA, BETA, GAMA]);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff.id}`,
+      { method: 'GET', headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DetailWire;
+    expect(body.periods).toHaveLength(2);
+    // sortOrder order (0,1,2), NOT alphabetical (['Alfa','Beta','Gama']).
+    const expected = ['Gama Ürün', 'Alfa Ürün', 'Beta Ürün'];
+    expect(body.periods[0]?.items.map((i) => i.productTitle)).toEqual(expected);
+    expect(body.periods[1]?.items.map((i) => i.productTitle)).toEqual(expected);
+  });
+
   it('deletes the tariff and then lists empty', async () => {
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/commission-tariffs/${fx.tariffId}`,

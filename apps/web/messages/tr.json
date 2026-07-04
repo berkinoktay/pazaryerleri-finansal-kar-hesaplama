@@ -797,7 +797,18 @@
     "search": "Ürün, model veya barkod ara",
     "actions": {
       "upload": "Excel Yükle",
-      "saveExport": "Kaydet ve İndir"
+      "saveExport": "Kaydet ve İndir",
+      "export": "Dışa aktar"
+    },
+    "exportDialog": {
+      "title": "Tarifeyi dışa aktar",
+      "description": "Seçimlerin aşağıdaki dosyalara aktarılıp indirilecek.",
+      "fileName": "{days} Günlük Fiyat",
+      "productCount": "{count} ürün",
+      "zipNote": "{count} dosya tek ZIP olarak inecek.",
+      "cancel": "Vazgeç",
+      "download": "İndir",
+      "exporting": "İndiriliyor…"
     },
     "templates": {
       "add": "Yeni tarife",
@@ -906,8 +917,11 @@
       "selectCustom": "Bu fiyatı seç",
       "customSelected": "Seçildi",
       "aboveQualifier": "ve üzeri",
-      "belowQualifier": "ve altı"
+      "belowQualifier": "ve altı",
+      "applyWholeWeek": "7 güne uygula",
+      "wholeWeekApplied": "7 gün uygulandı"
     },
+    "periodDayLabel": "{count} Gün",
     "noResults": {
       "title": "Eşleşen ürün yok",
       "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."

@@ -9,9 +9,11 @@ import { formatPercentDisplay } from '@/lib/format-percent';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
 import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
+import type { WholeWeekControls } from '../lib/whole-week';
 import type { CommissionTariffRow } from '../types';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
+import { WholePeriodToggle } from './whole-period-toggle';
 
 const BAND_INDEXES = [0, 1, 2, 3] as const;
 
@@ -22,6 +24,8 @@ export interface CommissionTariffsMobileCardsProps {
   onSelectBand: (rowId: string, band: string) => void;
   onSelectCustom: (rowId: string, band: string, choice: CustomChoice) => void;
   onDeselectCustom: (rowId: string) => void;
+  /** "7 günlük" spread controls; null for a single-period tariff (no toggle shown). */
+  wholeWeek?: WholeWeekControls | null;
 }
 
 /**
@@ -42,6 +46,7 @@ export function CommissionTariffsMobileCards({
   onSelectBand,
   onSelectCustom,
   onDeselectCustom,
+  wholeWeek,
 }: CommissionTariffsMobileCardsProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
   const reasonLabel = useReasonLabel();
@@ -70,6 +75,15 @@ export function CommissionTariffsMobileCards({
                 ) : null}
                 {!row.calculable && row.reason !== null ? (
                   <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>
+                ) : null}
+                {wholeWeek != null && (wholeWeek.isActive(row.id) || wholeWeek.canApply(row.id)) ? (
+                  <WholePeriodToggle
+                    active={wholeWeek.isActive(row.id)}
+                    onToggle={() => wholeWeek.onToggle(row.id)}
+                    label={t('table.applyWholeWeek')}
+                    activeLabel={t('table.wholeWeekApplied')}
+                    className="mt-2xs"
+                  />
                 ) : null}
               </div>
             </div>
@@ -121,6 +135,7 @@ export function CommissionTariffsMobileCards({
                 isSelected={customPrices[row.id] != null}
                 onSelect={(band, choice) => onSelectCustom(row.id, band, choice)}
                 onDeselect={() => onDeselectCustom(row.id)}
+                committedPrice={customPrices[row.id]?.price ?? null}
               />
             </div>
           </div>

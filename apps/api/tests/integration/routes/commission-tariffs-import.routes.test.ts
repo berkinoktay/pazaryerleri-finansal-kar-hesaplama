@@ -158,6 +158,17 @@ describe('POST .../commission-tariffs/import — real Trendyol fixture', () => {
     expect(imported.skippedRows).toBe(0);
   });
 
+  it('assigns a sequential sortOrder reflecting the Excel row order', async () => {
+    const items = await prisma.commissionTariffItem.findMany({
+      where: { storeId: ctx.storeId },
+      orderBy: { sortOrder: 'asc' },
+      select: { sortOrder: true },
+    });
+    // 0-based, gap-free, one per row — proves the import numbers products by file order
+    // (not all defaulting to 0, which would leave the detail order non-deterministic).
+    expect(items.map((i) => i.sortOrder)).toEqual(items.map((_row, index) => index));
+  });
+
   it('computes per-band profit for the matched product and NO_PRODUCT for the rest', async () => {
     const res = await app.request(
       `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/commission-tariffs/${imported.tariffId}`,
