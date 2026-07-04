@@ -104,8 +104,12 @@ export const AdvantageTierSchema = z
 
 export const AdvantageCurrentScenarioSchema = z
   .object({
+    /** Reduced commission PERCENT at the current customer price (band, else category); null when unresolved. */
+    commissionPct: z.string().nullable(),
     netProfit: z.string().nullable(),
     marginPct: z.string().nullable(),
+    /** True when keeping the current price is the single most-profitable (positive) option. */
+    isBest: z.boolean(),
   })
   .openapi('AdvantageCurrentScenario');
 

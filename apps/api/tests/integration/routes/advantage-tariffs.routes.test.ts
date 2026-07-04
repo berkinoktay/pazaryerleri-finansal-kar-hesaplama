@@ -55,6 +55,7 @@ interface TierWire {
 interface CurrentWire {
   netProfit: string | null;
   marginPct: string | null;
+  isBest: boolean;
 }
 interface ItemWire {
   id: string;
@@ -381,17 +382,23 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     // commissionPct is serialized at 4-decimal precision (matching the commission-tariff
     // vertical's `toFixed(4)`), so the full applied rate is preserved on the wire.
     expect(matched?.tiers.map((t) => t.commissionPct)).toEqual(['13.1000', '11.5000', '8.8000']);
-    // A best tier is marked and is one of the three.
-    expect(matched?.bestTierKey).not.toBeNull();
-    expect(matched?.tiers.map((t) => t.key)).toContain(matched?.bestTierKey);
     // The "do nothing" baseline (current price + its band commission) is computed.
     expect(matched?.current.netProfit).not.toBeNull();
     expect(matched?.current.marginPct).not.toBeNull();
+    // Every scenario here runs at a loss (cost 200 against the marketplace's commission +
+    // fees), so "En kârlı" is shown NOWHERE — neither a tier nor the current baseline is
+    // flagged. This is the regression Berkin caught: a loss must never read as "best".
+    expect(Number(matched?.current.netProfit)).toBeLessThan(0);
+    expect(matched?.current.isBest).toBe(false);
+    expect(matched?.bestTierKey).toBeNull();
 
     const unmatched = body.items.find((i) => i.barcode === 'ADV-UNKNOWN');
     expect(unmatched?.calculable).toBe(false);
     expect(unmatched?.reason).toBe('NO_PRODUCT');
     expect(unmatched?.tiers.every((t) => t.netProfit === null)).toBe(true);
+    // An uncalculable item is never "En kârlı" — neither a tier nor the current baseline.
+    expect(unmatched?.bestTierKey).toBeNull();
+    expect(unmatched?.current.isBest).toBe(false);
     // An unmatched item has no catalog product, so no image.
     expect(unmatched?.imageUrl).toBeNull();
   });

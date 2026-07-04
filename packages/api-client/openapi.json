@@ -5943,6 +5943,12 @@
       "AdvantageCurrentScenario": {
         "type": "object",
         "properties": {
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "netProfit": {
             "type": [
               "string",
@@ -5954,11 +5960,16 @@
               "string",
               "null"
             ]
+          },
+          "isBest": {
+            "type": "boolean"
           }
         },
         "required": [
+          "commissionPct",
           "netProfit",
-          "marginPct"
+          "marginPct",
+          "isBest"
         ]
       },
       "AdvantageTier": {

@@ -3,11 +3,7 @@
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
-import { formatPercentDisplay } from '@/lib/format-percent';
-import { marginColorStyle } from '@/lib/margin-color-style';
-import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useAdvantageReasonLabel } from '../hooks/use-advantage-reason-label';
 import {
@@ -18,6 +14,7 @@ import {
   type NonNullStarTierKey,
 } from '../lib/advantage-bulk-actions';
 import type { AdvantageTariffDetailItem } from '../types';
+import { AdvantageCurrentCell } from './advantage-current-cell';
 import { AdvantageCustomPriceCell } from './advantage-custom-price-cell';
 import { AdvantageTierCell } from './advantage-tier-cell';
 
@@ -55,7 +52,6 @@ export function AdvantageTariffsMobileCards({
   const t = useTranslations('productLabelsPage');
   const tTier = useTranslations('productLabelsPage.tier');
   const reasonLabel = useAdvantageReasonLabel();
-  const marginScale = useMarginColoring();
 
   return (
     <div className="gap-sm flex flex-col">
@@ -66,9 +62,6 @@ export function AdvantageTariffsMobileCards({
         ]
           .filter((v) => v !== null && v !== '')
           .join(' · ');
-        // Profit is computed on the price the buyer pays (customerPrice); surface the raw
-        // Trendyol list price only when a discount makes the two differ.
-        const hasDiscount = row.currentPrice !== row.customerPrice;
         return (
           <div
             key={row.id}
@@ -88,42 +81,14 @@ export function AdvantageTariffsMobileCards({
               </div>
             </div>
 
-            {/* Zone 2: current baseline — plain label→value rows (no box), the "do
-                nothing" reference every tier is compared against. */}
-            <div className="gap-2xs border-border pt-md flex flex-col border-t">
-              <div className="gap-sm flex items-baseline justify-between">
-                <span className="text-2xs text-muted-foreground">
-                  {hasDiscount ? t('table.displayPrice') : t('table.current')}
-                </span>
-                <span className="text-sm font-semibold tabular-nums">
-                  <Currency value={row.customerPrice} />
-                </span>
-              </div>
-              {hasDiscount ? (
-                <div className="gap-sm flex items-baseline justify-between">
-                  <span className="text-2xs text-muted-foreground">{t('table.salePrice')}</span>
-                  <span className="text-2xs text-muted-foreground tabular-nums">
-                    <Currency value={row.currentPrice} />
-                  </span>
-                </div>
-              ) : null}
-              <div className="gap-sm flex items-baseline justify-between">
-                <span className="text-2xs text-muted-foreground">
-                  {t('table.calculatedProfit')}
-                </span>
-                {row.current.netProfit !== null ? (
-                  <span
-                    className="text-2xs font-medium tabular-nums"
-                    // runtime-dynamic: margin-driven tinted text for the baseline profit
-                    style={marginColorStyle(row.current.marginPct, marginScale)}
-                  >
-                    <Currency value={row.current.netProfit} /> ·{' '}
-                    {formatPercentDisplay(row.current.marginPct)}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-2xs">—</span>
-                )}
-              </div>
+            {/* Zone 2: current baseline — same price + commission + ProfitBadge treatment as
+                the tier blocks below (via AdvantageCurrentCell), so the "do nothing" reference
+                is directly comparable to each advantage tier. */}
+            <div className="border-border pt-md flex flex-col border-t">
+              <span className="text-2xs text-muted-foreground mb-2xs font-medium">
+                {t('table.displayPrice')}
+              </span>
+              <AdvantageCurrentCell row={row} />
             </div>
 
             {/* Zone 3: one flat block per star tier, each with its own select control. */}

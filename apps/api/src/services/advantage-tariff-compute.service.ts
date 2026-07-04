@@ -60,8 +60,12 @@ export interface ComputedTierResult {
 }
 
 export interface ComputedCurrentScenario {
+  /** Reduced commission PERCENT applied at the current customer price (band, else category). */
+  readonly commissionPct: string | null;
   readonly netProfit: string | null;
   readonly marginPct: string | null;
+  /** True when keeping the current price is the single most-profitable (and positive) option. */
+  readonly isBest: boolean;
 }
 
 export interface ComputedAdvantageItem {
@@ -74,7 +78,12 @@ export interface ComputedAdvantageItem {
   readonly current: ComputedCurrentScenario;
 }
 
-const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
+const NULL_CURRENT: ComputedCurrentScenario = {
+  commissionPct: null,
+  netProfit: null,
+  marginPct: null,
+  isBest: false,
+};
 
 /** The commission inputs resolved for one advantage item (per §advantage-labels design). */
 export interface ItemCommissionInputs {
@@ -130,6 +139,37 @@ function uncalculableTierResults(
       marginPct: null,
     };
   });
+}
+
+/**
+ * Picks the single most-profitable option across the "do nothing" current baseline AND
+ * every star tier, but ONLY when that winner is actually PROFITABLE (netProfit > 0) —
+ * flagging a loss as "En kârlı" is misleading. The current baseline is weighed FIRST so a
+ * tie favors keeping the current price (no reason to change price just to move the badge).
+ * When the current price wins, no tier is flagged (`currentIsBest`, `bestTierKey = null`);
+ * when a tier wins, only that tier is flagged; when nothing is positive, neither is.
+ */
+export function selectBestScenario(
+  currentNetProfit: string | null,
+  tiers: ReadonlyArray<{ readonly key: StarTierKey; readonly netProfit: string | null }>,
+): { bestTierKey: StarTierKey | null; currentIsBest: boolean } {
+  let bestKey: StarTierKey | 'current' | null = null;
+  let bestProfit: Decimal | null = null;
+  const consider = (key: StarTierKey | 'current', profit: string | null): void => {
+    if (profit === null) return;
+    const p = new Decimal(profit);
+    if (!p.gt(0)) return;
+    if (bestProfit === null || p.gt(bestProfit)) {
+      bestProfit = p;
+      bestKey = key;
+    }
+  };
+  consider('current', currentNetProfit);
+  for (const tier of tiers) consider(tier.key, tier.netProfit);
+  return {
+    bestTierKey: bestKey !== null && bestKey !== 'current' ? bestKey : null,
+    currentIsBest: bestKey === 'current',
+  };
 }
 
 /**
@@ -192,22 +232,20 @@ export function computeAdvantageItemTiers(
 
   // Baseline ("do nothing"): current price at its resolved commission.
   const currentResolved = resolveCommission(commission, currentPrice);
-  const current: ComputedCurrentScenario =
+  const currentBase: Omit<ComputedCurrentScenario, 'isBest'> =
     currentResolved === null
-      ? NULL_CURRENT
+      ? { commissionPct: null, netProfit: null, marginPct: null }
       : (() => {
           const breakdown = computeUnitProfit(
             { ...baseEcon, commissionRate: currentResolved.pct },
             currentPrice,
           );
           return {
+            commissionPct: currentResolved.pct.toFixed(4),
             netProfit: breakdown.netProfit.toFixed(2),
             marginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
           };
         })();
-
-  let bestTierKey: StarTierKey | null = null;
-  let bestProfit: Decimal | null = null;
 
   const results = tiers.map((tier): ComputedTierResult => {
     const price = new Decimal(tier.upperLimit);
@@ -226,10 +264,6 @@ export function computeAdvantageItemTiers(
     }
     const econ: UnitEconomics = { ...baseEcon, commissionRate: resolved.pct };
     const breakdown = computeUnitProfit(econ, price);
-    if (bestProfit === null || breakdown.netProfit.gt(bestProfit)) {
-      bestProfit = breakdown.netProfit;
-      bestTierKey = tier.key;
-    }
     return {
       key: tier.key,
       upperLimit: tier.upperLimit,
@@ -241,6 +275,9 @@ export function computeAdvantageItemTiers(
       marginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
     };
   });
+
+  const { bestTierKey, currentIsBest } = selectBestScenario(currentBase.netProfit, results);
+  const current: ComputedCurrentScenario = { ...currentBase, isBest: currentIsBest };
 
   return { calculable: true, reason: null, tiers: results, bestTierKey, current };
 }

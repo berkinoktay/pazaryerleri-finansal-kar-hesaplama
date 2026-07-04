@@ -68,7 +68,7 @@ interface DetailWire {
     barcode: string;
     calculable: boolean;
     reason: string | null;
-    current: { netProfit: string | null };
+    current: { netProfit: string | null; isBest: boolean };
     tiers: TierWire[];
     bestTierKey: string | null;
   }[];
@@ -252,7 +252,10 @@ describe('POST .../advantage-tariffs/import - real Trendyol fixture + commission
     expect(matched?.calculable).toBe(true);
     expect(matched?.reason).toBeNull();
     expect(matched?.current.netProfit).not.toBeNull();
-    expect(matched?.bestTierKey).not.toBeNull();
+    // "En kârlı" spans the baseline + tiers, and the two flags are mutually exclusive —
+    // never a tier AND the current baseline at once. (The exhaustive per-case selection
+    // logic is covered in tests/unit/advantage-tariff-best-selection.test.ts.)
+    expect(matched?.current.isBest && matched?.bestTierKey !== null).toBe(false);
     // Every tier's reduced commission came from a band and produced a real profit.
     for (const tier of matched?.tiers ?? []) {
       expect(tier.commissionSource).toBe('band');

@@ -1281,7 +1281,6 @@
     "table": {
       "product": "Product Info",
       "current": "Current price",
-      "salePrice": "Sale price",
       "displayPrice": "Price the customer sees",
       "calculatedProfit": "Calculated profit",
       "vsCurrent": "vs current",

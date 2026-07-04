@@ -4,16 +4,12 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
-import { formatPercentDisplay } from '@/lib/format-percent';
-import { marginColorStyle } from '@/lib/margin-color-style';
-import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { useAdvantageReasonLabel } from '../hooks/use-advantage-reason-label';
@@ -25,6 +21,7 @@ import {
   type NonNullStarTierKey,
 } from '../lib/advantage-bulk-actions';
 import type { AdvantageTariffDetailItem } from '../types';
+import { AdvantageCurrentCell } from './advantage-current-cell';
 import { AdvantageCustomPriceCell } from './advantage-custom-price-cell';
 import { AdvantageTierCell } from './advantage-tier-cell';
 
@@ -61,7 +58,6 @@ export function AdvantageTariffsTable({
   const t = useTranslations('productLabelsPage');
   const tTier = useTranslations('productLabelsPage.tier');
   const reasonLabel = useAdvantageReasonLabel();
-  const marginScale = useMarginColoring();
   // Local (not persisted): every tariff opens at its normal 100% size; the seller can
   // shrink it to fit for that session.
   const [tableScale, setTableScale] = React.useState(TABLE_SCALE_DEFAULT);
@@ -101,43 +97,12 @@ export function AdvantageTariffsTable({
     const currentColumn: ColumnDef<AdvantageTariffDetailItem> = {
       id: 'current',
       // Every non-product column centers its header + content (seller preference).
-      header: () => <span className="block w-full text-center">{t('table.current')}</span>,
-      meta: { label: t('table.current') },
-      cell: ({ row }) => {
-        const r = row.original;
-        // Trendyol levies commission and checks badge eligibility on the price the buyer
-        // actually pays. Lead with that (customerPrice); surface the raw Trendyol list
-        // price (currentPrice / TSF) only when a discount makes the two differ.
-        const hasDiscount = r.currentPrice !== r.customerPrice;
-        return (
-          <div className="gap-3xs flex w-full flex-col items-center text-center text-sm">
-            {hasDiscount ? (
-              <span className="text-2xs text-muted-foreground">{t('table.displayPrice')}</span>
-            ) : null}
-            <div className="font-semibold tabular-nums">
-              <Currency value={r.customerPrice} />
-            </div>
-            {hasDiscount ? (
-              <span className="text-2xs text-muted-foreground tabular-nums">
-                {t('table.salePrice')} <Currency value={r.currentPrice} />
-              </span>
-            ) : null}
-            <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
-            {r.current.netProfit !== null ? (
-              <span
-                className="text-sm font-medium tabular-nums"
-                // runtime-dynamic: margin-driven tinted text for the baseline profit
-                style={marginColorStyle(r.current.marginPct, marginScale)}
-              >
-                <Currency value={r.current.netProfit} /> ·{' '}
-                {formatPercentDisplay(r.current.marginPct)}
-              </span>
-            ) : (
-              <span className="text-muted-foreground text-sm">{DASH}</span>
-            )}
-          </div>
-        );
-      },
+      header: () => <span className="block w-full text-center">{t('table.displayPrice')}</span>,
+      meta: { label: t('table.displayPrice') },
+      // The current baseline uses the SAME price + commission + ProfitBadge treatment as
+      // the tier columns (via AdvantageCurrentCell) so the seller compares "do nothing"
+      // against each advantage tier on identical terms.
+      cell: ({ row }) => <AdvantageCurrentCell row={row.original} centered />,
     };
 
     const tierColumns: ColumnDef<AdvantageTariffDetailItem>[] = TIER_KEYS.map((key) => ({
@@ -178,17 +143,7 @@ export function AdvantageTariffsTable({
     };
 
     return [productColumn, currentColumn, ...tierColumns, customPriceColumn];
-  }, [
-    t,
-    tTier,
-    reasonLabel,
-    marginScale,
-    tiers,
-    customPrices,
-    onSelectTier,
-    onSelectCustom,
-    onDeselectCustom,
-  ]);
+  }, [t, tTier, reasonLabel, tiers, customPrices, onSelectTier, onSelectCustom, onDeselectCustom]);
 
   return (
     <DataTable<AdvantageTariffDetailItem, unknown>
