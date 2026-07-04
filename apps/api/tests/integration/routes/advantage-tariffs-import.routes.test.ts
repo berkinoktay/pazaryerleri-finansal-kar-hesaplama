@@ -28,10 +28,7 @@ import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 const app = createApp();
 
 const FIXTURE = readFileSync(
-  new URL(
-    '../../../../../docs/excel-examples/trendyol_avantajli_urun_etiketleri.xlsx',
-    import.meta.url,
-  ),
+  new URL('../../fixtures/trendyol-advantage-tariff.xlsx', import.meta.url),
 );
 // First data row of the real export: "Var", tier prices 292,91 / 274,42 / 223,78,
 // current sale price 360,00.

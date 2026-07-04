@@ -36,10 +36,7 @@ const app = createApp();
 // validation case below (a valid file must parse before the commission-source pin
 // is validated).
 const ADVANTAGE_FIXTURE = readFileSync(
-  new URL(
-    '../../../../../docs/excel-examples/trendyol_avantajli_urun_etiketleri.xlsx',
-    import.meta.url,
-  ),
+  new URL('../../fixtures/trendyol-advantage-tariff.xlsx', import.meta.url),
 );
 
 interface TierWire {
