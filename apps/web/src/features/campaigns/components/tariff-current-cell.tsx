@@ -31,20 +31,33 @@ export interface TariffCurrentCellProps {
   /** What the empty badge shows when `netProfit` is `null` (e.g. "Maliyet girin"); defaults to an em-dash. */
   emptyLabel?: React.ReactNode;
   /**
-   * Reserved "En kârlı" slot. `{ label, visible }` renders a star badge whose
+   * Reserved "En kârlı" slot. `{ label, visible, icon? }` renders a badge whose
    * VISIBILITY is `visible` but whose height is always reserved (keeps the price
-   * aligned with the tier columns). `null`/omitted → the slot is not rendered at
-   * all, adding no height (the commission-current cell has no "best" concept).
+   * aligned with the tier columns). `icon` overrides the leading glyph — the
+   * Advantage vertical keeps the default {@link StarIcon}, while the commission
+   * vertical passes a Sparkles icon so its marker matches the band/custom ribbons.
+   * `null`/omitted → the slot is not rendered at all, adding no height.
    */
-  bestBadge?: { label: string; visible: boolean } | null;
+  bestBadge?: { label: string; visible: boolean; icon?: React.ReactNode } | null;
   /**
    * Center the content — the Advantage desktop columns are centered; the
    * commission-current column (and both mobile zones) are left-aligned.
    */
   centered?: boolean;
+  /**
+   * Desktop min width of the cell. `band` (default) matches a full band card so the
+   * Advantage columns line up; `current` is a touch narrower (no card frame around
+   * the commission-current cell, so it needn't reserve the band card's padding).
+   */
+  minWidth?: 'band' | 'current';
   /** The caller's breakdown modal (Advantage vs commission use different ones). */
   children?: React.ReactNode;
 }
+
+const MIN_WIDTH_CLASS: Record<NonNullable<TariffCurrentCellProps['minWidth']>, string> = {
+  band: 'md:min-w-tariff-band',
+  current: 'md:min-w-tariff-current',
+};
 
 /**
  * Presentational shell for a campaign vertical's CURRENT baseline cell — the "do
@@ -57,7 +70,9 @@ export interface TariffCurrentCellProps {
  * Shared by two verticals so their current cell reads identically:
  *   - Advantage current ({@link AdvantageCurrentCell}) — centered, with a reserved
  *     "En kârlı" slot (keeping the current price can be the single best option).
- *   - Commission current ({@link CurrentPriceCell}) — left-aligned, no "best" slot.
+ *   - Commission current ({@link CurrentPriceCell}) — left-aligned and a touch
+ *     narrower (`minWidth="current"`), passing the "En kârlı" badge only when keeping
+ *     the current price wins the row (no reserved slot, so it adds no height otherwise).
  */
 export function TariffCurrentCell({
   price,
@@ -71,6 +86,7 @@ export function TariffCurrentCell({
   emptyLabel,
   bestBadge = null,
   centered = false,
+  minWidth = 'band',
   children,
 }: TariffCurrentCellProps): React.ReactElement {
   const items = centered ? 'items-center' : 'items-start';
@@ -79,7 +95,8 @@ export function TariffCurrentCell({
   return (
     <div
       className={cn(
-        'gap-sm md:min-w-tariff-band flex min-w-0 flex-col',
+        'gap-sm flex min-w-0 flex-col',
+        MIN_WIDTH_CLASS[minWidth],
         items,
         centered && 'w-full text-center',
       )}
@@ -93,7 +110,7 @@ export function TariffCurrentCell({
             tone="primary"
             variant="solid"
             radius="full"
-            leadingIcon={<StarIcon />}
+            leadingIcon={bestBadge.icon ?? <StarIcon />}
             className={cn(
               'text-2xs px-2xs gap-3xs py-0 font-medium [&_svg]:size-3',
               !bestBadge.visible && 'invisible',

@@ -15,6 +15,7 @@ import type { CustomChoice } from '../lib/bulk-actions';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
+import { TariffBestRibbon } from './tariff-best-ribbon';
 import { TariffOptionCard } from './tariff-option-card';
 import { TariffProfitBlock } from './tariff-profit-block';
 import { TariffSelectFoot } from './tariff-select-foot';
@@ -44,6 +45,36 @@ export interface CustomPriceCellProps {
    * the server value.
    */
   committedPrice?: string | null;
+  /** Whether the typed custom price is the row's most profitable option (an "En kârlı" ribbon). */
+  isBest?: boolean;
+  /**
+   * Reports the estimated profit CURRENTLY SHOWN in this card back to the parent — the
+   * debounced what-if `netProfit` when it returns, or `null` when the input is cleared.
+   * The row's "En kârlı" marker races this LIVE (uncommitted) figure so the badge moves
+   * the instant the estimate lands, without waiting for "Bu fiyatı seç". It feeds ONLY
+   * the badge race — export/summary still key off the committed `customPrices`.
+   *
+   * The callback carries the `rowId` so the parent's ONE stable handler can be passed
+   * DIRECTLY (no per-row inline arrow). A fresh closure here would change the effect's
+   * dependency identity every render and needlessly restart the debounce.
+   */
+  onEstimate?: (rowId: string, netProfit: string | null) => void;
+  /**
+   * Reads this row's surviving DRAFT price from the parent's ref-based store, so a price
+   * typed but NOT committed comes back after the cell unmounts — the DataTable unmounts
+   * off-page rows on pagination, and a filter / tab switch unmounts the whole set. Return
+   * value: `undefined` = no draft (seed from the committed / server price), `null` = the
+   * seller deliberately cleared it (start EMPTY, do not fall back), a string = the draft
+   * price. Read only in the mount-time lazy initializer — the draft must not drive renders
+   * (the "En kârlı" race keys off `customEstimates`), so a ref is the right store.
+   */
+  getDraft?: (rowId: string) => string | null | undefined;
+  /**
+   * Persists this row's draft price into the parent's ref store on every keystroke so it
+   * survives an unmount. A cleared input reports `null` (a deliberate clear that keeps the
+   * remounted input empty); a typed value reports its decimal string.
+   */
+  onDraftChange?: (rowId: string, price: string | null) => void;
 }
 
 /**
@@ -67,6 +98,10 @@ export function CustomPriceCell({
   onSelect,
   onDeselect,
   committedPrice = null,
+  isBest = false,
+  onEstimate,
+  getDraft,
+  onDraftChange,
 }: CustomPriceCellProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
   const tBreakdown = useTranslations('commissionTariffsPage.breakdown');
@@ -74,13 +109,19 @@ export function CustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
-  // Seed the input from the edit-buffer's custom price (so the same amount picked in
-  // another sub-period shows here), falling back to the persisted value so reopening
-  // a tariff shows it. The debounced effect then re-estimates for THIS period's item.
-  const seededPrice = committedPrice ?? row.customPrice;
-  const [price, setPrice] = React.useState<Decimal | null>(
-    seededPrice !== null ? new Decimal(seededPrice) : null,
-  );
+  // Seed the input, highest priority first: a surviving DRAFT from the parent's ref store
+  // (so a price typed but not committed comes back after a pagination / filter / tab
+  // unmount), then the edit-buffer's committed custom price (the same amount picked in
+  // another sub-period), then the persisted server value (so reopening a tariff shows it).
+  // A `null` draft means the seller deliberately cleared the field, so start empty — do
+  // NOT fall through to the committed / server price. Reading the ref here, only in the
+  // mount-time lazy initializer, is the accepted escape hatch: the draft must not drive
+  // renders, so it lives in a ref. The debounced effect then re-estimates for this item.
+  const [price, setPrice] = React.useState<Decimal | null>(() => {
+    const draft = getDraft?.(row.id);
+    const seed = draft !== undefined ? draft : (committedPrice ?? row.customPrice);
+    return seed !== null ? new Decimal(seed) : null;
+  });
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   // Last SUCCESSFUL estimate. `mutate()` resets `estimate.data` to undefined,
   // which would unmount the badge on every debounced keystroke; keeping the
@@ -98,16 +139,29 @@ export function CustomPriceCell({
     const handle = setTimeout(() => {
       estimateMutate(
         { itemId: row.id, body: { price: priceStr } },
-        { onSuccess: (data) => setLastResult(data) },
+        {
+          onSuccess: (data) => {
+            setLastResult(data);
+            // Event-driven report of the figure shown here so the row's "En kârlı"
+            // badge races this live estimate — no watcher effect, fired on success.
+            onEstimate?.(row.id, data.breakdown?.netProfit ?? null);
+          },
+        },
       );
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(handle);
     };
-  }, [price, row.id, estimateMutate]);
+  }, [price, row.id, estimateMutate, onEstimate]);
 
   function handleChange(next: Decimal | null): void {
     setPrice(next);
+    // Persist the draft into the parent's ref so it survives an unmount (pagination /
+    // filter / tab switch); a cleared input records `null` — a deliberate clear that keeps
+    // the remounted input empty rather than re-seeding from the committed / server price.
+    onDraftChange?.(row.id, next !== null ? next.toFixed(2) : null);
+    // Clearing the input drops the custom candidate from the "En kârlı" race at once.
+    if (next === null) onEstimate?.(row.id, null);
     // Editing a committed custom price un-commits it — the seller re-confirms the
     // new value, so the selected amount is always the last confirmed one.
     if (isSelected) onDeselect();
@@ -145,6 +199,11 @@ export function CustomPriceCell({
 
   return (
     <TariffOptionCard selected={isSelected}>
+      {/* "En kârlı" — the same absolute ribbon the bands wear (the card is already
+          relative+isolate), rendered only when the typed custom price is the row's
+          most profitable option. */}
+      {isBest ? <TariffBestRibbon label={t('table.best')} /> : null}
+
       {/* Input group — the field stands in for the band's static price, the derived
           line for the band's "komisyon %" line. */}
       <div className="gap-3xs flex w-full flex-col items-start">

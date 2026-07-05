@@ -84,8 +84,40 @@ export function CommissionTariffDetailClient({
   // amount overriding that band's boundary price. Choosing a band clears the row's
   // custom price; committing a custom price sets both. Both stay local (edit state)
   // and save together on "Kaydet ve İndir".
-  const [selection, setSelection] = React.useState<SelectionMap>({});
-  const [customPrices, setCustomPrices] = React.useState<CustomPriceMap>({});
+  //
+  // They live in ONE state object so the select/deselect handlers below can be
+  // identity-stable `useCallback([])`: a functional `setChoices((prev) => …)` reads
+  // BOTH maps from `prev`, so no handler needs `customPrices` in its deps. A stable
+  // handler identity is what keeps the table's `columns` from rebuilding — rebuilding
+  // remounts every cell (flexRender renders each `cell:` as a component) and wipes a
+  // half-typed custom price. See commission-tariffs-table.tsx.
+  const [choices, setChoices] = React.useState<CommissionSelectionState>({
+    selection: {},
+    customPrices: {},
+  });
+  const { selection, customPrices } = choices;
+  // UNCOMMITTED live what-if profit per row (the figure the custom-price card shows
+  // while the seller is still typing). It exists ONLY to let the "En kârlı" badge race
+  // the live estimate before "Bu fiyatı seç" — it never feeds export or the summary.
+  const [customEstimates, setCustomEstimates] = React.useState<Record<string, string | null>>({});
+  // Uncommitted "what-if" draft prices per row, kept in a REF so they survive the cell
+  // unmounting: the DataTable unmounts off-page rows on pagination, and a filter / tab
+  // switch unmounts the whole set. Without this store a half-typed, NOT-yet-committed
+  // draft is lost on remount — a committed price re-seeds from `customPrices`, but an
+  // uncommitted one has no copy anywhere else. Map semantics: NO key = never touched (the
+  // cell falls back to its committed / server seed), value `null` = the seller
+  // deliberately cleared it (stay empty), a string = the draft price. It is a ref, not
+  // state, because the draft must NOT drive renders — the "En kârlı" marker already tracks
+  // the live figure through `customEstimates`. Making it state would re-render the whole
+  // table on every keystroke; a ref costs nothing and is read only at a cell's mount.
+  const customDraftsRef = React.useRef(new Map<string, string | null>());
+  const getCustomDraft = React.useCallback(
+    (rowId: string): string | null | undefined => customDraftsRef.current.get(rowId),
+    [],
+  );
+  const handleCustomDraftChange = React.useCallback((rowId: string, price: string | null): void => {
+    customDraftsRef.current.set(rowId, price);
+  }, []);
   const [exportOpen, setExportOpen] = React.useState(false);
   const [seededTariffId, setSeededTariffId] = React.useState<string | null>(null);
   // View state (filters + active period tab) is URL-owned via nuqs: reload /
@@ -160,30 +192,34 @@ export function CommissionTariffDetailClient({
         }
       }
     }
-    setSelection(seed);
-    setCustomPrices(seedCustom);
+    setChoices({ selection: seed, customPrices: seedCustom });
     setSeededTariffId(template.id);
   }
 
-  const handleSelectBand = React.useCallback(
-    (rowId: string, band: string): void => {
-      // Toggle off only when re-clicking the PLAIN boundary selection; when a custom
-      // price is active, clicking a band replaces it (never toggles off). Either way,
-      // choosing a band clears the row's custom price — a row has one choice.
-      setSelection((prev) => {
-        const isBoundarySelected = prev[rowId] === band && customPrices[rowId] == null;
-        return { ...prev, [rowId]: isBoundarySelected ? null : band };
-      });
-      setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
-    },
-    [customPrices],
-  );
+  const handleSelectBand = React.useCallback((rowId: string, band: string): void => {
+    // Toggle off only when re-clicking the PLAIN boundary selection; when a custom
+    // price is active, clicking a band replaces it (never toggles off). Either way,
+    // choosing a band clears the row's custom price — a row has one choice. Both maps
+    // are read from `prev` so the handler needs no deps (stable identity).
+    setChoices((prev) => {
+      const isBoundarySelected = prev.selection[rowId] === band && prev.customPrices[rowId] == null;
+      return {
+        selection: { ...prev.selection, [rowId]: isBoundarySelected ? null : band },
+        customPrices:
+          prev.customPrices[rowId] == null
+            ? prev.customPrices
+            : { ...prev.customPrices, [rowId]: null },
+      };
+    });
+  }, []);
 
   const handleSelectCustom = React.useCallback(
     (rowId: string, band: string, choice: CustomChoice): void => {
       // A confirmed custom price sets both the derived band and the amount.
-      setSelection((prev) => ({ ...prev, [rowId]: band }));
-      setCustomPrices((prev) => ({ ...prev, [rowId]: choice }));
+      setChoices((prev) => ({
+        selection: { ...prev.selection, [rowId]: band },
+        customPrices: { ...prev.customPrices, [rowId]: choice },
+      }));
     },
     [],
   );
@@ -191,9 +227,26 @@ export function CommissionTariffDetailClient({
   const handleDeselectCustom = React.useCallback((rowId: string): void => {
     // Un-committing a custom price clears the whole row choice (the band was only
     // there because of the custom price).
-    setSelection((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
-    setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
+    setChoices((prev) => ({
+      selection:
+        prev.selection[rowId] == null ? prev.selection : { ...prev.selection, [rowId]: null },
+      customPrices:
+        prev.customPrices[rowId] == null
+          ? prev.customPrices
+          : { ...prev.customPrices, [rowId]: null },
+    }));
   }, []);
+
+  const handleCustomEstimate = React.useCallback(
+    (rowId: string, netProfit: string | null): void => {
+      // Identity guard — the debounced estimate often resolves to the same figure; skip
+      // the state update (and the re-render) when nothing actually changed.
+      setCustomEstimates((prev) =>
+        prev[rowId] === netProfit ? prev : { ...prev, [rowId]: netProfit },
+      );
+    },
+    [],
+  );
 
   if (detail.isLoading) {
     // Full page-anatomy placeholder (back link + header + 4-cell summary strip
@@ -281,19 +334,10 @@ export function CommissionTariffDetailClient({
   const applyBulk = (
     fn: (rows: typeof filteredRows, state: CommissionSelectionState) => CommissionSelectionState,
   ): void => {
-    const next = fn(filteredRows, { selection, customPrices });
-    setSelection(next.selection);
-    setCustomPrices(next.customPrices);
+    setChoices((prev) => fn(filteredRows, prev));
   };
   const onTargetMargin = (targetPct: number, strategy: TargetStrategy): void => {
-    const next = selectByTargetMargin(
-      filteredRows,
-      { selection, customPrices },
-      targetPct,
-      strategy,
-    );
-    setSelection(next.selection);
-    setCustomPrices(next.customPrices);
+    setChoices((prev) => selectByTargetMargin(filteredRows, prev, targetPct, strategy));
   };
 
   const onSaveExport = (): void => {
@@ -414,9 +458,13 @@ export function CommissionTariffDetailClient({
             rows={filteredRows}
             selection={selection}
             customPrices={customPrices}
+            customEstimates={customEstimates}
             onSelectBand={handleSelectBand}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
+            onCustomEstimate={handleCustomEstimate}
+            getCustomDraft={getCustomDraft}
+            onCustomDraftChange={handleCustomDraftChange}
             tabs={periodTabs}
             toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
@@ -430,9 +478,13 @@ export function CommissionTariffDetailClient({
             rows={filteredRows}
             selection={selection}
             customPrices={customPrices}
+            customEstimates={customEstimates}
             onSelectBand={handleSelectBand}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
+            onCustomEstimate={handleCustomEstimate}
+            getCustomDraft={getCustomDraft}
+            onCustomDraftChange={handleCustomDraftChange}
           />
         </div>
 

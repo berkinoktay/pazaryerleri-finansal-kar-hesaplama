@@ -1,5 +1,6 @@
 'use client';
 
+import { SparklesIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -13,6 +14,8 @@ import { TariffCurrentCell } from './tariff-current-cell';
 
 export interface CurrentPriceCellProps {
   row: CommissionTariffRow;
+  /** Whether keeping the current price/commission is the row's most profitable option (an "En kârlı" badge). */
+  isBest?: boolean;
 }
 
 /**
@@ -22,10 +25,15 @@ export interface CurrentPriceCellProps {
  * its current commission, and the calculated profit as the SAME clickable {@link
  * ProfitBadge} the bands show. Presentation lives in the shared {@link
  * TariffCurrentCell}; this owns the data, the current-scenario estimate call, and the
- * breakdown modal. No "En kârlı" slot and left-aligned (the commission column has no
- * "best" concept). No client-side money math — the badge and modal are backend-computed.
+ * breakdown modal. Left-aligned and a touch narrower than a band card
+ * (`minWidth="current"`). Renders the starred "En kârlı" badge ONLY when keeping the
+ * current price is the row's most profitable choice — so the whole-row marker can land
+ * here. No client-side money math — the badge and modal are backend-computed.
  */
-export function CurrentPriceCell({ row }: CurrentPriceCellProps): React.ReactElement {
+export function CurrentPriceCell({
+  row,
+  isBest = false,
+}: CurrentPriceCellProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
   const scale = useMarginColoring();
   const scope = useTariffScope();
@@ -55,6 +63,13 @@ export function CurrentPriceCell({ row }: CurrentPriceCellProps): React.ReactEle
       scale={scale}
       onOpenBreakdown={openBreakdown}
       emptyLabel={row.reason === 'NO_COST' ? t('table.enterCost') : undefined}
+      minWidth="current"
+      // "En kârlı" badge only when keeping the current price wins the row — no
+      // reserved slot, so a non-best current cell adds no height. Sparkles icon (not
+      // the Advantage Star) so the marker matches the band/custom ribbons on this row.
+      bestBadge={
+        isBest === true ? { label: t('table.best'), visible: true, icon: <SparklesIcon /> } : null
+      }
     >
       <CommissionTariffBreakdown
         open={breakdownOpen}

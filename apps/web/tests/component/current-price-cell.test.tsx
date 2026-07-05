@@ -71,6 +71,16 @@ describe('CurrentPriceCell', () => {
     expect(screen.queryByText(/780,00/)).toBeNull();
   });
 
+  it('shows the "En kârlı" badge when isBest is set', () => {
+    renderCell({ row, isBest: true });
+    expect(screen.getByText(/en kârlı/i)).toBeInTheDocument();
+  });
+
+  it('hides the "En kârlı" badge by default (no reserved slot)', () => {
+    renderCell({ row });
+    expect(screen.queryByText(/en kârlı/i)).toBeNull();
+  });
+
   it("opens the breakdown with a scenario:'current' estimate request on badge click", async () => {
     let capturedBody: unknown;
     server.use(

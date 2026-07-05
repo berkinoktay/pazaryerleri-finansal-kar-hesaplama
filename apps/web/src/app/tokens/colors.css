@@ -151,11 +151,15 @@
   --primary-foreground: oklch(98% 0.004 265);
   --primary-hover: oklch(40% 0.15 265);
   /* Primary-soft — restrained brand-tinted surface for SELECTED states
-     (toggle on-state, connected ToggleGroup selection). Carries brand
-     identity without the loudness of a full --primary fill; same language
-     as the nav's --sidebar-active. --primary-soft-foreground (brand text)
-     clears AA on it. */
-  --primary-soft: oklch(92% 0.04 265);
+     (toggle on-state, connected ToggleGroup selection, selected option
+     cards). Carries brand identity without the loudness of a full
+     --primary fill; the same brand-tint language as the nav's
+     --sidebar-active, but eased ~halfway toward --background (97% / 0.008)
+     so it stays calm across a large fill (a whole option card, not just a
+     nav pill — the earlier 92% / 0.04 read too dark at that scale).
+     --primary-soft-foreground (brand text) clears AA on it — better now
+     against the lighter surface. */
+  --primary-soft: oklch(94.5% 0.024 265);
   --primary-soft-foreground: oklch(40% 0.15 265);
 
   --secondary: oklch(93.5% 0.006 265);
@@ -325,9 +329,12 @@
   --primary: oklch(72% 0.13 265);
   --primary-foreground: oklch(15% 0.01 265);
   --primary-hover: oklch(78% 0.11 265);
-  /* Dark primary-soft lifts ABOVE --card (raised = lighter), tinted toward
-     primary; foreground clears AA (~5.4:1). Mirrors --sidebar-active dark. */
-  --primary-soft: oklch(30% 0.05 265);
+  /* Dark primary-soft lifts ABOVE --card (17% / 0.012) so "raised = lighter"
+     holds, and stays above the row hover / active layers (20% / 23%), tinted
+     toward primary. Eased ~halfway from the nav's --sidebar-active pill (30%)
+     toward --card so a whole selected option card doesn't read as a heavy
+     block; foreground clears AA — contrast improves on the darker fill. */
+  --primary-soft: oklch(23.5% 0.03 265);
   --primary-soft-foreground: oklch(80% 0.11 265);
 
   --secondary: oklch(22% 0.012 265);

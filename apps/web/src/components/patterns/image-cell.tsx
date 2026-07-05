@@ -26,6 +26,10 @@ import { cn } from '@/lib/utils';
  * — paired with `fallback="initials"` it reads as the canonical avatar
  * primitive.
  *
+ * `fit="contain"` shows the whole product photo un-cropped (letterboxed
+ * against the `bg-muted` backing) instead of the default `cover` crop —
+ * use it where the SKU's true shape matters more than filling the tile.
+ *
  * Domain wrappers (e.g. `ProductImageCell`) compose this with their
  * own defaults rather than re-implementing the fallback / lazy /
  * onError plumbing — same WET+1 promotion logic that motivated
@@ -37,12 +41,18 @@ import { cn } from '@/lib/utils';
 export type ImageCellSize = 'sm' | 'md' | 'lg' | 'xl';
 export type ImageCellShape = 'square' | 'circle';
 export type ImageCellFallback = 'icon' | 'initials';
+export type ImageCellFit = 'cover' | 'contain';
 
 const SIZE_CLASS: Record<ImageCellSize, string> = {
   sm: 'size-thumb-sm',
   md: 'size-thumb-md',
   lg: 'size-thumb-lg',
   xl: 'size-thumb-xl',
+};
+
+const FIT_CLASS: Record<ImageCellFit, string> = {
+  cover: 'object-cover',
+  contain: 'object-contain',
 };
 
 export interface ImageCellProps {
@@ -54,6 +64,8 @@ export interface ImageCellProps {
   shape?: ImageCellShape;
   /** What to render when `src` is missing or fails to load. Defaults to `icon`. */
   fallback?: ImageCellFallback;
+  /** How the image fills its tile — `cover` (default, crop to fill) or `contain` (letterbox, no crop). */
+  fit?: ImageCellFit;
   className?: string;
 }
 
@@ -63,6 +75,7 @@ export function ImageCell({
   size = 'md',
   shape = 'square',
   fallback = 'icon',
+  fit = 'cover',
   className,
 }: ImageCellProps): React.ReactElement {
   const [errored, setErrored] = React.useState(false);
@@ -101,7 +114,7 @@ export function ImageCell({
           loading="lazy"
           decoding="async"
           onError={() => setErrored(true)}
-          className="size-full object-cover"
+          className={cn('size-full', FIT_CLASS[fit])}
         />
       )}
     </div>
