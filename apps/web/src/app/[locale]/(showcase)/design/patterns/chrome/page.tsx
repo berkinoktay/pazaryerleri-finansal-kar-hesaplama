@@ -1,11 +1,16 @@
 'use client';
 
+import { RefreshIcon } from 'hugeicons-react';
+
+import { DateRangePicker } from '@/components/patterns/date-range-picker';
 import { PageHeader } from '@/components/patterns/page-header';
+import { StatStrip } from '@/components/patterns/stat-strip';
 import { SubNavList } from '@/components/patterns/sub-nav-list';
 import { SyncBadge } from '@/components/patterns/sync-badge';
 import { CategoryNav } from '@/components/showcase/category-nav';
 import { Preview } from '@/components/showcase/preview';
 import { ShowcaseSection } from '@/components/showcase/section';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 import { BottomDockShowcase } from '../bottom-dock-showcase';
@@ -46,6 +51,108 @@ export default function ChromePatternsPage(): React.ReactElement {
                 </Button>
                 <Button size="sm">Mutabakatı başlat</Button>
               </>
+            }
+          />
+        </Preview>
+
+        <Preview
+          title="Çerçeveli — liste"
+          description="Başlık ve KPI şeridi tek yükseltilmiş kartta birleşir; sayfa-kapsamı filtre (tarih aralığı) sağ kümede aksiyonun solunda durur."
+        >
+          <PageHeader
+            variant="framed"
+            title="Siparişler"
+            intent="Bağlı mağazalardan akan siparişler. Filtrele, mutabakat durumunu izle."
+            filters={<DateRangePicker />}
+            actions={
+              <Button size="sm" leadingIcon={<RefreshIcon aria-hidden />}>
+                Yenile
+              </Button>
+            }
+            summary={
+              <StatStrip
+                surface="bare"
+                size="md"
+                items={[
+                  { label: 'Toplam Ciro', value: '₺284.750,00' },
+                  { label: 'Net Kâr', value: '₺52.180,40' },
+                  { label: 'Ortalama Marj', value: '%18,3' },
+                  {
+                    label: 'Zarar Eden Sipariş',
+                    value: '%4,2',
+                    context: '62 / 1.472 sipariş',
+                  },
+                ]}
+              />
+            }
+          />
+        </Preview>
+
+        <Preview
+          title="Çerçeveli — rakam-öncelikli (hero)"
+          description="Gerçek bir yıldız-rakamı olan sayfada başlık küçük kimliğe iner, rakam öne çıkar. intent yerine caption kullanılır; empty/error durumunda başlık-öncelikli düzene düşer."
+        >
+          <PageHeader
+            variant="framed"
+            title="Canlı Performans"
+            meta={
+              <Badge tone="success" variant="surface" size="sm">
+                Canlı
+              </Badge>
+            }
+            hero={{
+              value: '₺8.420,50',
+              caption: 'Bugünün net kârı · dün aynı saat ₺6.180,00',
+            }}
+            actions={
+              <Button size="sm" leadingIcon={<RefreshIcon aria-hidden />}>
+                Yenile
+              </Button>
+            }
+            summary={
+              <StatStrip
+                surface="bare"
+                size="sm"
+                items={[
+                  { label: 'Toplam Ciro', value: '₺46.900,00' },
+                  { label: 'Net Sipariş Adedi', value: '128' },
+                  { label: 'Kâr Marjı', value: '%17,9' },
+                ]}
+              />
+            }
+          />
+        </Preview>
+
+        <Preview
+          title="Çerçeveli — hero yükleniyor"
+          description="Hero ve şerit yüklenirken kimlik sabit kalır, yalnız veri iskelete döner."
+        >
+          <PageHeader
+            variant="framed"
+            title="Canlı Performans"
+            meta={
+              <Badge tone="success" variant="surface" size="sm">
+                Canlı
+              </Badge>
+            }
+            hero={{ value: '₺8.420,50', status: 'loading', loadingLabel: 'Yükleniyor' }}
+            actions={
+              <Button size="sm" leadingIcon={<RefreshIcon aria-hidden />}>
+                Yenile
+              </Button>
+            }
+            summary={
+              <StatStrip
+                surface="bare"
+                size="sm"
+                loading
+                loadingLabel="Yükleniyor"
+                items={[
+                  { label: 'Toplam Ciro', value: null },
+                  { label: 'Net Sipariş Adedi', value: null },
+                  { label: 'Kâr Marjı', value: null },
+                ]}
+              />
             }
           />
         </Preview>
