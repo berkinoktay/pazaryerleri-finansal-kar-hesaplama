@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { authMiddleware } from '@/middleware/auth.middleware';
@@ -125,7 +127,14 @@ describe('authMiddleware', () => {
     // `getUser(token)` must reject the now-orphaned token, otherwise an
     // attacker with an exfiltrated token retains access past the
     // intended revocation point.
-    const user = await createAuthenticatedTestUser();
+    //
+    // Mint a throwaway (non-pooled) user via the email override: if this
+    // test destroyed a pooled user it would leak an ordering dependency into
+    // whichever later test reuses that pool slot. The `@test.local` suffix
+    // keeps the teardown purge covering it.
+    const user = await createAuthenticatedTestUser({
+      email: `delete-me-${randomUUID()}@test.local`,
+    });
     const app = makeApp();
 
     // Sanity check — token works while user exists.
