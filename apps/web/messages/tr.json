@@ -808,6 +808,7 @@
       "zipNote": "{count} dosya tek ZIP olarak inecek.",
       "cancel": "Vazgeç",
       "download": "İndir",
+      "saving": "Seçimler kaydediliyor…",
       "exporting": "İndiriliyor…"
     },
     "templates": {
@@ -908,6 +909,7 @@
       "noChoice": "Kademe seç",
       "customPrice": "Özel Fiyat",
       "enterPrice": "Fiyat girin",
+      "enterCost": "Maliyet girin",
       "customPriceHint": "Fiyat girince tahmini kârı görürsün",
       "calculatedProfit": "Hesaplanan kâr",
       "vsCurrent": "Güncele göre",
@@ -917,11 +919,10 @@
       "selectCustom": "Bu fiyatı seç",
       "customSelected": "Seçildi",
       "aboveQualifier": "ve üzeri",
-      "belowQualifier": "ve altı",
-      "applyWholeWeek": "7 güne uygula",
-      "wholeWeekApplied": "7 gün uygulandı"
+      "belowQualifier": "ve altı"
     },
     "periodDayLabel": "{count} Gün",
+    "periodsAriaLabel": "Dönemler",
     "noResults": {
       "title": "Eşleşen ürün yok",
       "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."

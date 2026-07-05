@@ -5,10 +5,8 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { MoneyInput } from '@/components/patterns/money-input';
-import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
-import { cn } from '@/lib/utils';
 
 import type { EstimateItemPriceResult } from '../api/estimate-item-price.api';
 import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
@@ -17,8 +15,9 @@ import type { CustomChoice } from '../lib/bulk-actions';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
-import { ProfitDelta } from './profit-delta';
-import { TariffSelectControl } from './tariff-select-control';
+import { TariffOptionCard } from './tariff-option-card';
+import { TariffProfitBlock } from './tariff-profit-block';
+import { TariffSelectFoot } from './tariff-select-foot';
 
 const DEBOUNCE_MS = 400;
 // What-if ceiling ≈10M TL — far above any real Trendyol price. Decimal-aware
@@ -40,30 +39,26 @@ export interface CustomPriceCellProps {
   onDeselect: () => void;
   /**
    * The custom price currently held in the edit buffer for this row (a decimal
-   * string), if any. Seeds the input over the persisted `row.customPrice` so a
-   * "7 günlük" copy from another sub-period shows here too; null → fall back to the
-   * server value.
+   * string), if any. Seeds the input over the persisted `row.customPrice` so the
+   * same amount picked in another sub-period shows here too; null → fall back to
+   * the server value.
    */
   committedPrice?: string | null;
-  /** Center the content (desktop table column) vs left-align (mobile card, default). */
-  centered?: boolean;
 }
 
 /**
- * Custom-price "what-if" AND a selectable choice — the fifth option next to the
- * four price bands. The seller types any price; a debounced backend estimate
- * DERIVES the applicable band and returns the real profit at that band's
- * commission (shown via the shared {@link ProfitBadge}). When they are sure, an
- * EXPLICIT {@link TariffSelectControl} commits that price — the export then
- * writes the custom amount (at the derived band's commission) instead of a
- * band-boundary price.
+ * Custom-price "what-if" AND a selectable choice — the fifth card beside the four
+ * preset bands, wearing the same {@link TariffOptionCard} shell + {@link
+ * TariffProfitBlock} so the row reads as one uniform set: the INPUT stands in for the
+ * band's static price, then the derived preset range + commission, the calculated
+ * profit + "vs current" delta, and a {@link TariffSelectFoot}.
  *
- * Click-conflict resolution (three separate, non-overlapping targets): the INPUT
- * only types, the badge opens the breakdown, and the SELECT control commits.
- * There is no stretched-overlay here (unlike the band cards) precisely because
- * the input would fight it. Editing a committed price un-commits it, so the
- * selected amount is always the last value the seller confirmed. No client-side
- * math — the engine computes the authoritative value
+ * Unlike the click-the-card bands, the foot here is a REAL button (the `onToggle`
+ * form) rather than a card overlay — the overlay would fight the input. Three
+ * separate, non-overlapping targets keep it unambiguous: the input types, the badge
+ * opens the breakdown, the foot commits. The debounced backend estimate DERIVES the
+ * band and its real profit; editing a committed price un-commits it. No client-side
+ * money math — the engine computes the authoritative value
  * (feedback_no_frontend_financial_calculation).
  */
 export function CustomPriceCell({
@@ -72,7 +67,6 @@ export function CustomPriceCell({
   onSelect,
   onDeselect,
   committedPrice = null,
-  centered = false,
 }: CustomPriceCellProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
   const tBreakdown = useTranslations('commissionTariffsPage.breakdown');
@@ -80,7 +74,7 @@ export function CustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
-  // Seed the input from the edit-buffer's custom price (so a "7 günlük" copy from
+  // Seed the input from the edit-buffer's custom price (so the same amount picked in
   // another sub-period shows here), falling back to the persisted value so reopening
   // a tariff shows it. The debounced effect then re-estimates for THIS period's item.
   const seededPrice = committedPrice ?? row.customPrice;
@@ -131,6 +125,9 @@ export function CustomPriceCell({
   // "Seç" is only meaningful once the estimate maps the typed price to a band —
   // otherwise there is no confirmed choice to commit.
   const canSelect = derivedBand !== undefined;
+  // Band key ("band2") → its human number (2) for the "≈ 2. Fiyat Aralığı" label.
+  const derivedBandNum = derivedBand !== undefined ? Number(derivedBand.replace('band', '')) : null;
+  const hasEstimate = lastResult !== null && lastResult.calculable && derivedBandNum !== null;
 
   function handleToggleSelect(): void {
     if (isSelected) {
@@ -146,16 +143,13 @@ export function CustomPriceCell({
     }
   }
 
-  const items = centered ? 'items-center' : 'items-start';
-  const self = centered ? 'self-center' : 'self-start';
-
   return (
-    <div className={cn('gap-sm flex flex-col', items, centered && 'w-full text-center')}>
-      {/* Label + input as one tight group so the roomy outer gap-sm sits between
-          the input, the estimate, and the select control — not inside the field. */}
-      <div className={cn('gap-3xs flex flex-col', items, centered && 'w-full')}>
-        {/* On mobile the field has no column header, so label it here; the desktop
-            table's "Özel Fiyat" column header hides this (md:hidden). */}
+    <TariffOptionCard selected={isSelected}>
+      {/* Input group — the field stands in for the band's static price, the derived
+          line for the band's "komisyon %" line. */}
+      <div className="gap-3xs flex w-full flex-col items-start">
+        {/* Desktop has the "Özel Fiyat" column header; the mobile card has none, so
+            label it here (md:hidden). */}
         <span className="text-2xs text-muted-foreground font-medium md:hidden">
           {t('table.customPrice')}
         </span>
@@ -166,66 +160,59 @@ export function CustomPriceCell({
           max={MAX_WHAT_IF_PRICE}
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
-          // Narrow price field so the custom column stays compact (the bands get
-          // the freed width). Full width on mobile where the card is wide.
           className="md:max-w-input-price w-full"
-          // The applied commission depends on which band the price lands in —
-          // the Input's help-text slot spells this out under the field.
-          helpText={t('table.customCommissionHint')}
         />
-      </div>
-      {/* Profit block is ALWAYS visible: a neutral em-dash badge until the seller
-          types a price, then the estimated profit + the derived band's commission.
-          Same "Hesaplanan kâr" + badge structure and alignment as the band cards. */}
-      <div className={cn('gap-3xs flex flex-col', items)}>
-        <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
-        <ProfitBadge
-          value={lastResult?.breakdown?.netProfit ?? null}
-          marginPct={lastResult?.breakdown?.saleMarginPct ?? null}
-          scale={scale}
-          onOpen={() => {
-            // The empty em-dash badge has no breakdown to open; only open once a
-            // typed price has an estimate.
-            if (lastResult !== null) setBreakdownOpen(true);
-          }}
-          showMarginPct
-          className={self}
-        />
-        {/* "Güncele göre +₺X" — how much this custom price beats doing nothing. */}
-        <ProfitDelta
-          optionNetProfit={lastResult?.breakdown?.netProfit ?? null}
-          currentNetProfit={row.currentNetProfit}
-          label={t('table.vsCurrent')}
-        />
-        {/* Which commission the typed price earns (the derived band's rate) —
-            parallel to each band card's "komisyon %X" line. */}
-        {lastResult !== null && lastResult.calculable ? (
-          <span className="text-2xs text-muted-foreground tabular-nums">
-            {t('table.commission')} {formatPercentDisplay(lastResult.commissionPct)}
-          </span>
-        ) : null}
-        <CommissionTariffBreakdown
-          open={breakdownOpen}
-          onOpenChange={setBreakdownOpen}
-          productTitle={row.productTitle}
-          imageUrl={row.imageUrl}
-          result={lastResult}
-          loading={estimate.isPending}
-          profitLabel={tBreakdown('estimatedProfit')}
-        />
+        <span className="text-2xs text-muted-foreground">
+          {hasEstimate ? (
+            <>
+              ≈{' '}
+              <span className="text-foreground font-semibold">
+                {t('table.band', { n: derivedBandNum })}
+              </span>{' '}
+              · {t('table.commission')} {formatPercentDisplay(lastResult.commissionPct)}
+            </>
+          ) : (
+            t('table.customPriceHint')
+          )}
+        </span>
       </div>
 
-      {/* SELECT control — a separate target from the input, so typing never selects.
-          Enabled only once the typed price maps to a band. Shares the exact
-          affordance the band cards use (the same checkmark-circle). */}
-      <TariffSelectControl
+      <TariffProfitBlock
+        netProfit={lastResult?.breakdown?.netProfit ?? null}
+        marginPct={lastResult?.breakdown?.saleMarginPct ?? null}
+        currentNetProfit={row.currentNetProfit}
+        scale={scale}
+        onOpenBreakdown={() => {
+          // The empty badge has no breakdown to open; only open once a typed price
+          // has an estimate.
+          if (lastResult !== null) setBreakdownOpen(true);
+        }}
+        // A no-cost product can never estimate a profit — say why. With a cost, the
+        // empty badge stays "—" (the input placeholder already prompts).
+        emptyLabel={row.reason === 'NO_COST' ? t('table.enterCost') : undefined}
+        calculatedLabel={t('table.calculatedProfit')}
+        vsCurrentLabel={t('table.vsCurrent')}
+      />
+
+      {/* Real button foot — the input rules out a card overlay, so typing never
+          selects and this is the explicit commit. Disabled until a band is derived. */}
+      <TariffSelectFoot
         selected={isSelected}
-        disabled={!isSelected && !canSelect}
-        onToggle={handleToggleSelect}
         label={t('table.selectCustom')}
         selectedLabel={t('table.customSelected')}
-        className={cn(centered && 'self-center')}
+        onToggle={handleToggleSelect}
+        disabled={!isSelected && !canSelect}
       />
-    </div>
+
+      <CommissionTariffBreakdown
+        open={breakdownOpen}
+        onOpenChange={setBreakdownOpen}
+        productTitle={row.productTitle}
+        imageUrl={row.imageUrl}
+        result={lastResult}
+        loading={estimate.isPending}
+        profitLabel={tBreakdown('estimatedProfit')}
+      />
+    </TariffOptionCard>
   );
 }

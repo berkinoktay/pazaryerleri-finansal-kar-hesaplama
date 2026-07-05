@@ -56,6 +56,23 @@ describe('ProfitBadge', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it('renders a custom emptyLabel instead of the em-dash when the amount is null', () => {
+    // A specific, actionable empty cause (e.g. "Maliyet girin") reads better than a
+    // mute dash; the default stays "—" so existing surfaces are unchanged.
+    render(
+      <ProfitBadge
+        value={null}
+        marginPct={null}
+        scale={null}
+        onOpen={vi.fn()}
+        emptyLabel="Maliyet girin"
+      />,
+    );
+    const button = screen.getByRole('button', { name: OPEN_LABEL });
+    expect(button).toHaveTextContent('Maliyet girin');
+    expect(button).not.toHaveTextContent('—');
+  });
+
   it('fills the badge with the margin-driven scale color when a margin is present', () => {
     // happy-dom cannot parse oklch()/color-mix(); feed an rgb scale so the resolved
     // text color lands on the element (the tinted bg/border are color-mix → dropped

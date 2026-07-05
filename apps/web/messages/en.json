@@ -808,6 +808,7 @@
       "zipNote": "{count} files will download as a single ZIP.",
       "cancel": "Cancel",
       "download": "Download",
+      "saving": "Saving selections…",
       "exporting": "Downloading…"
     },
     "templates": {
@@ -908,6 +909,7 @@
       "noChoice": "Choose a band",
       "customPrice": "Custom Price",
       "enterPrice": "Enter price",
+      "enterCost": "Enter cost",
       "customPriceHint": "Enter a price to see the estimated profit",
       "calculatedProfit": "Calculated profit",
       "vsCurrent": "vs current",
@@ -917,11 +919,10 @@
       "selectCustom": "Select this price",
       "customSelected": "Selected",
       "aboveQualifier": "and above",
-      "belowQualifier": "and below",
-      "applyWholeWeek": "Apply to 7 days",
-      "wholeWeekApplied": "Applied to 7 days"
+      "belowQualifier": "and below"
     },
     "periodDayLabel": "{count} days",
+    "periodsAriaLabel": "Periods",
     "noResults": {
       "title": "No matching products",
       "description": "Try changing your search or filters."

@@ -30,6 +30,13 @@ export interface ProfitBadgeProps {
    * off by default so existing tables (orders, live) are unchanged.
    */
   showMarginPct?: boolean;
+  /**
+   * What to render when `value` is `null`. Defaults to a bare em-dash
+   * ("—") so existing surfaces (orders, live sheet) are unchanged. Pass a
+   * translated node (e.g. "Maliyet girin") where an empty value has a
+   * specific, actionable cause the seller should see instead of a mute dash.
+   */
+  emptyLabel?: React.ReactNode;
   className?: string;
 }
 
@@ -51,6 +58,7 @@ export function ProfitBadge({
   scale,
   onOpen,
   showMarginPct = false,
+  emptyLabel,
   className,
 }: ProfitBadgeProps): React.ReactElement {
   const t = useTranslations('profitBadge');
@@ -83,11 +91,22 @@ export function ProfitBadge({
             }
             className="duration-fast ease-out-quart cursor-pointer tabular-nums transition-shadow group-hover:shadow-xs"
           >
-            {value === null ? EMPTY_VALUE : <Currency value={value} />}
+            {value === null ? (
+              (emptyLabel ?? EMPTY_VALUE)
+            ) : (
+              // The amount is the hero — bold when a margin % rides beside it (the
+              // commission-tariff band cards) so the figure leads and the pct reads
+              // as a lighter qualifier. Other surfaces (no margin) keep the default weight.
+              <span className={cn(showMarginPct && 'font-bold')}>
+                <Currency value={value} />
+              </span>
+            )}
             {showMarginPct && value !== null && marginPct !== null ? (
-              // whitespace-nowrap: the separator + pct must never line-break
-              // internally (a huge amount once pushed "%74,17" onto its own line).
-              <span className="whitespace-nowrap">· {formatPercentDisplay(marginPct)}</span>
+              // Smaller, lighter margin % beside the amount — no separator dot.
+              // whitespace-nowrap so a huge amount never pushes the pct onto its own line.
+              <span className="text-2xs ml-3xs font-medium whitespace-nowrap opacity-80">
+                {formatPercentDisplay(marginPct)}
+              </span>
             ) : null}
           </Badge>
         </button>

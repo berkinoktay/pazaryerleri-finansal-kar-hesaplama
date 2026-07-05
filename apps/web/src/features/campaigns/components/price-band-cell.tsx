@@ -6,19 +6,18 @@ import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
 
-import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { Badge } from '@/components/ui/badge';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
-import { cn } from '@/lib/utils';
 
 import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
 import { asBandKey } from '../lib/band-key';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow, PriceBand } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
-import { ProfitDelta } from './profit-delta';
-import { TariffSelectControl } from './tariff-select-control';
+import { TariffOptionCard } from './tariff-option-card';
+import { TariffProfitBlock } from './tariff-profit-block';
+import { TariffSelectFoot } from './tariff-select-foot';
 
 export interface PriceBandCellProps {
   row: CommissionTariffRow;
@@ -28,11 +27,6 @@ export interface PriceBandCellProps {
   /** Whether this is the most profitable band (a quiet "En kârlı" badge). */
   isBest?: boolean;
   onSelect: (key: string) => void;
-  /**
-   * Center the cell's content — used in the desktop table column (all non-product
-   * columns are centered). Off (left-aligned) for the mobile card grid.
-   */
-  centered?: boolean;
 }
 
 /** The band's boundary price + its "ve altı / ve üzeri" qualifier as one hero unit. */
@@ -50,17 +44,21 @@ function useBandLabel(band: PriceBand): { priceText: string; qualifier: string }
 }
 
 /**
- * One price band as a flat, un-boxed selectable choice — the PRICE (with its "ve
- * altı / ve üzeri" qualifier as one unit) is the hero, then the commission, the
- * calculated profit + "vs current" delta, and a single explicit {@link
- * TariffSelectControl}. No click-anywhere card overlay: every selectable option on
- * the row (each band AND the custom price) shares the same distinct radio-button
- * affordance, so the interaction reads as one consistent control across the row.
+ * One price band as a CLICKABLE CARD — the whole {@link TariffOptionCard} is the
+ * select target (a stretched-overlay button), so the seller picks a band by clicking
+ * anywhere on it. Left-aligned, matching the mock: the PRICE (with its "ve altı / ve
+ * üzeri" qualifier) is the hero, then commission, the shared {@link TariffProfitBlock},
+ * and a {@link TariffSelectFoot} ("Bu aralığı seç" ring → "Seçildi" tick). Selected =
+ * brand border + soft brand fill + a featured "En kârlı" ribbon on the best band.
  *
  * Selection is a TOGGLE (one OR none per product) owned by the parent: choosing a
- * band clears any custom price; re-tapping the chosen band clears it. The most
- * profitable band carries a quiet "En kârlı" badge on its profit label (there is no
- * card edge to pin a ribbon to anymore).
+ * band clears any custom price; re-clicking the chosen band clears it.
+ *
+ * A11y: the overlay `<button>` is a SIBLING of the ProfitBadge (which is itself a
+ * `<button>` opening the breakdown), never an ancestor — nesting `<button>` in
+ * `<button>` is invalid HTML and breaks hydration. The badge (and the ribbon) are
+ * raised (`z-10`) so the badge's click still reaches it; the price, commission and
+ * foot sit below the overlay and select.
  */
 export function PriceBandCell({
   row,
@@ -68,7 +66,6 @@ export function PriceBandCell({
   selected,
   isBest = false,
   onSelect,
-  centered = false,
 }: PriceBandCellProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.table');
   const scale = useMarginColoring();
@@ -82,43 +79,41 @@ export function PriceBandCell({
     estimate.mutate({ itemId: row.id, body: { price: band.price, bandKey: asBandKey(band.key) } });
   }
 
-  const items = centered ? 'items-center' : 'items-start';
-  const self = centered ? 'self-center' : 'self-start';
-
   return (
-    <div
-      className={cn(
-        'gap-sm md:min-w-tariff-band flex min-w-0 flex-col',
-        items,
-        centered && 'w-full text-center',
-      )}
-    >
-      {/* "En kârlı" rides a reserved top slot — shown only for the best band, but its
-          height is held in EVERY band (invisible) so all four prices stay aligned
-          across the columns. A featured marker at the top reads clearly now that
-          there is no card edge to pin a ribbon to. */}
-      <div className={cn('flex w-full', centered ? 'justify-center' : 'justify-start')}>
+    <TariffOptionCard selected={selected} interactive>
+      {/* Stretched-overlay select target. Sibling of the ProfitBadge (never an
+          ancestor) so the badge's own <button> is not nested inside it. Price,
+          commission and the foot ring sit below the overlay → clicking them selects. */}
+      <button
+        type="button"
+        aria-pressed={selected}
+        aria-label={selected ? t('bandSelected') : t('selectBand')}
+        onClick={() => onSelect(band.key)}
+        // Tailwind v4 strips the native button cursor; the overlay covers the whole
+        // card, so its cursor is what the seller sees hovering the band.
+        className="focus-visible:shadow-focus absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none"
+      />
+
+      {/* "En kârlı" — a featured ribbon straddling the top border. Absolute, so it
+          adds NO height: every card starts at the price, keeping cards short and the
+          prices aligned. pointer-events-none → clicking it still selects via the
+          overlay. Only the best band shows it. */}
+      {isBest ? (
         <Badge
           tone="primary"
           variant="solid"
           radius="full"
           leadingIcon={<SparklesIcon />}
-          className={cn(
-            'text-2xs px-2xs gap-3xs py-0 font-medium [&_svg]:size-3',
-            !isBest && 'invisible',
-          )}
+          className="text-2xs px-2xs gap-3xs left-sm pointer-events-none absolute top-0 z-10 -translate-y-1/2 py-0 font-medium [&_svg]:size-3"
         >
           {t('best')}
         </Badge>
-      </div>
-      <div className={cn('gap-3xs flex min-w-0 flex-col', items)}>
-        {/* Price boundary + its "ve altı / ve üzeri" qualifier as one hero unit. */}
-        <span
-          className={cn(
-            'gap-x-2xs flex min-w-0 flex-wrap items-baseline',
-            centered && 'justify-center',
-          )}
-        >
+      ) : null}
+
+      {/* Price boundary + its "ve altı / ve üzeri" qualifier as one hero unit, then
+          the band's commission. */}
+      <div className="gap-3xs flex min-w-0 flex-col items-start">
+        <span className="gap-x-2xs flex min-w-0 flex-wrap items-baseline">
           <span className="text-base font-bold tabular-nums">{priceText}</span>
           <span className="text-xs font-normal">{qualifier}</span>
         </span>
@@ -127,30 +122,25 @@ export function PriceBandCell({
         </span>
       </div>
 
-      <div className={cn('gap-3xs flex flex-col', items)}>
-        <span className="text-2xs text-muted-foreground">{t('calculatedProfit')}</span>
-        <ProfitBadge
-          value={band.netProfit}
-          marginPct={band.marginPct}
-          scale={scale}
-          onOpen={openBreakdown}
-          showMarginPct
-          className={self}
-        />
-        {/* "Güncele göre +₺X" — how much this band beats the current price/commission. */}
-        <ProfitDelta
-          optionNetProfit={band.netProfit}
-          currentNetProfit={row.currentNetProfit}
-          label={t('vsCurrent')}
-        />
-      </div>
+      <TariffProfitBlock
+        netProfit={band.netProfit}
+        marginPct={band.marginPct}
+        currentNetProfit={row.currentNetProfit}
+        scale={scale}
+        onOpenBreakdown={openBreakdown}
+        // A missing cost profile is the one empty-profit cause worth naming inline
+        // ("Maliyet girin"); other non-calculable reasons keep the mute dash (their
+        // full reason shows in the product identity cell).
+        emptyLabel={row.reason === 'NO_COST' ? t('enterCost') : undefined}
+        calculatedLabel={t('calculatedProfit')}
+        vsCurrentLabel={t('vsCurrent')}
+      />
 
-      <TariffSelectControl
+      {/* Visual foot only — the card overlay owns the click. */}
+      <TariffSelectFoot
         selected={selected}
-        onToggle={() => onSelect(band.key)}
         label={t('selectBand')}
         selectedLabel={t('bandSelected')}
-        className={self}
       />
 
       <CommissionTariffBreakdown
@@ -161,6 +151,6 @@ export function PriceBandCell({
         result={estimate.data ?? null}
         loading={estimate.isPending}
       />
-    </div>
+    </TariffOptionCard>
   );
 }

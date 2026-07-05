@@ -16,11 +16,9 @@ import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
 import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
-import type { WholeWeekControls } from '../lib/whole-week';
 import type { CommissionTariffRow } from '../types';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
-import { WholePeriodToggle } from './whole-period-toggle';
 
 const BAND_INDEXES = [0, 1, 2, 3] as const;
 
@@ -32,8 +30,6 @@ export interface CommissionTariffsTableProps {
   onSelectBand: (rowId: string, band: string) => void;
   onSelectCustom: (rowId: string, band: string, choice: CustomChoice) => void;
   onDeselectCustom: (rowId: string) => void;
-  /** "7 günlük" spread controls; null for a single-period tariff (no toggle shown). */
-  wholeWeek?: WholeWeekControls | null;
   tabs?: React.ReactNode;
   toolbar?: React.ReactNode;
   hasActiveFilters: boolean;
@@ -47,7 +43,6 @@ export function CommissionTariffsTable({
   onSelectBand,
   onSelectCustom,
   onDeselectCustom,
-  wholeWeek,
   tabs,
   toolbar,
   hasActiveFilters,
@@ -84,15 +79,6 @@ export function CommissionTariffsTable({
                 {!r.calculable && r.reason !== null ? (
                   <span className="text-warning">{reasonLabel(r.reason)}</span>
                 ) : null}
-                {wholeWeek != null && (wholeWeek.isActive(r.id) || wholeWeek.canApply(r.id)) ? (
-                  <WholePeriodToggle
-                    active={wholeWeek.isActive(r.id)}
-                    onToggle={() => wholeWeek.onToggle(r.id)}
-                    label={t('table.applyWholeWeek')}
-                    activeLabel={t('table.wholeWeekApplied')}
-                    className="mt-3xs"
-                  />
-                ) : null}
               </span>
             }
           />
@@ -102,13 +88,13 @@ export function CommissionTariffsTable({
 
     const currentColumn: ColumnDef<CommissionTariffRow> = {
       id: 'current',
-      // Every non-product column centers its header + content (seller preference).
-      header: () => <span className="block w-full text-center">{t('table.current')}</span>,
+      // Left-aligned like the band + custom cards (design preference).
+      header: t('table.current'),
       meta: { label: t('table.current') },
       cell: ({ row }) => {
         const r = row.original;
         return (
-          <div className="gap-3xs flex w-full flex-col items-center text-center text-sm">
+          <div className="gap-3xs flex flex-col text-sm">
             <div className="font-semibold tabular-nums">
               <Currency value={r.currentPrice} />
             </div>
@@ -125,9 +111,7 @@ export function CommissionTariffsTable({
 
     const bandColumns: ColumnDef<CommissionTariffRow>[] = BAND_INDEXES.map((i) => ({
       id: `band${i + 1}`,
-      header: () => (
-        <span className="block w-full text-center">{t('table.band', { n: i + 1 })}</span>
-      ),
+      header: t('table.band', { n: i + 1 }),
       meta: { label: t('table.band', { n: i + 1 }) },
       cell: ({ row }) => {
         const r = row.original;
@@ -142,7 +126,6 @@ export function CommissionTariffsTable({
             // active it drives the derived band, so no band lights up.
             selected={selection[r.id] === band.key && customPrices[r.id] == null}
             onSelect={(key) => onSelectBand(r.id, key)}
-            centered
           />
         );
       },
@@ -150,7 +133,8 @@ export function CommissionTariffsTable({
 
     const customPriceColumn: ColumnDef<CommissionTariffRow> = {
       id: 'customPrice',
-      header: () => <span className="block w-full text-center">{t('table.customPrice')}</span>,
+      header: t('table.customPrice'),
+      meta: { label: t('table.customPrice') },
       cell: ({ row }) => (
         <CustomPriceCell
           row={row.original}
@@ -158,22 +142,12 @@ export function CommissionTariffsTable({
           onSelect={(band, choice) => onSelectCustom(row.original.id, band, choice)}
           onDeselect={() => onDeselectCustom(row.original.id)}
           committedPrice={customPrices[row.original.id]?.price ?? null}
-          centered
         />
       ),
     };
 
     return [productColumn, currentColumn, ...bandColumns, customPriceColumn];
-  }, [
-    t,
-    reasonLabel,
-    selection,
-    customPrices,
-    onSelectBand,
-    onSelectCustom,
-    onDeselectCustom,
-    wholeWeek,
-  ]);
+  }, [t, reasonLabel, selection, customPrices, onSelectBand, onSelectCustom, onDeselectCustom]);
 
   return (
     <DataTable<CommissionTariffRow, unknown>

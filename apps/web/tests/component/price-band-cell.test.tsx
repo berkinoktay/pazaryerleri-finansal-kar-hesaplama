@@ -92,11 +92,9 @@ describe('PriceBandCell', () => {
     );
   });
 
-  it('shows the "En kârlı" marker only for the best band (space is reserved otherwise)', () => {
-    // The marker is rendered in every band so its height is held (prices stay aligned
-    // across the columns), but it is hidden via `invisible` unless this is the best
-    // band. (Tailwind classes aren't computed in the test DOM, so assert the class,
-    // not computed visibility.)
+  it('shows the "En kârlı" marker only for the best band', () => {
+    // The marker is now an absolute ribbon rendered ONLY for the best band (no
+    // reserved slot), so non-best cards stay short.
     const { rerender } = renderCell({
       row,
       band,
@@ -104,13 +102,13 @@ describe('PriceBandCell', () => {
       isBest: false,
       onSelect: vi.fn(),
     });
-    expect(screen.getByText(/en kârlı/i)).toHaveClass('invisible');
+    expect(screen.queryByText(/en kârlı/i)).toBeNull();
     rerender(
       <TariffScopeProvider scope={SCOPE}>
         <PriceBandCell row={row} band={band} selected={false} isBest onSelect={vi.fn()} />
       </TariffScopeProvider>,
     );
-    expect(screen.getByText(/en kârlı/i)).not.toHaveClass('invisible');
+    expect(screen.getByText(/en kârlı/i)).toBeInTheDocument();
   });
 
   it('opens the profit breakdown from the badge without toggling the band', async () => {
