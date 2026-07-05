@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { MappedBadge } from '@/components/patterns/mapped-badge';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { StatRow } from '@/components/patterns/stat-row';
+import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
 
 import { DefinitionListShowcase } from '../definition-list-showcase';
 import { ImageCellShowcase } from '../image-cell-showcase';
@@ -49,6 +50,13 @@ const MOCK = {
 
 const MARKETPLACE_SIZES = ['xs', 'sm', 'md', 'lg', 'xl', '2xl'] as const;
 
+const STAT_STRIP_SIZE_ITEMS: StatStripItem[] = [
+  { label: 'Toplam Ciro', value: '₺284.750,00' },
+  { label: 'Net Kâr', value: '₺52.180,40' },
+  { label: 'Ortalama Marj', value: '%18,3' },
+  { label: 'Zarar Eden Sipariş', value: '%4,2', context: '62 / 1.472 sipariş' },
+];
+
 export default function DisplayPatternsPage(): React.ReactElement {
   return (
     <>
@@ -74,6 +82,24 @@ export default function DisplayPatternsPage(): React.ReactElement {
           description="Aynı item konfigürasyonu, `loading` ile: gerçek başlıklar ve ikonlar kalır, yalnız değer + bağlam satırı iskelete döner — sayı gelince hiçbir şey zıplamaz, sahte sıfır da parlamaz. Etiketleri henüz bilinmeyen rota-düzeyi yer tutucular için `StatStripSkeleton` / `PageSkeleton` var."
         >
           <StatStripLoadingShowcase />
+        </Preview>
+
+        <Preview
+          title="Bare yüzey (çerçeve içinde)"
+          description="Kartsız yüzey: çerçeveli PageHeader'ın summary yuvasına dokmak için — yüzeyi ve giriş animasyonunu dış çerçeve taşır."
+        >
+          <StatStrip surface="bare" size="md" items={STAT_STRIP_SIZE_ITEMS} />
+        </Preview>
+
+        <Preview
+          title="Boyut adımları"
+          description="Yalnız değer satırı ölçeklenir (20/24/30px); etiket ve bağlam satırları sabittir."
+        >
+          <div className="gap-lg flex flex-col">
+            <StatStrip size="sm" items={STAT_STRIP_SIZE_ITEMS} />
+            <StatStrip size="md" items={STAT_STRIP_SIZE_ITEMS} />
+            <StatStrip size="lg" items={STAT_STRIP_SIZE_ITEMS} />
+          </div>
         </Preview>
 
         <Preview
