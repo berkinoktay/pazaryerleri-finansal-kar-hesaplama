@@ -69,6 +69,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
+        with:
+          turbo-cache: 'true'
       - run: pnpm typecheck
 
   lint:
@@ -78,6 +80,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
+        with:
+          turbo-cache: 'true'
       # Every workspace declares a `lint` script (enforced by `pnpm audit:lint`),
       # so this genuinely lints all packages — including the profit engine, crypto,
       # and marketplace adapters. The filter pulls every workspace into scope
@@ -95,6 +99,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
+        with:
+          turbo-cache: 'true'
       - name: Build
         run: pnpm build
         env:
@@ -164,29 +170,42 @@ jobs:
       - name: Audit (high and critical, production deps)
         run: pnpm audit --prod --audit-level=high
 
+  unit-tests:
+    name: Unit and component tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+        with:
+          turbo-cache: 'true'
+      # DB-free suites split out of the integration job (#401): they give first
+      # signal in ~6 minutes and run in parallel with the Supabase-backed job
+      # instead of serially in front of it.
+      - name: Run unit tests
+        run: pnpm test:unit
+      - name: Run component tests
+        run: pnpm test:component
+
   test:
-    name: Unit and integration tests
+    name: Integration tests
     needs: changes
     # Skipped jobs report as "Skipped" (counts as success for branch
     # protection), unlike workflow-level paths-ignore which leaves
     # required checks pending forever.
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # The tariff verticals (#395-#400) grew the integration suite past the old 25m cap on a cold cache; 40m fits the observed ~34m worst case with headroom.
-    timeout-minutes: 40
+    # Only the integration suite runs here now (unit/component moved to the
+    # unit-tests job); on a cold cache Supabase spin-up + db:push + the suite
+    # land around ~18-20m, so 30m keeps headroom without the old 40m slack.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      # No turbo cache here — deliberately; see the setup action's turbo-cache
+      # input docs (integration hash can't see supabase/sql or config.toml).
       - uses: ./.github/actions/setup
-
-      # Fast feedback: unit tests first, fail before spinning up DB.
-      - name: Run unit tests
-        run: pnpm test:unit
-
-      # Component tests (happy-dom, DB-free) — run before the Supabase spin-up
-      # so a broken component fails fast without paying the DB cost. These live
-      # in apps/web/tests/component and previously ran in NO CI job.
-      - name: Run component tests
-        run: pnpm test:component
 
       # DB integration tests run against a fresh local Supabase instance
       # spun up just for this job. Schema applied via prisma db push so
@@ -325,7 +344,18 @@ jobs:
     name: CI success
     if: always()
     needs:
-      [api-spec-sync, typecheck, lint, build, pr-title, secret-scan, deps-audit, test, edge-functions]
+      [
+        api-spec-sync,
+        typecheck,
+        lint,
+        build,
+        pr-title,
+        secret-scan,
+        deps-audit,
+        unit-tests,
+        test,
+        edge-functions,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

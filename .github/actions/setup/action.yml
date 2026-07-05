@@ -1,5 +1,16 @@
 name: 'Setup PazarSync toolchain'
 description: 'pnpm + Node, install deps, generate Prisma client and OpenAPI types. Assumes the repo is already checked out.'
+inputs:
+  turbo-cache:
+    description: >-
+      Persist the turbo cache across runs via actions/cache. Only for jobs whose
+      tasks are a pure function of hashed inputs (typecheck, lint, build, unit,
+      component). NEVER enable for the integration job: test:integration is
+      cacheable in turbo.json but its hash cannot see out-of-package inputs
+      (supabase/sql/*.sql, supabase/config.toml), so a warm cache could silently
+      SKIP the RLS/tenant-isolation suites after a policy change.
+    required: false
+    default: 'false'
 runs:
   using: 'composite'
   steps:
@@ -10,6 +21,18 @@ runs:
       with:
         node-version: 22
         cache: 'pnpm'
+    - name: Persist turbo cache
+      if: ${{ inputs.turbo-cache == 'true' }}
+      uses: actions/cache@v4
+      with:
+        # Turborepo 2.x local cache default location.
+        path: .turbo/cache
+        # Exact key never hits twice (sha-scoped) — the restore-key prefix does the
+        # real work: newest cache from this branch, else from main (GitHub scopes
+        # cross-branch restores to the base branch automatically).
+        key: turbo-${{ runner.os }}-${{ github.sha }}
+        restore-keys: |
+          turbo-${{ runner.os }}-
     - run: pnpm install --frozen-lockfile
       shell: bash
     - name: Generate Prisma client
