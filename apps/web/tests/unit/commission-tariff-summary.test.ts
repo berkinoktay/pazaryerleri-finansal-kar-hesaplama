@@ -29,6 +29,7 @@ function makeRow(
     category: null,
     brand: null,
     currentPrice: '100',
+    commissionBasePrice: '100',
     currentCommissionPct: '10',
     currentNetProfit: '5',
     currentMarginPct: '5',

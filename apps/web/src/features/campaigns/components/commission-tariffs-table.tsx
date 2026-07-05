@@ -4,19 +4,18 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { IdentityCell } from '@/components/patterns/identity-cell';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
-import { formatPercentDisplay } from '@/lib/format-percent';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
 import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
 import type { CommissionTariffRow } from '../types';
+import { CurrentPriceCell } from './current-price-cell';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
 
@@ -91,22 +90,7 @@ export function CommissionTariffsTable({
       // Left-aligned like the band + custom cards (design preference).
       header: t('table.current'),
       meta: { label: t('table.current') },
-      cell: ({ row }) => {
-        const r = row.original;
-        return (
-          <div className="gap-3xs flex flex-col text-sm">
-            <div className="font-semibold tabular-nums">
-              <Currency value={r.currentPrice} />
-            </div>
-            <div className="text-2xs text-muted-foreground">
-              {t('table.currentCommission')}{' '}
-              <span className="text-foreground font-medium tabular-nums">
-                {formatPercentDisplay(r.currentCommissionPct)}
-              </span>
-            </div>
-          </div>
-        );
-      },
+      cell: ({ row }) => <CurrentPriceCell row={row.original} />,
     };
 
     const bandColumns: ColumnDef<CommissionTariffRow>[] = BAND_INDEXES.map((i) => ({

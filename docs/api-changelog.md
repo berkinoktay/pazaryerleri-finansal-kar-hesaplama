@@ -13,6 +13,16 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Commission tariff item estimate gained a `scenario: "current"` mode** (`POST
+  /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/items/{itemId}/estimate`)
+  — In addition to the price-based modes (`price` + optional `bandKey`), the body now accepts
+  `{ scenario: "current" }` (no price/bandKey). It returns the breakdown of the item's CURRENT
+  scenario: priced on its commission-base price (or the sale price when that column is absent) at
+  its current commission, so the breakdown matches the detail row's `currentNetProfit` badge
+  byte-for-byte (same engine, same price, same commission). The response `bandKey` is `null` and
+  `commissionPct` is the item's current rate. New `422` codes: `PRICE_REQUIRED` (no price in a
+  non-current mode) and `INVALID_ESTIMATE_MODE` (price/bandKey sent alongside `scenario:"current"`).
+  Non-breaking — existing price-based callers are unaffected.
 - **Commission tariff export is now window-bucketed** (`POST
   /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/export`) — Replaces the
   old single-file "last period wins" combine (a latent data-loss bug). A split week (3-Gün + 4-Gün)
@@ -31,6 +41,14 @@ section "Versioning" for details.
   ("corrupt file"). `Access-Control-Expose-Headers` now lists both.
 
 ### Added
+
+- **`commissionBasePrice` on `TariffDetailItem`** (`GET .../commission-tariffs/{tariffId}`) — Nullable
+  decimal string carrying the Excel's "KOMİSYONA ESAS FİYAT" (the customer-seen price commission is
+  charged on; lower than the sale price when the product is discounted). The import now reads this
+  column, and the current-scenario profit (`currentNetProfit` / `currentMarginPct`) is computed on
+  THIS price rather than the sale price (`currentPrice`). `null` for tariffs imported before the
+  column was read — the compute then falls back to `currentPrice`, and a re-import backfills it.
+  Non-breaking additive field.
 
 - **Plus Commission Tariffs API** (`/v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs`)
   — Sibling of the commission-tariffs endpoints for Trendyol's "Plus Komisyon" Excel. Seven routes:

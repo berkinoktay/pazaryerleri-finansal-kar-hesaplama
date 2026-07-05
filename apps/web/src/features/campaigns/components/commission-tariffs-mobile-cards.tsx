@@ -1,15 +1,13 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { Currency } from '@/components/patterns/currency';
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
-import { formatPercentDisplay } from '@/lib/format-percent';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
 import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
 import type { CommissionTariffRow } from '../types';
+import { CurrentPriceCell } from './current-price-cell';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
 
@@ -29,7 +27,8 @@ export interface CommissionTariffsMobileCardsProps {
  * by a top divider rule (border-t) + gap-md — the same treatment as the Plus tariff
  * card:
  *   1. Product identity — image + title + meta + not-calculable reason.
- *   2. Current baseline — "Güncel fiyat" / "Güncel komisyon" as label→value rows.
+ *   2. Current baseline — the shared {@link CurrentPriceCell} (price the buyer sees +
+ *      current commission + clickable profit badge).
  *   3. The four price bands in a 2×2 grid — each a click-the-card selectable option.
  *   4. Custom price — a what-if input AND a selectable choice, stacked below.
  * Shown below the `md` breakpoint; the desktop table is hidden there.
@@ -42,7 +41,6 @@ export function CommissionTariffsMobileCards({
   onSelectCustom,
   onDeselectCustom,
 }: CommissionTariffsMobileCardsProps): React.ReactElement {
-  const t = useTranslations('commissionTariffsPage');
   const reasonLabel = useReasonLabel();
 
   return (
@@ -73,23 +71,10 @@ export function CommissionTariffsMobileCards({
               </div>
             </div>
 
-            {/* Zone 2: current baseline — plain label→value rows, the "do nothing"
+            {/* Zone 2: current baseline — the shared current cell, the "do nothing"
                 reference every band + custom price is compared against. */}
-            <div className="gap-2xs border-border pt-md flex flex-col border-t">
-              <div className="gap-sm flex items-baseline justify-between">
-                <span className="text-2xs text-muted-foreground">{t('table.current')}</span>
-                <span className="text-sm font-semibold tabular-nums">
-                  <Currency value={row.currentPrice} />
-                </span>
-              </div>
-              <div className="gap-sm flex items-baseline justify-between">
-                <span className="text-2xs text-muted-foreground">
-                  {t('table.currentCommission')}
-                </span>
-                <span className="text-2xs font-medium tabular-nums">
-                  {formatPercentDisplay(row.currentCommissionPct)}
-                </span>
-              </div>
+            <div className="border-border pt-md border-t">
+              <CurrentPriceCell row={row} />
             </div>
 
             {/* Zone 3: the four price bands — a 2×2 grid of click-the-card choices. */}

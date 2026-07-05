@@ -1,11 +1,13 @@
 // On-demand profit estimate for a single Commission Tariff item.
 //
-// Backs two frontend surfaces without bloating the detail payload: the band-click
-// breakdown modal and the custom-price what-if. It resolves the SAME inputs the
-// detail view resolves (cost, shipping, fee definitions) but for ONE item, then
-// runs the profit engine at the requested price via `computeItemEstimate`. No
-// financial math lives here — the engine is reused, so an estimate at a band's
-// price matches that band's profit in the detail response exactly.
+// Backs three frontend surfaces without bloating the detail payload: the band-click
+// breakdown modal, the custom-price what-if, and the current-scenario breakdown.
+// It resolves the SAME inputs the detail view resolves (cost, shipping, fee
+// definitions) but for ONE item, then runs the profit engine via
+// `computeItemEstimate`. No financial math lives here — the engine is reused, so an
+// estimate at a band's price matches that band's profit in the detail response, and
+// the current-scenario breakdown matches the detail row's `currentNetProfit`
+// (same price = commission-base price ?? sale price, same current commission).
 //
 // Scoped by organizationId + storeId + tariff (via the item's period). A cross
 // -tenant or foreign item id is indistinguishable from a missing one (404).
@@ -22,6 +24,7 @@ import { fetchCostAggregates } from './products-list.service';
 import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
   computeItemEstimate,
+  type EstimateCommission,
   type TariffAssemblyContext,
   type TariffVariant,
 } from './commission-tariff-compute.service';
@@ -33,16 +36,21 @@ import type { EstimateItemPriceResult } from '../validators/commission-tariff.va
 // sentinel the detail service uses).
 const NO_SHIPPING: EstimateOutcome = { ok: false, reason: 'STORE_NOT_FOUND' };
 
-export interface EstimateItemPriceInput {
-  price: Decimal;
-  /** When set, that band's commission is used verbatim; otherwise derived from price. */
-  bandKey: string | null;
-}
+/**
+ * Which scenario to price:
+ *   - `price`   — an explicit price; `bandKey` (when set) applies that band's
+ *                 commission verbatim, otherwise the band is derived from price.
+ *   - `current` — the item's own commission-base price (or sale price) at its
+ *                 current commission — the "do nothing" baseline the detail shows.
+ */
+export type EstimateItemPriceInput =
+  | { readonly mode: 'price'; readonly price: Decimal; readonly bandKey: string | null }
+  | { readonly mode: 'current' };
 
 /**
- * Computes the full profit breakdown for one tariff item at `input.price`.
- * Throws `NotFoundError` when the item does not belong to this tariff/store
- * (non-disclosure). When the item is unmatched or uncostable the result carries
+ * Computes the full profit breakdown for one tariff item under `input`. Throws
+ * `NotFoundError` when the item does not belong to this tariff/store (non
+ * -disclosure). When the item is unmatched or uncostable the result carries
  * `calculable: false` + a `reason` and a null breakdown — never an error.
  */
 export async function estimateItemPrice(
@@ -59,7 +67,14 @@ export async function estimateItemPrice(
       // `period: { tariffId }` ties the item to THIS tariff — an item id from
       // another tariff (even in this store) is treated as missing.
       where: { id: itemId, organizationId: orgId, storeId, period: { tariffId } },
-      select: { id: true, productVariantId: true, bands: true },
+      select: {
+        id: true,
+        productVariantId: true,
+        bands: true,
+        currentPrice: true,
+        commissionBasePrice: true,
+        currentCommissionPct: true,
+      },
     });
   } catch (err) {
     mapPrismaError(err);
@@ -68,6 +83,19 @@ export async function estimateItemPrice(
   if (item === null) {
     throw new NotFoundError('CommissionTariffItem', itemId);
   }
+
+  // Resolve the price + commission source per mode. The 'current' scenario mirrors
+  // the detail row's baseline EXACTLY: the commission-base price (customer-seen
+  // price, or the sale price when the column predates the import) at the item's
+  // CURRENT commission — so the breakdown equals `currentNetProfit` byte-for-byte.
+  const price =
+    input.mode === 'current'
+      ? new Decimal((item.commissionBasePrice ?? item.currentPrice).toString())
+      : input.price;
+  const commission: EstimateCommission =
+    input.mode === 'current'
+      ? { kind: 'override', commissionPct: new Decimal(item.currentCommissionPct.toString()) }
+      : { kind: 'band', bandKey: input.bandKey };
 
   const bands = parseStoredBands(item.bands);
 
@@ -107,21 +135,17 @@ export async function estimateItemPrice(
   const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
   const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
 
-  const computed = computeItemEstimate(
-    ctx,
-    bands,
-    variant,
-    cost,
-    shipping,
-    input.price,
-    input.bandKey,
-  );
+  const computed = computeItemEstimate(ctx, bands, variant, cost, shipping, price, commission);
 
   return {
     itemId: item.id,
-    price: input.price.toFixed(2),
+    price: price.toFixed(2),
     bandKey: computed.bandKey,
-    commissionPct: computed.commissionPct,
+    // Current scenario echoes the item's commission in the detail wire format (4dp)
+    // so the breakdown modal's header matches the row; band/price modes surface the
+    // applied band's raw percent string (e.g. "15").
+    commissionPct:
+      input.mode === 'current' ? item.currentCommissionPct.toFixed(4) : computed.commissionPct,
     calculable: computed.calculable,
     reason: computed.reason,
     breakdown: computed.breakdown,
