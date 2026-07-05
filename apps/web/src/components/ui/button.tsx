@@ -53,6 +53,11 @@ const buttonVariants = cva(
         link: 'text-primary underline-offset-4 hover:underline',
         destructive:
           'bg-destructive text-destructive-foreground hover:bg-destructive-hover active:scale-[0.97]',
+        // Quiet destructive: red text only, tinted surface on hover — for a
+        // low-emphasis destroy action that must not shout next to a primary
+        // CTA (e.g. a header "Tabloyu sil" beside "Kaydet ve indir"). Keep it
+        // behind a ConfirmDialog; the softness is intentional, not the guard.
+        'destructive-ghost': 'text-destructive hover:bg-destructive-surface active:scale-[0.97]',
         success: 'bg-success text-success-foreground hover:bg-success-hover active:scale-[0.97]',
         warning: 'bg-warning text-warning-foreground hover:bg-warning-hover active:scale-[0.97]',
       },

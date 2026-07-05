@@ -9,11 +9,9 @@ import { formatPercentDisplay } from '@/lib/format-percent';
 
 import { useReasonLabel } from '../hooks/use-reason-label';
 import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
-import type { WholeWeekControls } from '../lib/whole-week';
 import type { CommissionTariffRow } from '../types';
 import { CustomPriceCell } from './custom-price-cell';
 import { PriceBandCell } from './price-band-cell';
-import { WholePeriodToggle } from './whole-period-toggle';
 
 const BAND_INDEXES = [0, 1, 2, 3] as const;
 
@@ -24,20 +22,17 @@ export interface CommissionTariffsMobileCardsProps {
   onSelectBand: (rowId: string, band: string) => void;
   onSelectCustom: (rowId: string, band: string, choice: CustomChoice) => void;
   onDeselectCustom: (rowId: string) => void;
-  /** "7 günlük" spread controls; null for a single-period tariff (no toggle shown). */
-  wholeWeek?: WholeWeekControls | null;
 }
 
 /**
  * Mobile layout: one card per product as a top-to-bottom flow, its sections opened
- * by a top divider rule (border-t) + gap-md so the flat (un-boxed) bands read as
- * distinct blocks, not one list — the same treatment as the Plus tariff card:
+ * by a top divider rule (border-t) + gap-md — the same treatment as the Plus tariff
+ * card:
  *   1. Product identity — image + title + meta + not-calculable reason.
  *   2. Current baseline — "Güncel fiyat" / "Güncel komisyon" as label→value rows.
- *   3. The four price bands in a 2×2 grid, each a flat choice with its own control.
- *   4. Custom price — a what-if input AND a selectable choice.
- * Every selectable option shares the one TariffSelectControl affordance. Shown below
- * the `md` breakpoint; the desktop table is hidden there.
+ *   3. The four price bands in a 2×2 grid — each a click-the-card selectable option.
+ *   4. Custom price — a what-if input AND a selectable choice, stacked below.
+ * Shown below the `md` breakpoint; the desktop table is hidden there.
  */
 export function CommissionTariffsMobileCards({
   rows,
@@ -46,7 +41,6 @@ export function CommissionTariffsMobileCards({
   onSelectBand,
   onSelectCustom,
   onDeselectCustom,
-  wholeWeek,
 }: CommissionTariffsMobileCardsProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
   const reasonLabel = useReasonLabel();
@@ -76,15 +70,6 @@ export function CommissionTariffsMobileCards({
                 {!row.calculable && row.reason !== null ? (
                   <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>
                 ) : null}
-                {wholeWeek != null && (wholeWeek.isActive(row.id) || wholeWeek.canApply(row.id)) ? (
-                  <WholePeriodToggle
-                    active={wholeWeek.isActive(row.id)}
-                    onToggle={() => wholeWeek.onToggle(row.id)}
-                    label={t('table.applyWholeWeek')}
-                    activeLabel={t('table.wholeWeekApplied')}
-                    className="mt-2xs"
-                  />
-                ) : null}
               </div>
             </div>
 
@@ -107,8 +92,7 @@ export function CommissionTariffsMobileCards({
               </div>
             </div>
 
-            {/* Zone 3: the four price bands — a 2×2 grid of flat choices, gap-md so
-                each reads as a distinct option without a card border. */}
+            {/* Zone 3: the four price bands — a 2×2 grid of click-the-card choices. */}
             <div className="gap-md border-border pt-md grid grid-cols-2 border-t">
               {BAND_INDEXES.map((i) => {
                 const band = row.bands[i];

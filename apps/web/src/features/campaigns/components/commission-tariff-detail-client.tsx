@@ -7,7 +7,6 @@ import * as React from 'react';
 
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { PageHeader } from '@/components/patterns/page-header';
 import { PageSkeleton } from '@/components/patterns/page-skeleton';
 import { Button } from '@/components/ui/button';
@@ -36,22 +35,14 @@ import { toDetailTemplate } from '../lib/adapt-tariff';
 import { findBand, summarizeSelection } from '../lib/commission-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
-import {
-  buildWholeWeekIndex,
-  choiceSignature,
-  computeExportPreview,
-  isWholeWeek,
-  siblingRowIds,
-  spreadToWeek,
-  unlinkWeek,
-  type WholeWeekControls,
-} from '../lib/whole-week';
-import { CommissionTariffStatusBadge } from './commission-tariff-status-badge';
+import { computeExportPreview } from '../lib/whole-week';
+import { CommissionTariffStatusBadge, STATUS_TONE } from './commission-tariff-status-badge';
 import { CommissionTariffsMobileCards } from './commission-tariffs-mobile-cards';
 import { CommissionTariffsSummary } from './commission-tariffs-summary';
 import { CommissionTariffsTable } from './commission-tariffs-table';
 import { CommissionTariffsToolbar } from './commission-tariffs-toolbar';
 import { ExportTariffDialog } from './export-tariff-dialog';
+import { PeriodTabs } from './period-tabs';
 
 const LIST_PATH = '/campaigns/product-commission-tariffs';
 
@@ -330,42 +321,22 @@ export function CommissionTariffDetailClient({
       },
     );
   };
-  const isExporting = updateSelections.isPending || exportTariff.isPending;
-
-  // "7 günlük" spread: link/unlink a product's choice across sub-periods. Only when
-  // the tariff is split (a single-period tariff has nothing to spread over). Rebuilt
-  // each render so the closures read the live selection buffers.
-  const wholeWeekIndex = buildWholeWeekIndex(periods);
-  const wholeWeek: WholeWeekControls | null =
-    periods.length > 1
-      ? {
-          isActive: (rowId) =>
-            isWholeWeek(siblingRowIds(rowId, wholeWeekIndex), selection, customPrices),
-          canApply: (rowId) => choiceSignature(rowId, selection, customPrices) !== null,
-          onToggle: (rowId) => {
-            const ids = siblingRowIds(rowId, wholeWeekIndex);
-            const next = isWholeWeek(ids, selection, customPrices)
-              ? unlinkWeek({ selection, customPrices }, ids, rowId)
-              : spreadToWeek({ selection, customPrices }, ids, rowId);
-            setSelection(next.selection);
-            setCustomPrices(next.customPrices);
-          },
-        }
-      : null;
-
   const periodTabs =
     periods.length > 1 ? (
-      <FilterTabs
+      <PeriodTabs
         value={activePeriod.id}
-        onValueChange={(next) => setPeriodId(next)}
+        onValueChange={setPeriodId}
+        aria-label={tPage('periodsAriaLabel')}
         options={periods.map((period) => ({
           value: period.id,
-          // Prefix the raw date range with "3 Gün" / "4 Gün" so the seller can tell the
-          // sub-periods apart at a glance (only the commission differs between them).
-          label:
+          // Bold "3 Gün" / "4 Gün" line + the date range as a muted sub-line, so the
+          // sub-period (the decision axis) and its validity read at a glance.
+          dayLabel:
             period.dayCount !== null
-              ? `${tPage('periodDayLabel', { count: period.dayCount })} · ${period.dateRangeLabel}`
+              ? tPage('periodDayLabel', { count: period.dayCount })
               : period.dateRangeLabel,
+          rangeLabel: period.dayCount !== null ? period.dateRangeLabel : '',
+          tone: STATUS_TONE[period.validity ?? 'draft'],
         }))}
       />
     ) : null;
@@ -409,10 +380,9 @@ export function CommissionTariffDetailClient({
               <ConfirmDialog
                 trigger={
                   <Button
-                    variant="outline"
+                    variant="destructive-ghost"
                     size="sm"
                     leadingIcon={<Delete02Icon aria-hidden />}
-                    className="text-destructive hover:border-destructive hover:bg-destructive-surface hover:text-destructive"
                   >
                     {tPage('templates.delete')}
                   </Button>
@@ -447,7 +417,6 @@ export function CommissionTariffDetailClient({
             onSelectBand={handleSelectBand}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
-            wholeWeek={wholeWeek}
             tabs={periodTabs}
             toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
@@ -464,7 +433,6 @@ export function CommissionTariffDetailClient({
             onSelectBand={handleSelectBand}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
-            wholeWeek={wholeWeek}
           />
         </div>
 
@@ -472,7 +440,10 @@ export function CommissionTariffDetailClient({
           open={exportOpen}
           onOpenChange={setExportOpen}
           files={previewFiles}
-          isExporting={isExporting}
+          // Two-phase: selections PATCH first, then the file downloads — so the
+          // dialog can say which is happening ("kaydediliyor…" → "indiriliyor…").
+          isSaving={updateSelections.isPending}
+          isDownloading={exportTariff.isPending}
           onConfirm={onSaveExport}
         />
       </div>

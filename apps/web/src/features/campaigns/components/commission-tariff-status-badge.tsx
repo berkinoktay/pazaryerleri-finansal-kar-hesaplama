@@ -14,9 +14,11 @@ import type { TariffValidity } from '../types';
  * the export axis is shown separately so each signal stays legible. A `null`
  * validity (no parseable dates) reads as "Taslak" (draft).
  */
-type TariffStatusKey = TariffValidity | 'draft';
+export type TariffStatusKey = TariffValidity | 'draft';
 
-const STATUS_TONE: Record<TariffStatusKey, ToneKey> = {
+/** Validity → semantic tone. Shared with PeriodTabs' validity dot so both surfaces
+ * read the same color vocabulary for a period's state. */
+export const STATUS_TONE: Record<TariffStatusKey, ToneKey> = {
   active: 'success',
   upcoming: 'info',
   past: 'neutral',

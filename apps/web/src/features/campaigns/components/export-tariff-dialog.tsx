@@ -1,6 +1,6 @@
 'use client';
 
-import { Download04Icon, File01Icon } from 'hugeicons-react';
+import { Download04Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -22,22 +22,27 @@ export interface ExportTariffDialogProps {
   onOpenChange: (open: boolean) => void;
   /** The window files the download will produce (day count + product count), in order. */
   files: readonly ExportPreviewFile[];
-  isExporting: boolean;
+  /** Phase 1: the seller's selections are being persisted (PATCH). */
+  isSaving: boolean;
+  /** Phase 2: the patched xlsx / zip is being generated + downloaded. */
+  isDownloading: boolean;
   onConfirm: () => void;
 }
 
 /**
  * Pre-download preview: before saving + exporting, show the seller EXACTLY which window
  * files (3/4/7 Günlük Fiyat) will download and how many products each holds, then let
- * them confirm. Replaces the old floating action bar so export is a deliberate,
- * well-understood step from a fixed button. A single file downloads directly; more than
- * one arrives as a .zip (noted below the list).
+ * them confirm. A single file downloads directly; more than one arrives as a .zip (noted
+ * below the list). The confirm button reports its two phases in order — first the
+ * selections are saved ("kaydediliyor…"), then the file downloads ("indiriliyor…") — so
+ * a seller whose save fails knows their choices were the step that didn't complete.
  */
 export function ExportTariffDialog({
   open,
   onOpenChange,
   files,
-  isExporting,
+  isSaving,
+  isDownloading,
   onConfirm,
 }: ExportTariffDialogProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.exportDialog');
@@ -56,8 +61,12 @@ export function ExportTariffDialog({
               key={file.dayCount}
               className="gap-sm border-border bg-card px-md py-sm flex items-center justify-between rounded-lg border"
             >
-              <span className="gap-2xs flex min-w-0 items-center">
-                <File01Icon className="text-muted-foreground size-4 shrink-0" aria-hidden />
+              <span className="gap-sm flex min-w-0 items-center">
+                {/* Static file-type tag — makes it plain these download as Excel
+                    files (the multi-file case zips, noted below). */}
+                <span className="text-2xs bg-muted text-muted-foreground px-2xs py-3xs shrink-0 rounded-sm font-semibold tracking-wide">
+                  XLSX
+                </span>
                 <span className="truncate text-sm font-medium">
                   {t('fileName', { days: file.dayCount })}
                 </span>
@@ -82,10 +91,13 @@ export function ExportTariffDialog({
           <Button
             size="sm"
             onClick={onConfirm}
-            disabled={isExporting || files.length === 0}
+            disabled={files.length === 0}
+            loading={isSaving || isDownloading}
+            // Phase-accurate label: saving the selections, then downloading.
+            loadingText={isSaving ? t('saving') : t('exporting')}
             leadingIcon={<Download04Icon aria-hidden />}
           >
-            {isExporting ? t('exporting') : t('download')}
+            {t('download')}
           </Button>
         </DialogFooter>
       </DialogContent>

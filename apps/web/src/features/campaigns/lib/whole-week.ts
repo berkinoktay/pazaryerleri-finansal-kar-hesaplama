@@ -1,4 +1,4 @@
-import type { CommissionSelectionState, CustomPriceMap, SelectionMap } from './bulk-actions';
+import type { CustomPriceMap, SelectionMap } from './bulk-actions';
 
 const FULL_WEEK_DAYS = 7;
 
@@ -7,20 +7,12 @@ const FULL_WEEK_DAYS = 7;
  *
  * A product appears once PER sub-period (same barcode, a distinct item id each), and
  * "7 günlük" ≡ its choice is identical across every sub-period — a derived state, not
- * a stored flag. These pure helpers map a product across periods and spread / unlink
- * its choice; the export then writes one "7 Günlük Fiyat" row when the choices match.
- * No money math — a copied custom price re-estimates per period in its own cell.
+ * a stored flag. These pure helpers DETECT that state so the export preview can write
+ * one "7 Günlük Fiyat" row when a product's choices match across periods (mirroring the
+ * backend). The per-row "apply to whole week" convenience toggle was removed from the
+ * table UI (2026-07-05 redesign); a seller reaches the whole-week bucket by picking the
+ * same choice in each period tab by hand — no whole-week flag is ever sent to the API.
  */
-
-/** Per-row "7 günlük" controls handed to the table / mobile cards. */
-export interface WholeWeekControls {
-  /** Is this product's choice identical (and non-empty) across every sub-period? */
-  isActive: (rowId: string) => boolean;
-  /** Does this product have a choice in the active period to spread over the week? */
-  canApply: (rowId: string) => boolean;
-  /** Spread the active choice to every period, or unlink (clear the other periods). */
-  onToggle: (rowId: string) => void;
-}
 
 /** barcode → its item ids across every period, and the reverse lookup. */
 export interface WholeWeekIndex {
@@ -52,13 +44,6 @@ export function buildWholeWeekIndex(periods: readonly PeriodRows[]): WholeWeekIn
   return { rowIdsByBarcode, barcodeByRowId };
 }
 
-/** This product's item ids across every sub-period (includes `rowId` itself). */
-export function siblingRowIds(rowId: string, index: WholeWeekIndex): readonly string[] {
-  const barcode = index.barcodeByRowId.get(rowId);
-  if (barcode === undefined) return [rowId];
-  return index.rowIdsByBarcode.get(barcode) ?? [rowId];
-}
-
 /** A product's choice folded into one comparable token (a custom price beats a band). */
 export function choiceSignature(
   rowId: string,
@@ -82,39 +67,6 @@ export function isWholeWeek(
   const sig = choiceSignature(first, selection, customPrices);
   if (sig === null) return false;
   return ids.every((id) => choiceSignature(id, selection, customPrices) === sig);
-}
-
-/** Copy `sourceRowId`'s choice (band + custom price) onto every sibling period. */
-export function spreadToWeek(
-  state: CommissionSelectionState,
-  ids: readonly string[],
-  sourceRowId: string,
-): CommissionSelectionState {
-  const band = state.selection[sourceRowId] ?? null;
-  const custom = state.customPrices[sourceRowId] ?? null;
-  const selection: SelectionMap = { ...state.selection };
-  const customPrices: CustomPriceMap = { ...state.customPrices };
-  for (const id of ids) {
-    selection[id] = band;
-    customPrices[id] = custom;
-  }
-  return { selection, customPrices };
-}
-
-/** Keep `keepRowId`'s choice; clear the other periods so each can differ again. */
-export function unlinkWeek(
-  state: CommissionSelectionState,
-  ids: readonly string[],
-  keepRowId: string,
-): CommissionSelectionState {
-  const selection: SelectionMap = { ...state.selection };
-  const customPrices: CustomPriceMap = { ...state.customPrices };
-  for (const id of ids) {
-    if (id === keepRowId) continue;
-    selection[id] = null;
-    customPrices[id] = null;
-  }
-  return { selection, customPrices };
 }
 
 /** One window file the export will produce: its day count + the number of products in it. */

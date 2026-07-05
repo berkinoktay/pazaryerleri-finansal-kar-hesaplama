@@ -1,14 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CommissionSelectionState } from '@/features/campaigns/lib/bulk-actions';
 import {
   buildWholeWeekIndex,
   choiceSignature,
   computeExportPreview,
   isWholeWeek,
-  siblingRowIds,
-  spreadToWeek,
-  unlinkWeek,
 } from '@/features/campaigns/lib/whole-week';
 
 // A split week: product X is item p3x in the 3-Gün period and p4x in the 4-Gün period;
@@ -28,23 +24,18 @@ const PERIODS = [
   },
 ];
 
-function state(
-  selection: CommissionSelectionState['selection'],
-  customPrices: CommissionSelectionState['customPrices'] = {},
-): CommissionSelectionState {
-  return { selection, customPrices };
-}
-
-describe('buildWholeWeekIndex + siblingRowIds', () => {
-  it('links every item id of a product across periods', () => {
+describe('buildWholeWeekIndex', () => {
+  it('links every item id of a product across periods by barcode', () => {
     const index = buildWholeWeekIndex(PERIODS);
-    expect([...siblingRowIds('p3x', index)].sort()).toEqual(['p3x', 'p4x']);
-    expect([...siblingRowIds('p4y', index)].sort()).toEqual(['p3y', 'p4y']);
+    expect([...(index.rowIdsByBarcode.get('X') ?? [])].sort()).toEqual(['p3x', 'p4x']);
+    expect([...(index.rowIdsByBarcode.get('Y') ?? [])].sort()).toEqual(['p3y', 'p4y']);
   });
 
-  it('returns just the row itself for an unknown id', () => {
+  it('maps each item id back to its barcode', () => {
     const index = buildWholeWeekIndex(PERIODS);
-    expect(siblingRowIds('ghost', index)).toEqual(['ghost']);
+    expect(index.barcodeByRowId.get('p3x')).toBe('X');
+    expect(index.barcodeByRowId.get('p4y')).toBe('Y');
+    expect(index.barcodeByRowId.get('ghost')).toBeUndefined();
   });
 });
 
@@ -88,45 +79,6 @@ describe('isWholeWeek', () => {
 
   it('is false for a single-period product (nothing to spread)', () => {
     expect(isWholeWeek(['p3x'], { p3x: 'band2' }, {})).toBe(false);
-  });
-});
-
-describe('spreadToWeek', () => {
-  it('copies the source band choice onto every period', () => {
-    const next = spreadToWeek(state({ p3x: 'band2' }), ['p3x', 'p4x'], 'p3x');
-    expect(next.selection['p4x']).toBe('band2');
-    expect(next.selection['p3x']).toBe('band2');
-  });
-
-  it('copies the source custom price + amount onto every period', () => {
-    const custom = { p3x: { price: '150.00', netProfit: '10', marginPct: '5' } };
-    const next = spreadToWeek(state({ p3x: 'band2' }, custom), ['p3x', 'p4x'], 'p3x');
-    expect(next.customPrices['p4x']).toEqual({ price: '150.00', netProfit: '10', marginPct: '5' });
-    expect(next.selection['p4x']).toBe('band2');
-  });
-
-  it('does not mutate the input state', () => {
-    const base = state({ p3x: 'band2' });
-    spreadToWeek(base, ['p3x', 'p4x'], 'p3x');
-    expect(base.selection['p4x']).toBeUndefined();
-  });
-});
-
-describe('unlinkWeek', () => {
-  it('keeps the source period and clears the others', () => {
-    const next = unlinkWeek(state({ p3x: 'band2', p4x: 'band2' }), ['p3x', 'p4x'], 'p4x');
-    expect(next.selection['p4x']).toBe('band2');
-    expect(next.selection['p3x']).toBeNull();
-  });
-
-  it('clears the source-cleared period custom prices too', () => {
-    const custom = {
-      p3x: { price: '150.00', netProfit: '10', marginPct: '5' },
-      p4x: { price: '150.00', netProfit: '8', marginPct: '4' },
-    };
-    const next = unlinkWeek(state({ p3x: 'band2', p4x: 'band2' }, custom), ['p3x', 'p4x'], 'p3x');
-    expect(next.customPrices['p3x']).toEqual({ price: '150.00', netProfit: '10', marginPct: '5' });
-    expect(next.customPrices['p4x']).toBeNull();
   });
 });
 

@@ -18,7 +18,8 @@ describe('ExportTariffDialog', () => {
         open
         onOpenChange={vi.fn()}
         files={FILES}
-        isExporting={false}
+        isSaving={false}
+        isDownloading={false}
         onConfirm={onConfirm}
       />,
     );
@@ -36,13 +37,28 @@ describe('ExportTariffDialog', () => {
     expect(onConfirm).toHaveBeenCalledOnce();
   });
 
-  it('shows the downloading state and disables the button while exporting', () => {
+  it('shows the saving phase and disables the button while selections persist', () => {
     render(
       <ExportTariffDialog
         open
         onOpenChange={vi.fn()}
         files={FILES}
-        isExporting
+        isSaving
+        isDownloading={false}
+        onConfirm={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /kaydediliyor/i })).toBeDisabled();
+  });
+
+  it('shows the downloading phase and disables the button while the file generates', () => {
+    render(
+      <ExportTariffDialog
+        open
+        onOpenChange={vi.fn()}
+        files={FILES}
+        isSaving={false}
+        isDownloading
         onConfirm={vi.fn()}
       />,
     );
@@ -55,7 +71,8 @@ describe('ExportTariffDialog', () => {
         open
         onOpenChange={vi.fn()}
         files={[{ dayCount: 7, count: 1 }]}
-        isExporting={false}
+        isSaving={false}
+        isDownloading={false}
         onConfirm={vi.fn()}
       />,
     );

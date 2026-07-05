@@ -54,11 +54,9 @@ function renderCell(props: React.ComponentProps<typeof CustomPriceCell>) {
 describe('CustomPriceCell', () => {
   it('shows the always-visible profit block + a disabled select when empty', () => {
     renderCell({ row, isSelected: false, onSelect: vi.fn(), onDeselect: vi.fn() });
-    // The price field + its help text under the input.
     expect(screen.getByPlaceholderText(/fiyat girin/i)).toBeInTheDocument();
-    expect(screen.getByText(/karşılık gelen aralığın komisyonu/i)).toBeInTheDocument();
-    // "Hesaplanan kâr" label renders even before a price is typed (em-dash badge).
-    expect(screen.getByText(/hesaplanan kâr/i)).toBeInTheDocument();
+    // Before a price is typed, the derived line shows the "type a price" hint.
+    expect(screen.getByText(/fiyat girince tahmini kâr/i)).toBeInTheDocument();
     // The select is disabled until a calculable estimate for a typed price is in.
     expect(screen.getByRole('button', { name: /bu fiyatı seç/i })).toBeDisabled();
   });

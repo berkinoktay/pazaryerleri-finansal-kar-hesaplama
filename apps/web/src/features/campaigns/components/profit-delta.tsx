@@ -39,15 +39,14 @@ export function ProfitDelta({
   if (delta.isZero()) return null;
   const positive = delta.isPositive();
   return (
-    <span
-      className={cn(
-        'text-2xs font-medium tabular-nums',
-        positive ? 'text-success' : 'text-destructive',
-        className,
-      )}
-    >
-      {label} {positive ? '+' : '−'}
-      {formatCurrency(delta.abs())}
+    <span className={cn('text-2xs tabular-nums', className)}>
+      {/* Muted prefix ("Güncele göre"), then the signed amount in its P&L color +
+          bold so the delta figure — not the label — is what the eye lands on. */}
+      <span className="text-muted-foreground">{label} </span>
+      <span className={cn('font-semibold', positive ? 'text-success' : 'text-destructive')}>
+        {positive ? '+' : '−'}
+        {formatCurrency(delta.abs())}
+      </span>
     </span>
   );
 }
