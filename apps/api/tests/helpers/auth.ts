@@ -5,6 +5,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { getSupabaseAdminClient } from '@/lib/supabase-admin-client';
 
+import { nextPoolIndex } from './auth-pool-cursor';
+
 const TEST_PASSWORD = 'integration-test-password';
 // The one profile field a reused user must keep pinned to the TEST convention
 // (the schema default for `full_name` is NULL, but mint sets 'Test User', so a
@@ -41,12 +43,17 @@ export interface AuthenticatedTestUser {
 }
 
 /**
- * Truncate-bounded pool of reusable authenticated test users, plus the cursor
- * into it. Minting a user is the suite's #2 setup cost: two GoTrue round-trips
- * (admin.createUser + signInWithPassword, ~180ms) per call, ~25% of the
- * integration suite. The pool amortises that — `auth.users` rows survive
- * `truncateAll` (it only wipes tenant tables), so a user minted once stays a
- * valid login for the whole vitest run and can be handed back to a later test.
+ * Truncate-bounded pool of reusable authenticated test users. Minting a user is
+ * the suite's #2 setup cost: two GoTrue round-trips (admin.createUser +
+ * signInWithPassword, ~180ms) per call, ~25% of the integration suite. The pool
+ * amortises that — `auth.users` rows survive `truncateAll` (it only wipes
+ * tenant tables), so a user minted once stays a valid login for the whole
+ * vitest run and can be handed back to a later test.
+ *
+ * The cursor into this pool lives in the sibling `./auth-pool-cursor` module
+ * (imported as `nextPoolIndex`), kept import-free so `db.ts` can rewind it from
+ * `truncateAll` without dragging this file's `@/` alias into non-api consumers
+ * — see that module's header for the full rationale.
  *
  * This module-level pool staying correct relies on vitest's default
  * `isolate: true`: each test file runs in its own module registry, so the pool
@@ -56,23 +63,6 @@ export interface AuthenticatedTestUser {
  * across many files) and the pool-growth bound — do not change it.
  */
 const pool: AuthenticatedTestUser[] = [];
-let cursor = 0;
-
-/**
- * Rewind the reusable-user cursor to the start of the pool.
- *
- * Called by `truncateAll` (tests/helpers/db.ts) at the end of every run —
- * `truncateAll` is the de-facto per-test boundary (every DB test invokes it in
- * `beforeEach`). After a rewind the next test again hands out `pool[0]`,
- * `pool[1]`, … so consecutive calls WITHIN a single test still get DISTINCT
- * users (multi-tenancy isolation tests stay correct), while the users
- * themselves are reused ACROSS tests. The pool array is never cleared: the
- * `auth.users` / `user_profiles` rows it points at live outside `truncateAll`'s
- * scope and stay valid for the whole run.
- */
-export function resetAuthUserPoolCursor(): void {
-  cursor = 0;
-}
 
 /**
  * Mint a brand-new Supabase Auth user + matching `user_profiles` row and sign
@@ -179,19 +169,20 @@ export async function createAuthenticatedTestUser(
     return mintAuthenticatedTestUser(overrides);
   }
 
-  // Reuse a pooled user while the cursor points inside the pool. The profile
-  // row is reset to a clean baseline; the token is handed back as-is.
-  const pooled = cursor < pool.length ? pool[cursor] : undefined;
+  // Reserve the next slot (advances the shared cursor). Reuse a pooled user
+  // while the reserved index points inside the pool; the profile row is reset
+  // to a clean baseline and the token is handed back as-is.
+  const index = nextPoolIndex();
+  const pooled = index < pool.length ? pool[index] : undefined;
   if (pooled !== undefined) {
-    cursor += 1;
     await resetPooledProfile(pooled);
     return pooled;
   }
 
-  // Pool exhausted for this test — mint a fresh user, remember it, advance.
+  // Pool exhausted for this test — mint a fresh user and remember it (the
+  // cursor already advanced via nextPoolIndex).
   const user = await mintAuthenticatedTestUser(overrides);
   pool.push(user);
-  cursor += 1;
   return user;
 }
 

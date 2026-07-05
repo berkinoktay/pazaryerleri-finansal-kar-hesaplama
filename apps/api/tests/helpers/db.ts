@@ -1,6 +1,6 @@
 import { prisma } from '@pazarsync/db';
 
-import { resetAuthUserPoolCursor } from './auth';
+import { resetAuthUserPoolCursor } from './auth-pool-cursor';
 
 export { prisma };
 
@@ -93,7 +93,7 @@ export async function truncateAll(): Promise<void> {
 
   // `truncateAll` is the de-facto per-test boundary (every DB test calls it in
   // `beforeEach`), so rewind the reusable auth-user pool here — always, even
-  // when nothing was truncated. See tests/helpers/auth.ts.
+  // when nothing was truncated. See tests/helpers/auth-pool-cursor.ts.
   resetAuthUserPoolCursor();
 }
 
