@@ -302,6 +302,22 @@ jobs:
         if: always()
         run: supabase stop
 
+  actionlint:
+    name: Workflow lint (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      # We edit ci.yml often now (job split, turbo cache, timeouts) and the only
+      # guard was a YAML parse. actionlint catches Actions-specific breakage:
+      # bad ${{ }} expressions, dangling needs/job refs, shellcheck on run:
+      # blocks, invalid permissions/runners. Version pinned like every other
+      # third-party tool in this workflow; bump deliberately.
+      - name: Run actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
   edge-functions:
     name: Edge Functions (Deno)
     runs-on: ubuntu-latest
@@ -354,6 +370,7 @@ jobs:
         deps-audit,
         unit-tests,
         test,
+        actionlint,
         edge-functions,
       ]
     runs-on: ubuntu-latest
