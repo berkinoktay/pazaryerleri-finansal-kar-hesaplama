@@ -49,7 +49,13 @@ interface BandWire {
 interface DetailWire {
   periods: {
     dateRangeLabel: string;
-    items: { barcode: string; calculable: boolean; reason: string | null; bands: BandWire[] }[];
+    items: {
+      barcode: string;
+      commissionBasePrice: string | null;
+      calculable: boolean;
+      reason: string | null;
+      bands: BandWire[];
+    }[];
   }[];
 }
 
@@ -184,6 +190,9 @@ describe('POST .../commission-tariffs/import — real Trendyol fixture', () => {
     const matched = period?.items.find((i) => i.barcode === MATCHED_BARCODE);
     expect(matched?.calculable).toBe(true);
     expect(matched?.reason).toBeNull();
+    // The "KOMİSYONA ESAS FİYAT" column was read from the real vendor file (852.0 for
+    // this row) — byte-level proof the layout's search string matches the header.
+    expect(matched?.commissionBasePrice).toBe('852.00');
     // Four bands, each with a non-null computed profit. The 4-day commissions are
     // 19 / 13.1 / 12.1 / 10.6 percent (read positionally past the duplicate headers).
     expect(matched?.bands).toHaveLength(4);

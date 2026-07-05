@@ -94,11 +94,15 @@ export const TariffDetailItemSchema = z
     category: z.string().nullable(),
     brand: z.string().nullable(),
     currentPrice: z.string(),
+    commissionBasePrice: z.string().nullable().openapi({
+      description:
+        'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null.',
+    }),
     currentCommissionPct: z.string(),
-    currentNetProfit: z
-      .string()
-      .nullable()
-      .openapi({ description: 'Güncel fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null.' }),
+    currentNetProfit: z.string().nullable().openapi({
+      description:
+        'Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; hesaplanamıyorsa null.',
+    }),
     currentMarginPct: z.string().nullable(),
     calculable: z.boolean(),
     reason: TariffItemReasonSchema.nullable(),
@@ -176,13 +180,19 @@ export const UpdateSelectionsResponseSchema = z
 
 export type TariffSelection = z.infer<typeof TariffSelectionSchema>;
 
-// ─── Estimate (on-demand breakdown at an arbitrary price) ───────────────────
+// ─── Estimate (on-demand breakdown for a tariff item) ───────────────────────
 //
-// One endpoint serves two frontend needs, both on-demand so the detail payload
-// stays light: (1) the band-click breakdown modal passes the band's price plus
-// its `bandKey` (exact commission, no boundary ambiguity); (2) the custom-price
-// what-if passes only a price and the applicable band is derived from it. The
-// full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
+// One endpoint serves THREE frontend needs, all on-demand so the detail payload
+// stays light:
+//   1. Band-click modal — pass the band's price plus its `bandKey`; that band's
+//      commission is applied verbatim (exact even on touching band boundaries).
+//   2. Custom-price what-if — pass only a `price`; the applicable band is derived
+//      from it.
+//   3. Current scenario (`scenario: 'current'`) — pass neither price nor bandKey;
+//      the item's own commission-base price (or its sale price when the column is
+//      absent) + current commission are used, so the breakdown matches the detail
+//      row's `currentNetProfit` badge byte-for-byte.
+// The full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const TariffItemIdPathSchema = TariffIdPathSchema.extend({
   itemId: z
@@ -196,12 +206,38 @@ export const EstimateItemPriceBodySchema = z
     price: z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+      .optional()
       .openapi({ description: 'Değerlendirilecek satış fiyatı (GROSS, TL).', example: '450.00' }),
     bandKey: TariffBandKeySchema.optional().openapi({
       description:
         'Verilirse o band’ın komisyonu birebir kullanılır (band-tıklaması). ' +
         'Yoksa fiyatın düştüğü band bulunur (özel-fiyat what-if).',
     }),
+    scenario: z
+      .literal('current')
+      .optional()
+      .openapi({
+        description:
+          'Güncel senaryonun dökümü — item’ın komisyona esas fiyatı (yoksa güncel fiyatı) + ' +
+          'güncel komisyonuyla hesaplanır; price/bandKey verilmez.',
+      }),
+  })
+  .superRefine((val, ctx) => {
+    // `scenario: 'current'` derives BOTH the price and the commission from the item
+    // itself, so a caller-supplied price or bandKey is contradictory — reject it.
+    if (val.scenario === 'current') {
+      if (val.price !== undefined) {
+        ctx.addIssue({ code: 'custom', message: 'INVALID_ESTIMATE_MODE', path: ['price'] });
+      }
+      if (val.bandKey !== undefined) {
+        ctx.addIssue({ code: 'custom', message: 'INVALID_ESTIMATE_MODE', path: ['bandKey'] });
+      }
+      return;
+    }
+    // The band-click and custom-price modes both require an explicit price.
+    if (val.price === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'PRICE_REQUIRED', path: ['price'] });
+    }
   })
   .openapi('EstimateItemPriceBody');
 

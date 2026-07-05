@@ -34,6 +34,7 @@ const row: CommissionTariffRow = {
   category: 'Bayrak',
   brand: 'Marka',
   currentPrice: '800.00',
+  commissionBasePrice: '780.00',
   currentCommissionPct: '19',
   currentNetProfit: '50.00',
   currentMarginPct: '6.25',

@@ -44,6 +44,10 @@ interface ParsedRow {
   brand: string | null;
   stock: number | null;
   currentPrice: string;
+  // "KOMİSYONA ESAS FİYAT" from the file, or null when the column is absent (older
+  // exports). The fallback to currentPrice happens at COMPUTE time — the import
+  // keeps data fidelity (null means the file did not carry the value).
+  commissionBasePrice: string | null;
   currentCommissionPct: string;
   brackets: PriceBrackets;
   // Commissions per layout period (parallel to layout.periods): [periodIdx][band].
@@ -94,6 +98,8 @@ function parseRow(row: readonly unknown[], layout: TariffLayout): ParsedRow | nu
     brand: cellText(row, fixed.brand),
     stock: cellInt(row, fixed.stock),
     currentPrice: cellDecimalString(row, layout.currentPrice) ?? '0',
+    commissionBasePrice:
+      layout.commissionBasePrice >= 0 ? cellDecimalString(row, layout.commissionBasePrice) : null,
     currentCommissionPct: cellDecimalString(row, layout.currentCommission) ?? '0',
     brackets: {
       band1Lower: cellDecimalString(row, fixed.band1Lower),
@@ -292,6 +298,7 @@ export async function importTariff(input: ImportTariffInput): Promise<ImportTari
           // same order so the detail lists products as in the file, identically per tab.
           sortOrder: index,
           currentPrice: p.currentPrice,
+          commissionBasePrice: p.commissionBasePrice,
           currentCommissionPct: p.currentCommissionPct,
           bands: bandsForPeriod(p.brackets, p.periodComms[period.layoutIndex] ?? []),
         }));

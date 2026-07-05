@@ -56,7 +56,11 @@ export interface ComputedBandResult {
   readonly marginPct: string | null;
 }
 
-/** The "do nothing" baseline: profit at the current price + current (regular) commission. */
+/**
+ * The "do nothing" baseline: profit at the commission-base price (the customer-seen
+ * price commission is charged on) + current (regular) commission. Falls back to the
+ * sale price when the commission-base price is absent (imports predating the column).
+ */
 export interface ComputedCurrentScenario {
   readonly netProfit: string | null;
   readonly marginPct: string | null;
@@ -69,8 +73,9 @@ export interface ComputedItemBands {
   /** Key of the band with the highest net profit, or null if none calculable. */
   readonly bestBandKey: string | null;
   /**
-   * Profit at the seller's CURRENT price + current commission — the baseline the
-   * band/custom "vs current" delta compares against. Null when not calculable.
+   * Profit at the commission-base price (customer-seen price, or the sale price when
+   * the column is absent) + current commission — the baseline the band/custom "vs
+   * current" delta compares against. Null when not calculable.
    */
   readonly current: ComputedCurrentScenario;
 }
@@ -116,6 +121,7 @@ export function computeItemBands(
   ctx: TariffAssemblyContext,
   bands: ReadonlyArray<StoredBand>,
   currentPrice: Decimal,
+  commissionBasePrice: Decimal | null,
   currentCommissionPct: Decimal,
   variant: TariffVariant | null,
   costAggregate: VariantCostAggregate | undefined,
@@ -152,10 +158,12 @@ export function computeItemBands(
   const baseEcon: UnitEconomics = probe.econ;
 
   // Baseline ("do nothing"): reuse the assembled econ, override only the commission
-  // to the seller's CURRENT (regular) rate, and run the engine at the current price.
+  // to the seller's CURRENT (regular) rate, and run the engine at the commission-base
+  // price — the customer-seen price commission is actually charged on. A null base
+  // (imports predating the KOMİSYONA ESAS FİYAT column) falls back to the sale price.
   const currentBreakdown = computeUnitProfit(
     { ...baseEcon, commissionRate: currentCommissionPct },
-    currentPrice,
+    commissionBasePrice ?? currentPrice,
   );
   const current: ComputedCurrentScenario = {
     netProfit: currentBreakdown.netProfit.toFixed(2),
@@ -212,21 +220,83 @@ export function bandForPrice(bands: ReadonlyArray<StoredBand>, price: Decimal): 
 export interface ComputedEstimate {
   readonly calculable: boolean;
   readonly reason: TariffItemReason | null;
-  /** The band whose commission was applied — echoed (bandKey) or price-derived. */
+  /** The band whose commission was applied — echoed (bandKey) or price-derived; null in override mode. */
   readonly bandKey: string | null;
-  /** Commission PERCENT of the applied band (e.g. "19"); null when no band. */
+  /** Commission PERCENT applied (e.g. "19"); null when no band / no variant. */
   readonly commissionPct: string | null;
   /** Full serialized profit breakdown at `price`; null when not calculable. */
   readonly breakdown: QuoteBreakdown | null;
 }
 
 /**
- * Computes the full profit breakdown for ONE tariff item at an arbitrary price.
- * Mirrors `computeItemBands` (same assembly, same not-calculable semantics) but
- * returns a single serialized breakdown for the detail band-click modal and the
- * custom-price what-if. The commission comes from the resolved band: a non-null
- * `bandKey` (band-click) selects it exactly; otherwise the band the price falls
- * into (`bandForPrice`) supplies it. A null variant or no resolvable band is
+ * How the estimate resolves its commission:
+ *   - `band`    — from the tariff bands: a non-null `bandKey` selects that band
+ *                 exactly (band-click); otherwise the band the price falls into
+ *                 (`bandForPrice`) supplies it (custom-price what-if).
+ *   - `override` — supplied directly (the current scenario), so NO band lookup
+ *                 happens; the rate is applied verbatim.
+ */
+export type EstimateCommission =
+  | { readonly kind: 'band'; readonly bandKey: string | null }
+  | { readonly kind: 'override'; readonly commissionPct: Decimal };
+
+/**
+ * Assembles the variant's econ at `commissionRate` and computes the breakdown at
+ * `price`, echoing the caller-chosen `bandKey` / `commissionPct` on the result.
+ * Shared tail of both estimate modes — the variant is already known non-null.
+ */
+function estimateAtCommission(
+  ctx: TariffAssemblyContext,
+  variant: TariffVariant,
+  costAggregate: VariantCostAggregate | undefined,
+  shipping: EstimateOutcome,
+  price: Decimal,
+  commissionRate: Decimal,
+  bandKey: string | null,
+  commissionPct: string,
+): ComputedEstimate {
+  const inputs: AssemblyInputs = {
+    costAggregate,
+    commission: tariffCommission(commissionRate),
+    shipping,
+  };
+  const probe = assembleUnitEconomics(ctx, variant, inputs);
+
+  if (probe.econ === null) {
+    return {
+      calculable: false,
+      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
+      bandKey,
+      commissionPct,
+      breakdown: null,
+    };
+  }
+
+  return {
+    calculable: true,
+    reason: null,
+    bandKey,
+    commissionPct,
+    breakdown: serializeBreakdown(computeUnitProfit(probe.econ, price)),
+  };
+}
+
+const NO_PRODUCT_ESTIMATE: ComputedEstimate = {
+  calculable: false,
+  reason: 'NO_PRODUCT',
+  bandKey: null,
+  commissionPct: null,
+  breakdown: null,
+};
+
+/**
+ * Computes the full profit breakdown for ONE tariff item at `price`. Mirrors
+ * `computeItemBands` (same assembly, same not-calculable semantics) but returns
+ * a single serialized breakdown for the detail band-click modal, the custom-price
+ * what-if, and the current-scenario breakdown. The commission comes from
+ * `commission`: `band` resolves a tariff band (see `EstimateCommission`), while
+ * `override` applies the given rate directly (no band, so `bandKey` is null on the
+ * result). A null variant — or, in band mode, no resolvable band — is
  * not-calculable with reason `NO_PRODUCT` (matching the detail view).
  */
 export function computeItemEstimate(
@@ -236,44 +306,40 @@ export function computeItemEstimate(
   costAggregate: VariantCostAggregate | undefined,
   shipping: EstimateOutcome,
   price: Decimal,
-  bandKey: string | null,
+  commission: EstimateCommission,
 ): ComputedEstimate {
+  // Override mode (current scenario): commission is supplied directly, no band
+  // lookup. Only the variant match gates calculability (same NO_PRODUCT semantics).
+  if (commission.kind === 'override') {
+    if (variant === null) return NO_PRODUCT_ESTIMATE;
+    return estimateAtCommission(
+      ctx,
+      variant,
+      costAggregate,
+      shipping,
+      price,
+      commission.commissionPct,
+      null,
+      commission.commissionPct.toString(),
+    );
+  }
+
+  // Band mode: a non-null bandKey selects the band exactly (band-click); otherwise
+  // the band the price falls into supplies the commission (custom-price what-if).
   const band =
-    (bandKey !== null ? bands.find((b) => b.key === bandKey) : undefined) ??
+    (commission.bandKey !== null ? bands.find((b) => b.key === commission.bandKey) : undefined) ??
     bandForPrice(bands, price);
 
-  if (variant === null || band === null) {
-    return {
-      calculable: false,
-      reason: 'NO_PRODUCT',
-      bandKey: null,
-      commissionPct: null,
-      breakdown: null,
-    };
-  }
+  if (variant === null || band === null) return NO_PRODUCT_ESTIMATE;
 
-  const inputs: AssemblyInputs = {
+  return estimateAtCommission(
+    ctx,
+    variant,
     costAggregate,
-    commission: tariffCommission(new Decimal(band.commissionPct)),
     shipping,
-  };
-  const probe = assembleUnitEconomics(ctx, variant, inputs);
-
-  if (probe.econ === null) {
-    return {
-      calculable: false,
-      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
-      bandKey: band.key,
-      commissionPct: band.commissionPct,
-      breakdown: null,
-    };
-  }
-
-  return {
-    calculable: true,
-    reason: null,
-    bandKey: band.key,
-    commissionPct: band.commissionPct,
-    breakdown: serializeBreakdown(computeUnitProfit(probe.econ, price)),
-  };
+    price,
+    new Decimal(band.commissionPct),
+    band.key,
+    band.commissionPct,
+  );
 }

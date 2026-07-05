@@ -3,7 +3,10 @@
 // The core invariant: an estimate at a band's price (band-click mode) equals
 // that band's profit in the detail response — same engine, same resolvers, so
 // the breakdown modal never disagrees with the badge. Custom-price mode derives
-// the band from the price; an unmatched item degrades to not-calculable.
+// the band from the price; the current scenario (`scenario: 'current'`) prices the
+// item's own commission-base price at its current commission and MUST equal the
+// detail row's `currentNetProfit` badge; an unmatched item degrades to
+// not-calculable.
 //
 // Fixture matches commission-tariffs.routes.test.ts: one calculable variant
 // (TRY cost + SENDEOMP shipping + fee defs) plus an unmatched item.
@@ -29,8 +32,15 @@ interface BandWire {
   netProfit: string | null;
   marginPct: string | null;
 }
+interface DetailItemWire {
+  id: string;
+  barcode: string;
+  commissionBasePrice: string | null;
+  currentNetProfit: string | null;
+  bands: BandWire[];
+}
 interface DetailWire {
-  periods: { items: { id: string; barcode: string; bands: BandWire[] }[] }[];
+  periods: { items: DetailItemWire[] }[];
 }
 interface EstimateWire {
   itemId: string;
@@ -145,7 +155,10 @@ async function setupFixture(): Promise<EstimateFixture> {
       stockCode: 'STK-EST',
       productTitle: 'Tarife Ürünü',
       currentPrice: '500.00',
-      currentCommissionPct: '0.1900',
+      // Customer-seen price commission is charged on — lower than the 500 sale price
+      // (a discounted product). The current scenario must price on THIS, not 500.
+      commissionBasePrice: '480.00',
+      currentCommissionPct: '19.0000',
       // Touching boundaries (band2.upper = band1.lower = 450): a band-click on
       // band2 (price 450) must still resolve to band2 — that is what bandKey does.
       bands: [
@@ -254,6 +267,82 @@ describe('Commission Tariffs — item estimate', () => {
     const body = (await res.json()) as EstimateWire;
     expect(body.bandKey).toBe('band1');
     expect(body.commissionPct).toBe('19');
+  });
+
+  it('current scenario breakdown equals the detail currentNetProfit (same engine, same price + commission)', async () => {
+    // Read the detail's current-scenario numbers for the SAME item, then prove the
+    // estimate reproduces them byte-for-byte — the guarantee the badge relies on.
+    const detailRes = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/commission-tariffs/${fx.tariffId}`,
+      { headers: { Authorization: bearer(fx.accessToken) } },
+    );
+    const detail = (await detailRes.json()) as DetailWire;
+    const matched = detail.periods[0]?.items.find((i) => i.barcode === 'BC-EST');
+    expect(matched?.commissionBasePrice).toBe('480.00');
+    expect(matched?.currentNetProfit).not.toBeNull();
+
+    const res = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+
+    expect(body.itemId).toBe(fx.matchedItemId);
+    expect(body.calculable).toBe(true);
+    expect(body.reason).toBeNull();
+    expect(body.bandKey).toBeNull();
+    // Priced on the commission-base price (480, the customer-seen price), NOT the 500 sale price.
+    expect(body.price).toBe('480.00');
+    expect(body.breakdown?.saleGross).toBe('480.00');
+    // Commission is the item's CURRENT rate, echoed in the detail's 4dp wire format.
+    expect(body.commissionPct).toBe('19.0000');
+    // The whole point: the modal number must equal the row badge exactly.
+    expect(body.breakdown?.netProfit).toBe(matched?.currentNetProfit);
+  });
+
+  it('current scenario falls back to the sale price when commission-base price is absent', async () => {
+    // The unmatched item has no commissionBasePrice (a legacy import shape) — current
+    // mode prices on currentPrice (300) and, being unmatched, is not calculable.
+    const res = await app.request(estimateUrl(fx, fx.unmatchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+    expect(body.price).toBe('300.00'); // == currentPrice (fallback)
+    expect(body.bandKey).toBeNull();
+    expect(body.calculable).toBe(false);
+    expect(body.reason).toBe('NO_PRODUCT');
+    expect(body.breakdown).toBeNull();
+  });
+
+  it('rejects price sent with scenario:current (INVALID_ESTIMATE_MODE)', async () => {
+    const res = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current', price: '100.00' }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors.some((e) => e.field === 'price' && e.code === 'INVALID_ESTIMATE_MODE')).toBe(
+      true,
+    );
+  });
+
+  it('rejects an empty body — neither price nor scenario (PRICE_REQUIRED)', async () => {
+    const res = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors.some((e) => e.field === 'price' && e.code === 'PRICE_REQUIRED')).toBe(true);
   });
 
   it('an unmatched item is not calculable', async () => {

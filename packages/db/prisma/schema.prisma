@@ -1228,7 +1228,13 @@ model CommissionTariffItem {
   // identical across sub-period tabs (same product → same sortOrder in every period).
   sortOrder        Int      @default(0) @map("sort_order")
   currentPrice     Decimal  @map("current_price") @db.Decimal(12, 2)
-  // Current (band1) commission as a FRACTION (0.19 = %19), Excel-sourced.
+  // "KOMİSYONA ESAS FİYAT" from the Excel — the customer-seen price commission is
+  // charged on (differs from currentPrice when the product is discounted). The
+  // current-scenario profit is computed on THIS price. Null for tariffs imported
+  // before the column was read (compute falls back to currentPrice; a re-import
+  // backfills it).
+  commissionBasePrice Decimal? @map("commission_base_price") @db.Decimal(12, 2)
+  // Current (band1) commission as a PERCENT (19 = %19), Excel-sourced.
   currentCommissionPct Decimal @map("current_commission_pct") @db.Decimal(6, 4)
   // The 4 price bands: [{ key, threshold, commissionPct }] (commissionPct fraction).
   bands            Json

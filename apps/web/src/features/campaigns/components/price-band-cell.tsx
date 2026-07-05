@@ -1,12 +1,10 @@
 'use client';
 
-import { SparklesIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
 
-import { Badge } from '@/components/ui/badge';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
@@ -15,6 +13,7 @@ import { asBandKey } from '../lib/band-key';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow, PriceBand } from '../types';
 import { CommissionTariffBreakdown } from './commission-tariff-breakdown';
+import { TariffBestRibbon } from './tariff-best-ribbon';
 import { TariffOptionCard } from './tariff-option-card';
 import { TariffProfitBlock } from './tariff-profit-block';
 import { TariffSelectFoot } from './tariff-select-foot';
@@ -98,17 +97,7 @@ export function PriceBandCell({
           adds NO height: every card starts at the price, keeping cards short and the
           prices aligned. pointer-events-none → clicking it still selects via the
           overlay. Only the best band shows it. */}
-      {isBest ? (
-        <Badge
-          tone="primary"
-          variant="solid"
-          radius="full"
-          leadingIcon={<SparklesIcon />}
-          className="text-2xs px-2xs gap-3xs left-sm pointer-events-none absolute top-0 z-10 -translate-y-1/2 py-0 font-medium [&_svg]:size-3"
-        >
-          {t('best')}
-        </Badge>
-      ) : null}
+      {isBest ? <TariffBestRibbon label={t('best')} /> : null}
 
       {/* Price boundary + its "ve altı / ve üzeri" qualifier as one hero unit, then
           the band's commission. */}

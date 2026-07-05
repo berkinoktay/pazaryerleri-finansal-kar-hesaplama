@@ -172,7 +172,8 @@ jobs:
     # required checks pending forever.
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The tariff verticals (#395-#400) grew the integration suite past the old 25m cap on a cold cache; 40m fits the observed ~34m worst case with headroom.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup

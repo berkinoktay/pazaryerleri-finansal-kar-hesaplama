@@ -35,6 +35,7 @@ interface ItemWire {
   barcode: string;
   productTitle: string;
   imageUrl: string | null;
+  commissionBasePrice: string | null;
   currentNetProfit: string | null;
   currentMarginPct: string | null;
   calculable: boolean;
@@ -351,6 +352,137 @@ describe('Commission Tariffs — list / detail / delete', () => {
     const expected = ['Gama Ürün', 'Alfa Ürün', 'Beta Ürün'];
     expect(body.periods[0]?.items.map((i) => i.productTitle)).toEqual(expected);
     expect(body.periods[1]?.items.map((i) => i.productTitle)).toEqual(expected);
+  });
+
+  it('computes the current-scenario profit at commissionBasePrice, falling back to currentPrice', async () => {
+    // The "do nothing" baseline must run at the KOMİSYONA ESAS FİYAT (the customer-seen
+    // price commission is charged on), NOT the sale price. Three items share one
+    // calculable variant + one current commission, differing only in price inputs:
+    //   A: currentPrice 500, commissionBasePrice 400  → baseline at 400
+    //   B: currentPrice 400, commissionBasePrice null → baseline at 400 (fallback)
+    //   C: currentPrice 500, commissionBasePrice null → baseline at 500 (fallback)
+    // So A must equal B (same 400 price point) and differ from C (sale-price fallback).
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing — globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Base Price Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'base-price-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8201n,
+        productMainId: 'pm-8201',
+        title: 'Baz Fiyat Ürünü',
+        categoryId: 597n,
+        categoryName: 'Gömlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 82010n,
+        barcode: 'BC-BASE',
+        stockCode: 'STK-BASE',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeight: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        name: 'COGS Base',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        currency: 'TRY',
+        vatRate: 20,
+        fxRateMode: 'MANUAL',
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.commissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Baz Fiyat Tarifesi' },
+    });
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 – 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    // All three point at the SAME calculable variant + same current commission; only
+    // the price inputs differ. A single band satisfies calculability (its commission
+    // does not affect the current-scenario, which uses currentCommissionPct).
+    const bands = [{ key: 'band1', upperLimit: '600.00', commissionPct: '19' }];
+    const makeItem = async (
+      barcode: string,
+      currentPrice: string,
+      commissionBasePrice: string | null,
+    ): Promise<void> => {
+      await prisma.commissionTariffItem.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          periodId: period.id,
+          productVariantId: variant.id,
+          barcode,
+          productTitle: barcode,
+          currentPrice,
+          commissionBasePrice,
+          currentCommissionPct: '19.0000',
+          bands,
+        },
+      });
+    };
+    await makeItem('BC-A', '500.00', '400.00');
+    await makeItem('BC-B', '400.00', null);
+    await makeItem('BC-C', '500.00', null);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/commission-tariffs/${tariff.id}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const items = ((await res.json()) as DetailWire).periods[0]?.items ?? [];
+    const a = items.find((i) => i.barcode === 'BC-A');
+    const b = items.find((i) => i.barcode === 'BC-B');
+    const c = items.find((i) => i.barcode === 'BC-C');
+
+    expect(a?.calculable).toBe(true);
+    expect(a?.currentNetProfit).not.toBeNull();
+    // (1) A (base 400) equals B (fallback at currentPrice 400) — same price point.
+    expect(a?.currentNetProfit).toBe(b?.currentNetProfit);
+    // (2) A (base 400) differs from C (fallback at sale price 500) — proves the
+    // baseline is NOT computed from the sale price when a base price is present.
+    expect(a?.currentNetProfit).not.toBe(c?.currentNetProfit);
+    // (3) The base price is echoed for A, null for B (column absent).
+    expect(a?.commissionBasePrice).toBe('400.00');
+    expect(b?.commissionBasePrice).toBeNull();
   });
 
   it('deletes the tariff and then lists empty', async () => {

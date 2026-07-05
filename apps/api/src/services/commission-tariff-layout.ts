@@ -48,6 +48,8 @@ export interface PeriodColumns {
 export interface TariffLayout {
   readonly fixed: typeof FIXED_COLUMNS;
   readonly currentPrice: number;
+  /** "KOMİSYONA ESAS FİYAT" — customer-seen price commission is charged on; -1 when absent. */
+  readonly commissionBasePrice: number;
   readonly currentCommission: number;
   readonly newTsf: number;
   readonly tariffSelection: number;
@@ -84,6 +86,9 @@ export function resolveTariffLayout(headerRow: readonly unknown[]): TariffLayout
   const currentCommission = findHeader(headers, 'GÜNCEL KOMİSYON');
   const newTsf = findHeader(headers, 'YENİ TSF (FİYAT GÜNCELLE)');
   const tariffSelection = findHeader(headers, 'Tarife Seçimi');
+  // Optional — files predating the column still import; -1 tolerated (NOT in the
+  // <0 reject below). Compute falls back to currentPrice when this is absent.
+  const commissionBasePrice = findHeader(headers, 'KOMİSYONA ESAS FİYAT');
   if (currentPrice < 0 || currentCommission < 0 || newTsf < 0 || tariffSelection < 0) {
     return null;
   }
@@ -91,6 +96,7 @@ export function resolveTariffLayout(headerRow: readonly unknown[]): TariffLayout
   return {
     fixed: FIXED_COLUMNS,
     currentPrice,
+    commissionBasePrice,
     currentCommission,
     newTsf,
     tariffSelection,

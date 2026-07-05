@@ -4910,11 +4910,15 @@
               "band4"
             ],
             "description": "Verilirse o band’ın komisyonu birebir kullanılır (band-tıklaması). Yoksa fiyatın düştüğü band bulunur (özel-fiyat what-if)."
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current"
+            ],
+            "description": "Güncel senaryonun dökümü — item’ın komisyona esas fiyatı (yoksa güncel fiyatı) + güncel komisyonuyla hesaplanır; price/bandKey verilmez."
           }
-        },
-        "required": [
-          "price"
-        ]
+        }
       },
       "CommissionTariffDetail": {
         "type": "object",
@@ -5018,6 +5022,13 @@
           "currentPrice": {
             "type": "string"
           },
+          "commissionBasePrice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır; kolon öncesi eski içe aktarımlarda null."
+          },
           "currentCommissionPct": {
             "type": "string"
           },
@@ -5026,7 +5037,7 @@
               "string",
               "null"
             ],
-            "description": "Güncel fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null."
+            "description": "Komisyona esas fiyat (yoksa güncel fiyat) + güncel komisyonla net kâr; hesaplanamıyorsa null."
           },
           "currentMarginPct": {
             "type": [
@@ -5074,6 +5085,7 @@
           "category",
           "brand",
           "currentPrice",
+          "commissionBasePrice",
           "currentCommissionPct",
           "currentNetProfit",
           "currentMarginPct",
@@ -14292,7 +14304,7 @@
           "CommissionTariffs"
         ],
         "summary": "Estimate the profit breakdown for a tariff item at a given price",
-        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE tariff item at the requested price, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses — so an estimate at a band’s price equals that band’s profit in the detail response. Two modes: pass `bandKey` to use that band’s commission verbatim (the band-click breakdown modal), or omit it to derive the band from the price (the custom-price what-if). Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, `calculable` is false, `reason` explains why and `breakdown` is null. Money fields are GROSS decimal strings.",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE tariff item, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses — so an estimate at a band’s price equals that band’s profit in the detail response. Three modes: pass `price` + `bandKey` to use that band’s commission verbatim (the band-click breakdown modal), pass only `price` to derive the band from it (the custom-price what-if), or pass `scenario: \"current\"` (no price/bandKey) to price the item’s own commission-base price at its current commission — the breakdown then matches the detail row’s `currentNetProfit` exactly. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, `calculable` is false, `reason` explains why and `breakdown` is null. Money fields are GROSS decimal strings.",
         "security": [
           {
             "bearerAuth": []
@@ -14414,7 +14426,7 @@
             }
           },
           "422": {
-            "description": "Invalid price payload",
+            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in a non-current mode (PRICE_REQUIRED), or price/bandKey sent with scenario:\"current\" (INVALID_ESTIMATE_MODE)",
             "content": {
               "application/json": {
                 "schema": {

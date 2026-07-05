@@ -19,9 +19,12 @@ export type EstimateItemPriceResult = Omit<RawEstimateItemPriceResult, 'breakdow
 /**
  * POST /v1/.../commission-tariffs/{tariffId}/items/{itemId}/estimate
  *
- * Full profit breakdown for one tariff item at a given price. Two modes: pass
- * `bandKey` to use that band's commission verbatim (the band-click breakdown
- * modal), or omit it to derive the band from the price (the custom-price what-if).
+ * Full profit breakdown for one tariff item. Three modes:
+ * - Band click — pass `price` plus `bandKey`; that band's commission is applied
+ *   verbatim (the band-click breakdown modal).
+ * - Custom-price what-if — pass only `price`; the applicable band is derived from it.
+ * - Current scenario — pass `scenario: 'current'` (no price/bandKey); the item's own
+ *   commission-base price (or its sale price when absent) + current commission are used.
  *
  * A `calculable:false` response is a normal 200 (not an error): the item is
  * unmatched or uncostable and `breakdown` is null. Callers MUST check
