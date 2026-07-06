@@ -13,6 +13,16 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Advantage tariff item estimate gained a `scenario: "current"` mode** (`POST
+  /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/items/{itemId}/estimate`)
+  — In addition to the custom-price mode (`price`), the body now accepts `{ scenario: "current" }`
+  (no price). It returns the breakdown of the item's CURRENT scenario: priced on its customer price
+  at its current commission (the band the customer price lands in, else the category rate — resolved
+  exactly as the detail baseline resolves it), so the breakdown matches the detail row's `current`
+  byte-for-byte (same engine, same price, same commission). `commissionPct` / `commissionSource`
+  echo the current rate and its source. New `422` codes: `PRICE_REQUIRED` (no price outside current
+  mode) and `INVALID_ESTIMATE_MODE` (price sent alongside `scenario:"current"`). Non-breaking —
+  existing price-based callers are unaffected.
 - **Commission tariff item estimate gained a `scenario: "current"` mode** (`POST
   /v1/organizations/{orgId}/stores/{storeId}/commission-tariffs/{tariffId}/items/{itemId}/estimate`)
   — In addition to the price-based modes (`price` + optional `bandKey`), the body now accepts
