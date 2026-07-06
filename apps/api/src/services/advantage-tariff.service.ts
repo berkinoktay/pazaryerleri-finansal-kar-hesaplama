@@ -167,7 +167,7 @@ export async function listAdvantageTariffs(
         name: true,
         exportedAt: true,
         updatedAt: true,
-        items: { select: { selectedTier: true } },
+        items: { select: { selectedTier: true, customPrice: true } },
       },
     });
   } catch (err) {
@@ -177,7 +177,11 @@ export async function listAdvantageTariffs(
   return tariffs.map((tariff): AdvantageTariffListItem => {
     let selectedCount = 0;
     for (const item of tariff.items) {
-      if (item.selectedTier !== null) selectedCount += 1;
+      // A row counts as selected when it has a tier OR a custom price. A confirmed
+      // custom price is persisted with selected_tier = NULL (custom_price only), so
+      // keying on selectedTier alone undercounts custom-only rows — the same root
+      // cause as the export skip (resolveAdvantageExportPrice).
+      if (item.selectedTier !== null || item.customPrice !== null) selectedCount += 1;
     }
     return {
       id: tariff.id,

@@ -16,7 +16,7 @@
 
 import { Decimal } from 'decimal.js';
 
-import { prisma } from '@pazarsync/db';
+import { Prisma, prisma } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
 import { readWorkbookGrid, SpreadsheetFileError, type SheetData } from '@pazarsync/spreadsheet';
 
@@ -31,6 +31,30 @@ const SHEET_NAME = 'YıldızlıÜrünEtiketleri';
 export interface ExportAdvantageTariffResult {
   filename: string;
   file: Buffer;
+}
+
+/** The item fields the export needs to resolve a barcode's new price. */
+export interface AdvantageExportItem {
+  readonly selectedTier: string | null;
+  readonly customPrice: Prisma.Decimal | null;
+  readonly starTiers: Prisma.JsonValue;
+}
+
+/**
+ * The seller's chosen new price for one Advantage item, or null when the row is not
+ * joined. A row is joined when it carries a CUSTOM price OR a selected tier: the two
+ * are mutually exclusive in the UI, but a confirmed custom price is persisted with
+ * `selected_tier = NULL` (only `custom_price` set), so gating the "is joined" test on
+ * `selectedTier` alone silently dropped every custom-only row from the export. Price =
+ * the custom override, else the chosen tier's upper threshold (the highest price still
+ * earning that badge). Mirrors the commission export's `custom ?? bandPrice` — checked
+ * custom-FIRST so a custom-only row (tier null) still resolves.
+ */
+export function resolveAdvantageExportPrice(item: AdvantageExportItem): string | null {
+  if (item.customPrice !== null) return item.customPrice.toFixed(2);
+  if (item.selectedTier === null) return null;
+  const tier = parseStarTiers(item.starTiers).find((t) => t.key === item.selectedTier);
+  return tier !== undefined ? new Decimal(tier.upperLimit).toFixed(2) : null;
 }
 
 /**
@@ -74,18 +98,12 @@ export async function exportAdvantageTariff(
     throw new ConflictError('Advantage tariff has no stored source file to export');
   }
 
-  // Per-barcode new price: custom price, else the chosen tier's upper threshold
-  // (the highest price still earning that badge).
+  // Per-barcode new price: the custom override, else the chosen tier's upper threshold
+  // (the highest price still earning that badge). A custom-only row (tier null, custom
+  // set) resolves via `resolveAdvantageExportPrice` too — see its doc for the fix.
   const priceByBarcode = new Map<string, string>();
   for (const item of tariff.items) {
-    if (item.selectedTier === null) continue;
-    let priceStr: string | null = null;
-    if (item.customPrice !== null) {
-      priceStr = item.customPrice.toFixed(2);
-    } else {
-      const tier = parseStarTiers(item.starTiers).find((t) => t.key === item.selectedTier);
-      if (tier !== undefined) priceStr = new Decimal(tier.upperLimit).toFixed(2);
-    }
+    const priceStr = resolveAdvantageExportPrice(item);
     if (priceStr !== null) priceByBarcode.set(item.barcode, priceStr);
   }
 
