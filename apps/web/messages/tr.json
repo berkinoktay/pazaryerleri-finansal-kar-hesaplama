@@ -1146,7 +1146,8 @@
         "empty": "Dosyada ürün satırı bulunamadı.",
         "noPeriod": "Dosyada tarife dönemi bulunamadı.",
         "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin.",
+        "DUPLICATE_TARIFF_WEEK": "Bu tarih aralığı için zaten bir Plus komisyon tarifesi var."
       }
     },
     "breakdown": {

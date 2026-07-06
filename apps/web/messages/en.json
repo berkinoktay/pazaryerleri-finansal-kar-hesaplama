@@ -1146,7 +1146,8 @@
         "empty": "No product rows found in the file.",
         "noPeriod": "No tariff period found in the file.",
         "tooLarge": "File too large — upload a smaller file.",
-        "generic": "Could not upload the file. Please try again."
+        "generic": "Could not upload the file. Please try again.",
+        "DUPLICATE_TARIFF_WEEK": "A Plus commission tariff already exists for this date range."
       }
     },
     "breakdown": {
