@@ -23,7 +23,7 @@ export interface PlusTariffsToolbarProps {
   brands: readonly string[];
   filters: PlusTariffFilterState;
   onFiltersChange: (next: Partial<PlusTariffFilterState>) => void;
-  onJoinAll: () => void;
+  onSelectBest: () => void;
   onJoinProfitable: () => void;
   onClearJoins: () => void;
 }
@@ -33,9 +33,9 @@ export interface PlusTariffsToolbarProps {
  * the standard advanced-filter building blocks (add button in the control row,
  * applied chips as their own row beneath). Mounted by BOTH the desktop table's
  * toolbar zone and the mobile cards header, so the building blocks are used
- * directly. The smart-join popover is simpler than the commission one — join all,
- * join only the profitable (`plusIsBetter`) products, or clear — because the Plus
- * model is a single boolean per product, not a band choice.
+ * directly. The smart-join popover mirrors the commission one, adapted to the single
+ * Plus offer: pick each row's most profitable option (join where Plus wins,
+ * un-join where the current price wins), join only the profitable ones, or clear.
  */
 export function PlusTariffsToolbar({
   searchValue,
@@ -44,7 +44,7 @@ export function PlusTariffsToolbar({
   brands,
   filters,
   onFiltersChange,
-  onJoinAll,
+  onSelectBest,
   onJoinProfitable,
   onClearJoins,
 }: PlusTariffsToolbarProps): React.ReactElement {
@@ -80,8 +80,8 @@ export function PlusTariffsToolbar({
             </Button>
           </PopoverTrigger>
           <PopoverContent align="start" className="gap-sm flex w-72 flex-col">
-            <Button variant="ghost" size="sm" className="justify-start" onClick={onJoinAll}>
-              {t('smartSelect.joinAll')}
+            <Button variant="ghost" size="sm" className="justify-start" onClick={onSelectBest}>
+              {t('smartSelect.selectBest')}
             </Button>
             <Button variant="ghost" size="sm" className="justify-start" onClick={onJoinProfitable}>
               {t('smartSelect.joinProfitable')}

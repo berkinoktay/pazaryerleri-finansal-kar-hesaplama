@@ -17,7 +17,9 @@ import type { PlusTariffValidity } from '../types';
  */
 type PlusStatusKey = 'active' | 'upcoming' | 'past';
 
-const STATUS_TONE: Record<PlusStatusKey, ToneKey> = {
+/** Plus validity → semantic tone. Shared with PeriodTabs' validity dot so a split-week
+ * Plus tariff's period tabs read the same color vocabulary as this badge. */
+export const STATUS_TONE: Record<PlusStatusKey, ToneKey> = {
   active: 'success',
   upcoming: 'info',
   past: 'neutral',

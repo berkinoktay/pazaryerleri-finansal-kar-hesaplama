@@ -1,5 +1,3 @@
-import type { CommissionTariffRow } from '../types';
-
 /**
  * Exact ordering of two `toFixed`-style decimal strings ("50.00", "-0.30",
  * "1234.5") WITHOUT floating point — the engine's money values are compared
@@ -55,11 +53,26 @@ function isPositiveProfit(netProfit: string): boolean {
 }
 
 /**
- * Which single option in a commission-tariff row earns the seller the most — their
- * CURRENT price/commission, one of the preset price BANDS, or the CUSTOM price they
- * typed — returned as the key the row marks with ONE "En kârlı" badge: `'current'`,
- * `'custom'`, or a band key (`'band1'`..`'band4'`). `null` when NO option is strictly
- * profitable (a loss is never crowned "most profitable" — the row then shows no badge).
+ * The minimal row shape the resolver ranks: the CURRENT-scenario net profit plus an
+ * ordered list of option candidates keyed by an opaque string. Structural on purpose —
+ * BOTH the commission vertical (its `CommissionTariffRow`, whose four `band1`..`band4`
+ * bands are the candidates) AND the Plus vertical (a single `{ key: 'plus' }` offer)
+ * satisfy it, so the two share one winner resolver. The key is a plain `string`: the
+ * caller maps it back to whatever option it represents.
+ */
+export interface BestChoiceRow {
+  currentNetProfit: string | null;
+  bands: readonly { key: string; netProfit: string | null }[];
+}
+
+/**
+ * Which single option in a tariff row earns the seller the most — their CURRENT
+ * price/commission, one of the preset option BANDS (a commission price band, or the
+ * single Plus offer), or the CUSTOM price they typed — returned as the key the row
+ * marks with ONE "En kârlı" badge: `'current'`, `'custom'`, or a band key
+ * (`'band1'`..`'band4'` for commission, `'plus'` for Plus). `null` when NO option is
+ * strictly profitable (a loss is never crowned "most profitable" — the row then shows
+ * no badge).
  *
  * The custom candidate is passed as its already-computed net-profit string
  * (`customNetProfit`), NOT the whole `CustomChoice`: the caller decides which
@@ -80,7 +93,7 @@ function isPositiveProfit(netProfit: string): boolean {
  * custom price never steals the highlight from the band.
  */
 export function resolveBestChoice(
-  row: Pick<CommissionTariffRow, 'currentNetProfit' | 'bands'>,
+  row: BestChoiceRow,
   customNetProfit: string | null,
 ): string | null {
   // Band candidate — the FIRST band holding the max profit (array order

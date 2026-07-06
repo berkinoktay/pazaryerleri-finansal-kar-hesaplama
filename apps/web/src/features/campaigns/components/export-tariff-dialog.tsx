@@ -1,7 +1,6 @@
 'use client';
 
 import { Download04Icon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -17,11 +16,35 @@ import {
 
 import type { ExportPreviewFile } from '../lib/whole-week';
 
+/**
+ * All localized copy the dialog renders, passed in by the caller (the {@link
+ * TariffProfitBlock} labels-as-props pattern) so the ONE dialog serves both the
+ * commission vertical (`commissionTariffsPage.exportDialog`) and the Plus vertical
+ * (`plusCommissionTariffsPage.exportDialog`) without a hard-coded namespace.
+ */
+export interface ExportTariffDialogLabels {
+  title: string;
+  description: string;
+  /** File-name row, e.g. "3 Günlük Fiyat". */
+  fileName: (days: number) => string;
+  /** Product-count row, e.g. "2 ürün". */
+  productCount: (count: number) => string;
+  /** Multi-file ZIP note, e.g. "3 dosya tek ZIP olarak inecek." */
+  zipNote: (count: number) => string;
+  cancel: string;
+  download: string;
+  /** Confirm-button label during the selections-PATCH phase. */
+  saving: string;
+  /** Confirm-button label during the file-download phase. */
+  exporting: string;
+}
+
 export interface ExportTariffDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The window files the download will produce (day count + product count), in order. */
   files: readonly ExportPreviewFile[];
+  labels: ExportTariffDialogLabels;
   /** Phase 1: the seller's selections are being persisted (PATCH). */
   isSaving: boolean;
   /** Phase 2: the patched xlsx / zip is being generated + downloaded. */
@@ -41,18 +64,17 @@ export function ExportTariffDialog({
   open,
   onOpenChange,
   files,
+  labels,
   isSaving,
   isDownloading,
   onConfirm,
 }: ExportTariffDialogProps): React.ReactElement {
-  const t = useTranslations('commissionTariffsPage.exportDialog');
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('title')}</DialogTitle>
-          <DialogDescription>{t('description')}</DialogDescription>
+          <DialogTitle>{labels.title}</DialogTitle>
+          <DialogDescription>{labels.description}</DialogDescription>
         </DialogHeader>
 
         <ul className="gap-2xs flex flex-col">
@@ -68,24 +90,24 @@ export function ExportTariffDialog({
                   XLSX
                 </span>
                 <span className="truncate text-sm font-medium">
-                  {t('fileName', { days: file.dayCount })}
+                  {labels.fileName(file.dayCount)}
                 </span>
               </span>
               <span className="text-2xs text-muted-foreground shrink-0 tabular-nums">
-                {t('productCount', { count: file.count })}
+                {labels.productCount(file.count)}
               </span>
             </li>
           ))}
         </ul>
 
         {files.length > 1 ? (
-          <p className="text-2xs text-muted-foreground">{t('zipNote', { count: files.length })}</p>
+          <p className="text-2xs text-muted-foreground">{labels.zipNote(files.length)}</p>
         ) : null}
 
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" size="sm">
-              {t('cancel')}
+              {labels.cancel}
             </Button>
           </DialogClose>
           <Button
@@ -94,10 +116,10 @@ export function ExportTariffDialog({
             disabled={files.length === 0}
             loading={isSaving || isDownloading}
             // Phase-accurate label: saving the selections, then downloading.
-            loadingText={isSaving ? t('saving') : t('exporting')}
+            loadingText={isSaving ? labels.saving : labels.exporting}
             leadingIcon={<Download04Icon aria-hidden />}
           >
-            {t('download')}
+            {labels.download}
           </Button>
         </DialogFooter>
       </DialogContent>

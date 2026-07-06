@@ -24,6 +24,7 @@ function importResponse() {
   return {
     tariffId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
     productCount: 12,
+    periodCount: 1,
     itemCount: 12,
     matched: 10,
     unmatched: 2,

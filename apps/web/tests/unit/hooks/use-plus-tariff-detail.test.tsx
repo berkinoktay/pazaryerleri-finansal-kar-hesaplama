@@ -17,16 +17,6 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={createTestQueryClient()}>{children}</QueryClientProvider>;
 }
 
-function scenario(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    price: '450.00',
-    commissionPct: '18.00',
-    netProfit: '42.00',
-    marginPct: '10.50',
-    ...overrides,
-  };
-}
-
 function detailItem() {
   return {
     id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
@@ -36,11 +26,16 @@ function detailItem() {
     imageUrl: 'https://cdn.example/urun.jpg',
     category: 'Kategori A',
     brand: 'Marka B',
+    currentPrice: '450.00',
+    commissionBasePrice: '450.00',
+    currentCommissionPct: '18.00',
+    currentNetProfit: '42.00',
+    currentMarginPct: '10.50',
+    plusPriceUpperLimit: '420.00',
+    plus: { price: '420.00', commissionPct: '14.00', netProfit: '58.00', marginPct: '14.20' },
+    plusIsBetter: true,
     calculable: true,
     reason: null,
-    current: scenario(),
-    plus: scenario({ commissionPct: '14.00', netProfit: '58.00', marginPct: '14.20' }),
-    plusIsBetter: true,
     selected: false,
     customPrice: null,
   };
@@ -50,15 +45,21 @@ function detailResponse() {
   return {
     id: TARIFF_ID,
     name: 'Plus 7 Gunluk',
-    dateRangeLabel: '30 Haz - 6 Tem',
-    validity: 'active',
     exported: false,
-    items: [detailItem()],
+    periods: [
+      {
+        id: 'pppppppp-pppp-pppp-pppp-pppppppppppp',
+        dateRangeLabel: '30 Haz - 6 Tem',
+        dayCount: 7,
+        validity: 'active',
+        items: [detailItem()],
+      },
+    ],
   };
 }
 
 describe('usePlusTariffDetail', () => {
-  it('returns the Plus tariff detail (items + scenarios) on success', async () => {
+  it('returns the Plus tariff detail (periods + items + scenarios) on success', async () => {
     server.use(http.get(ENDPOINT, () => HttpResponse.json(detailResponse(), { status: 200 })));
 
     const { result } = renderHook(() => usePlusTariffDetail(ORG_ID, STORE_ID, TARIFF_ID), {
@@ -67,11 +68,13 @@ describe('usePlusTariffDetail', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.id).toBe(TARIFF_ID);
-    expect(result.current.data?.dateRangeLabel).toBe('30 Haz - 6 Tem');
-    expect(result.current.data?.items).toHaveLength(1);
-    expect(result.current.data?.items[0].plusIsBetter).toBe(true);
-    expect(result.current.data?.items[0].current.netProfit).toBe('42.00');
-    expect(result.current.data?.items[0].plus.netProfit).toBe('58.00');
+    expect(result.current.data?.periods).toHaveLength(1);
+    const period = result.current.data?.periods[0];
+    expect(period?.dateRangeLabel).toBe('30 Haz - 6 Tem');
+    expect(period?.items).toHaveLength(1);
+    expect(period?.items[0].plusIsBetter).toBe(true);
+    expect(period?.items[0].currentNetProfit).toBe('42.00');
+    expect(period?.items[0].plus.netProfit).toBe('58.00');
   });
 
   it('does not fetch when tariffId is null (enabled=false path)', () => {

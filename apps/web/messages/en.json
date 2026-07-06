@@ -1010,7 +1010,18 @@
     "search": "Search product, model or barcode",
     "actions": {
       "upload": "Upload Excel",
-      "saveExport": "Save & Download"
+      "export": "Export"
+    },
+    "exportDialog": {
+      "title": "Export the Plus tariff",
+      "description": "Your selections will be written to the files below and downloaded.",
+      "fileName": "{days}-Day Plus Price",
+      "productCount": "{count} products",
+      "zipNote": "{count} files will download as a single ZIP.",
+      "cancel": "Cancel",
+      "download": "Download",
+      "saving": "Saving selections…",
+      "exporting": "Downloading…"
     },
     "templates": {
       "add": "New tariff",
@@ -1095,33 +1106,25 @@
     "table": {
       "product": "Product Info",
       "current": "Current price",
-      "salePrice": "Sale price",
-      "displayPrice": "Price the customer sees",
       "currentCommission": "Current commission",
-      "currentPrice": "Current Price",
       "plus": "Plus price range",
       "priceRange": "Price range",
-      "plusCeiling": "Plus price ceiling",
       "plusCommission": "Plus commission",
-      "commission": "commission",
-      "stock": "Stock",
-      "profit": "Profit",
-      "loss": "Loss",
+      "best": "Most profitable",
       "calculatedProfit": "Calculated profit",
       "vsCurrent": "vs. current",
-      "plusCommissionApplies": "Plus commission {pct} applies",
       "join": "Join at ceiling price",
       "joined": "Joined",
-      "joinHint": "Drop your price to the ceiling and earn the Plus commission",
-      "plusIsBetter": "Plus is better",
-      "plusIsWorse": "Plus is worse",
       "customPrice": "Plus Price",
       "enterPrice": "Enter price",
+      "enterCost": "Enter cost",
       "customPriceHint": "Try a Plus price below the ceiling",
       "selectCustom": "Join at this price",
       "customSelected": "Joined",
       "ceilingQualifier": "and below"
     },
+    "periodDayLabel": "{count} Days",
+    "periodsAriaLabel": "Periods",
     "noResults": {
       "title": "No matching products",
       "description": "Try adjusting your search or filters."
@@ -1164,7 +1167,7 @@
     },
     "smartSelect": {
       "label": "Smart Select",
-      "joinAll": "Join all to Plus",
+      "selectBest": "Pick the most profitable",
       "joinProfitable": "Only products where Plus wins",
       "clear": "Clear selections",
       "scopeHint": "Applies only to visible products when a filter is active."
@@ -1181,9 +1184,6 @@
       "selectionUnselected": "Not joined",
       "groupLabel": "Filters",
       "all": "All"
-    },
-    "actionBar": {
-      "joined": "{count} products joined to Plus"
     },
     "status": {
       "exported": "Downloaded",
