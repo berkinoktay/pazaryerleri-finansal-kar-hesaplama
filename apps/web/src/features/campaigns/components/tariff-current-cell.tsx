@@ -33,17 +33,12 @@ export interface TariffCurrentCellProps {
   /**
    * Reserved "En kârlı" slot. `{ label, visible, icon? }` renders a badge whose
    * VISIBILITY is `visible` but whose height is always reserved (keeps the price
-   * aligned with the tier columns). `icon` overrides the leading glyph — the
-   * Advantage vertical keeps the default {@link StarIcon}, while the commission
-   * vertical passes a Sparkles icon so its marker matches the band/custom ribbons.
-   * `null`/omitted → the slot is not rendered at all, adding no height.
+   * aligned with the tier columns). `icon` overrides the leading glyph — every vertical
+   * passes a Sparkles icon so its marker matches the band/offer/custom ribbons; the
+   * {@link StarIcon} is only the fallback default. `null`/omitted → the slot is not
+   * rendered at all, adding no height.
    */
   bestBadge?: { label: string; visible: boolean; icon?: React.ReactNode } | null;
-  /**
-   * Center the content — the Advantage desktop columns are centered; the
-   * commission-current column (and both mobile zones) are left-aligned.
-   */
-  centered?: boolean;
   /**
    * Desktop min width of the cell. `band` (default) matches a full band card so the
    * Advantage columns line up; `current` is a touch narrower (no card frame around
@@ -67,12 +62,12 @@ const MIN_WIDTH_CLASS: Record<NonNullable<TariffCurrentCellProps['minWidth']>, s
  * opens a breakdown modal). Purely presentational — the caller wires the data, the
  * estimate call, and the breakdown modal (passed as `children`).
  *
- * Shared by two verticals so their current cell reads identically:
- *   - Advantage current ({@link AdvantageCurrentCell}) — centered, with a reserved
- *     "En kârlı" slot (keeping the current price can be the single best option).
- *   - Commission current ({@link CurrentPriceCell}) — left-aligned and a touch
- *     narrower (`minWidth="current"`), passing the "En kârlı" badge only when keeping
- *     the current price wins the row (no reserved slot, so it adds no height otherwise).
+ * Shared by three verticals so their current cell reads identically — Advantage
+ * ({@link AdvantageCurrentCell}), commission ({@link CurrentPriceCell}), and Plus
+ * ({@link PlusCurrentPriceCell}). All are left-aligned and a touch narrower than a band
+ * card (`minWidth="current"`), and each passes the Sparkles "En kârlı" badge only when
+ * keeping the current price wins the row (no reserved slot, so a non-best current cell
+ * adds no height).
  */
 export function TariffCurrentCell({
   price,
@@ -85,23 +80,12 @@ export function TariffCurrentCell({
   onOpenBreakdown,
   emptyLabel,
   bestBadge = null,
-  centered = false,
   minWidth = 'band',
   children,
 }: TariffCurrentCellProps): React.ReactElement {
-  const items = centered ? 'items-center' : 'items-start';
-  const self = centered ? 'self-center' : 'self-start';
-
   return (
-    <div
-      className={cn(
-        'gap-sm flex min-w-0 flex-col',
-        MIN_WIDTH_CLASS[minWidth],
-        items,
-        centered && 'w-full text-center',
-      )}
-    >
-      <div className={cn('gap-3xs flex min-w-0 flex-col', items)}>
+    <div className={cn('gap-sm flex min-w-0 flex-col items-start', MIN_WIDTH_CLASS[minWidth])}>
+      <div className="gap-3xs flex min-w-0 flex-col items-start">
         {/* Reserved "En kârlı" slot — invisible unless `bestBadge.visible`, but the
             reserved height keeps the price aligned with the tier columns' price rows.
             Omitted entirely when the vertical has no "best" concept. */}
@@ -127,7 +111,7 @@ export function TariffCurrentCell({
         ) : null}
       </div>
 
-      <div className={cn('gap-3xs flex flex-col', items)}>
+      <div className="gap-3xs flex flex-col items-start">
         <span className="text-2xs text-muted-foreground">{calculatedLabel}</span>
         <ProfitBadge
           value={netProfit}
@@ -136,7 +120,7 @@ export function TariffCurrentCell({
           onOpen={onOpenBreakdown}
           showMarginPct
           emptyLabel={emptyLabel}
-          className={self}
+          className="self-start"
         />
       </div>
 

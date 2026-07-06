@@ -68,22 +68,36 @@ function bandProfit(band: AdvantageBand): Decimal | null {
 }
 
 /**
+ * The most-profitable tier (band) of a row together with the winning profit, comparing
+ * pre-computed `netProfit`. Bands with null profit (not calculable) never win; `band` is
+ * undefined (and `profit` null) when no tier is calculable. Returning both lets a caller
+ * that needs the winner's profit avoid re-deriving it with a second {@link bandProfit}
+ * allocation. Display ordering over already-backend-computed figures — no money math.
+ */
+function bestBandWithProfit(row: AdvantageTariffRow): {
+  band: AdvantageBand | undefined;
+  profit: Decimal | null;
+} {
+  let band: AdvantageBand | undefined;
+  let profit: Decimal | null = null;
+  for (const candidate of row.bands) {
+    const candidateProfit = bandProfit(candidate);
+    if (candidateProfit === null) continue;
+    if (profit === null || candidateProfit.greaterThan(profit)) {
+      band = candidate;
+      profit = candidateProfit;
+    }
+  }
+  return { band, profit };
+}
+
+/**
  * The most-profitable tier (band) of a row, comparing pre-computed `netProfit`. Bands
  * with null profit (not calculable) never win; undefined when no tier is calculable.
  * Display ordering over already-backend-computed figures — no money math.
  */
 export function bestBand(row: AdvantageTariffRow): AdvantageBand | undefined {
-  let best: AdvantageBand | undefined;
-  let bestProfit: Decimal | null = null;
-  for (const band of row.bands) {
-    const profit = bandProfit(band);
-    if (profit === null) continue;
-    if (bestProfit === null || profit.greaterThan(bestProfit)) {
-      best = band;
-      bestProfit = profit;
-    }
-  }
-  return best;
+  return bestBandWithProfit(row).band;
 }
 
 /**
@@ -213,20 +227,24 @@ export function filterAdvantageRows(
     if (filters.category !== null && row.category !== filters.category) return false;
     if (filters.brand !== null && row.brand !== filters.brand) return false;
 
-    const best = bestBand(row);
-    const bestMargin = best?.marginPct ?? null;
-    const profit = best !== undefined ? bandProfit(best) : null;
-    if (
-      filters.minMarginPct !== null &&
-      (bestMargin === null || Number(bestMargin) < filters.minMarginPct)
-    ) {
-      return false;
-    }
-    if (filters.profit === 'profitable' && !(profit !== null && profit.greaterThan(0))) {
-      return false;
-    }
-    if (filters.profit === 'loss' && (profit === null || profit.greaterThan(0))) {
-      return false;
+    // The best tier (and its profit Decimal) is only resolved when a margin or profit
+    // filter is actually engaged — both derive from the SAME winning band, computed in a
+    // single pass so the winner's profit is never re-allocated.
+    if (filters.minMarginPct !== null || filters.profit !== 'all') {
+      const { band: best, profit } = bestBandWithProfit(row);
+      const bestMargin = best?.marginPct ?? null;
+      if (
+        filters.minMarginPct !== null &&
+        (bestMargin === null || Number(bestMargin) < filters.minMarginPct)
+      ) {
+        return false;
+      }
+      if (filters.profit === 'profitable' && !(profit !== null && profit.greaterThan(0))) {
+        return false;
+      }
+      if (filters.profit === 'loss' && (profit === null || profit.greaterThan(0))) {
+        return false;
+      }
     }
 
     const joined = isJoinedRow(selection, customPrices, row.id);
