@@ -5180,6 +5180,20 @@
           "validity": {
             "$ref": "#/components/schemas/PlusTariffValidity"
           },
+          "weekStartsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "weekEndsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "updatedAt": {
             "type": "string",
             "format": "date-time"
@@ -5192,6 +5206,8 @@
           "selectedCount",
           "exported",
           "validity",
+          "weekStartsAt",
+          "weekEndsAt",
           "updatedAt"
         ]
       },
@@ -5218,6 +5234,9 @@
           "productCount": {
             "type": "integer"
           },
+          "periodCount": {
+            "type": "integer"
+          },
           "itemCount": {
             "type": "integer"
           },
@@ -5234,6 +5253,7 @@
         "required": [
           "tariffId",
           "productCount",
+          "periodCount",
           "itemCount",
           "matched",
           "unmatched",
@@ -5354,11 +5374,15 @@
             "pattern": "^\\d+(\\.\\d{1,2})?$",
             "description": "Değerlendirilecek satış fiyatı (GROSS, TL).",
             "example": "350.00"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current"
+            ],
+            "description": "Güncel senaryonun dökümü — item’ın komisyona esas fiyatı + güncel komisyonuyla hesaplanır; price verilmez."
           }
-        },
-        "required": [
-          "price"
-        ]
+        }
       },
       "PlusTariffDetail": {
         "type": "object",
@@ -5370,14 +5394,41 @@
           "name": {
             "type": "string"
           },
+          "exported": {
+            "type": "boolean"
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlusTariffPeriod"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "exported",
+          "periods"
+        ]
+      },
+      "PlusTariffPeriod": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "dateRangeLabel": {
             "type": "string"
           },
+          "dayCount": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "validity": {
             "$ref": "#/components/schemas/PlusTariffValidity"
-          },
-          "exported": {
-            "type": "boolean"
           },
           "items": {
             "type": "array",
@@ -5388,10 +5439,9 @@
         },
         "required": [
           "id",
-          "name",
           "dateRangeLabel",
+          "dayCount",
           "validity",
-          "exported",
           "items"
         ]
       },
@@ -5433,20 +5483,43 @@
               "null"
             ]
           },
-          "calculable": {
-            "type": "boolean"
+          "currentPrice": {
+            "type": "string"
           },
-          "reason": {
-            "$ref": "#/components/schemas/PlusTariffItemReason"
+          "commissionBasePrice": {
+            "type": "string",
+            "description": "Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır."
           },
-          "current": {
-            "$ref": "#/components/schemas/PlusScenario"
+          "currentCommissionPct": {
+            "type": "string"
+          },
+          "currentNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Komisyona esas fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null."
+          },
+          "currentMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plusPriceUpperLimit": {
+            "type": "string"
           },
           "plus": {
             "$ref": "#/components/schemas/PlusScenario"
           },
           "plusIsBetter": {
             "type": "boolean"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/PlusTariffItemReason"
           },
           "selected": {
             "type": "boolean"
@@ -5466,11 +5539,16 @@
           "imageUrl",
           "category",
           "brand",
-          "calculable",
-          "reason",
-          "current",
+          "currentPrice",
+          "commissionBasePrice",
+          "currentCommissionPct",
+          "currentNetProfit",
+          "currentMarginPct",
+          "plusPriceUpperLimit",
           "plus",
           "plusIsBetter",
+          "calculable",
+          "reason",
           "selected",
           "customPrice"
         ]
@@ -14969,7 +15047,7 @@
           "PlusCommissionTariffs"
         ],
         "summary": "Export the Plus tariff as a re-uploadable Trendyol Excel",
-        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's Plus choices patched in for every product that opted in to Plus. Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with the seller's Plus choices patched in for every product that opted in to Plus: the chosen Plus price into \"Plus Fiyat Seçimi\", \"{N} Günlük Fiyat\" into \"Tarife Seçimi\", the reduced Plus commission into \"Hesaplanan Komisyon (N Gün)\", and \"Hayır\" into \"İptal\". Every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim. A split week yields up to three window files (a whole-week \"7 Günlük Fiyat\" file for products priced the same in both sub-periods — carrying one price but a commission cell per sub-period — plus \"3 Günlük Fiyat\" / \"4 Günlük Fiyat\" files for period-specific prices), only the non-empty ones, bundled into a single .zip. Marks the tariff exported. Returns 409 if the tariff has no stored source file.",
         "security": [
           {
             "bearerAuth": []
@@ -15006,9 +15084,15 @@
         ],
         "responses": {
           "200": {
-            "description": "The patched .xlsx, ready to re-upload to Trendyol",
+            "description": "The patched .xlsx (single file), or a .zip of the window files when a product is priced differently across sub-periods, ready to re-upload to Trendyol",
             "content": {
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
@@ -15235,8 +15319,8 @@
         "tags": [
           "PlusCommissionTariffs"
         ],
-        "summary": "Estimate the profit breakdown for a Plus tariff item at a given price",
-        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Plus tariff item at the requested price, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a scenario's price equals that scenario's profit in the detail response. Uses the item's reduced Plus commission. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
+        "summary": "Estimate the profit breakdown for a Plus tariff item",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Plus tariff item, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a scenario's price equals that scenario's profit in the detail response. Two modes: pass `price` to price it under the item's reduced Plus commission (the custom-price what-if), or pass `scenario: \"current\"` (no price) to price the item's own commission-base price at its current commission - the breakdown then matches the detail row's `currentNetProfit` exactly. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
         "security": [
           {
             "bearerAuth": []
@@ -15358,7 +15442,7 @@
             }
           },
           "422": {
-            "description": "Invalid price payload",
+            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the custom-price mode (PRICE_REQUIRED), or price sent with scenario:\"current\" (INVALID_ESTIMATE_MODE)",
             "content": {
               "application/json": {
                 "schema": {

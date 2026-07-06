@@ -39,6 +39,33 @@ section "Versioning" for details.
   read these response headers (the default CORS allowlist hides them), so the file-download routes'
   server-chosen filename was invisible to the frontend and a `.zip` export was mis-saved as `.xlsx`
   ("corrupt file"). `Access-Control-Expose-Headers` now lists both.
+- **Plus commission tariffs are now multi-period** (the whole `/v1/organizations/{orgId}/stores/{storeId}/plus-commission-tariffs`
+  family) — A single Plus upload can carry several "Tarih Aralığı (N Gün)" date-range blocks (a 3-Gün
+  + 4-Gün split week), so the Plus tariff moved from the old single-folded-period shape to the same
+  three-level shape as the product tariff (tariff → period → item). Concretely:
+  - **Detail (`GET .../{tariffId}`) now returns `periods[]`** — an array of `{ dateRangeLabel,
+    dayCount, validity }` date-range tabs instead of the tariff-level single label/day count. Each
+    detail item's row belongs to a period; a product priced across two sub-periods can carry a
+    different reduced Plus commission per period. Callers that read the tariff's single period must
+    switch to the `periods[]` array.
+  - **Import (`POST .../import`) response gained `periodCount`** — how many date-range periods were
+    persisted from the upload (1 for a full-week file, 2 for a split week), alongside the existing
+    `productCount` / `itemCount` / match counts.
+  - **Item estimate (`POST .../{tariffId}/items/{itemId}/estimate`) gained a `scenario: "current"`
+    mode** — mirroring the product tariff estimate: pass `{ scenario: "current" }` (no `price`) to get
+    the item's CURRENT baseline breakdown (its commission-base price at its current commission, so it
+    matches the detail row's `currentNetProfit` byte-for-byte). New `422` codes `PRICE_REQUIRED` (no
+    price in the custom-price mode) and `INVALID_ESTIMATE_MODE` (`price` sent with `scenario:"current"`).
+    Existing price-based callers are unaffected.
+  - **Export (`POST .../{tariffId}/export`) is now window-bucketed** — like the product tariff export,
+    a split week is bucketed into up to three window files, only the non-empty ones: a whole-week
+    `"7 Günlük Fiyat"` file for products opted in at the same price in both sub-periods (carrying ONE
+    Plus price but a `"Hesaplanan Komisyon (N Gün)"` cell per sub-period, each at that period's own
+    reduced percent), plus `"3 Günlük Fiyat"` / `"4 Günlük Fiyat"` files for period-specific prices.
+    Multiple files are delivered as a single `.zip`; the `200` response now advertises **two** content
+    types — `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` and `application/zip` —
+    with the download name in `Content-Disposition`. Non-breaking for clients that read the response as
+    a binary blob + `Content-Disposition`.
 
 ### Added
 
@@ -57,8 +84,10 @@ section "Versioning" for details.
   dropping the price to the Plus ceiling), `PATCH /{tariffId}/selections` (boolean opt-in + optional
   custom price), `POST /{tariffId}/export` (byte-preserving re-uploadable .xlsx), `POST
   /{tariffId}/items/{itemId}/estimate` (custom-price what-if), `DELETE /{tariffId}`. Store-scoped +
-  RLS; profit never stored. Simpler than the product tariff (single 7-day period, single offer, no
-  band ladder). NOTE: the export's exact opt-in cell format is pending vendor verification.
+  RLS; profit never stored. Simpler than the product tariff in its offer (a single reduced Plus
+  commission per product, no band ladder), but shares its multi-period shape — see the "Plus
+  commission tariffs are now multi-period" note under Changed for the current `periods[]` / bucketed
+  export contract. NOTE: the export's exact opt-in cell format is pending vendor verification.
 
 ### Removed
 
