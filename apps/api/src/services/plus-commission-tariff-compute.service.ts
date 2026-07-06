@@ -34,7 +34,14 @@ import type { VariantCostAggregate } from '../validators/product.validator';
 // ─── Inputs the compute reads off one persisted item ────────────────────────
 
 export interface PlusItemInputs {
+  /** Güncel TSF (the seller's current sale price) — echoed on the wire, not priced. */
   readonly currentPrice: Decimal;
+  /**
+   * Komisyona Esas Fiyat — the customer-seen price commission is charged on. The
+   * current ("do nothing") scenario is priced HERE (schema NOT NULL, so there is no
+   * sale-price fallback), matching the product commission tariff's #400 semantics.
+   */
+  readonly commissionBasePrice: Decimal;
   readonly currentCommissionPct: Decimal;
   readonly plusPriceUpperLimit: Decimal;
   readonly plusCommissionPct: Decimal;
@@ -53,14 +60,27 @@ export interface ComputedScenario {
   readonly marginPct: string | null;
 }
 
+/**
+ * The "do nothing" baseline: net profit + sale margin at the commission-base price
+ * under the current commission. Price + commission are echoed from the item on the
+ * wire, so only the computed figures live here — mirrors the product commission
+ * tariff's flattened current scenario.
+ */
+export interface ComputedCurrentScenario {
+  readonly netProfit: string | null;
+  readonly marginPct: string | null;
+}
+
 export interface ComputedPlusItem {
   readonly calculable: boolean;
   readonly reason: TariffItemReason | null;
-  readonly current: ComputedScenario;
+  readonly current: ComputedCurrentScenario;
   readonly plus: ComputedScenario;
   /** True when the Plus scenario nets strictly more profit than the current one. */
   readonly plusIsBetter: boolean;
 }
+
+const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
 /** The gross price the Plus scenario uses: the seller's custom price, else the ceiling. */
 function plusPrice(inputs: PlusItemInputs): Decimal {
@@ -77,29 +97,22 @@ function nullScenario(price: Decimal, commissionPct: Decimal): ComputedScenario 
 }
 
 /** Runs the engine at one (price, commission) over a shared base econ. */
-function computeScenario(
+function runScenario(
   baseEcon: UnitEconomics,
   price: Decimal,
   commissionPct: Decimal,
-): { scenario: ComputedScenario; netProfit: Decimal } {
+): { netProfit: Decimal; marginPct: Decimal | null } {
   const econ: UnitEconomics = { ...baseEcon, commissionRate: commissionPct };
   const breakdown = computeUnitProfit(econ, price);
-  return {
-    scenario: {
-      price: price.toFixed(2),
-      commissionPct: commissionPct.toString(),
-      netProfit: breakdown.netProfit.toFixed(2),
-      marginPct: breakdown.saleMarginPct !== null ? breakdown.saleMarginPct.toFixed(2) : null,
-    },
-    netProfit: breakdown.netProfit,
-  };
+  return { netProfit: breakdown.netProfit, marginPct: breakdown.saleMarginPct };
 }
 
 /**
  * Computes the current + Plus scenarios for one item. `variant` is null for an
  * unmatched barcode → not calculable (NO_PRODUCT). Otherwise the econ is probed
- * once (cost/shipping/PSF/VAT are commission-invariant); if non-null, each
- * scenario overrides only `commissionRate` and runs at its own price.
+ * once (cost/shipping/PSF/VAT are commission-invariant); if non-null, the current
+ * scenario runs at the commission-base price under the current commission and the
+ * Plus scenario at its own price under the reduced commission.
  */
 export function computePlusItem(
   ctx: TariffAssemblyContext,
@@ -113,7 +126,7 @@ export function computePlusItem(
     return {
       calculable: false,
       reason: 'NO_PRODUCT',
-      current: nullScenario(inputs.currentPrice, inputs.currentCommissionPct),
+      current: NULL_CURRENT,
       plus: nullScenario(pPrice, inputs.plusCommissionPct),
       plusIsBetter: false,
     };
@@ -130,20 +143,32 @@ export function computePlusItem(
     return {
       calculable: false,
       reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
-      current: nullScenario(inputs.currentPrice, inputs.currentCommissionPct),
+      current: NULL_CURRENT,
       plus: nullScenario(pPrice, inputs.plusCommissionPct),
       plusIsBetter: false,
     };
   }
 
-  const current = computeScenario(probe.econ, inputs.currentPrice, inputs.currentCommissionPct);
-  const plus = computeScenario(probe.econ, pPrice, inputs.plusCommissionPct);
+  const baseEcon: UnitEconomics = probe.econ;
+
+  // Baseline ("do nothing"): the current commission at the COMMISSION-BASE price —
+  // the customer-seen price commission is actually charged on, NOT the sale price.
+  const current = runScenario(baseEcon, inputs.commissionBasePrice, inputs.currentCommissionPct);
+  const plus = runScenario(baseEcon, pPrice, inputs.plusCommissionPct);
 
   return {
     calculable: true,
     reason: null,
-    current: current.scenario,
-    plus: plus.scenario,
+    current: {
+      netProfit: current.netProfit.toFixed(2),
+      marginPct: current.marginPct !== null ? current.marginPct.toFixed(2) : null,
+    },
+    plus: {
+      price: pPrice.toFixed(2),
+      commissionPct: inputs.plusCommissionPct.toString(),
+      netProfit: plus.netProfit.toFixed(2),
+      marginPct: plus.marginPct !== null ? plus.marginPct.toFixed(2) : null,
+    },
     plusIsBetter: plus.netProfit.gt(current.netProfit),
   };
 }

@@ -421,6 +421,12 @@ CREATE POLICY plus_commission_tariffs_store_read ON plus_commission_tariffs
   FOR SELECT TO authenticated
   USING (can_access_store(store_id));
 
+ALTER TABLE plus_commission_tariff_periods ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plus_commission_tariff_periods_store_read ON plus_commission_tariff_periods;
+CREATE POLICY plus_commission_tariff_periods_store_read ON plus_commission_tariff_periods
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
 ALTER TABLE plus_commission_tariff_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS plus_commission_tariff_items_store_read ON plus_commission_tariff_items;
 CREATE POLICY plus_commission_tariff_items_store_read ON plus_commission_tariff_items

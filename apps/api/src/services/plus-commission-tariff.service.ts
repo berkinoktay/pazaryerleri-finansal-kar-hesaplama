@@ -36,6 +36,7 @@ import type {
   PlusTariffDetail,
   PlusTariffDetailItem,
   PlusTariffListItem,
+  PlusTariffPeriod,
   PlusTariffSelection,
 } from '../validators/plus-commission-tariff.validator';
 
@@ -43,8 +44,13 @@ import type {
 
 /**
  * Lists every saved Plus tariff for a store with the aggregates the master list
- * shows: product count, opted-in count, validity (from the single folded period),
- * exported flag. Counts are derived in memory (a store has a handful of uploads).
+ * shows: product count, opted-in count, overall validity, exported flag. Counts are
+ * derived in memory from the periods + items (a store has a handful of uploads).
+ *
+ * A multi-period tariff carries one item per (product × period), so a raw item
+ * count would multiply by the period count — `productCount` / `selectedCount` are
+ * therefore de-duplicated by barcode to reflect UNIQUE products. Overall validity
+ * spans the earliest period start to the latest period end (the week window).
  */
 export async function listPlusTariffs(
   orgId: string,
@@ -60,9 +66,13 @@ export async function listPlusTariffs(
         name: true,
         exportedAt: true,
         updatedAt: true,
-        startsAt: true,
-        endsAt: true,
-        items: { select: { plusSelected: true } },
+        periods: {
+          select: {
+            startsAt: true,
+            endsAt: true,
+            items: { select: { barcode: true, plusSelected: true, customPrice: true } },
+          },
+        },
       },
     });
   } catch (err) {
@@ -71,17 +81,35 @@ export async function listPlusTariffs(
 
   const now = new Date();
   return tariffs.map((tariff): PlusTariffListItem => {
-    let selectedCount = 0;
-    for (const item of tariff.items) {
-      if (item.plusSelected) selectedCount += 1;
+    const productBarcodes = new Set<string>();
+    const selectedBarcodes = new Set<string>();
+    let minStart: Date | null = null;
+    let maxEnd: Date | null = null;
+
+    for (const period of tariff.periods) {
+      for (const item of period.items) {
+        productBarcodes.add(item.barcode);
+        // A product counts as opted-in when it is joined to Plus or carries a
+        // custom price (a what-if the seller kept) in ANY period.
+        if (item.plusSelected || item.customPrice !== null) selectedBarcodes.add(item.barcode);
+      }
+      if (period.startsAt !== null && (minStart === null || period.startsAt < minStart)) {
+        minStart = period.startsAt;
+      }
+      if (period.endsAt !== null && (maxEnd === null || period.endsAt > maxEnd)) {
+        maxEnd = period.endsAt;
+      }
     }
+
     return {
       id: tariff.id,
       name: tariff.name,
-      productCount: tariff.items.length,
-      selectedCount,
+      productCount: productBarcodes.size,
+      selectedCount: selectedBarcodes.size,
       exported: tariff.exportedAt !== null,
-      validity: resolveValidity(tariff.startsAt, tariff.endsAt, now),
+      validity: resolveValidity(minStart, maxEnd, now),
+      weekStartsAt: minStart !== null ? minStart.toISOString() : null,
+      weekEndsAt: maxEnd !== null ? maxEnd.toISOString() : null,
       updatedAt: tariff.updatedAt.toISOString(),
     };
   });
@@ -91,10 +119,12 @@ export async function listPlusTariffs(
 
 /**
  * Returns one Plus tariff with per-item current-vs-Plus profit computed on read.
- * Throws `NotFoundError` when the tariff does not belong to this store. Matched
- * items are joined to their ProductVariant; cost + shipping are batch-resolved
- * once, fee definitions once, then each item is computed by reusing the
- * product-pricing assembly with the current + Plus commissions.
+ * Throws `NotFoundError` when the tariff does not belong to this store. Periods are
+ * ordered by `sortOrder`; within each, items follow the Excel row order
+ * (`sortOrder`, barcode tie-break) so every sub-period tab lists products
+ * identically. Matched items are joined to their ProductVariant; cost + shipping
+ * are batch-resolved ONCE for the whole tariff, fee definitions once, then each
+ * item is computed by reusing the product-pricing assembly.
  */
 export async function getPlusTariffDetail(
   orgId: string,
@@ -109,26 +139,37 @@ export async function getPlusTariffDetail(
       select: {
         id: true,
         name: true,
-        dateRangeLabel: true,
-        startsAt: true,
-        endsAt: true,
         exportedAt: true,
-        items: {
+        periods: {
           orderBy: { sortOrder: 'asc' },
           select: {
             id: true,
-            productVariantId: true,
-            barcode: true,
-            stockCode: true,
-            productTitle: true,
-            category: true,
-            brand: true,
-            currentPrice: true,
-            currentCommissionPct: true,
-            plusPriceUpperLimit: true,
-            plusCommissionPct: true,
-            plusSelected: true,
-            customPrice: true,
+            dateRangeLabel: true,
+            dayCount: true,
+            startsAt: true,
+            endsAt: true,
+            items: {
+              // Excel row order (`sortOrder`, set at import), barcode breaking ties —
+              // the detail lists products exactly as in the uploaded file and
+              // identically across sub-period tabs (same product → same sortOrder).
+              orderBy: [{ sortOrder: 'asc' }, { barcode: 'asc' }],
+              select: {
+                id: true,
+                productVariantId: true,
+                barcode: true,
+                stockCode: true,
+                productTitle: true,
+                category: true,
+                brand: true,
+                currentPrice: true,
+                commissionBasePrice: true,
+                currentCommissionPct: true,
+                plusPriceUpperLimit: true,
+                plusCommissionPct: true,
+                plusSelected: true,
+                customPrice: true,
+              },
+            },
           },
         },
       },
@@ -141,11 +182,15 @@ export async function getPlusTariffDetail(
     throw new NotFoundError('PlusCommissionTariff', tariffId);
   }
 
-  // ─── Batch-resolve matched variants + cost + shipping + image once ────────
-  const variantIds = tariff.items
-    .map((i) => i.productVariantId)
-    .filter((id): id is string => id !== null);
+  // ─── Collect matched variant ids across every period ──────────────────────
+  const variantIds: string[] = [];
+  for (const period of tariff.periods) {
+    for (const item of period.items) {
+      if (item.productVariantId !== null) variantIds.push(item.productVariantId);
+    }
+  }
 
+  // ─── Batch-resolve variants + cost + shipping + image once ────────────────
   const variantMap = new Map<string, TariffVariant>();
   const imageMap = new Map<string, string | null>();
   let costMap = new Map<string, VariantCostAggregate>();
@@ -189,58 +234,68 @@ export async function getPlusTariffDetail(
 
   const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
   const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
+  const now = new Date();
 
-  const items = tariff.items.map((item): PlusTariffDetailItem => {
-    const variant =
-      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
-    const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
-    const shipping =
-      item.productVariantId !== null
-        ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
-        : NO_SHIPPING;
+  const periods = tariff.periods.map((period): PlusTariffPeriod => {
+    const items = period.items.map((item): PlusTariffDetailItem => {
+      const variant =
+        item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
+      const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
+      const shipping =
+        item.productVariantId !== null
+          ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
+          : NO_SHIPPING;
 
-    const inputs: PlusItemInputs = {
-      currentPrice: new Decimal(item.currentPrice.toString()),
-      currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
-      plusPriceUpperLimit: new Decimal(item.plusPriceUpperLimit.toString()),
-      plusCommissionPct: new Decimal(item.plusCommissionPct.toString()),
-      customPrice: item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null,
-    };
-    const computed: ComputedPlusItem = computePlusItem(
-      ctx,
-      inputs,
-      variant ?? null,
-      cost,
-      shipping,
-    );
+      const inputs: PlusItemInputs = {
+        currentPrice: new Decimal(item.currentPrice.toString()),
+        commissionBasePrice: new Decimal(item.commissionBasePrice.toString()),
+        currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
+        plusPriceUpperLimit: new Decimal(item.plusPriceUpperLimit.toString()),
+        plusCommissionPct: new Decimal(item.plusCommissionPct.toString()),
+        customPrice: item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null,
+      };
+      const computed: ComputedPlusItem = computePlusItem(
+        ctx,
+        inputs,
+        variant ?? null,
+        cost,
+        shipping,
+      );
+
+      return {
+        id: item.id,
+        barcode: item.barcode,
+        stockCode: item.stockCode,
+        productTitle: item.productTitle,
+        imageUrl:
+          item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
+        category: item.category,
+        brand: item.brand,
+        currentPrice: item.currentPrice.toFixed(2),
+        commissionBasePrice: item.commissionBasePrice.toFixed(2),
+        currentCommissionPct: item.currentCommissionPct.toFixed(4),
+        currentNetProfit: computed.current.netProfit,
+        currentMarginPct: computed.current.marginPct,
+        plusPriceUpperLimit: item.plusPriceUpperLimit.toFixed(2),
+        plus: computed.plus,
+        plusIsBetter: computed.plusIsBetter,
+        calculable: computed.calculable,
+        reason: computed.reason,
+        selected: item.plusSelected,
+        customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,
+      };
+    });
 
     return {
-      id: item.id,
-      barcode: item.barcode,
-      stockCode: item.stockCode,
-      productTitle: item.productTitle,
-      imageUrl:
-        item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
-      category: item.category,
-      brand: item.brand,
-      calculable: computed.calculable,
-      reason: computed.reason,
-      current: computed.current,
-      plus: computed.plus,
-      plusIsBetter: computed.plusIsBetter,
-      selected: item.plusSelected,
-      customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,
+      id: period.id,
+      dateRangeLabel: period.dateRangeLabel,
+      dayCount: period.dayCount,
+      validity: resolveValidity(period.startsAt, period.endsAt, now),
+      items,
     };
   });
 
-  return {
-    id: tariff.id,
-    name: tariff.name,
-    dateRangeLabel: tariff.dateRangeLabel,
-    validity: resolveValidity(tariff.startsAt, tariff.endsAt, new Date()),
-    exported: tariff.exportedAt !== null,
-    items,
-  };
+  return { id: tariff.id, name: tariff.name, exported: tariff.exportedAt !== null, periods };
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────
@@ -275,9 +330,9 @@ export async function deletePlusTariff(
 /**
  * Persists the seller's Plus opt-in + optional custom price for the given items
  * in ONE bulk UPDATE (a VALUES join). Throws `NotFoundError` when the tariff is
- * not in this store. Each row is gated on `(organization_id, store_id, tariff)`,
- * so an itemId from another tariff/store is silently skipped — the returned
- * `updated` count reflects only rows that actually matched.
+ * not in this store. Each row is gated on `(organization_id, store_id, period ∈
+ * tariff)`, so an itemId from another tariff/store is silently skipped — the
+ * returned `updated` count reflects only rows that actually matched.
  */
 export async function updatePlusSelections(
   orgId: string,
@@ -306,7 +361,9 @@ export async function updatePlusSelections(
       WHERE i.id = v.id
         AND i.organization_id = ${orgId}::uuid
         AND i.store_id = ${storeId}::uuid
-        AND i.tariff_id = ${tariffId}::uuid
+        AND i.period_id IN (
+          SELECT p.id FROM plus_commission_tariff_periods p WHERE p.tariff_id = ${tariffId}::uuid
+        )
     `;
     return { updated };
   } catch (err) {

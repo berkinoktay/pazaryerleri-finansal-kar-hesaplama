@@ -19,21 +19,25 @@ import { createMembership, createOrganization, createStore } from '../../helpers
 
 const app = createApp();
 
-/** Seed a minimal Plus tariff (one item) for a store. Returns the tariff id. */
+/** Seed a minimal Plus tariff (one period, one item) for a store. Returns the tariff id. */
 async function seedTariff(organizationId: string, storeId: string): Promise<string> {
   const tariff = await prisma.plusCommissionTariff.create({
+    data: { organizationId, storeId, name: 'Org Plus Tariff' },
+  });
+  const period = await prisma.plusCommissionTariffPeriod.create({
     data: {
       organizationId,
       storeId,
-      name: 'Org Plus Tariff',
+      tariffId: tariff.id,
       dateRangeLabel: '30 Haziran - 7 Temmuz',
+      sortOrder: 0,
     },
   });
   await prisma.plusCommissionTariffItem.create({
     data: {
       organizationId,
       storeId,
-      tariffId: tariff.id,
+      periodId: period.id,
       barcode: 'BC-1',
       productTitle: 'Urun',
       currentPrice: '100.00',

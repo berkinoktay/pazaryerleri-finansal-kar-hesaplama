@@ -1,12 +1,15 @@
-// Happy-path integration tests for the Plus tariff item estimate endpoint.
+// Integration tests for the Plus tariff item estimate endpoint.
 //
-// The estimate runs the SAME profit engine + resolvers the detail view uses, at
-// the requested price under the item's reduced Plus commission, so the breakdown
-// modal never disagrees with the badge. An unmatched item degrades to
-// not-calculable; an invalid price is a 422.
+// The estimate runs the SAME profit engine + resolvers the detail view uses, so the
+// breakdown modal never disagrees with the badge. Two modes: pass a `price` (under
+// the item's reduced Plus commission) - an estimate at the Plus ceiling MUST equal
+// the detail's `plus.netProfit`; or pass `scenario: 'current'` (no price) - the
+// item's commission-base price at its current commission, which MUST equal the
+// detail row's `currentNetProfit`. An unmatched item degrades to not-calculable; a
+// contradictory or missing payload is a 422.
 //
-// Fixture matches plus-commission-tariffs.routes.test.ts: one calculable variant
-// (TRY cost + SENDEOMP shipping + fee defs) plus an unmatched item.
+// Fixture mirrors plus-commission-tariffs.routes.test.ts: one calculable variant
+// (TRY cost + SENDEOMP shipping + fee defs) plus an unmatched item, under one period.
 
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -22,6 +25,20 @@ import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
 
+interface ScenarioWire {
+  price: string;
+  netProfit: string | null;
+}
+interface DetailItemWire {
+  id: string;
+  barcode: string;
+  commissionBasePrice: string;
+  currentNetProfit: string | null;
+  plus: ScenarioWire;
+}
+interface DetailWire {
+  periods: { items: DetailItemWire[] }[];
+}
 interface EstimateWire {
   itemId: string;
   price: string;
@@ -113,25 +130,31 @@ async function setupFixture(): Promise<EstimateFixture> {
   await ensureFeeDefinitions();
 
   const tariff = await prisma.plusCommissionTariff.create({
+    data: { organizationId: org.id, storeId: store.id, name: 'Plus Tarifesi' },
+  });
+  const period = await prisma.plusCommissionTariffPeriod.create({
     data: {
       organizationId: org.id,
       storeId: store.id,
-      name: 'Plus Tarifesi',
+      tariffId: tariff.id,
       dateRangeLabel: '30 Haziran - 7 Temmuz',
+      sortOrder: 0,
     },
   });
   const matched = await prisma.plusCommissionTariffItem.create({
     data: {
       organizationId: org.id,
       storeId: store.id,
-      tariffId: tariff.id,
+      periodId: period.id,
       productVariantId: variant.id,
       barcode: 'BC-EST',
       stockCode: 'STK-EST',
       productTitle: 'Plus Tarife Urunu',
       currentPrice: '500.00',
-      commissionBasePrice: '500.00',
-      currentCommissionPct: '19',
+      // Customer-seen price commission is charged on - lower than the 500 sale price
+      // (a discounted product). The current scenario must price on THIS, not 500.
+      commissionBasePrice: '480.00',
+      currentCommissionPct: '19.0000',
       plusPriceUpperLimit: '450.00',
       plusCommissionPct: '15.4',
       plusCommissionBasePrice: '450.00',
@@ -142,7 +165,7 @@ async function setupFixture(): Promise<EstimateFixture> {
     data: {
       organizationId: org.id,
       storeId: store.id,
-      tariffId: tariff.id,
+      periodId: period.id,
       barcode: 'BC-UNKNOWN',
       productTitle: 'Eslesmeyen Urun',
       currentPrice: '300.00',
@@ -167,6 +190,17 @@ async function setupFixture(): Promise<EstimateFixture> {
 
 function estimateUrl(fx: EstimateFixture, itemId: string): string {
   return `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/plus-commission-tariffs/${fx.tariffId}/items/${itemId}/estimate`;
+}
+
+async function fetchDetailItem(fx: EstimateFixture, barcode: string): Promise<DetailItemWire> {
+  const detailRes = await app.request(
+    `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/plus-commission-tariffs/${fx.tariffId}`,
+    { headers: { Authorization: bearer(fx.accessToken) } },
+  );
+  const detail = (await detailRes.json()) as DetailWire;
+  const item = detail.periods[0]?.items.find((i) => i.barcode === barcode);
+  if (item === undefined) throw new Error(`detail item ${barcode} missing`);
+  return item;
 }
 
 describe('Plus Commission Tariffs - item estimate', () => {
@@ -199,6 +233,75 @@ describe('Plus Commission Tariffs - item estimate', () => {
     // Full breakdown line items are present (not a mock's summary).
     expect(Number(body.breakdown?.commissionGross)).toBeGreaterThan(0);
     expect(Number(body.breakdown?.shippingGross)).toBeGreaterThan(0);
+  });
+
+  it('price mode at the Plus ceiling equals the detail plus.netProfit (same engine)', async () => {
+    const matched = await fetchDetailItem(fx, 'BC-EST');
+    expect(matched.plus.price).toBe('450.00');
+    expect(matched.plus.netProfit).not.toBeNull();
+
+    const res = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: matched.plus.price }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+    expect(body.calculable).toBe(true);
+    expect(Number(body.commissionPct)).toBe(15.4);
+    // The estimate at the ceiling must reproduce the detail's Plus profit byte-for-byte.
+    expect(body.breakdown?.netProfit).toBe(matched.plus.netProfit);
+  });
+
+  it('current scenario breakdown equals the detail currentNetProfit (same engine, same base price + commission)', async () => {
+    const matched = await fetchDetailItem(fx, 'BC-EST');
+    expect(matched.commissionBasePrice).toBe('480.00');
+    expect(matched.currentNetProfit).not.toBeNull();
+
+    const res = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as EstimateWire;
+
+    expect(body.itemId).toBe(fx.matchedItemId);
+    expect(body.calculable).toBe(true);
+    expect(body.reason).toBeNull();
+    // Priced on the commission-base price (480, the customer-seen price), NOT the 500 sale price.
+    expect(body.price).toBe('480.00');
+    expect(body.breakdown?.saleGross).toBe('480.00');
+    // Commission is the item's CURRENT rate, echoed in the detail's 4dp wire format.
+    expect(body.commissionPct).toBe('19.0000');
+    // The whole point: the modal number must equal the row badge exactly.
+    expect(body.breakdown?.netProfit).toBe(matched.currentNetProfit);
+  });
+
+  it('rejects price sent with scenario:current (INVALID_ESTIMATE_MODE)', async () => {
+    const res = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario: 'current', price: '100.00' }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors.some((e) => e.field === 'price' && e.code === 'INVALID_ESTIMATE_MODE')).toBe(
+      true,
+    );
+  });
+
+  it('rejects an empty body - neither price nor scenario (PRICE_REQUIRED)', async () => {
+    const res = await app.request(estimateUrl(fx, fx.matchedItemId), {
+      method: 'POST',
+      headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors.some((e) => e.field === 'price' && e.code === 'PRICE_REQUIRED')).toBe(true);
   });
 
   it('an unmatched item is not calculable', async () => {

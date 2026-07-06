@@ -30,6 +30,7 @@ const TENANT_TABLES = [
   'commission_tariff_items',
   // Saved Plus commission tariffs (store-scoped Trendyol Plus offer)
   'plus_commission_tariffs',
+  'plus_commission_tariff_periods',
   'plus_commission_tariff_items',
   // Saved Advantage Label tariffs (store-scoped Trendyol "Avantajlı Ürün Etiketleri")
   'advantage_tariffs',
