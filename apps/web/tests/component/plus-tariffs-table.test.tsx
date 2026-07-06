@@ -89,6 +89,16 @@ const LOSS_ROW: PlusTariffRow = {
 // beats even a persisted seed on remount, not just an absent one.
 const SEEDED_ROW: PlusTariffRow = { ...row, customPrice: '150.00' };
 
+// A row with a committed custom price (80) BELOW the ceiling (100). The offer band
+// carries the CEILING as its price (the adapter's ground truth from `plusPriceUpperLimit`),
+// so the custom input's max must be the ceiling — the seller can raise the saved 80 back
+// up toward 100, not be trapped at 80.
+const CEILING_ROW: PlusTariffRow = {
+  ...row,
+  customPrice: '80.00',
+  bands: [{ ...offer, price: '100.00' }],
+};
+
 // Two rows so a join on ROW B can be shown NOT to disturb ROW A's cell state. Row A
 // keeps id 'r1' so the shared estimate mock (which echoes itemId 'r1') applies to its
 // typed what-if price.
@@ -512,5 +522,23 @@ describe('PlusTariffsTable — joining the offer is exclusive with a custom pric
     );
     // … and the custom price is no longer selected (its commit button is back).
     expect(screen.getByRole('button', { name: /bu fiyatla katıl/i })).toBeInTheDocument();
+  });
+});
+
+describe('PlusTariffsTable — the custom-price input ceiling is the true ceiling', () => {
+  it('lets the seller raise a saved custom price above it, up to the ceiling', async () => {
+    mockEstimate('50.00');
+    const { user } = render(<TableHarness rows={[CEILING_ROW]} />);
+
+    // The input mounts pre-filled with the committed custom price (80).
+    const input = screen.getByPlaceholderText(/fiyat girin/i);
+    expect(input).toHaveValue('80');
+
+    // Raise it to 95 — accepted, because the input's max is the CEILING (100), not the
+    // committed 80. Before the fix the offer band carried the custom price, capping the
+    // max at 80, so this keystroke was refused and the field stuck at '9'.
+    await user.clear(input);
+    await user.type(input, '95');
+    expect(input).toHaveValue('95');
   });
 });

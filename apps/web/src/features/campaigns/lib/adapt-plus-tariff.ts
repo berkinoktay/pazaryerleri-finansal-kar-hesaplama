@@ -94,7 +94,12 @@ function toRow(item: PlusTariffDetailItem): PlusTariffRow {
     bands: [
       {
         key: 'plus',
-        price: item.plus.price,
+        // Ground truth for the offer's ceiling: the dedicated `plusPriceUpperLimit`
+        // field, NOT `plus.price`. The offer card's hero price AND the custom-price
+        // input's max both key off this, so a saved custom price below the ceiling
+        // can never masquerade as the ceiling. `plus.*` carries only the scenario
+        // figures (commission %, profit, margin) computed at that ceiling.
+        price: item.plusPriceUpperLimit,
         commissionPct: item.plus.commissionPct,
         netProfit: item.plus.netProfit,
         marginPct: item.plus.marginPct,

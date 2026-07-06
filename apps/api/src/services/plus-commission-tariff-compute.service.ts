@@ -5,12 +5,16 @@
 // commission — no financial math is re-implemented. The difference: instead of a
 // 4-band ladder, each Plus item has exactly TWO scenarios:
 //   • CURRENT — the seller's current price @ their current commission (e.g. 19%).
-//   • PLUS    — the Trendyol Plus price CEILING (or the seller's custom Plus
-//               price ≤ ceiling) @ the reduced Plus commission (e.g. 15.4%).
+//   • PLUS    — the Trendyol Plus price CEILING @ the reduced Plus commission
+//               (e.g. 15.4%). ALWAYS the ceiling: a committed custom Plus price is
+//               a separate what-if that NEVER enters this on-read compute — the
+//               offer card is a pure ceiling option. The custom price is written by
+//               the export and priced free-form by the estimate endpoint instead.
 // The Plus deal requires DROPPING the price to the ceiling to earn the lower
 // commission (confirmed from the seller panel), so the value proposition is
-// whether the lower price + lower commission nets more than the status quo —
-// `plusIsBetter`. Profit is optimistic (a what-if), like every estimate here.
+// whether the lower ceiling price + lower commission nets more than the status
+// quo — `plusIsBetter` compares the CEILING scenario against the current one.
+// Profit is optimistic (a what-if), like every estimate here.
 
 import { Decimal } from 'decimal.js';
 
@@ -45,8 +49,6 @@ export interface PlusItemInputs {
   readonly currentCommissionPct: Decimal;
   readonly plusPriceUpperLimit: Decimal;
   readonly plusCommissionPct: Decimal;
-  /** Seller's optional override of the Plus price (≤ ceiling); null = the ceiling. */
-  readonly customPrice: Decimal | null;
 }
 
 // ─── Result shapes (serialized — strings, never float) ──────────────────────
@@ -82,9 +84,13 @@ export interface ComputedPlusItem {
 
 const NULL_CURRENT: ComputedCurrentScenario = { netProfit: null, marginPct: null };
 
-/** The gross price the Plus scenario uses: the seller's custom price, else the ceiling. */
+/**
+ * The gross price the Plus offer scenario is computed at: ALWAYS the ceiling. A
+ * committed custom price is deliberately NOT read here — the offer card is a pure
+ * ceiling option; the custom price is exported and priced by the estimate endpoint.
+ */
 function plusPrice(inputs: PlusItemInputs): Decimal {
-  return inputs.customPrice ?? inputs.plusPriceUpperLimit;
+  return inputs.plusPriceUpperLimit;
 }
 
 function nullScenario(price: Decimal, commissionPct: Decimal): ComputedScenario {
@@ -112,7 +118,8 @@ function runScenario(
  * unmatched barcode → not calculable (NO_PRODUCT). Otherwise the econ is probed
  * once (cost/shipping/PSF/VAT are commission-invariant); if non-null, the current
  * scenario runs at the commission-base price under the current commission and the
- * Plus scenario at its own price under the reduced commission.
+ * Plus scenario at the CEILING price under the reduced commission (a committed
+ * custom price never enters here — see `plusPrice`).
  */
 export function computePlusItem(
   ctx: TariffAssemblyContext,

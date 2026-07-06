@@ -48,6 +48,13 @@ section "Versioning" for details.
     detail item's row belongs to a period; a product priced across two sub-periods can carry a
     different reduced Plus commission per period. Callers that read the tariff's single period must
     switch to the `periods[]` array.
+  - **The detail item's `plus` scenario is now always the CEILING scenario** — `plus.price` always
+    equals `plusPriceUpperLimit`, and `plus.netProfit` / `plus.marginPct` are computed at the ceiling,
+    even when the seller has committed a custom Plus price below it. The committed custom price no
+    longer feeds the on-read compute (it is still echoed as `customPrice`, still written by the export,
+    and still priced free-form by the item estimate endpoint), and `plusIsBetter` now compares the
+    ceiling scenario against the current one. The response shape is unchanged — no field added or
+    removed — so this is a pure semantics fix (the offer card is a pure ceiling option).
   - **Import (`POST .../import`) response gained `periodCount`** — how many date-range periods were
     persisted from the upload (1 for a full-week file, 2 for a split week), alongside the existing
     `productCount` / `itemCount` / match counts.

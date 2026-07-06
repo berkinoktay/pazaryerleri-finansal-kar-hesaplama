@@ -529,6 +529,139 @@ describe('Plus Commission Tariffs - list / detail / delete', () => {
     expect(c?.commissionBasePrice).toBe('500.00');
   });
 
+  it('computes the Plus offer at the ceiling, ignoring a committed custom price', async () => {
+    // Regression: a committed custom Plus price (below the ceiling) must NOT change the
+    // detail's `plus` scenario — the offer card is a pure ceiling option, so `plus.price`
+    // always equals `plusPriceUpperLimit` and `plus.netProfit` is the ceiling's profit
+    // (NOT the custom price's). Two items share ONE calculable variant + identical ceiling
+    // (450) + reduced commission (15.4), differing only in `customPrice`:
+    //   A: customPrice null  -> joined at the ceiling
+    //   B: customPrice 400   -> committed below the ceiling
+    // A and B must produce an IDENTICAL Plus scenario; B still echoes its custom price.
+    const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+    if (carrier === null) throw new Error('SENDEOMP carrier missing - globalSetup must run');
+
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await prisma.store.create({
+      data: {
+        organizationId: org.id,
+        name: 'Plus Ceiling Store',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: 'plus-ceiling-test',
+        credentials: 'opaque',
+        shippingTariffSource: 'TRENDYOL_CONTRACT',
+        defaultShippingCarrierId: carrier.id,
+      },
+    });
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 8601n,
+        productMainId: 'pm-8601',
+        title: 'Tavan Fiyat Urunu',
+        categoryId: 597n,
+        categoryName: 'Gomlek',
+        brandId: 2032n,
+        brandName: 'Modline',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: 86010n,
+        barcode: 'BC-CEIL',
+        stockCode: 'STK-CEIL',
+        salePrice: new Decimal('500.00'),
+        listPrice: new Decimal('500.00'),
+        vatRate: 20,
+        dimensionalWeight: new Decimal('3.0'),
+      },
+    });
+    const profile = await prisma.costProfile.create({
+      data: {
+        organizationId: org.id,
+        name: 'COGS Ceiling',
+        type: 'COGS',
+        amountGross: new Decimal('200.00'),
+        currency: 'TRY',
+        vatRate: 20,
+        fxRateMode: 'MANUAL',
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+    });
+    await ensureFeeDefinitions();
+
+    const tariff = await prisma.plusCommissionTariff.create({
+      data: { organizationId: org.id, storeId: store.id, name: 'Tavan Tarifesi' },
+    });
+    const period = await prisma.plusCommissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: '1 - 7 Temmuz',
+        sortOrder: 0,
+      },
+    });
+    // Both point at the SAME variant + the SAME ceiling/commission; only customPrice differs.
+    let sort = 0;
+    const makeItem = async (barcode: string, customPrice: string | null): Promise<void> => {
+      await prisma.plusCommissionTariffItem.create({
+        data: {
+          organizationId: org.id,
+          storeId: store.id,
+          periodId: period.id,
+          productVariantId: variant.id,
+          barcode,
+          productTitle: barcode,
+          currentPrice: '500.00',
+          commissionBasePrice: '500.00',
+          currentCommissionPct: '19.0000',
+          plusPriceUpperLimit: '450.00',
+          plusCommissionPct: '15.4',
+          plusCommissionBasePrice: '450.00',
+          plusSelected: customPrice === null,
+          customPrice,
+          sortOrder: sort++,
+        },
+      });
+    };
+    await makeItem('BC-CEIL-A', null);
+    await makeItem('BC-CEIL-B', '400.00');
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/plus-commission-tariffs/${tariff.id}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const items = ((await res.json()) as DetailWire).periods[0]?.items ?? [];
+    const a = items.find((i) => i.barcode === 'BC-CEIL-A');
+    const b = items.find((i) => i.barcode === 'BC-CEIL-B');
+
+    // (1) Both Plus scenarios are priced at the ceiling — the custom 400 is ignored.
+    expect(a?.plus.price).toBe('450.00');
+    expect(b?.plus.price).toBe('450.00');
+    expect(b?.plusPriceUpperLimit).toBe('450.00');
+    // (2) The custom-priced item's Plus profit equals the ceiling-joined item's — proof
+    // the committed custom price never entered the on-read compute.
+    expect(a?.plus.netProfit).not.toBeNull();
+    expect(b?.plus.netProfit).toBe(a?.plus.netProfit);
+    expect(b?.plus.marginPct).toBe(a?.plus.marginPct);
+    expect(b?.plusIsBetter).toBe(a?.plusIsBetter);
+    // (3) The custom price is still echoed on the wire (exported / re-seeded), just unused
+    // in the compute — and it is NOT the Plus scenario's price.
+    expect(b?.customPrice).toBe('400.00');
+    expect(b?.plus.price).not.toBe(b?.customPrice);
+  });
+
   it('deletes the tariff and then lists empty', async () => {
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/plus-commission-tariffs/${fx.tariffId}`,

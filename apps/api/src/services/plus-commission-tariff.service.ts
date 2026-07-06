@@ -246,13 +246,16 @@ export async function getPlusTariffDetail(
           ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
           : NO_SHIPPING;
 
+      // The committed custom price is intentionally NOT passed to the compute: the
+      // Plus offer scenario is always the ceiling (see plus-commission-tariff-compute
+      // .service). The custom price is still echoed on the wire (below), exported, and
+      // priced free-form by the estimate endpoint.
       const inputs: PlusItemInputs = {
         currentPrice: new Decimal(item.currentPrice.toString()),
         commissionBasePrice: new Decimal(item.commissionBasePrice.toString()),
         currentCommissionPct: new Decimal(item.currentCommissionPct.toString()),
         plusPriceUpperLimit: new Decimal(item.plusPriceUpperLimit.toString()),
         plusCommissionPct: new Decimal(item.plusCommissionPct.toString()),
-        customPrice: item.customPrice !== null ? new Decimal(item.customPrice.toString()) : null,
       };
       const computed: ComputedPlusItem = computePlusItem(
         ctx,
