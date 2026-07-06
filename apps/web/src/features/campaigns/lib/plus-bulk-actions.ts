@@ -74,12 +74,6 @@ export interface PlusTariffFilterState {
   selection: PlusSelectionFilter;
 }
 
-/** The Plus offer's net profit as a Decimal, or null when the row is not calculable. */
-function offerProfit(row: PlusTariffRow): Decimal | null {
-  const offer = plusOffer(row);
-  return offer?.netProfit != null ? new Decimal(offer.netProfit) : null;
-}
-
 /**
  * Apply the row's most profitable option to every listed row ("En kârlıyı seç"):
  * join Plus at the ceiling where the offer beats doing nothing (`plusIsBetter`), and
@@ -158,18 +152,22 @@ export function filterPlusRows(
 
     const offer = plusOffer(row);
     const plusMargin = offer?.marginPct ?? null;
-    const plusProfit = offerProfit(row);
     if (
       filters.minMarginPct !== null &&
       (plusMargin === null || Number(plusMargin) < filters.minMarginPct)
     ) {
       return false;
     }
-    if (filters.profit === 'profitable' && !(plusProfit !== null && plusProfit.greaterThan(0))) {
-      return false;
-    }
-    if (filters.profit === 'loss' && (plusProfit === null || plusProfit.greaterThan(0))) {
-      return false;
+    // The Plus offer's net profit only matters (and is only allocated as a Decimal) when
+    // a profit filter is actually engaged — derived from the `offer` already in hand.
+    if (filters.profit !== 'all') {
+      const plusProfit = offer?.netProfit != null ? new Decimal(offer.netProfit) : null;
+      if (filters.profit === 'profitable' && !(plusProfit !== null && plusProfit.greaterThan(0))) {
+        return false;
+      }
+      if (filters.profit === 'loss' && (plusProfit === null || plusProfit.greaterThan(0))) {
+        return false;
+      }
     }
 
     const joined = isJoinedRow(selection, customPrices, row.id);

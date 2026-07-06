@@ -274,7 +274,10 @@ describe('plus-commission-tariff export', () => {
     );
 
     const blankFirstLabel = new Map<number, Map<number, XlsxCellValue>>([
-      [2, new Map<number, XlsxCellValue>([[firstPeriod.labelCol, { kind: 'inlineStr', value: '' }]])],
+      [
+        2,
+        new Map<number, XlsxCellValue>([[firstPeriod.labelCol, { kind: 'inlineStr', value: '' }]]),
+      ],
     ]);
     const blanked = patchXlsxCells(FIXTURE_MULTI, blankFirstLabel);
     const tariffId = await importFixture(ctx, blanked, 'trendyol-plus-tariff-3ve4.xlsx');

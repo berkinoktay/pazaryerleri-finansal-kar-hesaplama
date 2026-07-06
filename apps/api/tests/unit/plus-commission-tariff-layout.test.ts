@@ -128,9 +128,7 @@ describe('resolvePlusTariffLayout', () => {
   });
 
   it('returns null when the column after a period label is not the offer column', () => {
-    const header = PLUS_HEADER.map((h) =>
-      h === 'Plus Komisyon Teklifi' ? 'Bir Başka Kolon' : h,
-    );
+    const header = PLUS_HEADER.map((h) => (h === 'Plus Komisyon Teklifi' ? 'Bir Başka Kolon' : h));
     expect(resolvePlusTariffLayout(header)).toBeNull();
   });
 
