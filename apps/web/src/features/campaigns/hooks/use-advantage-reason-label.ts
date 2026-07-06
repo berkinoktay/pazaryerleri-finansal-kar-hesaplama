@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import * as React from 'react';
 
 import type { AdvantageTariffItemReason } from '../types';
 
@@ -12,23 +13,32 @@ import type { AdvantageTariffItemReason } from '../types';
  * Unlike the commission/Plus verticals this adds the `NO_COMMISSION` branch (the tier
  * price landed in neither a commission band nor a resolvable category rate). Concrete
  * keys per branch — next-intl's typed `t` cannot take a union.
+ *
+ * The mapper is `useCallback`-stable (keyed on the stable next-intl `t`) so it can sit in
+ * the Advantage table's `columns` dependency list without churning it every render.
+ * Mirrors {@link usePlusReasonLabel}: the table relies on this to keep its TanStack
+ * columns from rebuilding (and remounting the custom-price input) when unrelated parent
+ * state changes — a fresh closure here defeats the whole remount fix.
  */
 export function useAdvantageReasonLabel(): (reason: AdvantageTariffItemReason) => string {
   const t = useTranslations('productLabelsPage.reason');
-  return (reason) => {
-    switch (reason) {
-      case 'NO_PRODUCT':
-        return t('NO_PRODUCT');
-      case 'NO_COST':
-        return t('NO_COST');
-      case 'NO_SHIPPING':
-        return t('NO_SHIPPING');
-      case 'NO_COMMISSION':
-        return t('NO_COMMISSION');
-      default: {
-        const _exhaustive: never = reason;
-        throw new Error(`Unhandled advantage tariff reason: ${String(_exhaustive)}`);
+  return React.useCallback(
+    (reason) => {
+      switch (reason) {
+        case 'NO_PRODUCT':
+          return t('NO_PRODUCT');
+        case 'NO_COST':
+          return t('NO_COST');
+        case 'NO_SHIPPING':
+          return t('NO_SHIPPING');
+        case 'NO_COMMISSION':
+          return t('NO_COMMISSION');
+        default: {
+          const _exhaustive: never = reason;
+          throw new Error(`Unhandled advantage tariff reason: ${String(_exhaustive)}`);
+        }
       }
-    }
-  };
+    },
+    [t],
+  );
 }
