@@ -57,12 +57,13 @@ export default function ChromePatternsPage(): React.ReactElement {
 
         <Preview
           title="Çerçeveli — liste"
-          description="Başlık ve KPI şeridi tek yükseltilmiş kartta birleşir; sayfa-kapsamı filtre (tarih aralığı) sağ kümede aksiyonun solunda durur."
+          description="Başlık ve KPI şeridi tek yükseltilmiş kartta birleşir; sağ küme iki satıra ayrılır — üstte tazelik rozeti (SyncBadge) durum satırı, altında sayfa-kapsamı filtre (tarih aralığı) ve aksiyon kontrolleri."
         >
           <PageHeader
             variant="framed"
             title="Siparişler"
             intent="Bağlı mağazalardan akan siparişler. Filtrele, mutabakat durumunu izle."
+            meta={<SyncBadge state="fresh" lastSyncedAt={MOCK.syncMeta} source="Trendyol" />}
             filters={<DateRangePicker />}
             actions={
               <Button size="sm" leadingIcon={<RefreshIcon aria-hidden />}>

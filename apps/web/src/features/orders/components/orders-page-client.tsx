@@ -39,11 +39,13 @@ interface OrdersPageClientProps {
  * connecting a marketplace account yet.
  *
  * The header is the framed PageHeader: the orderDate DateRangePicker sits in
- * the `filters` slot (left of the right cluster), the SyncBadge + Refresh
- * action form the single right cluster in `actions`, and the KPI summary docks
- * into the `summary` slot as a bare StatStrip. The summary is omitted only on a
- * summary-query error with NO previously-cached data — a stale-but-present
- * summary keeps rendering; the failure still surfaces via the global QueryCache toast.
+ * the `filters` slot, the SyncBadge freshness pill rides the `meta` status row
+ * (the top line of the right cluster), the Refresh action sits alone in
+ * `actions` (the controls row directly below the status row), and the KPI
+ * summary docks into the `summary` slot as a bare StatStrip. The summary is
+ * omitted only on a summary-query error with NO previously-cached data — a
+ * stale-but-present summary keeps rendering; the failure still surfaces via the
+ * global QueryCache toast.
  */
 export function OrdersPageClient({
   orgId,
@@ -129,35 +131,35 @@ export function OrdersPageClient({
   // button only guards its own brief in-flight state.
   const refreshButtonDisabled = refresh.isPending;
 
-  // SyncBadge (freshness) grouped with the refresh action in the right
-  // cluster — one unit (design spec D10), no separate meta row.
-  const headerSlots = {
-    actions: (
-      <>
-        <SyncBadge
-          state={orderSyncSnapshot.state}
-          lastSyncedAt={orderSyncSnapshot.lastSyncedAt}
-          progress={orderSyncSnapshot.progress}
-          activeCount={activeSyncs.length}
-          source="Trendyol"
-          onClick={() => setSyncCenterOpen(true)}
-          ariaLabel={tSync('openLabel')}
-        />
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => refresh.mutate()}
-          disabled={refreshButtonDisabled}
-          className="gap-xs"
-        >
-          <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
-          {refreshButtonDisabled
-            ? tOrders('refreshButton.refreshing')
-            : tOrders('refreshButton.label')}
-        </Button>
-      </>
-    ),
-  };
+  // SyncBadge (freshness) rides the framed header's status row — the top line of
+  // the right cluster, directly ABOVE the controls row (design spec D10: the
+  // freshness pill sits right above the Refresh button). Passed via `meta`.
+  const headerMeta = (
+    <SyncBadge
+      state={orderSyncSnapshot.state}
+      lastSyncedAt={orderSyncSnapshot.lastSyncedAt}
+      progress={orderSyncSnapshot.progress}
+      activeCount={activeSyncs.length}
+      source="Trendyol"
+      onClick={() => setSyncCenterOpen(true)}
+      ariaLabel={tSync('openLabel')}
+    />
+  );
+
+  // Controls row: the Refresh action alone now that the freshness pill moved to
+  // the status row above it.
+  const headerActions = (
+    <Button
+      type="button"
+      size="sm"
+      onClick={() => refresh.mutate()}
+      disabled={refreshButtonDisabled}
+      className="gap-xs"
+    >
+      <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
+      {refreshButtonDisabled ? tOrders('refreshButton.refreshing') : tOrders('refreshButton.label')}
+    </Button>
+  );
 
   // orderDate range as a page-scope filter — it recomputes the summary + list,
   // so it lives in the header's `filters` slot (left of the action cluster),
@@ -184,8 +186,9 @@ export function OrdersPageClient({
           variant="framed"
           title={pageTitle}
           intent={pageIntent}
+          meta={headerMeta}
           filters={headerFilters}
-          actions={headerSlots.actions}
+          actions={headerActions}
           summary={
             // React Query keeps the last successful `data` even when a background
             // refetch errors, so drop the summary only on an error with NO prior
