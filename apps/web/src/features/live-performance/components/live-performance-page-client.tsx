@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import dynamic from 'next/dynamic';
 import * as React from 'react';
 
+import { Currency } from '@/components/patterns/currency';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
 import { Button } from '@/components/ui/button';
@@ -18,11 +19,13 @@ import { cn } from '@/lib/utils';
 import { useQueryState } from 'nuqs';
 
 import type { LiveOrderRow } from '../api/get-live-orders.api';
+import { useLiveKpis } from '../hooks/use-live-kpis';
 import { useLiveOrders } from '../hooks/use-live-orders';
 import { resolveDeepLinkRow } from '../lib/resolve-deep-link-row';
 import { liveKeys } from '../query-keys';
 import { useNewOrderNotifier } from '../providers/new-order-notifier-provider';
 
+import { LiveHeroCaption } from './live-hero-caption';
 import { LiveKpiRow } from './live-kpi-row';
 import { LiveOrderDetailSheet } from './live-order-detail-sheet';
 import { LiveOrdersTable } from './live-orders-table';
@@ -45,11 +48,12 @@ interface LivePerformancePageClientProps {
 
 /**
  * Orchestration root for /live-performance. Owns the Realtime subscription
- * (health drives the live indicator + polling fallback) and composes the three
- * sections in the locked vertical order: KPI strip + cumulative-profit chart
- * (hero) → today's products → orders feed. Each section owns its own query
- * so it loads and errors independently. Renders the no-store empty state until
- * a marketplace account is connected.
+ * (health drives the live indicator + polling fallback) and composes the page
+ * in the locked vertical order: the framed number-first header (today's net
+ * profit hero + the satellite KPI strip) → cumulative-profit chart → today's
+ * products → orders feed. Each section owns its own query so it loads and errors
+ * independently. Renders the no-store empty state until a marketplace account is
+ * connected.
  */
 export function LivePerformancePageClient({
   orgId,
@@ -58,10 +62,27 @@ export function LivePerformancePageClient({
   pageIntent,
 }: LivePerformancePageClientProps): React.ReactElement {
   const t = useTranslations('livePerformance');
+  const tCommon = useTranslations('common');
   const { health } = useNewOrderNotifier();
   const queryClient = useQueryClient();
   const isFetching = useIsFetching({ queryKey: liveKeys.all }) > 0;
   const [selected, setSelected] = React.useState<LiveOrderRow | null>(null);
+
+  // The page client reads the KPI query itself to drive the header hero
+  // (today's net profit). LiveKpiRow reads the SAME query for its satellites —
+  // React Query dedupes on the shared key, so there's no prop drilling and no
+  // second fetch.
+  const kpiQuery = useLiveKpis(orgId, storeId);
+  const kpis = kpiQuery.data;
+  // React Query keeps the last successful `data` through a failed background
+  // refetch, so treat the hero as 'error' only when the failure has NO prior
+  // data to fall back on — otherwise show the stale figures and avoid a layout
+  // flicker between the metric and title-fallback layouts.
+  const heroStatus: 'ready' | 'loading' | 'error' = kpiQuery.isPending
+    ? 'loading'
+    : kpiQuery.isError && kpis === undefined
+      ? 'error'
+      : 'ready';
 
   // Deep-link: a toast's "Detayi gor" routes here with ?order=/?buffer=. We
   // resolve the row from today's feed DURING RENDER (not an effect, so no
@@ -79,18 +100,34 @@ export function LivePerformancePageClient({
   if (orgId === null || storeId === null) {
     return (
       <>
-        <PageHeader title={pageTitle} intent={pageIntent} />
+        <PageHeader variant="framed" title={pageTitle} intent={pageIntent} />
         <EmptyState title={t('noStore.title')} description={t('noStore.description')} />
       </>
     );
   }
 
+  // Identity row next to the small title: the quiet live/offline pill plus a
+  // fixed "since 00:00" scope chip — the page is calendar-day bounded.
+  const metaNode = (
+    <span className="gap-xs inline-flex items-center">
+      <LiveStatusPill health={health} />
+      <span className="text-2xs text-muted-foreground tabular-nums">{t('scopeToday')}</span>
+    </span>
+  );
+
   return (
     <div className="gap-lg flex flex-col">
       <PageHeader
+        variant="framed"
         title={pageTitle}
         intent={pageIntent}
-        meta={<LiveStatusPill health={health} />}
+        meta={metaNode}
+        hero={{
+          value: <Currency animate value={kpis?.netProfitToday ?? '0'} />,
+          caption: kpis !== undefined ? <LiveHeroCaption kpis={kpis} /> : undefined,
+          status: heroStatus,
+          loadingLabel: tCommon('chart.loading'),
+        }}
         actions={
           <Button
             type="button"
@@ -103,8 +140,10 @@ export function LivePerformancePageClient({
             {t('refresh')}
           </Button>
         }
+        summary={
+          heroStatus === 'error' ? undefined : <LiveKpiRow orgId={orgId} storeId={storeId} />
+        }
       />
-      <LiveKpiRow orgId={orgId} storeId={storeId} />
       <LiveProfitChart orgId={orgId} storeId={storeId} live={health === 'healthy'} />
       <LiveTodayProducts orgId={orgId} storeId={storeId} />
       <LiveOrdersTable orgId={orgId} storeId={storeId} onRowClick={setSelected} />

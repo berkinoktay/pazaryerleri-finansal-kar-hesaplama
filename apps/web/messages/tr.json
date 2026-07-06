@@ -3002,6 +3002,7 @@
     "metaTitle": "Canlı Performans | PazarSync",
     "title": "Canlı Performans",
     "subtitle": "Bugünün anlık kâr, ciro ve sipariş performansı",
+    "scopeToday": "Bugün · 00.00'dan beri",
     "refresh": "Yenile",
     "status": {
       "live": "Canlı",

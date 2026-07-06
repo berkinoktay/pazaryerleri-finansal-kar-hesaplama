@@ -2937,6 +2937,7 @@
     "metaTitle": "Live Performance | PazarSync",
     "title": "Live Performance",
     "subtitle": "Today's real-time profit, revenue and order performance",
+    "scopeToday": "Today · since 00:00",
     "refresh": "Refresh",
     "status": {
       "live": "Live",
