@@ -7,8 +7,9 @@ import { formatNumber, formatPercent } from '@pazarsync/utils';
 
 import { AnimatedNumber } from '@/components/patterns/animated-number';
 import { Currency } from '@/components/patterns/currency';
-import { StatCard, type StatCardDelta } from '@/components/patterns/stat-card';
-import { StatGroup } from '@/components/patterns/stat-group';
+import { type StatCardDelta } from '@/components/patterns/stat-card';
+import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
+import type { MarginScale } from '@/lib/margin-coloring';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 import { marginColorStyle } from '@/lib/margin-color-style';
 
@@ -21,36 +22,32 @@ type KpiKey =
   | 'revenue'
   | 'orderCount'
   | 'unitsSold'
-  | 'netProfit'
   | 'margin'
   | 'profitCostRatio'
-  | 'estimateHint'
-  | 'pendingHint';
+  | 'estimateHint';
 
-interface KpiCardDescriptor {
+interface KpiItemDescriptor {
   key: string;
   /** i18n key under `livePerformance.kpis`. */
   labelKey: KpiKey;
-  /** Headline value node (Currency / number / percent). */
-  value: (k: LivePerformanceKpis) => React.ReactNode;
+  /** Value node (Currency / number / percent). Margin reads the scale for its inline color. */
+  value: (k: LivePerformanceKpis, scale: MarginScale | null) => React.ReactNode;
   /** [today, yesterday] decimal strings for the delta chip. */
   deltaPair: (k: LivePerformanceKpis) => [string, string];
-  /** ⓘ note key — only the profit-family cards explain the estimate. */
+  /** ⓘ note key — only the profit-quality satellites explain the estimate. */
   hintKey?: KpiKey;
-  /** Pending-cost count for the gap sub-label (Kâr Tutarı only). */
-  pending?: (k: LivePerformanceKpis) => number;
 }
 
 /**
- * The six headline KPIs. Volume (Ciro / Sipariş / Satış) reads the whole
- * today-universe; profit (Kâr Tutarı / Marj / Kâr-Maliyet) reads the costed
- * subset only — so the profit cards carry an ⓘ "estimate" note and the Kâr
- * Tutarı card shows how many orders are still awaiting cost (the gap that
- * explains "why is profit lower than revenue?"). All read "up is good"; the
- * delta chip is omitted when yesterday was zero. The six cards share one query,
- * so its loading / error state drives every card's `status`.
+ * The five satellite KPIs that orbit the hero net-profit figure in the framed
+ * header. Volume (Ciro / Sipariş / Satış) reads the whole today-universe; the
+ * profit-quality pair (Marj / Kâr-Maliyet) reads the costed subset only — so
+ * those two carry an ⓘ "estimate" note. Net profit itself is NOT here: it is
+ * the header hero, and the pending-cost gap sub-label rides with it. All read
+ * "up is good"; the delta chip is omitted when yesterday was zero. The strip
+ * shares one query with the hero, so its loading state drives every cell.
  */
-const KPI_CARDS: KpiCardDescriptor[] = [
+const KPI_ITEMS: KpiItemDescriptor[] = [
   {
     key: 'revenue',
     labelKey: 'revenue',
@@ -70,17 +67,18 @@ const KPI_CARDS: KpiCardDescriptor[] = [
     deltaPair: (k) => [String(k.unitsSoldToday), String(k.unitsSoldYesterday)],
   },
   {
-    key: 'netProfit',
-    labelKey: 'netProfit',
-    value: (k) => <Currency value={k.netProfitToday} animate />,
-    deltaPair: (k) => [k.netProfitToday, k.netProfitYesterday],
-    hintKey: 'estimateHint',
-    pending: (k) => k.pendingOrderCountToday,
-  },
-  {
     key: 'margin',
     labelKey: 'margin',
-    value: (k) => <AnimatedNumber value={Number(k.marginToday)} format={formatPercent} />,
+    // Margin coloring: the inline style tints the value by the live margin bucket;
+    // `marginColorStyle` returns undefined (colorless) when coloring is off, so the
+    // OFF state renders exactly as it did before the margin-coloring feature.
+    value: (k, scale) => (
+      <AnimatedNumber
+        value={Number(k.marginToday)}
+        format={formatPercent}
+        style={marginColorStyle(k.marginToday, scale)}
+      />
+    ),
     deltaPair: (k) => [k.marginToday, k.marginYesterday],
     hintKey: 'estimateHint',
   },
@@ -93,6 +91,14 @@ const KPI_CARDS: KpiCardDescriptor[] = [
   },
 ];
 
+/**
+ * The satellite KPI strip docked in the framed live-performance header's
+ * `summary` slot. Renders as a `bare` `StatStrip` (the framed PageHeader owns
+ * the surface + entrance). Net profit is the header hero, so it is deliberately
+ * absent here. Owns its own `useLiveKpis` query — React Query dedupes it with
+ * the page client's identical query, so no prop drilling. The page client omits
+ * this slot on error, so the strip only ever renders in the loading or ready state.
+ */
 export function LiveKpiRow({
   orgId,
   storeId,
@@ -101,57 +107,36 @@ export function LiveKpiRow({
   storeId: string;
 }): React.ReactElement {
   const t = useTranslations('livePerformance.kpis');
+  const tCommon = useTranslations('common');
   const query = useLiveKpis(orgId, storeId);
   const kpis = query.data;
-  const status: 'ready' | 'loading' | 'error' = query.isPending
-    ? 'loading'
-    : query.isError
-      ? 'error'
-      : 'ready';
-  // Margin coloring scale — read once for all KPI cards.
+  // Margin coloring scale — read once for the margin satellite.
   const scale = useMarginColoring();
 
+  const items: StatStripItem[] = KPI_ITEMS.map((card) => {
+    const pair = kpis ? card.deltaPair(kpis) : undefined;
+    return {
+      label: t(card.labelKey),
+      value: kpis ? card.value(kpis, scale) : null,
+      hint: card.hintKey ? t(card.hintKey) : undefined,
+      delta: pair ? deltaProp(pair[0], pair[1]) : undefined,
+    };
+  });
+
   return (
-    <StatGroup>
-      {KPI_CARDS.map((card) => {
-        const pair = kpis ? card.deltaPair(kpis) : undefined;
-        const pendingCount = kpis && card.pending ? card.pending(kpis) : 0;
-        // For the margin KPI, color the AnimatedNumber by the live margin value.
-        // OFF: original colorless AnimatedNumber (no className/tone — was colorless in
-        //      origin/main). ON: inline color from the bucket (style wins over default).
-        const value =
-          kpis && card.key === 'margin'
-            ? (() => {
-                return (
-                  <AnimatedNumber
-                    value={Number(kpis.marginToday)}
-                    format={formatPercent}
-                    style={marginColorStyle(kpis.marginToday, scale)}
-                  />
-                );
-              })()
-            : kpis
-              ? card.value(kpis)
-              : null;
-        return (
-          <StatCard
-            key={card.key}
-            status={status}
-            label={t(card.labelKey)}
-            value={value}
-            hint={card.hintKey ? t(card.hintKey) : undefined}
-            delta={pair ? deltaProp(pair[0], pair[1]) : undefined}
-            context={pendingCount > 0 ? t('pendingHint', { count: pendingCount }) : undefined}
-          />
-        );
-      })}
-    </StatGroup>
+    <StatStrip
+      surface="bare"
+      size="sm"
+      items={items}
+      loading={query.isPending}
+      loadingLabel={tCommon('chart.loading')}
+    />
   );
 }
 
 /**
- * Build the StatCard delta, or `undefined` when no relative change exists
- * (yesterday was zero). All six KPIs read "higher is better" → goodDirection up.
+ * Build the StatStrip delta, or `undefined` when no relative change exists
+ * (yesterday was zero). All five satellites read "higher is better" → goodDirection up.
  */
 function deltaProp(today: string, yesterday: string): StatCardDelta | undefined {
   const percent = computeDeltaPercent(today, yesterday);

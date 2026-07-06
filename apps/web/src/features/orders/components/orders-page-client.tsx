@@ -4,6 +4,7 @@ import { RefreshIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { DateRangePicker } from '@/components/patterns/date-range-picker';
 import { PageHeader } from '@/components/patterns/page-header';
 import { SyncBadge, type SyncState } from '@/components/patterns/sync-badge';
 import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-center';
@@ -16,6 +17,7 @@ import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
 import { useOrdersSummary } from '../hooks/use-orders-summary';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
+import { orderDateRangeFromParams, orderDateRangeToParams } from '../lib/orders-date-range';
 
 import { OrderDetailModal, type OrderDetailModalSelection } from './order-detail-modal';
 import { OrdersEmptyState } from './orders-empty-state';
@@ -36,10 +38,12 @@ interface OrdersPageClientProps {
  * Renders the no-store empty state when the user has not finished
  * connecting a marketplace account yet.
  *
- * The PageHeader hosts the data-freshness surface (SyncBadge in `meta`)
- * and the primary action (Eşitle button in `actions`). Mirrors the
- * products page composition so the trust-signal pattern reads the same
- * across data-source pages.
+ * The header is the framed PageHeader: the orderDate DateRangePicker sits in
+ * the `filters` slot (left of the right cluster), the SyncBadge + Refresh
+ * action form the single right cluster in `actions`, and the KPI summary docks
+ * into the `summary` slot as a bare StatStrip. The summary is omitted only on a
+ * summary-query error with NO previously-cached data — a stale-but-present
+ * summary keeps rendering; the failure still surfaces via the global QueryCache toast.
  */
 export function OrdersPageClient({
   orgId,
@@ -94,7 +98,7 @@ export function OrdersPageClient({
   if (noStoreSelected) {
     return (
       <>
-        <PageHeader title={pageTitle} intent={pageIntent} />
+        <PageHeader variant="framed" title={pageTitle} intent={pageIntent} />
         <OrdersEmptyState variant="no-store" />
       </>
     );
@@ -155,6 +159,16 @@ export function OrdersPageClient({
     ),
   };
 
+  // orderDate range as a page-scope filter — it recomputes the summary + list,
+  // so it lives in the header's `filters` slot (left of the action cluster),
+  // bound to the same nuqs from/to state via the shared conversion helpers.
+  const headerFilters = (
+    <DateRangePicker
+      value={orderDateRangeFromParams(filters.from, filters.to)}
+      onChange={(next) => setFilters(orderDateRangeToParams(next))}
+    />
+  );
+
   // The genuinely-empty store (zero rows, no filter active) shows a welcoming
   // "no orders yet" body INSIDE the table chrome rather than a full-page
   // takeover — the table keeps its toolbar + headers + pagination so the page
@@ -166,10 +180,20 @@ export function OrdersPageClient({
   return (
     <>
       <div className="gap-lg flex flex-col">
-        <PageHeader title={pageTitle} intent={pageIntent} actions={headerSlots.actions} />
-        <OrdersKpiStrip
-          summary={summaryQuery.data}
-          status={summaryQuery.isPending ? 'loading' : summaryQuery.isError ? 'error' : 'ready'}
+        <PageHeader
+          variant="framed"
+          title={pageTitle}
+          intent={pageIntent}
+          filters={headerFilters}
+          actions={headerSlots.actions}
+          summary={
+            // React Query keeps the last successful `data` even when a background
+            // refetch errors, so drop the summary only on an error with NO prior
+            // data; a stale-but-present summary keeps rendering instead of blanking.
+            summaryQuery.isError && summaryQuery.data === undefined ? undefined : (
+              <OrdersKpiStrip summary={summaryQuery.data} loading={summaryQuery.isPending} />
+            )
+          }
         />
         <OrdersTable
           rows={rows}
