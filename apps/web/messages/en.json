@@ -1396,7 +1396,7 @@
     },
     "smartSelect": {
       "label": "Smart Select",
-      "selectBest": "Best tier for each product",
+      "selectBest": "Best choice for every product",
       "selectProfitable": "Only profitable tiers",
       "clear": "Clear selections",
       "scopeHint": "If a filter is applied, only visible products are affected."

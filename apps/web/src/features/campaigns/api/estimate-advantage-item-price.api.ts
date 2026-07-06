@@ -19,9 +19,13 @@ export type EstimateAdvantagePriceResult = Omit<RawEstimateAdvantagePriceResult,
 /**
  * POST /v1/.../advantage-tariffs/{tariffId}/items/{itemId}/estimate
  *
- * Full profit breakdown for one Advantage tariff item at a given price, using the
- * reduced commission the price's band supplies (or the category fallback). The price
- * alone drives the what-if (POST-only because it carries a body; read-only).
+ * Full profit breakdown for one Advantage tariff item, in one of two mutually exclusive
+ * modes (POST-only because it carries a body; read-only):
+ *   1. Custom-price what-if — pass `price`; the reduced commission is resolved from the
+ *      band that price lands in (or the category fallback).
+ *   2. Current scenario — pass `scenario: 'current'` and no price; the item's own
+ *      customer price + its current commission drive the breakdown, so it matches the
+ *      row's `currentNetProfit` badge byte-for-byte.
  *
  * A `calculable:false` response is a normal 200 (not an error): the item is
  * unmatched, uncostable, or its commission cannot be resolved, and `breakdown` is

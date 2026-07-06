@@ -1396,7 +1396,7 @@
     },
     "smartSelect": {
       "label": "Akıllı Seçim",
-      "selectBest": "Her ürüne en kârlı kademe",
+      "selectBest": "Her ürüne en kârlı seçim",
       "selectProfitable": "Sadece kârlı kademeler",
       "clear": "Seçimleri temizle",
       "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
