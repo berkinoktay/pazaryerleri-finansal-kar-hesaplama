@@ -93,16 +93,26 @@ export interface ItemCommissionInputs {
   readonly categoryRate: Decimal | null;
 }
 
+/** A resolved reduced commission: the applied PERCENT plus where it came from. */
+export interface ResolvedCommission {
+  readonly pct: Decimal;
+  readonly source: CommissionSourceKind;
+}
+
 /**
  * Resolves the commission PERCENT for a price: the containing commission band
  * first (the reduced campaign rate), else the category fallback. Null when
  * neither is available. Band4 is open-ended so a band match is the norm when
  * bands exist; category covers products with no commission tariff.
+ *
+ * Exported so the estimate service can resolve the current-scenario commission
+ * the SAME way the detail baseline does (at the customer price) and inject it as a
+ * verbatim override — see `AdvantageEstimateCommission`.
  */
-function resolveCommission(
+export function resolveCommission(
   commission: ItemCommissionInputs,
   price: Decimal,
-): { pct: Decimal; source: CommissionSourceKind } | null {
+): ResolvedCommission | null {
   if (commission.bands !== null && commission.bands.length > 0) {
     const band = bandForPrice(commission.bands, price);
     if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
@@ -293,15 +303,32 @@ export interface ComputedAdvantageEstimate {
 }
 
 /**
- * Full profit breakdown for ONE advantage item at an arbitrary price (custom-price
- * what-if). Commission resolves from the containing band, else category.
+ * How the single-price estimate resolves its commission:
+ *   - `resolve`  — from the item's commission inputs at the estimate price: the
+ *                  containing band, else the category rate (the custom-price what-if).
+ *   - `override` — the commission is supplied verbatim (the current scenario). It is
+ *                  resolved the SAME way the detail's current baseline resolves it — at
+ *                  the customer price — and injected here so the breakdown mirrors the
+ *                  detail row's `current` byte-for-byte, with NO second band lookup. A
+ *                  null override means the commission was unresolvable → NO_COMMISSION.
+ */
+export type AdvantageEstimateCommission =
+  | { readonly kind: 'resolve'; readonly inputs: ItemCommissionInputs }
+  | { readonly kind: 'override'; readonly resolved: ResolvedCommission | null };
+
+/**
+ * Full profit breakdown for ONE advantage item at `price`. In `resolve` mode the
+ * commission comes from the band the price lands in (else category); in `override`
+ * mode it is applied verbatim (the current scenario). A null variant → NO_PRODUCT,
+ * a null probe econ → NO_COST/NO_SHIPPING, an unresolvable commission → NO_COMMISSION
+ * — the same ordering the detail view uses.
  */
 export function computeAdvantageEstimate(
   ctx: TariffAssemblyContext,
   variant: TariffVariant | null,
   costAggregate: VariantCostAggregate | undefined,
   shipping: EstimateOutcome,
-  commission: ItemCommissionInputs,
+  commission: AdvantageEstimateCommission,
   price: Decimal,
 ): ComputedAdvantageEstimate {
   if (variant === null) {
@@ -314,7 +341,10 @@ export function computeAdvantageEstimate(
     };
   }
 
-  const resolved = resolveCommission(commission, price);
+  const resolved =
+    commission.kind === 'override'
+      ? commission.resolved
+      : resolveCommission(commission.inputs, price);
   const probe = assembleUnitEconomics(ctx, variant, {
     costAggregate,
     commission: tariffCommission(resolved?.pct ?? new Decimal(0)),

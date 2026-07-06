@@ -1,7 +1,12 @@
-// On-demand profit estimate for a single Advantage tariff item (custom-price
-// what-if). Resolves the SAME inputs the detail resolves — cost, shipping, fee
-// definitions, and the commission source bands / category fallback — but for ONE
-// item, then runs the engine at the requested price via `computeAdvantageEstimate`.
+// On-demand profit estimate for a single Advantage tariff item.
+//
+// Backs two frontend surfaces without bloating the detail payload: the custom-price
+// what-if and the current-scenario breakdown. It resolves the SAME inputs the detail
+// resolves — cost, shipping, fee definitions, and the commission source bands /
+// category fallback — but for ONE item, then runs the engine via
+// `computeAdvantageEstimate`. No financial math lives here — the engine is reused, so
+// the current-scenario breakdown matches the detail row's `current` byte-for-byte
+// (same price = customer price, same current commission resolved the SAME way).
 //
 // Scoped by organizationId + storeId + tariff. A cross-tenant or foreign item id
 // is indistinguishable from a missing one (404).
@@ -19,6 +24,8 @@ import { fetchCostAggregates } from './products-list.service';
 import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
 import {
   computeAdvantageEstimate,
+  resolveCommission,
+  type AdvantageEstimateCommission,
   type ItemCommissionInputs,
 } from './advantage-tariff-compute.service';
 import { resolveCommissionSource } from './advantage-tariff.service';
@@ -31,10 +38,22 @@ import type { VariantCostAggregate } from '../validators/product.validator';
 import type { EstimateAdvantagePriceResult } from '../validators/advantage-tariff.validator';
 
 /**
- * Computes the full profit breakdown for one advantage item at `price`. The
- * commission comes from the resolved commission source's band for that price,
- * else the category rate. Throws `NotFoundError` when the item does not belong to
- * this tariff/store.
+ * Which scenario to price:
+ *   - `price`   — an explicit price; the band it lands in (else the category rate)
+ *                 supplies the reduced commission (the custom-price what-if).
+ *   - `current` — the item's own customer price at its current commission — the "do
+ *                 nothing" baseline the detail's `current` shows.
+ */
+export type EstimateAdvantagePriceInput =
+  | { readonly mode: 'price'; readonly price: Decimal }
+  | { readonly mode: 'current' };
+
+/**
+ * Computes the full profit breakdown for one advantage item under `input`. Throws
+ * `NotFoundError` when the item does not belong to this tariff/store. In `current`
+ * mode the price is the item's customer price and the commission is resolved EXACTLY
+ * as the detail's current baseline (band, else category), so the breakdown equals the
+ * detail row's `current.netProfit` byte-for-byte.
  */
 export async function estimateAdvantageItemPrice(
   orgId: string,
@@ -42,7 +61,7 @@ export async function estimateAdvantageItemPrice(
   store: PrismaStore,
   tariffId: string,
   itemId: string,
-  price: Decimal,
+  input: EstimateAdvantagePriceInput,
 ): Promise<EstimateAdvantagePriceResult> {
   let item;
   try {
@@ -52,6 +71,7 @@ export async function estimateAdvantageItemPrice(
         id: true,
         productVariantId: true,
         barcode: true,
+        customerPrice: true,
         tariff: { select: { commissionSourceTariffId: true } },
       },
     });
@@ -114,7 +134,17 @@ export async function estimateAdvantageItemPrice(
     });
     categoryRate = resolved?.rate ?? null;
   }
-  const commission: ItemCommissionInputs = { bands, categoryRate };
+  const commissionInputs: ItemCommissionInputs = { bands, categoryRate };
+
+  // Resolve the price + commission per mode. The 'current' scenario mirrors the detail
+  // row's baseline EXACTLY: the customer price at the commission resolved the SAME way
+  // (band, else category) at that price — injected as a verbatim override so the
+  // breakdown equals `current.netProfit` byte-for-byte, with no second band lookup.
+  const price = input.mode === 'current' ? new Decimal(item.customerPrice.toString()) : input.price;
+  const commission: AdvantageEstimateCommission =
+    input.mode === 'current'
+      ? { kind: 'override', resolved: resolveCommission(commissionInputs, price) }
+      : { kind: 'resolve', inputs: commissionInputs };
 
   const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
   const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };

@@ -247,14 +247,48 @@ export type UpdateAdvantageCommissionSourceBody = z.infer<
   typeof UpdateAdvantageCommissionSourceBodySchema
 >;
 
-// ─── Estimate (on-demand breakdown at an arbitrary price) ───────────────────
+// ─── Estimate (on-demand breakdown for an advantage item) ───────────────────
+//
+// Two modes, both on-demand so the detail payload stays light:
+//   1. Custom-price what-if — pass a `price`; the reduced commission is resolved
+//      from the band that price lands in (of the store's commission tariff), else
+//      the category rate.
+//   2. Current scenario (`scenario: 'current'`) — pass no price; the item's own
+//      customer price + its current commission (band, else category — resolved
+//      exactly as the detail's `current` baseline) are used, so the breakdown
+//      matches the detail row's `current.netProfit` byte-for-byte.
+// The full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const EstimateAdvantagePriceBodySchema = z
   .object({
     price: z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+      .optional()
       .openapi({ description: 'Değerlendirilecek satış fiyatı (GROSS, TL).', example: '250.00' }),
+    scenario: z
+      .literal('current')
+      .optional()
+      .openapi({
+        description:
+          'Güncel senaryonun dökümü — item’ın müşteri fiyatı (customerPrice) + güncel ' +
+          'komisyonuyla (banda düşen ya da kategori oranı) hesaplanır; price verilmez.',
+      }),
+  })
+  .superRefine((val, ctx) => {
+    // `scenario: 'current'` derives BOTH the price (the customer price) and the
+    // commission (the item's current rate) from the item itself, so a caller-supplied
+    // price is contradictory — reject it.
+    if (val.scenario === 'current') {
+      if (val.price !== undefined) {
+        ctx.addIssue({ code: 'custom', message: 'INVALID_ESTIMATE_MODE', path: ['price'] });
+      }
+      return;
+    }
+    // The custom-price what-if mode requires an explicit price.
+    if (val.price === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'PRICE_REQUIRED', path: ['price'] });
+    }
   })
   .openapi('EstimateAdvantagePriceBody');
 
