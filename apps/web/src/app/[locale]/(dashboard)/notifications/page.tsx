@@ -27,7 +27,7 @@ export default async function NotificationsPage({
   const t = await getTranslations({ locale: effectiveLocale, namespace: 'notificationsPage' });
   return (
     <>
-      <PageHeader title={t('title')} intent={t('intent')} />
+      <PageHeader variant="framed" title={t('title')} intent={t('intent')} />
       <EmptyState title={t('empty.title')} description={t('empty.description')} />
     </>
   );
