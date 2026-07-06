@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft02Icon } from 'hugeicons-react';
+import { ArrowLeft01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -130,21 +130,22 @@ export function CostProfileDetail({
   // with three generic bars. Rendered after all hooks, so this early return
   // is safe; tab state resets only if the component unmounts, not here.
   if (profileLoading) {
-    return <PageSkeleton label={tCommon('loading')} withBackLink />;
+    return <PageSkeleton label={tCommon('loading')} withBackLink framed />;
   }
 
   // ─── Header slots ───────────────────────────────────────────────────────
 
+  // Back-nav matches the other framed detail pages: an outline Button carrying
+  // the arrow. `asChild` renders it as the Link (Button's leadingIcon is ignored
+  // under asChild, so the icon rides as a Slot child and is auto-sized by the
+  // Button's [&_svg] rule) — same route + i18n label, but keeps Link prefetch.
   const headerLeading = (
-    <>
-      <Link
-        href="/costs"
-        className="hover:text-foreground gap-3xs flex items-center transition-colors"
-      >
-        <ArrowLeft02Icon className="size-icon-xs" />
+    <Button variant="outline" size="sm" asChild>
+      <Link href="/costs">
+        <ArrowLeft01Icon aria-hidden />
         {tDetail('header.backToList')}
       </Link>
-    </>
+    </Button>
   );
 
   const headerMeta = profile ? (
@@ -184,6 +185,7 @@ export function CostProfileDetail({
   return (
     <div className="gap-lg flex flex-col">
       <PageHeader
+        variant="framed"
         title={profile?.name ?? profileId}
         leading={headerLeading}
         meta={headerMeta}

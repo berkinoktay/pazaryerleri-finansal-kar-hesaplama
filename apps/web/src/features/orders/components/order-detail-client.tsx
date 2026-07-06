@@ -7,13 +7,15 @@ import * as React from 'react';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { PageHeader } from '@/components/patterns/page-header';
+import { PageSkeleton } from '@/components/patterns/page-skeleton';
 import { ProfitBreakdownCard } from '@/components/patterns/profit-breakdown';
+import { StatStrip } from '@/components/patterns/stat-strip';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api-error';
-import { cn } from '@/lib/utils';
 
+import { buildOrderKpiStripItems } from '../lib/order-kpi-strip-items';
 import { useOrder } from '../hooks/use-order';
 
 import { OrderClaimsCard } from './order-claims-card';
@@ -52,6 +54,8 @@ export function OrderDetailClient({
   chrome = 'page',
 }: OrderDetailClientProps): React.ReactElement {
   const t = useTranslations('orderDetail');
+  // KPI şeridi (sayfa yolu) OrderKpiGrid ile AYNI kaynağı kullanır.
+  const tKpis = useTranslations('orderDetail.kpis');
   // Dışlama sebebi kopyası tek kaynaktan (kâr-dışı liste hücresiyle aynı namespace).
   const tReason = useTranslations('exclusionReasons');
   const formatter = useFormatter();
@@ -64,7 +68,7 @@ export function OrderDetailClient({
   if (noContext) {
     return (
       <>
-        {chrome === 'page' && <PageHeader title={t('title.placeholder')} />}
+        {chrome === 'page' && <PageHeader variant="framed" title={t('title.placeholder')} />}
         <Alert tone="warning" size="md">
           <AlertDescription>{t('errors.noStoreContext')}</AlertDescription>
         </Alert>
@@ -80,7 +84,7 @@ export function OrderDetailClient({
     const notFound = orderQuery.error instanceof ApiError && orderQuery.error.status === 404;
     return (
       <>
-        {chrome === 'page' && <PageHeader title={t('title.placeholder')} />}
+        {chrome === 'page' && <PageHeader variant="framed" title={t('title.placeholder')} />}
         <Alert tone={notFound ? 'neutral' : 'destructive'} size="md">
           <AlertDescription>
             {notFound ? t('errors.notFound') : t('errors.loadFailed')}
@@ -127,37 +131,38 @@ export function OrderDetailClient({
   return (
     <div className="gap-lg flex flex-col">
       {chrome === 'page' && (
-        <>
-          <div>
+        <PageHeader
+          variant="framed"
+          leading={
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => router.push('/orders')}
-              className="gap-3xs"
+              leadingIcon={<ArrowLeft01Icon aria-hidden />}
             >
-              <ArrowLeft01Icon className="size-icon-sm" />
               {t('backToList')}
             </Button>
-          </div>
-          <PageHeader
-            title={headerTitle}
-            intent={t('intent', {
-              date: formatter.dateTime(new Date(order.orderDate), 'long'),
-            })}
-            meta={
-              <div className="gap-xs flex flex-wrap items-center">
-                <MarketplaceLogo
-                  platform={order.store.platform}
-                  alt={order.store.platform}
-                  className="size-icon-md"
-                />
-                <span className="text-sm">{order.store.name}</span>
-                <OrderStatusBadge status={order.status} />
-                <ReconciliationStatusBadge status={order.reconciliationStatus} />
-              </div>
-            }
-          />
-        </>
+          }
+          title={headerTitle}
+          intent={t('intent', {
+            date: formatter.dateTime(new Date(order.orderDate), 'long'),
+          })}
+          meta={
+            <div className="gap-xs flex flex-wrap items-center">
+              <MarketplaceLogo
+                platform={order.store.platform}
+                alt={order.store.platform}
+                className="size-icon-md"
+              />
+              <span className="text-sm">{order.store.name}</span>
+              <OrderStatusBadge status={order.status} />
+              <ReconciliationStatusBadge status={order.reconciliationStatus} />
+            </div>
+          }
+          summary={
+            <StatStrip surface="bare" size="md" items={buildOrderKpiStripItems(order, tKpis)} />
+          }
+        />
       )}
 
       <OrderStatusBanner order={order} />
@@ -171,7 +176,9 @@ export function OrderDetailClient({
         </Alert>
       ) : null}
 
-      <OrderKpiGrid order={order} dense={chrome === 'modal'} />
+      {/* Page chrome shows the KPIs inside the framed header summary strip; the
+          modal chrome (Sheet) has no PageHeader, so it keeps the dense KpiGrid. */}
+      {chrome === 'modal' ? <OrderKpiGrid order={order} dense /> : null}
 
       <OrderDeliverySection order={order} />
 
@@ -192,19 +199,22 @@ export function OrderDetailClient({
 }
 
 function LoadingState({ chrome }: { chrome: 'page' | 'modal' }): React.ReactElement {
+  const tCommon = useTranslations('common');
+
+  // Page path mirrors the campaign detail loading anatomy: a framed header with a
+  // back link and a 4-cell bare summary strip, matching the loaded page chrome
+  // (framed PageHeader + bare StatStrip) so nothing jumps when the order lands.
+  if (chrome === 'page') {
+    return <PageSkeleton label={tCommon('loading')} framed withBackLink statCells={4} />;
+  }
+
+  // Modal path: the Sheet/Dialog host owns its header + close, so the skeleton
+  // previews no back-nav and keeps the dense 2-col grid that mirrors the dense
+  // OrderKpiGrid the modal chrome renders.
   return (
     <div className="gap-lg flex flex-col">
-      {/* Back-nav block exists only in page chrome — the modal host (Sheet)
-          owns its own header + close, so the skeleton must not preview one. */}
-      {chrome === 'page' ? <Skeleton className="h-10 w-48" /> : null}
       <Skeleton className="h-24 w-full" />
-      {/* Mirrors OrderKpiGrid: dense (modal) stays 2-col, page widens to 4-col. */}
-      <div
-        className={cn(
-          'gap-md grid grid-cols-1 sm:grid-cols-2',
-          chrome === 'page' && 'lg:grid-cols-4',
-        )}
-      >
+      <div className="gap-md grid grid-cols-1 sm:grid-cols-2">
         <Skeleton className="h-32" />
         <Skeleton className="h-32" />
         <Skeleton className="h-32" />

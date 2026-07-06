@@ -99,5 +99,13 @@ export function AdvantageTariffListSummary({
     },
   ];
 
-  return <StatStrip items={items} loading={loading} loadingLabel={tCommon('loading')} />;
+  return (
+    <StatStrip
+      items={items}
+      loading={loading}
+      loadingLabel={tCommon('loading')}
+      surface="bare"
+      size="md"
+    />
+  );
 }

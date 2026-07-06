@@ -9,7 +9,7 @@ import { render, screen } from '../helpers/render';
 // Turkish copy is referenced through the message catalog (not inline literals)
 // so this source file stays ASCII. The em-dash is the null-margin sentinel.
 const kpis = trMessages.ordersPage.kpis;
-const loadingLabel = trMessages.common.chart.loading;
+const loadingLabel = trMessages.common.loading;
 const EM_DASH = String.fromCharCode(0x2014);
 
 const SUMMARY: OrderSummary = {

@@ -4,12 +4,14 @@ import { RefreshIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { DateRangePicker } from '@/components/patterns/date-range-picker';
 import { PageHeader } from '@/components/patterns/page-header';
 import { SyncBadge } from '@/components/patterns/sync-badge';
 import { SyncCenter } from '@/components/patterns/sync-center';
 import { Button } from '@/components/ui/button';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 import { deriveSyncSnapshot, toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
+import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
 import { cn } from '@/lib/utils';
 
 import { useRefreshReturns } from '../hooks/use-refresh-returns';
@@ -87,7 +89,7 @@ export function ReturnsPageClient({
   if (noStoreSelected) {
     return (
       <>
-        <PageHeader title={pageTitle} intent={pageIntent} />
+        <PageHeader variant="framed" title={pageTitle} intent={pageIntent} />
         <ReturnsEmptyState variant="no-store" />
       </>
     );
@@ -109,40 +111,68 @@ export function ReturnsPageClient({
   // button only guards its own brief in-flight state.
   const refreshButtonDisabled = refresh.isPending;
 
+  // SyncBadge (freshness) rides the framed header's status row — the top line of
+  // the right cluster, directly ABOVE the controls row — so the freshness pill
+  // does not crowd the Yenile button on one line. Passed via `meta`.
+  const headerMeta = (
+    <SyncBadge
+      state={claimsSyncSnapshot.state}
+      lastSyncedAt={claimsSyncSnapshot.lastSyncedAt}
+      progress={claimsSyncSnapshot.progress}
+      activeCount={activeSyncs.length}
+      source="Trendyol"
+      onClick={() => setSyncCenterOpen(true)}
+      ariaLabel={tSync('openLabel')}
+    />
+  );
+
+  // Controls row: the Yenile action alone now that the freshness pill moved to
+  // the status row above it.
   const headerActions = (
-    <>
-      <SyncBadge
-        state={claimsSyncSnapshot.state}
-        lastSyncedAt={claimsSyncSnapshot.lastSyncedAt}
-        progress={claimsSyncSnapshot.progress}
-        activeCount={activeSyncs.length}
-        source="Trendyol"
-        onClick={() => setSyncCenterOpen(true)}
-        ariaLabel={tSync('openLabel')}
-      />
-      <Button
-        type="button"
-        size="sm"
-        onClick={() => refresh.mutate()}
-        disabled={refreshButtonDisabled}
-        className="gap-xs"
-      >
-        <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
-        {refreshButtonDisabled
-          ? tReturns('refreshButton.refreshing')
-          : tReturns('refreshButton.label')}
-      </Button>
-    </>
+    <Button
+      type="button"
+      size="sm"
+      onClick={() => refresh.mutate()}
+      disabled={refreshButtonDisabled}
+      className="gap-xs"
+    >
+      <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
+      {refreshButtonDisabled
+        ? tReturns('refreshButton.refreshing')
+        : tReturns('refreshButton.label')}
+    </Button>
+  );
+
+  // claimDate range as a page-scope filter — it recomputes the summary + list,
+  // so it lives in the header's `filters` slot (left of the action cluster),
+  // bound to the same nuqs from/to state via the shared conversion helpers.
+  // Both bounds empty => no params sent, so the backend applies its 30-day
+  // default; the window is never re-derived on the FE.
+  const headerFilters = (
+    <DateRangePicker
+      value={dateRangeFromParams(filters.from, filters.to)}
+      onChange={(next) => setFilters(dateRangeToParams(next))}
+    />
   );
 
   return (
     <>
       <div className="gap-lg flex flex-col">
-        <PageHeader title={pageTitle} intent={pageIntent} actions={headerActions} />
-        <ReturnsKpiStrip
-          summary={summaryQuery.data}
-          loading={summaryQuery.isPending}
-          error={summaryQuery.isError}
+        <PageHeader
+          variant="framed"
+          title={pageTitle}
+          intent={pageIntent}
+          meta={headerMeta}
+          filters={headerFilters}
+          actions={headerActions}
+          summary={
+            // React Query keeps the last successful `data` even when a background
+            // refetch errors, so drop the summary only on an error with NO prior
+            // data; a stale-but-present summary keeps rendering instead of blanking.
+            summaryQuery.isError && summaryQuery.data === undefined ? undefined : (
+              <ReturnsKpiStrip summary={summaryQuery.data} loading={summaryQuery.isPending} />
+            )
+          }
         />
         <ReturnsTable
           rows={rows}

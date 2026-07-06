@@ -66,5 +66,5 @@ export function CommissionTariffsSummary({
     },
   ];
 
-  return <StatStrip items={items} />;
+  return <StatStrip items={items} surface="bare" size="md" />;
 }

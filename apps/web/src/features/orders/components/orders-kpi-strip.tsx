@@ -72,7 +72,7 @@ export function OrdersKpiStrip({
       size="md"
       items={items}
       loading={loading}
-      loadingLabel={tCommon('chart.loading')}
+      loadingLabel={tCommon('loading')}
     />
   );
 }

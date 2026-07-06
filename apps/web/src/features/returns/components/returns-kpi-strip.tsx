@@ -7,8 +7,7 @@ import * as React from 'react';
 import { formatNumber } from '@pazarsync/utils';
 
 import { Currency } from '@/components/patterns/currency';
-import { StatCard } from '@/components/patterns/stat-card';
-import { StatGroup } from '@/components/patterns/stat-group';
+import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
 
 import type { ClaimsSummary } from '../api/get-claims-summary.api';
 
@@ -54,27 +53,31 @@ const KPI_CARDS: KpiCardDescriptor[] = [
 export interface ReturnsKpiStripProps {
   summary: ClaimsSummary | undefined;
   loading: boolean;
-  error?: boolean;
 }
 
-export function ReturnsKpiStrip({
-  summary,
-  loading,
-  error = false,
-}: ReturnsKpiStripProps): React.ReactElement {
+/**
+ * Four returns KPIs docked into the returns PageHeader summary slot, scoped to
+ * the header's date range. Rendered as a bare StatStrip so the framed header
+ * owns the surface; loading shows skeletons while keeping the real labels. The
+ * page omits this strip on a summary-query error with no cached data, so no
+ * error branch lives here.
+ */
+export function ReturnsKpiStrip({ summary, loading }: ReturnsKpiStripProps): React.ReactElement {
   const t = useTranslations('returnsPage.kpi');
-  const status: 'ready' | 'loading' | 'error' = loading ? 'loading' : error ? 'error' : 'ready';
+  const tCommon = useTranslations('common');
+
+  const items: StatStripItem[] = KPI_CARDS.map((card) => ({
+    label: t(card.key),
+    value: summary !== undefined ? card.value(summary) : null,
+  }));
 
   return (
-    <StatGroup>
-      {KPI_CARDS.map((card) => (
-        <StatCard
-          key={card.key}
-          status={status}
-          label={t(card.key)}
-          value={summary !== undefined ? card.value(summary) : null}
-        />
-      ))}
-    </StatGroup>
+    <StatStrip
+      surface="bare"
+      size="md"
+      items={items}
+      loading={loading}
+      loadingLabel={tCommon('loading')}
+    />
   );
 }

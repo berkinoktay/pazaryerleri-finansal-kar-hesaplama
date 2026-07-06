@@ -16,5 +16,5 @@ import { PageSkeleton } from '@/components/patterns/page-skeleton';
  */
 export default function ProductLabelDetailLoading(): React.ReactElement {
   const t = useTranslations('common');
-  return <PageSkeleton label={t('loading')} withBackLink statCells={4} />;
+  return <PageSkeleton label={t('loading')} withBackLink statCells={4} framed />;
 }

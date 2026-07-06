@@ -11,13 +11,13 @@ import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-cente
 import { Button } from '@/components/ui/button';
 import { type SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
+import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
 import { cn } from '@/lib/utils';
 
 import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
 import { useOrdersSummary } from '../hooks/use-orders-summary';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
-import { orderDateRangeFromParams, orderDateRangeToParams } from '../lib/orders-date-range';
 
 import { OrderDetailModal, type OrderDetailModalSelection } from './order-detail-modal';
 import { OrdersEmptyState } from './orders-empty-state';
@@ -166,8 +166,8 @@ export function OrdersPageClient({
   // bound to the same nuqs from/to state via the shared conversion helpers.
   const headerFilters = (
     <DateRangePicker
-      value={orderDateRangeFromParams(filters.from, filters.to)}
-      onChange={(next) => setFilters(orderDateRangeToParams(next))}
+      value={dateRangeFromParams(filters.from, filters.to)}
+      onChange={(next) => setFilters(dateRangeToParams(next))}
     />
   );
 

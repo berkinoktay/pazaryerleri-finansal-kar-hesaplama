@@ -115,6 +115,7 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
   return (
     <div className="gap-lg flex flex-col">
       <PageHeader
+        variant="framed"
         title={t('page.title')}
         intent={t('page.description')}
         actions={

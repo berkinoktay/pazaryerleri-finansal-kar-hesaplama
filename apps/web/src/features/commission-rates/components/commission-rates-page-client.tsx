@@ -74,7 +74,7 @@ export function CommissionRatesPageClient({
   if (noStoreSelected) {
     return (
       <div className="gap-lg flex flex-col">
-        <PageHeader title={pageTitle} intent={pageIntent} />
+        <PageHeader variant="framed" title={pageTitle} intent={pageIntent} />
         <CommissionRatesEmptyState variant="no-store" />
       </div>
     );
@@ -152,7 +152,7 @@ export function CommissionRatesPageClient({
 
   return (
     <div className="gap-lg flex flex-col">
-      <PageHeader title={pageTitle} intent={pageIntent} meta={freshnessMeta} />
+      <PageHeader variant="framed" title={pageTitle} intent={pageIntent} meta={freshnessMeta} />
 
       <CommissionRatesTable
         rows={rows}
