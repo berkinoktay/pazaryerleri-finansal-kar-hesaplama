@@ -1205,10 +1205,17 @@
     "search": "Ürün, model veya barkod ara",
     "actions": {
       "upload": "Excel Yükle",
-      "saveExport": "Kaydet ve İndir"
+      "export": "Dışa aktar"
     },
-    "actionBar": {
-      "joined": "{count} ürün için kademe seçildi"
+    "exportDialog": {
+      "title": "Avantajlı etiketleri dışa aktar",
+      "description": "Seçimlerin Excel dosyasına aktarılıp indirilecek.",
+      "fileName": "Avantajlı etiket dosyası",
+      "productCount": "{count} ürün",
+      "cancel": "Vazgeç",
+      "download": "İndir",
+      "saving": "Seçimler kaydediliyor…",
+      "exporting": "İndiriliyor…"
     },
     "templates": {
       "back": "Tarifelere dön",
@@ -1293,7 +1300,6 @@
     },
     "table": {
       "product": "Ürün Bilgileri",
-      "current": "Güncel fiyat",
       "displayPrice": "Müşterinin gördüğü fiyat",
       "calculatedProfit": "Hesaplanan kâr",
       "vsCurrent": "Güncele göre",
@@ -1302,11 +1308,12 @@
       "tierQualifier": "ve altı",
       "tierSelected": "Seçildi",
       "selectTier": "Bu kademeyi seç",
+      "enterCost": "Maliyet girin",
       "customPrice": "Özel Fiyat",
       "enterPrice": "Fiyat girin",
+      "customPriceHint": "Bir fiyat girin, komisyonu görün",
       "selectCustom": "Bu fiyatı seç",
-      "customSelected": "Seçildi",
-      "customCommissionApplies": "Girdiğiniz fiyat, düştüğü komisyon bandının oranıyla hesaplanır."
+      "customSelected": "Seçildi"
     },
     "tier": {
       "tier1": "Avantaj",

@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 import { parseAsFloat, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
-import { BulkActionBar } from '@/components/patterns/bulk-action-bar';
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PageHeader } from '@/components/patterns/page-header';
@@ -13,13 +12,12 @@ import { PageSkeleton } from '@/components/patterns/page-skeleton';
 import { Button } from '@/components/ui/button';
 import { useRouter } from '@/i18n/navigation';
 import { ApiError } from '@/lib/api-error';
-import { cn } from '@/lib/utils';
 
 import { useAdvantageTariffDetail } from '../hooks/use-advantage-tariff-detail';
 import { useDeleteAdvantageTariff } from '../hooks/use-delete-advantage-tariff';
 import { useExportAdvantageTariff } from '../hooks/use-export-advantage-tariff';
 import { useUpdateAdvantageSelections } from '../hooks/use-update-advantage-selections';
-import { toAdvantageTariffView } from '../lib/adapt-advantage-tariff';
+import { toAdvantageTariffView, type NonNullStarTierKey } from '../lib/adapt-advantage-tariff';
 import {
   clearSelections,
   filterAdvantageRows,
@@ -27,20 +25,21 @@ import {
   selectProfitable,
   type AdvantageCustomChoice,
   type AdvantageCustomPriceMap,
+  type AdvantageSelectionMap,
   type AdvantageSelectionState,
   type AdvantageTariffFilterState,
-  type AdvantageTierMap,
-  type NonNullStarTierKey,
 } from '../lib/advantage-bulk-actions';
 import { summarizeAdvantageSelection } from '../lib/advantage-tariff-summary';
 import { downloadBlob } from '../lib/download-blob';
 import { TariffScopeProvider } from '../lib/tariff-scope';
+import type { ExportPreviewFile } from '../lib/whole-week';
 import { AdvantageCommissionSourceHeader } from './advantage-commission-source-header';
 import { AdvantageCommissionWarning } from './advantage-commission-warning';
 import { AdvantageTariffsMobileCards } from './advantage-tariffs-mobile-cards';
 import { AdvantageTariffsSummary } from './advantage-tariffs-summary';
 import { AdvantageTariffsTable } from './advantage-tariffs-table';
 import { AdvantageTariffsToolbar } from './advantage-tariffs-toolbar';
+import { ExportTariffDialog } from './export-tariff-dialog';
 
 const LIST_PATH = '/campaigns/product-labels';
 
@@ -49,16 +48,17 @@ function distinct(values: readonly (string | null)[]): string[] {
 }
 
 /**
- * Data-bound DETAIL screen for one saved Advantage tariff. Loads it from the backend
- * (with the current + per-tier profit already computed per product, and the resolved
- * commission source), lets the seller pick ONE of four states per product — None /
- * Avantaj / Çok Avantaj / Süper Avantaj — or type a custom price, then persists the
- * choices + downloads the patched Trendyol xlsx on "Kaydet ve İndir". Choices buffer
- * locally (seeded from the server) then save via PATCH; the breakdown modal +
- * custom-price what-if call the estimate endpoint (scope provided via context). No
- * client-side money math. Unlike the commission/Plus verticals there are NO periods and
- * NO validity, and the reduced commission is READ from the store's commission-tariff
- * data — surfaced (and switchable) via the commission-source header above the table.
+ * Data-bound DETAIL screen for one saved Advantage tariff. Loads it from the backend (with
+ * the current + per-tier profit already computed per product, and the resolved commission
+ * source), lets the seller pick ONE star tier per product — Avantaj / Çok Avantaj / Süper
+ * Avantaj — or type a custom price, then persists the choices + downloads the patched
+ * Trendyol xlsx via the export dialog. Choices buffer locally (seeded from the server) then
+ * save via PATCH; the breakdown modal + custom-price what-if call the estimate endpoint
+ * (scope provided via context). No client-side money math. Unlike the commission/Plus
+ * verticals there are NO periods and NO validity, and the reduced commission is READ from
+ * the store's commission-tariff data — surfaced (and switchable) via the commission-source
+ * header above the table. Mirrors the Plus detail one-to-one — the domain differences are
+ * up to three star tiers per row instead of one Plus offer, and no sub-period tabs.
  */
 export function AdvantageTariffDetailClient({
   orgId,
@@ -71,6 +71,7 @@ export function AdvantageTariffDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('productLabelsPage');
   const tCommon = useTranslations('common');
+  const tExport = useTranslations('productLabelsPage.exportDialog');
   const router = useRouter();
   const detail = useAdvantageTariffDetail(orgId ?? '', storeId, tariffId);
   const updateSelections = useUpdateAdvantageSelections(orgId ?? '', storeId ?? '', tariffId);
@@ -82,15 +83,43 @@ export function AdvantageTariffDetailClient({
     [detail.data],
   );
 
-  // Two MUTUALLY EXCLUSIVE per-row buffers: `tiers` = a chosen star tier;
-  // `customPrices` = a confirmed custom price. A row is in at most one. Both stay local
-  // (edit state) and save together on "Kaydet ve İndir".
-  const [tiers, setTiers] = React.useState<AdvantageTierMap>({});
-  const [customPrices, setCustomPrices] = React.useState<AdvantageCustomPriceMap>({});
+  // `selection` = the chosen star tier per row; `customPrices` = the optional custom amount
+  // chosen instead. The two are MUTUALLY EXCLUSIVE per row. Both stay local (edit state) and
+  // save together via the export dialog.
+  //
+  // They live in ONE state object so the select/deselect handlers below can be
+  // identity-stable `useCallback([])`: a functional `setChoices((prev) => …)` reads BOTH
+  // maps from `prev`, so no handler needs `customPrices` in its deps. A stable handler
+  // identity is what keeps the table's `columns` from rebuilding — rebuilding remounts every
+  // cell (flexRender renders each `cell:` as a component) and wipes a half-typed custom
+  // price. See advantage-tariffs-table.tsx.
+  const [choices, setChoices] = React.useState<AdvantageSelectionState>({
+    selection: {},
+    customPrices: {},
+  });
+  const { selection, customPrices } = choices;
+  // UNCOMMITTED live what-if profit per row (the figure the custom-price card shows while the
+  // seller is still typing). It exists ONLY to let the "En kârlı" badge race the live
+  // estimate before "Bu fiyatı seç" — it never feeds export or the summary.
+  const [customEstimates, setCustomEstimates] = React.useState<Record<string, string | null>>({});
+  // Uncommitted "what-if" draft prices per row, kept in a REF so they survive the cell
+  // unmounting (pagination / filter). Map semantics: NO key = never touched (fall back to
+  // committed / server seed), value `null` = the seller deliberately cleared it (stay empty),
+  // a string = the draft price. A ref, not state, because the draft must NOT drive renders —
+  // the "En kârlı" marker already tracks the live figure through `customEstimates`.
+  const customDraftsRef = React.useRef(new Map<string, string | null>());
+  const getCustomDraft = React.useCallback(
+    (rowId: string): string | null | undefined => customDraftsRef.current.get(rowId),
+    [],
+  );
+  const handleCustomDraftChange = React.useCallback((rowId: string, price: string | null): void => {
+    customDraftsRef.current.set(rowId, price);
+  }, []);
+  const [exportOpen, setExportOpen] = React.useState(false);
   const [seededTariffId, setSeededTariffId] = React.useState<string | null>(null);
-  // View state (filters) is URL-owned via nuqs: reload / share / back-forward reproduce
-  // the exact view. The tri-states encode 'all' as an absent param; minMargin is a float
-  // param. The selection buffer above stays local — edit state.
+  // View state (filters) is URL-owned via nuqs: reload / share / back-forward reproduce the
+  // exact view. The tri-states encode 'all' as an absent param; minMargin is a float param.
+  // The selection buffer above stays local — edit state.
   const [urlState, setUrlState] = useQueryStates(
     {
       q: parseAsString.withDefault(''),
@@ -133,74 +162,85 @@ export function AdvantageTariffDetailClient({
     });
 
   // Seed the editable selection buffer from the server-authoritative `selectedTier` /
-  // `customPrice` the first time this tariff's data arrives. Adjusting state during
-  // render (guarded by the tariff id, so it fires once per tariff) is the
-  // React-recommended alternative to a setState-in-effect — no cascading renders.
+  // `customPrice` the first time this tariff's data arrives. Adjusting state during render
+  // (guarded by the tariff id, so it fires once per tariff) is the React-recommended
+  // alternative to a setState-in-effect — no cascading renders.
   if (view !== null && view.id !== seededTariffId) {
-    const seedTiers: AdvantageTierMap = {};
+    const seedSelection: AdvantageSelectionMap = {};
     const seedCustom: AdvantageCustomPriceMap = {};
     for (const row of view.rows) {
       if (row.customPrice !== null) {
-        // Custom-joined: restore the confirmed price. The custom price's exact profit
-        // isn't in the detail payload, so approximate the summary with the best-tier
-        // profit until the seller re-confirms (which captures the estimate).
-        const best = row.tiers.find((tier) => tier.key === row.bestTierKey);
-        seedCustom[row.id] = {
-          price: row.customPrice,
-          netProfit: best?.netProfit ?? null,
-          marginPct: best?.marginPct ?? null,
-        };
+        // Custom-joined: restore the confirmed price. Its exact profit isn't in the detail
+        // payload (there is no single scenario for an arbitrary custom price on this
+        // vertical), so seed the summary figure as null — the live estimate on the visible
+        // card fills it in, and re-confirming captures it.
+        seedCustom[row.id] = { price: row.customPrice, netProfit: null, marginPct: null };
       } else if (row.selectedTier !== null) {
-        seedTiers[row.id] = row.selectedTier;
+        seedSelection[row.id] = row.selectedTier;
       }
     }
-    setTiers(seedTiers);
-    setCustomPrices(seedCustom);
+    setChoices({ selection: seedSelection, customPrices: seedCustom });
     setSeededTariffId(view.id);
   }
 
   const handleSelectTier = React.useCallback((rowId: string, key: NonNullStarTierKey): void => {
     // Toggle: re-tapping the chosen tier clears it (→ None). Choosing a tier clears any
-    // custom price (mutually exclusive).
-    setTiers((prev) => {
-      const next = { ...prev };
-      if (next[rowId] === key) {
-        delete next[rowId];
-      } else {
-        next[rowId] = key;
-      }
-      return next;
+    // custom price (mutually exclusive). Both maps are read from `prev` so the handler needs
+    // no deps (stable identity).
+    setChoices((prev) => {
+      const isSame = prev.selection[rowId] === key && prev.customPrices[rowId] == null;
+      return {
+        selection: { ...prev.selection, [rowId]: isSame ? null : key },
+        customPrices:
+          prev.customPrices[rowId] == null
+            ? prev.customPrices
+            : { ...prev.customPrices, [rowId]: null },
+      };
     });
-    setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
   }, []);
 
   const handleSelectCustom = React.useCallback(
     (rowId: string, choice: AdvantageCustomChoice): void => {
       // A confirmed custom price replaces any tier choice (mutually exclusive).
-      setCustomPrices((prev) => ({ ...prev, [rowId]: choice }));
-      setTiers((prev) => {
-        if (prev[rowId] === undefined) return prev;
-        const next = { ...prev };
-        delete next[rowId];
-        return next;
-      });
+      setChoices((prev) => ({
+        selection:
+          prev.selection[rowId] == null ? prev.selection : { ...prev.selection, [rowId]: null },
+        customPrices: { ...prev.customPrices, [rowId]: choice },
+      }));
     },
     [],
   );
 
   const handleDeselectCustom = React.useCallback((rowId: string): void => {
-    setCustomPrices((prev) => (prev[rowId] == null ? prev : { ...prev, [rowId]: null }));
+    setChoices((prev) => ({
+      selection: prev.selection,
+      customPrices:
+        prev.customPrices[rowId] == null
+          ? prev.customPrices
+          : { ...prev.customPrices, [rowId]: null },
+    }));
   }, []);
 
+  const handleCustomEstimate = React.useCallback(
+    (rowId: string, netProfit: string | null): void => {
+      // Identity guard — the debounced estimate often resolves to the same figure; skip the
+      // state update (and the re-render) when nothing actually changed.
+      setCustomEstimates((prev) =>
+        prev[rowId] === netProfit ? prev : { ...prev, [rowId]: netProfit },
+      );
+    },
+    [],
+  );
+
   if (detail.isLoading) {
-    // Full page-anatomy placeholder (back link + header + 4-cell summary strip + data
-    // panel) mirroring the loaded layout below.
+    // Full page-anatomy placeholder (back link + header + 4-cell summary strip + data panel)
+    // mirroring the loaded layout below.
     return <PageSkeleton label={tCommon('loading')} withBackLink statCells={4} framed />;
   }
 
-  // Distinguish a genuine 404 (deleted / cross-tenant — non-disclosure convention says
-  // show "not found") from a transient fetch failure (5xx / network — offer a retry,
-  // don't imply the tariff is gone). The global onError already toasts.
+  // Distinguish a genuine 404 (deleted / cross-tenant — non-disclosure convention says show
+  // "not found") from a transient fetch failure (5xx / network — offer a retry, don't imply
+  // the tariff is gone). The global onError already toasts.
   if (detail.isError) {
     const notFound = detail.error instanceof ApiError && detail.error.code === 'NOT_FOUND';
     return (
@@ -237,8 +277,12 @@ export function AdvantageTariffDetailClient({
   }
 
   const rows = view.rows;
-  const summary = summarizeAdvantageSelection(rows, tiers, customPrices);
-  const filteredRows = filterAdvantageRows(rows, tiers, customPrices, filters);
+  const summary = summarizeAdvantageSelection(rows, selection, customPrices);
+  const filteredRows = filterAdvantageRows(rows, selection, customPrices, filters);
+  // Single export file (no sub-periods): every joined product patched into the one xlsx.
+  // `dayCount` is a placeholder — the advantage export dialog never labels a file with days.
+  const previewFiles: ExportPreviewFile[] =
+    summary.joinedCount > 0 ? [{ dayCount: 0, count: summary.joinedCount }] : [];
   const categories = distinct(rows.map((row) => row.category));
   const brands = distinct(rows.map((row) => row.brand));
   const hasActiveFilters =
@@ -252,9 +296,7 @@ export function AdvantageTariffDetailClient({
   const applyBulk = (
     fn: (rows: typeof filteredRows, state: AdvantageSelectionState) => AdvantageSelectionState,
   ): void => {
-    const next = fn(filteredRows, { tiers, customPrices });
-    setTiers(next.tiers);
-    setCustomPrices(next.customPrices);
+    setChoices((prev) => fn(filteredRows, prev));
   };
 
   const onSaveExport = (): void => {
@@ -265,14 +307,19 @@ export function AdvantageTariffDetailClient({
       if (custom != null) {
         return { itemId: row.id, tier: null, customPrice: custom.price };
       }
-      return { itemId: row.id, tier: tiers[row.id] ?? null, customPrice: null };
+      return { itemId: row.id, tier: selection[row.id] ?? null, customPrice: null };
     });
     updateSelections.mutate(
       { selections },
       {
         onSuccess: () => {
           exportTariff.mutate(tariffId, {
-            onSuccess: (blob) => downloadBlob(blob, `${view.name}.xlsx`),
+            // Filename comes from the server; fall back to the tariff name only if the
+            // header was absent.
+            onSuccess: (file) => {
+              downloadBlob(file.blob, file.filename ?? `${view.name}.xlsx`);
+              setExportOpen(false);
+            },
           });
         },
       },
@@ -296,9 +343,7 @@ export function AdvantageTariffDetailClient({
 
   return (
     <TariffScopeProvider scope={{ orgId, storeId, tariffId }}>
-      {/* Reserve space for the floating save bar while products are selected, so the
-          last product row scrolls clear of it (esp. on mobile). */}
-      <div className={cn('gap-lg flex flex-col', summary.joinedCount > 0 && 'pb-4xl')}>
+      <div className="gap-lg flex flex-col">
         <PageHeader
           leading={
             <Button
@@ -314,24 +359,35 @@ export function AdvantageTariffDetailClient({
           intent={tPage('templates.detailIntent')}
           variant="framed"
           actions={
-            <ConfirmDialog
-              trigger={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  leadingIcon={<Delete02Icon aria-hidden />}
-                  className="text-destructive hover:border-destructive hover:bg-destructive-surface hover:text-destructive"
-                >
-                  {tPage('templates.delete')}
-                </Button>
-              }
-              title={tPage('templates.deleteTitle')}
-              description={tPage('templates.deleteDescription')}
-              confirmLabel={tPage('templates.deleteConfirm')}
-              onConfirm={() =>
-                deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
-              }
-            />
+            <div className="gap-sm flex items-center">
+              <ConfirmDialog
+                trigger={
+                  <Button
+                    variant="destructive-ghost"
+                    size="sm"
+                    leadingIcon={<Delete02Icon aria-hidden />}
+                  >
+                    {tPage('templates.delete')}
+                  </Button>
+                }
+                title={tPage('templates.deleteTitle')}
+                description={tPage('templates.deleteDescription')}
+                confirmLabel={tPage('templates.deleteConfirm')}
+                onConfirm={() =>
+                  deleteTariff.mutate(tariffId, { onSuccess: () => router.push(LIST_PATH) })
+                }
+              />
+              {/* Fixed export button (replaces the floating bar): opens a preview modal of the
+                  file that will download before the seller confirms. */}
+              <Button
+                size="sm"
+                onClick={() => setExportOpen(true)}
+                disabled={summary.joinedCount === 0}
+                leadingIcon={<DownloadCircle01Icon aria-hidden />}
+              >
+                {tPage('actions.export')}
+              </Button>
+            </div>
           }
           summary={<AdvantageTariffsSummary summary={summary} />}
         />
@@ -352,11 +408,15 @@ export function AdvantageTariffDetailClient({
         <div className="hidden min-w-0 md:block">
           <AdvantageTariffsTable
             rows={filteredRows}
-            tiers={tiers}
+            selection={selection}
             customPrices={customPrices}
+            customEstimates={customEstimates}
             onSelectTier={handleSelectTier}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
+            onCustomEstimate={handleCustomEstimate}
+            getCustomDraft={getCustomDraft}
+            onCustomDraftChange={handleCustomDraftChange}
             toolbar={toolbar}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={resetFilters}
@@ -366,26 +426,41 @@ export function AdvantageTariffDetailClient({
           {toolbar}
           <AdvantageTariffsMobileCards
             rows={filteredRows}
-            tiers={tiers}
+            selection={selection}
             customPrices={customPrices}
+            customEstimates={customEstimates}
             onSelectTier={handleSelectTier}
             onSelectCustom={handleSelectCustom}
             onDeselectCustom={handleDeselectCustom}
+            onCustomEstimate={handleCustomEstimate}
+            getCustomDraft={getCustomDraft}
+            onCustomDraftChange={handleCustomDraftChange}
           />
         </div>
 
-        <BulkActionBar
-          selectedCount={summary.joinedCount}
-          countLabel={(count) => tPage('actionBar.joined', { count })}
-          actions={[
-            {
-              id: 'save-export',
-              label: tPage('actions.saveExport'),
-              icon: <DownloadCircle01Icon aria-hidden />,
-              onClick: onSaveExport,
-              tone: 'primary',
-            },
-          ]}
+        <ExportTariffDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          files={previewFiles}
+          labels={{
+            title: tExport('title'),
+            description: tExport('description'),
+            // Advantage exports a single xlsx — the label never uses a day count.
+            fileName: () => tExport('fileName'),
+            productCount: (count) => tExport('productCount', { count }),
+            // Never rendered: advantage always produces exactly one file, so the multi-file
+            // ZIP note never shows (guarded by `files.length > 1`).
+            zipNote: () => '',
+            cancel: tExport('cancel'),
+            download: tExport('download'),
+            saving: tExport('saving'),
+            exporting: tExport('exporting'),
+          }}
+          // Two-phase: selections PATCH first, then the file downloads — so the dialog can say
+          // which is happening ("kaydediliyor…" → "indiriliyor…").
+          isSaving={updateSelections.isPending}
+          isDownloading={exportTariff.isPending}
+          onConfirm={onSaveExport}
         />
       </div>
     </TariffScopeProvider>
