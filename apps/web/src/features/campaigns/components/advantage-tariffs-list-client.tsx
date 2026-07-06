@@ -67,7 +67,8 @@ export function AdvantageTariffsListClient({
     (id: string): void => {
       const name = items.find((item) => item.id === id)?.name ?? id;
       exportTariff.mutate(id, {
-        onSuccess: (blob) => downloadBlob(blob, `${name}.xlsx`),
+        // Filename comes from the server (Content-Disposition); fall back to the tariff name.
+        onSuccess: (file) => downloadBlob(file.blob, file.filename ?? `${name}.xlsx`),
       });
     },
     [exportTariff, items],
