@@ -153,12 +153,9 @@ export function AdvantageTariffsListView({
   return (
     <div className="gap-lg flex flex-col">
       <PageHeader
+        variant="framed"
         title={t('title')}
         intent={t('intent')}
-        // `gap-lg` so the title/intent breathe above the summary strip; no bottom
-        // rule so the strip flows into the data panel below rather than being
-        // fenced off by a separator.
-        className="gap-lg border-b-0 pb-0"
         meta={
           stats.lastUpdatedAt !== null
             ? tList('lastUpdated', {

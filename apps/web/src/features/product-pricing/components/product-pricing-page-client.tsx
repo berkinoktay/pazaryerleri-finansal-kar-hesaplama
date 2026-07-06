@@ -78,7 +78,7 @@ export function ProductPricingPageClient({
   if (noStoreSelected) {
     return (
       <div className="gap-lg flex flex-col">
-        <PageHeader title={pageTitle} intent={pageIntent} />
+        <PageHeader variant="framed" title={pageTitle} intent={pageIntent} />
         <ProductPricingEmptyState variant="no-store" />
       </div>
     );
@@ -127,7 +127,7 @@ export function ProductPricingPageClient({
 
   return (
     <div className="gap-lg flex flex-col">
-      <PageHeader title={pageTitle} intent={pageIntent} />
+      <PageHeader variant="framed" title={pageTitle} intent={pageIntent} />
 
       <ProductPricingTable
         rows={rows}

@@ -65,5 +65,5 @@ export function PlusTariffsSummary({ summary }: PlusTariffsSummaryProps): React.
     },
   ];
 
-  return <StatStrip items={items} />;
+  return <StatStrip items={items} surface="bare" size="md" />;
 }

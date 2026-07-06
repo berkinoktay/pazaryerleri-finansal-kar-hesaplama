@@ -251,7 +251,7 @@ export function CommissionTariffDetailClient({
   if (detail.isLoading) {
     // Full page-anatomy placeholder (back link + header + 4-cell summary strip
     // + data panel) mirroring the loaded layout below.
-    return <PageSkeleton label={tCommon('loading')} withBackLink statCells={4} />;
+    return <PageSkeleton label={tCommon('loading')} withBackLink statCells={4} framed />;
   }
 
   // Distinguish a genuine 404 (deleted / cross-tenant — non-disclosure convention
@@ -418,7 +418,7 @@ export function CommissionTariffDetailClient({
           title={template.name}
           badge={<CommissionTariffStatusBadge validity={activePeriod.validity} />}
           intent={activePeriod.dateRangeLabel}
-          className="gap-lg border-b-0 pb-0"
+          variant="framed"
           actions={
             <div className="gap-sm flex items-center">
               <ConfirmDialog

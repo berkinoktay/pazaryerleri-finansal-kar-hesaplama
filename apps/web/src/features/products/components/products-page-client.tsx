@@ -89,7 +89,7 @@ export function ProductsPageClient({
   if (noStoreSelected) {
     return (
       <>
-        <PageHeader title={pageTitle} intent={pageIntent} />
+        <PageHeader variant="framed" title={pageTitle} intent={pageIntent} />
         <ProductsEmptyState variant="no-store" />
       </>
     );
@@ -142,36 +142,45 @@ export function ProductsPageClient({
     <>
       <div className="gap-lg flex flex-col">
         <PageHeader
+          variant="framed"
           title={pageTitle}
           intent={pageIntent}
-          summary={<ProductsSummary counts={facetsQuery.data?.overrideCounts} />}
+          summary={
+            // Drop the summary strip only when the facets query errored AND no
+            // prior data is cached; a stale-but-present count set keeps rendering
+            // (React Query retains last success), so a background-refetch error
+            // never leaves the strip stuck in an aria-busy skeleton.
+            facetsQuery.isError && facetsQuery.data === undefined ? undefined : (
+              <ProductsSummary counts={facetsQuery.data?.overrideCounts} />
+            )
+          }
+          // SyncBadge (freshness) rides the framed header's status row — the top
+          // line of the right cluster, directly ABOVE the controls row — so the
+          // freshness pill does not crowd the Eşitle button on one line.
+          meta={
+            <SyncBadge
+              state={productSyncSnapshot.state}
+              lastSyncedAt={productSyncSnapshot.lastSyncedAt}
+              progress={productSyncSnapshot.progress}
+              activeCount={activeSyncs.length}
+              source="Trendyol"
+              onClick={() => setSyncCenterOpen(true)}
+              ariaLabel={tSync('openLabel')}
+            />
+          }
+          // Controls row: the Eşitle action alone now that the freshness pill
+          // moved to the status row above it.
           actions={
-            // SyncBadge (freshness) grouped with the Eşitle action in the
-            // right cluster — freshness + its action read as one unit
-            // (design spec D10) instead of split across meta + actions.
-            <>
-              <SyncBadge
-                state={productSyncSnapshot.state}
-                lastSyncedAt={productSyncSnapshot.lastSyncedAt}
-                progress={productSyncSnapshot.progress}
-                activeCount={activeSyncs.length}
-                source="Trendyol"
-                onClick={() => setSyncCenterOpen(true)}
-                ariaLabel={tSync('openLabel')}
-              />
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => startSync.mutate()}
-                disabled={syncButtonDisabled}
-                className="gap-xs"
-              >
-                <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
-                {syncButtonDisabled
-                  ? tProducts('syncButton.syncing')
-                  : tProducts('syncButton.label')}
-              </Button>
-            </>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => startSync.mutate()}
+              disabled={syncButtonDisabled}
+              className="gap-xs"
+            >
+              <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
+              {syncButtonDisabled ? tProducts('syncButton.syncing') : tProducts('syncButton.label')}
+            </Button>
           }
         />
 

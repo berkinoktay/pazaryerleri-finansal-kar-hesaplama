@@ -129,7 +129,7 @@ export function LiveKpiRow({
       size="sm"
       items={items}
       loading={query.isPending}
-      loadingLabel={tCommon('chart.loading')}
+      loadingLabel={tCommon('loading')}
     />
   );
 }

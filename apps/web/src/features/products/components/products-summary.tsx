@@ -3,8 +3,7 @@
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
-import { StatCard } from '@/components/patterns/stat-card';
-import { StatGroup } from '@/components/patterns/stat-group';
+import { StatStrip, type StatStripItem } from '@/components/patterns/stat-strip';
 
 interface OverrideCounts {
   total: number;
@@ -27,55 +26,49 @@ export interface ProductsSummaryProps {
  * omitted because the page has no reliable aggregate profit figure (most
  * products are missing cost). We don't fabricate a metric to fill a slot.
  *
+ * Rendered as a bare StatStrip so the framed header owns the surface; while the
+ * counts load it shows skeletons but keeps the real labels (no flash of zeros).
+ *
  * @useWhen surfacing store-wide catalog health (total + missing-data counts) as the Products page header summary
  */
 export function ProductsSummary({ counts }: ProductsSummaryProps): React.ReactElement {
   const t = useTranslations('products.summary');
+  const tCommon = useTranslations('common');
   const formatter = useFormatter();
 
-  if (counts === undefined) {
-    // Canonical loading route: StatCard's own `status='loading'` skeleton
-    // (role="status" aria-busy per card), mirroring LiveKpiRow. Real labels
-    // keep the card API consistent with the loaded render below.
-    return (
-      <StatGroup>
-        {(['totalProducts', 'missingCost', 'missingVat'] as const).map((key) => (
-          <StatCard key={key} label={t(key)} value={null} status="loading" />
-        ))}
-      </StatGroup>
-    );
-  }
-
   const shareOfCatalog = (n: number): number =>
-    counts.total > 0 ? Math.round((n / counts.total) * 100) : 0;
+    counts !== undefined && counts.total > 0 ? Math.round((n / counts.total) * 100) : 0;
+
+  // Zero is good news on the missing-data tiles — "Katalog payı: %0" reads like
+  // a problem statistic, so the context line switches to an all-clear.
+  const missingContext = (n: number): React.ReactNode =>
+    n === 0 ? t('noneMissing') : t('ofCatalog', { pct: shareOfCatalog(n) });
+
+  const items: StatStripItem[] = [
+    {
+      label: t('totalProducts'),
+      value: counts !== undefined ? formatter.number(counts.total, 'integer') : null,
+      context: counts !== undefined ? t('totalContext') : undefined,
+    },
+    {
+      label: t('missingCost'),
+      value: counts !== undefined ? formatter.number(counts.missingCost, 'integer') : null,
+      context: counts !== undefined ? missingContext(counts.missingCost) : undefined,
+    },
+    {
+      label: t('missingVat'),
+      value: counts !== undefined ? formatter.number(counts.missingVat, 'integer') : null,
+      context: counts !== undefined ? missingContext(counts.missingVat) : undefined,
+    },
+  ];
 
   return (
-    <StatGroup>
-      <StatCard
-        label={t('totalProducts')}
-        value={formatter.number(counts.total, 'integer')}
-        context={t('totalContext')}
-      />
-      {/* Zero is good news on these tiles — "Katalog payı: %0" reads like a
-          problem statistic, so the context line switches to an all-clear. */}
-      <StatCard
-        label={t('missingCost')}
-        value={formatter.number(counts.missingCost, 'integer')}
-        context={
-          counts.missingCost === 0
-            ? t('noneMissing')
-            : t('ofCatalog', { pct: shareOfCatalog(counts.missingCost) })
-        }
-      />
-      <StatCard
-        label={t('missingVat')}
-        value={formatter.number(counts.missingVat, 'integer')}
-        context={
-          counts.missingVat === 0
-            ? t('noneMissing')
-            : t('ofCatalog', { pct: shareOfCatalog(counts.missingVat) })
-        }
-      />
-    </StatGroup>
+    <StatStrip
+      surface="bare"
+      size="md"
+      items={items}
+      loading={counts === undefined}
+      loadingLabel={tCommon('loading')}
+    />
   );
 }
