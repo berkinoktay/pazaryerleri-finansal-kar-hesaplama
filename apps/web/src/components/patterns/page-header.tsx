@@ -30,11 +30,15 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
    */
   actions?: React.ReactNode;
   /**
-   * Meta row inside the heading column — typically a SyncBadge for
-   * data-freshness signaling. Appears below the intent line so context
-   * stacks: title → intent → meta. In the framed metric mode (`hero`
-   * present) it renders inline on the identity row next to the small title
-   * instead — `intent` is not rendered there.
+   * Meta slot — typically a SyncBadge for data-freshness signaling. Its
+   * placement depends on the variant and mode:
+   * - Plain: inside the heading column, below the intent line, so context
+   *   stacks title → intent → meta.
+   * - Framed title mode: in the right cluster's TOP row — a status row that
+   *   sits ABOVE the filters/actions controls row — so the freshness signal
+   *   does not crowd the controls on a single line.
+   * - Framed metric mode (`hero` present, ready/loading): inline on the
+   *   identity row next to the small title; `intent` is not rendered there.
    */
   meta?: React.ReactNode;
   /**
@@ -127,8 +131,10 @@ export function PageHeader({
   className,
   ...props
 }: PageHeaderProps): React.ReactElement {
-  // Right cluster: page-scope filters sit to the LEFT of actions. Shared by
-  // both variants; when `filters` is omitted this reduces to today's markup.
+  // Plain-variant right cluster: page-scope filters sit to the LEFT of actions
+  // on a single row. When `filters` is omitted this reduces to today's markup.
+  // The framed variant builds its own two-row cluster below (status row over a
+  // controls row) once `resolvedMode` is known.
   const rightCluster =
     filters || actions ? (
       <div className="gap-xs flex shrink-0 flex-wrap items-center">
@@ -137,16 +143,19 @@ export function PageHeader({
       </div>
     ) : null;
 
-  // Title-first column — the classic stack (30px title + badge + intent + meta).
-  // Reused verbatim by the plain variant and by framed's title/empty/error mode.
-  const titleColumn = (
+  // Title-first column — the classic stack (30px title + badge + intent, with an
+  // optional meta row). `withMeta` governs whether the meta row (SyncBadge /
+  // freshness) stacks under the intent line: the plain variant keeps it here
+  // (byte-identical to the pre-split markup), while framed's title mode drops it
+  // (`false`) and re-renders it in the right cluster's status row instead.
+  const renderTitleColumn = (withMeta: boolean): React.ReactElement => (
     <div className="gap-3xs flex min-w-0 flex-col">
       <div className="gap-sm flex flex-wrap items-center">
         <h1 className="text-foreground text-3xl font-semibold tracking-tight">{title}</h1>
         {badge ? <div className="shrink-0">{badge}</div> : null}
       </div>
       {intent ? <p className="text-muted-foreground max-w-prose-max text-sm">{intent}</p> : null}
-      {meta ? <div className="pt-2xs">{meta}</div> : null}
+      {withMeta && meta ? <div className="pt-2xs">{meta}</div> : null}
     </div>
   );
 
@@ -162,7 +171,7 @@ export function PageHeader({
         <div
           className={cn('gap-md flex flex-col', 'sm:flex-row sm:items-start sm:justify-between')}
         >
-          {titleColumn}
+          {renderTitleColumn(true)}
           {rightCluster}
         </div>
         {summary ? <div className="min-w-0">{summary}</div> : null}
@@ -184,7 +193,7 @@ export function PageHeader({
 
   const framedLeftColumn =
     hero === undefined || resolvedMode === 'title' ? (
-      titleColumn
+      renderTitleColumn(false)
     ) : (
       <div className="gap-2xs flex min-w-0 flex-col">
         <div className="gap-sm flex flex-wrap items-center">
@@ -215,6 +224,27 @@ export function PageHeader({
       </div>
     );
 
+  // Framed right cluster: two rows. The status row (meta / SyncBadge) sits ABOVE
+  // the controls row (filters + actions) so the freshness signal reads clearly
+  // instead of crowding the DateRangePicker + button on one line. The outer band
+  // is already flex-col on mobile; `items-start sm:items-end` keeps the status
+  // left-aligned on mobile and right-aligned on desktop. Meta only migrates here
+  // in title mode — in metric mode it stays on the identity row next to the
+  // small title and is NOT duplicated here.
+  const metaInRightCluster = meta !== undefined && resolvedMode === 'title';
+  const framedRightCluster =
+    metaInRightCluster || filters || actions ? (
+      <div className="gap-xs flex shrink-0 flex-col items-start sm:items-end">
+        {metaInRightCluster ? <div className="flex">{meta}</div> : null}
+        {filters || actions ? (
+          <div className="gap-xs flex flex-wrap items-center">
+            {filters}
+            {actions}
+          </div>
+        ) : null}
+      </div>
+    ) : null;
+
   return (
     <header className={cn('flex flex-col', className)} {...props}>
       <Card className="overflow-hidden">
@@ -224,7 +254,7 @@ export function PageHeader({
           ) : null}
           <div className="gap-md flex flex-col sm:flex-row sm:items-start sm:justify-between">
             {framedLeftColumn}
-            {rightCluster}
+            {framedRightCluster}
           </div>
         </div>
         {filterChips ? (

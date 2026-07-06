@@ -83,6 +83,45 @@ describe('<PageHeader> framed variant', () => {
     expect(container.querySelector('header')).not.toHaveClass('border-b');
   });
 
+  it('renders the framed-title meta in the right cluster, above the controls row', () => {
+    render(
+      <PageHeader
+        variant="framed"
+        title="Orders"
+        intent="April period"
+        meta={<div>META_MARK</div>}
+        filters={<div>FILTERS_MARK</div>}
+        actions={<div>ACTIONS_MARK</div>}
+      />,
+    );
+
+    const meta = screen.getByText('META_MARK');
+    const filters = screen.getByText('FILTERS_MARK');
+    expect(meta).toBeInTheDocument();
+    // Status row (meta) precedes the controls row (filters/actions) in DOM order.
+    expect(meta.compareDocumentPosition(filters) & DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('lifts the framed-title meta out of the title column (not stacked under intent)', () => {
+    render(
+      <PageHeader
+        variant="framed"
+        title="Orders"
+        intent="April period"
+        meta={<div>META_MARK</div>}
+        actions={<div>ACTIONS_MARK</div>}
+      />,
+    );
+
+    const heading = screen.getByRole('heading', { level: 1, name: 'Orders' });
+    const meta = screen.getByText('META_MARK');
+    // The left column wraps the heading (title row → column); framed title mode
+    // renders meta in the right cluster instead, so that column must NOT contain it.
+    const titleColumn = heading.closest('div')?.parentElement;
+    expect(titleColumn).not.toBeNull();
+    expect(titleColumn?.contains(meta)).toBe(false);
+  });
+
   it('renders the metric mode when a ready hero is given (caption replaces intent)', () => {
     render(
       <PageHeader
@@ -102,6 +141,27 @@ describe('<PageHeader> framed variant', () => {
     // Typography step-down: title shrinks to text-lg, the star figure leads at text-5xl.
     expect(screen.getByRole('heading', { level: 1, name: 'Orders' })).toHaveClass('text-lg');
     expect(screen.getByText('HERO_VALUE')).toHaveClass('text-5xl');
+  });
+
+  it('keeps meta on the identity row (with the small title) in metric mode, before the hero', () => {
+    render(
+      <PageHeader
+        variant="framed"
+        title="Orders"
+        meta={<div>META_MARK</div>}
+        hero={{ value: 'HERO_VALUE', caption: 'CAPTION_MARK' }}
+      />,
+    );
+
+    const heading = screen.getByRole('heading', { level: 1, name: 'Orders' });
+    const meta = screen.getByText('META_MARK');
+    const hero = screen.getByText('HERO_VALUE');
+
+    // Metric mode keeps meta inline on the identity row next to the small title,
+    // NOT migrated into the right cluster.
+    expect(meta.parentElement).toBe(heading.parentElement);
+    // ...and it precedes the star figure in DOM order.
+    expect(meta.compareDocumentPosition(hero) & DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
   it('shows a busy region and hides the hero value while loading', () => {
