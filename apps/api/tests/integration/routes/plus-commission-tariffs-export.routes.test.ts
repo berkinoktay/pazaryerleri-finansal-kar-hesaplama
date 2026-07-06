@@ -20,6 +20,7 @@ import { readWorkbookGrid, type SheetData } from '@pazarsync/spreadsheet';
 
 import { createApp } from '@/app';
 import { cellText } from '@/lib/xlsx-grid-cells';
+import { patchXlsxCells, type XlsxCellValue } from '@/lib/xlsx-patch';
 import {
   resolvePlusTariffLayout,
   type PlusTariffLayout,
@@ -124,6 +125,14 @@ function num(row: readonly unknown[] | undefined, col: number): number {
   return Number(cellText(row ?? [], col));
 }
 
+// Decodes the RFC 5987 `filename*=UTF-8''…` the export route stamps on the download.
+function contentDispositionFilename(res: Response): string {
+  const header = res.headers.get('content-disposition') ?? '';
+  const match = /filename\*=UTF-8''(.+)$/.exec(header);
+  if (match?.[1] === undefined) throw new Error(`no RFC 5987 filename in: ${header}`);
+  return decodeURIComponent(match[1]);
+}
+
 describe('plus-commission-tariff export', () => {
   beforeEach(async () => {
     await ensureDbReachable();
@@ -179,6 +188,8 @@ describe('plus-commission-tariff export', () => {
     const res = await exportTariff(ctx, tariffId);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain(ZIP_MIME_FRAGMENT);
+    // The zip drops the per-window suffix and is named after the tariff itself.
+    expect(contentDispositionFilename(res)).toBe('plus-komisyon-tarifesi.zip');
 
     const entries = unzipSync(new Uint8Array(await res.arrayBuffer()));
     const names = Object.keys(entries).sort();
@@ -239,6 +250,62 @@ describe('plus-commission-tariff export', () => {
     });
     expect(cellText(other ?? [], layout.plusPriceSelection)).toBeNull();
     expect(cellText(other ?? [], layout.tariffSelection)).toBeNull();
+  });
+
+  it('writes the commission into the layout column matched by dayCount, not by position, when import drops a period', async () => {
+    const ctx = await setupStore();
+
+    // Blank the FIRST period block's (3 Gün) date label on the first data row, so import's
+    // "present" filter drops it. The surviving DB period (4 Gün) is then a SUBSEQUENCE of
+    // the raw layout's two periods: a positional layout lookup would land the commission
+    // in the 3-Gün column, whereas the dayCount match must put it in the 4-Gün column.
+    const { grid: fixtureGrid, layout: fixtureLayout } = await readParsed(FIXTURE_MULTI);
+    const firstPeriod = fixtureLayout.periods[0];
+    const secondPeriod = fixtureLayout.periods[1];
+    expect(firstPeriod).toBeDefined();
+    expect(secondPeriod).toBeDefined();
+    if (firstPeriod === undefined || secondPeriod === undefined) return;
+
+    // The 3-Gün commission column's value in the untouched source, to prove export never
+    // overwrites it (the fixture default here is a literal 0, not an empty cell).
+    const originalThreeCommission = cellText(
+      rowFor(fixtureGrid, fixtureLayout, MULTI_BARCODE) ?? [],
+      firstPeriod.computedCommissionCol,
+    );
+
+    const blankFirstLabel = new Map<number, Map<number, XlsxCellValue>>([
+      [2, new Map<number, XlsxCellValue>([[firstPeriod.labelCol, { kind: 'inlineStr', value: '' }]])],
+    ]);
+    const blanked = patchXlsxCells(FIXTURE_MULTI, blankFirstLabel);
+    const tariffId = await importFixture(ctx, blanked, 'trendyol-plus-tariff-3ve4.xlsx');
+
+    // Exactly the second (4 Gün) period survived import.
+    const periods = await prisma.plusCommissionTariffPeriod.findMany({
+      where: { storeId: ctx.storeId },
+    });
+    expect(periods).toHaveLength(1);
+    expect(periods[0]?.dayCount).toBe(secondPeriod.dayCount);
+
+    // Opt the surviving period's product into Plus (no custom price → the ceiling).
+    await optIn(ctx, tariffId, secondPeriod.dayCount, MULTI_BARCODE);
+    const item = await prisma.plusCommissionTariffItem.findFirst({
+      where: { storeId: ctx.storeId, barcode: MULTI_BARCODE },
+    });
+    expect(item).not.toBeNull();
+
+    const res = await exportTariff(ctx, tariffId);
+    expect(res.status).toBe(200);
+
+    const { grid, layout } = await readParsed(Buffer.from(await res.arrayBuffer()));
+    const row = rowFor(grid, layout, MULTI_BARCODE);
+    expect(row).toBeDefined();
+
+    // The commission lands in the SURVIVING period's (4 Gün, col W) "Hesaplanan Komisyon"
+    // column at its own percent — NOT the positional first (3 Gün, col V) column.
+    expect(num(row, secondPeriod.computedCommissionCol)).toBe(Number(item?.plusCommissionPct));
+    // The 3-Gün column is left exactly as the source had it — never overwritten with the
+    // surviving period's commission (which the old positional lookup would have done).
+    expect(cellText(row ?? [], firstPeriod.computedCommissionCol)).toBe(originalThreeCommission);
   });
 
   it('exports the source verbatim (one xlsx, no 409) when nothing is opted in', async () => {

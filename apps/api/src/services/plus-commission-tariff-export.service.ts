@@ -74,8 +74,14 @@ interface PlusRowPatch {
 
 // ─── The per-item join the seller's opt-in defines ───────────────────────────
 
-/** Per period (parallel to the layout's periods, in sort order): the seller's opt-in. */
+/** Per DB period (in sort order): the seller's opt-in. */
 interface PlusPeriodSelection {
+  /**
+   * The N from this DB period's "Tarih Aralığı (N Gün)"; null when the header lacked it.
+   * Used to locate the matching layout column — the DB periods can be a subsequence of
+   * the raw layout's periods (see `buildPlanRows`), so positional matching is unsafe.
+   */
+  readonly dayCount: number | null;
   /** barcode → chosen Plus price (custom price, else the ceiling), `.toFixed(2)`. */
   readonly pricesByBarcode: ReadonlyMap<string, string>;
   /** barcode → this period's reduced Plus commission percent, verbatim (e.g. "15.4"). */
@@ -119,10 +125,17 @@ function patchSource(
 
 /**
  * Builds the per-barcode Plus patch for one plan. Price + marker come from the shared
- * plan; the commission cells are Plus-specific: one per period the file covers (its
- * `computedCommissionCol`, skipped when -1), each at that period's own reduced percent
- * for this barcode. A whole-week file therefore writes ONE price but a commission cell
- * per sub-period; a single window file writes just that period's.
+ * plan; the commission cells are Plus-specific: one per period the file covers, each at
+ * that period's own reduced percent for this barcode, written into that period's
+ * "Hesaplanan Komisyon (N Gün)" column. A whole-week file therefore writes ONE price but
+ * a commission cell per sub-period; a single window file writes just that period's.
+ *
+ * `plan.periodIndices` indexes the DB periods (`selections`). The write-back column is
+ * matched to the layout by the DB period's `dayCount`, NEVER by position: import's
+ * "present" filter drops period blocks whose date label is blank on the first data row,
+ * so the DB periods can be a SUBSEQUENCE of the raw layout's periods — a positional read
+ * would land the commission in the wrong "Hesaplanan Komisyon (N Gün)" column. A null
+ * dayCount, no matching layout period, or a missing (-1) column skips that cell.
  */
 function buildPlanRows(
   plan: ExportFilePlan,
@@ -133,9 +146,15 @@ function buildPlanRows(
   for (const [barcode, { newPrice, selection }] of plan.rows) {
     const commissionCells: CommissionCell[] = [];
     for (const periodIndex of plan.periodIndices) {
-      const col = layout.periods[periodIndex]?.computedCommissionCol ?? -1;
+      const dbPeriod = selections[periodIndex];
+      if (dbPeriod === undefined) continue;
+      const layoutPeriod =
+        dbPeriod.dayCount === null
+          ? undefined
+          : layout.periods.find((p) => p.dayCount === dbPeriod.dayCount);
+      const col = layoutPeriod?.computedCommissionCol ?? -1;
       if (col < 0) continue;
-      const pct = selections[periodIndex]?.commissionByBarcode.get(barcode);
+      const pct = dbPeriod.commissionByBarcode.get(barcode);
       if (pct === undefined) continue;
       commissionCells.push({ col, pct });
     }
@@ -211,7 +230,7 @@ export async function exportPlusTariff(
       pricesByBarcode.set(item.barcode, price);
       commissionByBarcode.set(item.barcode, item.plusCommissionPct.toString());
     }
-    return { pricesByBarcode, commissionByBarcode };
+    return { dayCount: period.dayCount, pricesByBarcode, commissionByBarcode };
   });
 
   const periodSelections: PeriodSelection[] = tariff.periods.map((period, i) => ({
