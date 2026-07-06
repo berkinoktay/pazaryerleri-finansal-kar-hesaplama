@@ -30,7 +30,7 @@ export function SettingsPageShell({
 }): React.ReactElement {
   return (
     <div className="gap-lg flex flex-col">
-      <PageHeader title={title} intent={intent} actions={actions} />
+      <PageHeader variant="framed" title={title} intent={intent} actions={actions} />
       <div className="gap-lg flex flex-col md:flex-row">
         <SettingsNav />
         <section className="min-w-0 flex-1">
