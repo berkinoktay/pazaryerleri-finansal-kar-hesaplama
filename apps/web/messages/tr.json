@@ -1425,6 +1425,190 @@
       "pending": "Bekliyor"
     }
   },
+  "flashProductsPage": {
+    "search": "Ürün, model veya barkod ara",
+    "actions": {
+      "export": "Dışa aktar"
+    },
+    "exportDialog": {
+      "title": "Flaş ürünleri dışa aktar",
+      "description": "Seçimlerin Excel dosyasına aktarılıp indirilecek.",
+      "fileName": "Flaş ürün dosyası",
+      "productCount": "{count} ürün",
+      "cancel": "Vazgeç",
+      "download": "İndir",
+      "saving": "Seçimler kaydediliyor…",
+      "exporting": "İndiriliyor…"
+    },
+    "templates": {
+      "back": "Listelere dön",
+      "delete": "Listeyi Sil",
+      "deleteTitle": "Listeyi sil",
+      "deleteDescription": "Bu kayıtlı flaş ürün listesi ve içindeki tüm teklif seçimlerin kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "deleteConfirm": "Listeyi sil",
+      "detailIntent": "Her ürün ve tarih için 24 veya 3 saatlik flaş teklifini seç ve o fiyattaki kârını gör.",
+      "notFoundTitle": "Liste bulunamadı",
+      "notFoundDescription": "Bu liste silinmiş veya bu mağazaya ait olmayabilir."
+    },
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "Flaş ürünleri görüntülemek için bağlı bir Trendyol mağazası gerekir.",
+      "cta": "Mağazalara git"
+    },
+    "reason": {
+      "NO_PRODUCT": "Ürün eşleşmedi — bu barkod ürün kataloğunuzda yok.",
+      "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
+      "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik."
+    },
+    "list": {
+      "upload": "Excel Dosyası Yükle",
+      "search": "Liste ara…",
+      "productUnit": "ürün",
+      "offerUnit": "satır",
+      "columns": {
+        "list": "Liste",
+        "products": "Ürün",
+        "offers": "Teklif",
+        "status": "Durum",
+        "exported": "Dışa aktarım"
+      },
+      "summary": {
+        "total": "Toplam liste",
+        "products": "Ürün",
+        "productsContext": "{count} teklif satırı",
+        "selected": "Teklif seçilen",
+        "selectedContext": "satır için teklif seçtin",
+        "exported": "Dışa aktarılan",
+        "exportedValue": "{count} / {total}",
+        "exportedPending": "{count} liste dışa aktarım bekliyor",
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "noSelected": "henüz seçim yok"
+      },
+      "empty": {
+        "title": "Henüz flaş ürün listesi yok",
+        "description": "Trendyol panelinden indirdiğin Flaş Ürünler Excel dosyanı yükleyerek başla; her ürün ve tarih için hangi flaş teklifinin kârlı olduğunu gör.",
+        "cta": "Excel Dosyası Yükle"
+      },
+      "actions": {
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
+      },
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
+      "filterLabel": "Duruma göre filtrele",
+      "bulk": {
+        "selected": "{count} liste seçili",
+        "delete": "Seçilenleri sil",
+        "deleteTitle": "Seçili listeleri sil",
+        "deleteDescription": "{count} liste ve içindeki tüm teklif seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+        "deleteConfirm": "Listeleri sil"
+      },
+      "lastUpdated": "Son güncelleme: {date}",
+      "listStatus": {
+        "all": "Tümü",
+        "exported": "İndirildi",
+        "pending": "Bekliyor"
+      }
+    },
+    "summary": {
+      "total": "Teklif satırı",
+      "totalContext": "bu listede yer alan",
+      "joined": "Teklif seçilen",
+      "joinedValue": "{count}/{total}",
+      "joinedContext": "satır için teklif seçtin",
+      "joinedProfit": "Seçili kâr",
+      "joinedProfitContext": "seçtiğin tekliflerde tahmini toplam",
+      "currentProfit": "Mevcut kâr",
+      "currentProfitHint": "Hiçbir teklif seçmezsen bugünkü tahmini toplam kâr."
+    },
+    "table": {
+      "product": "Ürün Bilgileri",
+      "displayPrice": "Müşterinin gördüğü fiyat",
+      "calculatedProfit": "Hesaplanan kâr",
+      "vsCurrent": "Güncele göre",
+      "bestOffer": "En kârlı",
+      "offerCommission": "komisyon",
+      "offerWindow": "{date} · {start}–{end}",
+      "offerSelected": "Seçildi",
+      "selectOffer": "{slot} teklifini seç",
+      "selectOfferShort": "Bu teklifi seç",
+      "enterCost": "Maliyet girin",
+      "customPrice": "Özel Fiyat",
+      "enterPrice": "Fiyat girin",
+      "customPriceHint": "Bir fiyat girin, komisyonu görün",
+      "customPriceCeilingHint": "Maks. {price} girebilirsin",
+      "selectCustom": "Bu fiyatı seç",
+      "customSelected": "Seçildi"
+    },
+    "slot": {
+      "h24": "24 Saatlik",
+      "h3": "3 Saatlik"
+    },
+    "commissionBands": {
+      "title": "Ürün komisyon teklifleri",
+      "hint": "Komisyon bantlarını göster",
+      "above": "{price} ve üzeri",
+      "range": "{lower}–{upper}",
+      "below": "{price} ve altı"
+    },
+    "breakdown": {
+      "title": "Kâr dökümü",
+      "sale": "Satış",
+      "commission": "Komisyon",
+      "netVat": "Net KDV",
+      "profit": "Kâr",
+      "estimatedProfit": "Tahmini kâr",
+      "margin": "Marj",
+      "notCalculable": "Bu ürün için kâr hesaplanamıyor."
+    },
+    "smartSelect": {
+      "label": "Akıllı Seçim",
+      "selectBest": "Her ürüne en kârlı seçim",
+      "selectProfitable": "Sadece kârlı teklifler",
+      "clear": "Seçimleri temizle",
+      "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
+    },
+    "filters": {
+      "category": "Kategori",
+      "brand": "Marka",
+      "minMargin": "Min. marj %",
+      "profit": "Kârlılık",
+      "profitProfitable": "Kârlı",
+      "profitLoss": "Zararlı",
+      "selection": "Seçim durumu",
+      "selectionSelected": "Teklif seçildi",
+      "selectionUnselected": "Seçilmedi",
+      "groupLabel": "Filtreler"
+    },
+    "status": {
+      "exported": "İndirildi",
+      "pending": "Bekliyor"
+    },
+    "upload": {
+      "title": "Flaş Ürünler Excel'ini yükleyin",
+      "description": "Trendyol panelinden indirdiğiniz Flaş Ürünler dosyasını yükleyin; her ürün ve tarih için hangi flaş teklifinin kârlı olduğunu görün.",
+      "prompt": "Excel dosyasını sürükleyip bırakın",
+      "hint": "XLSX · en fazla 5 MB",
+      "cta": "Dosya seç",
+      "stepsTitle": "Nasıl çalışır?",
+      "step1": "Trendyol panelinden Flaş Ürünler Excel'ini indirin",
+      "step2": "Dosyayı buraya yükleyin",
+      "step3": "Her ürün ve tarih için hangi flaş teklifinin kârlı olduğunu görün",
+      "submit": "Listeyi oluştur",
+      "errors": {
+        "notReadable": "Dosya okunamadı — geçerli bir .xlsx dosyası yükleyin.",
+        "wrongFormat": "Bu bir Trendyol Flaş Ürünler dosyası değil ya da biçimi tanınmadı.",
+        "empty": "Dosyada teklif satırı bulunamadı.",
+        "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      }
+    },
+    "noResults": {
+      "title": "Eşleşen ürün yok",
+      "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."
+    }
+  },
   "featureStatus": {
     "draftLabel": "Taslak",
     "draftHint": "Bu bölümün arka ucu henüz bağlanmadı. Bu işaret yalnızca geliştirme ortamında görünür.",

@@ -99,3 +99,26 @@ export type { AdvantageTariffListItem } from './api/list-advantage-tariffs.api';
 export type AdvantageTariffItemReason = NonNullable<
   components['schemas']['AdvantageTariffItemReason']
 >;
+
+/**
+ * Component-facing Flash Products shapes, re-exported from the api layer so the UI has
+ * one import site. Money is a GROSS decimal STRING and `commissionPct` a PERCENT string,
+ * exactly as the backend serializes — the frontend renders, never computes. Uncalculable
+ * rows carry `null` profit/margin, so every consumer must null-guard. Unlike the
+ * commission/Plus detail there are NO periods; instead each ROW is one product × one date,
+ * carrying up to two dated flash offers (24 Saatlik / 3 Saatlik) whose reduced commission
+ * is AUTO-resolved per row from the store's commission-tariff data.
+ */
+export type {
+  FlashProductDetail,
+  FlashProductDetailItem,
+  FlashOffer,
+  FlashCommissionBand,
+  FlashCommissionSource,
+  FlashOfferType,
+  FlashValidity,
+} from './api/get-flash-product-detail.api';
+export type { FlashProductListItem } from './api/list-flash-products.api';
+
+/** Why a Flash row cannot be costed (mirrors the backend `reason` enum). */
+export type FlashProductItemReason = NonNullable<components['schemas']['FlashItemReason']>;
