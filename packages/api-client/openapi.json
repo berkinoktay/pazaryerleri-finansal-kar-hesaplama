@@ -6006,6 +6006,15 @@
               "$ref": "#/components/schemas/AdvantageTier"
             }
           },
+          "commissionBands": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AdvantageCommissionBand"
+            }
+          },
           "bestTierKey": {
             "$ref": "#/components/schemas/StarTierKey"
           },
@@ -6036,6 +6045,7 @@
           "reason",
           "current",
           "tiers",
+          "commissionBands",
           "bestTierKey",
           "selectedTier",
           "customPrice"
@@ -6123,6 +6133,32 @@
           "netProfit",
           "marginPct"
         ]
+      },
+      "AdvantageCommissionBand": {
+        "type": "object",
+        "properties": {
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upperLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPct": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lowerLimit",
+          "upperLimit",
+          "commissionPct"
+        ],
+        "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı. Kademe sınırları ile karışmasın diye ayrı verilir."
       },
       "ShippingCarrier": {
         "type": "object",

@@ -4,6 +4,8 @@ import { Decimal } from 'decimal.js';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { formatCurrency } from '@pazarsync/utils';
+
 import { MoneyInput } from '@/components/patterns/money-input';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
@@ -12,8 +14,10 @@ import type { EstimateAdvantagePriceResult } from '../api/estimate-advantage-ite
 import { useEstimateAdvantageItemPrice } from '../hooks/use-estimate-advantage-item-price';
 import type { AdvantageTariffRow } from '../lib/adapt-advantage-tariff';
 import type { AdvantageCustomChoice } from '../lib/advantage-bulk-actions';
+import { findBandForPrice, formatBandRange } from '../lib/commission-band-range';
 import { useTariffScope } from '../lib/tariff-scope';
 import { AdvantageTariffBreakdown } from './advantage-tariff-breakdown';
+import { CommissionBandsPopover, useCommissionBandLabels } from './commission-bands-popover';
 import { TariffBestRibbon } from './tariff-best-ribbon';
 import { TariffOptionCard } from './tariff-option-card';
 import { TariffProfitBlock } from './tariff-profit-block';
@@ -151,6 +155,19 @@ export function AdvantageCustomPriceCell({
     lastResult.price === price.toFixed(2);
   const canSelect = hasEstimate;
 
+  // The commission band the estimated price landed in, so the derived line can name the
+  // window ("≈ ₺146,00 ve altı") — distinct from the star-tier threshold. Only when a
+  // ladder exists AND the estimate resolved via a band (a category-rate item has no
+  // ladder to point at). Pure comparison; the profit itself is server-computed.
+  const commissionBands = row.commissionBands;
+  const bandLabels = useCommissionBandLabels();
+  const estimatedBand =
+    hasEstimate && commissionBands !== null && lastResult.commissionSource === 'band'
+      ? findBandForPrice(commissionBands, new Decimal(lastResult.price))
+      : null;
+  const rangeLabel =
+    estimatedBand !== null ? formatBandRange(estimatedBand, formatCurrency, bandLabels) : null;
+
   function handleToggleSelect(): void {
     if (isSelected) {
       onDeselect();
@@ -179,22 +196,36 @@ export function AdvantageCustomPriceCell({
         <span className="text-2xs text-muted-foreground font-medium md:hidden">
           {t('table.customPrice')}
         </span>
-        <MoneyInput
-          value={price}
-          onChange={handleChange}
-          nonNegative
-          aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
-          placeholder={t('table.enterPrice')}
-          className="md:max-w-input-price w-full"
-        />
+        {/* Input + the ⓘ commission-band hint. The hint only appears when the product
+            has a band ladder (a category-rate item has none to show). */}
+        <div className="gap-2xs flex w-full items-center">
+          <MoneyInput
+            value={price}
+            onChange={handleChange}
+            nonNegative
+            aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
+            placeholder={t('table.enterPrice')}
+            className="md:max-w-input-price w-full"
+          />
+          {commissionBands !== null ? (
+            <CommissionBandsPopover bands={commissionBands} labels={bandLabels} />
+          ) : null}
+        </div>
         <span className="text-2xs text-muted-foreground">
           {hasEstimate && lastResult.commissionPct != null ? (
-            <>
-              {t('table.tierCommission')}{' '}
-              <span className="text-foreground font-semibold">
-                {formatPercentDisplay(lastResult.commissionPct)}
-              </span>
-            </>
+            rangeLabel !== null ? (
+              <>
+                ≈ <span className="text-foreground font-semibold">{rangeLabel}</span> ·{' '}
+                {t('table.tierCommission')} {formatPercentDisplay(lastResult.commissionPct)}
+              </>
+            ) : (
+              <>
+                {t('table.tierCommission')}{' '}
+                <span className="text-foreground font-semibold">
+                  {formatPercentDisplay(lastResult.commissionPct)}
+                </span>
+              </>
+            )
           ) : (
             t('table.customPriceHint')
           )}

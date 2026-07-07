@@ -113,6 +113,21 @@ export const AdvantageCurrentScenarioSchema = z
   })
   .openapi('AdvantageCurrentScenario');
 
+export const AdvantageCommissionBandSchema = z
+  .object({
+    /** Lower price bound (GROSS TRY); null on the lowest band (open-ended below). */
+    lowerLimit: z.string().nullable(),
+    /** Upper price bound (GROSS TRY); null on the top band (open-ended above). */
+    upperLimit: z.string().nullable(),
+    /** The band's commission PERCENT (e.g. "13.1000"), at 4-decimal precision. */
+    commissionPct: z.string(),
+  })
+  .openapi('AdvantageCommissionBand', {
+    description:
+      'Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ' +
+      've o pencereye düşen komisyon oranı. Kademe sınırları ile karışmasın diye ayrı verilir.',
+  });
+
 export const AdvantageTariffDetailItemSchema = z
   .object({
     id: z.string().uuid(),
@@ -136,6 +151,13 @@ export const AdvantageTariffDetailItemSchema = z
     /** Profit at the current price + its resolved commission (the baseline). */
     current: AdvantageCurrentScenarioSchema,
     tiers: z.array(AdvantageTierSchema),
+    /**
+     * The product's commission-band ladder (top-down, band1 → band4), resolved from its
+     * commission source. Lets the UI show WHICH commission band a price lands in — the
+     * "Ürün Komisyon Teklifleri" popup equivalent. Null when the source is the category
+     * rate or the barcode has no matching band (there is no ladder to show).
+     */
+    commissionBands: z.array(AdvantageCommissionBandSchema).nullable(),
     /** Key of the most profitable tier, or null if none calculable. */
     bestTierKey: StarTierKeySchema.nullable(),
     /** Seller's chosen tier, or null. */
@@ -312,6 +334,7 @@ export type EstimateAdvantagePriceResult = z.infer<typeof EstimateAdvantagePrice
 export type StarTierKey = z.infer<typeof StarTierKeySchema>;
 export type AdvantageTariffListItem = z.infer<typeof AdvantageTariffListItemSchema>;
 export type AdvantageTier = z.infer<typeof AdvantageTierSchema>;
+export type AdvantageCommissionBand = z.infer<typeof AdvantageCommissionBandSchema>;
 export type AdvantageTariffDetailItem = z.infer<typeof AdvantageTariffDetailItemSchema>;
 export type AdvantageTariffDetail = z.infer<typeof AdvantageTariffDetailSchema>;
 export type AdvantageCommissionSource = z.infer<typeof AdvantageCommissionSourceSchema>;
