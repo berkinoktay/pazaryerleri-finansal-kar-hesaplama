@@ -151,4 +151,15 @@ describe('PATCH .../flash-products/{listId}/selections', () => {
     expect(res.status).toBe(422);
     expect(((await res.json()) as { code: string }).code).toBe('VALIDATION_ERROR');
   });
+
+  it('rejects an offer AND a custom price on the same row (422 INVALID_SELECTION_XOR)', async () => {
+    const s = await seedListWithItems();
+    const res = await patchSelections(s, {
+      selections: [{ itemId: s.item1, offer: 'H24', customPrice: '100.00' }],
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors.some((e) => e.code === 'INVALID_SELECTION_XOR')).toBe(true);
+  });
 });

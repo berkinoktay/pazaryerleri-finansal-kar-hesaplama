@@ -123,7 +123,8 @@ section "Versioning" for details.
   dates, and the same product spans several date rows), `GET /{listId}` (detail with per-scenario
   profit computed on read: the current baseline plus each present offer, `offer24` / `offer3`, with
   its window, `validity`, commission and profit), `PATCH /{listId}/selections` (chosen offer H24/H3
-  XOR custom price), `POST /{listId}/items/{itemId}/estimate` (custom-price what-if `price`, or
+  XOR custom price — the mutual exclusion is now server-enforced, `422` `INVALID_SELECTION_XOR` when
+  both are sent), `POST /{listId}/items/{itemId}/estimate` (custom-price what-if `price`, or
   `scenario: "current"` — `422` codes `PRICE_REQUIRED` / `INVALID_ESTIMATE_MODE` / `INVALID_CUSTOM_PRICE`),
   `POST /{listId}/export` (byte-preserving re-uploadable Trendyol .xlsx — writes each selected row's
   participation label into "Güncellenecek Fiyat": `24 Saat` / `3 Saat` / `Senin Belirlediğin Flaş

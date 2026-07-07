@@ -195,15 +195,24 @@ export const FlashProductDetailSchema = z
 
 // ─── Selections (chosen offer XOR custom price) ─────────────────────────────
 
-export const FlashSelectionSchema = z.object({
-  itemId: z.string().uuid(),
-  /** The chosen flash window, or null to clear / when a custom price is set instead. */
-  offer: FlashOfferTypeSchema.nullable(),
-  customPrice: z
-    .string()
-    .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
-    .nullable(),
-});
+export const FlashSelectionSchema = z
+  .object({
+    itemId: z.string().uuid(),
+    /** The chosen flash window, or null to clear / when a custom price is set instead. */
+    offer: FlashOfferTypeSchema.nullable(),
+    customPrice: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+      .nullable(),
+  })
+  .superRefine((val, ctx) => {
+    // An offer choice and a custom price are mutually exclusive — a row is EITHER a
+    // chosen flash window OR a what-if custom price, never both. Reject the contradiction
+    // instead of silently trusting the client to enforce the XOR.
+    if (val.offer !== null && val.customPrice !== null) {
+      ctx.addIssue({ code: 'custom', message: 'INVALID_SELECTION_XOR', path: ['customPrice'] });
+    }
+  });
 
 export const UpdateFlashSelectionsBodySchema = z
   .object({
