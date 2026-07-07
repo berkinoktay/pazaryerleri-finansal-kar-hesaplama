@@ -6160,6 +6160,497 @@
         ],
         "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı. Kademe sınırları ile karışmasın diye ayrı verilir."
       },
+      "FlashProductListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlashProductListItem"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "FlashProductListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "itemCount": {
+            "type": "integer"
+          },
+          "selectedCount": {
+            "type": "integer"
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "productCount",
+          "itemCount",
+          "selectedCount",
+          "exported",
+          "updatedAt"
+        ]
+      },
+      "ImportFlashProductsResponse": {
+        "type": "object",
+        "properties": {
+          "listId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "itemCount": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "unmatched": {
+            "type": "integer"
+          },
+          "skippedRows": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "listId",
+          "name",
+          "productCount",
+          "itemCount",
+          "matched",
+          "unmatched",
+          "skippedRows"
+        ]
+      },
+      "UpdateFlashSelectionsResponse": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated"
+        ]
+      },
+      "UpdateFlashSelectionsBody": {
+        "type": "object",
+        "properties": {
+          "selections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "itemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "offer": {
+                  "$ref": "#/components/schemas/FlashOfferType"
+                },
+                "customPrice": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^\\d+(\\.\\d{1,2})?$"
+                }
+              },
+              "required": [
+                "itemId",
+                "offer",
+                "customPrice"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 5000
+          }
+        },
+        "required": [
+          "selections"
+        ]
+      },
+      "FlashOfferType": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "H24",
+          "H3",
+          null
+        ],
+        "description": "Seçilen flaş penceresi: H24 = 24 Saatlik, H3 = 3 Saatlik."
+      },
+      "EstimateFlashPriceResult": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price": {
+            "type": "string"
+          },
+          "commissionPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionSource": {
+            "$ref": "#/components/schemas/FlashCommissionSource"
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/FlashItemReason"
+          },
+          "breakdown": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuoteBreakdown"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "itemId",
+          "price",
+          "commissionPct",
+          "commissionSource",
+          "calculable",
+          "reason",
+          "breakdown"
+        ]
+      },
+      "FlashCommissionSource": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "band",
+          "current",
+          null
+        ],
+        "description": "Komisyon nereden geldi: komisyon tarifesi bandı (band) / düz \"Mevcut Komisyon\" oranı (current)."
+      },
+      "FlashItemReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "NO_PRODUCT",
+          "NO_COST",
+          "NO_SHIPPING",
+          null
+        ],
+        "description": "Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok."
+      },
+      "EstimateFlashPriceBody": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$",
+            "description": "Değerlendirilecek satış fiyatı (GROSS, TL).",
+            "example": "199.90"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current"
+            ],
+            "description": "Güncel senaryonun dökümü — item’ın müşteri fiyatı (customerPrice) + güncel komisyonuyla (Mevcut Komisyon) hesaplanır; price verilmez."
+          }
+        }
+      },
+      "FlashProductDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "exported": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlashProductDetailItem"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "exported",
+          "items"
+        ]
+      },
+      "FlashProductDetailItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "modelCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productTitle": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Barkod-eşleşen ürünün birincil görseli; eşleşme yoksa null."
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stock": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "externalId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currentPrice": {
+            "type": "string"
+          },
+          "customerPrice": {
+            "type": "string"
+          },
+          "currentCommissionPct": {
+            "type": "string"
+          },
+          "currentNetProfit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currentMarginPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "calculable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/FlashItemReason"
+          },
+          "hasCommissionTariff": {
+            "type": "boolean"
+          },
+          "commissionSource": {
+            "$ref": "#/components/schemas/FlashCommissionSource"
+          },
+          "commissionBands": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/FlashCommissionBand"
+            }
+          },
+          "offer24": {
+            "$ref": "#/components/schemas/FlashOffer"
+          },
+          "offer3": {
+            "$ref": "#/components/schemas/FlashOffer"
+          },
+          "selectedOffer": {
+            "$ref": "#/components/schemas/FlashOfferType"
+          },
+          "customPrice": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "barcode",
+          "modelCode",
+          "productTitle",
+          "imageUrl",
+          "category",
+          "brand",
+          "stock",
+          "externalId",
+          "currentPrice",
+          "customerPrice",
+          "currentCommissionPct",
+          "currentNetProfit",
+          "currentMarginPct",
+          "calculable",
+          "reason",
+          "hasCommissionTariff",
+          "commissionSource",
+          "commissionBands",
+          "offer24",
+          "offer3",
+          "selectedOffer",
+          "customPrice"
+        ]
+      },
+      "FlashCommissionBand": {
+        "type": "object",
+        "properties": {
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upperLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPct": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lowerLimit",
+          "upperLimit",
+          "commissionPct"
+        ],
+        "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı."
+      },
+      "FlashOffer": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "price": {
+            "type": "string"
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "validity": {
+            "$ref": "#/components/schemas/FlashValidity"
+          },
+          "commissionPct": {
+            "type": "string"
+          },
+          "netProfit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "marginPct": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "price",
+          "startsAt",
+          "endsAt",
+          "validity",
+          "commissionPct",
+          "netProfit",
+          "marginPct"
+        ]
+      },
+      "FlashValidity": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "active",
+          "upcoming",
+          "past",
+          null
+        ],
+        "description": "Flaş penceresinin durumu: aktif / yaklaşan / geçmiş."
+      },
       "ShippingCarrier": {
         "type": "object",
         "properties": {
@@ -16797,6 +17288,822 @@
           },
           "404": {
             "description": "Tariff or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/flash-products": {
+      "get": {
+        "tags": [
+          "FlashProducts"
+        ],
+        "summary": "List saved Flash Products uploads for a store",
+        "description": "Returns one row per saved Flash Products upload for the store, with the aggregates the master list shows: distinct product count, item (offer row) count, how many rows already have a chosen offer or custom price, the exported flag and the last-updated timestamp. Newest first.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved Flash Products uploads for the store",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlashProductListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/flash-products/import": {
+      "post": {
+        "tags": [
+          "FlashProducts"
+        ],
+        "summary": "Import a Trendyol Flash Products Excel",
+        "description": "Uploads Trendyol's Flaş Ürünler .xlsx (multipart `file`). Every column is resolved by header name. A row carries up to two flash offers — a 24-hour window and a 3-hour window, each with its own price and start/end dates — and the same product can appear on several rows (different dates). Each offer row is joined to a ProductVariant by barcode and stored as one item; the reduced commission is READ from the store's Commission Tariff at compute time. Rows with neither offer are skipped. Returns counts: distinct products, items, matched/unmatched products, skipped rows. Rejects a file whose header layout does not match the expected Flash export (422 VALIDATION_ERROR).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Trendyol Flaş Ürünler .xlsx"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "İsteğe bağlı görünen ad; yoksa dosya adı."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Flash product list imported",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportFlashProductsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found or belongs to a different organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File missing, unreadable, or not the expected flash format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/selections": {
+      "patch": {
+        "tags": [
+          "FlashProducts"
+        ],
+        "summary": "Save flash offer choice + custom prices for list items",
+        "description": "Persists the seller's chosen flash offer (H24 / H3, or null to clear) and optional custom price per item, in a single bulk update. An offer and a custom price are mutually exclusive (the client enforces the XOR). Items not belonging to this list/store are ignored. Selection happens client-side over the backend-computed margins; this only records the result. Returns how many items were updated.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFlashSelectionsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Selections saved",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateFlashSelectionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid selection payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}/items/{itemId}/estimate": {
+      "post": {
+        "tags": [
+          "FlashProducts"
+        ],
+        "summary": "Estimate the profit breakdown for a Flash Products item",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE flash item, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at an offer price equals that offer’s profit in the detail response. Two modes: pass `price` to derive the reduced commission from the band that price lands in (of the item's primary window), else the flat rate (the custom-price what-if); or pass `scenario: \"current\"` (no price) to price the item’s own customer price at its current commission - the breakdown then matches the detail row’s current baseline exactly. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "itemId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateFlashPriceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profit breakdown at the requested price",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateFlashPriceResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item, list or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the custom-price mode (PRICE_REQUIRED), or a price sent with scenario:\"current\" (INVALID_ESTIMATE_MODE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/flash-products/{listId}": {
+      "get": {
+        "tags": [
+          "FlashProducts"
+        ],
+        "summary": "Get a saved Flash Products list with computed per-scenario profit",
+        "description": "Returns the full Flash Products list: per offer row, the current price scenario and each present flash offer (24 Saatlik / 3 Saatlik) with net profit and sale margin COMPUTED on read by the profit engine. Each offer's reduced commission is READ from the store's Commission Tariff (the offer's window resolves into a commission band) or falls back to the flat \"Mevcut Komisyon\" rate. Profit is never stored, so it always reflects the current cost / fee data. When a row cannot be costed (no catalog match, no cost profile, no shipping) calculable is false, reason explains why and every scenario profit is null. Money fields are GROSS decimal strings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The list with computed per-scenario profit",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlashProductDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "FlashProducts"
+        ],
+        "summary": "Delete a saved Flash Products list",
+        "description": "Hard-deletes the list and (via cascade) its offer rows. A list id from another store returns 404, indistinguishable from a missing one.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "List deleted"
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
             "content": {
               "application/json": {
                 "schema": {

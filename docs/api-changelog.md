@@ -116,6 +116,23 @@ section "Versioning" for details.
   commission tariffs are now multi-period" note under Changed for the current `periods[]` / bucketed
   export contract. NOTE: the export's exact opt-in cell format is pending vendor verification.
 
+- **Flash Products API** (`/v1/organizations/{orgId}/stores/{storeId}/flash-products`) — Fourth
+  campaign vertical, for Trendyol's "Flaş Ürünler" (Teklif Ürünleri) Excel. Routes: `GET` (list, with
+  distinct-product / item / selected counts), `POST /import` (multipart .xlsx → 201 with counts — a
+  row carries up to two flash OFFERS, a 24-hour and a 3-hour window each with its own price + window
+  dates, and the same product spans several date rows), `GET /{listId}` (detail with per-scenario
+  profit computed on read: the current baseline plus each present offer, `offer24` / `offer3`, with
+  its window, `validity`, commission and profit), `PATCH /{listId}/selections` (chosen offer H24/H3
+  XOR custom price), `POST /{listId}/items/{itemId}/estimate` (custom-price what-if `price`, or
+  `scenario: "current"` — `422` codes `PRICE_REQUIRED` / `INVALID_ESTIMATE_MODE` / `INVALID_CUSTOM_PRICE`),
+  `DELETE /{listId}`. Store-scoped + RLS; profit never stored. The vertical's novelty: an offer has
+  NO commission in the Excel — the reduced rate is resolved AUTOMATICALLY (no upload-time picker,
+  unlike Advantage) from the store's Commission Tariff by the offer window's START (covering week →
+  covering sub-period → barcode band), falling back to the flat "Mevcut Komisyon" rate with NO
+  category fallback. Each detail item exposes `commissionSource` (`band` / `current`) and, on a band,
+  `commissionBands` (the ladder for the ⓘ popover). NOTE: the export (byte-preserving re-uploadable
+  .xlsx) and the exact J/M participation labels are pending a follow-up + vendor verification.
+
 ### Removed
 
 - **`returnScenarioNetProfit` (order list + `ProfitBreakdown`) and `returnScenarioMarginPct`
