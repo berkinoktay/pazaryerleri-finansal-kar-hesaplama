@@ -151,7 +151,7 @@ const SKELETON_LABEL_WIDTHS = ['w-16', 'w-24', 'w-20', 'w-28', 'w-20', 'w-16', '
 function SkeletonRow({ labelWidth }: { labelWidth: string }): React.ReactElement {
   // h-5 matches the loaded text-sm row's line box, so nothing shifts on load.
   return (
-    <div className="flex h-5 items-center justify-between gap-4">
+    <div className="gap-sm flex h-5 items-center justify-between">
       <Skeleton className={cn('h-4', labelWidth)} />
       <Skeleton className="h-4 w-16" />
     </div>
@@ -184,7 +184,7 @@ function BreakdownRow({
   muted?: boolean;
 }): React.ReactElement {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="gap-sm flex items-center justify-between">
       <dt className={cn(muted && 'text-muted-foreground', emphasis && 'font-semibold')}>{label}</dt>
       <dd className={cn('tabular-nums', emphasis && 'font-semibold')}>{children}</dd>
     </div>
