@@ -5836,11 +5836,15 @@
             "pattern": "^\\d+(\\.\\d{1,2})?$",
             "description": "Değerlendirilecek satış fiyatı (GROSS, TL).",
             "example": "250.00"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "current"
+            ],
+            "description": "Güncel senaryonun dökümü — item’ın müşteri fiyatı (customerPrice) + güncel komisyonuyla (banda düşen ya da kategori oranı) hesaplanır; price verilmez."
           }
-        },
-        "required": [
-          "price"
-        ]
+        }
       },
       "AdvantageTariffDetail": {
         "type": "object",
@@ -6002,6 +6006,15 @@
               "$ref": "#/components/schemas/AdvantageTier"
             }
           },
+          "commissionBands": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AdvantageCommissionBand"
+            }
+          },
           "bestTierKey": {
             "$ref": "#/components/schemas/StarTierKey"
           },
@@ -6032,6 +6045,7 @@
           "reason",
           "current",
           "tiers",
+          "commissionBands",
           "bestTierKey",
           "selectedTier",
           "customPrice"
@@ -6119,6 +6133,32 @@
           "netProfit",
           "marginPct"
         ]
+      },
+      "AdvantageCommissionBand": {
+        "type": "object",
+        "properties": {
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upperLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPct": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lowerLimit",
+          "upperLimit",
+          "commissionPct"
+        ],
+        "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı. Kademe sınırları ile karışmasın diye ayrı verilir."
       },
       "ShippingCarrier": {
         "type": "object",
@@ -16406,8 +16446,8 @@
         "tags": [
           "AdvantageTariffs"
         ],
-        "summary": "Estimate the profit breakdown for an Advantage tariff item at a given price",
-        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Advantage tariff item at the requested price, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a tier's target price equals that tier's profit in the detail response. The reduced commission is resolved from the price band the requested price lands in. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
+        "summary": "Estimate the profit breakdown for an Advantage tariff item",
+        "description": "Computes the full profit breakdown (income + every expense line: commission, shipping, PSF, stoppage, VAT) for ONE Advantage tariff item, reusing the same profit engine and resolvers (cost, shipping, fee definitions) the detail view uses - so an estimate at a tier target price equals that tier's profit in the detail response. Two modes: pass `price` to derive the reduced commission from the band that price lands in, else the category rate (the custom-price what-if); or pass `scenario: \"current\"` (no price) to price the item’s own customer price at its current commission - the breakdown then matches the detail row’s `current` exactly. Read-only (POST only because it carries a body); no state changes. When the item is unmatched or uncostable, calculable is false, reason explains why and breakdown is null. Money fields are GROSS decimal strings.",
         "security": [
           {
             "bearerAuth": []
@@ -16529,7 +16569,7 @@
             }
           },
           "422": {
-            "description": "Invalid price payload",
+            "description": "Invalid payload — malformed price (INVALID_CUSTOM_PRICE), a missing price in the custom-price mode (PRICE_REQUIRED), or a price sent with scenario:\"current\" (INVALID_ESTIMATE_MODE)",
             "content": {
               "application/json": {
                 "schema": {

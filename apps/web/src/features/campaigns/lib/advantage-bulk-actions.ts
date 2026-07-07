@@ -1,27 +1,31 @@
 import { Decimal } from 'decimal.js';
 
-import type { AdvantageTariffDetailItem, AdvantageTier, StarTierKey } from '../types';
+import type {
+  AdvantageBand,
+  AdvantageTariffRow,
+  NonNullStarTierKey,
+} from './adapt-advantage-tariff';
+import { resolveBestChoice } from './best-choice';
 
-/** One of the three concrete star tiers (never null) — an actual seller choice. */
-export type NonNullStarTierKey = NonNullable<StarTierKey>;
+export type { NonNullStarTierKey };
 
 /**
- * Per-item tier choice map: `rowId → 'tier1' | 'tier2' | 'tier3'`. Absent = the
- * product has no tier chosen (None). Unlike the Plus model (a single boolean per row)
- * an Advantage product picks ONE of four states — None / Avantaj / Çok Avantaj /
- * Süper Avantaj.
+ * Per-item tier choice map: `rowId → 'tier1' | 'tier2' | 'tier3'` (or null when cleared).
+ * Unlike the Plus model (a single `'plus'`) an Advantage product picks ONE of four states
+ * — None / Avantaj / Çok Avantaj / Süper Avantaj. A single-valued sibling of the Plus
+ * `PlusSelectionMap` so the shared cells read a row's choice the same way.
  *
  * This pairs with {@link AdvantageCustomPriceMap}: the two maps are MUTUALLY EXCLUSIVE
- * per row — a row is either tier-joined (`tiers[id] != null`), custom-joined
+ * per row — a row is either tier-joined (`selection[id] != null`), custom-joined
  * (`customPrices[id] != null`), or not joined. Setting one clears the other.
  */
-export type AdvantageTierMap = Record<string, NonNullStarTierKey>;
+export type AdvantageSelectionMap = Record<string, NonNullStarTierKey | null>;
 
 /**
  * A committed custom Advantage price for one product: the seller typed a price and
- * confirmed it with "Bu fiyatı seç". The estimated profit/margin are captured at
- * confirm time so the header summary can total the joined products without
- * re-estimating. `price` is a GROSS decimal string.
+ * confirmed it with "Bu fiyatı seç". The estimated profit/margin are captured at confirm
+ * time so the header summary can total the joined products without re-estimating. `price`
+ * is a GROSS decimal string.
  */
 export interface AdvantageCustomChoice {
   price: string;
@@ -34,54 +38,80 @@ export type AdvantageCustomPriceMap = Record<string, AdvantageCustomChoice | nul
 
 /** The full per-row selection state: tier opt-ins + custom-price opt-ins. */
 export interface AdvantageSelectionState {
-  tiers: AdvantageTierMap;
+  selection: AdvantageSelectionMap;
   customPrices: AdvantageCustomPriceMap;
 }
 
 /**
- * Whether the seller has joined this row — via a star tier OR a custom price. The
- * single "is joined" predicate for export, summary, and filtering.
+ * Whether the seller has joined this row — via a star tier OR a custom price. The single
+ * "is joined" predicate for export, summary, and filtering.
  */
 export function isJoinedRow(
-  tiers: AdvantageTierMap,
+  selection: AdvantageSelectionMap,
   customPrices: AdvantageCustomPriceMap,
   itemId: string,
 ): boolean {
-  return tiers[itemId] != null || customPrices[itemId] != null;
+  return selection[itemId] != null || customPrices[itemId] != null;
 }
 
-/** The tier object for a given key on a row, or undefined when that tier is absent. */
-export function tierForKey(
-  row: AdvantageTariffDetailItem,
+/** The band (tier) object for a given key on a row, or undefined when that tier is absent. */
+export function bandForKey(
+  row: AdvantageTariffRow,
   key: NonNullStarTierKey,
-): AdvantageTier | undefined {
-  return row.tiers.find((tier) => tier.key === key);
+): AdvantageBand | undefined {
+  return row.bands.find((band) => band.key === key);
 }
 
-/** The row's most-profitable tier object (per the backend `bestTierKey`), or undefined. */
-export function bestTier(row: AdvantageTariffDetailItem): AdvantageTier | undefined {
-  if (row.bestTierKey == null) return undefined;
-  return tierForKey(row, row.bestTierKey);
-}
-
-/** A scenario's net profit as a Decimal, or null when the row/tier is not calculable. */
-function netProfitOrNull(netProfit: string | null): Decimal | null {
-  return netProfit !== null ? new Decimal(netProfit) : null;
+/** A band's net profit as a Decimal, or null when the row/tier is not calculable. */
+function bandProfit(band: AdvantageBand): Decimal | null {
+  return band.netProfit !== null ? new Decimal(band.netProfit) : null;
 }
 
 /**
- * Whether the row's best tier nets MORE profit than doing nothing (the current price).
- * Display math over two ALREADY-backend-computed profits (like {@link ProfitDelta} and
- * the header summary) — it never computes profit/commission/VAT, so the
- * no-frontend-financial-calculation rule holds. Un-calculable rows are not "better".
+ * The most-profitable tier (band) of a row together with the winning profit, comparing
+ * pre-computed `netProfit`. Bands with null profit (not calculable) never win; `band` is
+ * undefined (and `profit` null) when no tier is calculable. Returning both lets a caller
+ * that needs the winner's profit avoid re-deriving it with a second {@link bandProfit}
+ * allocation. Display ordering over already-backend-computed figures — no money math.
  */
-export function bestTierIsBetter(row: AdvantageTariffDetailItem): boolean {
-  const best = bestTier(row);
-  if (best === undefined) return false;
-  const tierProfit = netProfitOrNull(best.netProfit);
-  const currentProfit = netProfitOrNull(row.current.netProfit);
-  if (tierProfit === null || currentProfit === null) return false;
-  return tierProfit.greaterThan(currentProfit);
+function bestBandWithProfit(row: AdvantageTariffRow): {
+  band: AdvantageBand | undefined;
+  profit: Decimal | null;
+} {
+  let band: AdvantageBand | undefined;
+  let profit: Decimal | null = null;
+  for (const candidate of row.bands) {
+    const candidateProfit = bandProfit(candidate);
+    if (candidateProfit === null) continue;
+    if (profit === null || candidateProfit.greaterThan(profit)) {
+      band = candidate;
+      profit = candidateProfit;
+    }
+  }
+  return { band, profit };
+}
+
+/**
+ * The most-profitable tier (band) of a row, comparing pre-computed `netProfit`. Bands
+ * with null profit (not calculable) never win; undefined when no tier is calculable.
+ * Display ordering over already-backend-computed figures — no money math.
+ */
+export function bestBand(row: AdvantageTariffRow): AdvantageBand | undefined {
+  return bestBandWithProfit(row).band;
+}
+
+/**
+ * The tier key that wins the row's holistic "En kârlı" race ({@link resolveBestChoice}),
+ * or null when the current price / a custom price / nothing profitable wins instead. The
+ * committed custom price competes so a manually-set price is not overwritten. Purely a
+ * strict ordering of already-computed figures — no money math.
+ */
+function winningTierKey(
+  row: AdvantageTariffRow,
+  committedCustomNetProfit: string | null,
+): NonNullStarTierKey | null {
+  const best = resolveBestChoice(row, committedCustomNetProfit);
+  return row.bands.find((band) => band.key === best)?.key ?? null;
 }
 
 /** Best-tier profit filter (based on the best tier's net-profit sign). */
@@ -91,10 +121,10 @@ export type AdvantageProfitFilter = 'all' | 'profitable' | 'loss';
 export type AdvantageSelectionFilter = 'all' | 'selected' | 'unselected';
 
 /**
- * The detail screen's five client-side filter dimensions. Structurally identical to
- * the commission `TariffFilterState`, so the shared advanced-filter chip adapters in
+ * The detail screen's five client-side filter dimensions. Structurally identical to the
+ * commission `TariffFilterState`, so the shared advanced-filter chip adapters in
  * `tariff-filter-fields.ts` map to/from it — only the profit/margin SEMANTICS differ
- * (they read the BEST tier's scenario, not a single offer).
+ * (they read the BEST tier's scenario).
  */
 export interface AdvantageTariffFilterState {
   query: string;
@@ -107,66 +137,83 @@ export interface AdvantageTariffFilterState {
 }
 
 /**
- * Choose the most-profitable tier for every listed calculable row (uncalculable rows
- * cannot be chosen). Choosing a tier clears any per-row custom price, keeping the two
- * maps mutually exclusive.
+ * Apply each row's most profitable option ("Her ürüne en kârlı kademe") — the holistic
+ * {@link resolveBestChoice} winner: a star tier when one wins, no selection when keeping
+ * the current price (or nothing profitable) wins, and the committed CUSTOM price is
+ * preserved when it is the winner. Uncalculable rows are left untouched. Choosing/clearing
+ * a tier always drops the row's custom price, keeping the two maps mutually exclusive.
  */
 export function selectBestForAll(
-  rows: readonly AdvantageTariffDetailItem[],
+  rows: readonly AdvantageTariffRow[],
   state: AdvantageSelectionState,
 ): AdvantageSelectionState {
-  const tiers = { ...state.tiers };
+  const selection = { ...state.selection };
   const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    if (row.calculable && row.bestTierKey != null) {
-      tiers[row.id] = row.bestTierKey;
+    if (!row.calculable) continue;
+    const committedCustom = customPrices[row.id]?.netProfit ?? null;
+    const best = resolveBestChoice(row, committedCustom);
+    const winningBand = row.bands.find((band) => band.key === best);
+    if (winningBand !== undefined) {
+      // A tier wins → select it, clear any custom price.
+      selection[row.id] = winningBand.key;
+      customPrices[row.id] = null;
+    } else if (best === 'custom') {
+      // The committed custom price wins → keep it, clear the tier selection.
+      selection[row.id] = null;
+    } else {
+      // Current wins, or nothing is profitable → no selection at all.
+      selection[row.id] = null;
       customPrices[row.id] = null;
     }
   }
-  return { tiers, customPrices };
+  return { selection, customPrices };
 }
 
 /**
- * Choose the best tier only for rows where it nets MORE than the current price
- * (`bestTierIsBetter`). The useful default: dropping to an advantage tier is not always
- * a win, so this selects only the products that genuinely improve. Custom-priced rows
- * it touches switch to the best tier; rows it does not touch keep their choice.
+ * Choose the best tier only for rows where a star tier actually wins the holistic race
+ * ("Sadece kârlı kademeler") — dropping to an advantage tier is not always a win, so this
+ * selects only the products that genuinely improve on the current price. Rows where the
+ * current or a custom price wins are left untouched (their existing choice is preserved).
  */
 export function selectProfitable(
-  rows: readonly AdvantageTariffDetailItem[],
+  rows: readonly AdvantageTariffRow[],
   state: AdvantageSelectionState,
 ): AdvantageSelectionState {
-  const tiers = { ...state.tiers };
+  const selection = { ...state.selection };
   const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    if (row.calculable && row.bestTierKey != null && bestTierIsBetter(row)) {
-      tiers[row.id] = row.bestTierKey;
+    if (!row.calculable) continue;
+    const committedCustom = customPrices[row.id]?.netProfit ?? null;
+    const key = winningTierKey(row, committedCustom);
+    if (key !== null) {
+      selection[row.id] = key;
       customPrices[row.id] = null;
     }
   }
-  return { tiers, customPrices };
+  return { selection, customPrices };
 }
 
 /** Clear the listed rows' selection entirely (both tier and custom). */
 export function clearSelections(
-  rows: readonly AdvantageTariffDetailItem[],
+  rows: readonly AdvantageTariffRow[],
   state: AdvantageSelectionState,
 ): AdvantageSelectionState {
-  const tiers = { ...state.tiers };
+  const selection = { ...state.selection };
   const customPrices = { ...state.customPrices };
   for (const row of rows) {
-    delete tiers[row.id];
+    selection[row.id] = null;
     customPrices[row.id] = null;
   }
-  return { tiers, customPrices };
+  return { selection, customPrices };
 }
 
 export function filterAdvantageRows(
-  rows: readonly AdvantageTariffDetailItem[],
-  tiers: AdvantageTierMap,
+  rows: readonly AdvantageTariffRow[],
+  selection: AdvantageSelectionMap,
   customPrices: AdvantageCustomPriceMap,
   filters: AdvantageTariffFilterState,
-): AdvantageTariffDetailItem[] {
+): AdvantageTariffRow[] {
   const query = filters.query.trim().toLocaleLowerCase('tr');
   return rows.filter((row) => {
     if (
@@ -180,23 +227,27 @@ export function filterAdvantageRows(
     if (filters.category !== null && row.category !== filters.category) return false;
     if (filters.brand !== null && row.brand !== filters.brand) return false;
 
-    const best = bestTier(row);
-    const bestMargin = best?.marginPct ?? null;
-    const bestProfit = netProfitOrNull(best?.netProfit ?? null);
-    if (
-      filters.minMarginPct !== null &&
-      (bestMargin === null || Number(bestMargin) < filters.minMarginPct)
-    ) {
-      return false;
-    }
-    if (filters.profit === 'profitable' && !(bestProfit !== null && bestProfit.greaterThan(0))) {
-      return false;
-    }
-    if (filters.profit === 'loss' && (bestProfit === null || bestProfit.greaterThan(0))) {
-      return false;
+    // The best tier (and its profit Decimal) is only resolved when a margin or profit
+    // filter is actually engaged — both derive from the SAME winning band, computed in a
+    // single pass so the winner's profit is never re-allocated.
+    if (filters.minMarginPct !== null || filters.profit !== 'all') {
+      const { band: best, profit } = bestBandWithProfit(row);
+      const bestMargin = best?.marginPct ?? null;
+      if (
+        filters.minMarginPct !== null &&
+        (bestMargin === null || Number(bestMargin) < filters.minMarginPct)
+      ) {
+        return false;
+      }
+      if (filters.profit === 'profitable' && !(profit !== null && profit.greaterThan(0))) {
+        return false;
+      }
+      if (filters.profit === 'loss' && (profit === null || profit.greaterThan(0))) {
+        return false;
+      }
     }
 
-    const joined = isJoinedRow(tiers, customPrices, row.id);
+    const joined = isJoinedRow(selection, customPrices, row.id);
     if (filters.selection === 'selected' && !joined) return false;
     if (filters.selection === 'unselected' && joined) return false;
 

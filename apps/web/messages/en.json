@@ -1205,10 +1205,17 @@
     "search": "Search product, model or barcode",
     "actions": {
       "upload": "Upload Excel",
-      "saveExport": "Save & Download"
+      "export": "Export"
     },
-    "actionBar": {
-      "joined": "{count} products have a chosen tier"
+    "exportDialog": {
+      "title": "Export advantage labels",
+      "description": "Your selections will be applied to the Excel file and downloaded.",
+      "fileName": "Advantage label file",
+      "productCount": "{count} products",
+      "cancel": "Cancel",
+      "download": "Download",
+      "saving": "Saving selections…",
+      "exporting": "Downloading…"
     },
     "templates": {
       "back": "Back to tariffs",
@@ -1293,7 +1300,6 @@
     },
     "table": {
       "product": "Product Info",
-      "current": "Current price",
       "displayPrice": "Price the customer sees",
       "calculatedProfit": "Calculated profit",
       "vsCurrent": "vs current",
@@ -1302,11 +1308,19 @@
       "tierQualifier": "and below",
       "tierSelected": "Selected",
       "selectTier": "Select this tier",
+      "enterCost": "Enter cost",
       "customPrice": "Custom Price",
       "enterPrice": "Enter price",
+      "customPriceHint": "Enter a price to see the commission",
       "selectCustom": "Select this price",
-      "customSelected": "Selected",
-      "customCommissionApplies": "Your price is calculated at the commission of the band it falls into."
+      "customSelected": "Selected"
+    },
+    "commissionBands": {
+      "title": "Product commission offers",
+      "hint": "Show commission bands",
+      "above": "{price} and above",
+      "range": "{lower}–{upper}",
+      "below": "{price} and below"
     },
     "tier": {
       "tier1": "Advantage",
@@ -1389,7 +1403,7 @@
     },
     "smartSelect": {
       "label": "Smart Select",
-      "selectBest": "Best tier for each product",
+      "selectBest": "Best choice for every product",
       "selectProfitable": "Only profitable tiers",
       "clear": "Clear selections",
       "scopeHint": "If a filter is applied, only visible products are affected."

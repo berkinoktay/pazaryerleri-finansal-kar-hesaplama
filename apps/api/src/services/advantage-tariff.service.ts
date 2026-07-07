@@ -40,6 +40,7 @@ import {
 import { parseStarTiers } from './advantage-tariff.types';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import type {
+  AdvantageCommissionBand,
   AdvantageCommissionSource,
   AdvantageTariffDetail,
   AdvantageTariffDetailItem,
@@ -167,7 +168,7 @@ export async function listAdvantageTariffs(
         name: true,
         exportedAt: true,
         updatedAt: true,
-        items: { select: { selectedTier: true } },
+        items: { select: { selectedTier: true, customPrice: true } },
       },
     });
   } catch (err) {
@@ -177,7 +178,11 @@ export async function listAdvantageTariffs(
   return tariffs.map((tariff): AdvantageTariffListItem => {
     let selectedCount = 0;
     for (const item of tariff.items) {
-      if (item.selectedTier !== null) selectedCount += 1;
+      // A row counts as selected when it has a tier OR a custom price. A confirmed
+      // custom price is persisted with selected_tier = NULL (custom_price only), so
+      // keying on selectedTier alone undercounts custom-only rows — the same root
+      // cause as the export skip (resolveAdvantageExportPrice).
+      if (item.selectedTier !== null || item.customPrice !== null) selectedCount += 1;
     }
     return {
       id: tariff.id,
@@ -337,6 +342,19 @@ export async function getAdvantageTariffDetail(
     const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
     if (item.hasCommissionTariff && bands === null) hasUnmatchedCommissionProducts = true;
 
+    // The commission-band ladder surfaced to the UI (the "which band does this price
+    // land in?" popup). Reuses the bands ALREADY read for the compute above — no extra
+    // query. Serialized like the tier commission: money at 2 decimals, percent at 4.
+    // Null when there is no ladder (category source, or an unmatched barcode).
+    const commissionBands: AdvantageCommissionBand[] | null =
+      bands === null
+        ? null
+        : bands.map((band) => ({
+            lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
+            upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
+            commissionPct: new Decimal(band.commissionPct).toFixed(4),
+          }));
+
     const categoryRate =
       variant && variant.product.categoryId !== null
         ? (categoryRateByKey.get(
@@ -379,6 +397,7 @@ export async function getAdvantageTariffDetail(
       reason: computed.reason,
       current: computed.current,
       tiers: [...computed.tiers],
+      commissionBands,
       bestTierKey: computed.bestTierKey,
       selectedTier: toTierKey(item.selectedTier),
       customPrice: item.customPrice !== null ? item.customPrice.toFixed(2) : null,

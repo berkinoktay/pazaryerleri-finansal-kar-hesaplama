@@ -111,6 +111,45 @@ describe('advantage-tariff export', () => {
     expect(listed?.exportedAt).not.toBeNull();
   });
 
+  it('writes a CUSTOM-ONLY price (no tier chosen) into the exported file', async () => {
+    const ctx = await setupStore();
+    const tariffId = await importFixture(ctx);
+
+    // A confirmed custom price is persisted with selected_tier = NULL (custom_price
+    // only) — the exact state "Kaydet ve indir" produces for a custom-priced row.
+    // Before the fix the export gated on selectedTier !== null and skipped this row,
+    // so the price never reached the "YENİ TSF" cell (the reported bug).
+    const item = await prisma.advantageTariffItem.findFirst({
+      where: { storeId: ctx.storeId, tariffId },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(item).not.toBeNull();
+    const CUSTOM_ONLY_PRICE = '139.00';
+    await prisma.advantageTariffItem.update({
+      where: { id: item?.id },
+      data: { selectedTier: null, customPrice: CUSTOM_ONLY_PRICE },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/advantage-tariffs/${tariffId}/export`,
+      { method: 'POST', headers: { Authorization: bearer(ctx.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+
+    const out = Buffer.from(await res.arrayBuffer());
+    const grid = await readWorkbookGrid(out, { sheetName: SHEET_NAME });
+    const layout = resolveAdvantageTariffLayout(grid[0] ?? []);
+    expect(layout).not.toBeNull();
+    const dataRow = grid.slice(1).find((r) => cellText(r, layout?.barcode ?? -1) === item?.barcode);
+    expect(dataRow).toBeDefined();
+    // The custom price landed in the "YENİ TSF (FİYAT GÜNCELLE)" cell for the row.
+    expect(Number(cellText(dataRow ?? [], layout?.newTsf ?? -1))).toBe(Number(CUSTOM_ONLY_PRICE));
+
+    // And the tariff is marked exported (a custom-only selection is a real selection).
+    const listed = await prisma.advantageTariff.findUnique({ where: { id: tariffId } });
+    expect(listed?.exportedAt).not.toBeNull();
+  });
+
   it('marks exported:true in the list after an export', async () => {
     const ctx = await setupStore();
     const tariffId = await importFixture(ctx);

@@ -4,54 +4,92 @@ import { Decimal } from 'decimal.js';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
+import { formatCurrency } from '@pazarsync/utils';
+
 import { MoneyInput } from '@/components/patterns/money-input';
-import { ProfitBadge } from '@/components/patterns/profit-badge';
+import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
-import { cn } from '@/lib/utils';
 
 import type { EstimateAdvantagePriceResult } from '../api/estimate-advantage-item-price.api';
 import { useEstimateAdvantageItemPrice } from '../hooks/use-estimate-advantage-item-price';
+import type { AdvantageTariffRow } from '../lib/adapt-advantage-tariff';
 import type { AdvantageCustomChoice } from '../lib/advantage-bulk-actions';
+import { findBandForPrice, formatBandRange } from '../lib/commission-band-range';
 import { useTariffScope } from '../lib/tariff-scope';
-import type { AdvantageTariffDetailItem } from '../types';
 import { AdvantageTariffBreakdown } from './advantage-tariff-breakdown';
-import { ProfitDelta } from './profit-delta';
-import { TariffSelectControl } from './tariff-select-control';
+import { CommissionBandsPopover, useCommissionBandLabels } from './commission-bands-popover';
+import { TariffBestRibbon } from './tariff-best-ribbon';
+import { TariffOptionCard } from './tariff-option-card';
+import { TariffProfitBlock } from './tariff-profit-block';
+import { TariffSelectFoot } from './tariff-select-foot';
 
 const DEBOUNCE_MS = 400;
 
 export interface AdvantageCustomPriceCellProps {
-  row: AdvantageTariffDetailItem;
+  row: AdvantageTariffRow;
   /** Whether THIS row's custom price is the seller's active selection. */
   isSelected: boolean;
   /** Commit the typed custom price as the selection (carrying its estimated profit). */
   onSelect: (choice: AdvantageCustomChoice) => void;
   /** Un-commit the custom price for this row. */
   onDeselect: () => void;
-  /** Center the content (desktop table column) vs left-align (mobile card, default). */
-  centered?: boolean;
+  /**
+   * The custom price currently held in the edit buffer for this row (a decimal string),
+   * if any. Seeds the input over the persisted `row.customPrice`; null → fall back to the
+   * server value.
+   */
+  committedPrice?: string | null;
+  /** Whether the typed custom price is the row's most profitable option (an "En kârlı" ribbon). */
+  isBest?: boolean;
+  /**
+   * Reports the estimated profit CURRENTLY SHOWN in this card back to the parent — the
+   * debounced what-if `netProfit` when it returns, or `null` when the input is cleared. The
+   * row's "En kârlı" marker races this LIVE (uncommitted) figure so the badge moves the
+   * instant the estimate lands. It feeds ONLY the badge race — export/summary key off the
+   * committed `customPrices`. The callback carries the `rowId` so the parent's ONE stable
+   * handler can be passed DIRECTLY (no per-row inline arrow).
+   */
+  onEstimate?: (rowId: string, netProfit: string | null) => void;
+  /**
+   * Reads this row's surviving DRAFT price from the parent's ref-based store, so a price
+   * typed but NOT committed comes back after the cell unmounts (pagination / filter
+   * switch). `undefined` = no draft (seed from committed / server price), `null` = the
+   * seller deliberately cleared it (start EMPTY), a string = the draft price.
+   */
+  getDraft?: (rowId: string) => string | null | undefined;
+  /**
+   * Persists this row's draft price into the parent's ref store on every keystroke so it
+   * survives an unmount. A cleared input reports `null`; a typed value its decimal string.
+   */
+  onDraftChange?: (rowId: string, price: string | null) => void;
 }
 
 /**
- * Custom Advantage-price "what-if" AND a selectable choice. The seller types any price;
- * a debounced backend estimate returns the real profit at whichever commission band the
- * price lands in (shown via the shared {@link ProfitBadge}). When they are sure, an
- * EXPLICIT "Bu fiyatı seç" control commits that price as the row's selection — the
- * export then writes the custom amount instead of a tier's target price.
+ * Custom Advantage-price "what-if" AND a selectable choice — the fourth card beside the
+ * current baseline and the star tiers, wearing the same {@link TariffOptionCard} shell +
+ * {@link TariffProfitBlock} so the row reads as one uniform set: the INPUT stands in for a
+ * tier's static target price, then the derived commission, the calculated profit + "vs
+ * current" delta, and a {@link TariffSelectFoot}.
  *
- * Click-conflict resolution (three separate, non-overlapping targets): the INPUT only
- * types, the badge opens the breakdown, and the SELECT control commits. There is no
- * stretched-overlay here (unlike a tier cell) precisely because the input would fight
- * it. Editing a committed price un-commits it, so the selected amount is always the last
- * value the seller confirmed with "Seç". No client-side math — the engine computes the
- * authoritative value (feedback_no_frontend_financial_calculation).
+ * Unlike the click-the-card tiers, the foot here is a REAL button (the `onToggle` form)
+ * rather than a card overlay — the overlay would fight the input. Three separate,
+ * non-overlapping targets keep it unambiguous: the input types, the badge opens the
+ * breakdown, the foot commits. The debounced backend estimate returns the real profit at
+ * whichever commission band the price lands in; editing a committed price un-commits it.
+ * No client-side money math — the engine computes the authoritative value
+ * (feedback_no_frontend_financial_calculation). Advantage has no ceiling, so the input
+ * carries no `max`.
  */
 export function AdvantageCustomPriceCell({
   row,
   isSelected,
   onSelect,
   onDeselect,
-  centered = false,
+  committedPrice = null,
+  isBest = false,
+  onEstimate,
+  getDraft,
+  onDraftChange,
 }: AdvantageCustomPriceCellProps): React.ReactElement {
   const t = useTranslations('productLabelsPage');
   const tBreakdown = useTranslations('productLabelsPage.breakdown');
@@ -59,11 +97,19 @@ export function AdvantageCustomPriceCell({
   const scope = useTariffScope();
   const estimate = useEstimateAdvantageItemPrice(scope.orgId, scope.storeId, scope.tariffId);
   const estimateMutate = estimate.mutate;
-  // Seed the input from any persisted custom price so reopening a tariff shows it.
-  const [price, setPrice] = React.useState<Decimal | null>(
-    row.customPrice !== null ? new Decimal(row.customPrice) : null,
-  );
+  // Seed the input, highest priority first: a surviving DRAFT from the parent's ref store,
+  // then the edit-buffer's committed custom price, then the persisted server value. A
+  // `null` draft means the seller deliberately cleared the field — start empty.
+  const [price, setPrice] = React.useState<Decimal | null>(() => {
+    const draft = getDraft?.(row.id);
+    const seed = draft !== undefined ? draft : (committedPrice ?? row.customPrice);
+    return seed !== null ? new Decimal(seed) : null;
+  });
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  // Last SUCCESSFUL estimate. `mutate()` resets `estimate.data` to undefined, which would
+  // unmount the badge on every debounced keystroke; keeping the previous figures on screen
+  // kills that flicker. react-query fires a mutate-level onSuccess only for the LATEST
+  // call, so an out-of-order older response can never overwrite a newer one.
   const [lastResult, setLastResult] = React.useState<EstimateAdvantagePriceResult | null>(null);
 
   // Debounced what-if: fire the estimate ~400ms after the seller stops typing.
@@ -73,28 +119,54 @@ export function AdvantageCustomPriceCell({
     const handle = setTimeout(() => {
       estimateMutate(
         { itemId: row.id, body: { price: priceStr } },
-        { onSuccess: (data) => setLastResult(data) },
+        {
+          onSuccess: (data) => {
+            setLastResult(data);
+            // Event-driven report of the figure shown here so the row's "En kârlı" badge
+            // races this live estimate — no watcher effect, fired on success.
+            onEstimate?.(row.id, data.breakdown?.netProfit ?? null);
+          },
+        },
       );
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(handle);
     };
-  }, [price, row.id, estimateMutate]);
+  }, [price, row.id, estimateMutate, onEstimate]);
 
   function handleChange(next: Decimal | null): void {
     setPrice(next);
+    // Persist the draft into the parent's ref so it survives an unmount; a cleared input
+    // records `null` — a deliberate clear that keeps the remounted input empty.
+    onDraftChange?.(row.id, next !== null ? next.toFixed(2) : null);
+    // Clearing the input drops the custom candidate from the "En kârlı" race at once.
+    if (next === null) onEstimate?.(row.id, null);
     // Editing a committed custom price un-commits it — the seller re-confirms the new
-    // value with "Seç", so the selected amount is always the last confirmed one.
+    // value, so the selected amount is always the last confirmed one.
     if (isSelected) onDeselect();
   }
 
   // "Seç" is only meaningful once the estimate for the CURRENT typed price is back and
   // calculable — otherwise there is no confirmed profit to commit.
-  const canSelect =
+  const hasEstimate =
     price !== null &&
     lastResult !== null &&
     lastResult.calculable &&
     lastResult.price === price.toFixed(2);
+  const canSelect = hasEstimate;
+
+  // The commission band the estimated price landed in, so the derived line can name the
+  // window ("≈ ₺146,00 ve altı") — distinct from the star-tier threshold. Only when a
+  // ladder exists AND the estimate resolved via a band (a category-rate item has no
+  // ladder to point at). Pure comparison; the profit itself is server-computed.
+  const commissionBands = row.commissionBands;
+  const bandLabels = useCommissionBandLabels();
+  const estimatedBand =
+    hasEstimate && commissionBands !== null && lastResult.commissionSource === 'band'
+      ? findBandForPrice(commissionBands, new Decimal(lastResult.price))
+      : null;
+  const rangeLabel =
+    estimatedBand !== null ? formatBandRange(estimatedBand, formatCurrency, bandLabels) : null;
 
   function handleToggleSelect(): void {
     if (isSelected) {
@@ -110,82 +182,92 @@ export function AdvantageCustomPriceCell({
     }
   }
 
-  const items = centered ? 'items-center' : 'items-start';
-  const self = centered ? 'self-center' : 'self-start';
-
   return (
-    <div
-      className={cn(
-        'gap-sm md:min-w-tariff-band flex flex-col',
-        items,
-        centered && 'w-full text-center',
-      )}
-    >
-      {/* Label + input as one tight group so the roomy outer gap-sm sits between the
-          input, the estimate, and the select control — not inside the field. */}
-      <div className={cn('gap-3xs flex flex-col', items, centered && 'w-full')}>
-        {/* On mobile the field has no column header, so label it here; the desktop
-            table's "Özel Fiyat" column header hides this (md:hidden). */}
+    <TariffOptionCard selected={isSelected}>
+      {/* "En kârlı" — the same absolute ribbon the tiers wear (the card is already
+          relative+isolate), rendered only when the typed custom price wins the row. */}
+      {isBest ? <TariffBestRibbon label={t('table.bestTier')} /> : null}
+
+      {/* Input group — the field stands in for a tier's static target price, the derived
+          line for its commission. */}
+      <div className="gap-3xs flex w-full flex-col items-start">
+        {/* Desktop has the "Özel Fiyat" column header; the mobile card has none, so label
+            it here (md:hidden). */}
         <span className="text-2xs text-muted-foreground font-medium md:hidden">
           {t('table.customPrice')}
         </span>
+        {/* The price field alone — the derived line below carries the commission hint, and,
+            when the price lands in a band, the ⓘ that opens the band ladder. */}
         <MoneyInput
           value={price}
           onChange={handleChange}
           nonNegative
           aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
           placeholder={t('table.enterPrice')}
-          className="md:max-w-input-narrow w-full"
-          // Any price earns the reduced commission of whichever band it lands in —
-          // the Input's help-text slot spells this out under the field with an info icon.
-          helpText={t('table.customCommissionApplies')}
+          className="md:max-w-input-price w-full"
         />
-      </div>
-      {/* Profit block is ALWAYS visible — same as a tier cell: a neutral em-dash badge
-          until the seller types a price, then the estimated profit + "vs current" delta.
-          Same "Hesaplanan kâr" + badge + delta structure and alignment as the tiers, so
-          the columns read identically. */}
-      <div className={cn('gap-3xs flex flex-col', items)}>
-        <span className="text-2xs text-muted-foreground">{t('table.calculatedProfit')}</span>
-        <ProfitBadge
-          value={lastResult?.breakdown?.netProfit ?? null}
-          marginPct={lastResult?.breakdown?.saleMarginPct ?? null}
-          scale={scale}
-          onOpen={() => {
-            // The empty em-dash badge has no breakdown to open; only open once a typed
-            // price has an estimate.
-            if (lastResult !== null) setBreakdownOpen(true);
-          }}
-          showMarginPct
-          className={self}
-        />
-        <ProfitDelta
-          optionNetProfit={lastResult?.breakdown?.netProfit ?? null}
-          currentNetProfit={row.current.netProfit}
-          label={t('table.vsCurrent')}
-        />
-        <AdvantageTariffBreakdown
-          open={breakdownOpen}
-          onOpenChange={setBreakdownOpen}
-          productTitle={row.productTitle}
-          imageUrl={row.imageUrl}
-          result={lastResult}
-          loading={estimate.isPending}
-          profitLabel={tBreakdown('estimatedProfit')}
-        />
+        <span className="text-2xs text-muted-foreground">
+          {hasEstimate && lastResult.commissionPct != null ? (
+            rangeLabel !== null ? (
+              <>
+                ≈ <span className="text-foreground font-semibold">{rangeLabel}</span> ·{' '}
+                {t('table.tierCommission')} {formatPercentDisplay(lastResult.commissionPct)}{' '}
+                {/* The ⓘ rides at the END of the derived range line so the price window and
+                    the ladder that produced it read as one unit. It exists only for a
+                    band-sourced estimate — a category-rate item has no ladder (rangeLabel
+                    is null), which is exactly when this branch does not run. */}
+                {commissionBands !== null ? (
+                  <CommissionBandsPopover bands={commissionBands} labels={bandLabels} />
+                ) : null}
+              </>
+            ) : (
+              <>
+                {t('table.tierCommission')}{' '}
+                <span className="text-foreground font-semibold">
+                  {formatPercentDisplay(lastResult.commissionPct)}
+                </span>
+              </>
+            )
+          ) : (
+            t('table.customPriceHint')
+          )}
+        </span>
       </div>
 
-      {/* SELECT control — a separate target from the input, so typing never selects.
-          Enabled only once a calculable estimate for the typed price is in. Shares the
-          exact affordance the tier cells use (no click-anywhere overlay). */}
-      <TariffSelectControl
+      <TariffProfitBlock
+        netProfit={lastResult?.breakdown?.netProfit ?? null}
+        marginPct={lastResult?.breakdown?.saleMarginPct ?? null}
+        currentNetProfit={row.currentNetProfit}
+        scale={scale}
+        onOpenBreakdown={() => {
+          // The empty badge has no breakdown to open; only open once a typed price has an
+          // estimate.
+          if (lastResult !== null) setBreakdownOpen(true);
+        }}
+        emptyLabel={row.reason === 'NO_COST' ? t('table.enterCost') : undefined}
+        calculatedLabel={t('table.calculatedProfit')}
+        vsCurrentLabel={t('table.vsCurrent')}
+      />
+
+      {/* Real button foot — the input rules out a card overlay, so typing never selects and
+          this is the explicit commit. Disabled until an estimate is in. */}
+      <TariffSelectFoot
         selected={isSelected}
-        disabled={!isSelected && !canSelect}
-        onToggle={handleToggleSelect}
         label={t('table.selectCustom')}
         selectedLabel={t('table.customSelected')}
-        className={cn(centered && 'self-center')}
+        onToggle={handleToggleSelect}
+        disabled={!isSelected && !canSelect}
       />
-    </div>
+
+      <AdvantageTariffBreakdown
+        open={breakdownOpen}
+        onOpenChange={setBreakdownOpen}
+        productTitle={row.productTitle}
+        imageUrl={row.imageUrl}
+        result={lastResult}
+        loading={estimate.isPending}
+        profitLabel={tBreakdown('estimatedProfit')}
+      />
+    </TariffOptionCard>
   );
 }

@@ -1,39 +1,37 @@
 'use client';
 
+import { SparklesIcon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useEstimateAdvantageItemPrice } from '../hooks/use-estimate-advantage-item-price';
+import type { AdvantageTariffRow } from '../lib/adapt-advantage-tariff';
 import { useTariffScope } from '../lib/tariff-scope';
-import type { AdvantageTariffDetailItem } from '../types';
 import { AdvantageTariffBreakdown } from './advantage-tariff-breakdown';
 import { TariffCurrentCell } from './tariff-current-cell';
 
 export interface AdvantageCurrentCellProps {
-  row: AdvantageTariffDetailItem;
-  /**
-   * Center the cell's content — used in the desktop table columns (all non-product
-   * columns are centered). Off (left-aligned) for the mobile card zone.
-   */
-  centered?: boolean;
+  row: AdvantageTariffRow;
+  /** Whether keeping the current price/commission is the row's most profitable option (an "En kârlı" badge). */
+  isBest?: boolean;
 }
 
 /**
- * The product's CURRENT baseline as a flat, un-boxed cell that mirrors {@link AdvantageTierCell}:
- * the price the buyer currently pays (Müşterinin Gördüğü Fiyat), its resolved commission (from the
- * band that price falls into, else the category rate — the same lookup the tiers use), and the
- * calculated profit as the SAME {@link ProfitBadge} the tiers show. This lets the seller compare
- * "do nothing" against each advantage tier on identical terms. No vs-current delta (it is the
- * baseline) and no select control (there is nothing to choose about the current state); the reserved
- * "En kârlı" slot lights up only when keeping the current price is the single most-profitable option.
- * Clicking the badge opens the breakdown for the current price. The presentation lives in the shared
- * {@link TariffCurrentCell}; this owns the Advantage data, estimate call, and breakdown modal.
+ * The Advantage product's CURRENT baseline — the "do nothing" reference the seller
+ * compares each tier against. Shows the price the buyer currently pays (Müşterinin gördüğü
+ * fiyat, which the current profit is computed from), its resolved commission, and the
+ * calculated profit as the SAME clickable {@link ProfitBadge} the tiers show. Presentation
+ * lives in the shared {@link TariffCurrentCell}; this owns the data, the current-scenario
+ * estimate call, and the breakdown modal. Left-aligned and a touch narrower than a card
+ * cell (`minWidth="current"`). Renders the starred "En kârlı" badge ONLY when keeping the
+ * current price is the row's most profitable choice — so the whole-row marker can land
+ * here. No client-side money math — the badge and modal are backend-computed.
  */
 export function AdvantageCurrentCell({
   row,
-  centered = false,
+  isBest = false,
 }: AdvantageCurrentCellProps): React.ReactElement {
   const t = useTranslations('productLabelsPage.table');
   const scale = useMarginColoring();
@@ -43,21 +41,30 @@ export function AdvantageCurrentCell({
 
   function openBreakdown(): void {
     setBreakdownOpen(true);
-    estimate.mutate({ itemId: row.id, body: { price: row.customerPrice } });
+    // `scenario: 'current'` — the backend derives BOTH the customer price and its
+    // commission from the item itself, so the breakdown matches this row's
+    // `currentNetProfit` badge.
+    estimate.mutate({ itemId: row.id, body: { scenario: 'current' } });
   }
 
   return (
     <TariffCurrentCell
+      // The price the buyer sees — the current net profit is computed from it, so
+      // badge/modal/price stay in sync.
       price={row.customerPrice}
-      commissionPct={row.current.commissionPct}
+      commissionPct={row.currentCommissionPct}
       commissionLabel={t('tierCommission')}
       calculatedLabel={t('calculatedProfit')}
-      netProfit={row.current.netProfit}
-      marginPct={row.current.marginPct}
+      netProfit={row.currentNetProfit}
+      marginPct={row.currentMarginPct}
       scale={scale}
       onOpenBreakdown={openBreakdown}
-      bestBadge={{ label: t('bestTier'), visible: row.current.isBest }}
-      centered={centered}
+      emptyLabel={row.reason === 'NO_COST' ? t('enterCost') : undefined}
+      minWidth="current"
+      // "En kârlı" badge only when keeping the current price wins the row — no reserved
+      // slot, so a non-best current cell adds no height. Sparkles icon so the marker
+      // matches the tier/custom ribbons on this row.
+      bestBadge={isBest ? { label: t('bestTier'), visible: true, icon: <SparklesIcon /> } : null}
     >
       <AdvantageTariffBreakdown
         open={breakdownOpen}
