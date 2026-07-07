@@ -4,7 +4,6 @@ import * as React from 'react';
 
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 
-import { usePlusReasonLabel } from '../hooks/use-plus-reason-label';
 import type { PlusTariffRow } from '../lib/adapt-plus-tariff';
 import { resolveBestChoice } from '../lib/best-choice';
 import type {
@@ -56,8 +55,6 @@ export function PlusTariffsMobileCards({
   getCustomDraft,
   onCustomDraftChange,
 }: PlusTariffsMobileCardsProps): React.ReactElement {
-  const reasonLabel = usePlusReasonLabel();
-
   return (
     <div className="gap-sm flex flex-col">
       {rows.map((row) => {
@@ -87,9 +84,6 @@ export function PlusTariffsMobileCards({
                 <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
                 {meta !== '' ? (
                   <div className="text-2xs text-muted-foreground tabular-nums">{meta}</div>
-                ) : null}
-                {!row.calculable && row.reason !== null ? (
-                  <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>
                 ) : null}
               </div>
             </div>
@@ -125,6 +119,8 @@ export function PlusTariffsMobileCards({
                 onDeselect={() => onDeselectCustom(row.id)}
                 onEstimate={onCustomEstimate}
                 committedPrice={customPrices[row.id]?.price ?? null}
+                committedNetProfit={customPrices[row.id]?.netProfit ?? null}
+                committedMarginPct={customPrices[row.id]?.marginPct ?? null}
                 getDraft={getCustomDraft}
                 onDraftChange={onCustomDraftChange}
               />

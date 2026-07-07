@@ -4,7 +4,6 @@ import * as React from 'react';
 
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 
-import { useReasonLabel } from '../hooks/use-reason-label';
 import { resolveBestChoice } from '../lib/best-choice';
 import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
 import type { CommissionTariffRow } from '../types';
@@ -54,8 +53,6 @@ export function CommissionTariffsMobileCards({
   getCustomDraft,
   onCustomDraftChange,
 }: CommissionTariffsMobileCardsProps): React.ReactElement {
-  const reasonLabel = useReasonLabel();
-
   return (
     <div className="gap-sm flex flex-col">
       {rows.map((row) => {
@@ -84,9 +81,6 @@ export function CommissionTariffsMobileCards({
                 <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
                 {meta !== '' ? (
                   <div className="text-2xs text-muted-foreground tabular-nums">{meta}</div>
-                ) : null}
-                {!row.calculable && row.reason !== null ? (
-                  <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>
                 ) : null}
               </div>
             </div>
@@ -129,6 +123,8 @@ export function CommissionTariffsMobileCards({
                 // own rowId) — no per-row arrow that would restart the debounce each render.
                 onEstimate={onCustomEstimate}
                 committedPrice={customPrices[row.id]?.price ?? null}
+                committedNetProfit={customPrices[row.id]?.netProfit ?? null}
+                committedMarginPct={customPrices[row.id]?.marginPct ?? null}
                 // Ref-backed draft store: keeps an uncommitted what-if price alive when a
                 // filter / tab switch unmounts this card and later remounts it.
                 getDraft={getCustomDraft}

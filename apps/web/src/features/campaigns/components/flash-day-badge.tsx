@@ -12,19 +12,21 @@ export interface FlashDayBadgeProps {
 }
 
 /**
- * The row's flash DAY as a neutral soft chip — "8 Temmuz" — the muadili of the dated chip
- * Trendyol stamps on every flash row. The SAME product recurs across several dated rows, so
- * this chip tells the seller WHICH day a given row belongs to, right inside the product
+ * The row's flash DAY as a high-contrast solid chip — "8 Temmuz" — the muadili of the dated
+ * chip Trendyol stamps on every flash row. The SAME product recurs across several dated rows,
+ * so this chip tells the seller WHICH day a given row belongs to, right inside the product
  * identity cell. Rendered from a fixed ISO prop via the named `dayMonth` preset, so it is
- * deterministic and hydration-safe (no `Date.now()`). Pairs with the offer card's time-range
- * badge in the same neutral family.
+ * deterministic and hydration-safe (no `Date.now()`). Uses the neutral `solid` treatment
+ * (`bg-foreground` + `text-background`) — a dark pill in light mode, inverted in dark mode —
+ * so the date reads at a glance instead of fading into the row. Pairs with the offer card's
+ * time-range badge in the same high-contrast family.
  */
 export function FlashDayBadge({ startsAt }: FlashDayBadgeProps): React.ReactElement {
   const format = useFormatter();
   return (
     <Badge
       tone="neutral"
-      variant="surface"
+      variant="solid"
       size="sm"
       leadingIcon={<Calendar01Icon />}
       className="tabular-nums"

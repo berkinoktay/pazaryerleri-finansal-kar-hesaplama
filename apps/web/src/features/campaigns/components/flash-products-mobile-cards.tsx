@@ -5,7 +5,6 @@ import * as React from 'react';
 
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 
-import { useFlashReasonLabel } from '../hooks/use-flash-reason-label';
 import type { FlashOfferKey, FlashProductRow } from '../lib/adapt-flash-product';
 import {
   bandForKey,
@@ -64,7 +63,6 @@ export function FlashProductsMobileCards({
 }: FlashProductsMobileCardsProps): React.ReactElement {
   const t = useTranslations('flashProductsPage');
   const tSlot = useTranslations('flashProductsPage.slot');
-  const reasonLabel = useFlashReasonLabel();
 
   return (
     <div className="gap-sm flex flex-col">
@@ -87,22 +85,21 @@ export function FlashProductsMobileCards({
             key={row.id}
             className="border-border bg-card gap-md p-md flex flex-col rounded-lg border"
           >
+            {/* Which flash day this card belongs to — stamped as a header above the identity
+                (not under the name), parity with the desktop product cell. */}
+            {row.flashDay !== null ? (
+              <div className="flex">
+                <FlashDayBadge startsAt={row.flashDay} />
+              </div>
+            ) : null}
+
             {/* Zone 1: product identity — full width, no competing right column. */}
             <div className="gap-sm flex min-w-0 items-start">
               <ProductImageCell url={row.imageUrl} alt={row.productTitle} size="xl" fit="contain" />
               <div className="min-w-0 flex-1">
                 <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
-                {/* Which flash day this card belongs to — parity with the desktop product cell. */}
-                {row.flashDay !== null ? (
-                  <div className="mt-3xs flex">
-                    <FlashDayBadge startsAt={row.flashDay} />
-                  </div>
-                ) : null}
                 {meta !== '' ? (
                   <div className="text-2xs text-muted-foreground mt-3xs tabular-nums">{meta}</div>
-                ) : null}
-                {!row.calculable && row.reason !== null ? (
-                  <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>
                 ) : null}
               </div>
             </div>
@@ -147,6 +144,8 @@ export function FlashProductsMobileCards({
                 onDeselect={() => onDeselectCustom(row.id)}
                 onEstimate={onCustomEstimate}
                 committedPrice={customPrices[row.id]?.price ?? null}
+                committedNetProfit={customPrices[row.id]?.netProfit ?? null}
+                committedMarginPct={customPrices[row.id]?.marginPct ?? null}
                 getDraft={getCustomDraft}
                 onDraftChange={onCustomDraftChange}
               />

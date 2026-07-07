@@ -9,6 +9,7 @@ import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import type { AdvantageBand, AdvantageTariffRow } from '../lib/adapt-advantage-tariff';
+import { useAdvantageReasonEmptyLabel } from '../hooks/use-advantage-reason-label';
 import { useEstimateAdvantageItemPrice } from '../hooks/use-estimate-advantage-item-price';
 import { useTariffScope } from '../lib/tariff-scope';
 import { AdvantageTariffBreakdown } from './advantage-tariff-breakdown';
@@ -55,6 +56,7 @@ export function AdvantageTierCell({
   onSelect,
 }: AdvantageTierCellProps): React.ReactElement {
   const t = useTranslations('productLabelsPage.table');
+  const reasonEmptyLabel = useAdvantageReasonEmptyLabel();
   const scale = useMarginColoring();
   const scope = useTariffScope();
   const estimate = useEstimateAdvantageItemPrice(scope.orgId, scope.storeId, scope.tariffId);
@@ -103,10 +105,10 @@ export function AdvantageTierCell({
         currentNetProfit={row.currentNetProfit}
         scale={scale}
         onOpenBreakdown={openBreakdown}
-        // A missing cost profile is the one empty-profit cause worth naming inline
-        // ("Maliyet girin"); other non-calculable reasons keep the mute dash (their full
-        // reason shows in the product identity cell).
-        emptyLabel={row.reason === 'NO_COST' ? t('enterCost') : undefined}
+        // The row's not-calculable reason (or undefined when calculable) rides the empty
+        // badge as a warning-soft chip — the same reason-aware signal every option in the
+        // row shows, now that the product cell no longer prints it inline.
+        emptyLabel={reasonEmptyLabel(row.reason)}
         calculatedLabel={t('calculatedProfit')}
         vsCurrentLabel={t('vsCurrent')}
       />

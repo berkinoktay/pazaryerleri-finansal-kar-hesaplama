@@ -460,6 +460,23 @@ describe("FlashProductsTable — the 'En kârlı' mark follows the live estimate
   });
 });
 
+describe('FlashProductsTable — the calculated-profit block appears only with a price', () => {
+  it('hides the block on an empty custom card, then reveals it once a price is typed', async () => {
+    mockEstimate('345.00');
+    const { user } = render(<TableHarness />);
+
+    // Empty custom card: no "Hesaplanan kâr" block, no mute "—" profit chip. (The current
+    // cell always shows its own "Hesaplanan kâr", so the assertion is scoped to the card.)
+    expect(within(customCard()).queryByText(/hesaplanan kâr/i)).toBeNull();
+
+    // Typing a price reveals the block (its estimate then fills the badge).
+    await user.type(screen.getByPlaceholderText(/fiyat girin/i), '500');
+    await waitFor(() =>
+      expect(within(customCard()).getByText(/hesaplanan kâr/i)).toBeInTheDocument(),
+    );
+  });
+});
+
 describe('FlashProductsTable — a choice never remounts a sibling row', () => {
   it("keeps ROW A's half-typed custom price when ROW B selects an offer", async () => {
     // ROW A's live estimate wins its row (far above current + every offer) so we can wait on

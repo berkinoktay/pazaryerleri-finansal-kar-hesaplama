@@ -12,7 +12,6 @@ import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
-import { useReasonLabel } from '../hooks/use-reason-label';
 import { resolveBestChoice } from '../lib/best-choice';
 import type { CustomChoice, CustomPriceMap, SelectionMap } from '../lib/bulk-actions';
 import type { CommissionTariffRow, PriceBand } from '../types';
@@ -111,6 +110,8 @@ function CustomCellSlot({
       onDeselect={onDeselect}
       onEstimate={onEstimate}
       committedPrice={committed?.price ?? null}
+      committedNetProfit={committed?.netProfit ?? null}
+      committedMarginPct={committed?.marginPct ?? null}
       // Ref-backed draft store: keeps an uncommitted what-if price alive when pagination
       // (or a filter / tab switch) unmounts this cell and later remounts it.
       getDraft={getDraft}
@@ -158,7 +159,6 @@ export function CommissionTariffsTable({
   onClearFilters,
 }: CommissionTariffsTableProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
-  const reasonLabel = useReasonLabel();
   // Local (not persisted): every tariff opens at its normal 100% size; the
   // seller can shrink it to fit for that session.
   const [scale, setScale] = React.useState(TABLE_SCALE_DEFAULT);
@@ -201,9 +201,6 @@ export function CommissionTariffsTable({
                 {categoryBrand !== '' ? <span className="truncate">{categoryBrand}</span> : null}
                 {r.stockCode !== null ? (
                   <span className="truncate tabular-nums">{r.stockCode}</span>
-                ) : null}
-                {!r.calculable && r.reason !== null ? (
-                  <span className="text-warning">{reasonLabel(r.reason)}</span>
                 ) : null}
               </span>
             }
@@ -264,11 +261,10 @@ export function CommissionTariffsTable({
     // `cell:` as a component, React remounts every cell and wipes half-typed
     // custom-price drafts (see the remount regressions in
     // commission-tariffs-table.test.tsx). Every dep below is identity-stable:
-    // `t`/`reasonLabel` from next-intl, and the handlers (select/deselect/estimate + the
+    // `t` from next-intl, and the handlers (select/deselect/estimate + the
     // ref-backed draft getter/setter) from the parent's useCallback([]).
   }, [
     t,
-    reasonLabel,
     onSelectBand,
     onSelectCustom,
     onDeselectCustom,

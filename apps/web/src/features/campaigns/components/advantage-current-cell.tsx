@@ -6,6 +6,7 @@ import * as React from 'react';
 
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
+import { useAdvantageReasonEmptyLabel } from '../hooks/use-advantage-reason-label';
 import { useEstimateAdvantageItemPrice } from '../hooks/use-estimate-advantage-item-price';
 import type { AdvantageTariffRow } from '../lib/adapt-advantage-tariff';
 import { useTariffScope } from '../lib/tariff-scope';
@@ -34,6 +35,7 @@ export function AdvantageCurrentCell({
   isBest = false,
 }: AdvantageCurrentCellProps): React.ReactElement {
   const t = useTranslations('productLabelsPage.table');
+  const reasonEmptyLabel = useAdvantageReasonEmptyLabel();
   const scale = useMarginColoring();
   const scope = useTariffScope();
   const estimate = useEstimateAdvantageItemPrice(scope.orgId, scope.storeId, scope.tariffId);
@@ -59,7 +61,9 @@ export function AdvantageCurrentCell({
       marginPct={row.currentMarginPct}
       scale={scale}
       onOpenBreakdown={openBreakdown}
-      emptyLabel={row.reason === 'NO_COST' ? t('enterCost') : undefined}
+      // The row's not-calculable reason (or undefined when calculable) rides the badge as a
+      // warning-soft chip — the same signal the product cell used to print inline.
+      emptyLabel={reasonEmptyLabel(row.reason)}
       minWidth="current"
       // "En kârlı" badge only when keeping the current price wins the row — no reserved
       // slot, so a non-best current cell adds no height. Sparkles icon so the marker

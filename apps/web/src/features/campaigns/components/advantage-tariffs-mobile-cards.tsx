@@ -5,7 +5,6 @@ import * as React from 'react';
 
 import { ProductImageCell } from '@/components/patterns/product-image-cell';
 
-import { useAdvantageReasonLabel } from '../hooks/use-advantage-reason-label';
 import type { AdvantageTariffRow, NonNullStarTierKey } from '../lib/adapt-advantage-tariff';
 import {
   bandForKey,
@@ -64,7 +63,6 @@ export function AdvantageTariffsMobileCards({
 }: AdvantageTariffsMobileCardsProps): React.ReactElement {
   const t = useTranslations('productLabelsPage');
   const tTier = useTranslations('productLabelsPage.tier');
-  const reasonLabel = useAdvantageReasonLabel();
 
   return (
     <div className="gap-sm flex flex-col">
@@ -94,9 +92,6 @@ export function AdvantageTariffsMobileCards({
                 <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
                 {meta !== '' ? (
                   <div className="text-2xs text-muted-foreground tabular-nums">{meta}</div>
-                ) : null}
-                {!row.calculable && row.reason !== null ? (
-                  <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>
                 ) : null}
               </div>
             </div>
@@ -140,6 +135,8 @@ export function AdvantageTariffsMobileCards({
                 onDeselect={() => onDeselectCustom(row.id)}
                 onEstimate={onCustomEstimate}
                 committedPrice={customPrices[row.id]?.price ?? null}
+                committedNetProfit={customPrices[row.id]?.netProfit ?? null}
+                committedMarginPct={customPrices[row.id]?.marginPct ?? null}
                 getDraft={getCustomDraft}
                 onDraftChange={onCustomDraftChange}
               />

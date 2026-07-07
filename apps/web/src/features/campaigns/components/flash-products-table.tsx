@@ -12,7 +12,6 @@ import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
-import { useFlashReasonLabel } from '../hooks/use-flash-reason-label';
 import type { FlashBand, FlashOfferKey, FlashProductRow } from '../lib/adapt-flash-product';
 import {
   bandForKey,
@@ -121,6 +120,8 @@ function CustomCellSlot({
       onDeselect={onDeselect}
       onEstimate={onEstimate}
       committedPrice={committed?.price ?? null}
+      committedNetProfit={committed?.netProfit ?? null}
+      committedMarginPct={committed?.marginPct ?? null}
       getDraft={getDraft}
       onDraftChange={onDraftChange}
     />
@@ -175,7 +176,6 @@ export function FlashProductsTable({
 }: FlashProductsTableProps): React.ReactElement {
   const t = useTranslations('flashProductsPage');
   const tSlot = useTranslations('flashProductsPage.slot');
-  const reasonLabel = useFlashReasonLabel();
   // Local (not persisted): every list opens at its normal 100% size; the seller can shrink
   // it to fit for that session.
   const [scale, setScale] = React.useState(TABLE_SCALE_DEFAULT);
@@ -206,32 +206,32 @@ export function FlashProductsTable({
           .filter((v): v is string => v !== null)
           .join(' · ');
         return (
-          <IdentityCell
-            size="md"
-            titleLines={2}
-            className="max-w-tariff-product"
-            leading={<ProductImageCell url={r.imageUrl} alt={r.productTitle} size="xl" />}
-            title={r.productTitle}
-            meta={
-              <span className="gap-3xs flex flex-col">
-                {/* Which flash day this row belongs to — the same product recurs per date. The
-                    inline-flex wrapper keeps the chip content-width (not stretched by the
-                    column) while the text lines below stay full-width to truncate. */}
-                {r.flashDay !== null ? (
-                  <span className="flex">
-                    <FlashDayBadge startsAt={r.flashDay} />
-                  </span>
-                ) : null}
-                {categoryBrand !== '' ? <span className="truncate">{categoryBrand}</span> : null}
-                {r.modelCode !== null ? (
-                  <span className="truncate tabular-nums">{r.modelCode}</span>
-                ) : null}
-                {!r.calculable && r.reason !== null ? (
-                  <span className="text-warning">{reasonLabel(r.reason)}</span>
-                ) : null}
+          <div className="gap-2xs flex flex-col">
+            {/* Which flash day this row belongs to — the same product recurs per date. Stamped
+                as a header ABOVE the product identity (not under the name) so the date reads
+                first and the image/title stay uncluttered. The inline-flex wrapper keeps the
+                chip content-width instead of stretching to the column. */}
+            {r.flashDay !== null ? (
+              <span className="flex">
+                <FlashDayBadge startsAt={r.flashDay} />
               </span>
-            }
-          />
+            ) : null}
+            <IdentityCell
+              size="md"
+              titleLines={2}
+              className="max-w-tariff-product"
+              leading={<ProductImageCell url={r.imageUrl} alt={r.productTitle} size="xl" />}
+              title={r.productTitle}
+              meta={
+                <span className="gap-3xs flex flex-col">
+                  {categoryBrand !== '' ? <span className="truncate">{categoryBrand}</span> : null}
+                  {r.modelCode !== null ? (
+                    <span className="truncate tabular-nums">{r.modelCode}</span>
+                  ) : null}
+                </span>
+              }
+            />
+          </div>
         );
       },
     };
@@ -297,12 +297,11 @@ export function FlashProductsTable({
     return [productColumn, currentColumn, ...offerColumns, customPriceColumn];
     // `columns` identity MUST stay STABLE — the volatile per-row values (best / selection /
     // customPrices) flow through RowStateContext instead. Every dep below is
-    // identity-stable: `t`/`tSlot`/`reasonLabel` from next-intl, the handlers from the
-    // parent's useCallback([]), and the two show flags (primitives, only change with data).
+    // identity-stable: `t`/`tSlot` from next-intl, the handlers from the parent's
+    // useCallback([]), and the two show flags (primitives, only change with data).
   }, [
     t,
     tSlot,
-    reasonLabel,
     showOffer24,
     showOffer3,
     onSelectOffer,

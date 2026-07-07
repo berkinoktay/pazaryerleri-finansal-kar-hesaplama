@@ -1,5 +1,3 @@
-import { type ToneKey } from '@/lib/variants';
-
 import type {
   FlashCommissionBand,
   FlashCommissionSource,
@@ -26,13 +24,6 @@ export function offerKeyFromEnum(offer: FlashOfferType): FlashOfferKey | null {
   if (offer === 'H3') return 'h3';
   return null;
 }
-
-/** Flash window validity → semantic StatusDot tone; a null (unparseable) validity reads neutral. */
-export const FLASH_VALIDITY_TONE: Record<NonNullable<FlashValidity>, ToneKey> = {
-  active: 'success',
-  upcoming: 'info',
-  past: 'neutral',
-};
 
 /**
  * One flash offer (24 Saatlik / 3 Saatlik) rendered as a band-like option so the detail

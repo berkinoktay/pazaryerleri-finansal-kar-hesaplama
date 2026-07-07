@@ -42,3 +42,35 @@ export function useAdvantageReasonLabel(): (reason: AdvantageTariffItemReason) =
     [t],
   );
 }
+
+/**
+ * Advantage-scoped sibling of {@link useReasonEmptyLabel}: maps the not-calculable `reason`
+ * to a SHORT, action-oriented empty label (e.g. "Maliyet girin") for the row's {@link
+ * ProfitBadge} `emptyLabel`. Includes the `NO_COMMISSION` branch (Advantage-only). A `null`
+ * reason (a calculable row) maps to `undefined` so the badge keeps its mute em-dash.
+ */
+export function useAdvantageReasonEmptyLabel(): (
+  reason: AdvantageTariffItemReason | null,
+) => string | undefined {
+  const t = useTranslations('productLabelsPage.reasonShort');
+  return React.useCallback(
+    (reason) => {
+      if (reason === null) return undefined;
+      switch (reason) {
+        case 'NO_PRODUCT':
+          return t('NO_PRODUCT');
+        case 'NO_COST':
+          return t('NO_COST');
+        case 'NO_SHIPPING':
+          return t('NO_SHIPPING');
+        case 'NO_COMMISSION':
+          return t('NO_COMMISSION');
+        default: {
+          const _exhaustive: never = reason;
+          throw new Error(`Unhandled advantage tariff reason: ${String(_exhaustive)}`);
+        }
+      }
+    },
+    [t],
+  );
+}

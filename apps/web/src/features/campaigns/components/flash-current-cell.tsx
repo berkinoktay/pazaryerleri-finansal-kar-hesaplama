@@ -7,6 +7,7 @@ import * as React from 'react';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useEstimateFlashItemPrice } from '../hooks/use-estimate-flash-item-price';
+import { useFlashReasonEmptyLabel } from '../hooks/use-flash-reason-label';
 import type { FlashProductRow } from '../lib/adapt-flash-product';
 import { useTariffScope } from '../lib/tariff-scope';
 import { FlashProductBreakdown } from './flash-product-breakdown';
@@ -32,6 +33,7 @@ export function FlashCurrentCell({
   isBest = false,
 }: FlashCurrentCellProps): React.ReactElement {
   const t = useTranslations('flashProductsPage.table');
+  const reasonEmptyLabel = useFlashReasonEmptyLabel();
   const scale = useMarginColoring();
   const scope = useTariffScope();
   const estimate = useEstimateFlashItemPrice(scope.orgId, scope.storeId, scope.tariffId);
@@ -57,7 +59,9 @@ export function FlashCurrentCell({
       marginPct={row.currentMarginPct}
       scale={scale}
       onOpenBreakdown={openBreakdown}
-      emptyLabel={row.reason === 'NO_COST' ? t('enterCost') : undefined}
+      // The row's not-calculable reason (or undefined when calculable) rides the badge as a
+      // warning-soft chip — the same signal the product cell used to print inline.
+      emptyLabel={reasonEmptyLabel(row.reason)}
       minWidth="current"
       // "En kârlı" badge only when keeping the current price wins the row — no reserved
       // slot, so a non-best current cell adds no height. Sparkles icon so the marker

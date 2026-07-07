@@ -10,6 +10,7 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import type { EstimateItemPriceResult } from '../api/estimate-item-price.api';
 import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
+import { useReasonEmptyLabel } from '../hooks/use-reason-label';
 import { asBandKey } from '../lib/band-key';
 import type { CustomChoice } from '../lib/bulk-actions';
 import { useTariffScope } from '../lib/tariff-scope';
@@ -45,6 +46,15 @@ export interface CustomPriceCellProps {
    * the server value.
    */
   committedPrice?: string | null;
+  /**
+   * The net profit / margin CAPTURED when this row's custom price was committed — the band
+   * figures the parent seeds into `customPrices` on reload. Shown as the badge value until
+   * the live estimate refines it, so a reloaded committed price reads as a real figure, not
+   * a loading pill. `null` (Advantage / Flash never seed one) means the badge waits on the
+   * estimate and shows a skeleton meanwhile.
+   */
+  committedNetProfit?: string | null;
+  committedMarginPct?: string | null;
   /** Whether the typed custom price is the row's most profitable option (an "En kârlı" ribbon). */
   isBest?: boolean;
   /**
@@ -98,13 +108,17 @@ export function CustomPriceCell({
   onSelect,
   onDeselect,
   committedPrice = null,
+  committedNetProfit = null,
+  committedMarginPct = null,
   isBest = false,
   onEstimate,
   getDraft,
   onDraftChange,
 }: CustomPriceCellProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage');
+  const tCommon = useTranslations('common');
   const tBreakdown = useTranslations('commissionTariffsPage.breakdown');
+  const reasonEmptyLabel = useReasonEmptyLabel();
   const scale = useMarginColoring();
   const scope = useTariffScope();
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
@@ -182,6 +196,28 @@ export function CustomPriceCell({
   // Band key ("band2") → its human number (2) for the "≈ 2. Fiyat Aralığı" label.
   const derivedBandNum = derivedBand !== undefined ? Number(derivedBand.replace('band', '')) : null;
   const hasEstimate = lastResult !== null && lastResult.calculable && derivedBandNum !== null;
+  // Show the "Hesaplanan kâr" block only once the card carries a price in the input (a typed
+  // draft, or a seeded committed / server price) — an empty card shows just the input + hint
+  // + passive foot, never a mute "—" profit chip. Derived from the input state, so a
+  // deliberate clear (price → null) hides the block again.
+  const showProfitBlock = price !== null;
+  // The figures the badge shows: the live estimate when it is in, else the committed seed
+  // (commission carries a band profit; Advantage / Flash carry null). Live takes FULL
+  // precedence — a not-calculable live result (breakdown null) must fall to the reason chip,
+  // never the stale seed.
+  const displayNetProfit =
+    lastResult !== null ? (lastResult.breakdown?.netProfit ?? null) : committedNetProfit;
+  const displayMarginPct =
+    lastResult !== null ? (lastResult.breakdown?.saleMarginPct ?? null) : committedMarginPct;
+  // Skeleton the badge slot while an estimate is on the way: a positive price is in the
+  // input, no live result yet, and nothing seeds the figure — so a "—" would misread as
+  // "no data". An errored estimate falls back to the default badge, never a stuck skeleton.
+  const showEstimateSkeleton =
+    price !== null &&
+    price.greaterThan(0) &&
+    lastResult === null &&
+    committedNetProfit === null &&
+    !estimate.isError;
 
   function handleToggleSelect(): void {
     if (isSelected) {
@@ -236,22 +272,28 @@ export function CustomPriceCell({
         </span>
       </div>
 
-      <TariffProfitBlock
-        netProfit={lastResult?.breakdown?.netProfit ?? null}
-        marginPct={lastResult?.breakdown?.saleMarginPct ?? null}
-        currentNetProfit={row.currentNetProfit}
-        scale={scale}
-        onOpenBreakdown={() => {
-          // The empty badge has no breakdown to open; only open once a typed price
-          // has an estimate.
-          if (lastResult !== null) setBreakdownOpen(true);
-        }}
-        // A no-cost product can never estimate a profit — say why. With a cost, the
-        // empty badge stays "—" (the input placeholder already prompts).
-        emptyLabel={row.reason === 'NO_COST' ? t('table.enterCost') : undefined}
-        calculatedLabel={t('table.calculatedProfit')}
-        vsCurrentLabel={t('table.vsCurrent')}
-      />
+      {/* The calculated-profit block appears only once a price is in the input; an empty
+          card is just input + hint + passive foot (no mute "—" chip). */}
+      {showProfitBlock ? (
+        <TariffProfitBlock
+          netProfit={displayNetProfit}
+          marginPct={displayMarginPct}
+          currentNetProfit={row.currentNetProfit}
+          scale={scale}
+          loading={showEstimateSkeleton}
+          loadingLabel={tCommon('loading')}
+          onOpenBreakdown={() => {
+            // The empty badge has no breakdown to open; only open once a typed price
+            // has an estimate.
+            if (lastResult !== null) setBreakdownOpen(true);
+          }}
+          // A not-calculable row (e.g. no cost) can never estimate a profit — the badge
+          // carries the short reason as a warning-soft chip; a calculable row keeps "—".
+          emptyLabel={reasonEmptyLabel(row.reason)}
+          calculatedLabel={t('table.calculatedProfit')}
+          vsCurrentLabel={t('table.vsCurrent')}
+        />
+      ) : null}
 
       {/* Real button foot — the input rules out a card overlay, so typing never
           selects and this is the explicit commit. Disabled until a band is derived. */}

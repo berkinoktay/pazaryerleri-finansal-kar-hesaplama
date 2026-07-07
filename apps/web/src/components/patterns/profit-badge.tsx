@@ -35,6 +35,9 @@ export interface ProfitBadgeProps {
    * ("—") so existing surfaces (orders, live sheet) are unchanged. Pass a
    * translated node (e.g. "Maliyet girin") where an empty value has a
    * specific, actionable cause the seller should see instead of a mute dash.
+   * When provided, the empty chip switches to a warning-soft treatment
+   * (`bg-warning-surface text-warning`) so the cause draws the eye — the
+   * default em-dash (no `emptyLabel`) stays a mute neutral chip.
    */
   emptyLabel?: React.ReactNode;
   className?: string;
@@ -64,6 +67,10 @@ export function ProfitBadge({
   const t = useTranslations('profitBadge');
   // runtime-dynamic: margin-driven tinted fill/text/border (or undefined → neutral chip)
   const style = value === null ? undefined : marginBadgeStyle(marginPct, scale);
+  // A null amount with a specific cause (emptyLabel) reads as a warning-soft chip so the
+  // reason draws the eye; a bare null (default "—") stays a mute neutral chip so
+  // non-tariff surfaces (orders, live sheet) are unchanged.
+  const isCausedEmpty = value === null && emptyLabel !== undefined;
 
   return (
     <Tooltip>
@@ -80,7 +87,7 @@ export function ProfitBadge({
           )}
         >
           <Badge
-            tone="neutral"
+            tone={isCausedEmpty ? 'warning' : 'neutral'}
             variant="surface"
             style={style}
             trailingIcon={

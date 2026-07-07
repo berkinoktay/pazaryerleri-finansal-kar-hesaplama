@@ -1,21 +1,18 @@
 'use client';
 
+import { Clock01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
 
 import { Badge } from '@/components/ui/badge';
-import { StatusDot } from '@/components/ui/status-dot';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useEstimateFlashItemPrice } from '../hooks/use-estimate-flash-item-price';
-import {
-  FLASH_VALIDITY_TONE,
-  type FlashBand,
-  type FlashProductRow,
-} from '../lib/adapt-flash-product';
+import { useFlashReasonEmptyLabel } from '../hooks/use-flash-reason-label';
+import { type FlashBand, type FlashProductRow } from '../lib/adapt-flash-product';
 import { useTariffScope } from '../lib/tariff-scope';
 import { FlashProductBreakdown } from './flash-product-breakdown';
 import { TariffBestRibbon } from './tariff-best-ribbon';
@@ -41,10 +38,10 @@ export interface FlashProductOfferCellProps {
  * One flash offer (24 Saatlik / 3 Saatlik) as a CLICKABLE CARD — the whole {@link
  * TariffOptionCard} is the select target (a stretched-overlay button), so the seller
  * chooses the offer by clicking anywhere on it, exactly like an Advantage star tier or the
- * Plus offer. The card is HEADED by the offer's TIME RANGE — a neutral soft {@link Badge}
- * ("00:00–23:59") beside a {@link StatusDot} coloured by the window's `validity` (no live
- * countdown — SSR safe). The row's DATE lives in the product-identity cell instead (see
- * {@link FlashDayBadge}), since the same product recurs across dated rows. Below the header:
+ * Plus offer. The card is HEADED by the offer's TIME RANGE — a high-contrast solid, clock-led
+ * {@link Badge} ("00:00–23:59"), no live countdown so it stays SSR safe. The row's DATE lives
+ * in the product-identity cell instead (see {@link FlashDayBadge}), since the same product
+ * recurs across dated rows. Below the header:
  * the flash PRICE (hero), the reduced commission, the shared {@link TariffProfitBlock}, and a
  * {@link TariffSelectFoot}. Selected = brand border + soft brand fill + a featured "En kârlı"
  * ribbon when the offer wins the row.
@@ -65,6 +62,7 @@ export function FlashProductOfferCell({
   onSelect,
 }: FlashProductOfferCellProps): React.ReactElement {
   const t = useTranslations('flashProductsPage.table');
+  const reasonEmptyLabel = useFlashReasonEmptyLabel();
   const format = useFormatter();
   const scale = useMarginColoring();
   const scope = useTariffScope();
@@ -87,7 +85,6 @@ export function FlashProductOfferCell({
           end: band.endsAt !== null ? format.dateTime(new Date(band.endsAt), 'time') : '',
         })
       : null;
-  const tone = band.validity !== null ? FLASH_VALIDITY_TONE[band.validity] : 'neutral';
 
   return (
     <TariffOptionCard selected={selected} interactive>
@@ -107,18 +104,19 @@ export function FlashProductOfferCell({
           height. pointer-events-none → clicking it still chooses via the overlay. */}
       {isBest ? <TariffBestRibbon label={t('bestOffer')} /> : null}
 
-      {/* Time-range header — a validity-toned dot beside a neutral soft time-range badge. The
-          row's DATE is shown in the product cell (FlashDayBadge), never here. */}
+      {/* Time-range header — a high-contrast solid, clock-led time-range badge (a dark pill;
+          inverted in dark mode) so the window reads at a glance. The row's DATE is shown in the
+          product cell (FlashDayBadge), never here. */}
       {timeLabel !== null ? (
-        <StatusDot
-          tone={tone}
+        <Badge
+          tone="neutral"
+          variant="solid"
           size="sm"
-          label={
-            <Badge tone="neutral" variant="surface" size="sm" className="tabular-nums">
-              {timeLabel}
-            </Badge>
-          }
-        />
+          leadingIcon={<Clock01Icon />}
+          className="tabular-nums"
+        >
+          {timeLabel}
+        </Badge>
       ) : null}
 
       {/* Flash price (the exact offer price — not a ceiling) then the reduced commission. */}
@@ -135,9 +133,10 @@ export function FlashProductOfferCell({
         currentNetProfit={row.currentNetProfit}
         scale={scale}
         onOpenBreakdown={openBreakdown}
-        // A missing cost profile is the one empty-profit cause worth naming inline
-        // ("Maliyet girin"); other non-calculable reasons keep the mute dash.
-        emptyLabel={row.reason === 'NO_COST' ? t('enterCost') : undefined}
+        // The row's not-calculable reason (or undefined when calculable) rides the empty
+        // badge as a warning-soft chip — the same reason-aware signal every option in the
+        // row shows, now that the product cell no longer prints it inline.
+        emptyLabel={reasonEmptyLabel(row.reason)}
         calculatedLabel={t('calculatedProfit')}
         vsCurrentLabel={t('vsCurrent')}
       />

@@ -76,13 +76,96 @@ function renderCell(props: React.ComponentProps<typeof CustomPriceCell>) {
 }
 
 describe('CustomPriceCell', () => {
-  it('shows the always-visible profit block + a disabled select when empty', () => {
+  it('hides the calculated-profit block when empty, showing only input + hint + a disabled select', () => {
     renderCell({ row, isSelected: false, onSelect: vi.fn(), onDeselect: vi.fn() });
     expect(screen.getByPlaceholderText(/fiyat girin/i)).toBeInTheDocument();
     // Before a price is typed, the derived line shows the "type a price" hint.
     expect(screen.getByText(/fiyat girince tahmini kâr/i)).toBeInTheDocument();
+    // The "Hesaplanan kâr" block does not render at all on an empty card — no mute "—" chip.
+    expect(screen.queryByText(/hesaplanan kâr/i)).toBeNull();
     // The select is disabled until a calculable estimate for a typed price is in.
     expect(screen.getByRole('button', { name: /bu fiyatı seç/i })).toBeDisabled();
+  });
+
+  it('shows a skeleton in the badge slot while a seeded price is being estimated, then the real badge', async () => {
+    mockEstimate('34.00');
+    renderCell({
+      // A committed price seeds the input on reload; with no committed profit to seed the
+      // figure, the badge must WAIT on the estimate rather than flash a mute "—".
+      row: { ...row, customPrice: '500.00' },
+      isSelected: true,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    // The "Hesaplanan kâr" label stays, but its badge slot is a loading pill (role=status),
+    // never a mute "—" and never the profit badge yet.
+    expect(screen.getByText(/hesaplanan kâr/i)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.queryByText('—')).toBeNull();
+    expect(screen.queryByRole('button', { name: /kâr detayını gör/i })).toBeNull();
+    // Once the debounced estimate lands, the real badge replaces the skeleton.
+    expect(await screen.findByRole('button', { name: /kâr detayını gör/i })).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('shows the reason chip — never a skeleton — when the estimate is not calculable', async () => {
+    // A not-calculable estimate is a resolved (known) result, so the skeleton must clear and
+    // the badge carry the short reason chip instead.
+    server.use(
+      http.post(ESTIMATE_ENDPOINT, () =>
+        HttpResponse.json({
+          itemId: 'r1',
+          price: '500.00',
+          bandKey: null,
+          commissionPct: null,
+          calculable: false,
+          reason: 'NO_COST',
+          breakdown: null,
+        }),
+      ),
+    );
+    renderCell({
+      row: { ...row, customPrice: '500.00', calculable: false, reason: 'NO_COST' },
+      isSelected: true,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    expect(await screen.findByText(/maliyet girin/i)).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('drops the skeleton to the default "—" badge when the estimate errors', async () => {
+    // A failed estimate must not leave the pill spinning forever — it falls back to the
+    // neutral "—" badge (the global toast surfaces the error separately).
+    server.use(
+      http.post(ESTIMATE_ENDPOINT, () =>
+        HttpResponse.json(
+          { type: 'about:blank', title: 'Server Error', status: 500, code: 'INTERNAL_ERROR' },
+          { status: 500 },
+        ),
+      ),
+    );
+    renderCell({
+      row: { ...row, customPrice: '500.00' },
+      isSelected: true,
+      onSelect: vi.fn(),
+      onDeselect: vi.fn(),
+    });
+    // Starts as a skeleton (seeded price, no result yet)...
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    // ...then the error resolves it to the default "—" badge, skeleton gone.
+    expect(await screen.findByText('—')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('reveals the calculated-profit block once a price is typed', async () => {
+    mockEstimate('34.00');
+    const { user } = renderCell({ row, isSelected: false, onSelect: vi.fn(), onDeselect: vi.fn() });
+    // Empty card: no calculated-profit block.
+    expect(screen.queryByText(/hesaplanan kâr/i)).toBeNull();
+    await user.type(screen.getByPlaceholderText(/fiyat girin/i), '500');
+    // A price in the input reveals the block (its estimate then fills the badge).
+    expect(await screen.findByText(/hesaplanan kâr/i)).toBeInTheDocument();
   });
 
   it('seeds the input from a persisted custom price', () => {

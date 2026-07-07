@@ -831,6 +831,11 @@
       "NO_COST": "No cost — add a cost profile for this product.",
       "NO_SHIPPING": "No shipping estimate — carrier or desi setup is missing."
     },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup"
+    },
     "list": {
       "upload": "Upload Excel File",
       "search": "Search tariffs…",
@@ -1043,6 +1048,11 @@
       "NO_COST": "No cost — add a cost profile for this product.",
       "NO_SHIPPING": "No shipping estimate — carrier or desi setting is missing."
     },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup"
+    },
     "list": {
       "upload": "Upload Excel File",
       "search": "Search tariffs…",
@@ -1237,6 +1247,12 @@
       "NO_COST": "No cost — add a cost profile for this product.",
       "NO_SHIPPING": "No shipping estimate — carrier or desi setting is missing.",
       "NO_COMMISSION": "Commission rate unresolved — no commission tariff band or category rate found for this product."
+    },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup",
+      "NO_COMMISSION": "Commission unresolved"
     },
     "list": {
       "upload": "Upload Excel File",
@@ -1459,6 +1475,11 @@
       "NO_PRODUCT": "Product not matched — this barcode is not in your product catalog.",
       "NO_COST": "No cost — add a cost profile for this product.",
       "NO_SHIPPING": "No shipping estimate — the carrier or desi setting is missing."
+    },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup"
     },
     "list": {
       "upload": "Upload Excel File",

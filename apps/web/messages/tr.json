@@ -831,6 +831,11 @@
       "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
       "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik."
     },
+    "reasonShort": {
+      "NO_PRODUCT": "Ürün eşleşmedi",
+      "NO_COST": "Maliyet girin",
+      "NO_SHIPPING": "Kargo ayarı ekleyin"
+    },
     "list": {
       "upload": "Excel Dosyası Yükle",
       "search": "Tarife ara…",
@@ -1043,6 +1048,11 @@
       "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
       "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik."
     },
+    "reasonShort": {
+      "NO_PRODUCT": "Ürün eşleşmedi",
+      "NO_COST": "Maliyet girin",
+      "NO_SHIPPING": "Kargo ayarı ekleyin"
+    },
     "list": {
       "upload": "Excel Dosyası Yükle",
       "search": "Tarife ara…",
@@ -1237,6 +1247,12 @@
       "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
       "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik.",
       "NO_COMMISSION": "Komisyon oranı çözülemedi — bu ürün için komisyon tarifesi bandı veya kategori komisyonu bulunamadı."
+    },
+    "reasonShort": {
+      "NO_PRODUCT": "Ürün eşleşmedi",
+      "NO_COST": "Maliyet girin",
+      "NO_SHIPPING": "Kargo ayarı ekleyin",
+      "NO_COMMISSION": "Komisyon çözülemedi"
     },
     "list": {
       "upload": "Excel Dosyası Yükle",
@@ -1459,6 +1475,11 @@
       "NO_PRODUCT": "Ürün eşleşmedi — bu barkod ürün kataloğunuzda yok.",
       "NO_COST": "Maliyet yok — bu ürüne bir maliyet profili ekleyin.",
       "NO_SHIPPING": "Kargo tahmini yok — kargo firması veya desi ayarı eksik."
+    },
+    "reasonShort": {
+      "NO_PRODUCT": "Ürün eşleşmedi",
+      "NO_COST": "Maliyet girin",
+      "NO_SHIPPING": "Kargo ayarı ekleyin"
     },
     "list": {
       "upload": "Excel Dosyası Yükle",

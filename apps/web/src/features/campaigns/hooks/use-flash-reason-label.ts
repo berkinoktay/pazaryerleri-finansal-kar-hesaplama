@@ -37,3 +37,33 @@ export function useFlashReasonLabel(): (reason: FlashProductItemReason) => strin
     [t],
   );
 }
+
+/**
+ * Flash-scoped sibling of {@link useReasonEmptyLabel}: maps the not-calculable `reason` to a
+ * SHORT, action-oriented empty label (e.g. "Maliyet girin") for the row's {@link
+ * ProfitBadge} `emptyLabel`. A `null` reason (a calculable row) maps to `undefined` so the
+ * badge keeps its mute em-dash.
+ */
+export function useFlashReasonEmptyLabel(): (
+  reason: FlashProductItemReason | null,
+) => string | undefined {
+  const t = useTranslations('flashProductsPage.reasonShort');
+  return React.useCallback(
+    (reason) => {
+      if (reason === null) return undefined;
+      switch (reason) {
+        case 'NO_PRODUCT':
+          return t('NO_PRODUCT');
+        case 'NO_COST':
+          return t('NO_COST');
+        case 'NO_SHIPPING':
+          return t('NO_SHIPPING');
+        default: {
+          const _exhaustive: never = reason;
+          throw new Error(`Unhandled flash product reason: ${String(_exhaustive)}`);
+        }
+      }
+    },
+    [t],
+  );
+}
