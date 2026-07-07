@@ -54,6 +54,11 @@ interface CurrentWire {
   marginPct: string | null;
   isBest: boolean;
 }
+interface CommissionBandWire {
+  lowerLimit: string | null;
+  upperLimit: string | null;
+  commissionPct: string;
+}
 interface ItemWire {
   id: string;
   barcode: string;
@@ -71,6 +76,7 @@ interface ItemWire {
   reason: string | null;
   current: CurrentWire;
   tiers: TierWire[];
+  commissionBands: CommissionBandWire[] | null;
   bestTierKey: string | null;
   selectedTier: string | null;
   customPrice: string | null;
@@ -379,6 +385,15 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     // commissionPct is serialized at 4-decimal precision (matching the commission-tariff
     // vertical's `toFixed(4)`), so the full applied rate is preserved on the wire.
     expect(matched?.tiers.map((t) => t.commissionPct)).toEqual(['13.1000', '11.5000', '8.8000']);
+    // The band-sourced item surfaces its full commission-band ladder (top-down), so the
+    // UI can label WHICH band a price lands in. Money at 2 decimals, percent at 4 —
+    // omitted limits (band1 upper, band4 lower) serialize to null.
+    expect(matched?.commissionBands).toEqual([
+      { lowerLimit: '300.00', upperLimit: null, commissionPct: '19.0000' },
+      { lowerLimit: '280.00', upperLimit: '299.99', commissionPct: '13.1000' },
+      { lowerLimit: '250.00', upperLimit: '279.99', commissionPct: '11.5000' },
+      { lowerLimit: null, upperLimit: '249.99', commissionPct: '8.8000' },
+    ]);
     // The "do nothing" baseline (current price + its band commission) is computed.
     expect(matched?.current.netProfit).not.toBeNull();
     expect(matched?.current.marginPct).not.toBeNull();
@@ -393,6 +408,8 @@ describe('Advantage Product Labels - list / detail / commission-source / delete'
     expect(unmatched?.calculable).toBe(false);
     expect(unmatched?.reason).toBe('NO_PRODUCT');
     expect(unmatched?.tiers.every((t) => t.netProfit === null)).toBe(true);
+    // Its barcode is not in the commission tariff → no band ladder to show (null).
+    expect(unmatched?.commissionBands).toBeNull();
     // An uncalculable item is never "En kârlı" — neither a tier nor the current baseline.
     expect(unmatched?.bestTierKey).toBeNull();
     expect(unmatched?.current.isBest).toBe(false);

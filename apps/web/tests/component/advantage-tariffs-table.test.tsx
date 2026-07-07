@@ -88,6 +88,20 @@ const row: AdvantageTariffRow = {
   selectedTier: null,
   customPrice: null,
   bands: THREE_TIERS,
+  commissionBands: null,
+};
+
+// The four-band commission ladder Trendyol resolves for a banded product. Top-down
+// (band1 → band4): open above / two windows / open below. The estimate mock answers
+// "500.00" via a band, which lands in band1 ("₺450,00 ve üzeri").
+const BANDED_ROW: AdvantageTariffRow = {
+  ...row,
+  commissionBands: [
+    { lowerLimit: '450.00', upperLimit: null, commissionPct: '19.0000' },
+    { lowerLimit: '300.00', upperLimit: '449.99', commissionPct: '13.1000' },
+    { lowerLimit: '200.00', upperLimit: '299.99', commissionPct: '10.7000' },
+    { lowerLimit: null, upperLimit: '199.99', commissionPct: '6.5000' },
+  ],
 };
 
 // A row where nothing is strictly profitable — current (-30) and every tier (-10) lose —
@@ -560,6 +574,46 @@ describe('AdvantageTariffsTable — a tier card is exclusive with a custom price
     );
     // … and the custom price is no longer selected (its commit button is back).
     expect(screen.getByRole('button', { name: /bu fiyatı seç/i })).toBeInTheDocument();
+  });
+});
+
+describe('AdvantageTariffsTable — commission-band hint on the custom-price cell', () => {
+  it('labels the commission band the typed price lands in once the estimate returns', async () => {
+    mockEstimate('345.00', '19.00');
+    const { user } = render(<TableHarness rows={[BANDED_ROW]} />);
+
+    // Before typing: no range label, just the placeholder hint.
+    expect(screen.queryByText(/ve üzeri/i)).toBeNull();
+
+    // Type a what-if price; its band (500 → band1 "₺450,00 ve üzeri") is named once the
+    // estimate lands. The band the price falls in is found CLIENT-side (comparison only).
+    await user.type(screen.getByPlaceholderText(/fiyat girin/i), '500');
+    await waitFor(() => expect(screen.getByText(/₺450,00 ve üzeri/)).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+  });
+
+  it('opens a popover listing every commission band with its rate', async () => {
+    mockEstimate('345.00');
+    const { user } = render(<TableHarness rows={[BANDED_ROW]} />);
+
+    // The ⓘ hint is present without any typing (the ladder is server-provided on the row).
+    await user.click(screen.getByRole('button', { name: /komisyon bantlarını göster/i }));
+
+    // The popover lists the four bands top-down, each with its window + commission.
+    expect(screen.getByText('Komisyon bantları')).toBeInTheDocument();
+    expect(screen.getByText('₺450,00 ve üzeri')).toBeInTheDocument();
+    expect(screen.getByText('₺300,00–₺449,99')).toBeInTheDocument();
+    expect(screen.getByText('₺199,99 ve altı')).toBeInTheDocument();
+    // The lowest band's commission renders in the Turkish percent convention.
+    expect(screen.getByText('%6,50')).toBeInTheDocument();
+  });
+
+  it('renders no commission-band hint for a category-sourced row (no ladder)', () => {
+    mockEstimate('345.00');
+    // The base `row` has commissionBands === null (category rate) — no ladder to show.
+    render(<TableHarness rows={[row]} />);
+    expect(screen.queryByRole('button', { name: /komisyon bantlarını göster/i })).toBeNull();
   });
 });
 

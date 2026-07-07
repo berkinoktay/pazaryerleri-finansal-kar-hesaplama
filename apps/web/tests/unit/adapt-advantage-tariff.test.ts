@@ -52,6 +52,7 @@ function item(overrides: Partial<AdvantageTariffDetailItem> = {}): AdvantageTari
       apiTier('tier2', '100.00', '14.00', '40.00', '18.00'),
       apiTier('tier3', '90.00', '12.60', '30.00', '15.00'),
     ],
+    commissionBands: null,
     bestTierKey: 'tier2',
     selectedTier: 'tier2',
     customPrice: null,
@@ -114,6 +115,27 @@ describe('toAdvantageTariffView', () => {
       netProfit: '40.00',
       marginPct: '18.00',
     });
+  });
+
+  it('passes the commission-band ladder through verbatim (array and null)', () => {
+    // A band-sourced item carries its ladder; a category-sourced item carries null.
+    const banded = toAdvantageTariffView(
+      detail([
+        item({
+          commissionBands: [
+            { lowerLimit: '300.00', upperLimit: null, commissionPct: '19.0000' },
+            { lowerLimit: null, upperLimit: '299.99', commissionPct: '8.8000' },
+          ],
+        }),
+      ]),
+    ).rows[0];
+    expect(banded.commissionBands).toEqual([
+      { lowerLimit: '300.00', upperLimit: null, commissionPct: '19.0000' },
+      { lowerLimit: null, upperLimit: '299.99', commissionPct: '8.8000' },
+    ]);
+
+    const category = toAdvantageTariffView(detail([item({ commissionBands: null })])).rows[0];
+    expect(category.commissionBands).toBeNull();
   });
 
   it('carries a variable number of tiers (0–3) and drops any null-key tier', () => {

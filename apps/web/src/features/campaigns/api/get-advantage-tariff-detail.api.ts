@@ -6,6 +6,7 @@ import { throwApiError } from '@/lib/api-error';
 export type AdvantageTariffDetail = components['schemas']['AdvantageTariffDetail'];
 export type AdvantageTariffDetailItem = components['schemas']['AdvantageTariffDetailItem'];
 export type AdvantageTier = components['schemas']['AdvantageTier'];
+export type AdvantageCommissionBand = components['schemas']['AdvantageCommissionBand'];
 export type AdvantageCurrentScenario = components['schemas']['AdvantageCurrentScenario'];
 export type AdvantageCommissionSource = components['schemas']['AdvantageCommissionSource'];
 export type CommissionSourceMode = components['schemas']['CommissionSourceMode'];

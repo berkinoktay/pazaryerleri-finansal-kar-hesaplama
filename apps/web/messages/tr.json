@@ -1315,6 +1315,13 @@
       "selectCustom": "Bu fiyatı seç",
       "customSelected": "Seçildi"
     },
+    "commissionBands": {
+      "title": "Komisyon bantları",
+      "hint": "Komisyon bantlarını göster",
+      "above": "{price} ve üzeri",
+      "range": "{lower}–{upper}",
+      "below": "{price} ve altı"
+    },
     "tier": {
       "tier1": "Avantaj",
       "tier2": "Çok Avantaj",

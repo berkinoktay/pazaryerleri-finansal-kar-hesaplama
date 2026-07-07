@@ -1315,6 +1315,13 @@
       "selectCustom": "Select this price",
       "customSelected": "Selected"
     },
+    "commissionBands": {
+      "title": "Commission bands",
+      "hint": "Show commission bands",
+      "above": "{price} and above",
+      "range": "{lower}–{upper}",
+      "below": "{price} and below"
+    },
     "tier": {
       "tier1": "Advantage",
       "tier2": "Great Advantage",

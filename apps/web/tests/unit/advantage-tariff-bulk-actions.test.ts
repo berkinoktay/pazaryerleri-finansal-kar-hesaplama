@@ -59,6 +59,7 @@ function row(id: string, overrides: Partial<AdvantageTariffRow> = {}): Advantage
     selectedTier: null,
     customPrice: null,
     bands: [tier('tier1', '10', '8'), tier('tier2', '30', '20'), tier('tier3', '20', '15')],
+    commissionBands: null,
     ...overrides,
   };
 }

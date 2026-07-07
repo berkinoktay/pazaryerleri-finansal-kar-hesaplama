@@ -1,4 +1,5 @@
 import type {
+  AdvantageCommissionBand,
   AdvantageCommissionSource,
   AdvantageTariffDetail,
   AdvantageTariffDetailItem,
@@ -59,6 +60,13 @@ export interface AdvantageTariffRow {
   customPrice: string | null;
   /** The row's star tiers as band-like candidates (`bands.length` is 0–3). */
   bands: readonly AdvantageBand[];
+  /**
+   * The product's commission-band ladder (top-down), so the custom-price cell can label
+   * WHICH commission band a typed price lands in — distinct from the star-tier thresholds.
+   * Null when the commission source is the category rate or the barcode has no matching
+   * band (there is no ladder to show).
+   */
+  commissionBands: readonly AdvantageCommissionBand[] | null;
 }
 
 /**
@@ -104,6 +112,7 @@ function toRow(item: AdvantageTariffDetailItem): AdvantageTariffRow {
     reason: item.reason,
     selectedTier: item.selectedTier,
     customPrice: item.customPrice,
+    commissionBands: item.commissionBands,
     // flatMap drops any tier with a null key (never happens for a real tier) and narrows
     // `tier.key` to a concrete star key inside the guard.
     bands: item.tiers.flatMap((tier) =>

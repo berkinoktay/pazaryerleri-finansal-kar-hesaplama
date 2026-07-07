@@ -13,6 +13,16 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Advantage tariff detail item gained a `commissionBands` field** (`GET
+  /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}`) — Each detail item now
+  carries `commissionBands`: the product's commission-band ladder (`AdvantageCommissionBand[]`,
+  top-down band1 → band4, each `{ lowerLimit, upperLimit, commissionPct }` with money at 2 decimals
+  and percent at 4), resolved from the item's commission source. This lets the UI show WHICH
+  commission band a price lands in (the "Ürün Komisyon Teklifleri" popup equivalent), so a seller
+  can tell tier thresholds apart from commission-band boundaries. `null` when the source is the
+  category rate or the barcode has no matching band (no ladder to show). The bands are read from the
+  same source already loaded for the per-tier compute — no extra query. Non-breaking (additive
+  field).
 - **Advantage tariff item estimate gained a `scenario: "current"` mode** (`POST
   /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}/items/{itemId}/estimate`)
   — In addition to the custom-price mode (`price`), the body now accepts `{ scenario: "current" }`

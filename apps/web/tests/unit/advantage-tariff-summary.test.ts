@@ -37,6 +37,7 @@ function makeRow(
     selectedTier: null,
     customPrice: null,
     bands: [tier(tierNetProfit)],
+    commissionBands: null,
   };
 }
 
