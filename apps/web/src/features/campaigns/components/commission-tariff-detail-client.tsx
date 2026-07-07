@@ -69,6 +69,7 @@ export function CommissionTariffDetailClient({
 }): React.ReactElement {
   const tPage = useTranslations('commissionTariffsPage');
   const tCommon = useTranslations('common');
+  const tExport = useTranslations('commissionTariffsPage.exportDialog');
   const router = useRouter();
   const detail = useCommissionTariffDetail(orgId ?? '', storeId, tariffId);
   const updateSelections = useUpdateSelections(orgId ?? '', storeId ?? '', tariffId);
@@ -492,6 +493,17 @@ export function CommissionTariffDetailClient({
           open={exportOpen}
           onOpenChange={setExportOpen}
           files={previewFiles}
+          labels={{
+            title: tExport('title'),
+            description: tExport('description'),
+            fileName: (days) => tExport('fileName', { days }),
+            productCount: (count) => tExport('productCount', { count }),
+            zipNote: (count) => tExport('zipNote', { count }),
+            cancel: tExport('cancel'),
+            download: tExport('download'),
+            saving: tExport('saving'),
+            exporting: tExport('exporting'),
+          }}
           // Two-phase: selections PATCH first, then the file downloads — so the
           // dialog can say which is happening ("kaydediliyor…" → "indiriliyor…").
           isSaving={updateSelections.isPending}

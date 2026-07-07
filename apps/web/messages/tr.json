@@ -1010,7 +1010,18 @@
     "search": "Ürün, model veya barkod ara",
     "actions": {
       "upload": "Excel Yükle",
-      "saveExport": "Kaydet ve İndir"
+      "export": "Dışa aktar"
+    },
+    "exportDialog": {
+      "title": "Plus tarifesini dışa aktar",
+      "description": "Seçimlerin aşağıdaki dosyalara aktarılıp indirilecek.",
+      "fileName": "{days} Günlük Plus Fiyatı",
+      "productCount": "{count} ürün",
+      "zipNote": "{count} dosya tek ZIP olarak inecek.",
+      "cancel": "Vazgeç",
+      "download": "İndir",
+      "saving": "Seçimler kaydediliyor…",
+      "exporting": "İndiriliyor…"
     },
     "templates": {
       "add": "Yeni tarife",
@@ -1095,33 +1106,25 @@
     "table": {
       "product": "Ürün Bilgileri",
       "current": "Güncel fiyat",
-      "salePrice": "Satış fiyatı",
-      "displayPrice": "Müşterinin gördüğü fiyat",
       "currentCommission": "Güncel komisyon",
-      "currentPrice": "Güncel Fiyat",
       "plus": "Plus Fiyat Aralığı",
       "priceRange": "Fiyat Aralığı",
-      "plusCeiling": "Plus fiyat üst limiti",
       "plusCommission": "Plus komisyon",
-      "commission": "komisyon",
-      "stock": "Stok",
-      "profit": "Kâr",
-      "loss": "Zarar",
+      "best": "En kârlı",
       "calculatedProfit": "Hesaplanan kâr",
       "vsCurrent": "Güncele göre",
-      "plusCommissionApplies": "Plus komisyonu {pct} uygulanır",
       "join": "Tavan fiyata katıl",
       "joined": "Katıldın",
-      "joinHint": "Fiyatını üst limite çekip Plus komisyonundan yararlanırsın",
-      "plusIsBetter": "Plus daha kârlı",
-      "plusIsWorse": "Plus daha az kârlı",
       "customPrice": "Plus Fiyatı",
       "enterPrice": "Fiyat girin",
+      "enterCost": "Maliyet girin",
       "customPriceHint": "Üst limitin altında bir Plus fiyatı dene",
       "selectCustom": "Bu fiyatla katıl",
       "customSelected": "Katıldın",
       "ceilingQualifier": "ve altı"
     },
+    "periodDayLabel": "{count} Gün",
+    "periodsAriaLabel": "Dönemler",
     "noResults": {
       "title": "Eşleşen ürün yok",
       "description": "Arama veya filtrelerinizi değiştirmeyi deneyin."
@@ -1143,7 +1146,8 @@
         "empty": "Dosyada ürün satırı bulunamadı.",
         "noPeriod": "Dosyada tarife dönemi bulunamadı.",
         "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
-        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+        "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin.",
+        "DUPLICATE_TARIFF_WEEK": "Bu tarih aralığı için zaten bir Plus komisyon tarifesi var."
       }
     },
     "breakdown": {
@@ -1164,7 +1168,7 @@
     },
     "smartSelect": {
       "label": "Akıllı Seçim",
-      "joinAll": "Tümünü Plus'a kat",
+      "selectBest": "En kârlıyı seç",
       "joinProfitable": "Sadece Plus'ın kârlı olduğu ürünler",
       "clear": "Seçimleri temizle",
       "scopeHint": "Filtre uygulanmışsa yalnız görünen ürünlere uygulanır."
@@ -1181,9 +1185,6 @@
       "selectionUnselected": "Katılmadın",
       "groupLabel": "Filtreler",
       "all": "Tümü"
-    },
-    "actionBar": {
-      "joined": "{count} ürün Plus'a katıldı"
     },
     "status": {
       "exported": "İndirildi",

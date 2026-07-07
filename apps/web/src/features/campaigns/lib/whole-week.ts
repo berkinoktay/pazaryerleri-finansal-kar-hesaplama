@@ -1,6 +1,13 @@
-import type { CustomPriceMap, SelectionMap } from './bulk-actions';
-
 const FULL_WEEK_DAYS = 7;
+
+/**
+ * Minimal per-row choice maps the whole-week helpers read — STRUCTURAL so both
+ * verticals feed them: a selection key (a commission band key or the Plus `'plus'`
+ * key), and a custom price whose only read field is `price`. The commission
+ * `SelectionMap`/`CustomPriceMap` and the Plus equivalents both satisfy these.
+ */
+export type ChoiceSelectionMap = Record<string, string | null>;
+export type ChoiceCustomPriceMap = Record<string, { readonly price: string } | null>;
 
 /**
  * "7 günlük" model for a split-week tariff (§ plus-tariff-multiperiod-parity design).
@@ -47,8 +54,8 @@ export function buildWholeWeekIndex(periods: readonly PeriodRows[]): WholeWeekIn
 /** A product's choice folded into one comparable token (a custom price beats a band). */
 export function choiceSignature(
   rowId: string,
-  selection: SelectionMap,
-  customPrices: CustomPriceMap,
+  selection: ChoiceSelectionMap,
+  customPrices: ChoiceCustomPriceMap,
 ): string | null {
   const custom = customPrices[rowId]?.price;
   if (custom != null) return `custom:${custom}`;
@@ -58,8 +65,8 @@ export function choiceSignature(
 /** True when every sibling period shares the SAME non-empty choice. */
 export function isWholeWeek(
   ids: readonly string[],
-  selection: SelectionMap,
-  customPrices: CustomPriceMap,
+  selection: ChoiceSelectionMap,
+  customPrices: ChoiceCustomPriceMap,
 ): boolean {
   if (ids.length < 2) return false;
   const first = ids[0];
@@ -85,8 +92,8 @@ export interface ExportPreviewFile {
  */
 export function computeExportPreview(
   periods: readonly PreviewPeriod[],
-  selection: SelectionMap,
-  customPrices: CustomPriceMap,
+  selection: ChoiceSelectionMap,
+  customPrices: ChoiceCustomPriceMap,
 ): ExportPreviewFile[] {
   if (periods.length === 0) return [];
   const weekDayCount = periods.reduce((sum, p) => sum + (p.dayCount ?? 0), 0) || FULL_WEEK_DAYS;

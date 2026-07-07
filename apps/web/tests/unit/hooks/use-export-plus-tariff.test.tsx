@@ -24,11 +24,18 @@ function makeWrapper(client: QueryClient) {
 }
 
 describe('useExportPlusTariff', () => {
-  it('resolves with the patched xlsx Blob on success', async () => {
+  it('resolves with the patched file bytes + the server-chosen filename on success', async () => {
     server.use(
       http.post(
         ENDPOINT,
-        () => new HttpResponse(XLSX_BYTES, { status: 200, headers: { 'content-type': XLSX_TYPE } }),
+        () =>
+          new HttpResponse(XLSX_BYTES, {
+            status: 200,
+            headers: {
+              'content-type': XLSX_TYPE,
+              'content-disposition': "attachment; filename*=UTF-8''plus-tarife.xlsx",
+            },
+          }),
       ),
     );
 
@@ -38,8 +45,9 @@ describe('useExportPlusTariff', () => {
     result.current.mutate(TARIFF_ID);
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeInstanceOf(Blob);
-    expect(result.current.data?.size).toBe(XLSX_BYTES.byteLength);
+    expect(result.current.data?.blob).toBeInstanceOf(Blob);
+    expect(result.current.data?.blob.size).toBe(XLSX_BYTES.byteLength);
+    expect(result.current.data?.filename).toBe('plus-tarife.xlsx');
   });
 
   it('invalidates both the list and that tariff detail on success', async () => {

@@ -46,6 +46,8 @@ function useFileErrorMessage(): (code: string | null | undefined) => string | nu
         return t('empty');
       case 'NO_TARIFF_PERIOD':
         return t('noPeriod');
+      case 'DUPLICATE_TARIFF_WEEK':
+        return t('DUPLICATE_TARIFF_WEEK');
       case 'ROW_CAP_EXCEEDED':
       case 'COL_CAP_EXCEEDED':
       case 'PAYLOAD_TOO_LARGE':

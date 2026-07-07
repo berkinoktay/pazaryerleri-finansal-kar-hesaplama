@@ -65,6 +65,10 @@ export const PlusTariffListItemSchema = z
     selectedCount: z.number().int(),
     exported: z.boolean(),
     validity: PlusTariffValiditySchema.nullable(),
+    // The tariff's week window (min period start … max period end), parity with the
+    // product commission tariff list. Null when the period dates were unparseable.
+    weekStartsAt: z.string().datetime().nullable(),
+    weekEndsAt: z.string().datetime().nullable(),
     updatedAt: z.string().datetime(),
   })
   .openapi('PlusTariffListItem');
@@ -100,14 +104,26 @@ export const PlusTariffDetailItemSchema = z
       .openapi({ description: 'Barkod-eşleşen ürünün birincil görseli; eşleşme yoksa null.' }),
     category: z.string().nullable(),
     brand: z.string().nullable(),
-    calculable: z.boolean(),
-    reason: PlusTariffItemReasonSchema.nullable(),
-    /** Current price @ current commission (the seller's status quo). */
-    current: PlusScenarioSchema,
-    /** Plus price ceiling @ reduced Plus commission (the offer). */
+    /** Güncel TSF (the seller's current sale price). */
+    currentPrice: z.string(),
+    /** Komisyona Esas Fiyat — the customer-seen price the current scenario is priced on. */
+    commissionBasePrice: z.string().openapi({
+      description:
+        'Komisyona esas fiyat (müşterinin gördüğü fiyat) — güncel kâr bu fiyattan hesaplanır.',
+    }),
+    currentCommissionPct: z.string(),
+    currentNetProfit: z.string().nullable().openapi({
+      description: 'Komisyona esas fiyat + güncel komisyonla net kâr; hesaplanamıyorsa null.',
+    }),
+    currentMarginPct: z.string().nullable(),
+    /** Plus Fiyat Üst Limiti — the ceiling price to qualify for the Plus commission. */
+    plusPriceUpperLimit: z.string(),
+    /** Plus price (custom, else the ceiling) @ reduced Plus commission (the offer). */
     plus: PlusScenarioSchema,
     /** True when the Plus scenario nets more profit than the current one. */
     plusIsBetter: z.boolean(),
+    calculable: z.boolean(),
+    reason: PlusTariffItemReasonSchema.nullable(),
     /** Seller's opt-in: has this product been joined to Plus. */
     selected: z.boolean(),
     /** Optional seller override of the Plus price (what-if); null = the ceiling. */
@@ -115,14 +131,24 @@ export const PlusTariffDetailItemSchema = z
   })
   .openapi('PlusTariffDetailItem');
 
+export const PlusTariffPeriodSchema = z
+  .object({
+    id: z.string().uuid(),
+    dateRangeLabel: z.string(),
+    // The N from "Tarih Aralığı (N Gün)" — lets the UI label the sub-period tabs
+    // "3 Gün" / "4 Gün" (vs a full-week "7 Gün"). Null if the header lacked it.
+    dayCount: z.number().int().nullable(),
+    validity: PlusTariffValiditySchema.nullable(),
+    items: z.array(PlusTariffDetailItemSchema),
+  })
+  .openapi('PlusTariffPeriod');
+
 export const PlusTariffDetailSchema = z
   .object({
     id: z.string().uuid(),
     name: z.string(),
-    dateRangeLabel: z.string(),
-    validity: PlusTariffValiditySchema.nullable(),
     exported: z.boolean(),
-    items: z.array(PlusTariffDetailItemSchema),
+    periods: z.array(PlusTariffPeriodSchema),
   })
   .openapi('PlusTariffDetail');
 
@@ -139,6 +165,7 @@ export const ImportPlusTariffResponseSchema = z
   .object({
     tariffId: z.string().uuid(),
     productCount: z.number().int(),
+    periodCount: z.number().int(),
     itemCount: z.number().int(),
     matched: z.number().int(),
     unmatched: z.number().int(),
@@ -172,22 +199,46 @@ export const UpdatePlusSelectionsResponseSchema = z
 
 export type PlusTariffSelection = z.infer<typeof PlusTariffSelectionSchema>;
 
-// ─── Estimate (on-demand breakdown at an arbitrary Plus price) ──────────────
+// ─── Estimate (on-demand breakdown for a Plus tariff item) ──────────────────
 //
-// The custom-price what-if: the full profit breakdown at an arbitrary Plus price
-// under the item's reduced Plus commission. The detail already carries both
-// computed scenarios, so this exists only for the seller's free-form what-if. The
-// breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
+// One endpoint serves TWO frontend needs, both on-demand so the detail payload
+// stays light:
+//   1. Custom-price what-if — pass a `price`; the item's reduced Plus commission
+//      is applied at it.
+//   2. Current scenario (`scenario: 'current'`) — pass neither price; the item's
+//      own commission-base price + current commission are used, so the breakdown
+//      matches the detail row's `currentNetProfit` badge byte-for-byte.
+// The full profit breakdown is the SAME shape the Ürün Fiyatlandırma quote returns.
 
 export const EstimatePlusPriceBodySchema = z
   .object({
     price: z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_CUSTOM_PRICE')
+      .optional()
+      .openapi({ description: 'Değerlendirilecek satış fiyatı (GROSS, TL).', example: '350.00' }),
+    scenario: z
+      .literal('current')
+      .optional()
       .openapi({
-        description: 'Değerlendirilecek satış fiyatı (GROSS, TL).',
-        example: '350.00',
+        description:
+          'Güncel senaryonun dökümü — item’ın komisyona esas fiyatı + güncel komisyonuyla ' +
+          'hesaplanır; price verilmez.',
       }),
+  })
+  .superRefine((val, ctx) => {
+    // `scenario: 'current'` derives BOTH the price and the commission from the item
+    // itself, so a caller-supplied price is contradictory — reject it.
+    if (val.scenario === 'current') {
+      if (val.price !== undefined) {
+        ctx.addIssue({ code: 'custom', message: 'INVALID_ESTIMATE_MODE', path: ['price'] });
+      }
+      return;
+    }
+    // The custom-price mode requires an explicit price.
+    if (val.price === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'PRICE_REQUIRED', path: ['price'] });
+    }
   })
   .openapi('EstimatePlusPriceBody');
 
@@ -210,4 +261,5 @@ export type EstimatePlusPriceResult = z.infer<typeof EstimatePlusPriceResultSche
 export type PlusTariffListItem = z.infer<typeof PlusTariffListItemSchema>;
 export type PlusScenario = z.infer<typeof PlusScenarioSchema>;
 export type PlusTariffDetailItem = z.infer<typeof PlusTariffDetailItemSchema>;
+export type PlusTariffPeriod = z.infer<typeof PlusTariffPeriodSchema>;
 export type PlusTariffDetail = z.infer<typeof PlusTariffDetailSchema>;

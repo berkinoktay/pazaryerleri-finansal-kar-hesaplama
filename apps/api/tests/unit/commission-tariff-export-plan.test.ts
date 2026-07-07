@@ -15,7 +15,7 @@ import {
   ZIP_MIME,
   type ExportFile,
   type PeriodSelection,
-} from '@/services/commission-tariff-export.service';
+} from '@/services/tariff-export-commons';
 
 function period(dayCount: number | null, prices: Record<string, string>): PeriodSelection {
   return { dayCount, pricesByBarcode: new Map(Object.entries(prices)) };

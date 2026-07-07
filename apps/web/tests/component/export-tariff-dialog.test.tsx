@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ExportTariffDialog } from '@/features/campaigns/components/export-tariff-dialog';
+import {
+  ExportTariffDialog,
+  type ExportTariffDialogLabels,
+} from '@/features/campaigns/components/export-tariff-dialog';
 
 import { render, screen } from '../helpers/render';
 
@@ -10,6 +13,20 @@ const FILES = [
   { dayCount: 7, count: 3 },
 ];
 
+// Labels-as-props (the caller owns the i18n lookup). These mirror the commission
+// namespace's Turkish copy so the assertions read the same as before the refactor.
+const LABELS: ExportTariffDialogLabels = {
+  title: 'Tarifeyi dışa aktar',
+  description: 'Seçimlerin aşağıdaki dosyalara aktarılıp indirilecek.',
+  fileName: (days) => `${days} Günlük Fiyat`,
+  productCount: (count) => `${count} ürün`,
+  zipNote: (count) => `${count} dosya tek ZIP olarak inecek.`,
+  cancel: 'Vazgeç',
+  download: 'İndir',
+  saving: 'Seçimler kaydediliyor…',
+  exporting: 'İndiriliyor…',
+};
+
 describe('ExportTariffDialog', () => {
   it('previews each window file with its product count and confirms on download', async () => {
     const onConfirm = vi.fn();
@@ -18,6 +35,7 @@ describe('ExportTariffDialog', () => {
         open
         onOpenChange={vi.fn()}
         files={FILES}
+        labels={LABELS}
         isSaving={false}
         isDownloading={false}
         onConfirm={onConfirm}
@@ -43,6 +61,7 @@ describe('ExportTariffDialog', () => {
         open
         onOpenChange={vi.fn()}
         files={FILES}
+        labels={LABELS}
         isSaving
         isDownloading={false}
         onConfirm={vi.fn()}
@@ -57,6 +76,7 @@ describe('ExportTariffDialog', () => {
         open
         onOpenChange={vi.fn()}
         files={FILES}
+        labels={LABELS}
         isSaving={false}
         isDownloading
         onConfirm={vi.fn()}
@@ -71,6 +91,7 @@ describe('ExportTariffDialog', () => {
         open
         onOpenChange={vi.fn()}
         files={[{ dayCount: 7, count: 1 }]}
+        labels={LABELS}
         isSaving={false}
         isDownloading={false}
         onConfirm={vi.fn()}

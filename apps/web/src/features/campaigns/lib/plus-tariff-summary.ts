@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 
-import type { PlusScenario, PlusTariffDetailItem } from '../types';
-import { type PlusCustomPriceMap, type PlusSelectionMap } from './plus-bulk-actions';
+import type { PlusTariffRow } from './adapt-plus-tariff';
+import { plusOffer, type PlusCustomPriceMap, type PlusSelectionMap } from './plus-bulk-actions';
 
 export interface PlusTariffSummary {
   /** Products listed in this Plus window. */
@@ -14,28 +14,23 @@ export interface PlusTariffSummary {
   currentProfit: Decimal;
 }
 
-/** A scenario's net profit as a Decimal, or zero when the row is not calculable. */
-function profitOrZero(scenario: PlusScenario): Decimal {
-  return scenario.netProfit !== null ? new Decimal(scenario.netProfit) : new Decimal(0);
-}
-
 /** A raw net-profit string as a Decimal, or zero when null. */
-function stringProfitOrZero(netProfit: string | null): Decimal {
+function profitOrZero(netProfit: string | null): Decimal {
   return netProfit !== null ? new Decimal(netProfit) : new Decimal(0);
 }
 
 /**
- * Aggregate the seller's Plus opt-in choices for the header KPI strip. This only
- * SUMS already-computed profit figures for display — it does not calculate
+ * Aggregate the seller's Plus opt-in choices for the header KPI strip. This only SUMS
+ * already-computed profit figures for display — it does not calculate
  * profit/commission/VAT (that is the backend engine's job, per the no
  * frontend-financial-calculation rule). Uncalculable scenarios contribute zero.
  *
- * A row is joined either at the CEILING (`selection[id] === true`, whose profit is
- * `row.plus.netProfit`) or at a CUSTOM price (`customPrices[id] != null`, whose
+ * A row is joined either at the CEILING (`selection[id] === 'plus'`, whose profit is
+ * the Plus offer's `netProfit`) or at a CUSTOM price (`customPrices[id] != null`, whose
  * profit was captured from the estimate at confirm time) — never both.
  */
 export function summarizePlusSelection(
-  rows: readonly PlusTariffDetailItem[],
+  rows: readonly PlusTariffRow[],
   selection: PlusSelectionMap,
   customPrices: PlusCustomPriceMap,
 ): PlusTariffSummary {
@@ -44,14 +39,14 @@ export function summarizePlusSelection(
   let currentProfit = new Decimal(0);
 
   for (const row of rows) {
-    currentProfit = currentProfit.add(profitOrZero(row.current));
+    currentProfit = currentProfit.add(profitOrZero(row.currentNetProfit));
     const custom = customPrices[row.id];
     if (custom != null) {
       joinedCount += 1;
-      joinedProfit = joinedProfit.add(stringProfitOrZero(custom.netProfit));
-    } else if (selection[row.id] === true) {
+      joinedProfit = joinedProfit.add(profitOrZero(custom.netProfit));
+    } else if (selection[row.id] === 'plus') {
       joinedCount += 1;
-      joinedProfit = joinedProfit.add(profitOrZero(row.plus));
+      joinedProfit = joinedProfit.add(profitOrZero(plusOffer(row)?.netProfit ?? null));
     }
   }
 
