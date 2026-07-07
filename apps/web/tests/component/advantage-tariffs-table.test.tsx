@@ -597,16 +597,25 @@ describe('AdvantageTariffsTable — commission-band hint on the custom-price cel
     mockEstimate('345.00');
     const { user } = render(<TableHarness rows={[BANDED_ROW]} />);
 
-    // The ⓘ hint is present without any typing (the ladder is server-provided on the row).
+    // The ⓘ now rides at the END of the derived range line, so it only appears once a typed
+    // price has a band-sourced estimate. Type a price and wait for the range line to land.
+    await user.type(screen.getByPlaceholderText(/fiyat girin/i), '500');
+    await waitFor(() => expect(screen.getByText(/₺450,00 ve üzeri/)).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+
     await user.click(screen.getByRole('button', { name: /komisyon bantlarını göster/i }));
 
-    // The popover lists the four bands top-down, each with its window + commission.
-    expect(screen.getByText('Komisyon bantları')).toBeInTheDocument();
-    expect(screen.getByText('₺450,00 ve üzeri')).toBeInTheDocument();
-    expect(screen.getByText('₺300,00–₺449,99')).toBeInTheDocument();
-    expect(screen.getByText('₺199,99 ve altı')).toBeInTheDocument();
+    // The popover lists the four bands top-down, each with its window + commission. Scope
+    // the assertions to the popover: band1's window ("₺450,00 ve üzeri") also shows in the
+    // derived range line, so a page-wide getByText would match it twice.
+    const popover = within(screen.getByRole('dialog'));
+    expect(popover.getByText('Ürün komisyon teklifleri')).toBeInTheDocument();
+    expect(popover.getByText('₺450,00 ve üzeri')).toBeInTheDocument();
+    expect(popover.getByText('₺300,00–₺449,99')).toBeInTheDocument();
+    expect(popover.getByText('₺199,99 ve altı')).toBeInTheDocument();
     // The lowest band's commission renders in the Turkish percent convention.
-    expect(screen.getByText('%6,50')).toBeInTheDocument();
+    expect(popover.getByText('%6,50')).toBeInTheDocument();
   });
 
   it('renders no commission-band hint for a category-sourced row (no ladder)', () => {
