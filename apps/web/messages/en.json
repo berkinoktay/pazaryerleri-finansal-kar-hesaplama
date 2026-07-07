@@ -1316,7 +1316,7 @@
       "customSelected": "Selected"
     },
     "commissionBands": {
-      "title": "Commission bands",
+      "title": "Product commission offers",
       "hint": "Show commission bands",
       "above": "{price} and above",
       "range": "{lower}–{upper}",

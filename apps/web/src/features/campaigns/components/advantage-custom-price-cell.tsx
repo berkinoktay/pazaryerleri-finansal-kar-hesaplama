@@ -196,27 +196,29 @@ export function AdvantageCustomPriceCell({
         <span className="text-2xs text-muted-foreground font-medium md:hidden">
           {t('table.customPrice')}
         </span>
-        {/* Input + the ⓘ commission-band hint. The hint only appears when the product
-            has a band ladder (a category-rate item has none to show). */}
-        <div className="gap-2xs flex w-full items-center">
-          <MoneyInput
-            value={price}
-            onChange={handleChange}
-            nonNegative
-            aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
-            placeholder={t('table.enterPrice')}
-            className="md:max-w-input-price w-full"
-          />
-          {commissionBands !== null ? (
-            <CommissionBandsPopover bands={commissionBands} labels={bandLabels} />
-          ) : null}
-        </div>
+        {/* The price field alone — the derived line below carries the commission hint, and,
+            when the price lands in a band, the ⓘ that opens the band ladder. */}
+        <MoneyInput
+          value={price}
+          onChange={handleChange}
+          nonNegative
+          aria-label={`${t('table.customPrice')} — ${row.productTitle}`}
+          placeholder={t('table.enterPrice')}
+          className="md:max-w-input-price w-full"
+        />
         <span className="text-2xs text-muted-foreground">
           {hasEstimate && lastResult.commissionPct != null ? (
             rangeLabel !== null ? (
               <>
                 ≈ <span className="text-foreground font-semibold">{rangeLabel}</span> ·{' '}
-                {t('table.tierCommission')} {formatPercentDisplay(lastResult.commissionPct)}
+                {t('table.tierCommission')} {formatPercentDisplay(lastResult.commissionPct)}{' '}
+                {/* The ⓘ rides at the END of the derived range line so the price window and
+                    the ladder that produced it read as one unit. It exists only for a
+                    band-sourced estimate — a category-rate item has no ladder (rangeLabel
+                    is null), which is exactly when this branch does not run. */}
+                {commissionBands !== null ? (
+                  <CommissionBandsPopover bands={commissionBands} labels={bandLabels} />
+                ) : null}
               </>
             ) : (
               <>

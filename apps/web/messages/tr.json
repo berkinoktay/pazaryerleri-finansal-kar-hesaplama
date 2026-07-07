@@ -1316,7 +1316,7 @@
       "customSelected": "Seçildi"
     },
     "commissionBands": {
-      "title": "Komisyon bantları",
+      "title": "Ürün komisyon teklifleri",
       "hint": "Komisyon bantlarını göster",
       "above": "{price} ve üzeri",
       "range": "{lower}–{upper}",
