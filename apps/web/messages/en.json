@@ -831,6 +831,11 @@
       "NO_COST": "No cost — add a cost profile for this product.",
       "NO_SHIPPING": "No shipping estimate — carrier or desi setup is missing."
     },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup"
+    },
     "list": {
       "upload": "Upload Excel File",
       "search": "Search tariffs…",
@@ -1043,6 +1048,11 @@
       "NO_COST": "No cost — add a cost profile for this product.",
       "NO_SHIPPING": "No shipping estimate — carrier or desi setting is missing."
     },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup"
+    },
     "list": {
       "upload": "Upload Excel File",
       "search": "Search tariffs…",
@@ -1238,6 +1248,12 @@
       "NO_SHIPPING": "No shipping estimate — carrier or desi setting is missing.",
       "NO_COMMISSION": "Commission rate unresolved — no commission tariff band or category rate found for this product."
     },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup",
+      "NO_COMMISSION": "Commission unresolved"
+    },
     "list": {
       "upload": "Upload Excel File",
       "search": "Search tariff…",
@@ -1423,6 +1439,195 @@
     "status": {
       "exported": "Downloaded",
       "pending": "Pending"
+    }
+  },
+  "flashProductsPage": {
+    "search": "Search product, model or barcode",
+    "actions": {
+      "export": "Export"
+    },
+    "exportDialog": {
+      "title": "Export flash products",
+      "description": "Your selections will be written to an Excel file and downloaded.",
+      "fileName": "Flash products file",
+      "productCount": "{count} products",
+      "cancel": "Cancel",
+      "download": "Download",
+      "saving": "Saving selections…",
+      "exporting": "Downloading…"
+    },
+    "templates": {
+      "back": "Back to lists",
+      "delete": "Delete List",
+      "deleteTitle": "Delete list",
+      "deleteDescription": "This saved flash products list and all of its offer selections will be permanently deleted. This action cannot be undone.",
+      "deleteConfirm": "Delete list",
+      "detailIntent": "For each product and date, pick the 24-hour or 3-hour flash offer and see your profit at that price.",
+      "notFoundTitle": "List not found",
+      "notFoundDescription": "This list may have been deleted or may not belong to this store."
+    },
+    "noStore": {
+      "title": "Select a store first",
+      "description": "A connected Trendyol store is required to view flash products.",
+      "cta": "Go to stores"
+    },
+    "reason": {
+      "NO_PRODUCT": "Product not matched — this barcode is not in your product catalog.",
+      "NO_COST": "No cost — add a cost profile for this product.",
+      "NO_SHIPPING": "No shipping estimate — the carrier or desi setting is missing."
+    },
+    "reasonShort": {
+      "NO_PRODUCT": "No product match",
+      "NO_COST": "Enter cost",
+      "NO_SHIPPING": "Add shipping setup"
+    },
+    "list": {
+      "upload": "Upload Excel File",
+      "search": "Search list…",
+      "productUnit": "products",
+      "offerUnit": "rows",
+      "columns": {
+        "list": "List",
+        "products": "Products",
+        "offers": "Offers",
+        "status": "Status",
+        "exported": "Export"
+      },
+      "summary": {
+        "total": "Total lists",
+        "products": "Products",
+        "productsContext": "{count} offer rows",
+        "selected": "Offer selected",
+        "selectedContext": "rows have an offer picked",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "exportedPending": "{count} lists awaiting export",
+        "exportedAllDone": "all exported",
+        "noSelected": "no selection yet"
+      },
+      "empty": {
+        "title": "No flash products list yet",
+        "description": "Start by uploading the Flash Products Excel you downloaded from the Trendyol panel; see which flash offer is profitable for each product and date.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
+      "selectAll": "Select all",
+      "selectRow": "Select row",
+      "filterLabel": "Filter by status",
+      "bulk": {
+        "selected": "{count} lists selected",
+        "delete": "Delete selected",
+        "deleteTitle": "Delete selected lists",
+        "deleteDescription": "{count} lists and all of their offer selections will be permanently deleted. This action cannot be undone.",
+        "deleteConfirm": "Delete lists"
+      },
+      "lastUpdated": "Last updated: {date}",
+      "listStatus": {
+        "all": "All",
+        "exported": "Downloaded",
+        "pending": "Pending"
+      }
+    },
+    "summary": {
+      "total": "Offer rows",
+      "totalContext": "listed in this upload",
+      "joined": "Offer selected",
+      "joinedValue": "{count}/{total}",
+      "joinedContext": "rows have an offer picked",
+      "joinedProfit": "Selected profit",
+      "joinedProfitContext": "estimated total for your picked offers",
+      "currentProfit": "Current profit",
+      "currentProfitHint": "Today's estimated total profit if you pick no offer."
+    },
+    "table": {
+      "product": "Product Info",
+      "displayPrice": "Price the buyer sees",
+      "calculatedProfit": "Calculated profit",
+      "vsCurrent": "vs current",
+      "bestOffer": "Most profitable",
+      "offerCommission": "commission",
+      "offerTime": "{start}–{end}",
+      "offerSelected": "Selected",
+      "selectOffer": "Pick the {slot} offer",
+      "selectOfferShort": "Pick this offer",
+      "enterCost": "Enter cost",
+      "customPrice": "Custom Price",
+      "enterPrice": "Enter a price",
+      "customPriceHint": "Enter a price, see the commission",
+      "customPriceCeilingHint": "You can enter at most {price}",
+      "selectCustom": "Pick this price",
+      "customSelected": "Selected"
+    },
+    "slot": {
+      "h24": "24-Hour",
+      "h3": "3-Hour"
+    },
+    "commissionBands": {
+      "title": "Product commission offers",
+      "hint": "Show commission bands",
+      "above": "{price} and above",
+      "range": "{lower}–{upper}",
+      "below": "{price} and below"
+    },
+    "breakdown": {
+      "title": "Profit breakdown",
+      "sale": "Sale",
+      "commission": "Commission",
+      "netVat": "Net VAT",
+      "profit": "Profit",
+      "estimatedProfit": "Estimated profit",
+      "margin": "Margin",
+      "notCalculable": "Profit cannot be calculated for this product."
+    },
+    "smartSelect": {
+      "label": "Smart Select",
+      "selectBest": "Most profitable pick for each product",
+      "selectProfitable": "Only profitable offers",
+      "clear": "Clear selections",
+      "scopeHint": "If a filter is applied, only the visible products are affected."
+    },
+    "filters": {
+      "category": "Category",
+      "brand": "Brand",
+      "minMargin": "Min. margin %",
+      "profit": "Profitability",
+      "profitProfitable": "Profitable",
+      "profitLoss": "Loss-making",
+      "selection": "Selection status",
+      "selectionSelected": "Offer selected",
+      "selectionUnselected": "Not selected",
+      "groupLabel": "Filters"
+    },
+    "status": {
+      "exported": "Downloaded",
+      "pending": "Pending"
+    },
+    "upload": {
+      "title": "Upload the Flash Products Excel",
+      "description": "Upload the Flash Products file you downloaded from the Trendyol panel; see which flash offer is profitable for each product and date.",
+      "prompt": "Drag and drop the Excel file",
+      "hint": "XLSX · up to 5 MB",
+      "cta": "Choose file",
+      "stepsTitle": "How it works",
+      "step1": "Download the Flash Products Excel from the Trendyol panel",
+      "step2": "Upload the file here",
+      "step3": "See which flash offer is profitable for each product and date",
+      "submit": "Create list",
+      "errors": {
+        "notReadable": "The file could not be read — upload a valid .xlsx file.",
+        "wrongFormat": "This is not a Trendyol Flash Products file or its format was not recognized.",
+        "empty": "No offer rows found in the file.",
+        "tooLarge": "The file is too large — upload a smaller file.",
+        "generic": "The file could not be uploaded. Please try again."
+      }
+    },
+    "noResults": {
+      "title": "No matching products",
+      "description": "Try changing your search or filters."
     }
   },
   "featureStatus": {

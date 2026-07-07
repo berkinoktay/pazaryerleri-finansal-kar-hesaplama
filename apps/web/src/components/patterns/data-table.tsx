@@ -452,6 +452,19 @@ export function DataTable<TData, TValue>({
     manualSorting: isSortingControlled,
     manualFiltering: isFilteringControlled,
     manualPagination: isPaginationControlled,
+    // Keep the current page when `data` merely gets a NEW ARRAY REFERENCE without a
+    // content change. TanStack defaults this to `!manualPagination` (i.e. ON for our
+    // client-paginated tables): its core row-model memo keys on the `data` reference and,
+    // on any change, queues a `resetPageIndex()` in a microtask. Feature tables re-derive
+    // and often spread their rows (`data={[...rows]}`) on every render, so an UNRELATED
+    // re-render — e.g. a live what-if estimate landing while the seller is on page 2 —
+    // produced a fresh array and silently bounced them back to page 1. Row identity is
+    // already stable via `getRowId`, so paging state is safe to retain across these
+    // reference churns. Server-paginated tables are unaffected (TanStack already defaults
+    // this OFF when `manualPagination` is true). Trade-off: a client-side filter that
+    // shrinks the set no longer auto-returns to page 1 — features owning the filtered
+    // `data` reset their own page when that matters.
+    autoResetPageIndex: false,
     pageCount: isPaginationControlled ? pageCount : undefined,
     rowCount: isPaginationControlled ? rowCount : undefined,
     enableRowSelection,

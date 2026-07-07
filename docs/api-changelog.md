@@ -116,6 +116,31 @@ section "Versioning" for details.
   commission tariffs are now multi-period" note under Changed for the current `periods[]` / bucketed
   export contract. NOTE: the export's exact opt-in cell format is pending vendor verification.
 
+- **Flash Products API** (`/v1/organizations/{orgId}/stores/{storeId}/flash-products`) — Fourth
+  campaign vertical, for Trendyol's "Flaş Ürünler" (Teklif Ürünleri) Excel. Routes: `GET` (list, with
+  distinct-product / item / selected counts), `POST /import` (multipart .xlsx → 201 with counts — a
+  row carries up to two flash OFFERS, a 24-hour and a 3-hour window each with its own price + window
+  dates, and the same product spans several date rows), `GET /{listId}` (detail with per-scenario
+  profit computed on read: the current baseline plus each present offer, `offer24` / `offer3`, with
+  its window, `validity`, commission and profit), `PATCH /{listId}/selections` (chosen offer H24/H3
+  XOR custom price — the mutual exclusion is now server-enforced, `422` `INVALID_SELECTION_XOR` when
+  both are sent), `POST /{listId}/items/{itemId}/estimate` (custom-price what-if `price`, or
+  `scenario: "current"` — `422` codes `PRICE_REQUIRED` / `INVALID_ESTIMATE_MODE` / `INVALID_CUSTOM_PRICE`),
+  `POST /{listId}/export` (byte-preserving re-uploadable Trendyol .xlsx — writes each selected row's
+  participation label into "Güncellenecek Fiyat": `24 Saat` / `3 Saat` / `Senin Belirlediğin Flaş
+  Fiyatı`, plus the numeric custom price into "Senin Belirlediğin Flaş Fiyatı" on custom rows only;
+  selections are per-row so a choice never bleeds onto another date row of the same product; single
+  file, verbatim on zero selection, marks the list exported; `409` when no source file was kept —
+  fixed ASCII filename `flas-urunler.xlsx`), `DELETE /{listId}`. Store-scoped + RLS; profit never
+  stored. The vertical's novelty: an offer has NO commission in the Excel — the reduced rate is
+  resolved AUTOMATICALLY (no upload-time picker, unlike Advantage) from the store's Commission Tariff
+  by the offer window's END (covering week → covering sub-period → barcode band; a window straddling a
+  sub-period boundary anchors to the period containing its END — verified live 2026-07-07, TB300X450R
+  10 Temmuz flash), falling back to the flat "Mevcut Komisyon" rate with NO category fallback. Each
+  detail item exposes `commissionSource` (`band` / `current`) and, on a band, `commissionBands` (the
+  ladder for the ⓘ popover). NOTE: the exact J/M participation label casing is pending a live vendor
+  round-trip.
+
 ### Removed
 
 - **`returnScenarioNetProfit` (order list + `ProfitBreakdown`) and `returnScenarioMarginPct`

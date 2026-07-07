@@ -7,6 +7,7 @@ import * as React from 'react';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useEstimatePlusItemPrice } from '../hooks/use-estimate-plus-item-price';
+import { usePlusReasonEmptyLabel } from '../hooks/use-plus-reason-label';
 import type { PlusTariffRow } from '../lib/adapt-plus-tariff';
 import { useTariffScope } from '../lib/tariff-scope';
 import { PlusTariffBreakdown } from './plus-tariff-breakdown';
@@ -35,6 +36,7 @@ export function PlusCurrentPriceCell({
   isBest = false,
 }: PlusCurrentPriceCellProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage');
+  const reasonEmptyLabel = usePlusReasonEmptyLabel();
   const scale = useMarginColoring();
   const scope = useTariffScope();
   const estimate = useEstimatePlusItemPrice(scope.orgId, scope.storeId, scope.tariffId);
@@ -59,7 +61,9 @@ export function PlusCurrentPriceCell({
       marginPct={row.currentMarginPct}
       scale={scale}
       onOpenBreakdown={openBreakdown}
-      emptyLabel={row.reason === 'NO_COST' ? t('table.enterCost') : undefined}
+      // The row's not-calculable reason (or undefined when calculable) rides the badge as a
+      // warning-soft chip — the same signal the product cell used to print inline.
+      emptyLabel={reasonEmptyLabel(row.reason)}
       minWidth="current"
       // "En kârlı" badge only when keeping the current price wins the row — no reserved
       // slot, so a non-best current cell adds no height. Sparkles icon so the marker

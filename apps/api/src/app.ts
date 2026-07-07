@@ -16,6 +16,7 @@ import commissionRateRoutes from './routes/commission-rates/index';
 import commissionTariffRoutes from './routes/commission-tariffs/index';
 import plusCommissionTariffRoutes from './routes/plus-commission-tariffs/index';
 import advantageTariffRoutes from './routes/advantage-tariffs/index';
+import flashProductRoutes from './routes/flash-products/index';
 import costProfileRoutes from './routes/cost-profiles/index';
 import costProfileAttachmentRoutes from './routes/cost-profile-attachments/index';
 import fxRatesRoutes from './routes/fx-rates/index';
@@ -176,6 +177,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', commissionTariffRoutes);
   app.route('/', plusCommissionTariffRoutes);
   app.route('/', advantageTariffRoutes);
+  app.route('/', flashProductRoutes);
   app.route('/', shippingRoutes);
   app.route('/', profitSettingsRoutes);
 

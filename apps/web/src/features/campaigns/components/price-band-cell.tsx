@@ -9,6 +9,7 @@ import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useEstimateItemPrice } from '../hooks/use-estimate-item-price';
+import { useReasonEmptyLabel } from '../hooks/use-reason-label';
 import { asBandKey } from '../lib/band-key';
 import { useTariffScope } from '../lib/tariff-scope';
 import type { CommissionTariffRow, PriceBand } from '../types';
@@ -67,6 +68,7 @@ export function PriceBandCell({
   onSelect,
 }: PriceBandCellProps): React.ReactElement {
   const t = useTranslations('commissionTariffsPage.table');
+  const reasonEmptyLabel = useReasonEmptyLabel();
   const scale = useMarginColoring();
   const scope = useTariffScope();
   const estimate = useEstimateItemPrice(scope.orgId, scope.storeId, scope.tariffId);
@@ -117,10 +119,10 @@ export function PriceBandCell({
         currentNetProfit={row.currentNetProfit}
         scale={scale}
         onOpenBreakdown={openBreakdown}
-        // A missing cost profile is the one empty-profit cause worth naming inline
-        // ("Maliyet girin"); other non-calculable reasons keep the mute dash (their
-        // full reason shows in the product identity cell).
-        emptyLabel={row.reason === 'NO_COST' ? t('enterCost') : undefined}
+        // The row's not-calculable reason (or undefined when calculable) rides the empty
+        // badge as a warning-soft chip — the same reason-aware signal every option in the
+        // row shows, now that the product cell no longer prints it inline.
+        emptyLabel={reasonEmptyLabel(row.reason)}
         calculatedLabel={t('calculatedProfit')}
         vsCurrentLabel={t('vsCurrent')}
       />

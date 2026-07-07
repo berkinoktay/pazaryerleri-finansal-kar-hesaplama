@@ -13,7 +13,6 @@ import { TableScaleControl } from '@/components/patterns/table-scale-control';
 import { TrendyolPlusLockup } from '@/components/patterns/trendyol-plus-lockup';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
-import { usePlusReasonLabel } from '../hooks/use-plus-reason-label';
 import type { PlusTariffRow } from '../lib/adapt-plus-tariff';
 import { resolveBestChoice } from '../lib/best-choice';
 import type {
@@ -112,6 +111,8 @@ function CustomCellSlot({
       onDeselect={onDeselect}
       onEstimate={onEstimate}
       committedPrice={committed?.price ?? null}
+      committedNetProfit={committed?.netProfit ?? null}
+      committedMarginPct={committed?.marginPct ?? null}
       getDraft={getDraft}
       onDraftChange={onDraftChange}
     />
@@ -158,7 +159,6 @@ export function PlusTariffsTable({
   onClearFilters,
 }: PlusTariffsTableProps): React.ReactElement {
   const t = useTranslations('plusCommissionTariffsPage');
-  const reasonLabel = usePlusReasonLabel();
   // Local (not persisted): every tariff opens at its normal 100% size; the seller can
   // shrink it to fit for that session.
   const [scale, setScale] = React.useState(TABLE_SCALE_DEFAULT);
@@ -200,9 +200,6 @@ export function PlusTariffsTable({
                 {categoryBrand !== '' ? <span className="truncate">{categoryBrand}</span> : null}
                 {r.stockCode !== null ? (
                   <span className="truncate tabular-nums">{r.stockCode}</span>
-                ) : null}
-                {!r.calculable && r.reason !== null ? (
-                  <span className="text-warning">{reasonLabel(r.reason)}</span>
                 ) : null}
               </span>
             }
@@ -257,11 +254,9 @@ export function PlusTariffsTable({
     return [productColumn, currentColumn, offerColumn, customPriceColumn];
     // `columns` identity MUST stay STABLE — the volatile per-row values (best /
     // selection / customPrices) flow through RowStateContext instead. Every dep below is
-    // identity-stable: `t`/`reasonLabel` from next-intl, and the handlers from the
-    // parent's useCallback([]).
+    // identity-stable: `t` from next-intl, and the handlers from the parent's useCallback([]).
   }, [
     t,
-    reasonLabel,
     onToggleJoin,
     onSelectCustom,
     onDeselectCustom,

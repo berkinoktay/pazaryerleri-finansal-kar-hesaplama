@@ -73,6 +73,31 @@ describe('ProfitBadge', () => {
     expect(button).not.toHaveTextContent('—');
   });
 
+  it('paints the emptyLabel empty state as a warning-soft chip (bg-warning-surface text-warning)', () => {
+    // A null amount WITH a cause draws the eye as a warning-soft chip so the reason reads.
+    render(
+      <ProfitBadge
+        value={null}
+        marginPct={null}
+        scale={null}
+        onOpen={vi.fn()}
+        emptyLabel="Maliyet girin"
+      />,
+    );
+    const chip = screen.getByRole('button', { name: OPEN_LABEL }).firstElementChild as HTMLElement;
+    expect(chip.className).toContain('bg-warning-surface');
+    expect(chip.className).toContain('text-warning');
+  });
+
+  it('keeps the default em-dash empty state a mute neutral chip (no warning tone)', () => {
+    // Non-tariff surfaces (orders, live sheet) pass no emptyLabel — the null badge stays
+    // neutral, never adopting the warning tint reserved for a specific cause.
+    render(<ProfitBadge value={null} marginPct={null} scale={null} onOpen={vi.fn()} />);
+    const chip = screen.getByRole('button', { name: OPEN_LABEL }).firstElementChild as HTMLElement;
+    expect(chip.className).not.toContain('warning');
+    expect(chip).toHaveTextContent('—');
+  });
+
   it('fills the badge with the margin-driven scale color when a margin is present', () => {
     // happy-dom cannot parse oklch()/color-mix(); feed an rgb scale so the resolved
     // text color lands on the element (the tinted bg/border are color-mix → dropped

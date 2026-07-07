@@ -12,7 +12,6 @@ import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { TableScaleControl } from '@/components/patterns/table-scale-control';
 import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
-import { useAdvantageReasonLabel } from '../hooks/use-advantage-reason-label';
 import type {
   AdvantageBand,
   AdvantageTariffRow,
@@ -121,6 +120,8 @@ function CustomCellSlot({
       onDeselect={onDeselect}
       onEstimate={onEstimate}
       committedPrice={committed?.price ?? null}
+      committedNetProfit={committed?.netProfit ?? null}
+      committedMarginPct={committed?.marginPct ?? null}
       getDraft={getDraft}
       onDraftChange={onDraftChange}
     />
@@ -166,7 +167,6 @@ export function AdvantageTariffsTable({
 }: AdvantageTariffsTableProps): React.ReactElement {
   const t = useTranslations('productLabelsPage');
   const tTier = useTranslations('productLabelsPage.tier');
-  const reasonLabel = useAdvantageReasonLabel();
   // Local (not persisted): every tariff opens at its normal 100% size; the seller can
   // shrink it to fit for that session.
   const [scale, setScale] = React.useState(TABLE_SCALE_DEFAULT);
@@ -209,9 +209,6 @@ export function AdvantageTariffsTable({
                 {categoryBrand !== '' ? <span className="truncate">{categoryBrand}</span> : null}
                 {r.stockCode !== null ? (
                   <span className="truncate tabular-nums">{r.stockCode}</span>
-                ) : null}
-                {!r.calculable && r.reason !== null ? (
-                  <span className="text-warning">{reasonLabel(r.reason)}</span>
                 ) : null}
               </span>
             }
@@ -268,12 +265,11 @@ export function AdvantageTariffsTable({
     return [productColumn, currentColumn, ...tierColumns, customPriceColumn];
     // `columns` identity MUST stay STABLE — the volatile per-row values (best / selection /
     // customPrices) flow through RowStateContext instead. Every dep below is
-    // identity-stable: `t`/`tTier`/`reasonLabel` from next-intl, and the handlers from the
+    // identity-stable: `t`/`tTier` from next-intl, and the handlers from the
     // parent's useCallback([]).
   }, [
     t,
     tTier,
-    reasonLabel,
     onSelectTier,
     onSelectCustom,
     onDeselectCustom,

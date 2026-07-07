@@ -42,6 +42,9 @@ export const FORMATS = {
     },
     weekday: { weekday: 'long' },
     month: { year: 'numeric', month: 'long' },
+    // Day + month name, NO year/time — "8 Temmuz" — for the Flash offer-window
+    // header, which pairs this with a `time`-preset start–end range.
+    dayMonth: { day: 'numeric', month: 'long' },
   },
   number: {
     integer: { maximumFractionDigits: 0 },

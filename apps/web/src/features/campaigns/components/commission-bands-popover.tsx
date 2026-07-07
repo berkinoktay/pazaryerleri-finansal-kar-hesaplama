@@ -13,26 +13,42 @@ import type { AdvantageCommissionBand } from '../api/get-advantage-tariff-detail
 import { formatBandRange, type BandRangeLabelFns } from '../lib/commission-band-range';
 
 /**
- * The three band-range i18n templates bound to next-intl's `t`, so the inline
- * derived-band line (advantage-custom-price-cell) and the popover ladder below format
- * bands with the SAME wording. Shared here to keep the templates in one place. Not
- * memoised: the object is only read during render (never a hook dependency), so a
- * fresh reference each render is harmless.
+ * The band-range templates PLUS the popover's own chrome copy (title + trigger `hint`),
+ * all bound to next-intl's `t`, so the inline derived-band line and the popover ladder
+ * read from ONE labels object. Passed in by the caller (the ExportTariffDialog
+ * labels-as-props pattern) so the ONE popover serves both the Advantage vertical
+ * (`productLabelsPage.commissionBands`) and the Flash vertical
+ * (`flashProductsPage.commissionBands`) without a hard-coded namespace.
  */
-export function useCommissionBandLabels(): BandRangeLabelFns {
+export interface CommissionBandsLabels extends BandRangeLabelFns {
+  /** Popover heading, e.g. "Ürün komisyon teklifleri". */
+  title: string;
+  /** Trigger button accessible name, e.g. "Komisyon bantlarını göster". */
+  hint: string;
+}
+
+/**
+ * The Advantage vertical's band-range + popover-chrome templates, bound to
+ * `productLabelsPage.commissionBands`. Not memoised: the object is only read during
+ * render (never a hook dependency), so a fresh reference each render is harmless. The
+ * Flash vertical has its own equivalent hook against its namespace.
+ */
+export function useCommissionBandLabels(): CommissionBandsLabels {
   const t = useTranslations('productLabelsPage.commissionBands');
   return {
     above: (price) => t('above', { price }),
     range: (lower, upper) => t('range', { lower, upper }),
     below: (price) => t('below', { price }),
+    title: t('title'),
+    hint: t('hint'),
   };
 }
 
 export interface CommissionBandsPopoverProps {
   /** The product's commission-band ladder (top-down). Non-empty by construction of the caller. */
   bands: readonly AdvantageCommissionBand[];
-  /** Shared band-range label templates (from {@link useCommissionBandLabels}). */
-  labels: BandRangeLabelFns;
+  /** Shared band-range + popover-chrome labels (from the caller's per-namespace hook). */
+  labels: CommissionBandsLabels;
 }
 
 /**
@@ -52,13 +68,12 @@ export function CommissionBandsPopover({
   bands,
   labels,
 }: CommissionBandsPopoverProps): React.ReactElement {
-  const t = useTranslations('productLabelsPage.commissionBands');
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={t('hint')}
+          aria-label={labels.hint}
           onClick={(event) => event.stopPropagation()}
           className="text-muted-foreground-dim hover:text-muted-foreground focus-visible:ring-ring duration-fast ease-out-quart inline-flex shrink-0 cursor-pointer items-center rounded-full align-middle transition-colors outline-none focus-visible:ring-2"
         >
@@ -66,7 +81,7 @@ export function CommissionBandsPopover({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto min-w-56">
-        <span className="text-foreground mb-xs block text-xs font-semibold">{t('title')}</span>
+        <span className="text-foreground mb-xs block text-xs font-semibold">{labels.title}</span>
         <ul className="gap-2xs flex flex-col">
           {bands.map((band) => {
             const range = formatBandRange(band, formatCurrency, labels);

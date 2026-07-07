@@ -42,3 +42,19 @@ export const advantageTariffKeys = {
   detail: (orgId: string, storeId: string, tariffId: string) =>
     [...advantageTariffKeys.details(orgId, storeId), tariffId] as const,
 };
+
+// Flash Products (Flaş Ürünler) uploads are their own saved-upload family: each row is
+// one product × one date carrying up to two dated flash offers, and the reduced
+// commission is AUTO-resolved per row from the store's commission-tariff data. They get
+// an independent key namespace — same shape as the other families, only the root segment
+// differs — so invalidating one family never touches the others. `listId` (not
+// `tariffId`) matches the backend's route param for the detail/selections/export routes.
+export const flashProductKeys = {
+  all: ['flash-products'] as const,
+  lists: (orgId: string, storeId: string) =>
+    [...flashProductKeys.all, 'list', orgId, storeId] as const,
+  details: (orgId: string, storeId: string) =>
+    [...flashProductKeys.all, 'detail', orgId, storeId] as const,
+  detail: (orgId: string, storeId: string, listId: string) =>
+    [...flashProductKeys.details(orgId, storeId), listId] as const,
+};

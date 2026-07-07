@@ -3,6 +3,7 @@
 import * as React from 'react';
 
 import { ProfitBadge } from '@/components/patterns/profit-badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { type MarginScale } from '@/lib/margin-coloring';
 
 import { ProfitDelta } from './profit-delta';
@@ -22,6 +23,17 @@ export interface TariffProfitBlockProps {
   calculatedLabel: string;
   /** "Güncele göre" — localized by the caller. */
   vsCurrentLabel: string;
+  /**
+   * A price is in the input but its profit is still being computed (the debounced
+   * estimate has not returned yet, and no committed figure seeds it). Render a
+   * ProfitBadge-sized skeleton pill in the badge's slot instead of a mute "—", so the
+   * card reads as "loading", not "no data". The label + delta rows keep their slots so
+   * the swap to the real badge never shifts the card. Defaults to false — the band /
+   * tier / offer cards always know their profit up front and never pass it.
+   */
+  loading?: boolean;
+  /** Translated "loading" name for the skeleton pill's aria-busy status (used when `loading`). */
+  loadingLabel?: string;
 }
 
 /**
@@ -41,19 +53,28 @@ export function TariffProfitBlock({
   emptyLabel,
   calculatedLabel,
   vsCurrentLabel,
+  loading = false,
+  loadingLabel,
 }: TariffProfitBlockProps): React.ReactElement {
   return (
     <div className="gap-3xs flex flex-col items-start">
       <span className="text-2xs text-muted-foreground">{calculatedLabel}</span>
-      <ProfitBadge
-        value={netProfit}
-        marginPct={marginPct}
-        scale={scale}
-        onOpen={onOpenBreakdown}
-        showMarginPct
-        emptyLabel={emptyLabel}
-        className="relative z-10 self-start"
-      />
+      {loading ? (
+        // The estimate is still on the way — a rounded pill the exact height of the md
+        // Badge (18px line + 2×2px pad + 2×1px border = 24px = h-6) holds the badge's slot
+        // so nothing shifts when the real figure lands.
+        <Skeleton radius="full" label={loadingLabel} className="h-6 w-28" />
+      ) : (
+        <ProfitBadge
+          value={netProfit}
+          marginPct={marginPct}
+          scale={scale}
+          onOpen={onOpenBreakdown}
+          showMarginPct
+          emptyLabel={emptyLabel}
+          className="relative z-10 self-start"
+        />
+      )}
       <ProfitDelta
         optionNetProfit={netProfit}
         currentNetProfit={currentNetProfit}

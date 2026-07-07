@@ -38,3 +38,33 @@ export function useReasonLabel(): (reason: TariffItemReason) => string {
     [t],
   );
 }
+
+/**
+ * Returns a mapper from the not-calculable `reason` to a SHORT, action-oriented empty
+ * label (e.g. "Maliyet girin") for the row's {@link ProfitBadge} `emptyLabel`. A `null`
+ * reason (a calculable row) maps to `undefined` so the badge keeps its mute em-dash. This
+ * is the compact sibling of {@link useReasonLabel}'s full sentence (used in the breakdown
+ * modal) — the current/custom cells feed it into the badge so the "why it can't be costed"
+ * signal rides the warning-soft chip instead of a separate inline line.
+ */
+export function useReasonEmptyLabel(): (reason: TariffItemReason | null) => string | undefined {
+  const t = useTranslations('commissionTariffsPage.reasonShort');
+  return React.useCallback(
+    (reason) => {
+      if (reason === null) return undefined;
+      switch (reason) {
+        case 'NO_PRODUCT':
+          return t('NO_PRODUCT');
+        case 'NO_COST':
+          return t('NO_COST');
+        case 'NO_SHIPPING':
+          return t('NO_SHIPPING');
+        default: {
+          const _exhaustive: never = reason;
+          throw new Error(`Unhandled tariff reason: ${String(_exhaustive)}`);
+        }
+      }
+    },
+    [t],
+  );
+}
