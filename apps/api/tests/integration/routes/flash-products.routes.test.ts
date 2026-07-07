@@ -4,7 +4,7 @@
 //
 // A flash offer carries its OWN window dates but NO commission. The reduced rate is
 // resolved AUTOMATICALLY (no upload-time picker) from the store's Commission Tariff:
-// the offer window's START selects the covering week and, within it, the covering
+// the offer window's END selects the covering week and, within it, the covering
 // sub-period; that period's item bands (by barcode) supply the rate via bandForPrice.
 // It falls back to the flat "Mevcut Komisyon" (I column) when the product is not
 // flagged "Var", when no week covers the window, when the barcode is absent from the
@@ -12,12 +12,16 @@
 // from Advantage).
 //
 // The fixture builds ONE commission week split into two sub-periods (3-Gün + 4-Gün)
-// whose SAME barcode carries DIFFERENT bands per period. Two offer rows of that same
-// product — one whose window starts in the first sub-period, one in the second — then
+// whose SAME barcode carries DIFFERENT bands per period. Offer rows of that same product
+// — one whose window sits wholly in the first sub-period, one wholly in the second —
 // resolve to DIFFERENT commissions. That is the novelty lock: same product, same offer
-// price, different rate because the window lands in a different period. Three more rows
-// exercise each flat-fallback branch. A calculable row needs cost (TRY profile) +
-// shipping (SENDEOMP) + fee definitions; SENDEOMP is ensured by globalSetup.
+// price, different rate because the window lands in a different period. A THIRD row locks
+// the straddling-window END rule: a 00:00–23:59 window that STARTS in the first sub-period
+// but ENDS in the second resolves to the SECOND period's band (the TB300X450R 10 Temmuz
+// case — Trendyol anchors a boundary-straddling window to the period containing its END,
+// verified live 2026-07-07). Three more rows exercise each flat-fallback branch. A
+// calculable row needs cost (TRY profile) + shipping (SENDEOMP) + fee definitions;
+// SENDEOMP is ensured by globalSetup.
 
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -121,6 +125,7 @@ interface Fixture {
   listId: string;
   itemPeriod1: string;
   itemPeriod2: string;
+  itemStraddle: string;
   itemNoBand: string;
   itemFlagFalse: string;
   itemNoWeek: string;
@@ -342,6 +347,21 @@ async function setupFixture(): Promise<Fixture> {
       sortOrder: 1,
     },
   });
+  // (a′) STRADDLE: a 00:00–23:59 window whose START is in Period 1 (before the 11 Temmuz
+  // 08.00 boundary) but whose END is in Period 2 → resolves to Period 2's band (9), NOT
+  // Period 1's (11.5). This is the TB300X450R 10 Temmuz case: Trendyol anchors a
+  // boundary-straddling window to the period containing its END (verified live 2026-07-07).
+  const itemStraddle = await prisma.flashProductItem.create({
+    data: {
+      ...baseOfferItem,
+      productVariantId: variant.id,
+      barcode: MATCHED_BARCODE,
+      hasCommissionTariff: true,
+      offer24StartsAt: flashInstant(2026, 7, 11, 0), // 11 Temmuz 00.00 → Period 1
+      offer24EndsAt: flashInstant(2026, 7, 11, 23, 59), // 11 Temmuz 23.59 → Period 2
+      sortOrder: 5,
+    },
+  });
   // (d) hasCommissionTariff but the barcode is absent from the period → flat.
   const itemNoBand = await prisma.flashProductItem.create({
     data: {
@@ -387,6 +407,7 @@ async function setupFixture(): Promise<Fixture> {
     listId: list.id,
     itemPeriod1: itemPeriod1.id,
     itemPeriod2: itemPeriod2.id,
+    itemStraddle: itemStraddle.id,
     itemNoBand: itemNoBand.id,
     itemFlagFalse: itemFlagFalse.id,
     itemNoWeek: itemNoWeek.id,
@@ -413,9 +434,9 @@ describe('Flash Products - list / detail / delete', () => {
     const row = body.data[0];
     expect(row?.id).toBe(fx.listId);
     expect(row?.name).toBe('Flaş Ürünler');
-    // Two distinct barcodes (FLASH-1 recurs on four rows, FLASH-NOBAND on one).
+    // Two distinct barcodes (FLASH-1 recurs on five rows, FLASH-NOBAND on one).
     expect(row?.productCount).toBe(2);
-    expect(row?.itemCount).toBe(5);
+    expect(row?.itemCount).toBe(6);
     expect(row?.selectedCount).toBe(0);
     expect(row?.exported).toBe(false);
   });
@@ -428,11 +449,12 @@ describe('Flash Products - list / detail / delete', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as DetailWire;
     expect(body.id).toBe(fx.listId);
-    expect(body.items).toHaveLength(5);
+    expect(body.items).toHaveLength(6);
 
     const byId = new Map(body.items.map((i) => [i.id, i]));
     const p1 = byId.get(fx.itemPeriod1);
     const p2 = byId.get(fx.itemPeriod2);
+    const straddle = byId.get(fx.itemStraddle);
     const noBand = byId.get(fx.itemNoBand);
     const flagFalse = byId.get(fx.itemFlagFalse);
     const noWeek = byId.get(fx.itemNoWeek);
@@ -457,6 +479,12 @@ describe('Flash Products - list / detail / delete', () => {
     expect(p1?.offer24?.price).toBe(p2?.offer24?.price);
     expect(p1?.offer24?.commissionPct).not.toBe(p2?.offer24?.commissionPct);
     expect(p2?.commissionBands?.[1]?.commissionPct).toBe('9.0000');
+
+    // (a′) STRADDLE lock (TB300X450R 10 Temmuz): window STARTS in Period 1, ENDS in
+    // Period 2 → anchored to the END → Period 2's band (9.0), NOT Period 1's (11.5).
+    expect(straddle?.commissionSource).toBe('band');
+    expect(straddle?.offer24?.commissionPct).toBe('9.0000');
+    expect(straddle?.commissionBands?.[1]?.commissionPct).toBe('9.0000');
 
     // (d) barcode absent from the period → flat "Mevcut Komisyon" (19), no ladder.
     expect(noBand?.commissionSource).toBe('current');

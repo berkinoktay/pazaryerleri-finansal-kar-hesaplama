@@ -209,10 +209,18 @@ export async function getFlashProductDetail(
   for (const item of list.items) {
     if (!item.hasCommissionTariff) continue;
     if (item.offer24Price !== null) {
-      requests.push({ startsAt: item.offer24StartsAt, barcode: item.barcode });
+      requests.push({
+        startsAt: item.offer24StartsAt,
+        endsAt: item.offer24EndsAt,
+        barcode: item.barcode,
+      });
     }
     if (item.offer3Price !== null) {
-      requests.push({ startsAt: item.offer3StartsAt, barcode: item.barcode });
+      requests.push({
+        startsAt: item.offer3StartsAt,
+        endsAt: item.offer3EndsAt,
+        barcode: item.barcode,
+      });
     }
   }
   const resolver = await buildFlashCommissionResolver(orgId, storeId, requests);
@@ -235,7 +243,12 @@ export async function getFlashProductDetail(
             price: new Decimal(item.offer24Price.toString()),
             startsAt: item.offer24StartsAt,
             endsAt: item.offer24EndsAt,
-            bands: resolver.bandsFor(item.offer24StartsAt, item.barcode, item.hasCommissionTariff),
+            bands: resolver.bandsFor(
+              item.offer24StartsAt,
+              item.offer24EndsAt,
+              item.barcode,
+              item.hasCommissionTariff,
+            ),
           }
         : null;
     const offer3: FlashOfferInput | null =
@@ -244,14 +257,26 @@ export async function getFlashProductDetail(
             price: new Decimal(item.offer3Price.toString()),
             startsAt: item.offer3StartsAt,
             endsAt: item.offer3EndsAt,
-            bands: resolver.bandsFor(item.offer3StartsAt, item.barcode, item.hasCommissionTariff),
+            bands: resolver.bandsFor(
+              item.offer3StartsAt,
+              item.offer3EndsAt,
+              item.barcode,
+              item.hasCommissionTariff,
+            ),
           }
         : null;
 
-    // Primary window = the 24h offer's start, else the 3h offer's — drives the surfaced
-    // band ladder + the custom-price estimate (design MİMARİ KARAR 2).
+    // Primary window = the 24h offer's window, else the 3h offer's — drives the surfaced
+    // band ladder + the custom-price estimate (design MİMARİ KARAR 2). Resolved on the
+    // window's END (see flash-product-commission).
     const primaryStart = item.offer24StartsAt ?? item.offer3StartsAt;
-    const primaryBands = resolver.bandsFor(primaryStart, item.barcode, item.hasCommissionTariff);
+    const primaryEnd = item.offer24StartsAt !== null ? item.offer24EndsAt : item.offer3EndsAt;
+    const primaryBands = resolver.bandsFor(
+      primaryStart,
+      primaryEnd,
+      item.barcode,
+      item.hasCommissionTariff,
+    );
 
     const computed = computeFlashItem(
       ctx,

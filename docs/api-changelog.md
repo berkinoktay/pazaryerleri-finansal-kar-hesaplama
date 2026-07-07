@@ -134,10 +134,12 @@ section "Versioning" for details.
   fixed ASCII filename `flas-urunler.xlsx`), `DELETE /{listId}`. Store-scoped + RLS; profit never
   stored. The vertical's novelty: an offer has NO commission in the Excel — the reduced rate is
   resolved AUTOMATICALLY (no upload-time picker, unlike Advantage) from the store's Commission Tariff
-  by the offer window's START (covering week → covering sub-period → barcode band), falling back to
-  the flat "Mevcut Komisyon" rate with NO category fallback. Each detail item exposes
-  `commissionSource` (`band` / `current`) and, on a band, `commissionBands` (the ladder for the ⓘ
-  popover). NOTE: the exact J/M participation label casing is pending a live vendor round-trip.
+  by the offer window's END (covering week → covering sub-period → barcode band; a window straddling a
+  sub-period boundary anchors to the period containing its END — verified live 2026-07-07, TB300X450R
+  10 Temmuz flash), falling back to the flat "Mevcut Komisyon" rate with NO category fallback. Each
+  detail item exposes `commissionSource` (`band` / `current`) and, on a band, `commissionBands` (the
+  ladder for the ⓘ popover). NOTE: the exact J/M participation label casing is pending a live vendor
+  round-trip.
 
 ### Removed
 

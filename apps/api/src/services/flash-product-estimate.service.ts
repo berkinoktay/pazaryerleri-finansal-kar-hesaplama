@@ -71,7 +71,9 @@ export async function estimateFlashItemPrice(
         currentCommissionPct: true,
         hasCommissionTariff: true,
         offer24StartsAt: true,
+        offer24EndsAt: true,
         offer3StartsAt: true,
+        offer3EndsAt: true,
       },
     });
   } catch (err) {
@@ -115,15 +117,24 @@ export async function estimateFlashItemPrice(
     shipping = shippingMap.get(item.productVariantId) ?? NO_SHIPPING;
   }
 
-  // Resolve the item's PRIMARY window bands (offer24Start ?? offer3Start) once — the
-  // same source the detail uses for the custom-price estimate and the ⓘ popover.
+  // Resolve the item's PRIMARY window bands (offer24 window ?? offer3 window) once — the
+  // same source the detail uses for the custom-price estimate and the ⓘ popover. The
+  // window resolves on its END (see flash-product-commission).
   const primaryStart = item.offer24StartsAt ?? item.offer3StartsAt;
+  const primaryEnd = item.offer24StartsAt !== null ? item.offer24EndsAt : item.offer3EndsAt;
   const resolver = await buildFlashCommissionResolver(
     orgId,
     storeId,
-    item.hasCommissionTariff ? [{ startsAt: primaryStart, barcode: item.barcode }] : [],
+    item.hasCommissionTariff
+      ? [{ startsAt: primaryStart, endsAt: primaryEnd, barcode: item.barcode }]
+      : [],
   );
-  const primaryBands = resolver.bandsFor(primaryStart, item.barcode, item.hasCommissionTariff);
+  const primaryBands = resolver.bandsFor(
+    primaryStart,
+    primaryEnd,
+    item.barcode,
+    item.hasCommissionTariff,
+  );
 
   const flatPct = new Decimal(item.currentCommissionPct.toString());
   const price = input.mode === 'current' ? new Decimal(item.customerPrice.toString()) : input.price;
