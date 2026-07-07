@@ -1529,7 +1529,7 @@
       "vsCurrent": "Güncele göre",
       "bestOffer": "En kârlı",
       "offerCommission": "komisyon",
-      "offerWindow": "{date} · {start}–{end}",
+      "offerTime": "{start}–{end}",
       "offerSelected": "Seçildi",
       "selectOffer": "{slot} teklifini seç",
       "selectOfferShort": "Bu teklifi seç",

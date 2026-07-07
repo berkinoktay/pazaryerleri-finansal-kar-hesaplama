@@ -16,6 +16,7 @@ import {
 import { resolveBestChoice } from '../lib/best-choice';
 import { FlashCurrentCell } from './flash-current-cell';
 import { FlashCustomPriceCell } from './flash-custom-price-cell';
+import { FlashDayBadge } from './flash-day-badge';
 import { FlashProductOfferCell } from './flash-product-offer-cell';
 
 const OFFER_KEYS = ['h24', 'h3'] as const satisfies readonly FlashOfferKey[];
@@ -91,8 +92,14 @@ export function FlashProductsMobileCards({
               <ProductImageCell url={row.imageUrl} alt={row.productTitle} size="xl" fit="contain" />
               <div className="min-w-0 flex-1">
                 <div className="line-clamp-2 text-sm font-medium">{row.productTitle}</div>
+                {/* Which flash day this card belongs to — parity with the desktop product cell. */}
+                {row.flashDay !== null ? (
+                  <div className="mt-3xs flex">
+                    <FlashDayBadge startsAt={row.flashDay} />
+                  </div>
+                ) : null}
                 {meta !== '' ? (
-                  <div className="text-2xs text-muted-foreground tabular-nums">{meta}</div>
+                  <div className="text-2xs text-muted-foreground mt-3xs tabular-nums">{meta}</div>
                 ) : null}
                 {!row.calculable && row.reason !== null ? (
                   <div className="text-warning text-2xs mt-3xs">{reasonLabel(row.reason)}</div>

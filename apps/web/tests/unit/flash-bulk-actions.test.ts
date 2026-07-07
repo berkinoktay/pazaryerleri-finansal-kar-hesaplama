@@ -68,6 +68,7 @@ function row(id: string, overrides: Partial<FlashProductRow> = {}): FlashProduct
     selectedOffer: null,
     customPrice: null,
     bands: [offer('h24', '30.00', '20.00'), offer('h3', '20.00', '15.00', '650.00')],
+    flashDay: '2026-07-08T00:00:00Z',
     ...overrides,
   };
 }

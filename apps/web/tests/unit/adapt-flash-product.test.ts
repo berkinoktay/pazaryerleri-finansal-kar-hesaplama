@@ -107,6 +107,22 @@ describe('toFlashProductView', () => {
     expect(row.bands[1].validity).toBe('upcoming');
   });
 
+  it('derives flashDay from the primary window (offer24 ?? offer3), or null when no offer has one', () => {
+    // Both offers present → the primary (24 Saatlik) window's start is the row's day.
+    const both = toFlashProductView(detail([item()])).rows[0];
+    expect(both.flashDay).toBe('2026-07-08T00:00:00Z');
+
+    // Only 3 Saatlik present → its window's start becomes the row's day.
+    const only3 = toFlashProductView(
+      detail([item({ offer24: null, offer3: apiOffer({ startsAt: '2026-07-09T00:00:00Z' }) })]),
+    ).rows[0];
+    expect(only3.flashDay).toBe('2026-07-09T00:00:00Z');
+
+    // Neither offer present → null (no day chip to show).
+    const none = toFlashProductView(detail([item({ offer24: null, offer3: null })])).rows[0];
+    expect(none.flashDay).toBeNull();
+  });
+
   it('drops an absent offer so the band-presence flags reflect which offers exist', () => {
     // Only 24 Saatlik present → one band (a data set of these rows would hide the 3 Saatlik
     // column).

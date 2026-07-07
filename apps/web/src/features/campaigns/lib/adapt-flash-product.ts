@@ -99,6 +99,12 @@ export interface FlashProductRow {
   customPrice: string | null;
   /** The row's present flash offers as band-like candidates (`bands.length` is 0–2). */
   bands: readonly FlashBand[];
+  /**
+   * The row's flash DAY — the PRIMARY window's start (`offer24 ?? offer3`), as a fixed ISO
+   * date-time (SSR-safe) or null when neither offer carries a window. The SAME product recurs
+   * across several dated rows, so the product-identity cell renders this as a "which day" chip.
+   */
+  flashDay: string | null;
 }
 
 /**
@@ -132,6 +138,9 @@ function offerBand(key: FlashOfferKey, offer: FlashOffer): FlashBand[] {
 
 /** Fold a Flash detail item into the table row shape (present offers → `bands`). */
 function toRow(item: FlashProductDetailItem): FlashProductRow {
+  // Column render order — 24 Saatlik before 3 Saatlik. `bands[0]` is therefore the PRIMARY
+  // window (offer24 when present, else offer3) — the source of the row's flash day.
+  const bands = [...offerBand('h24', item.offer24), ...offerBand('h3', item.offer3)];
   return {
     id: item.id,
     barcode: item.barcode,
@@ -153,8 +162,9 @@ function toRow(item: FlashProductDetailItem): FlashProductRow {
     commissionBands: item.commissionBands,
     selectedOffer: item.selectedOffer,
     customPrice: item.customPrice,
-    // Column render order — 24 Saatlik before 3 Saatlik.
-    bands: [...offerBand('h24', item.offer24), ...offerBand('h3', item.offer3)],
+    bands,
+    // The row's flash day = the primary window's start (or null when neither offer has one).
+    flashDay: bands[0]?.startsAt ?? null,
   };
 }
 

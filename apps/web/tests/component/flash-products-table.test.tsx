@@ -95,6 +95,9 @@ const row: FlashProductRow = {
   selectedOffer: null,
   customPrice: null,
   bands: [offer('h24'), offer('h3')],
+  // The row's flash day — the primary window's start (offer24). In the test provider's
+  // Europe/Istanbul zone this ISO renders as "8 Temmuz" in the product cell's day chip.
+  flashDay: '2026-07-08T00:00:00Z',
 };
 
 // The four-band commission ladder the custom-price cell's ⓘ popover lists. Top-down
@@ -666,6 +669,31 @@ describe('FlashProductsTable — offer column visibility (flash-specific)', () =
     // Only the rows that carry a 3 Saatlik offer add a "3 Saatlik teklifini seç" target —
     // exactly one here (the sibling row), never the absent-offer cell.
     expect(screen.getAllByRole('button', { name: /3 saatlik teklifini seç/i })).toHaveLength(1);
+  });
+});
+
+describe('FlashProductsTable — flash day in the product cell, time range in the offer card', () => {
+  it('shows the flash day as a badge in the product identity cell (once, not in the offer cards)', () => {
+    render(<TableHarness rows={[row]} />);
+
+    // "8 Temmuz" reads inside the product (first) cell …
+    const productCell = within(rowByTitle('Test Ürün')).getAllByRole('cell')[0];
+    expect(within(productCell).getByText('8 Temmuz')).toBeInTheDocument();
+
+    // … and only there — the date no longer rides in either offer card header.
+    expect(screen.getAllByText('8 Temmuz')).toHaveLength(1);
+  });
+
+  it('shows the offer time range as a badge in each offer card, never in the product cell', () => {
+    render(<TableHarness rows={[row]} />);
+
+    // Both offers span the same window → a time-range badge heads each offer card (24h + 3h).
+    // The separator char is matched loosely (any single char) to stay encoding-robust.
+    expect(screen.getAllByText(/^\d{2}:\d{2}.\d{2}:\d{2}$/)).toHaveLength(2);
+
+    // The product cell carries the day, never a time range.
+    const productCell = within(rowByTitle('Test Ürün')).getAllByRole('cell')[0];
+    expect(within(productCell).queryByText(/\d{2}:\d{2}.\d{2}:\d{2}/)).toBeNull();
   });
 });
 

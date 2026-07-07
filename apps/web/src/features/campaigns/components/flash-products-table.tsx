@@ -23,6 +23,7 @@ import {
 import { resolveBestChoice } from '../lib/best-choice';
 import { FlashCurrentCell } from './flash-current-cell';
 import { FlashCustomPriceCell } from './flash-custom-price-cell';
+import { FlashDayBadge } from './flash-day-badge';
 import { FlashProductOfferCell } from './flash-product-offer-cell';
 
 const DASH = '—';
@@ -213,6 +214,14 @@ export function FlashProductsTable({
             title={r.productTitle}
             meta={
               <span className="gap-3xs flex flex-col">
+                {/* Which flash day this row belongs to — the same product recurs per date. The
+                    inline-flex wrapper keeps the chip content-width (not stretched by the
+                    column) while the text lines below stay full-width to truncate. */}
+                {r.flashDay !== null ? (
+                  <span className="flex">
+                    <FlashDayBadge startsAt={r.flashDay} />
+                  </span>
+                ) : null}
                 {categoryBrand !== '' ? <span className="truncate">{categoryBrand}</span> : null}
                 {r.modelCode !== null ? (
                   <span className="truncate tabular-nums">{r.modelCode}</span>

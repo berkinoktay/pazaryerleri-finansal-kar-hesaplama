@@ -44,6 +44,7 @@ function makeRow(
     selectedOffer: null,
     customPrice: null,
     bands: [offer(offerNetProfit)],
+    flashDay: '2026-07-08T00:00:00Z',
   };
 }
 

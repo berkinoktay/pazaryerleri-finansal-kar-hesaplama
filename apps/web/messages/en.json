@@ -1529,7 +1529,7 @@
       "vsCurrent": "vs current",
       "bestOffer": "Most profitable",
       "offerCommission": "commission",
-      "offerWindow": "{date} · {start}–{end}",
+      "offerTime": "{start}–{end}",
       "offerSelected": "Selected",
       "selectOffer": "Pick the {slot} offer",
       "selectOfferShort": "Pick this offer",

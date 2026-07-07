@@ -5,6 +5,7 @@ import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
 
+import { Badge } from '@/components/ui/badge';
 import { StatusDot } from '@/components/ui/status-dot';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
@@ -40,11 +41,13 @@ export interface FlashProductOfferCellProps {
  * One flash offer (24 Saatlik / 3 Saatlik) as a CLICKABLE CARD — the whole {@link
  * TariffOptionCard} is the select target (a stretched-overlay button), so the seller
  * chooses the offer by clicking anywhere on it, exactly like an Advantage star tier or the
- * Plus offer. The card is HEADED by the offer's dated window — the date + time range with a
- * {@link StatusDot} coloured by the window's `validity` (no live countdown — SSR safe) —
- * then the flash PRICE (hero), the reduced commission, the shared {@link TariffProfitBlock},
- * and a {@link TariffSelectFoot}. Selected = brand border + soft brand fill + a featured
- * "En kârlı" ribbon when the offer wins the row.
+ * Plus offer. The card is HEADED by the offer's TIME RANGE — a neutral soft {@link Badge}
+ * ("00:00–23:59") beside a {@link StatusDot} coloured by the window's `validity` (no live
+ * countdown — SSR safe). The row's DATE lives in the product-identity cell instead (see
+ * {@link FlashDayBadge}), since the same product recurs across dated rows. Below the header:
+ * the flash PRICE (hero), the reduced commission, the shared {@link TariffProfitBlock}, and a
+ * {@link TariffSelectFoot}. Selected = brand border + soft brand fill + a featured "En kârlı"
+ * ribbon when the offer wins the row.
  *
  * Choosing is a TOGGLE owned by the parent: choosing clears any custom price and the other
  * offer (1-of-4 per row); re-clicking clears the offer.
@@ -73,13 +76,13 @@ export function FlashProductOfferCell({
     estimate.mutate({ itemId: row.id, body: { price: band.price } });
   }
 
-  // Static window header — "8 Temmuz · 00:00–23:59" — rendered from the offer's fixed ISO
-  // dates (deterministic, so SSR-safe: no Date.now()). Falls back to nothing if the file
-  // left the window blank (never expected for a present offer).
-  const windowLabel =
+  // Static time-range header — "00:00–23:59" — rendered from the offer's fixed ISO dates
+  // (deterministic, so SSR-safe: no Date.now()). The date is shown once per row in the
+  // product cell (FlashDayBadge), not here. Falls back to nothing if the file left the
+  // window blank (never expected for a present offer).
+  const timeLabel =
     band.startsAt !== null
-      ? t('offerWindow', {
-          date: format.dateTime(new Date(band.startsAt), 'dayMonth'),
+      ? t('offerTime', {
           start: format.dateTime(new Date(band.startsAt), 'time'),
           end: band.endsAt !== null ? format.dateTime(new Date(band.endsAt), 'time') : '',
         })
@@ -104,12 +107,17 @@ export function FlashProductOfferCell({
           height. pointer-events-none → clicking it still chooses via the overlay. */}
       {isBest ? <TariffBestRibbon label={t('bestOffer')} /> : null}
 
-      {/* Dated window header — a validity-toned dot beside the date + time range. */}
-      {windowLabel !== null ? (
+      {/* Time-range header — a validity-toned dot beside a neutral soft time-range badge. The
+          row's DATE is shown in the product cell (FlashDayBadge), never here. */}
+      {timeLabel !== null ? (
         <StatusDot
           tone={tone}
           size="sm"
-          label={<span className="text-2xs text-muted-foreground tabular-nums">{windowLabel}</span>}
+          label={
+            <Badge tone="neutral" variant="surface" size="sm" className="tabular-nums">
+              {timeLabel}
+            </Badge>
+          }
         />
       ) : null}
 
