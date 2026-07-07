@@ -246,6 +246,15 @@ enum PriceChangeStatus {
   FAILED
 }
 
+// Flash Products (Flaş Ürünler) join type per item. A row offers up to two
+// windows — H24 (24-hour slot) and H3 (3-hour slot). The seller picks one, or
+// sets a custom price instead (customPrice, mutually exclusive). Emitted as a
+// domain enum for the frontend column language ("24 Saatlik" / "3 Saatlik").
+enum FlashOfferType {
+  H24
+  H3
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -352,6 +361,7 @@ model Store {
   commissionTariffs      CommissionTariff[]
   plusCommissionTariffs  PlusCommissionTariff[]
   advantageTariffs       AdvantageTariff[]
+  flashProductLists      FlashProductList[]
   orgPeriodFees          OrgPeriodFee[]
   commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
@@ -1454,6 +1464,95 @@ model AdvantageTariffItem {
   @@index([tariffId])
   @@index([storeId, barcode])
   @@map("advantage_tariff_items")
+}
+
+// ─── Flash Products ("Flaş Ürünler") ──────────────────────────────────────────
+// Trendyol's "Flaş Ürünler" campaign: a product can join a flash slot — five
+// 3-hour windows between 09:00–00:00, or a 24-hour 00:00–23:59 window — at a
+// reduced price. UNLIKE the tariff verticals the offers arrive as ONE rolling
+// list covering multiple dates (no per-week file, no periods): one row = one
+// product × one offer bundle, and the same product recurs on rows for different
+// dates. Commission is NOT in this Excel — compute resolves it per row from the
+// store's covering commission_tariffs band (by the window start), falling back
+// to the row's flat currentCommissionPct (the "I" column). `source_file` keeps
+// the raw .xlsx so export byte-patches Trendyol's exact file. Profit is COMPUTED
+// on read (never stored). 2-level (list → item), no periods.
+// See docs/plans/2026-07-07-flash-products-design.md.
+model FlashProductList {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
+  name           String
+  sourceFilename String?   @map("source_filename")
+  // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
+  sourceFile     Bytes?    @map("source_file")
+  exportedAt     DateTime? @map("exported_at")
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // NO week-uniqueness: offers arrive as one rolling list, so duplicate uploads
+  // are the seller's call (unlike the tariff verticals' per-week @@unique).
+  store Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items FlashProductItem[]
+
+  @@index([organizationId])
+  @@index([storeId])
+  @@map("flash_product_lists")
+}
+
+model FlashProductItem {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  listId         String @map("list_id") @db.Uuid
+  // Matched seller variant (by barcode at import); null = no catalog match →
+  // profit shown as "no product". No FK: a deleted variant must not drop the row.
+  productVariantId String? @map("product_variant_id") @db.Uuid
+  modelCode        String? @map("model_code")
+  barcode          String
+  productTitle     String  @map("product_title")
+  category         String?
+  brand            String?
+  stock            Int?
+  // Passthrough Trendyol "Ürün Id" (column T) kept for export fidelity / grouping.
+  externalId       String? @map("external_id")
+  // Mevcut Fiyat / TSF (G) + Müşterinin Gördüğü Fiyat (H). The current scenario
+  // baseline is customerPrice @ currentCommissionPct (advantage's customer-price model).
+  currentPrice  Decimal @map("current_price") @db.Decimal(12, 2)
+  customerPrice Decimal @map("customer_price") @db.Decimal(12, 2)
+  // Mevcut Komisyon (I) as a PERCENT ("19" = %19), stored verbatim. Used as the
+  // flat fallback commission when no covering tariff band resolves.
+  currentCommissionPct Decimal @map("current_commission_pct") @db.Decimal(6, 4)
+  // "Ürün Komisyon Tarife Seçeneği" column (R == "Var" ⇒ true): does the product
+  // have a commission tariff? Drives whether compute looks up a band vs. the flat rate.
+  hasCommissionTariff Boolean @map("has_commission_tariff")
+  // "Kampanyalı Ürün" (S) kept verbatim for display / export fidelity.
+  campaignedProduct String? @map("campaigned_product")
+  // 24-hour offer (K + N/O window). Null price ⇒ this row has no 24h offer.
+  offer24Price    Decimal?  @map("offer_24_price") @db.Decimal(12, 2)
+  offer24StartsAt DateTime? @map("offer_24_starts_at")
+  offer24EndsAt   DateTime? @map("offer_24_ends_at")
+  // 3-hour offer (L + P/Q window). Null price ⇒ this row has no 3h offer.
+  offer3Price    Decimal?  @map("offer_3_price") @db.Decimal(12, 2)
+  offer3StartsAt DateTime? @map("offer_3_starts_at")
+  offer3EndsAt   DateTime? @map("offer_3_ends_at")
+  // The seller's chosen offer (H24|H3) XOR a custom price for the what-if preview
+  // (max = the row's lowest present offer price). Both null ⇒ not joined.
+  selectedOffer FlashOfferType? @map("selected_offer")
+  customPrice   Decimal?        @map("custom_price") @db.Decimal(12, 2)
+  // Preserves the Excel row order so export patches the right rows.
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  list FlashProductList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, sortOrder])
+  @@index([organizationId])
+  @@index([listId])
+  @@index([storeId, barcode])
+  @@map("flash_product_items")
 }
 
 // ─── Profit Calculation V1 — Schema Foundation (PR-1) ──────────────────

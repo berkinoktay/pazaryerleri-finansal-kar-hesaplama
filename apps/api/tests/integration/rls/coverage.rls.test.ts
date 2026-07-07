@@ -35,6 +35,9 @@ const TENANT_TABLES = [
   // Saved Advantage Label tariffs (store-scoped Trendyol "Avantajlı Ürün Etiketleri")
   'advantage_tariffs',
   'advantage_tariff_items',
+  // Saved Flash Products lists (store-scoped Trendyol "Flaş Ürünler")
+  'flash_product_lists',
+  'flash_product_items',
   // Profit Calculation V1 (PR-1)
   'order_fees',
   'order_claims',
