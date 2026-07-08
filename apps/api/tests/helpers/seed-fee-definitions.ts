@@ -31,10 +31,10 @@ const __dirname = dirname(__filename);
 // Order matters: the denetim-A migration's seed section runs AFTER the PR-2 seed
 // (it DELETEs the PR-2 TRENDYOL STOPPAGE and replaces it with the 'ALL' row).
 const SEED_MIGRATION_PATHS = [
-  '../../../../packages/db/prisma/migrations/20260519175540_fee_definitions_trendyol_seed/migration.sql',
-  '../../../../packages/db/prisma/migrations/20260610090000_cargo_invoice_foundation/migration.sql',
-  '../../../../packages/db/prisma/migrations/20260614020000_fee_scope_commission_vat/migration.sql',
-  '../../../../packages/db/prisma/migrations/20260624120100_international_service_fee_seed/migration.sql',
+  '../../../../packages/db/prisma/reference-seed/20260519175540_fee_definitions_trendyol_seed.sql',
+  '../../../../packages/db/prisma/reference-seed/20260610090000_cargo_invoice_foundation.sql',
+  '../../../../packages/db/prisma/reference-seed/20260614020000_fee_scope_commission_vat.sql',
+  '../../../../packages/db/prisma/reference-seed/20260624120100_international_service_fee_seed.sql',
 ].map((rel) => resolve(__dirname, rel));
 
 // PR-2: PSF + PSF_FAST + RETURN_SHIPPING (TRENDYOL) + STOPPAGE (ALL, denetim A) ·

@@ -31,12 +31,12 @@ const __dirname = dirname(__filename);
 
 const MIGRATION_SQL_PATH = resolve(
   __dirname,
-  '../prisma/migrations/20260517085409_shipping_tariffs/migration.sql',
+  '../prisma/reference-seed/20260517085409_shipping_tariffs.sql',
 );
 
 const MICRO_RETURN_TIER_MIGRATION_SQL_PATH = resolve(
   __dirname,
-  '../prisma/migrations/20260625120000_micro_export_return_fee_tiers/migration.sql',
+  '../prisma/reference-seed/20260625120000_micro_export_return_fee_tiers.sql',
 );
 
 const EXPECTED_CARRIER_COUNT = 10;
