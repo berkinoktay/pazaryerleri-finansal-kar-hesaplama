@@ -140,6 +140,9 @@ export interface CreateOrderOverrides {
   // Promosyon adları + brüt tutarları (spec ekleme #3). Order upsert'in yazdığı
   // JSON; liste/detay/canlı-performans bu kolondan servis eder. null = indirimsiz.
   promotionDisplays?: { displayName: string; amountGross: string }[] | null;
+  // Buffer-graduation marker: non-null when the order came from the
+  // live-performance buffer (drives the notification summary's isPromotion flag).
+  promotedFromBufferAt?: Date | null;
 }
 
 export async function createOrder(
@@ -162,6 +165,7 @@ export async function createOrder(
       // Omit (undefined) → column stays SQL NULL, matching the order upsert's
       // no-promotion write. A provided array is stored verbatim as JSON.
       promotionDisplays: overrides.promotionDisplays ?? undefined,
+      promotedFromBufferAt: overrides.promotedFromBufferAt ?? null,
     },
   });
 }

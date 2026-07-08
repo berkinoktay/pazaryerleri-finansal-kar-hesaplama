@@ -1,4 +1,5 @@
 import { prisma } from '@pazarsync/db';
+import type { OrderStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
@@ -713,6 +714,13 @@ export interface NewOrderNotificationSummary {
   profit: string | null;
   costStatus: 'costed' | 'pending';
   isToday: boolean;
+  // Order lifecycle status for source='orders'; null for buffer (not yet an
+  // order). Lets the client drop a toast for a CANCELLED / first-seen-RETURNED
+  // order that the summary endpoint would otherwise announce.
+  status: OrderStatus | null;
+  // True only when an order graduated from the live-performance buffer; always
+  // false for buffer entries. Suppresses a duplicate ding for an already-seen order.
+  isPromotion: boolean;
 }
 
 // --- Buffer Detail ---
@@ -818,6 +826,11 @@ export async function getNewOrderNotificationSummary(args: {
         saleGross: true,
         estimatedNetProfit: true,
         orderDate: true,
+        status: true,
+        // Buffer-graduation marker: non-null when the order came from the
+        // live-performance buffer (the seller already saw it). Drives isPromotion
+        // so the client can drop a duplicate toast for an already-shown order.
+        promotedFromBufferAt: true,
       },
     });
     if (order === null) {
@@ -835,6 +848,8 @@ export async function getNewOrderNotificationSummary(args: {
       profit,
       costStatus: profit !== null ? 'costed' : 'pending',
       isToday: order.orderDate >= start && order.orderDate < end,
+      status: order.status,
+      isPromotion: order.promotedFromBufferAt !== null,
     };
   }
 
@@ -855,5 +870,11 @@ export async function getNewOrderNotificationSummary(args: {
     profit: null,
     costStatus: 'pending',
     isToday: entry.orderDate.getTime() === getBusinessDateAnchor().getTime(),
+    // A buffer entry is not yet an order: it has no lifecycle status and cannot be
+    // cancelled, and it is never itself a promotion (promotion is the graduation
+    // INTO orders). Both stay null/false so the client's status/isPromotion gates
+    // are no-ops for buffer sources.
+    status: null,
+    isPromotion: false,
   };
 }

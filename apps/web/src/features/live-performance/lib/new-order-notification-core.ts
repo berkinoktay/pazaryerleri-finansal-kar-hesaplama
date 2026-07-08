@@ -2,9 +2,71 @@
 // no side effects -- the provider owns the imperative shell (subscribe, fetch,
 // toast, sound); this module decides WHAT to do so the decisions are unit-tested.
 
+import { getBusinessDate } from '@pazarsync/utils';
+
 export interface NewOrderEvent {
   table: 'orders' | 'buffer';
   id: string;
+  /** The row's `order_date`, straight off the Realtime INSERT payload. Used by
+   *  {@link isBusinessToday} to drop past-day inserts before they coalesce. */
+  orderDate: string;
+}
+
+/**
+ * Normalize a Realtime `order_date` wire value so `new Date` yields the intended
+ * instant. Two wire shapes reach here, and only one needs fixing:
+ *
+ *   - `orders.order_date` is a `timestamp WITHOUT time zone` column, so Postgres /
+ *     supabase realtime-js emit the stored UTC wall clock with NO offset, e.g.
+ *     '2026-07-08T14:00:00' (a space separator is also possible). ECMAScript
+ *     parses an offset-less date-TIME value as CLIENT-LOCAL, shifting the instant
+ *     by the browser's offset — on an Istanbul browser an order placed
+ *     00:00-02:59 would read as YESTERDAY and its toast would be dropped (a daily
+ *     recurring dead zone; also wrong for clients east of UTC+3). We stamp such
+ *     values UTC so the wall clock is read as the UTC instant the column holds.
+ *   - `live_performance_buffer.order_date` is a `@db.Date`, emitted date-only
+ *     ('2026-07-08'). ECMAScript already parses a date-only value as UTC midnight,
+ *     and the column is a business-date anchor, so we leave it untouched.
+ *
+ * A value that already carries an explicit offset ('Z', '+HH..', '-HH..') is
+ * trusted as-is. Anything unrecognized flows through unchanged and fails closed
+ * at the NaN guard in {@link isBusinessToday}.
+ */
+function normalizeOrderDateWire(orderDate: string): string {
+  // Date-only (buffer @db.Date): ECMAScript already parses this as UTC midnight.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) return orderDate;
+  // Unify the separator so the time part is trivial to isolate.
+  const withT = orderDate.includes(' ') ? orderDate.replace(' ', 'T') : orderDate;
+  const tIndex = withT.indexOf('T');
+  if (tIndex === -1) return orderDate; // not a datetime we recognize -> fail closed
+  const timePart = withT.slice(tIndex + 1);
+  // The date hyphens are behind us, so a '+' / '-' in the time part is an offset.
+  if (/Z/.test(timePart) || /[+-]\d{2}/.test(timePart)) return withT;
+  // Offset-less datetime = a UTC wall clock from a timestamp-without-tz column.
+  return `${withT}Z`;
+}
+
+/**
+ * Whether `orderDate` (a Realtime `order_date` wire value) falls in the same
+ * business day as `now`, using the single business-timezone source of truth
+ * ({@link getBusinessDate}) — never a hand-rolled offset. The wire value is
+ * normalized first ({@link normalizeOrderDateWire}) because the orders wire is an
+ * offset-less UTC wall clock (a `timestamp` column) while the buffer wire is a
+ * plain business date (`@db.Date`); both must resolve to the correct Istanbul
+ * business day. A non-string (schema drift; see `newOrderInsertEvent`) or an
+ * unparseable date returns false so a malformed event is never toasted; data
+ * invalidation runs on a separate channel, so dropping a suspect toast costs
+ * nothing. This is the FIRST gate the provider applies, so a midnight buffer
+ * flush or a historical backfill (both past-day) never enters the coalesce window
+ * and can never trigger a "N new orders" burst.
+ */
+export function isBusinessToday(orderDate: string, now: Date): boolean {
+  // Runtime fail-close: a non-string wire value would throw in the normalizer;
+  // the compile-time constraint does not bind a drifted Realtime payload.
+  if (typeof orderDate !== 'string') return false;
+  const parsed = new Date(normalizeOrderDateWire(orderDate));
+  if (Number.isNaN(parsed.getTime())) return false;
+  return getBusinessDate(parsed) === getBusinessDate(now);
 }
 
 /**
@@ -21,6 +83,14 @@ export interface NotificationSummaryLike {
   profit: string | null;
   costStatus: 'costed' | 'pending';
   isToday: boolean;
+  /** Order lifecycle status for orders; null for buffer entries (not yet an
+   *  order). CANCELLED / RETURNED are dropped by {@link selectSurvivors}. Typed as
+   *  `string | null` (not the OrderStatus union) to stay structurally compatible
+   *  with the api-client-generated summary the provider passes straight in. */
+  status: string | null;
+  /** True when an order graduated from the live-performance buffer (the seller
+   *  already saw it) — {@link selectSurvivors} drops it. Always false for buffer. */
+  isPromotion: boolean;
 }
 
 /** Max per-event summary fetches per coalesce window. Beyond this a burst is
@@ -70,12 +140,25 @@ export interface SurvivorSelection {
   newlySeen: string[];
 }
 
+/** Statuses that must never surface a "new order" toast: a cancelled order (or
+ *  one whose very first record already dropped to RETURNED) is not a sale to
+ *  celebrate. Checked against the summary's `status` (null for buffer sources,
+ *  which never match). */
+const NON_TOASTABLE_STATUSES: ReadonlySet<string> = new Set(['CANCELLED', 'RETURNED']);
+
 /**
- * Drop a summary when it is not today's (backfill / historical) or when its
- * platformOrderNumber was already toasted this session (a promotion of an
- * already-shown buffer order, or a split-shipment repeat). Summaries with a
- * null platformOrderNumber can't be deduped by number, so they pass the dedup
- * gate (still subject to isToday).
+ * Drop a summary when it fails any survivor gate:
+ *   - not today's (backfill / historical) — the isToday gate;
+ *   - a promotion from the buffer (isPromotion) — the seller already saw this order
+ *     as a cost-missing buffer entry, so its graduation into `orders` is NOT a new
+ *     order even if the tab was closed when it was first buffered;
+ *   - a CANCELLED / first-seen-RETURNED order — never a sale to announce;
+ *   - a platformOrderNumber already toasted this session (a split-shipment repeat).
+ *
+ * A dropped promotion / cancelled summary is NOT added to the seen-set: only
+ * survivors are recorded (via newlySeen), keeping the set from growing on rows
+ * that were never toasted. Summaries with a null platformOrderNumber can't be
+ * deduped by number, so they pass the dedup gate (still subject to the gates above).
  */
 export function selectSurvivors(
   summaries: readonly NotificationSummaryLike[],
@@ -86,6 +169,8 @@ export function selectSurvivors(
   const windowSeen = new Set<string>();
   for (const s of summaries) {
     if (!s.isToday) continue;
+    if (s.isPromotion) continue;
+    if (s.status !== null && NON_TOASTABLE_STATUSES.has(s.status)) continue;
     const num = s.platformOrderNumber;
     if (num !== null) {
       if (seen.has(num) || windowSeen.has(num)) continue;

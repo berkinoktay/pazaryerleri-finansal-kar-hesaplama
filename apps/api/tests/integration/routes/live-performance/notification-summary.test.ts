@@ -46,6 +46,7 @@ describe('GET live-performance/notification-summary', () => {
       platformOrderNumber: 'TY-100',
       saleGross: '149.90',
       estimatedNetProfit: '38.40',
+      status: 'PROCESSING',
     });
 
     const res = await get(org.id, store.id, 'orders', order.id, user.accessToken);
@@ -60,7 +61,25 @@ describe('GET live-performance/notification-summary', () => {
       profit: '38.40',
       costStatus: 'costed',
       isToday: true,
+      status: 'PROCESSING',
+      // A directly-written order (never buffered) is not a promotion.
+      isPromotion: false,
     });
+  });
+
+  it('orders source: isPromotion true when the order graduated from the buffer', async () => {
+    const { user, org, store } = await ownerWithStore();
+    const order = await createOrder(org.id, store.id, {
+      orderDate: new Date(),
+      saleGross: '75.00',
+      status: 'PROCESSING',
+      promotedFromBufferAt: new Date(),
+    });
+
+    const res = await get(org.id, store.id, 'orders', order.id, user.accessToken);
+    const body = await res.json();
+    expect(body.isPromotion).toBe(true);
+    expect(body.status).toBe('PROCESSING');
   });
 
   it('orders source: pending costStatus + null profit when estimate is null', async () => {
@@ -110,6 +129,9 @@ describe('GET live-performance/notification-summary', () => {
       profit: null,
       costStatus: 'pending',
       isToday: true,
+      // A buffer entry is not yet an order: no status, never a promotion.
+      status: null,
+      isPromotion: false,
     });
   });
 

@@ -139,6 +139,9 @@ describe('processBufferPromote', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('pkg-001');
     expect(order.estimatedNetProfit).not.toBeNull();
+    // Buffer graduation stamps promotedFromBufferAt so the realtime toast can
+    // suppress a duplicate ding for an order the seller already saw buffered.
+    expect(order.promotedFromBufferAt).not.toBeNull();
     // Buffer JSONB round-trip: ISO-string tarihler new Date() ile coerce edilir,
     // fastDeliveryType ?? null ile geçer (2026-06-14 capture — review gap kapatma).
     expect(order.fastDeliveryType).toBe('FastDelivery');
@@ -239,6 +242,9 @@ describe('processBufferPromote', () => {
     expect(order.estimatedNetProfit).toBeNull();
     expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
     expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    // Excluded graduation is still a buffer -> orders write: it must carry the
+    // promotion marker so the toast suppresses this midnight-path INSERT (C2).
+    expect(order.promotedFromBufferAt).not.toBeNull();
   });
 
   it('cost vanished on a today PROMOTING entry → demoted back to PENDING (window still open)', async () => {
@@ -344,6 +350,9 @@ describe('processPastDayBufferFlush', () => {
     expect(order.profitExcludedAt).not.toBeNull();
     // Kâr-dışı sipariş PSF/Stopaj ESTIMATE satırı da taşımaz.
     expect(await prisma.orderFee.count({ where: { orderId: order.id } })).toBe(0);
+    // The midnight flush is exactly the buffer -> orders path whose toast C2 must
+    // suppress: the graduated order carries the promotion marker.
+    expect(order.promotedFromBufferAt).not.toBeNull();
   });
 
   it('does NOT flush a today PENDING entry (same-day cost window preserved)', async () => {

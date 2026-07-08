@@ -1,5 +1,7 @@
 import { z } from '@hono/zod-openapi';
 
+import { OrderStatus } from '@pazarsync/db/enums';
+
 // All monetary values are Decimal strings (services preserve precision via
 // decimal.js + toFixed(2)); the frontend re-parses with decimal.js. Never floats.
 
@@ -222,6 +224,20 @@ export const NewOrderNotificationSummarySchema = z
     isToday: z.boolean().openapi({
       description: "Whether the order falls in today's business day",
       example: true,
+    }),
+    status: z.enum(OrderStatus).nullable().openapi({
+      description:
+        "Order lifecycle status for source='orders'; null for source='buffer' (a buffer " +
+        'entry is not yet an order and cannot be cancelled). Lets the client drop a toast ' +
+        'for a CANCELLED / first-seen-RETURNED order.',
+      example: 'PROCESSING',
+    }),
+    isPromotion: z.boolean().openapi({
+      description:
+        "True when source='orders' and the order graduated from the live-performance " +
+        'buffer (promotedFromBufferAt set); always false for buffer entries. Lets the ' +
+        'client suppress a duplicate ding for an order the seller already saw.',
+      example: false,
     }),
   })
   .openapi('NewOrderNotificationSummary');
