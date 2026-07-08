@@ -275,10 +275,10 @@ async function seedTrendyolCommissionRates(): Promise<void> {
 // Order matters: the denetim-A migration's seed section runs AFTER the PR-2 seed
 // (it DELETEs the PR-2 TRENDYOL STOPPAGE and replaces it with the 'ALL' row).
 const FEE_SEED_MIGRATIONS = [
-  '../prisma/migrations/20260519175540_fee_definitions_trendyol_seed/migration.sql',
-  '../prisma/migrations/20260610090000_cargo_invoice_foundation/migration.sql',
-  '../prisma/migrations/20260614020000_fee_scope_commission_vat/migration.sql',
-  '../prisma/migrations/20260624120100_international_service_fee_seed/migration.sql',
+  '../prisma/reference-seed/20260519175540_fee_definitions_trendyol_seed.sql',
+  '../prisma/reference-seed/20260610090000_cargo_invoice_foundation.sql',
+  '../prisma/reference-seed/20260614020000_fee_scope_commission_vat.sql',
+  '../prisma/reference-seed/20260624120100_international_service_fee_seed.sql',
 ].map((rel) => path.resolve(__dirname, rel));
 
 const FEE_SEED_MARKER = '-- ─── Seed: fee_definitions';
@@ -305,7 +305,7 @@ async function seedFeeDefinitions(): Promise<void> {
 // migration'ın marked seed section'ı idempotent (ON CONFLICT DO NOTHING) replay edilir.
 const MICRO_RETURN_TIER_SEED_MIGRATION = path.resolve(
   __dirname,
-  '../prisma/migrations/20260625120000_micro_export_return_fee_tiers/migration.sql',
+  '../prisma/reference-seed/20260625120000_micro_export_return_fee_tiers.sql',
 );
 const MICRO_RETURN_TIER_SEED_MARKER = '-- ─── Seed: micro_export_return_fee_tiers';
 
