@@ -12,6 +12,13 @@
  * under a different base — e.g. a production deployment that shares the same
  * Trendyol seller — are filtered out up front, so a dev/ngrok reconciler can
  * never delete a production deployment's webhooks.
+ *
+ * The one exception is `extraPruneBaseUrls`: RETIRED bases the operator lists
+ * explicitly (old domains / rotated ngrok hosts) whose leftover subscriptions
+ * should also be pruned. This does NOT weaken the invariant — the default
+ * behaviour is unchanged, and a base only enters prune scope when the operator
+ * names it. Hooks under an extra base are ONLY ever prune candidates; they are
+ * never claimed by a store nor turned into a register/update target.
  */
 
 import { WEBHOOK_ORDERS_PATH } from './webhook-paths';
@@ -55,6 +62,14 @@ export function planWebhookReconcile(args: {
   stores: ReconcileStore[];
   remoteHooks: RemoteWebhook[];
   baseUrl: string;
+  /**
+   * RETIRED, normalized (https, no trailing slash) base URLs whose leftover
+   * subscriptions should ALSO be pruned — e.g. an old domain or a rotated ngrok
+   * host after `PUBLIC_API_BASE_URL` changed. Hooks under one of these bases are
+   * ONLY prune candidates: never claimed, never a register/update target. Absent
+   * or empty → identical to the default (our-base-only) behaviour.
+   */
+  extraPruneBaseUrls?: string[];
 }): ReconcilePlan {
   const base = stripTrailingSlash(args.baseUrl);
   const ourPrefix = `${base}${WEBHOOK_ORDERS_PATH}`;
@@ -85,11 +100,39 @@ export function planWebhookReconcile(args: {
     }
   }
 
+  // Hooks under an operator-listed RETIRED base are prune-only orphans. They are
+  // matched here against the remote list directly (NOT the our-base `ours`
+  // filter) so a subscription pointing at an old domain gets reclaimed against
+  // the 15-webhook-per-seller cap. `!claimed` guards the case where a stale copy
+  // of the ACTIVE base is listed by mistake: an active store's live hook stays
+  // claimed and is therefore never pruned.
+  const extraPrefixes = (args.extraPruneBaseUrls ?? []).map(
+    (extraBase) => `${stripTrailingSlash(extraBase)}${WEBHOOK_ORDERS_PATH}`,
+  );
+  const extraOrphans = args.remoteHooks.filter(
+    (hook) => !claimed.has(hook.id) && extraPrefixes.some((prefix) => hook.url.startsWith(prefix)),
+  );
+
   // Every "ours" hook not claimed by an active store is an orphan (dead
   // storeId), a duplicate, or a PASSIVE hook being replaced — all pruned to
   // respect Trendyol's 15-webhook-per-seller cap. The worker prunes BEFORE
-  // registering so freeing these slots never collides with that cap.
-  const toPrune = ours.filter((hook) => !claimed.has(hook.id));
+  // registering so freeing these slots never collides with that cap. Extra-base
+  // orphans are appended, then the whole list is de-duplicated by id so a hook
+  // matched by both paths (e.g. the active base listed as an extra base) is
+  // pruned exactly once.
+  const toPrune = dedupeById([...ours.filter((hook) => !claimed.has(hook.id)), ...extraOrphans]);
 
   return { toRegister, toUpdate, toPrune };
+}
+
+/** Keep the first occurrence of each hook id, preserving order. */
+function dedupeById(hooks: RemoteWebhook[]): RemoteWebhook[] {
+  const seen = new Set<string>();
+  const result: RemoteWebhook[] = [];
+  for (const hook of hooks) {
+    if (seen.has(hook.id)) continue;
+    seen.add(hook.id);
+    result.push(hook);
+  }
+  return result;
 }

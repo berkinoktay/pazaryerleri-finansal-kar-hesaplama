@@ -265,9 +265,11 @@ export async function disconnect(organizationId: string, storeId: string): Promi
         webhookId: row.webhookId,
       });
     } catch (err) {
-      syncLog.warn('store.webhook-unregister-failed', {
+      syncLog.error('store.webhook-unregister-failed', {
         storeId: row.id,
         errorMessage: err instanceof Error ? err.message : String(err),
+        orphanRisk: true,
+        hint: 'Trendyol subscription may keep POSTing to a dead URL; reconcile cannot prune it once the seller has no ACTIVE stores.',
       });
     }
   }

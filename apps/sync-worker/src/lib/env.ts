@@ -10,6 +10,12 @@
  * is the primary ingest path; cron sweeps the trailing N hours to
  * catch anything the webhook missed (delivery failure, our downtime).
  *
+ * WEBHOOK_PRUNE_EXTRA_BASE_URLS — optional, runtime-only (read directly by the
+ * webhook-reconcile handler, not validated here): a comma-separated list of
+ * RETIRED public base URLs whose leftover Trendyol subscriptions the reconciler
+ * should additionally prune after PUBLIC_API_BASE_URL changed. Unset in normal
+ * setups; no boot/test-env wiring needed.
+ *
  * WEBHOOK_EVENT_RETENTION_DAYS — how many days of `webhook_events` rows
  * the daily cleanup tick keeps. Optional; defaults to 90. Read directly by
  * the webhook-event-cleanup handler (not via readSyncEnv), so it is not
