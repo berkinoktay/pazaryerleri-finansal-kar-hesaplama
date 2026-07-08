@@ -694,6 +694,13 @@ model Order {
   platformCreatedBy        String?   @map("platform_created_by")
   originShipmentDate       DateTime? @map("origin_shipment_date")
 
+  // Marketplace-side lastModifiedDate of the most recent event / sync page applied
+  // to this row. Used by the order upsert as an out-of-order guard: a stale webhook
+  // re-delivery or a racing hourly-sync page must never regress status/fields already
+  // written by a newer event. Nullable: legacy rows and buffer-JSONB replays without
+  // the field skip the guard.
+  platformLastModifiedAt DateTime? @map("platform_last_modified_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
