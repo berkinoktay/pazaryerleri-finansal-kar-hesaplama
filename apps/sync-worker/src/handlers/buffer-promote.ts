@@ -106,6 +106,7 @@ async function promoteOne(id: string, now: Date): Promise<void> {
             });
             await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
               profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
+              promotedFromBuffer: true,
             });
             await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
             return entry;
@@ -124,8 +125,12 @@ async function promoteOne(id: string, now: Date): Promise<void> {
           return null;
         }
 
-        // Same tx → order write + buffer delete commit atomically.
-        await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx);
+        // Same tx → order write + buffer delete commit atomically. Marked as a
+        // buffer graduation so the realtime toast suppresses a duplicate ding for
+        // an order the seller already saw as a cost-missing buffer entry.
+        await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
+          promotedFromBuffer: true,
+        });
         await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
         return entry;
       },
@@ -242,6 +247,7 @@ async function flushOne(id: string): Promise<void> {
       // korunur; kâr alanları kalıcı donuk. Aynı tx → order + buffer-delete atomik.
       await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
         profitExclusion: { reason: 'COST_DEADLINE_MISSED' },
+        promotedFromBuffer: true,
       });
       await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
       return entry;

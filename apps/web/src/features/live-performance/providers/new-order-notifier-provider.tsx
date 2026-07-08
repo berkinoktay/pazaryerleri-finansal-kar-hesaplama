@@ -16,6 +16,7 @@ import { useCurrentScope } from '@/providers/current-scope';
 import { getNotificationSummary } from '../api/get-notification-summary.api';
 import {
   decideCoalesce,
+  isBusinessToday,
   planToast,
   selectSurvivors,
   shouldPlaySound,
@@ -197,6 +198,16 @@ export function NewOrderNotifierProvider({
     };
 
     const onNewOrder = (event: NewOrderEvent): void => {
+      // First gate (C1): drop past-day inserts BEFORE the coalesce window. A
+      // midnight buffer flush or a historical-day backfill emits INSERTs whose
+      // order_date is not today; letting them into `pending` would inflate the
+      // burst counter, which short-circuits the per-summary isToday/seen gates and
+      // rains "N new orders" + dings for orders that are not new. Data
+      // invalidation runs on the separate onEvent channel (scheduleInvalidate), so
+      // dropping the toast here never stalls a refetch.
+      // Deliberately NOT filtered: a store's first sync of the day backfills
+      // today's orders — those are genuinely today's new orders and should toast.
+      if (!isBusinessToday(event.orderDate, new Date())) return;
       pending.push(event);
       if (coalesceTimer === null) {
         coalesceTimer = setTimeout(() => {

@@ -25,6 +25,8 @@ describe('getNotificationSummary', () => {
           profit: '30.00',
           costStatus: 'costed',
           isToday: true,
+          status: 'PROCESSING',
+          isPromotion: false,
         });
       }),
     );
@@ -37,6 +39,8 @@ describe('getNotificationSummary', () => {
     });
     expect(result.revenue).toBe('120.00');
     expect(result.costStatus).toBe('costed');
+    expect(result.status).toBe('PROCESSING');
+    expect(result.isPromotion).toBe(false);
   });
 
   it('throws an ApiError on 404', async () => {

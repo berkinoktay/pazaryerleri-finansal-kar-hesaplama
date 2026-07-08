@@ -13,6 +13,17 @@ section "Versioning" for details.
 
 ### Changed
 
+- **New-order notification summary now carries `status` and `isPromotion`**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/notification-summary`).
+  Two fields were added to `NewOrderNotificationSummary` so the realtime toast can
+  suppress notifications that are not genuinely new sales:
+  - `status` — the order lifecycle status (`OrderStatus`) for `source=orders`;
+    `null` for `source=buffer` (a buffer entry is not yet an order). The client
+    drops a toast for a `CANCELLED` / first-seen-`RETURNED` order.
+  - `isPromotion` — `true` when the order graduated from the live-performance
+    buffer (its `promotedFromBufferAt` is set), meaning the seller already saw it
+    as a cost-missing buffer entry; always `false` for buffer sources. The client
+    suppresses a duplicate ding for an already-shown order.
 - **Trendyol order webhook receiver hardened around the vendor retry model**
   (`POST /v1/webhooks/orders/{storeId}`). Trendyol replays every failed request
   (4xx included) every 5 minutes until it succeeds, then flips the webhook to

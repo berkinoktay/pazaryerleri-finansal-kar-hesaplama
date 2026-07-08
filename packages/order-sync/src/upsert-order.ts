@@ -221,6 +221,15 @@ export interface UpsertOrderOpts {
    * Snapshot + estimate adımları atlanır; item'lar barkod iziyle yazılır.
    */
   profitExclusion?: { reason: ProfitExclusionReason };
+  /**
+   * Set true by the buffer-promote worker when this order graduates from the
+   * live-performance buffer (the seller already saw it as a cost-missing entry).
+   * Stamps `promotedFromBufferAt` so the realtime new-order toast can suppress a
+   * duplicate "new order" ding for an order the seller has already been shown.
+   * CREATE-only by design: an UPDATE never emits a Realtime INSERT event, so the
+   * toast pipeline never reads it — stamping it on update would be meaningless.
+   */
+  promotedFromBuffer?: boolean;
 }
 
 export async function upsertOrderWithSnapshot(
@@ -375,6 +384,11 @@ export async function upsertOrderWithSnapshot(
           profitExcludedAt: new Date(),
           profitExclusionReason: opts.profitExclusion.reason,
         }),
+        // Buffer-graduation marker (CREATE-only): the realtime toast reads this to
+        // drop a duplicate "new order" for an order the seller already saw in the
+        // buffer. Deliberately NOT in the update branch — an UPDATE emits no
+        // Realtime INSERT event, so the toast pipeline would never consult it.
+        ...(opts?.promotedFromBuffer === true && { promotedFromBufferAt: new Date() }),
       },
       update: {
         status: order.status,

@@ -65,8 +65,9 @@ interface SyncLogsRowWire {
 
 /**
  * Wire shape of an `orders` row arriving over postgres_changes (INSERT only).
- * Mirrors Postgres logical-decoding output; only `id` is consumed by the
- * notifier, but the scope columns document what the row carries.
+ * Mirrors Postgres logical-decoding output; the notifier consumes `id` and
+ * `order_date` (the past-day drop gate), while the scope columns document what
+ * the row carries.
  */
 interface OrdersRowWire {
   id: string;
@@ -339,17 +340,45 @@ export function subscribeToOrgSyncs(
   };
 }
 
+// One-time diagnostic: the generic constraint below is COMPILE-TIME only. If a
+// live Realtime payload drifts (a replica-identity change, a column rename, a
+// schema migration) so `order_date` is not a string, `isBusinessToday` fails
+// closed and EVERY new-order toast on the channel is silently suppressed. We warn
+// once so that whole-channel outage is diagnosable from the console — naming only
+// the table, never any payload contents (no PII).
+let warnedNonStringOrderDate = false;
+
 /**
  * Map a postgres_changes payload to a new-order event, or null when the event
  * is not an INSERT. Extracted so the INSERT-narrowing is unit-testable without
  * mocking a Realtime channel. The INSERT discriminant gives `payload.new: T`.
+ *
+ * Carries `orderDate` (the row's `order_date` — both `orders` and
+ * `live_performance_buffer` wire shapes have it) so the notifier can drop
+ * past-day inserts (midnight buffer flush, historical backfill) BEFORE they
+ * enter the coalesce window — those must never trigger a "N new orders" burst.
+ *
+ * Fail-closed mode: the `order_date` type is only guaranteed at compile time. If
+ * a drifted payload delivers a non-string value we still return the event with
+ * the raw value — `isBusinessToday` then classifies it as not-today and drops the
+ * toast — but we emit a one-time console warning first, because in that state the
+ * gate suppresses the ENTIRE channel's toasts until the wire shape is restored.
  */
-export function newOrderInsertEvent<T extends { id: string }>(
+export function newOrderInsertEvent<T extends { id: string; order_date: string }>(
   table: 'orders' | 'buffer',
   payload: RealtimePostgresChangesPayload<T>,
-): { table: 'orders' | 'buffer'; id: string } | null {
+): { table: 'orders' | 'buffer'; id: string; orderDate: string } | null {
   if (payload.eventType !== 'INSERT') return null;
-  return { table, id: payload.new.id };
+  const orderDate = payload.new.order_date;
+  if (typeof orderDate !== 'string' && !warnedNonStringOrderDate) {
+    warnedNonStringOrderDate = true;
+    console.warn(
+      `[realtime] new-order toasts suppressed: '${table}' INSERT arrived with a non-string ` +
+        'order_date; the business-day gate now fails closed for this channel until the wire ' +
+        'shape is restored.',
+    );
+  }
+  return { table, id: payload.new.id, orderDate };
 }
 
 export interface SubscribeToLivePerformanceOptions {
@@ -361,8 +390,10 @@ export interface SubscribeToLivePerformanceOptions {
    * this callback carries no row data (unlike the sync_logs subscription).
    */
   onEvent: () => void;
-  /** Fires ONLY on a buffer/orders INSERT -- a genuinely new order for the toast. */
-  onNewOrder?: (event: { table: 'orders' | 'buffer'; id: string }) => void;
+  /** Fires ONLY on a buffer/orders INSERT -- a genuinely new order for the toast.
+   *  `orderDate` is the row's business date so the consumer can drop past-day
+   *  inserts before they count toward a coalesce burst. */
+  onNewOrder?: (event: { table: 'orders' | 'buffer'; id: string; orderDate: string }) => void;
   onHealthChange?: (health: RealtimeHealth) => void;
 }
 
