@@ -63,6 +63,12 @@ export function OrgSyncsProvider({
   // React Query re-evaluates `refetchInterval` immediately (a ref would
   // let one stale poll fire on the originally-scheduled tick).
   const [realtimeHealth, setRealtimeHealth] = React.useState<RealtimeHealth>('connecting');
+  // Latches whether we saw a real outage ('errored'/'paused') so the recovery
+  // invalidate fires on the way back to 'healthy'. A ref, not a prev-state
+  // compare, because buildChannel reports 'connecting' on every (re)subscribe:
+  // a prev-vs-next check would only ever see 'connecting' -> 'healthy' and the
+  // outage-recovery reconcile would be dead code.
+  const hadOutageRef = React.useRef(false);
 
   const query: UseQueryResult<SyncLog[]> = useQuery<SyncLog[]>({
     queryKey: isEnabled && orgId !== null ? orgSyncKeys.list(orgId) : ['org-syncs', '__disabled__'],
@@ -95,18 +101,19 @@ export function OrgSyncsProvider({
         );
       },
       onHealthChange: (next) => {
-        setRealtimeHealth((prev) => {
-          // Recovery edge: when health flips from a real outage back to
-          // healthy, refetch once so any events emitted during the
-          // outage window get reconciled. The initial `connecting` →
-          // `healthy` does NOT trigger this — REST hydrate already ran
-          // on mount.
-          const wasOutage = prev === 'errored' || prev === 'paused';
-          if (next === 'healthy' && wasOutage) {
-            void queryClient.invalidateQueries({ queryKey });
-          }
-          return next;
-        });
+        // Recovery edge: when health returns to healthy after a real outage,
+        // refetch once so any events emitted during the outage window get
+        // reconciled. Ref-latched (see hadOutageRef) so the interim
+        // `connecting` buildChannel emits can't break the gate. The initial
+        // `connecting` → `healthy` does NOT trigger this — REST hydrate already
+        // ran on mount. The state updater stays pure.
+        if (next === 'errored' || next === 'paused') {
+          hadOutageRef.current = true;
+        } else if (next === 'healthy' && hadOutageRef.current) {
+          hadOutageRef.current = false;
+          void queryClient.invalidateQueries({ queryKey });
+        }
+        setRealtimeHealth(next);
       },
     });
   }, [isEnabled, orgId, queryClient]);

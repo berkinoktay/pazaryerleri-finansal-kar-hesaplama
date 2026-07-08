@@ -237,11 +237,15 @@ export interface SubscribeToOrgSyncsOptions {
  *   - `connecting` — initial state until SUBSCRIBED arrives.
  *   - `healthy`    — the channel is live and delivering events. Polling
  *                    should be off.
- *   - `errored`    — CHANNEL_ERROR / TIMED_OUT / CLOSED. Polling fills
- *                    in until the next SUBSCRIBED.
+ *   - `errored`    — CHANNEL_ERROR / TIMED_OUT / CLOSED from a genuine
+ *                    drop. Polling fills in until the next SUBSCRIBED.
  *   - `paused`     — we explicitly removed the channel because the tab
  *                    is hidden (see visibility handling below). Polling
- *                    is also off because nobody is watching.
+ *                    is also off because nobody is watching, and it
+ *                    STAYS `paused` — the CLOSED that `removeChannel`
+ *                    triggers is swallowed (see `suppressClosedOnce`) so
+ *                    it can't flip the tab back to `errored` and wake the
+ *                    fallback in a hidden tab.
  *
  * **Tab visibility.** Browsers throttle background tabs aggressively;
  * we go further and tear the channel down entirely on `visibilitychange`
@@ -249,7 +253,10 @@ export interface SubscribeToOrgSyncsOptions {
  * for the common case of a merchant leaving the dashboard in a
  * background tab — and frees the consumer's polling-gate logic from
  * trying to distinguish "channel is up but tab is dormant" from
- * "channel is up and we're watching."
+ * "channel is up and we're watching." Because teardown makes supabase-js
+ * emit one CLOSED, we arm `suppressClosedOnce` before removing the
+ * channel so health remains `paused` rather than briefly reading
+ * `errored`.
  *
  * Returns an unsubscribe function. Caller calls on unmount;
  * OrgSyncsProvider does this in its cleanup.
@@ -262,6 +269,12 @@ export function subscribeToOrgSyncs(
   const supabase = createClient();
   let channel: RealtimeChannel | null = null;
   let unsubscribed = false;
+  // One-shot flag: a visibility-triggered teardown removes the channel, which
+  // makes supabase-js fire the subscribe callback once with 'CLOSED'. That is
+  // our own teardown, not a real drop — swallow exactly one CLOSED so health
+  // stays 'paused'. It is one-shot on purpose: a genuine later CLOSED (an actual
+  // outage) must still surface as 'errored'.
+  let suppressClosedOnce = false;
 
   const reportHealth = (next: RealtimeHealth): void => {
     if (onHealthChange !== undefined) onHealthChange(next);
@@ -297,6 +310,12 @@ export function subscribeToOrgSyncs(
       )
       .subscribe((status) => {
         if (unsubscribed) return;
+        // Swallow the single CLOSED our own visibility teardown produces so
+        // health stays 'paused' (see suppressClosedOnce above).
+        if (status === 'CLOSED' && suppressClosedOnce) {
+          suppressClosedOnce = false;
+          return;
+        }
         // Status values: SUBSCRIBED | TIMED_OUT | CLOSED | CHANNEL_ERROR | (transient others)
         if (status === 'SUBSCRIBED') reportHealth('healthy');
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
@@ -319,6 +338,9 @@ export function subscribeToOrgSyncs(
     if (typeof document === 'undefined') return;
     if (document.visibilityState === 'hidden') {
       reportHealth('paused');
+      // Arm the CLOSED suppressor BEFORE teardown so the resulting CLOSED does
+      // not overwrite 'paused' with 'errored' and wake the polling fallback.
+      suppressClosedOnce = true;
       void teardown();
     } else if (channel === null) {
       channel = buildChannel();
@@ -413,7 +435,9 @@ export interface SubscribeToLivePerformanceOptions {
  * WebSocket authenticates through the cookie session — no `setAuth` on this
  * path), health reported through `onHealthChange` so the consumer can gate a
  * polling fallback, and tab-visibility teardown to free the socket in
- * background tabs. Returns an unsubscribe function.
+ * background tabs. Health stays `paused` while hidden — the CLOSED the teardown
+ * triggers is suppressed (`suppressClosedOnce`) so the fallback doesn't wake in
+ * a background tab. Returns an unsubscribe function.
  *
  * Single store channel: `live-performance:${storeId}`.
  */
@@ -425,6 +449,12 @@ export function subscribeToLivePerformance(
   const supabase = createClient();
   let channel: RealtimeChannel | null = null;
   let unsubscribed = false;
+  // One-shot flag: a visibility-triggered teardown removes the channel, which
+  // makes supabase-js fire the subscribe callback once with 'CLOSED'. That is
+  // our own teardown, not a real drop — swallow exactly one CLOSED so health
+  // stays 'paused'. It is one-shot on purpose: a genuine later CLOSED (an actual
+  // outage) must still surface as 'errored'.
+  let suppressClosedOnce = false;
 
   const reportHealth = (next: RealtimeHealth): void => {
     if (onHealthChange !== undefined) onHealthChange(next);
@@ -464,6 +494,12 @@ export function subscribeToLivePerformance(
       )
       .subscribe((status) => {
         if (unsubscribed) return;
+        // Swallow the single CLOSED our own visibility teardown produces so
+        // health stays 'paused' (see suppressClosedOnce above).
+        if (status === 'CLOSED' && suppressClosedOnce) {
+          suppressClosedOnce = false;
+          return;
+        }
         if (status === 'SUBSCRIBED') reportHealth('healthy');
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           reportHealth('errored');
@@ -482,6 +518,9 @@ export function subscribeToLivePerformance(
     if (typeof document === 'undefined') return;
     if (document.visibilityState === 'hidden') {
       reportHealth('paused');
+      // Arm the CLOSED suppressor BEFORE teardown so the resulting CLOSED does
+      // not overwrite 'paused' with 'errored' and wake the polling fallback.
+      suppressClosedOnce = true;
       void teardown();
     } else if (channel === null) {
       channel = buildChannel();
