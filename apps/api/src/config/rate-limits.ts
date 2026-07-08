@@ -20,6 +20,15 @@ export const RATE_LIMITS = {
    * upstream limits and surface as 5xx for legitimate users.
    */
   STORE_CONNECT: { max: 5, windowSec: 60, keyPrefix: 'stores-connect' },
+  /**
+   * Trendyol order webhook receiver limit. Bucketed per store (the route
+   * supplies a `keyResolver` keyed on the `storeId` path param) since webhook
+   * callers are not authenticated users. Generous headroom for a legitimate
+   * Trendyol event burst — a busy store can emit dozens of status transitions
+   * a minute. A 429 is transient for Trendyol: it retries the failed delivery
+   * every 5 minutes, so throttling a flood never loses an event, it defers it.
+   */
+  WEBHOOK: { max: 120, windowSec: 60, keyPrefix: 'webhook' },
 } as const;
 
 /**

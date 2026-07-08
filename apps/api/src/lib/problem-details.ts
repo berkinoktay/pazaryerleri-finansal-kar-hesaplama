@@ -1,6 +1,10 @@
 import { SyncErrorCode } from '@pazarsync/db/enums';
 import { EncryptionKeyError } from '@pazarsync/sync-core';
+import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
+import { REQUEST_ID_HEADER } from './constants';
 import {
   ConflictError,
   CostProfileArchivedCannotAttachError,
@@ -63,7 +67,11 @@ export interface ProblemDetailsBody {
 
 export interface ProblemDetailsResult {
   body: ProblemDetailsBody;
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 503;
+  // Widened to ContentfulStatusCode so a passed-through `HTTPException` (e.g.
+  // Hono's 400 "Malformed JSON" from a body-parse failure) can carry its own
+  // status verbatim. Every hand-authored branch below still returns a specific
+  // literal, all of which are members of this union.
+  status: ContentfulStatusCode;
   headers?: Record<string, string>;
 }
 
@@ -316,6 +324,26 @@ function classify(err: unknown): ProblemDetailsResult {
       },
     };
   }
+  // Hono-native HTTPException (e.g. a malformed-JSON body parse failure throws
+  // a 400 before any route handler runs). Without this branch such throws
+  // collapse to a generic 500, masking a deterministic client error as a
+  // server fault. Kept last so the domain error classes above (which all
+  // extend `Error`, not `HTTPException`) match first.
+  if (err instanceof HTTPException) {
+    const status = err.status;
+    const isMalformed = status === 400;
+    const detail = err.message.length > 0 ? err.message : 'The request could not be processed';
+    return {
+      status,
+      body: {
+        type: `${TYPE_BASE}/${isMalformed ? 'malformed-request' : 'http-error'}`,
+        title: isMalformed ? 'Malformed request' : 'HTTP error',
+        status,
+        code: isMalformed ? 'MALFORMED_REQUEST' : 'HTTP_ERROR',
+        detail,
+      },
+    };
+  }
   return {
     status: 500,
     body: {
@@ -326,4 +354,26 @@ function classify(err: unknown): ProblemDetailsResult {
       detail: 'An unexpected error occurred',
     },
   };
+}
+
+/**
+ * Shared error → HTTP Response bridge used by `app.onError` (app.ts) and the
+ * Trendyol webhook sub-app's own `onError`. Reads the correlation id stamped
+ * by `requestIdMiddleware`, maps the error via `problemDetailsForError`,
+ * logs unhandled 500s, mirrors any headers (e.g. `Retry-After`), and returns
+ * the RFC 7807 JSON response. Keeping it here means both error handlers share
+ * one implementation instead of copying the body.
+ */
+export function problemDetailsResponse(err: unknown, c: Context): Response {
+  const requestId = c.res.headers.get(REQUEST_ID_HEADER) ?? undefined;
+  const { body, status, headers } = problemDetailsForError(err, { requestId });
+  if (status === 500) {
+    console.error('Unhandled error:', { requestId, err });
+  }
+  if (headers !== undefined) {
+    for (const [name, value] of Object.entries(headers)) {
+      c.header(name, value);
+    }
+  }
+  return c.json(body, status);
 }

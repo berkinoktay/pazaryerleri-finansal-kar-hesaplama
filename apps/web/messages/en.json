@@ -185,6 +185,7 @@
       "VALIDATION_ERROR": "Some fields are invalid. Please review them.",
       "INVALID_REFERENCE": "The reference you provided doesn't exist.",
       "RATE_LIMITED": "Too many requests. Please try again shortly.",
+      "MALFORMED_REQUEST": "The request body could not be parsed. Please try again.",
       "INTERNAL_ERROR": "An unexpected error occurred. Please try again.",
       "SERVER_CONFIG_ERROR": "Server configuration error. Please contact our support team.",
       "NETWORK_ERROR": "Network error. Check your connection.",
