@@ -225,13 +225,16 @@ export const NewOrderNotificationSummarySchema = z
       description: "Whether the order falls in today's business day",
       example: true,
     }),
-    status: z.enum(OrderStatus).nullable().openapi({
-      description:
-        "Order lifecycle status for source='orders'; null for source='buffer' (a buffer " +
-        'entry is not yet an order and cannot be cancelled). Lets the client drop a toast ' +
-        'for a CANCELLED / first-seen-RETURNED order.',
-      example: 'PROCESSING',
-    }),
+    status: z
+      .enum(OrderStatus)
+      .nullable()
+      .openapi({
+        description:
+          "Order lifecycle status for source='orders'; null for source='buffer' (a buffer " +
+          'entry is not yet an order and cannot be cancelled). Lets the client drop a toast ' +
+          'for a CANCELLED / first-seen-RETURNED order.',
+        example: 'PROCESSING',
+      }),
     isPromotion: z.boolean().openapi({
       description:
         "True when source='orders' and the order graduated from the live-performance " +

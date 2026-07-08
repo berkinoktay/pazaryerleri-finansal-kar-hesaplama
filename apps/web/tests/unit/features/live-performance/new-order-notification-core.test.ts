@@ -85,10 +85,7 @@ describe('dedupeEvents', () => {
         event({ table: 'buffer', id: 'a' }),
         event({ table: 'orders', id: 'b' }),
       ]),
-    ).toEqual([
-      event({ table: 'orders', id: 'a' }),
-      event({ table: 'orders', id: 'b' }),
-    ]);
+    ).toEqual([event({ table: 'orders', id: 'a' }), event({ table: 'orders', id: 'b' })]);
   });
 });
 
@@ -102,7 +99,9 @@ describe('decideCoalesce', () => {
   });
 
   it('burst mode above cap (no per-event fetch)', () => {
-    const events = Array.from({ length: MAX_FETCH_PER_WINDOW + 1 }, (_, i) => event({ id: `o${i}` }));
+    const events = Array.from({ length: MAX_FETCH_PER_WINDOW + 1 }, (_, i) =>
+      event({ id: `o${i}` }),
+    );
     const d = decideCoalesce(events);
     expect(d.mode).toBe('burst');
     expect(d.toFetch).toEqual([]);
