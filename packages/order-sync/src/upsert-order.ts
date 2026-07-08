@@ -236,6 +236,45 @@ export async function upsertOrderWithSnapshot(
   // promoted order is never left half-written with its buffer placeholder still
   // present (which would double-count it on the Live Performance page).
   const run = async (tx: Prisma.TransactionClient): Promise<void> => {
+    // Out-of-order guard (freshness): a stale webhook re-delivery or a racing
+    // hourly-sync page can arrive AFTER a newer event already wrote this row.
+    // `platformLastModifiedAt` records the marketplace lastModifiedDate of the
+    // freshest event applied so far. If the incoming event is strictly OLDER,
+    // skip the ENTIRE write and return early: the item insert, cost snapshot,
+    // and estimate are all write-once, and a stale event carries no fresher
+    // information — applying it would only regress status/fields. Equality
+    // passes (falls through to the idempotent upsert) so a same-lastModifiedDate
+    // re-delivery keeps the existing behavior. `incomingLmd` is derived with the
+    // loose `!= null` guard because `mappedOrder` also arrives as buffer JSONB on
+    // the promote path, where `lastModifiedDate` may be an ISO string or (on
+    // legacy rows) undefined; a null incoming value skips the guard by design.
+    //
+    // Scope: this closes the SEQUENTIAL out-of-order case. Two CONCURRENT
+    // in-flight transactions can still last-write-win under Read Committed (both
+    // read the same watermark before either commits), which self-heals on the
+    // next delivery and is never worse than the pre-guard behavior; taking a row
+    // lock here was deliberately avoided to keep the hot intake path lock-free.
+    const existingOrder = await tx.order.findUnique({
+      where: {
+        storeId_platformOrderId: { storeId, platformOrderId: order.platformOrderId },
+      },
+      select: { platformLastModifiedAt: true },
+    });
+    // Normalize a corrupt lastModifiedDate (e.g. a malformed string from a
+    // replayed JSONB snapshot) to null: an Invalid Date must neither drive the
+    // guard nor be stamped, or it would flow into the CREATE/UPDATE below and
+    // abort the whole order persist at the Prisma layer.
+    const parsedLmd = order.lastModifiedDate != null ? new Date(order.lastModifiedDate) : null;
+    const incomingLmd = parsedLmd !== null && Number.isNaN(parsedLmd.getTime()) ? null : parsedLmd;
+    if (
+      existingOrder !== null &&
+      existingOrder.platformLastModifiedAt !== null &&
+      incomingLmd !== null &&
+      incomingLmd.getTime() < existingOrder.platformLastModifiedAt.getTime()
+    ) {
+      return;
+    }
+
     // Mikro ihracat (Trendyol marketplace `micro=true`): satış KDV'den müstesnadır
     // (ihracat istisnası, 3065 sayılı KDV Kanunu 11/1-a — e-arşiv fatura tipi "İstisna").
     // KDV'yi KAYNAKTA sıfırlarız (Order.saleVat + OrderItem.saleVatRate + sellerDiscountVat):
@@ -326,6 +365,10 @@ export async function upsertOrderWithSnapshot(
         platformCreatedBy: order.platformCreatedBy ?? null,
         originShipmentDate:
           order.originShipmentDate != null ? new Date(order.originShipmentDate) : null,
+        // Out-of-order guard baseline: stamp the freshest lastModifiedDate seen so
+        // subsequent stale events are rejected. Null when the buffer JSONB replay
+        // carries no lastModifiedDate (legacy rows).
+        platformLastModifiedAt: incomingLmd,
         // Kâr-dondurma (spec 2026-06-12): yalnız CREATE — pencereyi kaçırmış
         // sipariş KÂR-DIŞI doğar; mevcut satırın durumu update'le değişmez.
         ...(opts?.profitExclusion !== undefined && {
@@ -361,6 +404,10 @@ export async function upsertOrderWithSnapshot(
         ...(order.originShipmentDate != null && {
           originShipmentDate: new Date(order.originShipmentDate),
         }),
+        // Advance the freshness watermark only when the incoming event carries a
+        // lastModifiedDate. A null (legacy buffer JSONB) must not overwrite an
+        // existing watermark, or a later stale event could slip past the guard.
+        ...(incomingLmd !== null && { platformLastModifiedAt: incomingLmd }),
       },
     });
 

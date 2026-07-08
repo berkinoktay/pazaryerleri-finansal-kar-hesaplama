@@ -38,7 +38,10 @@ export type OrderIntakeOutcome =
       reason: 'calculable' | 'excluded_late_arrival' | 'already_in_orders' | 'cancelled_audit';
     }
   | { kind: 'buffered' }
-  | { kind: 'buffered_deduped' }
+  // `refreshed` is an OPTIONAL flag (never a new kind) on purpose: consumers with
+  // an exhaustive `switch (outcome.kind)` keep compiling untouched, while callers
+  // that care can tell a plain dedupe from one that refreshed the buffer snapshot.
+  | { kind: 'buffered_deduped'; refreshed?: boolean }
   | { kind: 'dematerialized'; deletedOrder: boolean; deletedBufferEntries: number };
 
 export async function intakeOrder(args: {
@@ -140,8 +143,92 @@ export async function intakeOrder(args: {
     return { kind: 'buffered' };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      return { kind: 'buffered_deduped' };
+      return refreshBufferSnapshot(args);
     }
     throw err;
   }
+}
+
+/**
+ * P2002 on the buffer create means a row for this (storeId, platformOrderId)
+ * already exists — a concurrent or repeated delivery lost the insert race. Rather
+ * than a blind dedupe, refresh the existing PENDING row's snapshot when THIS event
+ * is newer, so the eventual promote writes the latest status/fields (an earlier
+ * blind dedupe would freeze the buffer at the first event and lose every later
+ * status change until the midnight reset).
+ *
+ * Only PENDING rows are touched: a row already PROMOTING (or later) is being
+ * consumed by the promote worker and must not be rewritten under it. The final
+ * write is a status-guarded `updateMany` so a row that flipped to PROMOTING
+ * between the read and the write is left untouched (count 0 → not refreshed).
+ *
+ * Concurrency: two concurrent PENDING refreshes are last-write-wins (no row lock
+ * on this path); the status predicate only guards the PROMOTING flip. Any stale
+ * snapshot that wins the race is corrected by the order-row out-of-order guard
+ * once the entry is promoted.
+ */
+async function refreshBufferSnapshot(args: {
+  storeId: string;
+  mapped: MappedOrder;
+  rawPayload?: Prisma.InputJsonValue;
+}): Promise<OrderIntakeOutcome> {
+  const { storeId, mapped } = args;
+
+  const existing = await prisma.livePerformanceBuffer.findUnique({
+    where: { storeId_platformOrderId: { storeId, platformOrderId: mapped.platformOrderId } },
+    select: { id: true, status: true, mappedOrder: true },
+  });
+
+  // Race: the promote worker may have deleted the row between the failed create
+  // and this read — nothing to refresh.
+  if (existing === null || existing.status !== 'PENDING') {
+    return { kind: 'buffered_deduped' };
+  }
+
+  // Refresh when the buffered snapshot has no comparable timestamp (legacy JSONB)
+  // or the incoming event is strictly newer. Equal/older events change nothing.
+  // `mapped.lastModifiedDate` is re-wrapped + NaN-checked so a future caller that
+  // replays a JSONB snapshot (string / Invalid Date) cannot throw at `.getTime()`;
+  // an unparseable incoming value carries no fresher info → do not refresh.
+  const existingLmd = parseBufferLastModified(existing.mappedOrder);
+  const incomingLmd = mapped.lastModifiedDate != null ? new Date(mapped.lastModifiedDate) : null;
+  const shouldRefresh =
+    incomingLmd !== null &&
+    !Number.isNaN(incomingLmd.getTime()) &&
+    (existingLmd === null || incomingLmd.getTime() > existingLmd.getTime());
+  if (!shouldRefresh) {
+    return { kind: 'buffered_deduped' };
+  }
+
+  // orderDate + status are intentionally left untouched — only the mapped/raw
+  // snapshot is replaced. Status-guarded so a concurrent flip to PROMOTING wins.
+  const updated = await prisma.livePerformanceBuffer.updateMany({
+    where: { id: existing.id, status: 'PENDING' },
+    data: {
+      mappedOrder: mapped as unknown as Prisma.InputJsonValue,
+      rawPayload: args.rawPayload ?? (mapped as unknown as Prisma.InputJsonValue),
+    },
+  });
+
+  return updated.count > 0
+    ? { kind: 'buffered_deduped', refreshed: true }
+    : { kind: 'buffered_deduped' };
+}
+
+/**
+ * Defensively read `lastModifiedDate` out of a buffer row's `mappedOrder` JSONB.
+ * The value is an ISO string on fresh rows and absent on legacy rows; anything
+ * that is not a parseable string/number yields null so the caller treats the row
+ * as "older than anything" (always refreshable).
+ */
+function parseBufferLastModified(mappedOrder: Prisma.JsonValue): Date | null {
+  if (typeof mappedOrder !== 'object' || mappedOrder === null || Array.isArray(mappedOrder)) {
+    return null;
+  }
+  const raw = mappedOrder['lastModifiedDate'];
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return null;
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

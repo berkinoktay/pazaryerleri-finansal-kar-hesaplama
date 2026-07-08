@@ -1,11 +1,26 @@
 import { prisma } from '@pazarsync/db';
+import type { Prisma } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createCostProfile, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createBufferEntry,
+  createCostProfile,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
+
+// Narrow a buffer row's mappedOrder/rawPayload JSONB so tests can read fields
+// without a type assertion (repo rule: no `as`).
+function readBufferJson(value: Prisma.JsonValue): Record<string, Prisma.JsonValue | undefined> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('expected buffer JSONB to be an object');
+  }
+  return value;
+}
 
 const BARCODE = 'EAN13-INTAKE-001';
 
@@ -14,6 +29,9 @@ const BARCODE = 'EAN13-INTAKE-001';
 function buildMapped(over: {
   platformOrderId: string;
   orderDate: Date;
+  /** Marketplace lastModifiedDate — drives the out-of-order / refresh comparison.
+   * Defaults to orderDate when omitted (the pre-existing tests' behavior). */
+  lastModifiedDate?: Date;
   barcode?: string;
   status?: MappedOrder['status'];
   dematerialized?: boolean;
@@ -37,7 +55,7 @@ function buildMapped(over: {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: `ord-${over.platformOrderId}`,
     orderDate: over.orderDate,
-    lastModifiedDate: over.orderDate,
+    lastModifiedDate: over.lastModifiedDate ?? over.orderDate,
     status: over.status ?? 'PROCESSING',
     dematerialized: over.dematerialized ?? false,
     // GROSS konvansiyon: saleGross 100 = net 84.75 + KDV 15.25.
@@ -178,6 +196,161 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(first).toEqual({ kind: 'buffered' });
     expect(second).toEqual({ kind: 'buffered_deduped' });
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+  });
+
+  // ── Buffer snapshot refresh: a re-delivery of a still-PENDING buffered order ──
+  // must advance the stored snapshot when it is newer, so the eventual promote
+  // writes the freshest status/fields instead of freezing at the first event.
+
+  it('(e) PENDING buffer + newer event → snapshot refreshed (refreshed: true), identity columns untouched', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // cost-missing → buffer
+    const today = new Date();
+    const older = new Date(today.getTime() - 60_000);
+
+    const first = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'refresh-1',
+        orderDate: today,
+        lastModifiedDate: older,
+        status: 'PROCESSING',
+      }),
+    });
+    expect(first).toEqual({ kind: 'buffered' });
+    const before = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { storeId: store.id },
+    });
+
+    const second = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'refresh-1',
+        orderDate: today,
+        lastModifiedDate: today,
+        status: 'SHIPPED',
+      }),
+    });
+    expect(second).toEqual({ kind: 'buffered_deduped', refreshed: true });
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    const after = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { storeId: store.id },
+    });
+    // Snapshot advanced to the newer event (both mapped + raw).
+    const mapped = readBufferJson(after.mappedOrder);
+    expect(mapped['lastModifiedDate']).toBe(today.toISOString());
+    expect(mapped['status']).toBe('SHIPPED');
+    expect(readBufferJson(after.rawPayload)['lastModifiedDate']).toBe(today.toISOString());
+    // Identity columns are left untouched by the refresh.
+    expect(after.status).toBe('PENDING');
+    expect(after.orderDate.toISOString()).toBe(before.orderDate.toISOString());
+  });
+
+  it('(f) PENDING buffer + older event → NOT refreshed (plain buffered_deduped), snapshot preserved', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    const today = new Date();
+    const older = new Date(today.getTime() - 60_000);
+
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'refresh-2',
+        orderDate: today,
+        lastModifiedDate: today, // newer event lands first
+        status: 'SHIPPED',
+      }),
+    });
+    const second = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'refresh-2',
+        orderDate: today,
+        lastModifiedDate: older, // stale re-delivery
+        status: 'PROCESSING',
+      }),
+    });
+
+    expect(second).toEqual({ kind: 'buffered_deduped' });
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { storeId: store.id },
+    });
+    const mapped = readBufferJson(entry.mappedOrder);
+    // Snapshot still holds the newer T2 event — the stale one did not overwrite it.
+    expect(mapped['lastModifiedDate']).toBe(today.toISOString());
+    expect(mapped['status']).toBe('SHIPPED');
+  });
+
+  it('(g) legacy buffer snapshot without lastModifiedDate → treated as older, refreshed', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    const today = new Date();
+
+    // Pre-existing PENDING row whose mappedOrder JSONB carries no lastModifiedDate
+    // (legacy shape — the factory default is `{ lines: [] }`).
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'legacy-1',
+      status: 'PENDING',
+    });
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'legacy-1',
+        orderDate: today,
+        lastModifiedDate: today,
+        status: 'SHIPPED',
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered_deduped', refreshed: true });
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { storeId: store.id },
+    });
+    const mapped = readBufferJson(entry.mappedOrder);
+    expect(mapped['lastModifiedDate']).toBe(today.toISOString());
+    expect(mapped['status']).toBe('SHIPPED');
+  });
+
+  it('(h) PROMOTING buffer is never rewritten — plain buffered_deduped, snapshot untouched', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    const today = new Date();
+
+    // A row already claimed by the promote worker (status past PENDING).
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'promoting-1',
+      status: 'PROMOTING',
+    });
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'promoting-1',
+        orderDate: today,
+        lastModifiedDate: today,
+        status: 'SHIPPED',
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered_deduped' });
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { storeId: store.id },
+    });
+    expect(entry.status).toBe('PROMOTING');
+    // The incoming event never touched the snapshot (still the legacy default shape).
+    expect(readBufferJson(entry.mappedOrder)['lastModifiedDate']).toBeUndefined();
   });
 
   it('cost-missing + past-day → persists PROFIT-EXCLUDED (no later cost entry)', async () => {

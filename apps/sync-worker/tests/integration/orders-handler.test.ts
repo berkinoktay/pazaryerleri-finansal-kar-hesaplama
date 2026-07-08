@@ -18,7 +18,11 @@ import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import type { TrendyolOrdersStreamResponse, TrendyolShipmentPackage } from '@pazarsync/marketplace';
+import type {
+  MappedOrder,
+  TrendyolOrdersStreamResponse,
+  TrendyolShipmentPackage,
+} from '@pazarsync/marketplace';
 import { encryptCredentials } from '@pazarsync/sync-core';
 import type { OrdersStreamWindowCursor } from '@pazarsync/sync-core';
 import { getBusinessDayRange } from '@pazarsync/utils';
@@ -1087,6 +1091,158 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     expect(order.originShipmentDate?.toISOString()).toBe('2026-05-19T09:00:00.000Z');
     // actualShipDate ilk sync'te null'dı; ikinci sync'te (Shipped event) yazıldı.
     expect(order.actualShipDate?.toISOString()).toBe('2026-05-19T13:00:00.000Z');
+  });
+});
+
+describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  const GUARD_BARCODE = 'EAN13-GUARD';
+  // T1 < T2 — the marketplace lastModifiedDate of the older vs. newer event.
+  const T1 = new Date('2026-05-19T10:00:00Z');
+  const T2 = new Date('2026-05-19T12:00:00Z');
+
+  function buildGuardMapped(over: {
+    status: MappedOrder['status'];
+    lastModifiedDate: Date;
+    actualDeliveryDate?: Date | null;
+  }): MappedOrder {
+    return {
+      platformOrderId: 'guard-1',
+      platformOrderNumber: 'TY-GUARD',
+      orderDate: new Date('2026-05-19T09:00:00Z'),
+      lastModifiedDate: over.lastModifiedDate,
+      status: over.status,
+      dematerialized: false,
+      saleGross: '120.00',
+      saleVat: '20.00',
+      listGross: '120.00',
+      sellerDiscountGross: '0.00',
+      promotionDisplays: null,
+      agreedDeliveryDate: null,
+      actualDeliveryDate: over.actualDeliveryDate ?? null,
+      actualShipDate: null,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: null,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      originShipmentDate: null,
+      lines: [
+        {
+          barcode: GUARD_BARCODE,
+          quantity: 1,
+          platformLineId: '55501',
+          lineListGross: '120.00',
+          lineSaleGross: '120.00',
+          lineSellerDiscountGross: '0.00',
+          saleVatRate: '20',
+          commissionRate: '10',
+          commissionGross: '12.00',
+          refundedCommissionGross: '0.00',
+          commissionVatRate: '20',
+        },
+      ],
+    };
+  }
+
+  it('(a) stale event (older lastModifiedDate) is dropped — no status regression, watermark stays', async () => {
+    const { org, store } = await setupStoreAndSyncLog([GUARD_BARCODE]);
+
+    // Fresh event at T2 → status SHIPPED, watermark stamped at T2.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'SHIPPED', lastModifiedDate: T2 }),
+    );
+    // Stale older event (T1 < T2) tries to regress the status back to PROCESSING.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'PROCESSING', lastModifiedDate: T1 }),
+    );
+
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    // Guard dropped the whole write — status and watermark are untouched.
+    expect(order.status).toBe('SHIPPED');
+    expect(order.platformLastModifiedAt?.toISOString()).toBe(T2.toISOString());
+  });
+
+  it('(b) newer event is applied and advances the watermark', async () => {
+    const { org, store } = await setupStoreAndSyncLog([GUARD_BARCODE]);
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'PROCESSING', lastModifiedDate: T1 }),
+    );
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'SHIPPED', lastModifiedDate: T2 }),
+    );
+
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.status).toBe('SHIPPED');
+    expect(order.platformLastModifiedAt?.toISOString()).toBe(T2.toISOString());
+  });
+
+  it('(c) legacy row with a null watermark accepts the incoming event regardless of its timestamp', async () => {
+    const { org, store } = await setupStoreAndSyncLog([GUARD_BARCODE]);
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'SHIPPED', lastModifiedDate: T2 }),
+    );
+    // Simulate a legacy row: clear the watermark the create just stamped.
+    await prisma.order.updateMany({
+      where: { storeId: store.id },
+      data: { platformLastModifiedAt: null },
+    });
+
+    // Even an OLDER event (T1 < T2) is applied — there is no watermark to compare.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'DELIVERED', lastModifiedDate: T1, actualDeliveryDate: T1 }),
+    );
+
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.status).toBe('DELIVERED');
+    expect(order.platformLastModifiedAt?.toISOString()).toBe(T1.toISOString());
+  });
+
+  it('(d) same lastModifiedDate re-delivery is applied (equality passes → idempotent upsert)', async () => {
+    const { org, store } = await setupStoreAndSyncLog([GUARD_BARCODE]);
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'SHIPPED', lastModifiedDate: T2 }),
+    );
+    // Same watermark, a status the re-delivery carries — equality must NOT block it.
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildGuardMapped({ status: 'DELIVERED', lastModifiedDate: T2, actualDeliveryDate: T2 }),
+    );
+
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.status).toBe('DELIVERED');
+    expect(order.platformLastModifiedAt?.toISOString()).toBe(T2.toISOString());
   });
 });
 
