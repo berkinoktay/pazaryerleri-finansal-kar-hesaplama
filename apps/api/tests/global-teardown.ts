@@ -5,6 +5,7 @@ import { prisma } from '@pazarsync/db';
 import {
   ensureMicroExportReturnTiers,
   ensureShippingReferenceData,
+  purgeLeakedTestAuthUsers,
 } from '@pazarsync/db/test-support';
 
 const execFilePromise = promisify(execFile);
@@ -45,30 +46,39 @@ async function restoreReferenceData(): Promise<void> {
  *   who already ran `prisma migrate dev` see a fast no-op.
  *
  * TEARDOWN half (clean-by-default):
- *   Always TRUNCATE leftover tenant rows AND purge leaked `@test.local`
- *   auth users — integration tests mint real `auth.users` rows that
- *   `truncateAll` never touches (feedback_tests_dont_wipe_seed), so without
- *   this they accumulate unboundedly (hit ~35k once). The post-test re-seed
- *   that re-hydrates the dev UI (berkin / demo orgs + stores) is now OPT-IN
- *   via PAZARSYNC_RESEED_AFTER_TESTS=1; by default the DB is left clean.
- *   Skipped entirely in CI (no dev UI) and on unit-only runs (`pnpm test:unit`
- *   sets PAZARSYNC_SKIP_RESEED=1 — no DB was touched).
+ *   The main integration suite is remapped at the ISOLATED test DB (see
+ *   packages/db/src/test-env.ts), so `prisma` here is bound to the test DB, NOT
+ *   the dev DB. Three independent, isolated steps run (a failure in one must not
+ *   skip the others):
  *
- *   REFERENCE DATA RESTORE (always, locally):
- *     `truncateAll` wipes `fee_definitions` and `marketplace_commission_rate`
- *     on purpose — RLS/list tests assert exact reference-row counts and need
- *     an empty slate per test (see fee-definitions.rls.test.ts, which creates
- *     2 rows and expects to read back exactly 2). But those tables are NOT
- *     tenant data: the same rows service every seller, and the live dev app
- *     reads them on every ORDERS sync. After a test run wiped them, the dev
- *     app's sync broke with `No active FeeDefinition for TRENDYOL/
- *     COMMISSION_INVOICE` until someone re-ran `pnpm db:seed-reference` by
- *     hand. So we restore the reference catalog here, unconditionally, by
- *     shelling out to the canonical seed-reference script (single source of
- *     truth — same buckets as `pnpm db:seed-reference`). This is independent
- *     of the opt-in dev-UI reseed: reference data is parameter data the live
- *     app always needs, not tenant residue. Skipped in CI (ephemeral DB) and
- *     on unit-only runs (no DB touched).
+ *   (1) TRUNCATE leftover tenant rows in the test DB — tenant-isolation tests
+ *       leave "iso-a"/"iso-b" orgs behind with no `beforeEach` after them.
+ *
+ *   (2) REFERENCE DATA RESTORE: `truncateAll` wipes `fee_definitions` and
+ *       `marketplace_commission_rate` on purpose — RLS/list tests assert exact
+ *       reference-row counts and need an empty slate per test (see
+ *       fee-definitions.rls.test.ts). Those tables are NOT tenant data (the same
+ *       rows service every seller), so we restore them via the canonical
+ *       `pnpm db:seed-reference` script. The shell-out inherits the remapped env,
+ *       so it restores the test DB in the main run and the dev DB in the
+ *       (un-remapped) RLS run — both need it back.
+ *
+ *   (3) DEV-DB AUTH PURGE: integration tests mint real `auth.users` rows via
+ *       GoTrue, which is bound to the dev "postgres" DB and cannot be pointed at
+ *       the test DB — so those rows (and the `on_auth_user_created` trigger's
+ *       orphan `user_profiles`) accumulate in the DEV DB, out of the test-DB
+ *       Prisma singleton's reach (they once hit ~35k). We purge them with a
+ *       separate connection to the pre-remap dev URL (PAZARSYNC_DEV_DATABASE_URL,
+ *       stashed by the remap; the un-remapped RLS run falls back to DATABASE_URL,
+ *       already the dev DB).
+ *
+ *   The old PAZARSYNC_RESEED_AFTER_TESTS dev-UI reseed hook was REMOVED: the main
+ *   suite no longer wipes the dev DB, so there is nothing to re-hydrate. The RLS
+ *   suite does still run against the dev DB — if it empties the dev tenant data
+ *   you want back, run `pnpm db:seed --with-sample` by hand.
+ *
+ *   Skipped entirely in CI (ephemeral DB) and on unit-only runs (`pnpm test:unit`
+ *   sets PAZARSYNC_SKIP_RESEED=1 — no DB was touched).
  */
 export default async function globalSetup(): Promise<() => Promise<void>> {
   // Setup: shipping reference data. Skipped for unit-only runs (DB may
@@ -93,69 +103,73 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     if (process.env['PAZARSYNC_SKIP_RESEED'] === '1') return;
 
     try {
-      // Wipe any leftover rows from the last test's `beforeEach`-less
-      // aftermath (e.g. tenant-isolation tests leave "iso-a" / "iso-b"
-      // orgs behind). Otherwise they accumulate run after run.
-      //
-      // Does NOT touch `user_profiles` — wiping it would orphan a
-      // browser-signed-up developer's auth.users row (P2003 on the next
-      // org-create attempt).
-      await prisma.$executeRawUnsafe(
-        `TRUNCATE TABLE
-           sync_logs,
-           settlement_items,
-           settlements,
-           order_items,
-           orders,
-           products,
-           expenses,
-           stores,
-           organization_members,
-           organizations
-         RESTART IDENTITY CASCADE`,
-      );
+      // (1) Wipe any leftover rows from the last test's `beforeEach`-less
+      // aftermath (e.g. tenant-isolation tests leave "iso-a" / "iso-b" orgs
+      // behind) from the TEST DB (prisma is remapped there). Does NOT touch
+      // `user_profiles` — wiping it would orphan a browser-signed-up developer's
+      // auth.users row (P2003 on the next org-create attempt). Isolated so a
+      // failure here never skips the restore/purge steps below.
+      try {
+        await prisma.$executeRawUnsafe(
+          `TRUNCATE TABLE
+             sync_logs,
+             settlement_items,
+             settlements,
+             order_items,
+             orders,
+             products,
+             expenses,
+             stores,
+             organization_members,
+             organizations
+           RESTART IDENTITY CASCADE`,
+        );
+      } catch (err) {
+        console.warn(
+          '[teardown] tenant TRUNCATE failed:',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
 
-      // Purge leaked test auth users. `createAuthenticatedTestUser` mints real
-      // Supabase `auth.users` rows (`test-<uuid>@test.local`) and the
-      // `createUserProfile` factory uses `<uuid>@test.local`. `truncateAll`
-      // never touches `auth.users` (feedback_tests_dont_wipe_seed), so they
-      // accumulate run after run (hit ~35k once). Pattern-scoped to
-      // `@test.local` → real logins (gmail, `demo@pazarsync.local`) never match.
-      const purged = await prisma.$executeRawUnsafe(
-        `DELETE FROM auth.users WHERE email LIKE '%@test.local'`,
-      );
-      if (purged > 0) console.log(`Purged ${purged} test auth user(s)`);
+      // (2) Re-prime the reference/parameter catalog (fee_definitions +
+      // marketplace_commission_rate) that `truncateAll` wiped during the run, so
+      // the NEXT run starts from the canonical reference baseline instead of an
+      // empty slate. The shell-out inherits the remapped env, so it targets the
+      // TEST DB in the main run (the dev DB is untouched by the main suite) and
+      // the dev DB in the un-remapped RLS run. Isolated so a purge failure never
+      // leaves reference data missing (single source of truth:
+      // `pnpm db:seed-reference`, idempotent).
+      try {
+        await restoreReferenceData();
+      } catch (err) {
+        console.warn(
+          'Reference restore failed. Run `pnpm db:seed-reference` manually.',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
 
-      // Restore the reference/parameter catalog (fee_definitions +
-      // marketplace_commission_rate) that `truncateAll` wiped during the run.
-      // These are NOT tenant data — the live dev app reads them on every
-      // ORDERS sync, and a wiped table breaks sync with `No active
-      // FeeDefinition for TRENDYOL/COMMISSION_INVOICE`. Always restore
-      // (independent of the opt-in dev-UI reseed below). Single source of
-      // truth: the same script `pnpm db:seed-reference` runs, which is
-      // idempotent (delete+insert per bucket) and skips missing snapshots.
-      await restoreReferenceData();
-
-      // Clean-by-default: the post-test re-seed (demo orgs / stores / products)
-      // is residue most runs do not want. Opt in with
-      // PAZARSYNC_RESEED_AFTER_TESTS=1 when the dev UI should be hydrated.
-      if (process.env['PAZARSYNC_RESEED_AFTER_TESTS'] !== '1') return;
-
-      // `--with-sample` because `db:seed` is clean-by-default (a no-op without
-      // it); the opt-in reseed wants the full dev-UI hydration.
-      const { stdout, stderr } = await execFilePromise(
-        'pnpm',
-        ['--filter', '@pazarsync/db', 'seed', '--with-sample'],
-        { cwd: process.cwd().replace(/\/apps\/api$/, '') },
-      );
-      const lastLines = stdout.trim().split('\n').slice(-5).join('\n');
-      console.log(`\n\u2713 Post-test re-seed:\n${lastLines}`);
-      if (stderr.trim() !== '') console.warn('[teardown] stderr:', stderr);
-    } catch (err) {
-      console.warn(
-        '\u26a0\ufe0f  Post-test re-seed failed. Run `pnpm db:seed` manually if you plan to use the dev UI.',
-        err instanceof Error ? err.message : String(err),
-      );
+      // (3) Purge the `@test.local` auth users GoTrue minted in the DEV DB (and
+      // the `on_auth_user_created` trigger's orphan `user_profiles`). GoTrue only
+      // ever writes the dev "postgres" DB, so this needs a separate connection to
+      // the pre-remap dev URL (PAZARSYNC_DEV_DATABASE_URL); the RLS run is not
+      // remapped, so fall back to DATABASE_URL (already the dev DB). Without this
+      // the rows accumulate run after run (hit ~35k once).
+      try {
+        const devUrl = process.env['PAZARSYNC_DEV_DATABASE_URL'] ?? process.env['DATABASE_URL'];
+        if (devUrl !== undefined && devUrl.length > 0) {
+          const { authUsers, profiles } = await purgeLeakedTestAuthUsers(devUrl);
+          if (authUsers > 0 || profiles > 0) {
+            console.log(
+              `Purged ${authUsers} test auth user(s) + ${profiles} orphan profile(s) from the dev DB`,
+            );
+          }
+        }
+      } catch (err) {
+        console.warn(
+          '[teardown] dev-DB auth purge failed:',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     } finally {
       await prisma.$disconnect();
     }

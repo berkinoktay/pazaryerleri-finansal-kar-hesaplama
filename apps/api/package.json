@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:unit": "PAZARSYNC_SKIP_RESEED=1 vitest run tests/unit --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests",
+    "test:integration:rls": "vitest run --config vitest.rls.config.ts --passWithNoTests",
     "test:watch": "vitest",
     "openapi:dump": "tsx scripts/dump-openapi.ts",
     "gen:encryption-key": "tsx scripts/gen-encryption-key.ts",

@@ -1,7 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // Local-dev convenience: pull DATABASE_URL etc. from the workspace-root .env
 // so `pnpm --filter @pazarsync/api test` works without exporting env vars by
@@ -9,6 +10,10 @@ import { defineConfig } from 'vitest/config';
 // is a no-op (dotenv silently skips when the file isn't found).
 const here = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(here, '../../.env') });
+
+// Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts).
+// Harmless for the unit tests this same config includes — they never touch the DB.
+remapDatabaseUrlToTestDb();
 
 export default defineConfig({
   resolve: {
@@ -23,6 +28,11 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
+    // The RLS suite is deliberately excluded here and run via its own config
+    // (`vitest.rls.config.ts`, script `test:integration:rls`). RLS tests exercise
+    // policies through PostgREST/GoTrue, which only serve the dev "postgres" DB,
+    // so they must NOT be remapped at the isolated test DB like everything else.
+    exclude: [...configDefaults.exclude, 'tests/integration/rls/**'],
     // Integration tests share one Postgres DB and TRUNCATE between tests.
     // Running test files in parallel forks would race: file A's TRUNCATE
     // wipes the data file B just inserted in its beforeEach. Tests within

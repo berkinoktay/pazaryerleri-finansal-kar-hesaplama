@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { remapDatabaseUrlToTestDb } from '@pazarsync/db/test-env';
 import { config as loadEnv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
 
@@ -11,6 +12,10 @@ import { defineConfig } from 'vitest/config';
 // isn't found).
 const here = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(here, '../../.env') });
+
+// Redirect DATABASE_URL at the isolated test DB (see packages/db/src/test-env.ts).
+// This config is integration-only; unit tests use vitest.unit.config.ts (no DB).
+remapDatabaseUrlToTestDb();
 
 export default defineConfig({
   test: {

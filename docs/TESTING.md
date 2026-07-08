@@ -138,11 +138,15 @@ describe('MyService', () => {
 
 `truncateAll` runs `TRUNCATE TABLE … CASCADE` on every tenant-scoped table. Each test starts with an empty DB.
 
-**Pre-requisite:** Supabase local must be running (`supabase start`) and the schema applied (`pnpm db:push`). The `ensureDbReachable` helper fails fast with a helpful message if not.
+**Pre-requisite:** Supabase local must be running (`supabase start`), and the ISOLATED test DB must be bootstrapped once with `pnpm db:test-setup` with `TEST_DATABASE_URL` set in the workspace-root `.env`. The integration suite runs against that separate DB — never the shared dev DB — so `truncateAll` can never wipe your dev data. The `ensureDbReachable` helper fails fast with a helpful message if the DB is unreachable, and the vitest config throws a clear error if `TEST_DATABASE_URL` is missing.
+
+> The RLS suite is the ONE exception: it still runs against the dev "postgres" DB (PostgREST/GoTrue/Realtime only ever serve that database), via its own command `pnpm --filter @pazarsync/api test:integration:rls`. It is excluded from the main integration run.
 
 ### Environment loading
 
 `apps/api/vitest.config.ts` auto-loads the workspace-root `.env` via `dotenv` (see the file for the `path.resolve(here, "../../.env")` block). This means `pnpm --filter @pazarsync/api test` picks up `DATABASE_URL` and `DIRECT_URL` without having to export them in your shell. CI passes them via the workflow `env:` block, so a missing `.env` there is a no-op (dotenv silently skips when the file isn't found).
+
+Immediately after loading `.env`, each integration `vitest.config.ts` calls `remapDatabaseUrlToTestDb()` (`@pazarsync/db/test-env`), which redirects `DATABASE_URL`/`DIRECT_URL` at `TEST_DATABASE_URL` (the isolated test DB) and stashes the original dev URL in `PAZARSYNC_DEV_DATABASE_URL` so the teardown can purge GoTrue-minted `@test.local` auth users from the dev DB (GoTrue only ever writes the dev "postgres" DB). The RLS config (`vitest.rls.config.ts`) deliberately skips the remap. A DB-free unit run (`PAZARSYNC_SKIP_RESEED=1`) does not require `TEST_DATABASE_URL`.
 
 If you ever see `Cannot reach test database at DATABASE_URL=undefined`, your `.env` is missing or your shell shadowed it — check the worktree root.
 
@@ -324,10 +328,14 @@ Without these two, `apps/web` typecheck and any test that imports `@pazarsync/db
 # Fast iteration (no DB needed)
 pnpm test:unit
 
-# Full suite — needs local Supabase
+# Full suite — needs local Supabase + the isolated test DB
 supabase start
-pnpm db:push        # apply schema to local DB
-pnpm test:integration
+pnpm db:push          # apply schema to the dev "postgres" DB (RLS suite target)
+pnpm db:test-setup    # one-time: create + prepare the isolated test DB
+pnpm test:integration # runs against TEST_DATABASE_URL, never the dev DB
+
+# RLS suite (runs against the dev "postgres" DB via PostgREST — opt-in locally)
+pnpm --filter @pazarsync/api test:integration:rls
 
 # Watch mode (during dev)
 pnpm test:watch
