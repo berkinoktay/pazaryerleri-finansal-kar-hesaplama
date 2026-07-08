@@ -35,6 +35,7 @@ import { syncLog, tryClaimNext } from '@pazarsync/sync-core';
 import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
 import { processVariantResolution } from './handlers/variant-resolution';
+import { processWebhookEventCleanup } from './handlers/webhook-event-cleanup';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { dbConnectivity } from './lib/db-connectivity';
 import { validateRequiredEnv } from './lib/env';
@@ -68,6 +69,11 @@ const WEBHOOK_RECONCILE_INTERVAL_MS = 5 * 60_000;
 // within a minute of the product appearing, while per-store batching + the
 // per-item exponential backoff keep vendor traffic negligible.
 const VARIANT_RESOLUTION_INTERVAL_MS = 60_000;
+// Webhook-event retention cleanup tick — prunes `webhook_events` rows older than
+// WEBHOOK_EVENT_RETENTION_DAYS (default 90). Daily cadence (plus once on boot):
+// the table is an idempotency + raw-audit log that only grows, and nothing reads
+// rows past the retention window, so a once-a-day batched delete is ample.
+const WEBHOOK_EVENT_CLEANUP_INTERVAL_MS = 24 * 60 * 60_000;
 const IDLE_LOG_THROTTLE_MS = 30_000;
 
 let shuttingDown = false;
@@ -142,6 +148,23 @@ async function main(): Promise<void> {
       });
     });
   }, WEBHOOK_RECONCILE_INTERVAL_MS);
+
+  // Run once on boot so a restarted worker prunes stale webhook_events rows
+  // immediately, then on the daily interval. The table only ever grows (webhook
+  // idempotency + raw audit log), so a batched retention delete keeps it bounded.
+  // Wrapped like the other ticks so a DB hiccup never crashes the worker.
+  void processWebhookEventCleanup().catch((err: unknown) => {
+    dbConnectivity.logBackgroundError('webhook.event-cleanup-boot-error', err, {
+      workerId: WORKER_ID,
+    });
+  });
+  const webhookEventCleanupTimer = setInterval(() => {
+    void processWebhookEventCleanup().catch((err: unknown) => {
+      dbConnectivity.logBackgroundError('webhook.event-cleanup-tick-error', err, {
+        workerId: WORKER_ID,
+      });
+    });
+  }, WEBHOOK_EVENT_CLEANUP_INTERVAL_MS);
 
   // Variant resolution: once on boot (a freshly restarted worker drains the
   // queue immediately — e.g. right after the daily product sync landed), then
@@ -220,6 +243,7 @@ async function main(): Promise<void> {
   clearInterval(watchdogTimer);
   clearInterval(bufferPromoteTimer);
   clearInterval(webhookReconcileTimer);
+  clearInterval(webhookEventCleanupTimer);
   clearInterval(variantResolutionTimer);
   syncLog.info('worker.stopped', { workerId: WORKER_ID });
 }
