@@ -116,13 +116,17 @@ CREATE INDEX order_items_resolution_due_idx
   ON order_items (next_resolution_at)
   WHERE product_variant_id IS NULL AND barcode IS NOT NULL;
 
--- catalog_barcode_miss — mirror: prisma/migrations/20260619120000_catalog_barcode_miss
--- (storeId, barcode) tekilliği: bir mağazada bir barkod en fazla bir eksik-kaydı.
--- (storeId, nextRetryAt) due-index: yeniden-deneme tick'i vadesi gelmiş satırları tarar.
-CREATE UNIQUE INDEX IF NOT EXISTS catalog_barcode_miss_store_barcode_uniq
-  ON catalog_barcode_miss (store_id, barcode);
-CREATE INDEX IF NOT EXISTS catalog_barcode_miss_store_retry_idx
-  ON catalog_barcode_miss (store_id, next_retry_at);
+-- catalog_barcode_miss indexes are owned by the Prisma schema, not this script.
+-- schema.prisma declares @@unique([storeId, barcode]) and @@index([storeId,
+-- nextRetryAt]) on CatalogBarcodeMiss; the Prisma migrations (0_init baseline)
+-- create them under Prisma's default names:
+--   catalog_barcode_miss_store_id_barcode_key        (UNIQUE store_id, barcode)
+--   catalog_barcode_miss_store_id_next_retry_at_idx  (store_id, next_retry_at)
+-- Do NOT recreate them here. Earlier CREATE INDEX IF NOT EXISTS statements under
+-- different custom names (catalog_barcode_miss_store_barcode_uniq /
+-- catalog_barcode_miss_store_retry_idx) produced duplicate indexes over the same
+-- columns, dropped with the 2026-07-08 migration-history baseline. Unlike the
+-- partial (WHERE-clause) uniques above, these are plain indexes Prisma owns.
 
 -- ─── 2026-06-12 profit-freeze: calculated-or-excluded ──────────────────
 -- Orders'a giren her sipariş iki nihai durumdan birindedir: HESAPLANMIŞ
