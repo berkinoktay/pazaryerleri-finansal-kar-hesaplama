@@ -11,63 +11,66 @@
  *   3. authMiddleware
  *   4. Protected routes
  *
- * Flow:
- *   1. verify-trendyol-webhook middleware → store + creds validated, c.set('store')
- *   2. Defense-in-depth: payload.supplierId === store.externalAccountId
- *   3. WebhookEvent INSERT — composite unique key catches P2002 → dedupe 200 OK
- *   4. Status mapping (mapTrendyolStatusToEnum):
- *      - null  → log warn + skip upsert + still 200 (forward-compat unknown)
- *      - !null → continue
- *   5. createdBy === 'transfer' → override status to CANCELLED (Trendyol
- *      forwarded the package to another seller; we lose it)
- *   6. Build MappedOrder + upsertOrderWithSnapshot dispatch (same path as sync)
- *   7. WebhookEvent.processedAt set
- *   8. 200 OK
+ * Retry-model contract (webhook-model.md "Webhook Önemli Notlar"): Trendyol
+ * replays EVERY failed request (4xx included) every 5 minutes until it succeeds,
+ * then flips a permanently-failing webhook to PASSIVE. That makes the response
+ * code a control signal, not just a status:
+ *   - 200 → CLOSE the event. Used for both success AND deterministic dead-ends
+ *     (bad auth already passed, malformed body, unknown status, payload defect,
+ *     supplier mismatch) — retrying those never changes the outcome.
+ *   - 5xx → KEEP the event open so Trendyol's retry becomes our replay engine
+ *     for TRANSIENT faults (DB down, fee seed missing, intake exception).
+ *   - 401 / 404 (verify middleware) stay in the normal flow: a stale secret's
+ *     401s drive Trendyol to PASSIVE, which the reconciler prunes + re-registers
+ *     — the intended heal path.
  *
- * Error responses:
- *   - 401 (auth) — Trendyol does not retry; permanent failure
- *   - 404 (store/disabled) — same as above
- *   - 400 (malformed payload) — log + 400; Trendyol does not retry
- *   - 5xx — processing exception; Trendyol retries every 5 minutes
+ * Request hardening (before auth): a 1 MB body limit and a per-store rate limit
+ * both fail SAFE (drop with 200 / 429) so a malformed or flooding caller cannot
+ * wedge the receiver.
  */
 
 import { createRoute, z } from '@hono/zod-openapi';
-import { ensureBarcodesInCatalog } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import { Prisma, type Store } from '@pazarsync/db';
-import {
-  mapTrendyolStatusToEnum,
-  type MappedOrder,
-  type TrendyolShipmentPackage,
-} from '@pazarsync/marketplace';
-import { intakeOrder } from '@pazarsync/order-sync';
-import { resolveFeeDefinition } from '@pazarsync/profit';
-import { syncLog, syncLogService, SyncInProgressError } from '@pazarsync/sync-core';
-import { businessZoneEpochToInstant } from '@pazarsync/utils';
+import type { TrendyolShipmentPackage } from '@pazarsync/marketplace';
+import { syncLog } from '@pazarsync/sync-core';
+import type { Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { HTTPException } from 'hono/http-exception';
 
-import { UnauthorizedError, ValidationError } from '../../lib/errors';
+import { RATE_LIMITS } from '../../config/rate-limits';
 import { createSubApp } from '../../lib/create-hono-app';
-import { ProblemDetailsSchema } from '../../openapi/error-schemas';
+import { problemDetailsResponse } from '../../lib/problem-details';
+import { rateLimit } from '../../middleware/rate-limit.middleware';
 import { verifyTrendyolWebhookMiddleware } from '../../middleware/verify-trendyol-webhook.middleware';
-
-import { mapTrendyolWebhookPayload } from './trendyol-orders.mapper';
+import { Common429Response, ProblemDetailsSchema } from '../../openapi';
+import { processTrendyolWebhookEvent } from '../../services/webhooks/trendyol-webhook-intake.service';
 
 type WebhookEnv = { Variables: { store: Store } };
+
+/** Max webhook body Trendyol should ever send us; larger = malformed/hostile. */
+const WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/**
+ * A de-duped WebhookEvent row whose `processedAt` is still null AND whose
+ * `receivedAt` is older than this window is treated as a failed prior attempt
+ * and REPROCESSED on the current re-delivery (Trendyol's retry as replay).
+ * Younger unprocessed rows are assumed in-flight (a concurrent first attempt)
+ * and left alone to avoid double processing. Exported for tests.
+ */
+export const STALE_REPROCESS_THRESHOLD_MS = 2 * 60_000;
 
 // Webhook payload schema — minimal runtime validation. Full
 // `TrendyolShipmentPackage` shape stays as a TS type; here we assert the
 // fields the receiver actually consumes so a malformed payload short-circuits
-// before reaching the upsert path. Trendyol's contract is documented in
-// docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/webhook/webhook-model.md.
+// (via the sub-app defaultHook → logged 200) before reaching the intake path.
+// Contract: docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/webhook/webhook-model.md.
 // supplierId optional + lines[].sellerId required: Trendyol prod webhook
-// payload (webhook-model.md) ships root-level `supplierId`, but stage test
-// order endpoint omits it. Per-line `sellerId` is present in both envs
-// (it is the authoritative seller scope per Trendyol API contract).
+// payload ships root-level `supplierId`, but the stage test order endpoint omits
+// it. Per-line `sellerId` is present in both envs (authoritative seller scope).
 //
 // lineUnitPrice + lineGrossAmount required: the mapper reads them for KDV
-// split + commission calc. Stage test orders ship sparse payloads without
-// these — that case returns 422 here (cleaner than a deep-mapper crash);
-// real prod orders always carry both fields per webhook-model.md §lines.
+// split + commission calc.
 const TrendyolWebhookLineSchema = z
   .object({
     sellerId: z.number().int().positive('LINE_SELLER_ID_REQUIRED'),
@@ -90,7 +93,39 @@ const TrendyolWebhookPayloadSchema = z
   })
   .passthrough();
 
-const webhookApp = createSubApp<WebhookEnv>();
+/**
+ * Webhook-specific validation hook. A Zod failure here means Trendyol sent a
+ * body we cannot process; a 422 would loop Trendyol's infinite retry forever,
+ * so we log the issue codes (never the payload — PII) and CLOSE the event with
+ * a 200 instead.
+ */
+function webhookValidationHook(
+  result: { success: boolean; error?: { issues: Array<{ message: string }> } },
+  c: Context,
+): Response | undefined {
+  if (!result.success && result.error !== undefined) {
+    const issues = result.error.issues.map((issue) => issue.message);
+    syncLog.error('webhook.payload-invalid', {
+      storeId: c.req.param('storeId'),
+      issues,
+    });
+    return c.body(null, 200);
+  }
+  return undefined;
+}
+
+const webhookApp = createSubApp<WebhookEnv>({ defaultHook: webhookValidationHook });
+
+// Convert a thrown error to a message string for the `processingError` column,
+// without leaking a stack. Used by both the fresh and reprocess catch sites.
+async function markProcessingError(webhookEventId: string, err: unknown): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  syncLog.error('webhook.process-failed', { webhookEventId, error: message });
+  await prisma.webhookEvent.update({
+    where: { id: webhookEventId },
+    data: { processingError: message },
+  });
+}
 
 const trendyolOrderWebhookRoute = createRoute({
   method: 'post',
@@ -105,7 +140,9 @@ const trendyolOrderWebhookRoute = createRoute({
     '(`Authorization: Basic <base64(user:pass)>`); HMAC not supported by ' +
     'Trendyol. Idempotent: composite key (storeId, platformOrderId, status, ' +
     'lastModifiedDate) catches re-deliveries within the 5-minute retry window. ' +
-    'Mounted BEFORE the global Bearer JWT auth middleware.',
+    'Deterministic failures (malformed body, unknown status, supplier mismatch) ' +
+    'return 200 so Trendyol stops retrying; transient failures return 5xx so it ' +
+    'replays. Mounted BEFORE the global Bearer JWT auth middleware.',
   request: {
     params: z.object({ storeId: z.string().uuid('INVALID_STORE_ID') }),
     body: {
@@ -118,11 +155,7 @@ const trendyolOrderWebhookRoute = createRoute({
   },
   responses: {
     200: {
-      description: 'Event accepted (processed or deduped)',
-    },
-    400: {
-      content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description: 'Malformed payload',
+      description: 'Event accepted (processed, deduped, or deterministically dropped)',
     },
     401: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
@@ -132,10 +165,41 @@ const trendyolOrderWebhookRoute = createRoute({
       content: { 'application/json': { schema: ProblemDetailsSchema } },
       description: 'Store not found or webhook disabled',
     },
+    429: Common429Response,
   },
 });
 
-webhookApp.use(trendyolOrderWebhookRoute.getRoutingPath(), verifyTrendyolWebhookMiddleware);
+// Request hardening + auth, in order, BEFORE the handler:
+//   1. bodyLimit — cap the payload; oversize drops with 200 (no retry loop).
+//   2. rateLimit — per-store bucket (webhook callers are not authenticated
+//      users, so a keyResolver derives identity from the storeId path param,
+//      falling back to the forwarded client IP). Overflow → 429 (transient for
+//      Trendyol; it retries in 5 minutes).
+//   3. verifyTrendyolWebhookMiddleware — store-scoped Basic Auth.
+const routingPath = trendyolOrderWebhookRoute.getRoutingPath();
+webhookApp.use(
+  routingPath,
+  bodyLimit({
+    maxSize: WEBHOOK_BODY_LIMIT_BYTES,
+    onError: (c) => {
+      // Deliberate tradeoff: a genuine >1 MB event is PERMANENTLY dropped here
+      // (we reply 200 so it is not retried). A Trendyol order webhook never
+      // legitimately approaches 1 MB, so the alternative — letting an oversize
+      // body through, or 4xx-ing it into Trendyol's infinite 5-minute retry
+      // loop — is worse than losing the pathological outlier.
+      syncLog.warn('webhook.body-too-large', { path: c.req.path });
+      return c.body(null, 200);
+    },
+  }),
+);
+webhookApp.use(
+  routingPath,
+  rateLimit({
+    ...RATE_LIMITS.WEBHOOK,
+    keyResolver: (c) => c.req.param('storeId') ?? c.req.header('x-forwarded-for') ?? 'unknown',
+  }),
+);
+webhookApp.use(routingPath, verifyTrendyolWebhookMiddleware);
 
 webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
   const store = c.get('store');
@@ -147,10 +211,9 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
   // The `connect` path already blocks SANDBOX store creation in production
   // via the ALLOW_SANDBOX_CONNECTIONS env flag (services/store.service.ts).
   // This is the receiver-side mirror: if a SANDBOX store ever ends up in a
-  // production deployment (flag flipped, manual DB insert, code regression),
-  // drop the webhook silently with 200 OK so prod data sets stay clean of
-  // test orders. Non-production environments still intake SANDBOX webhooks
-  // normally so stage runbooks keep working.
+  // production deployment, drop the webhook silently with 200 OK so prod data
+  // sets stay clean of test orders. Non-production environments still intake
+  // SANDBOX webhooks normally so stage runbooks keep working.
   if (process.env['NODE_ENV'] === 'production' && store.environment === 'SANDBOX') {
     syncLog.info('webhook.sandbox-dropped-in-production', {
       storeId: store.id,
@@ -181,22 +244,25 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
     payloadSupplierIds.size === 1 &&
     payloadSupplierIds.has(storeSupplierId);
   if (!isSingleMatch) {
+    // Deterministic drop: the caller authenticated as this store, but the body
+    // names a different seller. Retrying the same body never helps, so CLOSE
+    // the event with 200 (identity was already proven at the auth layer).
     syncLog.error('webhook.supplier-mismatch', {
       storeId: store.id,
       payloadSupplierIds: Array.from(payloadSupplierIds),
       storeSupplierId: store.externalAccountId,
     });
-    throw new UnauthorizedError('Supplier ID mismatch');
+    return c.body(null, 200);
   }
 
-  // ─── 2. Idempotency log INSERT (P2002 = re-delivery dedupe) ────────────
   const platformOrderId = String(payload.shipmentPackageId);
   const platformStatus = payload.status;
   const lastModifiedDate = new Date(payload.lastModifiedDate);
 
-  let webhookEventId: string;
+  // ─── 2. Idempotency log INSERT (P2002 = re-delivery) ───────────────────
+  let created: { id: string };
   try {
-    const created = await prisma.webhookEvent.create({
+    created = await prisma.webhookEvent.create({
       data: {
         organizationId: store.organizationId,
         storeId: store.id,
@@ -208,173 +274,108 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
       },
       select: { id: true },
     });
-    webhookEventId = created.id;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      syncLog.info('webhook.deduped', {
-        storeId: store.id,
+      return handleReDelivery(c, store, payload, {
         platformOrderId,
         platformStatus,
-        lastModifiedDate: lastModifiedDate.toISOString(),
+        lastModifiedDate,
       });
-      return c.body(null, 200);
     }
     throw err;
   }
 
-  // ─── 3. Status mapping (forward-compat fallback) ───────────────────────
-  const mappedStatus = mapTrendyolStatusToEnum(platformStatus);
-  if (mappedStatus === null) {
-    syncLog.warn('webhook.unknown-status', {
-      storeId: store.id,
-      platformOrderId,
-      rawStatus: platformStatus,
-    });
-    // Order.status DOKUNULMAZ — event log yazıldı, dispatch atlanır, 200 OK.
-    await prisma.webhookEvent.update({
-      where: { id: webhookEventId },
-      data: { processedAt: new Date() },
-    });
-    return c.body(null, 200);
+  // ─── 3. Fresh event: process, then close with 200 ──────────────────────
+  try {
+    await processTrendyolWebhookEvent(store, payload, created.id);
+  } catch (err) {
+    // Transient fault — record it and rethrow so Trendyol replays in ~5 min.
+    await markProcessingError(created.id, err);
+    throw err;
   }
+  return c.body(null, 200);
+});
 
-  // ─── 4. Build MappedOrder + dispatch ───────────────────────────────────
-  // Komisyon KDV oranı DB'den (denetim A — fee_definitions ALL/COMMISSION_INVOICE).
-  // `at` = siparişin tarihi (payload.orderDate, mapper'la aynı normalize): settlement
-  // handler'ları da order.orderDate'e göre çözer → T+0 tahmin ile mutabakat aynı oranı
-  // kullanır (oran bir gün değişse bile tutarlı). Bulunamazsa loud throw (seed eksik=yanlış kurulum).
-  const commissionVatDef = await resolveFeeDefinition(prisma, {
-    platform: store.platform,
-    feeType: 'COMMISSION_INVOICE',
-    at: businessZoneEpochToInstant(payload.orderDate),
+/**
+ * P2002 re-delivery decision tree. The composite idempotency key already
+ * exists, so we look up the prior row and decide whether this delivery is a
+ * true duplicate (drop), a concurrent in-flight first attempt (drop), or a
+ * failed prior attempt worth reprocessing (Trendyol's retry as replay).
+ */
+async function handleReDelivery(
+  c: Context<WebhookEnv>,
+  store: Store,
+  payload: TrendyolShipmentPackage,
+  key: { platformOrderId: string; platformStatus: string; lastModifiedDate: Date },
+): Promise<Response> {
+  const existing = await prisma.webhookEvent.findUnique({
+    where: {
+      webhook_event_idempotency_key: {
+        storeId: store.id,
+        platformOrderId: key.platformOrderId,
+        platformStatus: key.platformStatus,
+        platformLastModifiedDate: key.lastModifiedDate,
+      },
+    },
+    select: { id: true, processedAt: true, receivedAt: true },
   });
 
-  let mapped: MappedOrder;
-  try {
-    mapped = mapTrendyolWebhookPayload(
-      payload,
-      mappedStatus,
-      Number(commissionVatDef.defaultVatRate),
-    );
-  } catch (err) {
-    syncLog.error('webhook.payload-map-failed', {
+  // Row vanished between the P2002 and this read (extremely unlikely) — nothing
+  // to reprocess; treat as handled.
+  if (existing === null || existing.processedAt !== null) {
+    syncLog.info('webhook.deduped', {
       storeId: store.id,
-      platformOrderId,
-      errorMessage: err instanceof Error ? err.message : String(err),
+      platformOrderId: key.platformOrderId,
+      platformStatus: key.platformStatus,
+      lastModifiedDate: key.lastModifiedDate.toISOString(),
     });
-    throw new ValidationError([{ field: '(payload)', code: 'PAYLOAD_MAPPING_FAILED' }]);
+    return c.body(null, 200);
   }
 
-  // ─── Anında katalog onarımı (spec 2026-06-12 §4 + K6) ───────────────────
-  // Bilinmeyen barkod tekil vendor sorgusuyla kataloğa eklenir — sipariş satırı
-  // kimliğiyle doğar, satıcı pencere içinde maliyet ekleyebilir. Başarısızlık
-  // intake'i BLOKE ETMEZ (satır eşleşmeden devam eder; tick gün içinde onarır).
-  // Gecikme bütçesi: cap=5 tekil sorgu, kötü durumda ~4 sn — Trendyol webhook
-  // teslim zaman aşımı içinde.
-  await ensureBarcodesInCatalog(store, [...new Set(mapped.lines.map((line) => line.barcode))]);
-
-  // ─── Intake routing (Slice 0 shared helper) ────────────────────────────
-  // calculable → orders; cost-missing today → buffer; cost-missing past-day →
-  // orders PROFIT-EXCLUDED (spec 2026-06-12). Unmatched variant lines fold
-  // into cost_missing — the order is ALWAYS written. Identical to the
-  // sync-worker.
-  try {
-    const outcome = await intakeOrder({
+  const age = Date.now() - existing.receivedAt.getTime();
+  if (age < STALE_REPROCESS_THRESHOLD_MS) {
+    // A first attempt received moments ago may still be running — do NOT
+    // double-process. Trendyol will retry again if that attempt fails.
+    syncLog.info('webhook.dedup-inflight', {
       storeId: store.id,
-      organizationId: store.organizationId,
-      mapped,
-      rawPayload: payload as unknown as Prisma.InputJsonValue,
+      platformOrderId: key.platformOrderId,
     });
-
-    switch (outcome.kind) {
-      case 'buffered':
-        syncLog.info('buffer.entry-created', {
-          source: 'webhook',
-          storeId: store.id,
-          platformOrderId,
-          orderDate: mapped.orderDate.toISOString(),
-        });
-        break;
-      case 'buffered_deduped':
-        syncLog.info('buffer.entry-deduped', {
-          source: 'webhook',
-          storeId: store.id,
-          platformOrderId,
-        });
-        break;
-      case 'persisted':
-        syncLog.info('orders.persisted', {
-          source: 'webhook',
-          reason: outcome.reason,
-          storeId: store.id,
-          platformOrderId,
-        });
-        break;
-      case 'dematerialized':
-        // Split ghost (UnPacked) — the pre-split package was removed from the
-        // books; the split children arrive as their own webhooks/sync rows.
-        syncLog.info('orders.dematerialized', {
-          source: 'webhook',
-          storeId: store.id,
-          platformOrderId,
-          deletedOrder: outcome.deletedOrder,
-          deletedBufferEntries: outcome.deletedBufferEntries,
-        });
-        break;
-      default: {
-        const _exhaustive: never = outcome;
-        throw new Error(`Unhandled intake outcome: ${JSON.stringify(_exhaustive)}`);
-      }
-    }
-
-    await prisma.webhookEvent.update({
-      where: { id: webhookEventId },
-      data: { processedAt: new Date() },
-    });
-
-    // ─── RETURNED → CLAIMS hızlandırma (Task 8) ──────────────────────────
-    // Trendyol iade webhook'u iade detayını taşımaz; gerçek veri getClaims
-    // API'sinden gelir (~6 saatte bir cron ile). Müşteri iadesinin kâra
-    // yansıması için CLAIMS sync'i hemen kuyruğa alırız — söz konusu mağaza
-    // için aktif bir CLAIMS satırı varsa (SyncInProgressError) sessizce devam
-    // ederiz (dedup). Webhook 200 OK döner; enqueue başarısızlığı asla
-    // isteği bloke etmez.
-    if (mappedStatus === 'RETURNED') {
-      try {
-        await syncLogService.acquireSlot(store.organizationId, store.id, 'CLAIMS');
-        syncLog.info('webhook.claims-enqueued', {
-          storeId: store.id,
-          platformOrderId,
-          reason: 'RETURNED_webhook_accelerates_getClaims',
-        });
-      } catch (enqueueErr) {
-        if (!(enqueueErr instanceof SyncInProgressError)) {
-          // Beklenmedik hata — loglayıp devam et, webhook'u başarısız sayma.
-          syncLog.warn('webhook.claims-enqueue-failed', {
-            storeId: store.id,
-            platformOrderId,
-            errorMessage: enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
-          });
-        }
-        // SyncInProgressError: aktif CLAIMS sync zaten var — dedup, işlem gerekmez.
-      }
-    }
-
     return c.body(null, 200);
+  }
+
+  // Unprocessed AND stale → the prior attempt failed. Reprocess on this
+  // re-delivery, using the row we already have. If two stale re-deliveries race
+  // here, double reprocessing is TOLERATED and harmless: intakeOrder is
+  // idempotent (upsert on the composite order key) and the RETURNED → CLAIMS
+  // acquireSlot dedupes via SyncInProgressError — so a concurrent replay
+  // converges to the same single order + single CLAIMS slot.
+  syncLog.warn('webhook.reprocessing-failed-event', {
+    storeId: store.id,
+    platformOrderId: key.platformOrderId,
+    webhookEventId: existing.id,
+  });
+  try {
+    await processTrendyolWebhookEvent(store, payload, existing.id);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    syncLog.error('webhook.process-failed', {
-      storeId: store.id,
-      platformOrderId,
-      error: message,
-    });
-    await prisma.webhookEvent.update({
-      where: { id: webhookEventId },
-      data: { processingError: message },
-    });
-    // Re-throw → 500 → Trendyol retries every 5 minutes per webhook-model.md
+    await markProcessingError(existing.id, err);
     throw err;
   }
+  return c.body(null, 200);
+}
+
+// Sub-app error handler. Two lanes:
+//   1. A Hono-native 4xx HTTPException (e.g. a malformed-JSON body parse that
+//      throws before the handler) is a deterministic client fault — log it and
+//      CLOSE the event with 200 so Trendyol stops retrying a broken body.
+//   2. Everything else (domain errors, transient 5xx) flows through the shared
+//      RFC 7807 mapper — same behaviour as the global app.onError, so 401/404
+//      (stale-secret heal path) and 429 (rate limit) reach Trendyol verbatim.
+webhookApp.onError((err, c) => {
+  if (err instanceof HTTPException && err.status >= 400 && err.status < 500) {
+    syncLog.error('webhook.request-malformed', { path: c.req.path, status: err.status });
+    return c.body(null, 200);
+  }
+  return problemDetailsResponse(err, c);
 });
 
 export default webhookApp;

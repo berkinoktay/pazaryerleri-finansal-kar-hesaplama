@@ -30,11 +30,15 @@ function buildMappedOrder(over: {
   estimatedDeliveryStartDate?: string;
   estimatedDeliveryEndDate?: string;
   actualShipDate?: string;
+  /** ISO string — the marketplace lastModifiedDate carried by the buffer snapshot.
+   * Omitted by default so existing rows keep their lastModifiedDate-free shape. */
+  lastModifiedDate?: string;
 }): Prisma.InputJsonValue {
   const value = {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: over.platformOrderNumber ?? `ord-${over.platformOrderId}`,
     orderDate: new Date().toISOString(),
+    ...(over.lastModifiedDate !== undefined && { lastModifiedDate: over.lastModifiedDate }),
     status: 'PROCESSING',
     // GROSS konvansiyon: saleGross (KDV-dahil) = 100; saleVat = 100×18/118 = 15.25.
     saleGross: '100.00',
@@ -255,6 +259,55 @@ describe('processBufferPromote', () => {
     const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
     expect(after.status).toBe('PENDING');
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('promote applies the out-of-order guard: stale buffer snapshot deletes the row but never regresses a newer order', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedCalculableVariant(org.id, store.id, BARCODE);
+
+    // T1 < T2 — the buffered snapshot is OLDER than the order row's watermark.
+    const T1 = new Date('2026-06-12T10:00:00.000Z');
+    const T2 = new Date('2026-06-12T12:00:00.000Z');
+
+    // A newer event already wrote the order (status SHIPPED, watermark T2). This
+    // is the racing-delivery case: the same order was buffered earlier at T1 and
+    // its cost only just arrived, flipping the buffer row to PROMOTING.
+    await prisma.order.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformOrderId: 'pkg-guard',
+        platformOrderNumber: 'ord-guard',
+        orderDate: new Date('2026-06-12T09:00:00.000Z'),
+        status: 'SHIPPED',
+        platformLastModifiedAt: T2,
+      },
+    });
+
+    // Matching PROMOTING buffer row whose snapshot carries the OLDER lmd (T1) and
+    // a regressive status (PROCESSING via buildMappedOrder's default).
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-guard',
+      platformOrderNumber: 'ord-guard',
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-guard',
+        platformOrderNumber: 'ord-guard',
+        lastModifiedDate: T1.toISOString(),
+      }),
+    });
+
+    await processBufferPromote();
+
+    // Buffer row consumed (no lingering placeholder → no double-count) …
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    // … but the order write was skipped by the guard: still exactly one row,
+    // status + watermark unchanged at the newer T2 event (no regression).
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.status).toBe('SHIPPED');
+    expect(order.platformLastModifiedAt?.toISOString()).toBe(T2.toISOString());
   });
 });
 

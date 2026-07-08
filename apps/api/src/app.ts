@@ -7,9 +7,8 @@ import { RATE_LIMITS } from './config/rate-limits';
 import { authMiddleware } from './middleware/auth.middleware';
 import { rateLimit } from './middleware/rate-limit.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
-import { REQUEST_ID_HEADER } from './lib/constants';
 import { createSubApp } from './lib/create-hono-app';
-import { problemDetailsForError } from './lib/problem-details';
+import { problemDetailsResponse } from './lib/problem-details';
 import { bearerAuthScheme } from './openapi';
 import claimRoutes from './routes/claims/index';
 import commissionRateRoutes from './routes/commission-rates/index';
@@ -66,22 +65,7 @@ export function createApp(): OpenAPIHono {
   // responses here. The `code` field is SCREAMING_SNAKE_CASE and stable —
   // the frontend translates it to i18n strings. Unknown errors collapse to
   // a generic 500 that never leaks internals to the client.
-  app.onError((err, c) => {
-    // Read the correlation id stamped by requestIdMiddleware. Nullable
-    // because onError is reachable from a few paths where the middleware
-    // may not have run (e.g. outer Hono-level failures) — stay defensive.
-    const requestId = c.res.headers.get(REQUEST_ID_HEADER) ?? undefined;
-    const { body, status, headers } = problemDetailsForError(err, { requestId });
-    if (status === 500) {
-      console.error('Unhandled error:', { requestId, err });
-    }
-    if (headers !== undefined) {
-      for (const [name, value] of Object.entries(headers)) {
-        c.header(name, value);
-      }
-    }
-    return c.json(body, status);
-  });
+  app.onError((err, c) => problemDetailsResponse(err, c));
 
   const healthRoute = createRoute({
     method: 'get',

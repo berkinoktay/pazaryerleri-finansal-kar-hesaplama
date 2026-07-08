@@ -244,16 +244,20 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
   });
 
   describe('Defense-in-depth supplierId check', () => {
-    it('401 when payload supplierId does not match store externalAccountId', async () => {
+    it('200 (deterministic drop) when payload supplierId does not match store externalAccountId', async () => {
       const { storeId } = await setupStore();
       const res = await postWebhook(
         storeId,
         makeWebhookPayload({ supplierId: 88888 }),
         basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
       );
-      expect(res.status).toBe(401);
-      // No WebhookEvent row should have been written
+      // Retry-model (webhook-model.md): a body that names another seller is a
+      // deterministic dead-end — 200 closes the event so Trendyol stops
+      // retrying. Identity was already proven at the auth layer.
+      expect(res.status).toBe(200);
+      // The supplier check fires before the idempotency INSERT — nothing persists.
       expect(await prisma.webhookEvent.count()).toBe(0);
+      expect(await prisma.order.count({ where: { storeId } })).toBe(0);
     });
   });
 
@@ -373,16 +377,19 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
   });
 
   describe('Malformed payload', () => {
-    it('422 when shipmentPackageId is missing (Zod payload check)', async () => {
+    it('200 (deterministic drop) when shipmentPackageId is missing (Zod payload check)', async () => {
       const { storeId } = await setupStore();
       const res = await postWebhook(
         storeId,
         { ...makeWebhookPayload(), shipmentPackageId: undefined },
         basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
       );
-      // Hono @hono/zod-openapi maps schema failure via defaultHook →
-      // ValidationError → 422 (RFC 7807). Trendyol won't retry a 4xx.
-      expect(res.status).toBe(422);
+      // Retry-model reversal (webhook-model.md): Trendyol retries 4xx forever,
+      // so the webhook-specific defaultHook logs the issue codes and returns
+      // 200 to close the event instead of 422. No WebhookEvent row is written
+      // (the hook short-circuits before the handler's INSERT).
+      expect(res.status).toBe(200);
+      expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(0);
     });
   });
 

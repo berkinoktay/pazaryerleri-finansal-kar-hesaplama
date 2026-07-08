@@ -694,6 +694,13 @@ model Order {
   platformCreatedBy        String?   @map("platform_created_by")
   originShipmentDate       DateTime? @map("origin_shipment_date")
 
+  // Marketplace-side lastModifiedDate of the most recent event / sync page applied
+  // to this row. Used by the order upsert as an out-of-order guard: a stale webhook
+  // re-delivery or a racing hourly-sync page must never regress status/fields already
+  // written by a newer event. Nullable: legacy rows and buffer-JSONB replays without
+  // the field skip the guard.
+  platformLastModifiedAt DateTime? @map("platform_last_modified_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1870,7 +1877,8 @@ model CommissionInvoice {
 //
 // `rawPayload` jsonb full audit trail — Trendyol payload yapısı değişirse veya
 // edge case debugging gerekirse log'tan inceleyebiliriz. 90 gün retention
-// (env-configurable WEBHOOK_EVENT_RETENTION_DAYS) — PR-F cleanup cron.
+// (env-configurable WEBHOOK_EVENT_RETENTION_DAYS), enforced by the daily
+// webhook-event-cleanup tick in apps/sync-worker.
 //
 // RLS: org-scoped SELECT (admin/owner debugging için). INSERT/UPDATE/DELETE
 // yalnız service role (webhook handler postgres role kullanır).

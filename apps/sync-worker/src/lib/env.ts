@@ -15,6 +15,12 @@
  * RETIRED public base URLs whose leftover Trendyol subscriptions the reconciler
  * should additionally prune after PUBLIC_API_BASE_URL changed. Unset in normal
  * setups; no boot/test-env wiring needed.
+ *
+ * WEBHOOK_EVENT_RETENTION_DAYS — how many days of `webhook_events` rows
+ * the daily cleanup tick keeps. Optional; defaults to 90. Read directly by
+ * the webhook-event-cleanup handler (not via readSyncEnv), so it is not
+ * validated here — an unset/invalid value falls back to the default (an
+ * invalid value additionally warns once).
  */
 
 import { syncLog } from '@pazarsync/sync-core';

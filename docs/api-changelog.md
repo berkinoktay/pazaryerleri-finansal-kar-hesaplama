@@ -13,6 +13,33 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Trendyol order webhook receiver hardened around the vendor retry model**
+  (`POST /v1/webhooks/orders/{storeId}`). Trendyol replays every failed request
+  (4xx included) every 5 minutes until it succeeds, then flips the webhook to
+  PASSIVE, so the response code is now a control signal:
+  - Deterministic dead-ends return **200** instead of 4xx so Trendyol stops
+    retrying a request that can never succeed: a malformed JSON body, a
+    schema-invalid payload (previously `422`), a payload naming a different
+    seller (supplier mismatch, previously `401`), an unknown order status, and a
+    payload that passes schema validation but crashes the mapper. The event is
+    logged (issue codes / reason only — never the payload) and, where a row was
+    already written, marked terminal (`processedAt` + `processingError`).
+  - Transient faults (fee-definition resolution, intake, DB) still return
+    **5xx** so Trendyol's retry becomes the replay engine.
+  - A re-delivery whose prior idempotency row is unprocessed **and** older than
+    2 minutes is now reprocessed on the retry (a failed first attempt is
+    replayed); a younger unprocessed row is treated as in-flight and left alone.
+  - A non-UUID `storeId` path segment now returns **404** (guarded before the
+    DB) instead of collapsing a Prisma error to `500`.
+  - Repeated credential-mismatch / decrypt / shape failures for one store
+    self-heal: past an in-memory threshold the stale `webhookSecret` is nulled so
+    the reconciler rotates a fresh one; the webhook reads as disabled (**404**)
+    until it does. `401` (auth) and `404` (disabled) still flow normally as the
+    intended PASSIVE-flip heal path.
+  - Added a 1 MB body limit and a per-store rate limit (bucketed on the
+    `storeId` path param). Oversize bodies drop with **200**; rate-limit
+    overflow returns **429** (transient for Trendyol). The documented response
+    set drops `400` and adds `429`.
 - **Advantage tariff detail item gained a `commissionBands` field** (`GET
   /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}`) — Each detail item now
   carries `commissionBands`: the product's commission-band ladder (`AdvantageCommissionBand[]`,
