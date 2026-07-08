@@ -9,6 +9,12 @@
  * SYNC_SAFETY_NET_HOURS — cron's per-tick lookback window. Webhook
  * is the primary ingest path; cron sweeps the trailing N hours to
  * catch anything the webhook missed (delivery failure, our downtime).
+ *
+ * WEBHOOK_EVENT_RETENTION_DAYS — how many days of `webhook_events` rows
+ * the daily cleanup tick keeps. Optional; defaults to 90. Read directly by
+ * the webhook-event-cleanup handler (not via readSyncEnv), so it is not
+ * validated here — an unset/invalid value falls back to the default (an
+ * invalid value additionally warns once).
  */
 
 import { syncLog } from '@pazarsync/sync-core';

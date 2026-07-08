@@ -1870,7 +1870,8 @@ model CommissionInvoice {
 //
 // `rawPayload` jsonb full audit trail — Trendyol payload yapısı değişirse veya
 // edge case debugging gerekirse log'tan inceleyebiliriz. 90 gün retention
-// (env-configurable WEBHOOK_EVENT_RETENTION_DAYS) — PR-F cleanup cron.
+// (env-configurable WEBHOOK_EVENT_RETENTION_DAYS), enforced by the daily
+// webhook-event-cleanup tick in apps/sync-worker.
 //
 // RLS: org-scoped SELECT (admin/owner debugging için). INSERT/UPDATE/DELETE
 // yalnız service role (webhook handler postgres role kullanır).

@@ -46,7 +46,8 @@
         "ALLOW_SANDBOX_CONNECTIONS",
         "NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS",
         "SYNC_HISTORICAL_BACKFILL_DAYS",
-        "SYNC_SAFETY_NET_HOURS"
+        "SYNC_SAFETY_NET_HOURS",
+        "WEBHOOK_EVENT_RETENTION_DAYS"
       ]
     },
     "test:unit": {
@@ -60,7 +61,8 @@
         "PUBLIC_API_BASE_URL",
         "ALLOW_SANDBOX_CONNECTIONS",
         "SYNC_HISTORICAL_BACKFILL_DAYS",
-        "SYNC_SAFETY_NET_HOURS"
+        "SYNC_SAFETY_NET_HOURS",
+        "WEBHOOK_EVENT_RETENTION_DAYS"
       ]
     },
     "test:component": {
@@ -74,7 +76,8 @@
         "PUBLIC_API_BASE_URL",
         "ALLOW_SANDBOX_CONNECTIONS",
         "SYNC_HISTORICAL_BACKFILL_DAYS",
-        "SYNC_SAFETY_NET_HOURS"
+        "SYNC_SAFETY_NET_HOURS",
+        "WEBHOOK_EVENT_RETENTION_DAYS"
       ]
     },
     "test:integration": {
@@ -95,7 +98,8 @@
         "ALLOW_SANDBOX_CONNECTIONS",
         "NEXT_PUBLIC_ALLOW_SANDBOX_CONNECTIONS",
         "SYNC_HISTORICAL_BACKFILL_DAYS",
-        "SYNC_SAFETY_NET_HOURS"
+        "SYNC_SAFETY_NET_HOURS",
+        "WEBHOOK_EVENT_RETENTION_DAYS"
       ]
     },
     "test:watch": {
