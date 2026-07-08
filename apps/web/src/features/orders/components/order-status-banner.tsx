@@ -47,12 +47,9 @@ export function OrderStatusBanner({ order }: OrderStatusBannerProps): React.Reac
       : t(`descriptions.${config.titleKey}`);
 
   return (
-    <Alert tone={config.tone} size="md" radius="lg">
-      <Icon data-alert-icon className="size-icon-sm mt-3xs" />
-      <div className="gap-3xs flex flex-col">
-        <AlertTitle>{t(`titles.${config.titleKey}`)}</AlertTitle>
-        <AlertDescription>{description}</AlertDescription>
-      </div>
+    <Alert tone={config.tone} size="md" radius="lg" icon={<Icon />}>
+      <AlertTitle>{t(`titles.${config.titleKey}`)}</AlertTitle>
+      <AlertDescription>{description}</AlertDescription>
     </Alert>
   );
 }

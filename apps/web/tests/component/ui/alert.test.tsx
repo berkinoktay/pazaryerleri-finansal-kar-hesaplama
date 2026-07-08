@@ -79,4 +79,42 @@ describe('Alert primitive', () => {
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
     });
   });
+
+  describe('emphasis', () => {
+    it('defaults to the calm card surface (subtle)', () => {
+      render(
+        <Alert tone="destructive">
+          <AlertDescription>x</AlertDescription>
+        </Alert>,
+      );
+      expect(screen.getByRole('alert').className).toContain('bg-card');
+    });
+
+    it('tints the whole surface when emphasis="solid"', () => {
+      render(
+        <Alert tone="destructive" emphasis="solid">
+          <AlertDescription>x</AlertDescription>
+        </Alert>,
+      );
+      expect(screen.getByRole('alert').className).toContain('bg-destructive-surface');
+    });
+
+    it('maps the legacy hasBorder prop to the solid treatment', () => {
+      render(
+        <Alert tone="warning" hasBorder>
+          <AlertDescription>x</AlertDescription>
+        </Alert>,
+      );
+      expect(screen.getByRole('alert').className).toContain('bg-warning-surface');
+    });
+
+    it('lets an explicit emphasis win over hasBorder', () => {
+      render(
+        <Alert tone="warning" emphasis="subtle" hasBorder>
+          <AlertDescription>x</AlertDescription>
+        </Alert>,
+      );
+      expect(screen.getByRole('alert').className).toContain('bg-card');
+    });
+  });
 });

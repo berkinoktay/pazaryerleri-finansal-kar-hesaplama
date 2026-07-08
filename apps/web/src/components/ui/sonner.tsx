@@ -21,20 +21,26 @@ type ToasterProps = React.ComponentProps<typeof Sonner>;
  *   import { toast } from '@/components/ui/sonner';
  *   toast.success('Saved.');
  *
- * Each toast is a card with a tone icon (left) + bold title + muted
- * description, optional action / cancel buttons and a close affordance.
- * Per-tone toasts mirror Alert exactly: `toast.success()` is a tinted card
- * (`bg-success-surface` + `text-success` + a soft `border-success-border`)
- * with a green check, so a success toast and a success Alert read the same.
- * `toast.error()` maps to the **destructive** tone; the neutral `toast()` is a
- * framed `bg-card` with no icon. Custom icons / soft-square badges go per call:
- * `toast('…', { icon: <TruckIcon /> })`.
+ * DESIGN — surface-first, tone-as-accent (mirrors Alert). EVERY toast is a
+ * clean `bg-card` card (hairline border + floating `shadow-lg`), NOT a
+ * full-bleed tinted slab. The semantic color is concentrated into the leading
+ * icon slot, styled into a soft tone MEDALLION (`bg-<tone>-surface` +
+ * `text-<tone>`) — the same anatomy as the Alert medallion, so a success toast
+ * and a success Alert read the same. Title is `text-foreground` (bold),
+ * description is calm `text-muted-foreground`; the medallion + elevation carry
+ * the signal, not a wall of color.
  *
- * The base `toast` class carries layout only and the per-type class carries the
- * single color pairing, so the tone always wins (two competing `bg-*`/`border-*`
- * utilities on one element are order-dependent). The toaster is mount-gated
- * (Sonner's portal carries a `theme` class that would otherwise hydration-
- * mismatch); users never see a toast on first paint anyway.
+ *   toast.success() → green medallion · toast.error() → destructive medallion
+ *   toast.warning() → amber · toast.info() → blue · toast.loading() → spinner
+ *   toast() (neutral) → clean card, no medallion unless a custom `icon` is
+ *   passed (`toast('…', { icon: <TruckIcon /> })`), which then renders in a
+ *   neutral chip.
+ *
+ * The per-type color lives ONLY on the `[data-icon]` medallion (via the
+ * per-type classNames keys, `!`-forced past Sonner's own icon styles); the
+ * base `toast`/`default` keys carry the shared card surface + layout. The
+ * toaster is mount-gated (Sonner's portal carries a `theme` class that would
+ * otherwise hydration-mismatch); users never see a toast on first paint anyway.
  *
  * For inline page-level messages use Alert; for app-spanning system messages
  * (maintenance, billing past-due) use the future Banner.
@@ -59,42 +65,57 @@ export function Toaster(props: ToasterProps): React.ReactElement | null {
       mobileOffset={{ top: 'calc(var(--space-2xl) + var(--space-sm))' }}
       closeButton
       icons={{
-        success: <CheckmarkCircle02Icon className="size-icon-sm" />,
-        error: <AlertCircleIcon className="size-icon-sm" />,
-        warning: <Alert02Icon className="size-icon-sm" />,
-        info: <InformationCircleIcon className="size-icon-sm" />,
-        loading: <Spinner size="sm" />,
+        success: <CheckmarkCircle02Icon />,
+        error: <AlertCircleIcon />,
+        warning: <Alert02Icon />,
+        info: <InformationCircleIcon />,
+        loading: <Spinner size="md" />,
       }}
       toastOptions={{
         classNames: {
-          // `default` is applied to EVERY toast (not only neutral ones), so the
-          // per-type color must win deterministically — hence the `!` important
-          // modifier (Sonner's own injected styles also fix the source order).
+          // CASCADE NOTE (load-bearing): Tailwind v4 emits every utility into
+          // `@layer utilities`, but Sonner v2.0.7 injects its base CSS UNLAYERED.
+          // Per the cascade, a normal UNLAYERED declaration beats ANY normal
+          // layered one regardless of specificity — so a non-important utility
+          // here silently loses to Sonner's defaults (surface color, radius,
+          // shadow, padding, `gap: 6px`, button + close-button styling). Every
+          // utility that must override Sonner therefore carries `!` (author-
+          // important, the one thing that outranks an unlayered normal rule).
+          // `toast` = layout, `default` = shared card surface (applied to EVERY
+          // toast); the per-type keys paint ONLY the medallion.
           toast:
-            'group toast group-[.toaster]:gap-sm group-[.toaster]:rounded-lg group-[.toaster]:border group-[.toaster]:p-md group-[.toaster]:shadow-md',
+            'group toast group-[.toaster]:gap-sm! group-[.toaster]:rounded-lg! group-[.toaster]:border! group-[.toaster]:p-md! group-[.toaster]:shadow-lg!',
           default:
-            'group-[.toaster]:bg-card group-[.toaster]:text-foreground group-[.toaster]:border-border',
-          success:
-            'group-[.toaster]:bg-success-surface! group-[.toaster]:text-success! group-[.toaster]:border-success-border!',
-          warning:
-            'group-[.toaster]:bg-warning-surface! group-[.toaster]:text-warning! group-[.toaster]:border-warning-border!',
-          error:
-            'group-[.toaster]:bg-destructive-surface! group-[.toaster]:text-destructive! group-[.toaster]:border-destructive-border!',
-          info: 'group-[.toaster]:bg-info-surface! group-[.toaster]:text-info! group-[.toaster]:border-info-border!',
-          // Sonner colors the icon slot AND pins it to 16px — force it to
-          // inherit the toast's tone (so a success toast gets a green check) and
-          // size to its content (so a larger custom soft-square icon fits
-          // without overflowing the slot).
-          icon: 'group-[.toast]:mt-px group-[.toast]:size-auto! group-[.toast]:shrink-0 group-[.toast]:text-inherit!',
-          title: 'group-[.toast]:text-sm group-[.toast]:font-semibold!',
-          // Inherit the toast's tone color (never gray-on-tint), dimmed.
-          description: 'group-[.toast]:text-2xs group-[.toast]:opacity-80',
+            'group-[.toaster]:bg-card! group-[.toaster]:text-foreground! group-[.toaster]:border-border!',
+          // Per-type: color ONLY the medallion (`[data-icon]`). Important, and a
+          // touch higher specificity than the neutral default on the `icon` key,
+          // so the tone wins for typed toasts; neutral toasts keep the muted chip.
+          success: '[&_[data-icon]]:bg-success-surface! [&_[data-icon]]:text-success!',
+          warning: '[&_[data-icon]]:bg-warning-surface! [&_[data-icon]]:text-warning!',
+          error: '[&_[data-icon]]:bg-destructive-surface! [&_[data-icon]]:text-destructive!',
+          info: '[&_[data-icon]]:bg-info-surface! [&_[data-icon]]:text-info!',
+          // The medallion shell: a 36px soft square with the icon centered.
+          // Sonner pins the slot to 16px and sets `justify-content: flex-start`
+          // (icon hugs the left edge) — the `!` shape utilities override that so
+          // the glyph sits dead-center. The neutral tint (`bg-muted`/
+          // `text-foreground`) is deliberately NOT `!`: Sonner sets no icon
+          // background to fight, and keeping it non-important lets the per-type
+          // keys above win the color for typed toasts (an important neutral here
+          // would outrank them by specificity and paint every medallion grey).
+          icon: 'group-[.toast]:flex! group-[.toast]:size-9! group-[.toast]:shrink-0! group-[.toast]:items-center! group-[.toast]:justify-center! group-[.toast]:rounded-md! group-[.toast]:m-0! group-[.toast]:bg-muted group-[.toast]:text-foreground group-[.toast]:[&>svg]:size-icon! group-[.toast]:[&>svg]:m-0!',
+          title:
+            'group-[.toast]:text-foreground! group-[.toast]:text-sm! group-[.toast]:font-semibold!',
+          // Calm secondary text — muted, never a second tone color.
+          description: 'group-[.toast]:text-muted-foreground! group-[.toast]:text-xs!',
+          // Outline action (white surface + hairline) — pops on the card without
+          // shouting; cancel stays ghost-quiet. Own focus ring (shadow-focus):
+          // Sonner's fixed black focus box-shadow is invisible on the card.
           actionButton:
-            'group-[.toast]:bg-primary group-[.toast]:text-primary-foreground group-[.toast]:rounded-md group-[.toast]:px-sm group-[.toast]:text-2xs group-[.toast]:font-medium',
+            'group-[.toast]:rounded-md! group-[.toast]:border! group-[.toast]:border-border-strong! group-[.toast]:bg-card! group-[.toast]:px-sm! group-[.toast]:text-2xs! group-[.toast]:font-medium! group-[.toast]:text-foreground! group-[.toast]:hover:bg-muted! group-[.toast]:focus-visible:shadow-focus! group-[.toast]:focus-visible:outline-none!',
           cancelButton:
-            'group-[.toast]:bg-muted group-[.toast]:text-muted-foreground group-[.toast]:rounded-md group-[.toast]:px-sm group-[.toast]:text-2xs',
+            'group-[.toast]:rounded-md! group-[.toast]:bg-transparent! group-[.toast]:px-sm! group-[.toast]:text-2xs! group-[.toast]:text-muted-foreground! group-[.toast]:hover:bg-muted! group-[.toast]:hover:text-foreground! group-[.toast]:focus-visible:shadow-focus! group-[.toast]:focus-visible:outline-none!',
           closeButton:
-            'group-[.toast]:border-border group-[.toast]:bg-card group-[.toast]:text-muted-foreground group-[.toast]:hover:text-foreground',
+            'group-[.toast]:border-border! group-[.toast]:bg-card! group-[.toast]:text-muted-foreground! group-[.toast]:hover:text-foreground! group-[.toast]:focus-visible:shadow-focus! group-[.toast]:focus-visible:outline-none!',
         },
       }}
       {...props}
