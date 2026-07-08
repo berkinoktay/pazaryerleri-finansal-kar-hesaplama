@@ -430,9 +430,9 @@ describe('processWebhookReconcile', () => {
     await processWebhookReconcile();
 
     // The prune was attempted and failed, warned per-hook...
-    expect(
-      calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/webhooks/orphan-wh')),
-    ).toBe(true);
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/webhooks/orphan-wh'))).toBe(
+      true,
+    );
     expect(warnSpy).toHaveBeenCalledWith(
       'webhook.reconcile-prune-error',
       expect.objectContaining({ sellerId: SUPPLIER_ID, webhookId: 'orphan-wh' }),

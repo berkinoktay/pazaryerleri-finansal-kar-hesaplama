@@ -20,7 +20,8 @@ import { WEBHOOK_ORDERS_PATH } from '../../src/trendyol/webhook-paths';
 const BASE = 'https://api.pazarsync.test';
 const RETIRED_BASE = 'https://old-ngrok.pazarsync.test';
 
-const urlUnder = (base: string, storeId: string): string => `${base}${WEBHOOK_ORDERS_PATH}${storeId}`;
+const urlUnder = (base: string, storeId: string): string =>
+  `${base}${WEBHOOK_ORDERS_PATH}${storeId}`;
 
 const store = (over: Partial<ReconcileStore> & { id: string }): ReconcileStore => ({
   webhookId: null,
