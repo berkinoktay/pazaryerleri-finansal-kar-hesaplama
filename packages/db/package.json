@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./enums": "./src/enums.ts",
-    "./test-support": "./src/test-support.ts"
+    "./test-support": "./src/test-support.ts",
+    "./test-env": "./src/test-env.ts"
   },
   "scripts": {
     "generate": "prisma generate",
@@ -16,6 +17,7 @@
     "push": "prisma db push && pnpm apply-policies",
     "deploy": "prisma migrate deploy && pnpm apply-policies",
     "apply-policies": "tsx --env-file-if-exists=../../.env scripts/apply-policies.ts",
+    "test-db:setup": "tsx scripts/setup-test-db.ts",
     "cutover:v2": "tsx --env-file-if-exists=../../.env scripts/cutover-stale-running.ts",
     "purge-test-users": "tsx --env-file-if-exists=../../.env scripts/purge-test-users.ts",
     "reset-clean": "tsx --env-file-if-exists=../../.env scripts/reset-clean.ts",
@@ -23,6 +25,7 @@
     "seed:reference": "tsx scripts/seed-reference.ts",
     "studio": "prisma studio",
     "test": "vitest run",
+    "test:unit": "vitest run --config vitest.unit.config.ts --passWithNoTests",
     "test:integration": "vitest run tests --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

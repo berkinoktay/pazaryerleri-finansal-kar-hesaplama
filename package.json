@@ -17,6 +17,7 @@
     "db:apply-policies": "pnpm --filter @pazarsync/db apply-policies",
     "db:seed": "pnpm --filter @pazarsync/db seed",
     "db:seed-reference": "pnpm --filter @pazarsync/db seed:reference",
+    "db:test-setup": "pnpm --filter @pazarsync/db test-db:setup",
     "db:studio": "pnpm --filter @pazarsync/db studio",
     "db:purge-test-users": "pnpm --filter @pazarsync/db purge-test-users",
     "db:reset:clean": "pnpm --filter @pazarsync/db reset-clean",

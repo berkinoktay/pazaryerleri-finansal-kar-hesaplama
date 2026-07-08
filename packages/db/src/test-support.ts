@@ -24,6 +24,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import pg from 'pg';
+
 import { prisma } from './index';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -122,5 +124,46 @@ export async function ensureShippingReferenceData(): Promise<void> {
   const canonical = await prisma.shippingCarrier.count();
   if (canonical < EXPECTED_CARRIER_COUNT) {
     await prisma.$executeRawUnsafe(loadSeedSql());
+  }
+}
+
+/**
+ * Purge GoTrue-minted `@test.local` auth users (and the orphan `user_profiles`
+ * rows the `on_auth_user_created` trigger leaves behind) from a target DB via a
+ * short-lived `pg` connection — NOT the Prisma singleton.
+ *
+ * Integration tests bind Prisma to the ISOLATED test DB, but GoTrue is wired to
+ * the "postgres" (dev) database and cannot be pointed elsewhere, so every
+ * `createAuthenticatedTestUser` call mints a real `auth.users` row THERE and the
+ * dev-DB trigger inserts a matching `public.user_profiles` orphan. Neither is
+ * reachable through the test-DB singleton, so the apps/api global teardown calls
+ * this with the dev connection string to keep the dev DB from accumulating test
+ * residue (it once hit ~35k rows).
+ *
+ * Both deletes are flat `email LIKE '%@test.local'` DELETEs, NOT join-based
+ * orphan detection: the dev-DB `user_profiles` row is pure residue of the mint's
+ * dual write (GoTrue INSERT on `auth.users` → the trigger's `user_profiles`
+ * INSERT), so the `@test.local` pattern alone identifies it. The pattern also
+ * spares real logins (gmail, `demo@pazarsync.local`). `user_profiles` has no FK
+ * to `auth.users`, and the tenant TRUNCATE that runs before this already cleared
+ * `organization_members`, so the profile delete is childless and order-independent.
+ */
+export async function purgeLeakedTestAuthUsers(
+  connectionString: string,
+): Promise<{ authUsers: number; profiles: number }> {
+  const client = new pg.Client({ connectionString });
+  // Track connection state so a `connect()` failure still flows through the
+  // finally without calling `end()` on a client that never connected.
+  let connected = false;
+  try {
+    await client.connect();
+    connected = true;
+    const users = await client.query(`DELETE FROM auth.users WHERE email LIKE '%@test.local'`);
+    const profiles = await client.query(
+      `DELETE FROM public.user_profiles WHERE email LIKE '%@test.local'`,
+    );
+    return { authUsers: users.rowCount ?? 0, profiles: profiles.rowCount ?? 0 };
+  } finally {
+    if (connected) await client.end();
   }
 }

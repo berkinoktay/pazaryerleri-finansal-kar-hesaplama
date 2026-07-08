@@ -261,11 +261,22 @@ jobs:
       # time so the package.json alias stays parallel-friendly; we only
       # serialize in CI where every package runs together.
       - name: Run integration tests
-        run: pnpm turbo run test:integration --concurrency=1
+        run: |
+          pnpm turbo run test:integration --concurrency=1
+          # The RLS suite is excluded from the main integration config (it drives
+          # PostgREST/GoTrue, which only serve the "postgres" DB) and runs via its
+          # own config here. It shares this env block; in CI DATABASE_URL already
+          # IS the disposable per-job postgres DB, so no separate DB is needed.
+          pnpm --filter @pazarsync/api test:integration:rls
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          # Isolated test DB. In CI there is no second DB to provision — the
+          # per-job Supabase instance is already disposable — so this points at
+          # the SAME postgres DB the schema was pushed to. One code path: the
+          # vitest remap sets DATABASE_URL := TEST_DATABASE_URL (a no-op here).
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           # NODE_ENV is validated at boot by apps/api/src/lib/env.ts —
           # 'test' is the recognised mode for CI runs (alongside
           # production, staging, development). Production must set this

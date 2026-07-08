@@ -137,6 +137,7 @@ pnpm build --filter api     # Build backend only
 pnpm db:generate            # Generate Prisma client
 pnpm db:migrate             # Run migrations (dev)
 pnpm db:push                # Push schema changes (dev)
+pnpm db:test-setup          # Bootstrap the isolated integration-test DB (one-time)
 pnpm db:seed                # Seed database
 pnpm db:studio              # Open Prisma Studio
 
