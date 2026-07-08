@@ -1,4 +1,4 @@
-import { OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono, type OpenAPIHonoOptions } from '@hono/zod-openapi';
 import type { Env } from 'hono';
 
 import { ValidationError, type ValidationIssue } from './errors';
@@ -35,7 +35,14 @@ function validationDefaultHook(result: { success: boolean; error?: { issues: unk
  * Always use this instead of `new OpenAPIHono()` in route files so the shared
  * `validationDefaultHook` is applied. Without it, Zod failures return the
  * library's default 400 body instead of our RFC 7807 422 `VALIDATION_ERROR`.
+ *
+ * Pass `options.defaultHook` to override the validation hook for a sub-app that
+ * must handle Zod failures differently (e.g. the Trendyol webhook receiver,
+ * which turns a validation failure into a logged 200 so Trendyol stops its
+ * infinite retry loop). Omit it to keep the standard `VALIDATION_ERROR` mapping.
  */
-export function createSubApp<E extends Env = Env>(): OpenAPIHono<E> {
-  return new OpenAPIHono<E>({ defaultHook: validationDefaultHook });
+export function createSubApp<E extends Env = Env>(
+  options: { defaultHook?: OpenAPIHonoOptions<E>['defaultHook'] } = {},
+): OpenAPIHono<E> {
+  return new OpenAPIHono<E>({ defaultHook: options.defaultHook ?? validationDefaultHook });
 }

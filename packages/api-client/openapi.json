@@ -6893,7 +6893,7 @@
           "Webhooks"
         ],
         "summary": "Receive a Trendyol order status webhook",
-        "description": "Per-store webhook callback. Authenticated via store-scoped Basic Auth (`Authorization: Basic <base64(user:pass)>`); HMAC not supported by Trendyol. Idempotent: composite key (storeId, platformOrderId, status, lastModifiedDate) catches re-deliveries within the 5-minute retry window. Mounted BEFORE the global Bearer JWT auth middleware.",
+        "description": "Per-store webhook callback. Authenticated via store-scoped Basic Auth (`Authorization: Basic <base64(user:pass)>`); HMAC not supported by Trendyol. Idempotent: composite key (storeId, platformOrderId, status, lastModifiedDate) catches re-deliveries within the 5-minute retry window. Deterministic failures (malformed body, unknown status, supplier mismatch) return 200 so Trendyol stops retrying; transient failures return 5xx so it replays. Mounted BEFORE the global Bearer JWT auth middleware.",
         "parameters": [
           {
             "schema": {
@@ -6988,17 +6988,7 @@
         },
         "responses": {
           "200": {
-            "description": "Event accepted (processed or deduped)"
-          },
-          "400": {
-            "description": "Malformed payload",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Event accepted (processed, deduped, or deterministically dropped)"
           },
           "401": {
             "description": "Webhook auth failed",
@@ -7012,6 +7002,26 @@
           },
           "404": {
             "description": "Store not found or webhook disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {

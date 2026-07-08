@@ -16,6 +16,7 @@
  * Postgres or Upstash Redis.
  */
 
+import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
 import { RATE_LIMIT_INTERNAL } from '../config/rate-limits';
@@ -33,6 +34,15 @@ export interface RateLimitOptions {
    * a separate bucket (e.g. POST vs GET sharing a path).
    */
   keyPrefix?: string;
+  /**
+   * Overrides the default per-user identity. Authenticated routes bucket by
+   * `c.get('userId')`; unauthenticated routes (e.g. the marketplace webhook
+   * receiver, which runs before the JWT auth middleware) have no user, so they
+   * pass a resolver that derives a stable identity from the request (e.g. the
+   * `storeId` path param). Return a non-empty string to bucket, or an empty
+   * string to fall through unlimited.
+   */
+  keyResolver?: (c: Context) => string;
 }
 
 interface Bucket {
@@ -43,20 +53,27 @@ interface Bucket {
 const MAX_KEYS = RATE_LIMIT_INTERNAL.MAX_IN_MEMORY_BUCKETS;
 const store = new Map<string, Bucket>();
 
+/** Default identity source for authenticated routes: the Supabase user id. */
+function resolveUserIdentity(c: Context): string {
+  const userId = c.get('userId');
+  return typeof userId === 'string' ? userId : '';
+}
+
 export function rateLimit(opts: RateLimitOptions) {
   return createMiddleware(async (c, next) => {
-    const userId = c.get('userId');
-    // No user context → skip. The global auth middleware should have
-    // rejected upstream; we do NOT throw here to keep this middleware
-    // composable with unauthenticated routes (none today, but cheap
-    // future-proofing).
-    if (typeof userId !== 'string' || userId.length === 0) {
+    // Identity resolution: an explicit `keyResolver` wins (unauthenticated
+    // routes derive their own key), otherwise fall back to the authenticated
+    // user id. Absent identity → skip. For authenticated routes the global
+    // auth middleware should have rejected upstream; we do NOT throw here to
+    // keep this middleware composable with unauthenticated routes.
+    const identity = opts.keyResolver !== undefined ? opts.keyResolver(c) : resolveUserIdentity(c);
+    if (identity.length === 0) {
       await next();
       return;
     }
 
     const prefix = opts.keyPrefix ?? c.req.routePath;
-    const key = `${userId}:${prefix}`;
+    const key = `${identity}:${prefix}`;
     const now = Date.now();
 
     let bucket = store.get(key);

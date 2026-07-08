@@ -149,7 +149,7 @@ describe('Tenant isolation — webhook receiver cross-store/cross-org safety', (
     expect(await prisma.webhookEvent.count({ where: { storeId: a.storeId } })).toBe(0);
   });
 
-  it('Store A credentials on Store A URL but payload carries Store B supplierId → 401', async () => {
+  it('Store A credentials on Store A URL but payload carries Store B supplierId → 200 drop, no data', async () => {
     const a = await setupOrgStore({
       supplierId: SUPPLIER_ID_A,
       username: WEBHOOK_USER_A,
@@ -164,9 +164,11 @@ describe('Tenant isolation — webhook receiver cross-store/cross-org safety', (
       },
       body: JSON.stringify(makePayload(Number.parseInt(SUPPLIER_ID_B, 10))),
     });
-    expect(res.status).toBe(401);
-    // Defense-in-depth supplierId check fires after credential validation;
-    // no Order or WebhookEvent should be created.
+    // Retry-model (webhook-model.md): the defense-in-depth supplierId check is a
+    // deterministic drop → 200 closes the event (retrying never helps). The
+    // isolation guarantee is unchanged: no Order or WebhookEvent is created for
+    // a body naming another seller.
+    expect(res.status).toBe(200);
     expect(await prisma.order.count({ where: { storeId: a.storeId } })).toBe(0);
     expect(await prisma.webhookEvent.count({ where: { storeId: a.storeId } })).toBe(0);
   });

@@ -1,3 +1,4 @@
+import { HTTPException } from 'hono/http-exception';
 import { describe, expect, it } from 'vitest';
 
 import { EncryptionKeyError } from '@pazarsync/sync-core';
@@ -164,6 +165,30 @@ describe('problemDetailsForError — marketplace errors', () => {
       detail: 'Marketplace rejected the price update for TRENDYOL: PRICE_ALREADY_UPDATED_TODAY',
       meta: { platform: 'TRENDYOL', errorCode: 'PRICE_ALREADY_UPDATED_TODAY' },
     });
+  });
+});
+
+describe('problemDetailsForError — Hono HTTPException passthrough', () => {
+  it('maps a 400 HTTPException (malformed body) to 400 MALFORMED_REQUEST', () => {
+    const { body, status } = problemDetailsForError(
+      new HTTPException(400, { message: 'Malformed JSON in request body' }),
+    );
+    expect(status).toBe(400);
+    expect(body).toEqual({
+      type: 'https://api.pazarsync.com/errors/malformed-request',
+      title: 'Malformed request',
+      status: 400,
+      code: 'MALFORMED_REQUEST',
+      detail: 'Malformed JSON in request body',
+    });
+  });
+
+  it('maps a non-400 4xx HTTPException to its status with HTTP_ERROR', () => {
+    const { body, status } = problemDetailsForError(new HTTPException(413, {}));
+    expect(status).toBe(413);
+    expect(body.code).toBe('HTTP_ERROR');
+    // Empty message falls back to a generic detail (never leaks internals).
+    expect(body.detail).toBe('The request could not be processed');
   });
 });
 
