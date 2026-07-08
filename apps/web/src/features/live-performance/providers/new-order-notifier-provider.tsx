@@ -112,6 +112,12 @@ export function NewOrderNotifierProvider({
   const tRef = React.useRef<RealtimeTranslator>(t);
   const routerRef = React.useRef<PushRouter>(router);
   const soundRef = React.useRef(soundEnabled);
+  // Latches whether we saw a real outage ('errored'/'paused') so the recovery
+  // invalidate fires on the way back to 'healthy'. A ref, not a prev-state
+  // compare, because buildChannel reports 'connecting' on every (re)subscribe:
+  // a prev-vs-next check would only ever see 'connecting' -> 'healthy' and the
+  // tab-return reconcile would be dead code.
+  const hadOutageRef = React.useRef(false);
   React.useEffect(() => {
     tRef.current = t;
   }, [t]);
@@ -130,6 +136,11 @@ export function NewOrderNotifierProvider({
     let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
     let lastDingAt: number | null = null;
+    // Cancels an in-flight coalesce window on store/org switch or unmount so a
+    // window that already started (fetch in flight) can't fire the previous
+    // store's toast — its "Detay" deep-link would resolve in the new store, and
+    // its ding could bypass the fresh session's frequency cap.
+    let cancelled = false;
 
     const invalidateAll = (): void => {
       void queryClient.invalidateQueries({ queryKey: liveKeys.all });
@@ -159,6 +170,7 @@ export function NewOrderNotifierProvider({
     };
 
     const runWindow = async (): Promise<void> => {
+      if (cancelled) return;
       const events = pending.splice(0, pending.length);
       const decision = decideCoalesce(events);
 
@@ -168,6 +180,9 @@ export function NewOrderNotifierProvider({
         burstTotal = decision.total;
       } else {
         const fetched = await Promise.all(decision.toFetch.map(fetchSummary));
+        // The window may have been cancelled (store switch / unmount) while the
+        // summary fetch was in flight — drop the toast/ding for the old store.
+        if (cancelled) return;
         const summaries = fetched.filter((s): s is NotificationSummaryLike => s !== null);
         const selection = selectSurvivors(summaries, seen);
         selection.newlySeen.forEach((n) => seen.add(n));
@@ -207,6 +222,7 @@ export function NewOrderNotifierProvider({
       // dropping the toast here never stalls a refetch.
       // Deliberately NOT filtered: a store's first sync of the day backfills
       // today's orders — those are genuinely today's new orders and should toast.
+      if (cancelled) return;
       if (!isBusinessToday(event.orderDate, new Date())) return;
       pending.push(event);
       if (coalesceTimer === null) {
@@ -228,15 +244,22 @@ export function NewOrderNotifierProvider({
       onEvent: scheduleInvalidate,
       onNewOrder,
       onHealthChange: (next) => {
-        setHealth((prev) => {
-          const wasOutage = prev === 'errored' || prev === 'paused';
-          if (next === 'healthy' && wasOutage) invalidateAll();
-          return next;
-        });
+        // Ref-latched outage tracking (see hadOutageRef): the recovery
+        // invalidate fires when we return to 'healthy' after any outage, even
+        // though buildChannel emits an interim 'connecting'. The state updater
+        // stays pure — the invalidate decision lives here, not inside setHealth.
+        if (next === 'errored' || next === 'paused') {
+          hadOutageRef.current = true;
+        } else if (next === 'healthy' && hadOutageRef.current) {
+          hadOutageRef.current = false;
+          invalidateAll();
+        }
+        setHealth(next);
       },
     });
 
     return () => {
+      cancelled = true;
       if (typeof window !== 'undefined') {
         window.removeEventListener('pointerdown', unlock);
         window.removeEventListener('keydown', unlock);
