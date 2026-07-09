@@ -1,77 +1,79 @@
+
+
+# Webhook Model
+
 Webhook ( web kancaları ) geliştirmeleri ile birlikte , belirli bir olay ve ya işlem gerçekleştiğinde başka bir uygulamayı otomatik olarak bilgilendirebileceğiz.
 
 Siparişlerinizi çekmek için kullandığınız getshipmentpackage servisini kullanarak veri almak yerine , webhook ile (web kancaları ile) ,olayın meydana geldiği zaman tetiklenen, sizin paylaştığınız özel bir URL’ye istek gönderen bir mekanizma kullanılmaktadır.
 
-### Webhook Servisi[](#webhook-servisi)
+### Webhook Servisi
 
 Trendyol Satıcı Merkezi'ndeki sipariş pakerleri ile ilgili bildirim almak için webhook aboneliklerini kullanabilirsiniz. Siparişlerin aşağıdaki statuleri için webhook kullanılabilir
 
-- "CREATED"
-- "PICKING"
-- "INVOICED"
-- "SHIPPED"
-- "CANCELLED"
-- "DELIVERED"
-- "UNDELIVERED"
-- "RETURNED"
-- "UNSUPPLIED"
-- "AWAITING"
-- "UNPACKED"
-- "AT_COLLECTION_POINT"
-- "VERIFIED"
-
+* "CREATED"
+* "PICKING"
+* "INVOICED"
+* "SHIPPED"
+* "CANCELLED"
+* "DELIVERED"
+* "UNDELIVERED"
+* "RETURNED"
+* "UNSUPPLIED"
+* "AWAITING"
+* "UNPACKED"
+* "AT\_COLLECTION\_POINT"
+* "VERIFIED"
 
 Tüm statuleri tek bir webhook yaratma servisi ile elde edebilirsiniz. Yapılan istekler statu farketmeksizin full order datası olarak iletilecek olup, satıcıların, siparişin istenen durumunu alabilmesi için webhook hizmetini aşağıda ki modele göre sağlamanız gerekmektedir.
 
-### Webhook Authorization[](#webhook-authorization)
+### Webhook Authorization
 
-İzin verilen 2 tür yetkilendirme yöntemi vardır: "BASIC_AUTHENTICATION" veya "API_KEY". Webhook isteğinizi oluştururken "AuthenticationType" adlı alanda ilgili yöntemlerden birini kullanmalısınız.
+İzin verilen 2 tür yetkilendirme yöntemi vardır: "BASIC\_AUTHENTICATION" veya "API\_KEY". Webhook isteğinizi oluştururken "AuthenticationType" adlı alanda ilgili yöntemlerden birini kullanmalısınız.
 
-- "AuthenticationType" alanı "API_KEY" ise, "apiKey" alanı zorunludur ve "username" ve "password" alanları gönderilmeyebilir.
+* "AuthenticationType" alanı "API\_KEY" ise, "apiKey" alanı zorunludur ve "username" ve "password" alanları gönderilmeyebilir.
   * Eğer servisiniz header'da api key bekliyorsa, ilgili alan "x-api-key" olarak gönderilecektir.
-- "AuthenticationType" alanı "BASIC_AUTHENTICATION" ise, "username" ve "password" alanları zorunludur. "apiKey" alanı gönderilmeyebilir.
+* "AuthenticationType" alanı "BASIC\_AUTHENTICATION" ise, "username" ve "password" alanları zorunludur. "apiKey" alanı gönderilmeyebilir.
 
-
-### Webhook Yeniden Tetikleme Modeli[](#webhook-yeniden-tetikleme-modeli)
+### Webhook Yeniden Tetikleme Modeli
 
 Webhook servislerinde hata alınması durumunda, sistem otomatik olarak aksiyon alacak olup ilgili webhook isteğini pasife alacaktır, bu kapsamda satıcılarımıza iki adet mail iletiyor olacağız.
 
-- 1.Mailde hata alınan webhook ID ile ilgili bilgileri paylaşıyor olup, bu servise istek atmaya devam edeceğimiz süreyi sizinle paylaşıyor olacağız.
-- 2.Mailde ise ilgili sürenin sonuna geldiğimizi ve hata alınan webhook ID nin pasife alındığını sizlere bildirmiş olacağız.
-
+* 1.Mailde hata alınan webhook ID ile ilgili bilgileri paylaşıyor olup, bu servise istek atmaya devam edeceğimiz süreyi sizinle paylaşıyor olacağız.
+* 2.Mailde ise ilgili sürenin sonuna geldiğimizi ve hata alınan webhook ID nin pasife alındığını sizlere bildirmiş olacağız.
 
 Pasife alınan webhooklarınızı servisinizdeki sorunu giderdikten sonra aktife alabilirsiniz.
 
-### Webhook Önemli Notlar[](#webhook-önemli-notlar)
+### Webhook Önemli Notlar
 
-- Webhook servislerinize yapılan herhangi bir başarısız istek olması durumunda, Trendyol, başarılı olana kadar her 5 dakikada bir başarısız istekleri iletecektir. (Bu gelecekte değiştirilecektir)
-- Webhook ile veri gönderimi her zaman olanaklı olamadığı için, ilgili servis üzerinden, Trendyol'dan periyodik olarak veri almak için geliştirme yapmanız tavsiye edilmektedir.
+* Webhook servislerinize yapılan herhangi bir başarısız istek olması durumunda, Trendyol, başarılı olana kadar her 5 dakikada bir başarısız istekleri iletecektir. (Bu gelecekte değiştirilecektir)
+* Webhook ile veri gönderimi her zaman olanaklı olamadığı için, ilgili servis üzerinden, Trendyol'dan periyodik olarak veri almak için geliştirme yapmanız tavsiye edilmektedir.
   * Örneğin sipariş datası için bir webhook isteği oluşturduysanız, getshipmentpackage servisini kullanarak periyodik olarak datalarınızı eşitlemenizi öneririz.
-- Webhook servislerinizin endpointi "Trendyol", "Dolap", "Localhost" ibareleri içermemelidir.
-- 1 satıcı için oluşturulabileceek maksimum webhook sayısı 15 dir. Pasife alınan webhooklarda burdaki sayıya dahildir. Maksimum webhook sayısını aşarsanız var olan webhooklarınızdan uygun olanı silip yeniden webhook tanımlayabilirsiniz
+* Webhook servislerinizin endpointi "Trendyol", "Dolap", "Localhost" ibareleri içermemelidir.
+* 1 satıcı için oluşturulabileceek maksimum webhook sayısı 15 dir. Pasife alınan webhooklarda burdaki sayıya dahildir. Maksimum webhook sayısını aşarsanız var olan webhooklarınızdan uygun olanı silip yeniden webhook tanımlayabilirsiniz
 
-
-### Webhook Request Modeli[](#webhook-request-modeli)
+### Webhook Request Modeli
 
 Şu anda satıcıların getShipmentPackages hizmetiyle yalnızca aynı modele sahip siparişleri kullanmasına izin veriyoruz.
 
-- Request tipi JSON formatında olmalıdır.
-- Request methodu POST olmalıdır.
-
+* Request tipi JSON formatında olmalıdır.
+* Request methodu POST olmalıdır.
 
 **"createdBy" aşağıdaki değerleri alabilir:**
 
-- "order-creation" -> Paket, gelen siparişle doğrudan oluşturulur
-- "cancel" -> Paket, kısmi iptalden sonra oluşturulur
-- "split" -> Paket, paket bölünmesine göre oluşturulur
-- "transfer" -> Siparişi alan satıcının ürünü olmaması nedeniyle Trendyol tarafından başka bir satıcıya yönlendirilen siparişler.
+* "order-creation" -> Paket, gelen siparişle doğrudan oluşturulur
+* "cancel" -> Paket, kısmi iptalden sonra oluşturulur
+* "split" -> Paket, paket bölünmesine göre oluşturulur
+* "transfer" -> Siparişi alan satıcının ürünü olmaması nedeniyle Trendyol tarafından başka bir satıcıya yönlendirilen siparişler.
 
+**Adres Bilgilerine Erişim**
+
+* Mikro ihracat ve Yurt Dışı Aracılığı Modeli siparişlerindeki shipment adres alanları bazı durumlarda boş dönebilir. İlgili siparişler için tekrar istek attığınızda adres alanları dolu gelecektir.
+* "defectiveClaimListingInsight" kusurlu/eksik/yanlış reasonla iadesi onaylanan ürünleri tespit edip, yeni sipariş geldiğinde satıcıya o ürün özelinde müşteride nasıl bir problem yarattığını ifade eden bir alandır. Bu sayede yeni gelen siparişte de aynı durumu yaşamamak için satıcının proaktif davranmasını ve ürünleri hazırlar\&kargolarken önlemlerini almasını, satıcı kaynaklı defective sebeplerle iade edilme oranlarını düşürmeyi hedefliyoruz.
 
 **Trendyol siparişleri aşağıdaki modele göre iletiyor olacak**
 
-JSON
-
 ```json
+
 {
     "totalElements": 1,
     "totalPages": 1,
@@ -138,6 +140,7 @@ JSON
                     "addressLine2": ""
                 },
                 "postalCode": "", // GULF bölgesi siparişlerinde boş gelebilir.
+                "sector": "",
                 "countryCode": "TR",
                 "neighborhoodId": 0,
                 "phone": null,
@@ -153,6 +156,7 @@ JSON
             "customerId": 1451111111,
             "supplierId": 2738,
             "customerLastName": "Customer",
+            "channelId": 25, // 1 ise TR core,25 ise luxury kanalından gelen sipariştir.
             "shipmentPackageId": 3330111111, // Paket ID'si
             "cargoTrackingNumber": 7280027504111111,
             "cargoTrackingLink": "https://tracking.trendyol.com/?id=111111111-1111-1111-1111-11111111",
@@ -192,7 +196,8 @@ JSON
                     "businessUnit": "Sports Shoes",
                     "cancelledBy": "", // İptal eden taraf
                     "cancelReason": "", // İptal nedeni
-                    "cancelReasonCode": 0 // İptal neden kodu
+                    "cancelReasonCode": 0, // İptal neden kodu
+                    "defectiveClaimListingInsight": "Kırık ve akma sorunları var" //new field
                 }
             ],
             "orderDate": 1762253333685,
@@ -222,6 +227,9 @@ JSON
             "deliveredByService": false,
             "warehouseId": 372389,
             "invoiceLink": "https://efatura01.evidea.com/11111111111",
+            "invoiceNumber": "1255141",
+            "invoiceStatus": "NotInvoiced",
+            "invoiceRejectedReasonKeys: "" // Yalnızca Trendyol Yurt Dışı Aracılığı modelindeki siparişler için bu alan dönecektir.
             "micro": true, // micro ihracat siparişleri için true olarak dönecektir.
             "giftBoxRequested": false,
             "3pByTrendyol": false,
@@ -238,49 +246,47 @@ JSON
         }
     ]
 }
-
-
 ```
 
+<br />
 
-**15 Haziran 2026 tarihinden itibaren servis cevabına aşağıdaki alanlar da eklenecektir (bu tarih, şu an taslaktır):**
-
-JSON
+**15 Haziran 2026 tarihinden itibaren Trendyol Yurt Dışı Aracılığı ile modeli için servis cevabına aşağıdaki alanlar da eklenecektir (bu tarih, şu an taslaktır):**
 
 ```json
-  "invoiceNumber": "1255141"
-      "invoiceStatus": "NotInvoiced"
+"invoiceNumber": "1255141" 
+"invoiceStatus": "NotInvoiced" 
 "invoiceRejectedReasonKeys: [
-		{
-			"INVOICE_NUMBER_ALREADY_EXISTS",
-            "NVOICE_TOTAL_MISMATCH"  
-		}
-        ]
-
+{	
+"INVOICE_NUMBER_ALREADY_EXISTS",
+"INVOICE_TOTAL_MISMATCH"    
+}
+]
 
 ```
 
 **"invoiceStatus" alanı değerleri açıklamaları:**
 
-| invoiceStatus | Açıklama |
-| --- | --- |
-| **NotInvoiced** | Sipariş paketine ait faturanın beslenmediğini gösterir. |
-| **Received** | Sipariş paketine ait fatura beslenmiştir ve kontrol aşamasındadır. |
-| **Rejected** | Sipariş paketine ait fatura, kontroller sonucu hatalı bulunmuştur. Bu statüdeki sipariş paketleri için; Türkiye Pazaryerindeki bir sipariş ise hatalı faturanın sipariş üzerinden silinip, tekrar gönderilmesi gerekmektedir. Sipariş Mikro İhracat veya Trendyol Yurtdışı Aracılığı siparişi ise aynı sipariş paketine fatura silme isteği yapılmadan yeni bir fatura beslenmelidir. |
-| **Invoiced** | Sipariş paketine ait fatura yapılan kontroller sonucu doğru bulunmuştur. Sipariş paketine ait "invoiceLink" alanı yalnızca bu statüye geçen sipariş paketinlerinde dolu olarak dönecektir. Bu statüye geçmeyen Mikro İhracat ve Trendyol Yurt Dışı Aracılığı sipariş paketleri için kargo etiketi entegrasyon servisimizden dönmeyecektir. |
+| invoiceStatus   | Açıklama                                                                                                                                                                                                                                                                                                                                                                              |
+| :-------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **NotInvoiced** | Sipariş paketine ait faturanın beslenmediğini gösterir.                                                                                                                                                                                                                                                                                                                               |
+| **Received**    | Sipariş paketine ait fatura beslenmiştir ve kontrol aşamasındadır.                                                                                                                                                                                                                                                                                                                    |
+| **Rejected**    | Sipariş paketine ait fatura, kontroller sonucu hatalı bulunmuştur. Bu statüdeki sipariş paketleri için; Türkiye Pazaryerindeki bir sipariş ise hatalı faturanın sipariş üzerinden silinip, tekrar gönderilmesi gerekmektedir. Sipariş Mikro İhracat veya Trendyol Yurtdışı Aracılığı siparişi ise aynı sipariş paketine fatura silme isteği yapılmadan yeni bir fatura beslenmelidir. |
+| **Invoiced**    | Sipariş paketine ait fatura yapılan kontroller sonucu doğru bulunmuştur. Sipariş paketine ait "invoiceLink" alanı yalnızca bu statüye geçen sipariş paketinlerinde dolu olarak dönecektir. Bu statüye geçmeyen Mikro İhracat ve Trendyol Yurt Dışı Aracılığı sipariş paketleri için kargo etiketi entegrasyon servisimizden dönmeyecektir.                                            |
 
 **"invoiceRejectedReasonKeys" alanı değerleri açıklamaları:**
 
-| invoiceRejectedReasonKeys | Açıklama |
-| --- | --- |
-| **INVOICE_LINE_MISMATCH** | Siparişinizde yer alan her bir ürün çeşidi için; ürün miktarı, birim fiyat ve KDV bilgileri uyuşan bir kalem bulunması gerekmektedir. |
-| **INVOICE_TOTAL_MISMATCH** | Faturanızdaki dip toplam tutarın siparişteki toplam tutar ile eşleşmesi gerekmektedir. |
-| **INVOICE_LINE_NUMBER_MISMATCH** | Faturanızdaki kalem sayısı ile siparişteki ürün çeşidi sayısı eşleşmelidir. |
-| **INVOICE_TYPE_MISMATCH** | Faturanızdaki fatura tipi satış olmalıdır. |
-| **SENDER_VKN_MISMATCH** | Faturanızdaki VKN bilginiz sistemdeki tanımlı VKN ile aynı olmalıdır. |
-| **RECEIPENT_VKN_MISMATCH** | Faturanızdaki alıcı VKN bilgisi Trendyol VKN bilgisi olmalıdır. |
-| **INVOICE_NUMBER_MISMATCH** | Faturanızdaki fatura numarası sipariş için beslediğiniz fatura numarası ile aynı olmalıdır. |
-| **INVOICE_DATE_MISMATCH** | Faturanızdaki fatura tarihi sipariş tarihinden sonra olmalıdır. |
-| **INVOICE_SCENARIO_MISMATCH** | Faturanızdaki fatura senaryosu temel veya ticari olmalıdır. |
-| **INVOICE_NOT_FOUND_IN_MAILBOX** | Fatura Trendyol gelen kutusunda bulunamamaktadır. Yeni bir fatura iletmeniz beklenmektedir. |
-| **INVOICE_NUMBER_ALREADY_EXISTS** | Daha önce gönderilen bir "invoiceNumber" farklı bir sipariş paketi için tekrar gönderilmektedir. Fatura numarasının değiştirilmesi gerekmektedir. |
+| invoiceRejectedReasonKeys            | Açıklama                                                                                                                                          |
+| :----------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **INVOICE\_LINE\_MISMATCH**          | Siparişinizde yer alan her bir ürün çeşidi için; ürün miktarı, birim fiyat ve KDV bilgileri uyuşan bir kalem bulunması gerekmektedir.             |
+| **INVOICE\_TOTAL\_MISMATCH**         | Faturanızdaki dip toplam tutarın siparişteki toplam tutar ile eşleşmesi gerekmektedir.                                                            |
+| **INVOICE\_LINE\_NUMBER\_MISMATCH**  | Faturanızdaki kalem sayısı ile siparişteki ürün çeşidi sayısı eşleşmelidir.                                                                       |
+| **INVOICE\_TYPE\_MISMATCH**          | Faturanızdaki fatura tipi satış olmalıdır.                                                                                                        |
+| **SENDER\_VKN\_MISMATCH**            | Faturanızdaki VKN bilginiz sistemdeki tanımlı VKN ile aynı olmalıdır.                                                                             |
+| **RECEIPENT\_VKN\_MISMATCH**         | Faturanızdaki alıcı VKN bilgisi Trendyol VKN bilgisi olmalıdır.                                                                                   |
+| **INVOICE\_NUMBER\_MISMATCH**        | Faturanızdaki fatura numarası sipariş için beslediğiniz fatura numarası ile aynı olmalıdır.                                                       |
+| **INVOICE\_DATE\_MISMATCH**          | Faturanızdaki fatura tarihi sipariş tarihinden sonra olmalıdır.                                                                                   |
+| **INVOICE\_SCENARIO\_MISMATCH**      | Faturanızdaki fatura senaryosu temel veya ticari olmalıdır.                                                                                       |
+| **INVOICE\_NOT\_FOUND\_IN\_MAILBOX** | Fatura Trendyol gelen kutusunda bulunamamaktadır. Yeni bir fatura iletmeniz beklenmektedir.                                                       |
+| **INVOICE\_NUMBER\_ALREADY\_EXISTS** | Daha önce gönderilen bir "invoiceNumber" farklı bir sipariş paketi için tekrar gönderilmektedir. Fatura numarasının değiştirilmesi gerekmektedir. |
+
+<br />
