@@ -418,6 +418,25 @@ describe('mapLine — GROSS output', () => {
     expect(m.commissionRate).toBe('0');
     expect(m.commissionGross).toBe('0.00');
   });
+
+  // categoryId + commissionKnown drive the order-intake commission fallback:
+  // a line that carries no commission must be flagged so intake can resolve the
+  // rate from the DB category instead of trusting the defensive 0.
+  it('flags commissionKnown false and carries categoryId when commission is absent', () => {
+    // `commission: undefined` mirrors the sparse-webhook case (rate not carried).
+    const line = buildLine({ commission: undefined, productCategoryId: 411 });
+    const m = mapLine(line, { shipmentPackageId: 1 });
+    expect(m.commissionKnown).toBe(false);
+    expect(m.categoryId).toBe('411');
+  });
+
+  it('flags commissionKnown true and stringifies categoryId when commission is present', () => {
+    const line = buildLine({ commission: 20, productCategoryId: 626 });
+    const m = mapLine(line, { shipmentPackageId: 1 });
+    expect(m.commissionKnown).toBe(true);
+    expect(m.categoryId).toBe('626');
+    expect(m.commissionRate).toBe('20');
+  });
 });
 
 // ─── Package header from totals + saleVat + invariant ─────────────────

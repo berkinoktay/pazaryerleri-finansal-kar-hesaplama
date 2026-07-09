@@ -50,6 +50,8 @@ function buildMapped(over: {
     commissionGross: '15',
     refundedCommissionGross: '0',
     commissionVatRate: '20',
+    categoryId: null,
+    commissionKnown: true,
   };
   return {
     platformOrderId: over.platformOrderId,

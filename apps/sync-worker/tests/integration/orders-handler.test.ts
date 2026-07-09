@@ -852,6 +852,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           commissionGross: '12.00',
           refundedCommissionGross: '0.00',
           commissionVatRate: '20',
+          categoryId: null,
+          commissionKnown: true,
         },
       ],
     };
@@ -935,6 +937,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           commissionGross: '9.90',
           refundedCommissionGross: '1.10',
           commissionVatRate: '20',
+          categoryId: null,
+          commissionKnown: true,
         },
       ],
     };
@@ -993,6 +997,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           commissionGross: '9.90',
           refundedCommissionGross: '1.10',
           commissionVatRate: '20',
+          categoryId: null,
+          commissionKnown: true,
         },
         {
           barcode: 'EAN13-MIX-B',
@@ -1006,6 +1012,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           commissionGross: '11.00',
           refundedCommissionGross: '1.20',
           commissionVatRate: '20',
+          categoryId: null,
+          commissionKnown: true,
         },
       ],
     };
@@ -1057,6 +1065,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
           commissionGross: '12.00',
           refundedCommissionGross: '0.00',
           commissionVatRate: '20',
+          categoryId: null,
+          commissionKnown: true,
         },
       ],
     };
@@ -1153,6 +1163,8 @@ describe('upsertOrderWithSnapshot — out-of-order guard (freshness)', () => {
           commissionGross: '12.00',
           refundedCommissionGross: '0.00',
           commissionVatRate: '20',
+          categoryId: null,
+          commissionKnown: true,
         },
       ],
     };

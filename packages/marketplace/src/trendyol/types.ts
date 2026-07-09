@@ -396,6 +396,19 @@ export interface MappedOrderLine {
   refundedCommissionGross: string;
   /** Commission VAT rate %, DB-driven default (#331); net split derived downstream. */
   commissionVatRate: string;
+  /**
+   * Trendyol lines[].productCategoryId — stringified for boundary parity with the
+   * other id/money fields (downstream converts to BigInt). null when the payload
+   * omits it. Used by order-intake to fall back to a DB category commission rate
+   * when the line carries no commission of its own.
+   */
+  categoryId: string | null;
+  /**
+   * True only when Trendyol actually carried a commission rate on the line.
+   * When false, commissionRate/commissionGross are the defensive 0 fallback (not a
+   * real zero), signalling order-intake to resolve the rate from the category.
+   */
+  commissionKnown: boolean;
 }
 
 export interface MappedOrder {

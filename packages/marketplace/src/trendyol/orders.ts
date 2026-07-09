@@ -365,6 +365,8 @@ export function mapLine(
     commissionGross: commissionGross.toFixed(2),
     refundedCommissionGross: refundedCommissionGross.toFixed(2),
     commissionVatRate: new Decimal(commissionVatRate).toString(),
+    categoryId: line.productCategoryId != null ? String(line.productCategoryId) : null,
+    commissionKnown: line.commission !== undefined && line.commission !== null,
   };
 }
 
