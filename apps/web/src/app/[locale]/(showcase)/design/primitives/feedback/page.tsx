@@ -22,6 +22,9 @@ import { RADIUS_KEYS, SIZE_KEYS, TONE_KEYS } from '@/lib/variants';
 // Alert's tone union is narrower than the full TONE_KEYS (no `primary`) — it
 // carries semantic message meaning + a default leading icon per tone.
 const ALERT_TONES = ['neutral', 'info', 'success', 'warning', 'destructive'] as const;
+// Emphasis: `subtle` = calm card + soft medallion (default); `solid` = full
+// tone tint, reserved for high-stakes / irreversible notices.
+const ALERT_EMPHASIS = ['subtle', 'solid'] as const;
 
 export default function FeedbackPrimitivePage(): React.ReactElement {
   const t = useTranslations('common');
@@ -36,25 +39,25 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
 
       <ShowcaseSection
         title="Alert"
-        description="Bölüm-içi semantik mesaj. Icon prop verilmezse tone'a göre otomatik (info → i, success → check, warning/destructive → uyarı). Varsayılan kenarlıksız (sakin yüzen bilgi); hasBorder YALNIZ warning/destructive'te ton-kenarlığı firmleştirir. Yan-şerit border yasak."
+        description="Yüzey-önce, renk-aksan: uyarı, çevresindeki kartlarla aynı bg-card yüzeyine oturur (ince kenarlık + shadow-xs), semantik renk ise sol baştaki ton madalyonunda (SoftSquareIcon) toplanır — dolu renkli levha değil. emphasis='subtle' varsayılan (sakin, gövde metni sönük); emphasis='solid' TÜM yüzeyi tonlar, yalnızca yüksek-riskli/geri-dönüşsüz uyarılar için. Icon verilmezse tone default'u (info→i, success→check, warning/destructive→uyarı). Yan-şerit border yasak — renk madalyonda."
       >
         <Playground
-          title="Alert — tone · size · radius · hasBorder · dismiss · icon"
-          description="Eski 'her tonu statik grid'de tekrar et' + onDismiss + icon-opt-out bloklarının yerini alır. icon kapalıyken tone default'u bastırılır (metin tam genişlikte akar); dismiss açıkken sağ üstte 44px touch-target X belirir."
+          title="Alert — tone · emphasis · size · radius · dismiss · icon"
+          description="emphasis='solid' tüm yüzeyi tonlar (yüksek-riskli istisna); 'subtle' sakin kart + yumuşak madalyon. icon kapalıyken madalyon düşer (metin tam genişlikte akar); dismiss açıkken sağ üstte 44px touch-target X belirir."
           controls={{
             tone: control.segment(ALERT_TONES, 'warning'),
+            emphasis: control.segment(ALERT_EMPHASIS, 'subtle'),
             size: control.segment(SIZE_KEYS, 'md'),
-            radius: control.select(RADIUS_KEYS, 'md'),
-            hasBorder: control.bool(false, 'hasBorder'),
+            radius: control.select(RADIUS_KEYS, 'lg'),
             dismiss: control.bool(false, 'dismiss'),
             icon: control.bool(true, 'icon'),
           }}
           render={(v) => (
             <Alert
               tone={v.tone}
+              emphasis={v.emphasis}
               size={v.size}
               radius={v.radius}
-              hasBorder={v.hasBorder}
               icon={v.icon ? undefined : null}
               dismissLabel={t('dismiss')}
               onDismiss={v.dismiss ? () => undefined : undefined}
@@ -77,12 +80,12 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
         </Preview>
 
         <Preview
-          title="Alert — action slot"
-          description="action slot'u CTA Button'ı bileşen içinde tutar — focus + layout primitive'de. Yüksek-riskli/geri-dönüşsüz uyarılarda hasBorder ile ton-kenarlığı firmleşir."
+          title="Alert — action slot + solid emphasis"
+          description="action slot'u CTA Button'ı bileşen içinde tutar — focus + layout primitive'de. emphasis='solid' tüm yüzeyi tonlar + saturated madalyon: geri-dönüşsüz / yüksek-riskli uyarının bilinçli 'yüksek sesli istisna'sı."
         >
           <Alert
             tone="destructive"
-            hasBorder
+            emphasis="solid"
             action={{ label: 'Ayarlara git', onClick: () => undefined }}
             className="max-w-form"
           >
@@ -94,11 +97,11 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
 
       <ShowcaseSection
         title="Toast (Sonner)"
-        description="İkon + kalın başlık + sönük açıklama. Tona göre tinted + ton-kenarlık (success toast = success Alert): success=yeşil check, error=destructive, warning=üçgen, info=i, loading=spinner. Nötr toast(): bg-card. Tetikleyici grid bir davranıştır (async + sağ-alt mount) — Playground'a indirgenmez."
+        description="Yüzey-önce, Alert'le aynı anatomi: her toast temiz bg-card kart (shadow-lg ile yüzen) + sol baştaki ton MADALYONU. Renk yalnızca madalyonda, tüm yüzeyde değil: success=yeşil madalyon, error=destructive, warning=amber, info=mavi, loading=spinner. Başlık foreground/kalın, açıklama sönük muted. Nötr toast() madalyonsuz düz kart; custom icon verilirse nötr chip'e oturur. Tetikleyici grid bir davranıştır (async + sağ-üst mount) — Playground'a indirgenmez."
       >
         <Preview
           title="Toast tetikleyicileri"
-          description="Custom icon (soft-square) + action + close butonu. Butona tıkla → sağ altta toast belirir."
+          description="Her mod: nötr, success, warning, error, info, loading, action (geri al) ve custom icon. İkonlar Sonner'ın madalyon slotuna oturur (renk tona göre). Butona tıkla → sağ üstte toast belirir; üst üste gelince istiflenir, hover'da açılır."
         >
           <div className="gap-xs flex flex-wrap">
             <Button
@@ -167,11 +170,9 @@ export default function FeedbackPrimitivePage(): React.ReactElement {
               onClick={() =>
                 toast('Sipariş yola çıktı', {
                   description: 'Kuryeniz birkaç blok uzakta.',
-                  icon: (
-                    <span className="bg-warning-surface text-warning flex size-7 items-center justify-center rounded-md">
-                      <DeliveryBox01Icon className="size-icon-sm" />
-                    </span>
-                  ),
+                  // Bare icon — Sonner's icon slot styles it into a (neutral)
+                  // medallion; no need to hand-wrap a chip.
+                  icon: <DeliveryBox01Icon />,
                 })
               }
             >

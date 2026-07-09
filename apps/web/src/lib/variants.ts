@@ -121,6 +121,22 @@ export const toneOutlineClass: Record<ToneKey, string> = {
   info: 'border-info text-info',
 };
 
+/**
+ * Soft tone border — the calmer `-border` token (a pale, ~70%-lightness tint
+ * of the tone) that firms up a TINTED surface without the loud saturation of
+ * `toneOutlineClass`. Pairs with `toneSurfaceClass` on the high-emphasis
+ * (`solid`) Alert. Neutral falls back to `border-strong`; primary has no
+ * dedicated `-border` token so it borrows the saturated `border-primary`.
+ */
+export const toneSoftBorderClass: Record<ToneKey, string> = {
+  neutral: 'border-border-strong',
+  primary: 'border-primary',
+  success: 'border-success-border',
+  warning: 'border-warning-border',
+  destructive: 'border-destructive-border',
+  info: 'border-info-border',
+};
+
 /** Bare tone fill (progress range, status dot) — background only. */
 export const toneFillClass: Record<ToneKey, string> = {
   neutral: 'bg-muted-foreground',

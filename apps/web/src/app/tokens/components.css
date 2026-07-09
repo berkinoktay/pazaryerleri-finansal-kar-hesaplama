@@ -130,3 +130,19 @@ table tr[data-depth='1'] > td:first-child {
 .group\/tablescroll[data-can-scroll-right] [data-pinned-edge='first-right']::after {
   opacity: 1;
 }
+
+/* Sonner (ui/sonner.tsx) close button → TOP-RIGHT. Sonner defaults the close
+   button to the top-LEFT corner via three position variables (see
+   sonner/dist/styles.css: --toast-close-button-{start,end,transform}); the
+   supported way to move it is to override those vars on the toaster. We mirror
+   Sonner's own RTL values (start:unset / end:0 / transform flipped) so the
+   button sits half-outside the top-right corner — clear of the left medallion.
+   `!important` on the custom-property declarations guarantees they win the
+   cascade over Sonner's runtime-injected <style> regardless of source order.
+   The button's appearance (surface, border, color) stays in the `closeButton`
+   classNames in ui/sonner.tsx. */
+[data-sonner-toaster] {
+  --toast-close-button-start: unset !important;
+  --toast-close-button-end: 0 !important;
+  --toast-close-button-transform: translate(35%, -35%) !important;
+}

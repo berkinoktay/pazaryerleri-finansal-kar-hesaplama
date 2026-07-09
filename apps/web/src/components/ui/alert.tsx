@@ -8,55 +8,57 @@ import {
 import * as React from 'react';
 
 import { Button, type ButtonProps } from '@/components/ui/button';
+import { SoftSquareIcon } from '@/components/ui/soft-square-icon';
 import { cn } from '@/lib/utils';
+import { radiusClass, type RadiusKey, toneSoftBorderClass, toneSurfaceClass } from '@/lib/variants';
 
 /**
  * Page- or section-level message that surfaces a state the user should
- * notice (validation summary, sync result, partial-data notice). The
- * `tone` prop carries semantic meaning AND auto-selects a default
- * leading icon — pass `icon={null}` to opt out, or supply a custom
- * one. The dismiss affordance (`onDismiss`) widens its hit area under
+ * notice (validation summary, sync result, partial-data notice).
+ *
+ * DESIGN — surface-first, tone-as-accent. The alert sits on the same
+ * `bg-card` surface as the cards around it (hairline border + ambient
+ * `shadow-xs`) so it reads as a module that BELONGS to the page, not a
+ * full-bleed colored slab pasted on top. The semantic color is concentrated
+ * into a leading `SoftSquareIcon` medallion — the tone signals, the surface
+ * stays calm. (No left accent bar — the color lives in the chip.)
+ *
+ * `emphasis` picks the treatment:
+ *   - `subtle` (default): white card + soft tone medallion + neutral text.
+ *     The everyday notice. The medallion + surface carry the weight, so the
+ *     body text stays quiet (`text-muted-foreground`).
+ *   - `solid`: the whole surface tints (`bg-<tone>-surface` + soft tone
+ *     border + tone text) with a saturated medallion. RESERVE for genuinely
+ *     high-stakes / irreversible notices (payment failed, bulk price write) —
+ *     it is the loud exception, so its attention value never inflates.
+ *
+ * `tone` carries semantic meaning AND auto-selects a default leading icon —
+ * pass `icon={null}` to opt out, or supply a custom one (it is sized by the
+ * medallion). The dismiss affordance (`onDismiss`) widens its hit area under
  * `pointer-coarse:` so touch users still meet the 44px target.
  *
- * For app-level system messages (maintenance window, payment past due)
- * use the future `Banner` molecule instead — banners are sticky / page-
- * spanning, alerts are inline within content.
+ * For app-level system messages (maintenance window, payment past due) use the
+ * future `Banner` molecule instead — banners are sticky / page-spanning, alerts
+ * are inline within content. Toast (`ui/sonner`) shares this exact anatomy for
+ * transient messages, so a success toast and a success Alert read the same.
  *
  * @useWhen surfacing a page or section-level message in a semantic tone (info, success, warning, destructive); use the future Banner for app-spanning system messages
  */
 
-const alertVariants = cva('relative flex w-full items-start gap-sm border [&_svg]:shrink-0', {
+type AlertTone = 'neutral' | 'info' | 'success' | 'warning' | 'destructive';
+type AlertEmphasis = 'subtle' | 'solid';
+type AlertSize = 'sm' | 'md' | 'lg';
+
+const alertVariants = cva('relative flex w-full items-start border', {
   variants: {
-    tone: {
-      neutral: 'border-border bg-muted text-foreground [&>[data-alert-icon]]:text-muted-foreground',
-      info: 'border-transparent bg-info-surface text-info [&>[data-alert-icon]]:text-info',
-      success:
-        'border-transparent bg-success-surface text-success [&>[data-alert-icon]]:text-success',
-      warning:
-        'border-transparent bg-warning-surface text-warning [&>[data-alert-icon]]:text-warning',
-      destructive:
-        'border-transparent bg-destructive-surface text-destructive [&>[data-alert-icon]]:text-destructive',
-    },
     size: {
-      sm: 'px-sm py-xs text-xs',
-      md: 'px-md py-sm text-sm',
-      lg: 'px-lg py-md text-base',
-    },
-    radius: {
-      none: 'rounded-none',
-      xs: 'rounded-xs',
-      sm: 'rounded-sm',
-      md: 'rounded-md',
-      lg: 'rounded-lg',
-      xl: 'rounded-xl',
-      '2xl': 'rounded-2xl',
-      full: 'rounded-full',
+      sm: 'gap-xs px-sm py-xs text-xs',
+      md: 'gap-sm px-md py-sm text-sm',
+      lg: 'gap-sm px-lg py-md text-base',
     },
   },
-  defaultVariants: { tone: 'neutral', size: 'md', radius: 'md' },
+  defaultVariants: { size: 'md' },
 });
-
-type AlertTone = 'neutral' | 'info' | 'success' | 'warning' | 'destructive';
 
 const DEFAULT_TONE_ICONS: Record<AlertTone, React.ComponentType<{ className?: string }>> = {
   neutral: InformationCircleIcon,
@@ -66,22 +68,27 @@ const DEFAULT_TONE_ICONS: Record<AlertTone, React.ComponentType<{ className?: st
   destructive: AlertCircleIcon,
 };
 
-// Dedicated tone-border tokens exist only for the high-stakes tones — so
-// `hasBorder` only firms up warning / destructive (the others stay calm).
-const ALERT_TONE_BORDER: Partial<Record<AlertTone, string>> = {
-  warning: 'border-warning-border',
-  destructive: 'border-destructive-border',
-};
+// The medallion scales gently with the alert: the two common sizes share the
+// restrained 32px chip; only the page-level `lg` alert grows it.
+const MEDALLION_SIZE: Record<AlertSize, 'sm' | 'md' | 'lg'> = { sm: 'sm', md: 'sm', lg: 'md' };
 
 export interface AlertProps
   extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof alertVariants> {
-  /** Icon rendered on the left. If omitted, a tone-based default is used. Pass `null` to opt out. Size your custom icon to `size-icon-sm` to align with the text. */
+  /** Semantic tone. Drives the medallion color and default icon. Default `neutral`. */
+  tone?: AlertTone;
+  /**
+   * `subtle` (default): calm white-card surface + soft tone medallion.
+   * `solid`: whole surface tints — reserve for high-stakes / irreversible notices.
+   */
+  emphasis?: AlertEmphasis;
+  /** Corner radius. Default `lg`. */
+  radius?: RadiusKey;
+  /** Icon rendered inside the leading medallion. If omitted, a tone-based default is used. Pass `null` to opt out (drops the medallion). */
   icon?: React.ReactNode | null;
   /**
-   * Firms up the surface with a visible tone border (warning / destructive
-   * only — the tones that ship a dedicated `-border` token). Default off: the
-   * calm surface tint + leading icon carry the signal. Reserve `true` for
-   * genuinely irreversible / high-stakes notices.
+   * Legacy alias for `emphasis="solid"` — maps to the `solid` treatment (the
+   * old "firm up the border" intent for high-stakes notices). Prefer
+   * `emphasis`; an explicit `emphasis` always wins over `hasBorder`.
    */
   hasBorder?: boolean;
   /** Optional CTA rendered under the content. Owns its own Button so focus + layout stay in the primitive. */
@@ -96,6 +103,7 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>((props, ref) =
   const {
     className,
     tone,
+    emphasis,
     size,
     radius,
     icon,
@@ -108,28 +116,41 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>((props, ref) =
   } = props;
 
   const resolvedTone: AlertTone = tone ?? 'neutral';
+  const resolvedEmphasis: AlertEmphasis = emphasis ?? (hasBorder ? 'solid' : 'subtle');
+  const resolvedSize: AlertSize = size ?? 'md';
+
+  // subtle → the alert matches the surrounding cards; the description is calm.
+  // solid → the whole surface tints; title AND description use the full tone
+  // color (hierarchy comes from the title's weight, not an opacity dim — the
+  // sanctioned `text-<tone>` on `bg-<tone>-surface` pairing clears AA at full
+  // opacity but not once dimmed, so we keep it at 1).
+  const surfaceClass =
+    resolvedEmphasis === 'solid'
+      ? cn(toneSurfaceClass[resolvedTone], toneSoftBorderClass[resolvedTone])
+      : 'bg-card border-border text-foreground shadow-xs [&_[data-alert-desc]]:text-muted-foreground';
+
   const iconToRender =
     icon === null
       ? null
       : icon !== undefined
         ? icon
-        : React.createElement(DEFAULT_TONE_ICONS[resolvedTone], { className: 'size-icon-sm' });
+        : React.createElement(DEFAULT_TONE_ICONS[resolvedTone]);
 
   return (
     <div
       ref={ref}
       role="alert"
-      className={cn(
-        alertVariants({ tone, size, radius }),
-        hasBorder ? ALERT_TONE_BORDER[resolvedTone] : undefined,
-        className,
-      )}
+      className={cn(alertVariants({ size }), radiusClass[radius ?? 'lg'], surfaceClass, className)}
       {...rest}
     >
       {iconToRender !== null ? (
-        <span data-alert-icon="" className="mt-3xs [&_svg]:size-icon-sm flex shrink-0 items-center">
+        <SoftSquareIcon
+          tone={resolvedTone}
+          variant={resolvedEmphasis === 'solid' ? 'solid' : 'soft'}
+          size={MEDALLION_SIZE[resolvedSize]}
+        >
           {iconToRender}
-        </span>
+        </SoftSquareIcon>
       ) : null}
       <div className="min-w-0 flex-1">
         {children}
@@ -151,7 +172,9 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>((props, ref) =
             'rounded-xs opacity-70 hover:opacity-100',
             'duration-fast ease-out-quart transition-opacity',
             'focus-visible:shadow-focus focus-visible:outline-none',
-            'p-2xs pointer-coarse:p-sm',
+            // 44px touch target under coarse pointers (p-sm padding only reached
+            // 40px on the 16px icon); size-11 makes the hit area exactly 44px.
+            'p-2xs pointer-coarse:size-11 pointer-coarse:p-0',
             '[&_svg]:size-icon-sm',
           )}
         >
@@ -175,7 +198,12 @@ export const AlertDescription = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn('opacity-90 [&_p]:leading-relaxed', className)} {...props} />
+  <div
+    ref={ref}
+    data-alert-desc=""
+    className={cn('leading-relaxed [&_p]:leading-relaxed', className)}
+    {...props}
+  />
 ));
 AlertDescription.displayName = 'AlertDescription';
 
