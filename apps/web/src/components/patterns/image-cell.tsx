@@ -92,7 +92,10 @@ export function ImageCell({
       className={cn(
         SIZE_CLASS[size],
         shape === 'circle' ? 'rounded-full' : 'rounded-md',
-        'bg-muted relative flex shrink-0 items-center justify-center overflow-hidden',
+        // Subtle inset hairline so the thumbnail reads as an intentional framed
+        // image on ANY row surface — product photos usually carry a white
+        // backdrop that otherwise "boxes out" on a tinted (hover / selected) row.
+        'bg-muted ring-border relative flex shrink-0 items-center justify-center overflow-hidden ring-1 ring-inset',
         className,
       )}
     >

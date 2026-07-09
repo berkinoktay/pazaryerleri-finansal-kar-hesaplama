@@ -2,10 +2,11 @@
 
 import {
   type ColumnDef,
+  type Row,
   type SortingState,
   type Table as TanstackTable,
 } from '@tanstack/react-table';
-import { ArrowDown01Icon, ArrowRight01Icon } from 'hugeicons-react';
+import { ArrowRight01Icon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -57,6 +58,18 @@ function getSelectedRowOriginals(table: TanstackTable<ProductRow>): ProductRow[]
   return table.getSelectedRowModel().rows.map((r) => r.original);
 }
 
+/**
+ * Whether a variant sub-row is the LAST of its parent's variants — drives the
+ * `└` terminator on the tree connector (the last elbow has no through-line
+ * below it, so it must not render the continuous spine).
+ */
+function isLastVariant(row: Row<ProductRow>): boolean {
+  const parent = row.getParentRow();
+  if (parent === undefined) return false;
+  const subs = parent.subRows;
+  return subs.length > 0 && subs[subs.length - 1]?.id === row.id;
+}
+
 interface ProductsTableProps {
   orgId: string;
   storeId: string;
@@ -99,30 +112,27 @@ interface ProductsTableProps {
  * variants as sibling rows in the same grid (column widths align). The
  * variant-vs-parent hierarchy is signalled WITHOUT a row background
  * fill — we tried both `--muted` and `--surface-subtle` and the seller
- * read both as a foreign surface that broke the table's airy feel. The
- * remaining cues are token-compliant: a CSS-drawn rounded-corner
- * connector in the expand column (a 28-px SVG path traced with a 2-px
- * `--muted-foreground` stroke and round line caps — earlier passes
- * tried a 1-px CSS border-L and it read as a stray hair against the
- * white surface) and a deeper first-cell padding (token-driven, see
- * tokens/components.css
- * `tr[data-depth='1']`). NO side-stripe — that pattern is banned by
- * /ui-design-system BAN 1.
+ * read both as a foreign surface that broke the table's airy feel. Instead a
+ * dedicated "Varyantlar" column (LEFT of "Ürün") carries the expand affordance:
+ * the variant-count chip (rotating caret) on multi-variant parents, and a
+ * file-tree connector — a continuous `--tree-line` spine with ├/└ elbows — on
+ * the variant sub-rows, each elbow reaching the column's right edge to point at
+ * the product image next door. The connector is drawn on the "Varyantlar" `<td>`
+ * from the `.variant-ident` / `.parent-ident-open` marker classes (see
+ * tokens/components.css). NO side-stripe — banned by /ui-design-system BAN 1.
  *
- * 7-column layout: expand · Ürün bilgisi (compound) · Beden · Renk ·
- * Satış fiyatı · Stok · Teslimat. Two columns retired: "Barkod" (every
- * alphanumeric identifier — model / stock / barcode — now ships inside
- * the title cell with an explicit `Marka · Kategori` label line plus
- * dedicated `Stok Kodu` / `Barkod` / `Model Kodu` lines, each value
- * wrapped in `CopyableValue`) and "Durum" (the override tab strip and
- * the status filter already let the seller scope by status; a status
- * column on every row repeated information they had just narrowed by).
+ * Column layout: select · Varyantlar (expand chip + tree) · Ürün bilgisi
+ * (image + identifiers) · Beden · Renk · Satış fiyatı · Stok · Teslimat · Desi
+ * · Maliyet. Retired earlier: the "Barkod" and "Durum" columns (every
+ * alphanumeric identifier — model / stock / barcode — now ships inside the
+ * title cell with an explicit `Marka · Kategori` label line plus dedicated
+ * `Stok Kodu` / `Barkod` / `Model Kodu` lines, each wrapped in `CopyableValue`;
+ * status is covered by the override tab strip + status filter).
  *
- * Variant sub-rows mirror their parent's image at the same 56px size
- * (no step-down) and surface both `Stok Kodu` and `Barkod` on two
- * labelled, copyable rows. The variant content is top-aligned (matching
- * the parent's `items-start`) so the visual rhythm reads as a column
- * of identifiers anchored under the product image.
+ * Variant sub-rows mirror their parent's image at the same 56px size (no
+ * step-down) and surface both `Stok Kodu` and `Barkod` on two labelled, copyable
+ * rows. Rows are `align-middle` and the identity image is `items-center`, so the
+ * chip / tree in the "Varyantlar" column line up with the product image.
  *
  * Server-side everything: sorting, filtering, pagination — DataTable runs
  * in controlled mode for sort + pagination, and the toolbar's controlled-
@@ -171,76 +181,79 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         },
       },
       {
-        id: 'expand',
+        // Dedicated "Varyantlar" column, LEFT of the identity ("Ürün") column,
+        // to expand/collapse a product's variants — pulled OUT of the identity
+        // cell so the product info is no longer squeezed. Holds the variant-count
+        // chip (multi-variant parents) and the file-tree connector on the variant
+        // sub-rows: a continuous `--tree-line` spine with ├/└ elbows, drawn on
+        // this <td> in tokens/components.css via the `.variant-ident` /
+        // `.parent-ident-open` marker classes; the elbow reaches the column's
+        // right edge, pointing at the product image in the adjacent cell.
+        // Everything aligns on the row's vertical centre (align-middle), matching
+        // the centred product image.
+        id: 'variants',
+        header: () => tCols('variants'),
         enableSorting: false,
-        // Expand affordance is a chip, not text — an empty loading cell beats
-        // a misleading text bar in this narrow control column.
+        enableHiding: false,
         meta: { skeleton: 'none' },
         cell: ({ row }) => {
-          if (row.depth > 0) {
-            // SVG-drawn branch connector. The previous CSS-border L
-            // (1-px hairline) read as "a strand of hair" against the
-            // table's white surface — too subtle to feel like a real
-            // hierarchy cue. This version traces the same conceptual
-            // shape (vertical line → quarter-circle → horizontal stub)
-            // as a single SVG path with a 2-px stroke and round line
-            // caps, which lands as a substantial, intentional mark
-            // without crossing into BAN 1 territory (it's an SVG glyph
-            // inside the cell, not a side-stripe on the row's edge).
-            // 28-px square (`size-7`) gives the corner enough space to
-            // feel rounded; `--muted-foreground` keeps the tone neutral
-            // and on-brand against the white surface.
+          if (row.original.kind === 'variant') {
+            // Variant sub-row: just the tree connector. `.variant-ident` makes
+            // the <td> position:relative so the spine spans its padding box and
+            // meets the next sibling across the row border (one continuous line).
             return (
-              <svg
-                aria-hidden
-                viewBox="0 0 24 24"
-                fill="none"
-                className="text-muted-foreground ml-3xs mt-2xs size-7 shrink-0"
-              >
-                <path
-                  d="M6 2 V12 A 8 8 0 0 0 14 20 H22"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <div className={cn('variant-ident', isLastVariant(row) && 'variant-ident-last')}>
+                <span aria-hidden className="variant-ident-spine" />
+                <span aria-hidden className="variant-ident-elbow" />
+              </div>
             );
           }
-          if (!row.getCanExpand()) {
-            return <span aria-hidden className="size-icon-sm inline-block" />;
-          }
+          const p = row.original.product;
+          if (!isMultiVariant(p)) return null;
           const expanded = row.getIsExpanded();
-          const variantCount =
-            row.original.kind === 'parent' ? row.original.product.variantCount : 0;
-          // Count chip + caret. Wider click target than a bare arrow,
-          // and the count surfaces "this row has N variants" without
-          // forcing the user to expand to find out. Styling mirrors
-          // Badge variant="outline" size="sm" radius="md" — kept inline
-          // because Badge is a <span>, not interactive.
           return (
-            <button
-              type="button"
-              onClick={row.getToggleExpandedHandler()}
-              aria-label={expanded ? t('a11y.collapseRow') : t('a11y.expandRow')}
-              aria-expanded={expanded}
-              className="border-border text-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring duration-fast gap-3xs px-xs py-3xs text-2xs [&_svg]:size-icon-xs inline-flex cursor-pointer items-center rounded-md border bg-transparent font-medium tabular-nums transition-colors focus-visible:ring-2 focus-visible:outline-none"
-            >
-              {variantCount}
-              {expanded ? <ArrowDown01Icon /> : <ArrowRight01Icon />}
-            </button>
+            <div className={cn('flex justify-center', expanded && 'parent-ident-open')}>
+              {expanded ? <span aria-hidden className="parent-ident-stub" /> : null}
+              <button
+                type="button"
+                onClick={row.getToggleExpandedHandler()}
+                aria-label={expanded ? t('a11y.collapseRow') : t('a11y.expandRow')}
+                aria-expanded={expanded}
+                className={cn(
+                  // `relative` so the opaque chip paints ABOVE the absolutely-
+                  // positioned tree stub (both are positioned descendants of the
+                  // relative <td>; later-in-DOM wins) — the spine emerges from
+                  // BENEATH the chip instead of drawing a line across it.
+                  'gap-3xs px-xs py-3xs text-2xs [&_svg]:size-icon-xs relative inline-flex cursor-pointer items-center rounded-md border font-medium tabular-nums',
+                  'duration-fast transition-colors',
+                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+                  expanded
+                    ? 'bg-primary-soft text-primary-soft-foreground border-transparent'
+                    : 'border-border bg-card text-foreground hover:bg-muted hover:border-border-strong',
+                )}
+              >
+                {p.variantCount}
+                <ArrowRight01Icon
+                  className={cn(
+                    'duration-base transition-transform',
+                    expanded && 'text-primary rotate-90',
+                  )}
+                />
+              </button>
+            </div>
           );
         },
       },
       {
         // id matches the backend `title` sort key so sortToTanstack /
-        // tanstackToSort round-trip cleanly when the user toggles the
-        // "Ürün" header. Column label still reads "Ürün" via tCols('title').
-        // accessorFn is a no-op contract requirement — TanStack v8's
-        // `column.getCanSort()` returns false unless the column declares
-        // an accessor (key or fn), even when `enableSorting: true`. Since
-        // ordering is server-driven (`manualSorting: true`), the returned
-        // value is never used for client-side sorting; it just unlocks the
-        // sort header button.
+        // tanstackToSort round-trip cleanly when the user toggles the "Ürün"
+        // header. accessorFn is a no-op contract requirement — it unlocks the
+        // sort header button under `manualSorting` (server-driven ordering; the
+        // returned value is never used client-side). The expand chip + variant
+        // tree live in the dedicated "Varyantlar" column to the LEFT, so this
+        // identity cell is purely the product image + stacked identifier lines.
+        // `items-center` centres the image on the row so it aligns with the chip
+        // / tree in the neighbouring column.
         id: 'title',
         accessorFn: (row) => (row.kind === 'parent' ? row.product.title : ''),
         header: () => tCols('title'),
@@ -250,37 +263,33 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         enableSorting: true,
         cell: ({ row }) => {
           if (row.original.kind === 'variant') {
-            // Variant sub-row: 56px image (same as the parent — the user
-            // wants images on every variant aligned identically with the
-            // parent's image, not stepped down). Two labeled rows surface
-            // the variant's two identifiers (Stok Kodu + Barkod) since the
-            // dedicated barcode column was retired in favour of inline
-            // labels — the column header alone never disambiguated three
-            // similar-looking alphanumerics (model / stock / barcode).
             const v = row.original.variant;
             const parent = row.original.parent;
             const parentImage = parent.images[0];
             return (
-              <div className="gap-sm flex items-start">
-                <ProductImageCell url={parentImage?.url ?? null} alt={parent.title} size="lg" />
-                <div className="gap-3xs py-3xs flex min-w-0 flex-col">
+              <div className="gap-sm flex items-center">
+                <ProductImageCell
+                  url={parentImage?.url ?? null}
+                  alt={parent.title}
+                  size="lg"
+                  fit="cover"
+                />
+                <div className="gap-3xs flex min-w-0 flex-col">
                   <LabeledIdentifier label={tCols('stockCode')} value={v.stockCode} />
                   <LabeledIdentifier label={tCols('barcode')} value={v.barcode} />
                 </div>
               </div>
             );
           }
-          // Parent row. Two layouts depending on whether the product has
-          // multiple variants: multi-variant gets the model code (the
-          // grouping key shared by every variant), single-variant gets
-          // the variant's own identifiers because the variant IS the
-          // product — model code adds nothing the seller can act on.
+          // Parent row. Two identity layouts by variant multiplicity: multi-variant
+          // surfaces the model code (the shared grouping key); single-variant
+          // surfaces the variant's own identifiers (the variant IS the product).
           const p = row.original.product;
           const firstImage = p.images[0];
           const v0 = !isMultiVariant(p) ? p.variants[0] : null;
           return (
-            <div className="gap-sm flex items-start">
-              <ProductImageCell url={firstImage?.url ?? null} alt={p.title} size="lg" />
+            <div className="gap-sm flex items-center">
+              <ProductImageCell url={firstImage?.url ?? null} alt={p.title} size="lg" fit="cover" />
               <div className="gap-3xs flex min-w-0 flex-col">
                 <span className="text-foreground line-clamp-1 font-medium">{p.title}</span>
                 <BrandCategoryLine

@@ -21,7 +21,6 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { ArrowDataTransferVerticalIcon, ArrowDown01Icon, ArrowUp01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -85,6 +84,55 @@ function normalizePinning(pinning: ColumnPinningState): ColumnPinningState {
     ? [...right.filter((id) => id !== ROW_ACTIONS_COLUMN_ID), ROW_ACTIONS_COLUMN_ID]
     : right;
   return { left: nextLeft, right: nextRight };
+}
+
+/**
+ * Sort affordance — a single DOUBLE-CHEVRON glyph that shows BOTH directions at
+ * once, replacing the old up/down arrow plus a separate hover-only "sortable"
+ * hint icon (two glyphs doing one job). At rest both chevrons sit faint and lift
+ * on hover / keyboard focus; the ACTIVE direction is solid brand (`stroke-primary`)
+ * while the other recedes. Paired with the active-column brand tint on the header
+ * button, the sorted axis reads at a glance. `stroke` inherits `currentColor`;
+ * only the active chevron overrides to `--primary`.
+ */
+function SortIndicator({ sorted }: { sorted: false | 'asc' | 'desc' }): React.ReactElement {
+  const restOrHint =
+    'opacity-40 group-hover/sortbtn:opacity-70 group-focus-visible/sortbtn:opacity-70';
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden
+      className="size-icon-xs shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path
+        d="M4.5 6.5 8 3.2l3.5 3.3"
+        className={cn(
+          'transition-opacity',
+          sorted === 'asc'
+            ? 'stroke-primary opacity-100'
+            : sorted === 'desc'
+              ? 'opacity-30'
+              : restOrHint,
+        )}
+      />
+      <path
+        d="M4.5 9.5 8 12.8l3.5-3.3"
+        className={cn(
+          'transition-opacity',
+          sorted === 'desc'
+            ? 'stroke-primary opacity-100'
+            : sorted === 'asc'
+              ? 'opacity-30'
+              : restOrHint,
+        )}
+      />
+    </svg>
+  );
 }
 
 export interface DataTableProps<TData, TValue> {
@@ -627,13 +675,12 @@ export function DataTable<TData, TValue>({
                       }
                       className={cn(
                         isNumeric && 'text-right',
-                        // Active-sorted column carries a faint persistent tile
-                        // (one step under the header band) so the sorted column
-                        // is legible at a glance.
-                        sortDir !== false && 'bg-muted',
                         // Sortable header drops its cell padding so the button
                         // can fill the WHOLE cell (the entire header is the hit
-                        // target); the button re-adds px-sm.
+                        // target); the button re-adds px-sm. The active-sort tint
+                        // now lives ON the button (which fills the cell), so it
+                        // survives the button's own hover without a th/button
+                        // background fight.
                         canSort && 'p-0',
                       )}
                       {...pinning}
@@ -645,15 +692,12 @@ export function DataTable<TData, TValue>({
                           className={cn(
                             // Fill the entire header cell so the WHOLE header is
                             // the sort hit target (the th drops its padding; the
-                            // button re-adds px-sm).
-                            'group/sortbtn px-sm gap-3xs duration-fast flex h-10 w-full items-center transition-colors',
+                            // button re-adds px-sm). `cursor-pointer` — Tailwind v4
+                            // preflight no longer gives <button> an implicit pointer.
+                            'group/sortbtn px-sm gap-2xs duration-fast flex h-10 w-full cursor-pointer items-center transition-colors',
                             // Touch floor: a 44px tap target under a coarse pointer
                             // (the header row grows to fit on touch devices).
                             'pointer-coarse:min-h-11',
-                            // Hover tile = bg-muted, one step darker than the
-                            // bg-surface-subtle band; bg-background was lighter
-                            // than the band and read as a hole punched in it.
-                            'hover:bg-muted',
                             // Inset ring — the table's nested overflow containers
                             // clip the global outset focus glow; matches the row +
                             // pin-button focus idiom so the focused header is visible.
@@ -662,21 +706,17 @@ export function DataTable<TData, TValue>({
                             // side on every column); numeric headers just
                             // right-align the label+icon group over their figures.
                             isNumeric ? 'justify-end' : 'justify-start',
+                            // Active-sort column: a calm brand tint on the whole
+                            // header (was a flat grey tile) + a brand chevron, so
+                            // the organizing axis is unmistakable. Inactive headers
+                            // stay clear and tint to muted only on hover.
+                            sortDir === false
+                              ? 'hover:bg-muted'
+                              : 'bg-primary-soft text-primary-soft-foreground',
                           )}
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
-                          {sortDir === 'asc' ? (
-                            <ArrowUp01Icon className="size-icon-xs text-foreground shrink-0" />
-                          ) : sortDir === 'desc' ? (
-                            <ArrowDown01Icon className="size-icon-xs text-foreground shrink-0" />
-                          ) : (
-                            // Reveal-on-intent: an up/down "sortable both ways"
-                            // hint — hidden at rest, shown at FULL strength on
-                            // hover or keyboard focus (muted-foreground, matching
-                            // the label). The active column keeps a solid,
-                            // foreground-strength arrow so the sort pops.
-                            <ArrowDataTransferVerticalIcon className="size-icon-xs shrink-0 opacity-0 transition-opacity group-hover/sortbtn:opacity-100 group-focus-visible/sortbtn:opacity-100" />
-                          )}
+                          <SortIndicator sorted={sortDir} />
                           <span className="sr-only">
                             {sortDir === 'asc'
                               ? t('sort.ascending')
