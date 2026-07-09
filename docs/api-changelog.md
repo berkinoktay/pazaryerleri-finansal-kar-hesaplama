@@ -51,6 +51,17 @@ section "Versioning" for details.
     `storeId` path param). Oversize bodies drop with **200**; rate-limit
     overflow returns **429** (transient for Trendyol). The documented response
     set drops `400` and adds `429`.
+- **Trendyol order webhook now accepts sparse line financial fields**
+  (`POST /v1/webhooks/orders/{storeId}`). Per-line `lineUnitPrice`,
+  `lineGrossAmount`, and `vatRate` are now **optional** in the request body
+  schema (they were required). The mapper already tolerates their absence
+  (`?? 0`, logged as `orders.sparse-line`), so the receiver was needlessly
+  stricter than the pipeline it feeds. Trendyol STAGE test-order webhooks omit
+  these fields; previously such payloads were silently 200-dropped with no row
+  written, which killed the webhook's real-time path (intake + toast + live
+  performance) under stage testing. A sparse order now intakes as an estimate,
+  and a later sync/settlement reflects the real values. `sellerId` and
+  `quantity` remain required.
 - **Advantage tariff detail item gained a `commissionBands` field** (`GET
   /v1/organizations/{orgId}/stores/{storeId}/advantage-tariffs/{tariffId}`) — Each detail item now
   carries `commissionBands`: the product's commission-band ladder (`AdvantageCommissionBand[]`,

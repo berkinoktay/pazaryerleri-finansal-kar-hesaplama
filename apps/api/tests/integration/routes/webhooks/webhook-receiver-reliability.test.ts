@@ -202,6 +202,116 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
     expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(0);
   });
 
+  it('(a2) sparse line (no lineUnitPrice/lineGrossAmount/vatRate) → 200 + estimate-incomplete order', async () => {
+    const { storeId } = await setupStore();
+    // The Trendyol STAGE test-order webhook ships lines WITHOUT the financial
+    // fields; sellerId + quantity are present (they stay required). Previously
+    // this Zod-failed → silent 200-drop with zero rows. Now the schema tolerates
+    // it and the calculable-barcode order is intaken as an estimate. The payload
+    // still carries package-level totals (packageTotalPrice/packageGrossAmount =
+    // 120), so the ORDER header saleGross is 120 (header-derived) — but the LINE
+    // money is sparse: lineGrossAmount ?? 0 → zero commission base → commissionGross 0.
+    const sparse = makeWebhookPayload({
+      lines: [
+        {
+          lineId: 1,
+          sellerId: Number.parseInt(SUPPLIER_ID, 10),
+          barcode: BARCODE,
+          quantity: 1,
+          commission: 10,
+        },
+      ],
+    });
+    const res = await postWebhook(
+      storeId,
+      JSON.stringify(sparse),
+      basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+    );
+    expect(res.status).toBe(200);
+
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+    expect(event.processedAt).not.toBeNull();
+
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId },
+      include: { items: true },
+    });
+    // Header total comes from packageTotalPrice (present), NOT from the sparse line.
+    expect(order.saleGross?.toNumber()).toBe(120);
+    // Sparse line → lineGrossAmount ?? 0 → zero list gross → zero commission estimate.
+    expect(order.items).toHaveLength(1);
+    const [item] = order.items;
+    expect(item?.lineListGross.toNumber()).toBe(0);
+    expect(item?.commissionGross.toNumber()).toBe(0);
+    expect(item?.estimatedCommissionGross?.toNumber()).toBe(0);
+  });
+
+  it('(a2b) sparse line AND no package totals → zero-revenue order intakes with no Decimal crash', async () => {
+    const { storeId } = await setupStore();
+    // Extreme sparse: the line omits money AND the payload omits the package
+    // totals, so every money term resolves through `?? 0`. This proves the
+    // all-zero path is safe end to end — no `new Decimal(undefined)` throw
+    // anywhere in the mapper → upsert → estimate chain. A throw would surface
+    // either as a non-200 (transient/intake) or as a terminal processingError
+    // (deterministic mapper defect) with no order row, so asserting 200 + an
+    // order row + a null processingError is complete proof of a clean intake.
+    const {
+      packageTotalPrice: _pt,
+      packageGrossAmount: _pg,
+      ...zeroRevenue
+    } = makeWebhookPayload({
+      lines: [
+        {
+          lineId: 1,
+          sellerId: Number.parseInt(SUPPLIER_ID, 10),
+          barcode: BARCODE,
+          quantity: 1,
+        },
+      ],
+    });
+    void _pt;
+    void _pg;
+    const res = await postWebhook(
+      storeId,
+      JSON.stringify(zeroRevenue),
+      basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+    );
+    expect(res.status).toBe(200);
+
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+    expect(event.processedAt).not.toBeNull();
+    expect(event.processingError).toBeNull();
+
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
+    expect(order.saleGross?.toNumber()).toBe(0);
+  });
+
+  it('(a3) line missing required sellerId/quantity → 200 drop + no webhook_events row', async () => {
+    const { storeId } = await setupStore();
+    // sellerId and quantity remain REQUIRED after the sparse-tolerance change,
+    // so a line missing them is still a Zod failure → deterministic 200-drop
+    // with no row (unlike (a2), which only drops the optional money fields).
+    const invalid = makeWebhookPayload({
+      lines: [
+        {
+          lineId: 1,
+          barcode: BARCODE,
+          lineUnitPrice: 120,
+          lineGrossAmount: 120,
+          vatRate: 20,
+          commission: 10,
+        },
+      ],
+    });
+    const res = await postWebhook(
+      storeId,
+      JSON.stringify(invalid),
+      basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
+    );
+    expect(res.status).toBe(200);
+    expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(0);
+  });
+
   it('(b) supplier mismatch → 200 + no webhook_events row', async () => {
     const { storeId } = await setupStore();
     const res = await postWebhook(
