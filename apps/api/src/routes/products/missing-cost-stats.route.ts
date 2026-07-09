@@ -1,7 +1,9 @@
 import { createRoute, z } from '@hono/zod-openapi';
+import { CAPABILITIES } from '@pazarsync/utils';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireCapability } from '../../lib/require-capability';
+import { accessibleStoreIds } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import { missingCostStats } from '../../services/products-list.service';
 
@@ -71,8 +73,12 @@ const missingCostStatsRoute = createRoute({
 app.openapi(missingCostStatsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
-  const stats = await missingCostStats(organizationId);
+  // Org-wide aggregate: gate on DATA_READ (every member) and narrow the byStore
+  // breakdown to the caller's granted stores so a MEMBER/VIEWER can't enumerate
+  // stores they were not granted (null = OWNER/ADMIN → all stores).
+  const role = await requireCapability(userId, orgId, CAPABILITIES.DATA_READ);
+  const storeIds = await accessibleStoreIds(userId, orgId, role);
+  const stats = await missingCostStats(orgId, storeIds);
   return c.json(stats, 200);
 });
 

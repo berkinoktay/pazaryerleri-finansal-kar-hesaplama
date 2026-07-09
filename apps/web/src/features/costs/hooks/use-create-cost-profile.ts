@@ -18,8 +18,8 @@ export function useCreateCostProfile() {
 
   return useMutation<CostProfile, Error, CreateCostProfileArgs>({
     mutationFn: createCostProfile,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles() });
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles(variables.orgId) });
     },
   });
 }

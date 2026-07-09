@@ -1,7 +1,10 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
+import { CAPABILITIES } from '@pazarsync/utils';
+
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireCapability } from '../../lib/require-capability';
+import { accessibleStoreIds } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as attachmentService from '../../services/cost-profile-attachment.service';
 import { attachmentBodySchema } from '../../validators/cost-profile-attachment.validator';
@@ -70,9 +73,17 @@ app.openapi(detachRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId } = c.req.valid('param');
   const { profileIds, variantIds } = c.req.valid('json');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  // DATA_WRITE blocks VIEWER; accessibleStoreIds narrows a MEMBER to granted
+  // stores (null = OWNER/ADMIN). Same gate as attach — see attach.route.ts.
+  const role = await requireCapability(userId, orgId, CAPABILITIES.DATA_WRITE);
+  const storeIds = await accessibleStoreIds(userId, orgId, role);
 
-  const result = await attachmentService.detachCostProfiles(organizationId, profileIds, variantIds);
+  const result = await attachmentService.detachCostProfiles(
+    orgId,
+    profileIds,
+    variantIds,
+    storeIds,
+  );
 
   return c.json(result, 200);
 });

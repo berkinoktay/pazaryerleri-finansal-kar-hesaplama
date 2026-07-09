@@ -52,10 +52,15 @@ export async function insertOrgPeriodFee(
   }
 
   // Idempotency — Trendyol id unique per transaction. Same row twice
-  // means a re-poll or window overlap; skip without throwing.
+  // means a re-poll or window overlap; skip without throwing. STORE-scoped
+  // (not org-scoped): an org can hold multiple Trendyol sellers whose
+  // transaction-id sequences are independent, so an org-only key would drop a
+  // second store's fee on a cross-seller id collision. Mirrors the partial
+  // unique (store_id, fee_type, trendyol_transaction_id) in check-constraints.sql
+  // — both must stay in sync.
   const existing = await tx.orgPeriodFee.findFirst({
     where: {
-      organizationId,
+      storeId,
       feeType,
       trendyolTransactionId: row.id,
     },

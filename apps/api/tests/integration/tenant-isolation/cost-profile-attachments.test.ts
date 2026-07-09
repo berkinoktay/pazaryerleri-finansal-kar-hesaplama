@@ -20,7 +20,12 @@ import { prisma } from '@pazarsync/db';
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createMemberStoreAccess,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 describe('Tenant isolation — cost-profile attachment routes', () => {
   const app = createApp();
@@ -218,5 +223,61 @@ describe('Tenant isolation — cost-profile attachment routes', () => {
     );
 
     expect(res.status).toBe(403);
+  });
+
+  // ─── Role gate: VIEWER (read-only) must not mutate cost links ─────────────────
+  // The write routes require DATA_WRITE; a VIEWER has only DATA_READ → 403.
+
+  it('VIEWER cannot attach cost profiles → 403 (DATA_WRITE required)', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'VIEWER');
+    const store = await createStore(org.id);
+    const profile = await seedProfile(org.id);
+    const variant = await seedVariant(org.id, store.id);
+
+    const res = await app.request(`/v1/organizations/${org.id}/cost-profile-attachments/attach`, {
+      method: 'POST',
+      headers: { Authorization: bearer(user.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileIds: [profile.id], variantIds: [variant.id] }),
+    });
+
+    expect(res.status).toBe(403);
+    // The read-only member changed nothing.
+    const links = await prisma.productVariantCostProfile.findMany({
+      where: { productVariantId: variant.id },
+    });
+    expect(links).toHaveLength(0);
+  });
+
+  // ─── Store-access gate: MEMBER may only touch variants in granted stores ─────
+
+  it('MEMBER granted only store A cannot attach to a store B variant (same org) → 422', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    const membership = await createMembership(org.id, user.id, 'MEMBER');
+    const storeA = await createStore(org.id);
+    const storeB = await createStore(org.id);
+    await createMemberStoreAccess(org.id, membership.id, storeA.id);
+
+    const profile = await seedProfile(org.id);
+    const variantB = await seedVariant(org.id, storeB.id);
+
+    const res = await app.request(`/v1/organizations/${org.id}/cost-profile-attachments/attach`, {
+      method: 'POST',
+      headers: { Authorization: bearer(user.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileIds: [profile.id], variantIds: [variantB.id] }),
+    });
+
+    // The ungranted store's variant is invisible to this member — same 422 as a
+    // cross-org variant (non-disclosure).
+    expect(res.status).toBe(422);
+    const err = (await res.json()) as { code: string };
+    expect(err.code).toBe('COST_PROFILE_VARIANT_ORG_MISMATCH');
+
+    const links = await prisma.productVariantCostProfile.findMany({
+      where: { productVariantId: variantB.id },
+    });
+    expect(links).toHaveLength(0);
   });
 });

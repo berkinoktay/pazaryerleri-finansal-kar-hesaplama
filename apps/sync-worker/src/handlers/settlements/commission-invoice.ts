@@ -23,9 +23,14 @@
 // Stage validation (commit 9) may surface a true period range; extension
 // scheduled for V2.
 //
-// Tenant filter on the OrderItem batch UPDATE uses OrderItem.organizationId
-// (denormalized, PR-1). storeId join via Order would require findMany +
-// loop; the denormalized column makes a single SQL UPDATE possible.
+// Tenant filter on the OrderItem batch UPDATE scopes by BOTH organizationId
+// (denormalized, PR-1 — kept for the indexed prefix) AND the parent order's
+// storeId via a relation filter. Store scope is required, not optional: an org
+// can connect multiple Trendyol seller accounts (Stores), each with its own
+// invoice-serial sequence, so an org-only filter attaches store B's items to
+// store A's invoice on a cross-seller serial collision (both stores' hakediş
+// reconciliation corrupted). Prisma updateMany DOES support the `order: {...}`
+// relation filter — no findMany + loop needed.
 
 import { Decimal } from 'decimal.js';
 
@@ -101,13 +106,15 @@ export async function handleCommissionInvoice(
   });
 
   // Batch backfill OrderItem.commissionInvoiceId. The `commissionInvoiceId:
-  // null` filter is the idempotency anchor — items that already point to
-  // this (or any) invoice are left alone. organizationId scopes the update
-  // to the tenant; cross-tenant items with the same serial (unusual but
-  // possible) get their own invoice row.
+  // null` filter is the idempotency anchor — items that already point to this
+  // (or any) invoice are left alone. Scoped to (organizationId, order.storeId):
+  // the store filter keeps a second seller's items with a colliding serial from
+  // being attached to THIS store's invoice; cross-tenant / cross-store items
+  // with the same serial each get their own invoice row.
   const updateResult = await tx.orderItem.updateMany({
     where: {
       organizationId,
+      order: { storeId },
       commissionInvoiceSerialNumber: trendyolSerialNumber,
       commissionInvoiceId: null,
     },

@@ -23,7 +23,9 @@ export function useCostProfiles(
 ): UseQueryResult<ListCostProfilesResponse> {
   return useQuery<ListCostProfilesResponse>({
     queryKey:
-      args !== null ? costsKeys.profilesList(args.filters) : ['costs', 'profiles', '__disabled__'],
+      args !== null
+        ? costsKeys.profilesList(args.orgId, args.filters)
+        : ['costs', 'profiles', '__disabled__'],
     queryFn: () => {
       if (args === null) throw new Error('useCostProfiles called with null args');
       return listCostProfiles({ orgId: args.orgId, filters: args.filters });
@@ -50,7 +52,7 @@ export function useCostProfilesInfinite(
   >({
     queryKey:
       args !== null
-        ? ([...costsKeys.profilesList(args.filters), 'infinite'] as const)
+        ? ([...costsKeys.profilesList(args.orgId, args.filters), 'infinite'] as const)
         : (['costs', 'profiles', '__disabled__', 'infinite'] as const),
     queryFn: ({ pageParam }) => {
       if (args === null) throw new Error('useCostProfilesInfinite called with null args');

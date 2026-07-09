@@ -59,7 +59,7 @@ describe('useUpdateCostProfile', () => {
     const queryClient = makeQueryClient();
     queryClient.setQueryData(costsKeys.profile(PROFILE_ID), BASE_PROFILE);
     queryClient.setQueryData(costsKeys.profileVersions(PROFILE_ID), { data: [], meta: {} });
-    queryClient.setQueryData(costsKeys.profiles(), { data: [BASE_PROFILE], meta: {} });
+    queryClient.setQueryData(costsKeys.profiles(ORG_ID), { data: [BASE_PROFILE], meta: {} });
     // Seed a products cache entry to assert it gets invalidated
     queryClient.setQueryData(productKeys.all, []);
 
@@ -87,7 +87,7 @@ describe('useUpdateCostProfile', () => {
     expect(queryClient.getQueryState(costsKeys.profileVersions(PROFILE_ID))?.isInvalidated).toBe(
       true,
     );
-    expect(queryClient.getQueryState(costsKeys.profiles())?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(costsKeys.profiles(ORG_ID))?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(productKeys.all)?.isInvalidated).toBe(true);
   });
 });

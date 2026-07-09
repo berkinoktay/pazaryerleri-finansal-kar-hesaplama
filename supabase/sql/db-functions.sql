@@ -41,3 +41,19 @@ AS $$
   )
   SELECT count(*) FROM deleted;
 $$;
+
+-- Client-RPC hardening: PostgREST exposes public functions as RPC
+-- (POST /rest/v1/rpc/<name>). reset_live_performance_buffer() is SECURITY DEFINER
+-- (runs a system-wide, cross-org DELETE as postgres, RLS-bypassed) and is
+-- pg_cron-only — a browser JWT must never be able to trigger it. We revoke from
+-- PUBLIC AND from anon/authenticated explicitly: the Supabase image ships an
+-- ALTER DEFAULT PRIVILEGES that grants EXECUTE on new public functions DIRECTLY
+-- to anon/authenticated (not only via PUBLIC), so `FROM PUBLIC` alone leaves the
+-- direct grant intact. The pg_cron caller runs as the DB owner / service_role and
+-- keeps access. CREATE OR REPLACE preserves grants on replace, so this also
+-- re-hardens an already-deployed function on the next apply. Idempotent.
+--
+-- NOTE: is_org_member() / can_access_store() are deliberately NOT revoked here —
+-- RLS policy evaluation for the `authenticated` role requires EXECUTE on them,
+-- and they only ever answer a boolean about the caller's own auth.uid().
+REVOKE EXECUTE ON FUNCTION public.reset_live_performance_buffer() FROM PUBLIC, anon, authenticated;

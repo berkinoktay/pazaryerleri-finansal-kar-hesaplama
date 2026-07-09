@@ -38,6 +38,32 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT ALL ON TABLES TO service_role;
 
+-- ─── Non-tenant public tables: revoke the blanket grant ───────────────────────
+-- The GRANT above hands `authenticated` DML on EVERY public table, and RLS
+-- default-deny only protects a table where RLS was actually ENABLE-d. Any public
+-- table that is neither a tenant table (with an RLS policy below) nor a global
+-- reference table (RLS + USING(true)) is therefore fully cross-tenant readable
+-- AND writable via PostgREST. `_prisma_migrations` is the live instance: Prisma
+-- owns it (created by `prisma migrate deploy` in prod; the postgres/service_role
+-- keeps access), it holds no tenant data, and it must never be enrolled in RLS —
+-- so it is REVOKE-d instead. Without this, any authenticated JWT could read or
+-- corrupt migration history via `/rest/v1/_prisma_migrations`, breaking every
+-- future deploy platform-wide (empirically reproducible; covered by the
+-- "no public base table is readable by authenticated without RLS" RLS test).
+-- Guarded by an existence check because db:push dev DBs may not have the table.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class
+     WHERE relname = '_prisma_migrations'
+       AND relnamespace = 'public'::regnamespace
+       AND relkind = 'r'
+  ) THEN
+    REVOKE ALL ON public._prisma_migrations FROM authenticated, anon;
+  END IF;
+END
+$$;
+
 -- ─── is_org_member helper ──────────────────────────────────────────────
 -- A naive policy like
 --   USING (EXISTS (SELECT 1 FROM organization_members WHERE …))

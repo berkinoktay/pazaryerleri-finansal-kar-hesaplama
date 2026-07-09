@@ -357,7 +357,21 @@ export interface MissingCostStats {
   byStore: { storeId: string; missingCount: number }[];
 }
 
-export async function missingCostStats(organizationId: string): Promise<MissingCostStats> {
+/**
+ * Org-wide missing-cost stats, narrowed to the caller's accessible stores.
+ *
+ * `storeIds` is `null` for OWNER/ADMIN (every store in the org) or the granted
+ * store-id list for MEMBER/VIEWER. Without this narrowing a member restricted to
+ * store A could enumerate every store id in the org plus each store's catalog
+ * size and cost-coverage counts — data the store-scoped endpoints (and the
+ * product_variants RLS) deliberately hide from them. The `NULL OR ANY(...)`
+ * predicate keeps both cases in one query: NULL disables the filter; an empty
+ * granted list (member with no grants) matches nothing → count 0, empty byStore.
+ */
+export async function missingCostStats(
+  organizationId: string,
+  storeIds: string[] | null,
+): Promise<MissingCostStats> {
   // Reuse the same logic as fetchCostAggregates but org-wide:
   // find variants with profileCount = 0.
   const rows = await prisma.$queryRaw<
@@ -377,6 +391,7 @@ export async function missingCostStats(organizationId: string): Promise<MissingC
       COUNT(*)                                AS total_variants
     FROM product_variants pv
     WHERE pv.organization_id = ${organizationId}::uuid
+      AND (${storeIds}::uuid[] IS NULL OR pv.store_id = ANY(${storeIds}::uuid[]))
     GROUP BY pv.store_id
   `;
 

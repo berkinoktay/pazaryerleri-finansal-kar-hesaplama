@@ -60,7 +60,12 @@ export default async function DashboardLayout({
         <MarginColoringProvider>
           <CurrentScopeProvider org={activeOrg} store={activeStore} accessibleStores={stores}>
             <NewOrderNotifierProvider>
+              {/* key={activeOrgId} remounts the launcher on an org switch so its
+                  internal activeStoreId useState resets — otherwise the previous
+                  org's store id lingers and the switcher chip disagrees with the
+                  server-resolved store the pages actually render. */}
               <DashboardStoreLauncher
+                key={activeOrgId ?? 'no-org'}
                 orgs={orgs}
                 activeOrgId={activeOrgId}
                 initialStores={stores}

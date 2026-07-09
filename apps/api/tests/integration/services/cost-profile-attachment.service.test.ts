@@ -20,6 +20,13 @@ import {
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createOrganization, createStore, createUserProfile } from '../../helpers/factories';
 
+// The write services take `accessibleStoreIds` as their last arg: `null` for
+// OWNER/ADMIN (every store, no store-grant narrowing), or the caller's granted
+// store-id list for MEMBER/VIEWER. Most tests here exercise the OWNER path, so
+// they pass ALL_STORES; the dedicated "store-access narrowing" block below
+// passes an explicit granted list to prove the store gate.
+const ALL_STORES = null;
+
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
 async function seedProfile(orgId: string, opts: { archived?: boolean; name?: string } = {}) {
@@ -84,7 +91,13 @@ describe('cost-profile-attachment service', () => {
       const profile = await seedProfile(org.id);
       const variant = await seedVariant(org.id, store.id);
 
-      const result = await attachCostProfiles(org.id, [profile.id], [variant.id], user.id);
+      const result = await attachCostProfiles(
+        org.id,
+        [profile.id],
+        [variant.id],
+        user.id,
+        ALL_STORES,
+      );
 
       expect(result.attached).toBe(1);
 
@@ -105,11 +118,23 @@ describe('cost-profile-attachment service', () => {
       const variant = await seedVariant(org.id, store.id);
 
       // First attach
-      const first = await attachCostProfiles(org.id, [profile.id], [variant.id], user.id);
+      const first = await attachCostProfiles(
+        org.id,
+        [profile.id],
+        [variant.id],
+        user.id,
+        ALL_STORES,
+      );
       expect(first.attached).toBe(1);
 
       // Second attach — same pair, should be a no-op
-      const second = await attachCostProfiles(org.id, [profile.id], [variant.id], user.id);
+      const second = await attachCostProfiles(
+        org.id,
+        [profile.id],
+        [variant.id],
+        user.id,
+        ALL_STORES,
+      );
       expect(second.attached).toBe(0);
 
       // DB must still have exactly one link row
@@ -135,6 +160,7 @@ describe('cost-profile-attachment service', () => {
         [profile1!.id, profile2!.id],
         [variant1!.id, variant2!.id],
         user.id,
+        ALL_STORES,
       );
 
       expect(result.attached).toBe(4);
@@ -149,7 +175,7 @@ describe('cost-profile-attachment service', () => {
       const variant = await seedVariant(org.id, store.id);
 
       await expect(
-        attachCostProfiles(org.id, [archived.id], [variant.id], user.id),
+        attachCostProfiles(org.id, [archived.id], [variant.id], user.id, ALL_STORES),
       ).rejects.toBeInstanceOf(CostProfileArchivedCannotAttachError);
     });
 
@@ -163,7 +189,7 @@ describe('cost-profile-attachment service', () => {
       const variantA = await seedVariant(orgA.id, storeA.id);
 
       await expect(
-        attachCostProfiles(orgA.id, [profileB.id], [variantA.id], user.id),
+        attachCostProfiles(orgA.id, [profileB.id], [variantA.id], user.id, ALL_STORES),
       ).rejects.toBeInstanceOf(CostProfileNotFoundError);
     });
 
@@ -177,7 +203,7 @@ describe('cost-profile-attachment service', () => {
       const variantB = await seedVariant(orgB.id, storeB.id);
 
       await expect(
-        attachCostProfiles(orgA.id, [profileA.id], [variantB.id], user.id),
+        attachCostProfiles(orgA.id, [profileA.id], [variantB.id], user.id, ALL_STORES),
       ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
     });
   });
@@ -193,9 +219,9 @@ describe('cost-profile-attachment service', () => {
       const profile = await seedProfile(org.id);
       const variant = await seedVariant(org.id, store.id);
 
-      await attachCostProfiles(org.id, [profile.id], [variant.id], user.id);
+      await attachCostProfiles(org.id, [profile.id], [variant.id], user.id, ALL_STORES);
 
-      const result = await detachCostProfiles(org.id, [profile.id], [variant.id]);
+      const result = await detachCostProfiles(org.id, [profile.id], [variant.id], ALL_STORES);
       expect(result.detached).toBe(1);
 
       const links = await prisma.productVariantCostProfile.findMany({
@@ -213,7 +239,7 @@ describe('cost-profile-attachment service', () => {
       const variantA = await seedVariant(orgA.id, storeA.id);
 
       await expect(
-        detachCostProfiles(orgA.id, [profileB.id], [variantA.id]),
+        detachCostProfiles(orgA.id, [profileB.id], [variantA.id], ALL_STORES),
       ).rejects.toBeInstanceOf(CostProfileNotFoundError);
     });
 
@@ -226,7 +252,7 @@ describe('cost-profile-attachment service', () => {
       const variantB = await seedVariant(orgB.id, storeB.id);
 
       await expect(
-        detachCostProfiles(orgA.id, [profileA.id], [variantB.id]),
+        detachCostProfiles(orgA.id, [profileA.id], [variantB.id], ALL_STORES),
       ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
     });
   });
@@ -247,7 +273,13 @@ describe('cost-profile-attachment service', () => {
       const variant = await seedVariant(org.id, store.id);
 
       // Attach profiles 1 and 2 initially
-      await attachCostProfiles(org.id, [profile1!.id, profile2!.id], [variant.id], user.id);
+      await attachCostProfiles(
+        org.id,
+        [profile1!.id, profile2!.id],
+        [variant.id],
+        user.id,
+        ALL_STORES,
+      );
 
       // Replace with just profile 3
       const result = await replaceCostProfilesForVariants(
@@ -255,6 +287,7 @@ describe('cost-profile-attachment service', () => {
         [variant.id],
         [profile3!.id],
         user.id,
+        ALL_STORES,
       );
 
       expect(result.variantsAffected).toBe(1);
@@ -275,9 +308,15 @@ describe('cost-profile-attachment service', () => {
       const profile = await seedProfile(org.id);
       const variant = await seedVariant(org.id, store.id);
 
-      await attachCostProfiles(org.id, [profile.id], [variant.id], user.id);
+      await attachCostProfiles(org.id, [profile.id], [variant.id], user.id, ALL_STORES);
 
-      const result = await replaceCostProfilesForVariants(org.id, [variant.id], [], user.id);
+      const result = await replaceCostProfilesForVariants(
+        org.id,
+        [variant.id],
+        [],
+        user.id,
+        ALL_STORES,
+      );
 
       expect(result.variantsAffected).toBe(1);
       expect(result.finalProfilesPerVariant).toBe(0);
@@ -301,7 +340,13 @@ describe('cost-profile-attachment service', () => {
       const variant = await seedVariant(org.id, store.id);
 
       // Attach A and B
-      await attachCostProfiles(org.id, [profileA!.id, profileB!.id], [variant.id], user.id);
+      await attachCostProfiles(
+        org.id,
+        [profileA!.id, profileB!.id],
+        [variant.id],
+        user.id,
+        ALL_STORES,
+      );
 
       // Replace with B and C — A must disappear, B survives, C appears
       await replaceCostProfilesForVariants(
@@ -309,6 +354,7 @@ describe('cost-profile-attachment service', () => {
         [variant.id],
         [profileB!.id, profileC!.id],
         user.id,
+        ALL_STORES,
       );
 
       const links = await prisma.productVariantCostProfile.findMany({
@@ -328,7 +374,7 @@ describe('cost-profile-attachment service', () => {
       const variant = await seedVariant(org.id, store.id);
 
       await expect(
-        replaceCostProfilesForVariants(org.id, [variant.id], [archived.id], user.id),
+        replaceCostProfilesForVariants(org.id, [variant.id], [archived.id], user.id, ALL_STORES),
       ).rejects.toBeInstanceOf(CostProfileArchivedCannotAttachError);
     });
 
@@ -342,7 +388,87 @@ describe('cost-profile-attachment service', () => {
       const variantB = await seedVariant(orgB.id, storeB.id);
 
       await expect(
-        replaceCostProfilesForVariants(orgA.id, [variantB.id], [profileA.id], user.id),
+        replaceCostProfilesForVariants(orgA.id, [variantB.id], [profileA.id], user.id, ALL_STORES),
+      ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
+    });
+  });
+
+  // ─── store-access narrowing (MEMBER/VIEWER granted-store gate) ─────────────
+  // A MEMBER granted only store A must not attach/detach/replace cost profiles
+  // on store B's variants — even though both stores belong to the same org.
+  // The service receives the caller's granted store-id list; a variant outside
+  // it is rejected exactly like a cross-org variant (non-disclosure).
+
+  describe('store-access narrowing', () => {
+    it('attach — a variant in an ungranted store (same org) is rejected', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      const storeA = await createStore(org.id);
+      const storeB = await createStore(org.id);
+
+      const profile = await seedProfile(org.id);
+      const variantB = await seedVariant(org.id, storeB.id);
+
+      // Caller is granted only store A.
+      await expect(
+        attachCostProfiles(org.id, [profile.id], [variantB.id], user.id, [storeA.id]),
+      ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
+
+      // Nothing was written.
+      const links = await prisma.productVariantCostProfile.findMany({
+        where: { productVariantId: variantB.id },
+      });
+      expect(links).toHaveLength(0);
+    });
+
+    it('attach — a variant in a granted store succeeds', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      const storeA = await createStore(org.id);
+
+      const profile = await seedProfile(org.id);
+      const variantA = await seedVariant(org.id, storeA.id);
+
+      const result = await attachCostProfiles(org.id, [profile.id], [variantA.id], user.id, [
+        storeA.id,
+      ]);
+      expect(result.attached).toBe(1);
+    });
+
+    it('replace — an ungranted-store variant is rejected before any delete runs', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      const storeA = await createStore(org.id);
+      const storeB = await createStore(org.id);
+
+      const profile = await seedProfile(org.id);
+      const variantB = await seedVariant(org.id, storeB.id);
+      // Pre-existing link on store B (as if an OWNER attached it earlier).
+      await attachCostProfiles(org.id, [profile.id], [variantB.id], user.id, ALL_STORES);
+
+      await expect(
+        replaceCostProfilesForVariants(org.id, [variantB.id], [], user.id, [storeA.id]),
+      ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
+
+      // The guard runs before the transaction, so the existing link survives.
+      const links = await prisma.productVariantCostProfile.findMany({
+        where: { productVariantId: variantB.id },
+      });
+      expect(links).toHaveLength(1);
+    });
+
+    it('detach — an ungranted-store variant is rejected', async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      const storeA = await createStore(org.id);
+      const storeB = await createStore(org.id);
+
+      const profile = await seedProfile(org.id);
+      const variantB = await seedVariant(org.id, storeB.id);
+      await attachCostProfiles(org.id, [profile.id], [variantB.id], user.id, ALL_STORES);
+
+      await expect(
+        detachCostProfiles(org.id, [profile.id], [variantB.id], [storeA.id]),
       ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
     });
   });
@@ -361,8 +487,8 @@ describe('cost-profile-attachment service', () => {
       ]);
       const variant = await seedVariant(org.id, store.id);
 
-      await attachCostProfiles(org.id, [profile1!.id], [variant.id], user.id);
-      await attachCostProfiles(org.id, [profile2!.id], [variant.id], user.id);
+      await attachCostProfiles(org.id, [profile1!.id], [variant.id], user.id, ALL_STORES);
+      await attachCostProfiles(org.id, [profile2!.id], [variant.id], user.id, ALL_STORES);
 
       const profiles = await listCostProfilesForVariant(org.id, variant.id);
 

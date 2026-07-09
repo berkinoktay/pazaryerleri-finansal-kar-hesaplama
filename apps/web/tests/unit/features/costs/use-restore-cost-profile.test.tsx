@@ -58,7 +58,7 @@ describe('useRestoreCostProfile', () => {
       ...RESTORED_PROFILE,
       archivedAt: '2026-05-08T15:00:00Z',
     });
-    queryClient.setQueryData(costsKeys.profiles(), {
+    queryClient.setQueryData(costsKeys.profiles(ORG_ID), {
       data: [{ ...RESTORED_PROFILE, archivedAt: '2026-05-08T15:00:00Z' }],
       meta: {},
     });
@@ -72,6 +72,6 @@ describe('useRestoreCostProfile', () => {
     expect(result.current.data?.archivedAt).toBeNull();
 
     expect(queryClient.getQueryState(costsKeys.profile(PROFILE_ID))?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(costsKeys.profiles())?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(costsKeys.profiles(ORG_ID))?.isInvalidated).toBe(true);
   });
 });

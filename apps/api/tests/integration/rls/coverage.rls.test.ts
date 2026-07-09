@@ -93,4 +93,56 @@ describe('RLS — coverage', () => {
       ).toBeGreaterThan(0);
     }
   });
+
+  // Defense against the "forgot to add an RLS policy for a new table" footgun.
+  // The GRANT baseline (rls-policies.sql) hands `authenticated` DML on ALL public
+  // tables plus ALTER DEFAULT PRIVILEGES for future ones, so RLS default-deny only
+  // protects a table where RLS was actually enabled. A table that is neither
+  // RLS-protected NOR revoked is fully cross-tenant readable via PostgREST. This
+  // is allowlist-free on purpose: instead of enumerating exempt tables, we assert
+  // the real invariant — a table is safe iff RLS is on OR `authenticated` cannot
+  // read it. `_prisma_migrations` (present in prod via `prisma migrate deploy`,
+  // usually absent in db:push dev) is the concrete case: it has no RLS, so it MUST
+  // be REVOKE-d (see the DO block in rls-policies.sql).
+  it('no public base table is readable by `authenticated` without RLS', async () => {
+    const rows = await prisma.$queryRaw<Array<{ relname: string; readable: boolean }>>`
+      SELECT c.relname,
+             has_table_privilege('authenticated', c.oid, 'SELECT') AS readable
+        FROM pg_class c
+       WHERE c.relnamespace = 'public'::regnamespace
+         AND c.relkind = 'r'
+         AND c.relrowsecurity = false
+    `;
+
+    const leaky = rows.filter((r) => r.readable).map((r) => r.relname);
+    expect(
+      leaky,
+      `public tables with RLS disabled AND still readable by authenticated — ` +
+        `either enable RLS + add a SELECT policy, or REVOKE the grant: ${leaky.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  // SECURITY DEFINER maintenance functions must not be client-invokable via
+  // PostgREST RPC. reset_live_performance_buffer() runs a cross-org DELETE as
+  // postgres and is pg_cron-only; Postgres grants EXECUTE to PUBLIC by default,
+  // so db-functions.sql must REVOKE it. (is_org_member/can_access_store are
+  // deliberately NOT revoked — RLS policy evaluation for `authenticated` needs
+  // EXECUTE on them, and they only answer about the caller's own auth.uid().)
+  it('reset_live_performance_buffer() is not EXECUTE-able by `authenticated`', async () => {
+    const rows = await prisma.$queryRaw<Array<{ authExec: boolean }>>`
+      SELECT has_function_privilege('authenticated', p.oid, 'EXECUTE') AS "authExec"
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public'
+         AND p.proname = 'reset_live_performance_buffer'
+    `;
+
+    expect(rows.length, 'reset_live_performance_buffer() should exist').toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(
+        r.authExec,
+        'reset_live_performance_buffer() must not be EXECUTE-able by authenticated',
+      ).toBe(false);
+    }
+  });
 });

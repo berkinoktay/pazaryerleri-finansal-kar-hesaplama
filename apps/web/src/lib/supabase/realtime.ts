@@ -223,10 +223,13 @@ export interface SubscribeToOrgSyncsOptions {
  * OrgSyncsProvider so a single channel surfaces every sync across every
  * store the user can see in the active org.
  *
- * The flat `is_org_member(organization_id)` RLS policy on sync_logs
- * (PR #60 — denormalized organization_id) lets Realtime's
- * postgres_changes evaluator gate rows by membership without a
- * cross-table walk.
+ * The `can_access_store(store_id)` RLS policy on sync_logs (a SECURITY DEFINER
+ * STABLE plain-function call) lets Realtime's postgres_changes evaluator gate
+ * rows without a cross-table walk. Note this is a per-STORE grant check, not a
+ * bare org-membership check: the client channel filters by organization_id for
+ * efficiency, but RLS is the actual boundary — a MEMBER/VIEWER receives events
+ * only for the stores they were granted, and the client filter is not itself a
+ * security boundary.
  *
  * **Connection lifecycle.** Supabase's Realtime client retries the
  * underlying WebSocket on its own, but the per-channel subscription
@@ -423,13 +426,17 @@ export interface SubscribeToLivePerformanceOptions {
  * Subscribe to the two tables that drive a store's live-performance surface,
  * both filtered by `store_id`:
  *
- *   - `live_performance_buffer` (event `*`) — a cost-missing order arriving,
- *     a cost being attached (PENDING → PROMOTING), or a promotion completing
- *     (row deleted). Refreshes the missing-cost list + orders feed.
+ *   - `live_performance_buffer` (event `*`) — a cost-missing order arriving
+ *     (INSERT) or a cost being attached (UPDATE PENDING → PROMOTING). Refreshes
+ *     the missing-cost list + orders feed. NOTE: promotion completion is NOT
+ *     observed here — the buffer table is REPLICA IDENTITY DEFAULT (tenant-
+ *     isolation fix, see supabase/sql/realtime-publications.sql), so its DELETE
+ *     old-row carries only the PK and never matches the store_id filter. That is
+ *     intentional: the promotion refresh rides on the orders INSERT below.
  *   - `orders` (event `INSERT`) — a brand-new fully-calculable order written
  *     straight to `orders` (cost already known, never buffered), or the
- *     promote worker writing a promoted order. Refreshes KPIs + top-products +
- *     orders feed.
+ *     promote worker writing a promoted order (the promotion-complete signal).
+ *     Refreshes KPIs + top-products + orders feed.
  *
  * Mirrors {@link subscribeToOrgSyncs}: browser Supabase client (the Realtime
  * WebSocket authenticates through the cookie session — no `setAuth` on this
