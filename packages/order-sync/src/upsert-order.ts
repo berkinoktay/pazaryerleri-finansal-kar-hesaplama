@@ -35,11 +35,12 @@ import type {
   CostProfileType,
   Currency,
   FxRateMode,
+  Platform,
   Prisma,
   ProfitExclusionReason,
 } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { applyEstimateOnOrderCreate } from '@pazarsync/profit';
+import { applyEstimateOnOrderCreate, resolveCommissionRate } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 interface SnapshotComponentData {
@@ -195,6 +196,64 @@ export async function captureCostSnapshot(
   });
 
   await tx.orderItemCostSnapshotComponent.createMany({ data: components });
+}
+
+/**
+ * Resolve the effective commission for a mapped line, applying the DB category
+ * base_rate fallback when the webhook carried no commission of its own.
+ *
+ * Precedence:
+ *   1. commissionKnown !== false (true OR legacy-undefined) → trust the mapped
+ *      commission values as-is (existing behavior; no DB read).
+ *   2. commissionKnown === false with a categoryId and a known platform → look
+ *      up the category base_rate (sellerSegment=null) and recompute
+ *      commissionGross/refundedCommissionGross with mapLine's exact formula.
+ *   3. Category has no rule in the DB (resolver returns null) → keep the mapped
+ *      0 fallback (unchanged legacy behavior) and warn.
+ */
+async function resolveEffectiveCommission(
+  line: MappedOrder['lines'][number],
+  platform: Platform | null,
+  tx: Prisma.TransactionClient,
+): Promise<{
+  commissionRate: Decimal;
+  commissionGross: Decimal;
+  refundedCommissionGross: Decimal;
+}> {
+  // commissionKnown !== false (true veya legacy undefined) -> mapped degerleri KULLAN (mevcut davranis).
+  if (line.commissionKnown !== false || line.categoryId === null || platform === null) {
+    return {
+      commissionRate: new Decimal(line.commissionRate),
+      commissionGross: new Decimal(line.commissionGross),
+      refundedCommissionGross: new Decimal(line.refundedCommissionGross),
+    };
+  }
+  // Webhook komisyon tasimadi -> DB kategori base_rate fallback (sellerSegment=null).
+  const resolved = await resolveCommissionRate(
+    { platform, categoryId: BigInt(line.categoryId), brandId: null, sellerSegment: null },
+    tx,
+  );
+  if (resolved === null) {
+    syncLog.warn('orders.commission-fallback-miss', {
+      barcode: line.barcode,
+      categoryId: line.categoryId,
+    });
+    return {
+      commissionRate: new Decimal(line.commissionRate),
+      commissionGross: new Decimal(line.commissionGross),
+      refundedCommissionGross: new Decimal(line.refundedCommissionGross),
+    };
+  }
+  const rate = resolved.rate;
+  // mapLine ile AYNI formul: commissionGross = rate x lineListGross / 100; refunded = rate x lineSellerDiscountGross / 100.
+  return {
+    commissionRate: rate,
+    commissionGross: new Decimal(line.lineListGross).mul(rate).div(100).toDecimalPlaces(2),
+    refundedCommissionGross: new Decimal(line.lineSellerDiscountGross)
+      .mul(rate)
+      .div(100)
+      .toDecimalPlaces(2),
+  };
 }
 
 /**
@@ -425,6 +484,15 @@ export async function upsertOrderWithSnapshot(
       },
     });
 
+    // Commission fallback needs the store platform only when at least one line
+    // arrived without a commission (commissionKnown === false). Resolve it once,
+    // and only then, to keep the hot intake path free of an extra store read.
+    const needsCommissionFallback = order.lines.some((l) => l.commissionKnown === false);
+    const storePlatform: Platform | null = needsCommissionFallback
+      ? ((await tx.store.findUnique({ where: { id: storeId }, select: { platform: true } }))
+          ?.platform ?? null)
+      : null;
+
     // 2. OrderItem'lar: variant lookup (barcode) + INSERT-if-new + snapshot.
     for (const line of order.lines) {
       const variant = await tx.productVariant.findFirst({
@@ -452,7 +520,12 @@ export async function upsertOrderWithSnapshot(
                 ],
               }
             : { orderId: upserted.id, productVariantId: variant?.id ?? null },
-        select: { id: true, platformLineId: true },
+        select: {
+          id: true,
+          platformLineId: true,
+          commissionGross: true,
+          settledCommissionGross: true,
+        },
       });
       if (existing !== null) {
         // Self-heal: legacy anahtarla yakalanan satıra platform kimliğini
@@ -463,6 +536,25 @@ export async function upsertOrderWithSnapshot(
             where: { id: existing.id },
             data: { platformLineId: BigInt(line.platformLineId) },
           });
+        }
+        // Sonraki webhook gercek komisyon getirdi ve depodakinden farkliysa tazele
+        // (settlement yoksa). Freshness guard (yukarida) bayat olaylari zaten erken
+        // dondurur -> buraya newer-or-equal gelir. estimate-tarafi komisyon alanlari
+        // tazelenir; settled* alanlarina ASLA dokunulmaz. Fonksiyon sonundaki
+        // applyEstimateOnOrderCreate kari taze komisyonla yeniden hesaplar.
+        if (line.commissionKnown === true && existing.settledCommissionGross === null) {
+          const eff = await resolveEffectiveCommission(line, storePlatform, tx);
+          if (!eff.commissionGross.equals(new Decimal(existing.commissionGross))) {
+            await tx.orderItem.update({
+              where: { id: existing.id },
+              data: {
+                commissionRate: eff.commissionRate,
+                commissionGross: eff.commissionGross,
+                refundedCommissionGross: eff.refundedCommissionGross,
+                estimatedCommissionGross: eff.commissionGross,
+              },
+            });
+          }
         }
         continue;
       }
@@ -476,6 +568,11 @@ export async function upsertOrderWithSnapshot(
           barcode: line.barcode,
         });
       }
+
+      // Commission with DB category base_rate fallback when the line carried no
+      // real commission (commissionKnown === false). Otherwise the mapped values
+      // pass through unchanged.
+      const eff = await resolveEffectiveCommission(line, storePlatform, tx);
 
       const item = await tx.orderItem.create({
         data: {
@@ -501,14 +598,16 @@ export async function upsertOrderWithSnapshot(
           // Mikro ihracat → satış KDV oranı %0 (ihracat istisnası). build-profit-breakdown
           // saleVat'i bu orandan türetir → micro siparişte 0 (Order.saleVat=0 ile tutarlı).
           saleVatRate: microExport ? new Decimal(0) : new Decimal(line.saleVatRate),
-          commissionRate: new Decimal(line.commissionRate),
-          commissionGross: new Decimal(line.commissionGross),
-          refundedCommissionGross: new Decimal(line.refundedCommissionGross),
+          commissionRate: eff.commissionRate,
+          commissionGross: eff.commissionGross,
+          refundedCommissionGross: eff.refundedCommissionGross,
           commissionVatRate: new Decimal(line.commissionVatRate),
-          // Komisyon TAHMİNİ donuk kopyası (write-once #340): mapper'ın T+0 gross değeri.
-          // Settlement Sale satırı settledCommissionGross'u GERÇEKLE yazar; bu kolon
-          // tahmini KORUR (Hakediş Kontrolü tahmin-vs-gerçek). Bir kez yazılır.
-          estimatedCommissionGross: new Decimal(line.commissionGross),
+          // Komisyon TAHMİNİ (#340): T+0'da mapper değeri — webhook komisyon taşımazsa
+          // kategori base_rate fallback'i (resolveEffectiveCommission). Sonraki webhook
+          // gerçek komisyonu getirince settlement'a kadar TAZELENİR (mevcut-satır dalı);
+          // settledCommissionGross yazılınca donar. Hakediş Kontrolü tahmin-vs-gerçek tabanı
+          // (recompute-settled önce settledCommissionGross'u, yoksa bunu okur).
+          estimatedCommissionGross: eff.commissionGross,
           // Maliyet snapshot null bırakılır — captureCostSnapshot (aşağıda) doldurur.
           unitCostSnapshotGross: null,
           unitCostSnapshotVatRate: null,

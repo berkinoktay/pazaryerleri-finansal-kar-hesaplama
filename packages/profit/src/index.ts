@@ -47,6 +47,7 @@ export {
 } from './shipping/resolve-tariff';
 export { estimateShippingCostForOrder } from './shipping/estimate-order-shipping';
 export { grossToVat } from './money';
+export { resolveCommissionRate, type ResolvedCommissionRate } from './resolve-commission-rate';
 export {
   buildUnitProfitInput,
   computeUnitProfit,

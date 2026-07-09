@@ -168,6 +168,8 @@ function buildMappedOrder(args: {
         commissionGross: '15.00',
         refundedCommissionGross: '0.00',
         commissionVatRate: '20',
+        categoryId: null,
+        commissionKnown: true,
       },
     ],
   };
