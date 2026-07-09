@@ -13,6 +13,16 @@ section "Versioning" for details.
 
 ### Changed
 
+- **`QuoteBreakdown` now carries three grouped allocation totals** (every
+  price-estimate endpoint that returns a breakdown: commission / Plus / advantage
+  / flash tariff item estimates and the product-pricing quote). The profit-detail
+  dialogs render a grouped "satış nereye gitti" allocation, so the sums are done
+  once in the backend (`serializeBreakdown`) rather than re-added on the client:
+  - `marketplaceFeesGross` — commission + shipping + platform service + any
+    micro-export fees (derived so buckets without their own field are included).
+  - `taxesGross` — stoppage + net VAT.
+  - `totalDeductionsGross` — `saleGross − netProfit`; the four groups
+    (cost + marketplace + taxes + profit) close to `saleGross`.
 - **New-order notification summary now carries `status` and `isPromotion`**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/notification-summary`).
   Two fields were added to `NewOrderNotificationSummary` so the realtime toast can

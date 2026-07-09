@@ -195,6 +195,7 @@ export async function listOrders(
     // dönüşüm — liste satırı indirimin hangi promosyondan geldiğini gösterir.
     promotionDisplays: toPromotionDisplays(row.promotionDisplays),
     fastDelivery: row.fastDelivery,
+    deliveredOnTime: row.deliveredOnTime,
     micro: row.micro,
     itemCount: row._count.items,
     // Kâr-dışı satırında sebep + tarih gösterimi için (liste include'u tüm Order
@@ -484,6 +485,7 @@ export async function getOrderById(
       saleVatRate: item.saleVatRate.toString(),
       lineSellerDiscountGross: item.lineSellerDiscountGross.toString(),
       commissionGross: item.commissionGross.toString(),
+      commissionRate: item.commissionRate.toString(),
       commissionVatRate: item.commissionVatRate.toString(),
       refundedCommissionGross: item.refundedCommissionGross.toString(),
       estimatedCommissionGross: item.estimatedCommissionGross?.toString() ?? null,

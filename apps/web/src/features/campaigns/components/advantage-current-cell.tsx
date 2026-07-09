@@ -75,6 +75,8 @@ export function AdvantageCurrentCell({
         onOpenChange={setBreakdownOpen}
         productTitle={row.productTitle}
         imageUrl={row.imageUrl}
+        stockCode={row.stockCode}
+        currentNetProfit={row.currentNetProfit}
         result={estimate.data ?? null}
         loading={estimate.isPending}
       />

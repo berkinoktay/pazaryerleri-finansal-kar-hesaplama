@@ -30,6 +30,7 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     costMarkupPct: '38.4',
     promotionDisplays: null,
     fastDelivery: false,
+    deliveredOnTime: null,
     micro: false,
     itemCount: 2,
     profitExcludedAt: null,

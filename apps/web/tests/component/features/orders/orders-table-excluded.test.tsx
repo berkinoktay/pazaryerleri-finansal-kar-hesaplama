@@ -28,6 +28,7 @@ const baseRow = {
   costMarkupPct: null,
   promotionDisplays: null,
   fastDelivery: false,
+  deliveredOnTime: null,
   micro: false,
   itemCount: 2,
   profitExcludedAt: null,

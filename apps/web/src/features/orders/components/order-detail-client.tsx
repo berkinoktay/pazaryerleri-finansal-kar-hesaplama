@@ -8,7 +8,6 @@ import * as React from 'react';
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
 import { PageHeader } from '@/components/patterns/page-header';
 import { PageSkeleton } from '@/components/patterns/page-skeleton';
-import { ProfitBreakdownCard } from '@/components/patterns/profit-breakdown';
 import { StatStrip } from '@/components/patterns/stat-strip';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -18,13 +17,10 @@ import { ApiError } from '@/lib/api-error';
 import { buildOrderKpiStripItems } from '../lib/order-kpi-strip-items';
 import { useOrder } from '../hooks/use-order';
 
-import { OrderClaimsCard } from './order-claims-card';
-import { OrderDeliverySection } from './order-delivery-section';
-import { OrderFeeTimeline } from './order-fee-timeline';
 import { OrderItemsList } from './order-items-list';
-import { OrderKpiGrid } from './order-kpi-grid';
+import { OrderProfitHero } from './order-profit-hero';
+import { OrderProfitSummary } from './order-profit-summary';
 import { OrderStatusBadge } from './order-status-badge';
-import { OrderStatusBanner } from './order-status-banner';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
 interface OrderDetailClientProps {
@@ -165,8 +161,6 @@ export function OrderDetailClient({
         />
       )}
 
-      <OrderStatusBanner order={order} />
-
       {/* Kalıcı kâr-dışı banner'ı (spec 2026-06-12 §7): pencere kaçtı, dışlama
           geri dönüşsüz — satıcı nedenini (sebebe özel) ve tarihini her zaman görür. */}
       {exclusionDescription !== null ? (
@@ -176,24 +170,34 @@ export function OrderDetailClient({
         </Alert>
       ) : null}
 
-      {/* Page chrome shows the KPIs inside the framed header summary strip; the
-          modal chrome (Sheet) has no PageHeader, so it keeps the dense KpiGrid. */}
-      {chrome === 'modal' ? <OrderKpiGrid order={order} dense /> : null}
+      {/* İade durum bandı (Seçenek A): iade varsa öne çıkar; kâr dökümündeki
+          tutarlar zaten iade sonrası nettir. GetClaims worker gelene dek çoğu
+          siparişte boş. */}
+      {order.claims.length > 0 ? (
+        <Alert tone="warning" size="md">
+          <AlertTitle>{t('returnBanner.title')}</AlertTitle>
+          <AlertDescription>
+            {t('returnBanner.description', { count: order.claims.length })}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
-      <OrderDeliverySection order={order} />
-
-      <div className="gap-lg grid grid-cols-1 lg:grid-cols-2">
-        <ProfitBreakdownCard
-          breakdown={order.profitBreakdown}
-          promotionDisplays={order.promotionDisplays}
-          micro={order.micro}
-        />
-        <OrderFeeTimeline fees={order.fees} />
-      </div>
+      {/* Profit-led + odaklı: sonuç (hero) → siparişteki ürünler (resimlerle) →
+          kâr dökümü (gelir + gruplu tahsis + öneri). Ücret zaman çizgisi, iade
+          talepleri ve teslimat bilinçli olarak kaldırıldı — sheet yalnız kâr
+          hikâyesine odaklanır. */}
+      <OrderProfitHero
+        breakdown={order.profitBreakdown}
+        reconciliationStatus={order.reconciliationStatus}
+      />
 
       <OrderItemsList items={order.items} profitExcluded={order.profitExcludedAt !== null} />
 
-      <OrderClaimsCard claims={order.claims} />
+      <OrderProfitSummary
+        breakdown={order.profitBreakdown}
+        promotionDisplays={order.promotionDisplays}
+        micro={order.micro}
+      />
     </div>
   );
 }

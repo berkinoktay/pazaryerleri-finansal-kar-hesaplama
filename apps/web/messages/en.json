@@ -1740,6 +1740,20 @@
       "badges": {
         "fastDelivery": "Fast",
         "micro": "Micro"
+      },
+      "sla": {
+        "onTime": {
+          "label": "Fast · on time",
+          "hint": "Shipped on time; the fast-delivery advantage (reduced service fee) was kept."
+        },
+        "late": {
+          "label": "Fast · late",
+          "hint": "Shipped late; the fast-delivery advantage was lost."
+        },
+        "pending": {
+          "label": "Fast delivery",
+          "hint": "A fast-delivery order; the delivery outcome isn't known yet."
+        }
       }
     },
     "tabs": {
@@ -3014,7 +3028,20 @@
     "estimatedProfit": "Estimated profit",
     "settledProfit": "Actual profit",
     "microExport": "Micro export",
-    "exportVatExemption": "VAT %0 — export exemption"
+    "exportVatExemption": "VAT %0 — export exemption",
+    "roi": "Profit rate",
+    "salePrice": "Sale price",
+    "vsCurrent": "vs current",
+    "notCalculable": "Profit can't be calculated for this product.",
+    "allocationTitle": "Where the sale went",
+    "incomeLabel": "Revenue",
+    "incomeSaleVat": "Sale VAT within",
+    "groups": {
+      "cost": "Product cost",
+      "marketplace": "Marketplace fees",
+      "taxes": "Taxes",
+      "profit": "Net profit"
+    }
   },
   "profitBadge": {
     "open": "View profit detail",
@@ -3030,6 +3057,7 @@
     },
     "intent": "Order from {date} — profit breakdown, fee timeline, and return status.",
     "backToList": "Back to list",
+    "sheetNumberLabel": "Order no",
     "kpis": {
       "saleGross": {
         "label": "Sale (incl. VAT)"
@@ -3111,6 +3139,14 @@
     },
     "items": {
       "title": "Order items",
+      "count": "{count} items",
+      "barcode": "Barcode",
+      "meta": {
+        "quantity": "Qty",
+        "cost": "Unit cost",
+        "commissionRate": "Commission rate",
+        "commissionAmount": "Commission amount"
+      },
       "empty": {
         "title": "No order items",
         "description": "The sync has not pulled line items yet."
@@ -3152,6 +3188,10 @@
     "exclusion": {
       "title": "Outside profit calculations",
       "description": "This order isn't included in profit. It still appears in revenue but not in profit reports."
+    },
+    "returnBanner": {
+      "title": "This order has a return",
+      "description": "{count, plural, one {# return claim} other {# return claims}} processed; the amounts in the profit breakdown are shown net of returns."
     }
   },
   "livePerformance": {

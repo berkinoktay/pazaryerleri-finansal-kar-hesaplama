@@ -214,6 +214,12 @@ export const OrderListItemSchema = z
           'Null when there is no promotion/discount.',
       }),
     fastDelivery: z.boolean(),
+    // Hızlı teslimat SLA sonucu (Bugün Kargoda avantajı): actualDeliveryDate <=
+    // agreedDeliveryDate → true (zamanında, avantaj korundu), false → geç (avantaj
+    // kaybı). null → henüz teslim edilmedi. fastDelivery ile birlikte SLA rozetini sürer.
+    deliveredOnTime: z.boolean().nullable().openapi({
+      description: 'Delivery SLA outcome: true on-time, false late, null not delivered yet.',
+    }),
     micro: z.boolean(),
     itemCount: z.number().int().nonnegative().openapi({
       description: 'Number of OrderItems on this order.',
@@ -311,6 +317,9 @@ const OrderItemDetailSchema = z
       .openapi({ description: 'Seller discount incl. VAT (decimal string).' }),
     // Komisyon (gross + oran) — always present (default 0 in schema).
     commissionGross: z.string().openapi({ description: 'Commission incl. VAT (decimal string).' }),
+    commissionRate: z
+      .string()
+      .openapi({ description: 'Commission rate % (decimal string), e.g. "21.64".' }),
     commissionVatRate: z
       .string()
       .openapi({ description: 'Commission VAT rate %, decimal string.' }),
@@ -487,6 +496,19 @@ const ProfitBreakdownSchema = z
       .string()
       .nullable()
       .openapi({ description: 'Kâr / Σ maliyet brüt × 100. null: maliyet brüt 0.' }),
+    // Grup toplamları — "satış nereye gitti" gruplu sunumu için kâr motorunda toplanır
+    // (frontend finansal toplama yapmaz). costGross + marketplaceFeesGross + taxesGross
+    // + netProfit = saleGross.
+    marketplaceFeesGross: z.string().openapi({
+      description: 'Pazaryeri kesintileri = komisyon + kargo + PSF + mikro ücretler (display).',
+    }),
+    taxesGross: z.string().openapi({
+      description: 'Vergiler = stopaj + Net KDV. Net KDV negatifse grup küçülür.',
+    }),
+    totalDeductionsGross: z.string().openapi({
+      description:
+        'Toplam gider = ürün maliyeti + pazaryeri kesintileri + vergiler ( = satış − net kâr ).',
+    }),
   })
   .openapi('ProfitBreakdown');
 

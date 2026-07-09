@@ -750,6 +750,15 @@ export interface QuoteBreakdown {
   netProfit: string;
   saleMarginPct: string | null;
   costMarkupPct: string | null;
+  // Grup toplamları — "satış nereye gitti" tahsisini besler (frontend para toplamaz).
+  // marketplaceFees = totalDeductions − cost − taxes (komisyon + kargo + PSF + mikro
+  // ihracat DEBIT/CREDIT'in net'i; ProfitBreakdown'da ayrı kova olmayan uluslararası
+  // ücretler de böylece dahil olur ve gruplar HER ZAMAN satışa toplanır).
+  marketplaceFeesGross: string;
+  // taxes = stopaj + net KDV.
+  taxesGross: string;
+  // totalDeductions = satış − net kâr (tanım gereği; grup çubuğunun kalanı = kâr).
+  totalDeductionsGross: string;
 }
 
 export type QuoteResult =
@@ -769,6 +778,12 @@ export interface QuoteServiceInput {
 }
 
 export function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
+  // Grup toplamları Decimal ile burada hesaplanır (frontend para toplamaz).
+  // totalDeductions'ı satış − kâr olarak türetmek, uluslararası/yurt dışı gibi
+  // ayrı kovası olmayan ücretleri de otomatik yakalar → gruplar tam satışa toplanır.
+  const taxesGross = bd.stoppage.add(bd.netVat);
+  const totalDeductionsGross = bd.saleGross.sub(bd.netProfit);
+  const marketplaceFeesGross = totalDeductionsGross.sub(bd.costGross).sub(taxesGross);
   return {
     listGross: bd.listGross.toFixed(2),
     sellerDiscountGross: bd.sellerDiscountGross.toFixed(2),
@@ -787,6 +802,9 @@ export function serializeBreakdown(bd: ProfitBreakdown): QuoteBreakdown {
     netProfit: bd.netProfit.toFixed(2),
     saleMarginPct: bd.saleMarginPct !== null ? bd.saleMarginPct.toFixed(4) : null,
     costMarkupPct: bd.costMarkupPct !== null ? bd.costMarkupPct.toFixed(4) : null,
+    marketplaceFeesGross: marketplaceFeesGross.toFixed(2),
+    taxesGross: taxesGross.toFixed(2),
+    totalDeductionsGross: totalDeductionsGross.toFixed(2),
   };
 }
 
