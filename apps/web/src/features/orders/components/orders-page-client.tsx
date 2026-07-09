@@ -19,7 +19,7 @@ import { useOrdersFilters } from '../hooks/use-orders-filters';
 import { useOrdersSummary } from '../hooks/use-orders-summary';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
 
-import { OrderDetailModal, type OrderDetailModalSelection } from './order-detail-modal';
+import { OrderDetailSheet, type OrderDetailSelection } from './order-detail-sheet';
 import { OrdersEmptyState } from './orders-empty-state';
 import { OrdersKpiStrip } from './orders-kpi-strip';
 import { OrdersTable } from './orders-table';
@@ -57,7 +57,7 @@ export function OrdersPageClient({
   const tSync = useTranslations('syncCenter');
   const { filters, setFilters } = useOrdersFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
-  const [selectedOrder, setSelectedOrder] = React.useState<OrderDetailModalSelection | null>(null);
+  const [selectedOrder, setSelectedOrder] = React.useState<OrderDetailSelection | null>(null);
 
   const noStoreSelected = orgId === null || storeId === null;
 
@@ -248,7 +248,7 @@ export function OrdersPageClient({
         />
       </div>
 
-      <OrderDetailModal
+      <OrderDetailSheet
         orgId={orgId}
         storeId={storeId}
         order={selectedOrder}

@@ -214,6 +214,7 @@
   --spacing-form: var(--size-form);
   --spacing-sheet: var(--size-sheet);
   --spacing-sheet-wide: var(--size-sheet-wide);
+  --spacing-sheet-detail: var(--size-sheet-detail);
   --spacing-modal: var(--size-modal);
   --spacing-dropdown-popover: var(--size-dropdown-popover);
   /* InfoHint/açıklama tooltip genişliği — bu eşleme olmadan `max-w-tooltip` no-op

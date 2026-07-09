@@ -31,6 +31,7 @@ import {
 } from '../lib/orders-filter-parsers';
 
 import { ExcludedReasonCell } from './excluded-reason-cell';
+import { FastDeliverySlaBadge } from './fast-delivery-sla-badge';
 import { OrderStatusBadge } from './order-status-badge';
 import { OrdersCostStatusTabs } from './orders-cost-status-tabs';
 import { OrdersToolbar, type OrdersToolbarChange } from './orders-toolbar';
@@ -187,12 +188,11 @@ export function OrdersTable({
           return (
             <span className="gap-xs flex items-center">
               <span className="font-medium">{number}</span>
-              {/* Sevkıyat tipi sinyalleri (veri liste API'sinde zaten var). */}
-              {row.original.fastDelivery ? (
-                <Badge tone="info" size="sm">
-                  {t('badges.fastDelivery')}
-                </Badge>
-              ) : null}
+              {/* Hızlı teslimat SLA sonucu (zamanında/geç → avantaj korundu/kayıp). */}
+              <FastDeliverySlaBadge
+                fastDelivery={row.original.fastDelivery}
+                deliveredOnTime={row.original.deliveredOnTime}
+              />
               {row.original.micro ? (
                 <Badge tone="neutral" size="sm">
                   {t('badges.micro')}
@@ -381,11 +381,11 @@ export function OrdersTable({
       columns={columns}
       data={rows}
       loading={loading}
-      // Hesaplanmış sekmede satır-tıklaması modal AÇMAZ — modal yalnız Tahmini
-      // kâr rozetinden açılır (satırdaki diğer etkileşimler serbest). Kâr-dışı
-      // sekmede rozet yok (kâr sütunu yok), bu yüzden orada satır-tıklaması korunur
-      // ki o satırların detayına da ulaşılabilsin.
-      onRowClick={costStatus === 'excluded' ? (row) => onRowOpen?.(row.id) : undefined}
+      // Sheet yalnız Hesaplanmış sekmedeki Tahmini kâr rozetinden açılır. Kâr-dışı
+      // siparişlerin kâr dökümü YOK (kalıcı hesaplanamaz, yalnız ciroya etki eder);
+      // o satırlar için sheet boş açılırdı — sebep zaten kolonda göründüğünden
+      // satır-tıklaması bilinçli olarak kapalı (gereksiz boş sheet yok).
+      onRowClick={undefined}
       sorting={sortingState}
       onSortingChange={handleSortingChange}
       paginationState={paginationState}

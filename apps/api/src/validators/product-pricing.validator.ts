@@ -270,6 +270,20 @@ export const QuoteBreakdownSchema = z
       description: 'Null when costGross=0.',
       example: '45.00',
     }),
+    marketplaceFeesGross: moneyString.openapi({
+      description:
+        'Grouped marketplace deductions (commission + shipping + platform service + any ' +
+        'micro-export fees). Backend-summed so the frontend never adds money.',
+      example: '90.00',
+    }),
+    taxesGross: moneyString.openapi({
+      description: 'Grouped taxes (stoppage + net VAT).',
+      example: '47.00',
+    }),
+    totalDeductionsGross: moneyString.openapi({
+      description: 'saleGross − netProfit — cost + marketplace fees + taxes.',
+      example: '317.00',
+    }),
   })
   .openapi('QuoteBreakdown');
 

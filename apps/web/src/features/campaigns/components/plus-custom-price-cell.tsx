@@ -282,6 +282,8 @@ export function PlusCustomPriceCell({
         onOpenChange={setBreakdownOpen}
         productTitle={row.productTitle}
         imageUrl={row.imageUrl}
+        stockCode={row.stockCode}
+        currentNetProfit={row.currentNetProfit}
         result={lastResult}
         loading={estimate.isPending}
         profitLabel={tBreakdown('estimatedProfit')}

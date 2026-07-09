@@ -331,6 +331,8 @@ export function FlashCustomPriceCell({
         onOpenChange={setBreakdownOpen}
         productTitle={row.productTitle}
         imageUrl={row.imageUrl}
+        stockCode={row.barcode}
+        currentNetProfit={row.currentNetProfit}
         result={lastResult}
         loading={estimate.isPending}
         profitLabel={tBreakdown('estimatedProfit')}

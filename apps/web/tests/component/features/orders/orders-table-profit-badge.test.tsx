@@ -27,6 +27,7 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     costMarkupPct: '38.4',
     promotionDisplays: null,
     fastDelivery: false,
+    deliveredOnTime: null,
     micro: false,
     itemCount: 2,
     profitExcludedAt: null,
@@ -80,16 +81,17 @@ describe('OrdersTable — Tahmini kâr profit badge', () => {
     expect(onRowOpen).not.toHaveBeenCalled();
   });
 
-  it('keeps row-click → modal in the profit-excluded tab, where there is no badge', async () => {
+  it('opens nothing in the profit-excluded tab — no badge, row not clickable', async () => {
     const { onRowOpen, user } = renderTable({
       costStatus: 'excluded',
       rows: [makeRow({ estimatedNetProfit: null, saleMarginPct: null })],
       counts: { calculated: 0, excluded: 1 },
     });
-    // The excluded segment has no profit column → no badge.
+    // Excluded orders have no profit breakdown → no profit badge. The row is also
+    // NOT clickable: opening an empty sheet is pointless (the exclusion reason is
+    // shown inline in its own column).
     expect(screen.queryByRole('button', { name: OPEN_LABEL })).toBeNull();
-    // Row-click still opens the detail there (otherwise those rows would be unreachable).
     await user.click(screen.getByText('ON-1'));
-    expect(onRowOpen).toHaveBeenCalledWith('o1');
+    expect(onRowOpen).not.toHaveBeenCalled();
   });
 });

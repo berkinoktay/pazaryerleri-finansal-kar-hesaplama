@@ -92,6 +92,17 @@ export interface ProfitBreakdownView {
   netProfit: string;
   saleMarginPct: string;
   costMarkupPct: string;
+  // Kalem grupları (görünüm) — "satış nereye gitti" gruplu sunumu için grup
+  // toplamları BURADA (kâr motorunda) toplanır; frontend finansal toplama yapmaz
+  // (feedback_no_frontend_financial_calculation). Dört grup display satışa kapanır:
+  // ürün maliyeti (costGross) + pazaryeri kesintileri + vergiler + net kâr = saleGross.
+  // Pay (%) UI'da salt gösterim oranı olarak türetilir (formatPercentDisplay sınıfı).
+  /** Pazaryeri kesintileri = komisyon + kargo + PSF + mikro ücretler (display, netted). */
+  marketplaceFeesGross: string;
+  /** Vergiler = stopaj + Net KDV. Net KDV negatifse (satıcı lehine) grup küçülür. */
+  taxesGross: string;
+  /** Toplam gider = ürün maliyeti + pazaryeri kesintileri + vergiler ( = satış − net kâr ). */
+  totalDeductionsGross: string;
 }
 
 export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBreakdownView {
@@ -179,6 +190,17 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
   // "Stopaj iadesi" olarak görünür. Alt sınır 0 (over-refund negatif stopaj üretmesin).
   const dispStoppage = Decimal.max(0, stoppage.gross.sub(returnLegs.STOPPAGE_REFUND.gross));
 
+  // Grup toplamları (görünüm) — display (netted) terimlerden toplanır ki gösterilen
+  // dört grup display satışa kapansın. Pazaryeri = Trendyol'un kestiği tüm ücretler;
+  // Vergiler = stopaj + Net KDV; Toplam gider = maliyet + pazaryeri + vergiler.
+  const marketplaceFeesGross = dispCommissionGross
+    .add(dispShippingGross)
+    .add(platformService.gross)
+    .add(internationalService.gross)
+    .add(overseasReturnOperation.gross);
+  const taxesGross = dispStoppage.add(input.netVat);
+  const totalDeductionsGross = dispCostGross.add(marketplaceFeesGross).add(taxesGross);
+
   return {
     listGross: input.listGross.toFixed(2),
     sellerDiscountGross: input.sellerDiscountGross.toFixed(2),
@@ -207,5 +229,8 @@ export function buildProfitBreakdown(input: BuildProfitBreakdownInput): ProfitBr
     netProfit: input.netProfit.toFixed(2),
     saleMarginPct: input.saleMarginPct === null ? '—' : input.saleMarginPct.toFixed(2),
     costMarkupPct: input.costMarkupPct === null ? '—' : input.costMarkupPct.toFixed(2),
+    marketplaceFeesGross: marketplaceFeesGross.toFixed(2),
+    taxesGross: taxesGross.toFixed(2),
+    totalDeductionsGross: totalDeductionsGross.toFixed(2),
   };
 }

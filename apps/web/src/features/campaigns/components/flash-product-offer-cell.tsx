@@ -153,6 +153,8 @@ export function FlashProductOfferCell({
         onOpenChange={setBreakdownOpen}
         productTitle={row.productTitle}
         imageUrl={row.imageUrl}
+        stockCode={row.barcode}
+        currentNetProfit={row.currentNetProfit}
         result={estimate.data ?? null}
         loading={estimate.isPending}
       />

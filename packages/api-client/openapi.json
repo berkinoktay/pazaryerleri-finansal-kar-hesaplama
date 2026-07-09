@@ -918,6 +918,13 @@
           "fastDelivery": {
             "type": "boolean"
           },
+          "deliveredOnTime": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Delivery SLA outcome: true on-time, false late, null not delivered yet."
+          },
           "micro": {
             "type": "boolean"
           },
@@ -967,6 +974,7 @@
           "costMarkupPct",
           "promotionDisplays",
           "fastDelivery",
+          "deliveredOnTime",
           "micro",
           "itemCount",
           "profitExcludedAt",
@@ -1411,6 +1419,18 @@
               "null"
             ],
             "description": "Kâr / Σ maliyet brüt × 100. null: maliyet brüt 0."
+          },
+          "marketplaceFeesGross": {
+            "type": "string",
+            "description": "Pazaryeri kesintileri = komisyon + kargo + PSF + mikro ücretler (display)."
+          },
+          "taxesGross": {
+            "type": "string",
+            "description": "Vergiler = stopaj + Net KDV. Net KDV negatifse grup küçülür."
+          },
+          "totalDeductionsGross": {
+            "type": "string",
+            "description": "Toplam gider = ürün maliyeti + pazaryeri kesintileri + vergiler ( = satış − net kâr )."
           }
         },
         "required": [
@@ -1438,7 +1458,10 @@
           "netVat",
           "netProfit",
           "saleMarginPct",
-          "costMarkupPct"
+          "costMarkupPct",
+          "marketplaceFeesGross",
+          "taxesGross",
+          "totalDeductionsGross"
         ]
       },
       "OrderItemDetail": {
@@ -1467,6 +1490,10 @@
           "commissionGross": {
             "type": "string",
             "description": "Commission incl. VAT (decimal string)."
+          },
+          "commissionRate": {
+            "type": "string",
+            "description": "Commission rate % (decimal string), e.g. \"21.64\"."
           },
           "commissionVatRate": {
             "type": "string",
@@ -1534,6 +1561,7 @@
           "saleVatRate",
           "lineSellerDiscountGross",
           "commissionGross",
+          "commissionRate",
           "commissionVatRate",
           "refundedCommissionGross",
           "estimatedCommissionGross",
@@ -3716,6 +3744,24 @@
             "pattern": "^-?\\d+(\\.\\d{1,4})?$",
             "description": "Null when costGross=0.",
             "example": "45.00"
+          },
+          "marketplaceFeesGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "Grouped marketplace deductions (commission + shipping + platform service + any micro-export fees). Backend-summed so the frontend never adds money.",
+            "example": "90.00"
+          },
+          "taxesGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "Grouped taxes (stoppage + net VAT).",
+            "example": "47.00"
+          },
+          "totalDeductionsGross": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "description": "saleGross − netProfit — cost + marketplace fees + taxes.",
+            "example": "317.00"
           }
         },
         "required": [
@@ -3735,7 +3781,10 @@
           "netVat",
           "netProfit",
           "saleMarginPct",
-          "costMarkupPct"
+          "costMarkupPct",
+          "marketplaceFeesGross",
+          "taxesGross",
+          "totalDeductionsGross"
         ],
         "description": "Full profit breakdown at the solved price. Present only when calculable=true."
       },

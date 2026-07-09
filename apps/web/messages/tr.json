@@ -1740,6 +1740,20 @@
       "badges": {
         "fastDelivery": "Hızlı",
         "micro": "Mikro"
+      },
+      "sla": {
+        "onTime": {
+          "label": "Hızlı · zamanında",
+          "hint": "Zamanında kargoya verildi; hızlı teslimat avantajı (indirimli hizmet bedeli) korundu."
+        },
+        "late": {
+          "label": "Hızlı · geç",
+          "hint": "Geç kargoya verildi; hızlı teslimat avantajı kaybedildi (hizmet bedeli avantajı düştü)."
+        },
+        "pending": {
+          "label": "Hızlı teslimat",
+          "hint": "Bugün Kargoda siparişi; teslim durumu henüz belli değil."
+        }
       }
     },
     "tabs": {
@@ -3079,7 +3093,20 @@
     "estimatedProfit": "Tahmini kâr",
     "settledProfit": "Fiili kâr",
     "microExport": "Mikro İhracat",
-    "exportVatExemption": "KDV %0 — İhracat istisnası"
+    "exportVatExemption": "KDV %0 — İhracat istisnası",
+    "roi": "Kâr oranı",
+    "salePrice": "Satış fiyatı",
+    "vsCurrent": "Güncele göre",
+    "notCalculable": "Bu ürün için kâr hesaplanamıyor.",
+    "allocationTitle": "Satış nereye gitti",
+    "incomeLabel": "Gelir",
+    "incomeSaleVat": "İçindeki satış KDV'si",
+    "groups": {
+      "cost": "Ürün maliyeti",
+      "marketplace": "Pazaryeri kesintileri",
+      "taxes": "Vergiler",
+      "profit": "Net kâr"
+    }
   },
   "profitBadge": {
     "open": "Kâr detayını gör",
@@ -3095,6 +3122,7 @@
     },
     "intent": "{date} tarihli sipariş — kâr dökümü, fatura zaman çizgisi ve iade durumu.",
     "backToList": "Listeye dön",
+    "sheetNumberLabel": "Sipariş No",
     "kpis": {
       "saleGross": {
         "label": "Satış (KDV dahil)"
@@ -3176,6 +3204,14 @@
     },
     "items": {
       "title": "Sipariş kalemleri",
+      "count": "{count} kalem",
+      "barcode": "Barkod",
+      "meta": {
+        "quantity": "Adet",
+        "cost": "Birim maliyet",
+        "commissionRate": "Komisyon oranı",
+        "commissionAmount": "Komisyon tutarı"
+      },
       "empty": {
         "title": "Sipariş kalemi yok",
         "description": "Sipariş senkronu kalemleri henüz çekmedi."
@@ -3217,6 +3253,10 @@
     "exclusion": {
       "title": "Kâr hesabı dışı",
       "description": "Bu sipariş kâr hesabına dahil edilmedi. Ciroda görünür, kâr raporlarına girmez."
+    },
+    "returnBanner": {
+      "title": "Bu siparişte iade var",
+      "description": "{count, plural, other {# iade talebi}} işlendi; kâr dökümündeki tutarlar iade sonrası net gösterilir."
     }
   },
   "livePerformance": {

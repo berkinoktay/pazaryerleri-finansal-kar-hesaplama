@@ -1,14 +1,15 @@
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderDetailModal } from '@/features/orders/components/order-detail-modal';
+import { OrderDetailSheet } from '@/features/orders/components/order-detail-sheet';
 
 import trMessages from '../../../../messages/tr.json';
 import { HttpResponse, http, server } from '../../../helpers/msw';
-import { render, screen, within } from '../../../helpers/render';
+import { render, screen } from '../../../helpers/render';
 
 // Turkish copy referenced through the catalog so this source file stays ASCII.
-const kpis = trMessages.orderDetail.kpis;
+const profitTitle = trMessages.profitBreakdown.title;
+const marginLabel = trMessages.profitBreakdown.margin;
 const backToListLabel = trMessages.orderDetail.backToList;
 
 vi.mock('next/navigation', () => ({ useRouter: vi.fn(() => ({ push: vi.fn() })) }));
@@ -23,8 +24,8 @@ const selection = {
   orderDate: '2026-06-20T10:00:00.000Z',
 };
 
-// Full backend-served ProfitBreakdown so OrderKpiGrid + ProfitBreakdownCard read
-// real fields (margin comes from saleMarginPct — no frontend derivation).
+// Full backend-served ProfitBreakdown so the profit summary reads real fields
+// (margin comes from saleMarginPct — no frontend derivation).
 const BREAKDOWN = {
   listGross: '200.00',
   sellerDiscountGross: '0.00',
@@ -50,12 +51,15 @@ const BREAKDOWN = {
   netVat: '13.33',
   netProfit: '31.00',
   saleMarginPct: '15.5',
-  costMarkupPct: null,
+  costMarkupPct: '31.00',
+  marketplaceFeesGross: '20.00',
+  taxesGross: '13.33',
+  totalDeductionsGross: '169.00',
 };
 
-// Minimal-but-complete order graph: empty items/fees/claims render their empty
-// states, all delivery fields null (delivery section renders nothing), so the
-// modal-chrome body renders cleanly around the dense KPI grid.
+// Minimal-but-complete order graph: empty items/fees/claims render their states,
+// all delivery fields null (delivery section renders nothing), so the profit-led
+// modal-chrome body renders cleanly around the profit summary.
 const ORDER = {
   id: 'ord-1',
   organizationId: ORG,
@@ -89,10 +93,10 @@ const ORDER = {
   claims: [],
 };
 
-describe('OrderDetailModal', () => {
+describe('OrderDetailSheet', () => {
   it('renders nothing when no order is selected', () => {
     const { container } = render(
-      <OrderDetailModal orgId={ORG} storeId={STORE} order={null} onClose={() => {}} />,
+      <OrderDetailSheet orgId={ORG} storeId={STORE} order={null} onClose={() => {}} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -110,7 +114,7 @@ describe('OrderDetailModal', () => {
       ),
     );
     const onClose = vi.fn();
-    render(<OrderDetailModal orgId={ORG} storeId={STORE} order={selection} onClose={onClose} />);
+    render(<OrderDetailSheet orgId={ORG} storeId={STORE} order={selection} onClose={onClose} />);
 
     expect(await screen.findByText('TY-12345')).toBeInTheDocument();
 
@@ -119,30 +123,18 @@ describe('OrderDetailModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('renders the dense OrderKpiGrid and omits the framed page header in modal chrome', async () => {
+  it('leads with the profit summary and omits the framed page header in modal chrome', async () => {
     server.use(
       http.get(`${API}/v1/organizations/${ORG}/stores/${STORE}/orders/ord-1`, () =>
         HttpResponse.json(ORDER),
       ),
     );
-    render(<OrderDetailModal orgId={ORG} storeId={STORE} order={selection} onClose={() => {}} />);
+    render(<OrderDetailSheet orgId={ORG} storeId={STORE} order={selection} onClose={() => {}} />);
 
-    // The sale KPI comes from OrderKpiGrid — the modal path's dense grid.
-    const saleLabel = await screen.findByText(kpis.saleGross.label);
-
-    // It is the DENSE grid (2-col, never widened to 4-col) — the page-path bare
-    // StatStrip inside a framed PageHeader is not mounted in modal chrome.
-    const grid = saleLabel.closest('.grid');
-    expect(grid).not.toBeNull();
-    expect(grid?.className).toContain('sm:grid-cols-2');
-    expect(grid?.className).not.toContain('lg:grid-cols-4');
-
-    // The other three KPI labels live in the SAME grid (scoped, since the profit
-    // breakdown card repeats "estimated profit" elsewhere on the page).
-    const gridScope = within(grid as HTMLElement);
-    expect(gridScope.getByText(kpis.estimatedNetProfit.label)).toBeInTheDocument();
-    expect(gridScope.getByText(kpis.settledNetProfit.label)).toBeInTheDocument();
-    expect(gridScope.getByText(kpis.margin.label)).toBeInTheDocument();
+    // The profit summary card leads the sheet: its title + the backend-served
+    // margin (%15,50) render from the estimate-basis breakdown.
+    expect(await screen.findByText(profitTitle)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(marginLabel))).toBeInTheDocument();
 
     // No framed page header: the page-only back-to-list button is absent.
     expect(screen.queryByRole('button', { name: backToListLabel })).toBeNull();

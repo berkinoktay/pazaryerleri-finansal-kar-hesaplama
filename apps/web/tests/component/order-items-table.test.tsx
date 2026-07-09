@@ -15,6 +15,7 @@ function makeItem(overrides: Partial<OrderItemDetail> = {}): OrderItemDetail {
     saleVatRate: '20.00',
     lineSellerDiscountGross: '0.00',
     commissionGross: '12.00',
+    commissionRate: '20.00',
     commissionVatRate: '20.00',
     refundedCommissionGross: '0.00',
     estimatedCommissionGross: '12.00',

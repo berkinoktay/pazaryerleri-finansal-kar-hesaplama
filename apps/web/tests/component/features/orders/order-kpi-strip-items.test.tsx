@@ -39,6 +39,9 @@ function makeBreakdown(saleMarginPct: string | null): OrderDetail['profitBreakdo
     netProfit: '31.00',
     saleMarginPct,
     costMarkupPct: null,
+    marketplaceFeesGross: '20.00',
+    taxesGross: '13.33',
+    totalDeductionsGross: '169.00',
   };
 }
 
