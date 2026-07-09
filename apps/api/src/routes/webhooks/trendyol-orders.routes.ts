@@ -69,15 +69,33 @@ export const STALE_REPROCESS_THRESHOLD_MS = 2 * 60_000;
 // payload ships root-level `supplierId`, but the stage test order endpoint omits
 // it. Per-line `sellerId` is present in both envs (authoritative seller scope).
 //
-// lineUnitPrice + lineGrossAmount required: the mapper reads them for KDV
-// split + commission calc.
+// lineUnitPrice + lineGrossAmount + vatRate optional: the mapper already
+// tolerates their absence (`?? 0`, logged as `orders.sparse-line`), so the
+// receiver must not be stricter than the mapper it feeds. Sparseness is a
+// Trendyol STAGE test-order artifact — PROD webhooks always ship full pricing.
+// Accepting a sparse payload as an estimate-incomplete order is strictly better
+// than the previous silent 200-drop, which wrote no row and killed the
+// webhook's real-time path (intake + toast + live performance) entirely.
+//
+// IMPORTANT: a sparse order's estimate money is WRITE-ONCE at create — a later
+// sync does NOT heal it (upsert-order.ts updates only status/delivery/cargo/
+// watermark; OrderItem lines are insert-skip-if-exists). Only settlement
+// reconciliation writes the real settled values. Stage orders with an
+// uncatalogued barcode route to the cost-missing BUFFER, whose snapshot IS
+// refreshed before promotion, so they self-heal there; a sparse order for a
+// calculable (cost-known) product would freeze its zero estimate money until
+// settlement (rare — prod ships full pricing).
+//
+// sellerId + quantity stay REQUIRED: sellerId is the authoritative seller-scope
+// guard and quantity is load-bearing for a meaningful order (stage payloads
+// carry both).
 const TrendyolWebhookLineSchema = z
   .object({
     sellerId: z.number().int().positive('LINE_SELLER_ID_REQUIRED'),
     quantity: z.number().int().positive('LINE_QUANTITY_REQUIRED'),
-    lineUnitPrice: z.number().nonnegative('LINE_UNIT_PRICE_REQUIRED'),
-    lineGrossAmount: z.number().nonnegative('LINE_GROSS_AMOUNT_REQUIRED'),
-    vatRate: z.number().nonnegative('LINE_VAT_RATE_REQUIRED'),
+    lineUnitPrice: z.number().nonnegative('LINE_UNIT_PRICE_REQUIRED').optional(),
+    lineGrossAmount: z.number().nonnegative('LINE_GROSS_AMOUNT_REQUIRED').optional(),
+    vatRate: z.number().nonnegative('LINE_VAT_RATE_REQUIRED').optional(),
   })
   .passthrough();
 

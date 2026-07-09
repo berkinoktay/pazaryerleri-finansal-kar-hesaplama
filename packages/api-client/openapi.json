@@ -6987,10 +6987,7 @@
                       },
                       "required": [
                         "sellerId",
-                        "quantity",
-                        "lineUnitPrice",
-                        "lineGrossAmount",
-                        "vatRate"
+                        "quantity"
                       ],
                       "additionalProperties": {}
                     },
