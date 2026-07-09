@@ -1,26 +1,17 @@
-/* DataTable depth-based row styling — driven by patterns/data-table.tsx
-   when getSubRows is supplied. Feature code does not author these styles
-   directly; setting data-depth on the row is the entire contract.
+/* DataTable depth-based first-cell indent — driven by patterns/data-table.tsx
+   when getSubRows is supplied (it sets data-depth on each row; feature code
+   never authors this directly). A larger first-cell padding on depth-1 rows
+   nudges their content in so the hierarchy reads WITHOUT a row background fill
+   or a side-stripe (BAN 1 of /ui-design-system forbids `border-left > 1px` and
+   inset-box-shadow fakes on rows / cards / callouts). Earlier variant-background
+   experiments (`--muted`, `--surface-subtle`) were rejected as muddy /
+   distracting; the indent + the table's row separators carry depth on a uniform
+   white surface.
 
-   Hierarchy is signalled by TWO token-compliant cues — NO row-level
-   background fill, NO side-stripe (BAN 1 of /ui-design-system forbids
-   `border-left > 1px` and `inset box-shadow` faking the same effect on
-   rows / cards / callouts):
-
-     1. A CSS-drawn rounded-corner connector in the expand column,
-        rendered by feature code as a 16-px square with `border-l +
-        border-b + rounded-bl-md` (see products-table.tsx). This is the
-        "leading icon carries the semantic" pattern from the design
-        system.
-     2. A larger first-cell padding so the connector indents into the
-        row. Image position is unaffected (image lives in column 2, not
-        column 1) so variant images stay aligned with the parent's.
-
-   Earlier iterations tried `--muted` (4% lightness step) and then
-   `--surface-subtle` (2% step) as variant backgrounds; both were
-   rejected as either muddy or visually distracting. The connector +
-   indent + the table's row separators carry the hierarchy on their own
-   on a uniform white surface. */
+   NOTE: products-table now draws its OWN richer cue — a continuous `--tree-line`
+   spine + ├/└ elbows INSIDE the identity cell (see the `.variant-ident` rules
+   further down) — and no longer leans on this indent for its connector. This
+   generic indent still applies to other depth tables (e.g. product-pricing). */
 
 table tr[data-depth='1'] > td:first-child {
   padding-left: var(--space-xl);
@@ -145,4 +136,69 @@ table tr[data-depth='1'] > td:first-child {
   --toast-close-button-start: unset !important;
   --toast-close-button-end: 0 !important;
   --toast-close-button-transform: translate(35%, -35%) !important;
+}
+
+/* Products table — variant TREE connector (features/products/products-table.tsx).
+   The connector lives in the dedicated "Varyantlar" column (LEFT of "Ürün"): the
+   variant-count chip roots it, a continuous spine links the variant sub-rows, and
+   each ├/└ elbow reaches the column's RIGHT edge — pointing across at the product
+   image in the neighbouring identity cell. The spine is drawn on the "Varyantlar"
+   <td> (made position:relative via :has — the same escape hatch the ui/* inputs
+   use) so it spans the cell's PADDING box and meets the next sibling's spine
+   across the 1px row border: one continuous vertical line. Everything anchors to
+   the row's vertical centre (50%) — the cells are align-middle and the identity
+   image is items-center, so the chip, the elbow, and the image all sit on the
+   same line regardless of row height. The chip is centred in the column, so the
+   spine runs down the column's horizontal centre (calc(50% - 1px)); the elbow is
+   a short branch pointing toward the product. Colour = --tree-line (neutral, NOT
+   a side stripe → /ui-design-system BAN 1). */
+/* :not([data-pinned-side]) — a PINNED identity column is already position:sticky
+   (a positioning context for the absolute spine), and forcing position:relative
+   here would out-specify and break the sticky pin. Non-pinned cells need the
+   relative to anchor the spine to the <td>. */
+td:not([data-pinned-side]):has(> .variant-ident),
+td:not([data-pinned-side]):has(> .parent-ident-open) {
+  position: relative;
+}
+.variant-ident-spine {
+  position: absolute;
+  left: calc(50% - 1px);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--tree-line);
+  pointer-events: none;
+}
+/* Last child: no straight through-line — the elbow's own left border draws the
+   vertical and curves at the centre, so nothing pokes past the corner. */
+.variant-ident-last .variant-ident-spine {
+  display: none;
+}
+/* height:50% = the row's vertical centre (cells are align-middle, the identity
+   image is items-center), so the elbow's horizontal lands level with the product
+   image. width:16px keeps it a short, tidy ├/└ branch (the row alignment carries
+   the connection to the product, not a long reaching line). */
+.variant-ident-elbow {
+  position: absolute;
+  left: calc(50% - 1px);
+  top: 0;
+  width: 16px;
+  height: 50%;
+  border-left: 2px solid var(--tree-line);
+  border-bottom: 2px solid var(--tree-line);
+  border-bottom-left-radius: 9px;
+  pointer-events: none;
+}
+/* Parent → first child: a spine from the chip (row centre) down to the row edge,
+   so the parent reads as the branch root feeding its variants. top:50% = the chip
+   centre; the chip is position:relative (products-table.tsx) so it paints OVER
+   this stub, hiding the overlap — the line emerges cleanly from beneath the chip. */
+.parent-ident-stub {
+  position: absolute;
+  left: calc(50% - 1px);
+  top: 50%;
+  bottom: 0;
+  width: 2px;
+  background: var(--tree-line);
+  pointer-events: none;
 }

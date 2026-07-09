@@ -67,7 +67,11 @@
      modes. Replaces `bg-muted/50` (a dark-mode trap). Half a step BELOW
      --surface-subtle so a hovered row no longer melts into the header/footer
      band it used to coincide with (both were 96%). */
-  --surface-row-hover: oklch(95.5% 0.007 265);
+  /* Chroma eased 0.007 → 0.004: the hover kept its lightness (pinned just below
+     the --surface-subtle header band) but read a touch "dominant" as a violet
+     wash on tall multi-line rows; a calmer near-neutral tint is quieter while
+     still separating the hovered row. */
+  --surface-row-hover: oklch(95.5% 0.004 265);
 
   /* Row press feedback (active state on clickable rows) — one step deeper
      than hover so a tap/click acknowledges before navigation. Matters most
@@ -224,6 +228,13 @@
   --success-border: oklch(72% 0.12 155);
   --info-border: oklch(70% 0.12 240);
 
+  /* Tree connector line — the file-tree spine + elbow that links a product's
+     variant sub-rows to their parent row (products table). A step stronger than
+     --border-strong so the hierarchy reads at a glance, but deliberately NEUTRAL
+     (a brand-tinted spine on every expansion would be loud) and NOT a side
+     stripe (BAN 1). Drawn in tokens/components.css; consumed by products-table. */
+  --tree-line: oklch(80% 0.012 265);
+
   /* Sidebar surface contract — required by the shadcn Sidebar primitive
      (`bg-sidebar`, `bg-sidebar-accent`, `text-sidebar-foreground`, …).
 
@@ -277,7 +288,7 @@
 
   /* Dark: lifts above --card (17%) by ~3% — matches --muted (20%).
      Comparable visual lift to the light-mode drop. */
-  --surface-row-hover: oklch(20% 0.012 265);
+  --surface-row-hover: oklch(20% 0.008 265);
 
   /* Dark row press: one step past hover (raised = lighter in dark). */
   --surface-row-active: oklch(23% 0.014 265);
@@ -378,6 +389,9 @@
   --destructive-border: oklch(48% 0.14 27);
   --success-border: oklch(50% 0.09 155);
   --info-border: oklch(50% 0.1 240);
+
+  /* Tree connector — lifted for the dark card (see :root for rationale). */
+  --tree-line: oklch(40% 0.02 265);
 
   /* Sidebar surface contract — see :root for full rationale. In dark
      mode the rail sits ~3% darker than the main content panel so it
