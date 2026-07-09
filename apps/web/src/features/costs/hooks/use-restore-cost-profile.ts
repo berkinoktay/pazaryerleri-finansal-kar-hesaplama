@@ -29,7 +29,7 @@ export function useRestoreCostProfile() {
     mutationFn: ({ orgId, profileId }) => restoreCostProfile(orgId, profileId),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: costsKeys.profile(variables.profileId) });
-      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles() });
+      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles(variables.orgId) });
       // Invalidate all variant attachments — restored profile re-enters combobox
       void queryClient.invalidateQueries({ queryKey: [...costsKeys.all, 'variant'] });
     },

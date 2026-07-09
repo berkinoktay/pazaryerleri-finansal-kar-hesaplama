@@ -15,7 +15,12 @@ import { prisma } from '@pazarsync/db';
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import {
+  createMemberStoreAccess,
+  createMembership,
+  createOrganization,
+  createStore,
+} from '../../helpers/factories';
 
 const app = createApp();
 
@@ -80,6 +85,39 @@ describe('Tenant isolation — products/missing-cost-stats', () => {
     // Org A user should see only Org A's 1 variant — Org B's 10 are invisible
     expect(body.totalVariants).toBe(1);
     expect(body.count).toBe(1);
+  });
+
+  it('MEMBER granted only store A sees store A stats, never store B (byStore narrowed)', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    const membership = await createMembership(org.id, user.id, 'MEMBER');
+    const storeA = await createStore(org.id);
+    const storeB = await createStore(org.id);
+    // MEMBER is granted access to store A only.
+    await createMemberStoreAccess(org.id, membership.id, storeA.id);
+
+    // 1 profile-less variant in store A, 3 in store B.
+    await seedVariant(org.id, storeA.id);
+    for (let i = 0; i < 3; i++) {
+      await seedVariant(org.id, storeB.id);
+    }
+
+    const res = await app.request(`/v1/organizations/${org.id}/products/missing-cost-stats`, {
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      count: number;
+      totalVariants: number;
+      byStore: { storeId: string; missingCount: number }[];
+    };
+
+    // Only store A's single variant is counted; store B is invisible to this
+    // member — no store-B id leaks in byStore, and its 3 variants don't inflate
+    // the totals.
+    expect(body.totalVariants).toBe(1);
+    expect(body.count).toBe(1);
+    expect(body.byStore.map((b) => b.storeId)).toEqual([storeA.id]);
   });
 
   it('Org A user gets 403 when querying Org B endpoint directly', async () => {

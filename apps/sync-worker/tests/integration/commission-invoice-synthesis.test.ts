@@ -34,15 +34,18 @@ interface BuiltCtx {
   itemIds: string[];
 }
 
-async function buildOrderWithItemsCarryingSerial(itemCount: number): Promise<BuiltCtx> {
-  const user = await createUserProfile();
-  const org = await createOrganization();
-  await createMembership(org.id, user.id);
-  const store = await createStore(org.id);
+// Build one store (in the given org) + an order + `itemCount` OrderItems all
+// carrying SERIAL. Split out from buildOrderWithItemsCarryingSerial so a test
+// can put TWO stores under ONE org (the cross-store collision scenario).
+async function buildStoreOrderWithItems(
+  organizationId: string,
+  itemCount: number,
+): Promise<BuiltCtx> {
+  const store = await createStore(organizationId);
 
   const order = await prisma.order.create({
     data: {
-      organizationId: org.id,
+      organizationId,
       storeId: store.id,
       platformOrderId: `pkg-${randomUUID().slice(0, 8)}`,
       orderDate: new Date(),
@@ -54,7 +57,7 @@ async function buildOrderWithItemsCarryingSerial(itemCount: number): Promise<Bui
   for (let i = 0; i < itemCount; i++) {
     const product = await prisma.product.create({
       data: {
-        organizationId: org.id,
+        organizationId,
         storeId: store.id,
         platformContentId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
         productMainId: `main-${randomUUID().slice(0, 8)}`,
@@ -63,7 +66,7 @@ async function buildOrderWithItemsCarryingSerial(itemCount: number): Promise<Bui
     });
     const variant = await prisma.productVariant.create({
       data: {
-        organizationId: org.id,
+        organizationId,
         storeId: store.id,
         productId: product.id,
         platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000_000)),
@@ -76,7 +79,7 @@ async function buildOrderWithItemsCarryingSerial(itemCount: number): Promise<Bui
     const item = await prisma.orderItem.create({
       data: {
         orderId: order.id,
-        organizationId: org.id,
+        organizationId,
         productVariantId: variant.id,
         quantity: 1,
         // GROSS CONVENTION (2026-06-16): lineListGross/lineSaleGross; commissionGross=12.
@@ -94,7 +97,14 @@ async function buildOrderWithItemsCarryingSerial(itemCount: number): Promise<Bui
     itemIds.push(item.id);
   }
 
-  return { storeId: store.id, organizationId: org.id, itemIds };
+  return { storeId: store.id, organizationId, itemIds };
+}
+
+async function buildOrderWithItemsCarryingSerial(itemCount: number): Promise<BuiltCtx> {
+  const user = await createUserProfile();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  return buildStoreOrderWithItems(org.id, itemCount);
 }
 
 function makeCommissionInvoiceRow(
@@ -254,6 +264,36 @@ describe('handleCommissionInvoice', () => {
 
     const itemsA = await prisma.orderItem.findMany({ where: { id: { in: orgA.itemIds } } });
     const itemsB = await prisma.orderItem.findMany({ where: { id: { in: orgB.itemIds } } });
+    expect(itemsA.every((i) => i.commissionInvoiceId !== null)).toBe(true);
+    expect(itemsB.every((i) => i.commissionInvoiceId === null)).toBe(true);
+  });
+
+  it('store scope — a SECOND store in the SAME org with a colliding serial is NOT backfilled by the first store invoice', async () => {
+    // One org, two Trendyol seller accounts (two Stores). Trendyol serials are
+    // per-seller sequences, so a collision across the org's two stores is
+    // possible. The backfill must attach only store A's items to store A's
+    // invoice — an org-scoped filter would wrongly grab store B's items too and
+    // corrupt both stores' hakediş reconciliation. This also proves the Prisma
+    // `order: { storeId }` relation filter in updateMany scopes at runtime.
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const storeA = await buildStoreOrderWithItems(org.id, 2);
+    const storeB = await buildStoreOrderWithItems(org.id, 2);
+
+    await prisma.$transaction(async (tx) => {
+      const result = await handleCommissionInvoice(
+        storeA.storeId,
+        org.id,
+        makeCommissionInvoiceRow(),
+        tx,
+      );
+      // Only store A's 2 items — not store B's — are backfilled.
+      expect(result.backfilledItemCount).toBe(2);
+    });
+
+    const itemsA = await prisma.orderItem.findMany({ where: { id: { in: storeA.itemIds } } });
+    const itemsB = await prisma.orderItem.findMany({ where: { id: { in: storeB.itemIds } } });
     expect(itemsA.every((i) => i.commissionInvoiceId !== null)).toBe(true);
     expect(itemsB.every((i) => i.commissionInvoiceId === null)).toBe(true);
   });

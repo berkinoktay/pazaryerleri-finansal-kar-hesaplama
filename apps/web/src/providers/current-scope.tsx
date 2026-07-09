@@ -1,6 +1,7 @@
 'use client';
 
 import { can as roleCan, capabilitiesFor, type Capability } from '@pazarsync/utils';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useMemo, type ReactElement, type ReactNode } from 'react';
 
@@ -48,6 +49,7 @@ export function CurrentScopeProvider({
   children: ReactNode;
 }): ReactElement {
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const value = useMemo<CurrentScope>(() => {
     const role = org.role;
@@ -63,11 +65,20 @@ export function CurrentScopeProvider({
         router.refresh();
       },
       setOrg: (orgId) => {
+        // Tenant boundary crossing: every cached query is scoped to the
+        // now-previous org. Store/org switch only calls router.refresh() (server
+        // re-render) and does NOT reset the React Query cache, so a query whose
+        // key omits orgId would otherwise serve the previous tenant's data from
+        // cache. Clearing here makes that whole bug class non-exploitable —
+        // belt-and-suspenders on top of org-scoped query keys. Store switches
+        // stay within one org (store-scoped keys carry storeId), so setStore
+        // does not clear.
+        queryClient.clear();
         void setActiveOrgIdAction(orgId);
         router.refresh();
       },
     };
-  }, [org, store, accessibleStores, router]);
+  }, [org, store, accessibleStores, router, queryClient]);
 
   return <CurrentScopeContext.Provider value={value}>{children}</CurrentScopeContext.Provider>;
 }

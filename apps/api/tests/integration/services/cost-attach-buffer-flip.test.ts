@@ -74,7 +74,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
       });
     }
 
-    const result = await attachCostProfiles(org.id, [profile.id], [variant.id], randomUUID());
+    const result = await attachCostProfiles(org.id, [profile.id], [variant.id], randomUUID(), null);
 
     expect(result.bufferEntriesPromoted).toBe(3);
     const entries = await prisma.livePerformanceBuffer.findMany({ where: { storeId: store.id } });
@@ -96,7 +96,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     });
 
     // Attach cost to A only → B still missing → order not yet calculable → no flip.
-    const r1 = await attachCostProfiles(org.id, [profile.id], [vA.id], randomUUID());
+    const r1 = await attachCostProfiles(org.id, [profile.id], [vA.id], randomUUID(), null);
     expect(r1.bufferEntriesPromoted).toBe(0);
     expect(
       (await prisma.livePerformanceBuffer.findFirstOrThrow({ where: { storeId: store.id } }))
@@ -104,7 +104,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
     ).toBe('PENDING');
 
     // Now attach cost to B → all lines calculable → flips.
-    const r2 = await attachCostProfiles(org.id, [profile.id], [vB.id], randomUUID());
+    const r2 = await attachCostProfiles(org.id, [profile.id], [vB.id], randomUUID(), null);
     expect(r2.bufferEntriesPromoted).toBe(1);
     expect(
       (await prisma.livePerformanceBuffer.findFirstOrThrow({ where: { storeId: store.id } }))
@@ -124,7 +124,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
       mappedOrder: buildMappedOrder(['BC-OTHER']),
     });
 
-    const result = await attachCostProfiles(org.id, [profile.id], [variant.id], randomUUID());
+    const result = await attachCostProfiles(org.id, [profile.id], [variant.id], randomUUID(), null);
 
     expect(result.bufferEntriesPromoted).toBe(0);
     expect(
@@ -148,7 +148,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
       mappedOrder: buildMappedOrder(['BC-1']),
     });
 
-    const result = await attachCostProfiles(org.id, [profile.id], [vA.id], randomUUID());
+    const result = await attachCostProfiles(org.id, [profile.id], [vA.id], randomUUID(), null);
 
     expect(result.bufferEntriesPromoted).toBe(0);
     expect(
@@ -174,6 +174,7 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
       [variant.id],
       [profile.id],
       randomUUID(),
+      null,
     );
 
     expect(result.bufferEntriesPromoted).toBe(1);

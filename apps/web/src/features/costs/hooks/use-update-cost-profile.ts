@@ -34,7 +34,7 @@ export function useUpdateCostProfile() {
       void queryClient.invalidateQueries({
         queryKey: costsKeys.profileVersions(variables.profileId),
       });
-      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles() });
+      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles(variables.orgId) });
       void queryClient.invalidateQueries({ queryKey: ['products'] });
     },
   });

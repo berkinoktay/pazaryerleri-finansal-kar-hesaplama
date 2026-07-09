@@ -29,7 +29,7 @@ export function useArchiveCostProfile() {
     mutationFn: ({ orgId, profileId }) => archiveCostProfile(orgId, profileId),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: costsKeys.profile(variables.profileId) });
-      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles() });
+      void queryClient.invalidateQueries({ queryKey: costsKeys.profiles(variables.orgId) });
       // Invalidate all variant attachments — archived profile drops from combobox
       void queryClient.invalidateQueries({ queryKey: [...costsKeys.all, 'variant'] });
     },

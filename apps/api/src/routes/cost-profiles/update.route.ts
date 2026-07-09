@@ -1,7 +1,8 @@
 import { createRoute, z } from '@hono/zod-openapi';
+import { CAPABILITIES } from '@pazarsync/utils';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireCapability } from '../../lib/require-capability';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as costProfileService from '../../services/cost-profile.service';
 import {
@@ -72,9 +73,10 @@ app.openapi(updateCostProfileRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, id } = c.req.valid('param');
   const patch = c.req.valid('json');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  // DATA_WRITE gate — a VIEWER (read-only) must not update cost profiles.
+  await requireCapability(userId, orgId, CAPABILITIES.DATA_WRITE);
 
-  const profile = await costProfileService.updateCostProfile(organizationId, id, patch, userId);
+  const profile = await costProfileService.updateCostProfile(orgId, id, patch, userId);
 
   const body: z.infer<typeof CostProfileSchema> = {
     id: profile.id,

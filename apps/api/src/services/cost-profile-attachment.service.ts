@@ -42,14 +42,32 @@ async function guardProfiles(orgId: string, profileIds: string[]): Promise<void>
 }
 
 /**
- * Verify all variantIds belong to `orgId`.
+ * Verify all variantIds belong to `orgId` AND — for a MEMBER/VIEWER caller — to
+ * a store the caller has been granted access to.
  *
- * Throws `CostProfileVariantOrgMismatchError` if any variant is missing or
- * belongs to a different org. HTTP 422 per spec §6.7.
+ * `accessibleStoreIds` is `null` for OWNER/ADMIN (see access every store, no
+ * narrowing) or the caller's granted store-id list for MEMBER/VIEWER. When
+ * non-null, a variant in an ungranted store fails the count and is rejected
+ * exactly like a cross-org variant — non-disclosure: an ungranted store's
+ * variant is indistinguishable from one that doesn't exist. This is the
+ * store-access counterpart to the org guard; without it a MEMBER granted only
+ * store A could attach/detach/replace cost profiles on store B's variants
+ * (mutating store B's profit figures) just by knowing the variant UUIDs.
+ *
+ * Throws `CostProfileVariantOrgMismatchError` if any variant is missing, in a
+ * different org, or in an ungranted store. HTTP 422 per spec §6.7.
  */
-async function guardVariants(orgId: string, variantIds: string[]): Promise<void> {
+async function guardVariants(
+  orgId: string,
+  variantIds: string[],
+  accessibleStoreIds: string[] | null,
+): Promise<void> {
   const count = await prisma.productVariant.count({
-    where: { id: { in: variantIds }, organizationId: orgId },
+    where: {
+      id: { in: variantIds },
+      organizationId: orgId,
+      ...(accessibleStoreIds !== null ? { storeId: { in: accessibleStoreIds } } : {}),
+    },
   });
 
   if (count !== variantIds.length) {
@@ -148,9 +166,10 @@ export async function attachCostProfiles(
   profileIds: string[],
   variantIds: string[],
   actorId: string,
+  accessibleStoreIds: string[] | null,
 ): Promise<{ attached: number; bufferEntriesPromoted: number }> {
   await guardProfiles(orgId, profileIds);
-  await guardVariants(orgId, variantIds);
+  await guardVariants(orgId, variantIds, accessibleStoreIds);
 
   // Build Cartesian product of (profileId, variantId) pairs
   const data = profileIds.flatMap((profileId) =>
@@ -186,9 +205,10 @@ export async function detachCostProfiles(
   orgId: string,
   profileIds: string[],
   variantIds: string[],
+  accessibleStoreIds: string[] | null,
 ): Promise<{ detached: number }> {
   await guardProfiles(orgId, profileIds);
-  await guardVariants(orgId, variantIds);
+  await guardVariants(orgId, variantIds, accessibleStoreIds);
 
   const result = await prisma.productVariantCostProfile.deleteMany({
     where: {
@@ -220,6 +240,7 @@ export async function replaceCostProfilesForVariants(
   variantIds: string[],
   profileIds: string[],
   actorId: string,
+  accessibleStoreIds: string[] | null,
 ): Promise<{
   variantsAffected: number;
   finalProfilesPerVariant: number;
@@ -228,7 +249,7 @@ export async function replaceCostProfilesForVariants(
   if (profileIds.length > 0) {
     await guardProfiles(orgId, profileIds);
   }
-  await guardVariants(orgId, variantIds);
+  await guardVariants(orgId, variantIds, accessibleStoreIds);
 
   const bufferEntriesPromoted = await prisma.$transaction(async (tx) => {
     // Delete all existing links for these variants within the org

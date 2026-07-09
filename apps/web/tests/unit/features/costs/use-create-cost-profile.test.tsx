@@ -9,6 +9,7 @@ import { costsKeys } from '@/features/costs/hooks/costs-keys';
 import { HttpResponse, http, server } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000099';
+const OTHER_ORG_ID = '00000000-0000-0000-0000-0000000000ff';
 const PROFILE_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
 function makeQueryClient(): QueryClient {
@@ -53,8 +54,10 @@ describe('useCreateCostProfile', () => {
     );
 
     const queryClient = makeQueryClient();
-    // Pre-seed the profiles list so we can assert invalidation
-    queryClient.setQueryData(costsKeys.profiles(), { data: [], meta: {} });
+    // Pre-seed BOTH orgs' profiles lists so we can assert the invalidation is
+    // scoped to the acting org and never touches another tenant's cache entry.
+    queryClient.setQueryData(costsKeys.profiles(ORG_ID), { data: [], meta: {} });
+    queryClient.setQueryData(costsKeys.profiles(OTHER_ORG_ID), { data: [], meta: {} });
 
     const { result } = renderHook(() => useCreateCostProfile(), {
       wrapper: makeWrapper(queryClient),
@@ -75,8 +78,9 @@ describe('useCreateCostProfile', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.id).toBe(PROFILE_ID);
 
-    // After success, the profiles() cache key should be invalidated (stale)
-    const state = queryClient.getQueryState(costsKeys.profiles());
-    expect(state?.isInvalidated).toBe(true);
+    // After success, the acting org's profiles list is invalidated (stale)...
+    expect(queryClient.getQueryState(costsKeys.profiles(ORG_ID))?.isInvalidated).toBe(true);
+    // ...and the other org's cached list is left untouched (tenant isolation).
+    expect(queryClient.getQueryState(costsKeys.profiles(OTHER_ORG_ID))?.isInvalidated).toBe(false);
   });
 });

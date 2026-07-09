@@ -59,7 +59,7 @@ describe('useArchiveCostProfile', () => {
       ...ARCHIVED_PROFILE,
       archivedAt: null,
     });
-    queryClient.setQueryData(costsKeys.profiles(), {
+    queryClient.setQueryData(costsKeys.profiles(ORG_ID), {
       data: [{ ...ARCHIVED_PROFILE, archivedAt: null }],
       meta: {},
     });
@@ -75,6 +75,6 @@ describe('useArchiveCostProfile', () => {
     // profile(PROFILE_ID) should be invalidated
     expect(queryClient.getQueryState(costsKeys.profile(PROFILE_ID))?.isInvalidated).toBe(true);
     // profiles() should be invalidated
-    expect(queryClient.getQueryState(costsKeys.profiles())?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(costsKeys.profiles(ORG_ID))?.isInvalidated).toBe(true);
   });
 });

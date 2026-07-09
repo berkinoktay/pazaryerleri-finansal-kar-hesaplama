@@ -1,4 +1,5 @@
 import { CAPABILITIES } from '@pazarsync/utils';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -46,11 +47,16 @@ const STORE: Store = {
 };
 
 function wrapperFor(role: Organization['role']) {
+  // CurrentScopeProvider calls useQueryClient() (setOrg clears the cache on a
+  // tenant switch), so it must render under a QueryClientProvider.
+  const queryClient = new QueryClient();
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <CurrentScopeProvider org={makeOrg(role)} store={STORE} accessibleStores={[STORE]}>
-        {children}
-      </CurrentScopeProvider>
+      <QueryClientProvider client={queryClient}>
+        <CurrentScopeProvider org={makeOrg(role)} store={STORE} accessibleStores={[STORE]}>
+          {children}
+        </CurrentScopeProvider>
+      </QueryClientProvider>
     );
   };
 }

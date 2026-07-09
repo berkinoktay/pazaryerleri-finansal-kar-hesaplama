@@ -68,9 +68,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS order_fees_derived_correction_uniq
   ON order_fees (order_id, fee_type, derived_from)
   WHERE derived_from IS NOT NULL;
 
--- Org-düzeyi period fee'ler: Trendyol transaction id org+fee_type başına tek.
+-- Period fee'ler: Trendyol transaction id STORE+fee_type başına tek.
+-- STORE-scope (organization_id DEĞİL): bir org birden çok Trendyol satıcı hesabı
+-- (Store) bağlayabilir ve transaction id'ler satıcı-başına dizilerdir; org-scope
+-- anahtar, iki satıcının çakışan bir id'sinde ikinci mağazanın ücret satırını
+-- sessizce "duplicate" sayıp düşürür (o mağazanın hakediş toplamı bozulur).
+-- Çift-sayma riski yok: Store @@unique([organizationId, platform,
+-- externalAccountId]) aynı satıcının bir org'da iki kez bağlanmasını engeller,
+-- yani aynı org'un iki mağazası her zaman iki FARKLI satıcıdır. insertOrgPeriodFee
+-- findFirst'ü de storeId ile eşleşir (ikisi birlikte değişmeli).
+-- Mevcut org-scope index'i DROP + yeniden CREATE (IF NOT EXISTS eski tanımı korur).
+DROP INDEX IF EXISTS org_period_fees_settlement_row_uniq;
 CREATE UNIQUE INDEX IF NOT EXISTS org_period_fees_settlement_row_uniq
-  ON org_period_fees (organization_id, fee_type, trendyol_transaction_id)
+  ON org_period_fees (store_id, fee_type, trendyol_transaction_id)
   WHERE trendyol_transaction_id IS NOT NULL;
 
 -- ─── variant-recovery PR-2: ESTIMATE fee idempotency ───────────────────
