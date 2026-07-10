@@ -10,6 +10,13 @@ export interface MissingCostWidgetProps {
   /** Organization id for the missing-cost stats query. Null disables the query. */
   orgId: string | null;
   /**
+   * Active store id. The dashboard follows the "default scope = selected store"
+   * rule, so the widget counts ONLY this store's missing-cost variants — its
+   * drill-down goes to that store's filtered products table, so the count must
+   * match the destination.
+   */
+  storeId: string;
+  /**
    * Locale-aware path to the products page filtered to missing-cost variants.
    * Caller assembles the URL (route + locale + ?costStatus=NO_PROFILES) so the
    * widget stays decoupled from the routing strategy.
@@ -28,11 +35,12 @@ export interface MissingCostWidgetProps {
  */
 export function MissingCostWidget({
   orgId,
+  storeId,
   filteredProductsHref,
 }: MissingCostWidgetProps): React.ReactElement | null {
   const t = useTranslations('dashboard.missingCostWidget');
   const formatter = useFormatter();
-  const { data } = useMissingCostStats(orgId);
+  const { data } = useMissingCostStats(orgId, storeId);
 
   if (data === undefined || data.count === 0) {
     return null;

@@ -1,7 +1,7 @@
 /**
  * Integration tests for GET /v1/organizations/:orgId/products/missing-cost-stats (Task 6.2).
  *
- * Returns { count, totalVariants, byStore: [{ storeId, missingCount }] }
+ * Returns { count, totalVariants, byStore: [{ storeId, missingCount, totalVariants }] }
  * where count = number of variants with 0 active attached profiles.
  */
 
@@ -65,7 +65,7 @@ async function attachProfile(organizationId: string, variantId: string) {
 type MissingStatsBody = {
   count: number;
   totalVariants: number;
-  byStore: { storeId: string; missingCount: number }[];
+  byStore: { storeId: string; missingCount: number; totalVariants: number }[];
 };
 
 async function callStats(
@@ -130,6 +130,9 @@ describe('GET /v1/organizations/:orgId/products/missing-cost-stats', () => {
     expect(body.totalVariants).toBe(2);
     const storeRow = body.byStore.find((r) => r.storeId === store.id);
     expect(storeRow?.missingCount).toBe(2);
+    // byStore carries the store's OWN totalVariants so a store-scoped view can
+    // render "N missing of M" without mixing in other stores.
+    expect(storeRow?.totalVariants).toBe(2);
   });
 
   it('does not count variants that have an active profile attached', async () => {

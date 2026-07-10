@@ -31,12 +31,15 @@ const MissingCostStatsResponseSchema = z
         z.object({
           storeId: z.string().uuid().openapi({ example: '1c1b9b3a-4f2d-49a8-9c5e-3a2f1d8b9c0e' }),
           missingCount: z.number().int().nonnegative().openapi({ example: 15 }),
+          totalVariants: z.number().int().nonnegative().openapi({ example: 120 }),
         }),
       )
       .openapi({
         description:
           'Per-store breakdown. Only includes stores that have at least one variant. ' +
-          'Stores with missingCount = 0 are still included so the UI can calculate totals.',
+          'Stores with missingCount = 0 are still included so the UI can calculate totals. ' +
+          'Each row carries the store’s own missingCount AND totalVariants so a ' +
+          'store-scoped view can render "N missing of M" for just the active store.',
       }),
   })
   .openapi('MissingCostStatsResponse');
