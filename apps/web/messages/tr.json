@@ -450,6 +450,7 @@
     "dark": "Koyu tema"
   },
   "orgStoreSwitcher": {
+    "switchedStore": "{name} mağazasına geçildi",
     "search": "Org veya mağaza ara…",
     "sectionOrgs": "Organizasyonlar",
     "sectionStores": "Mağazalar",
@@ -2668,6 +2669,11 @@
       "title": "Henüz maliyet profili yok",
       "description": "Ürün varyantlarına atamak için maliyet profilleri oluştur. Her profil bir maliyet türünü (hammadde, ambalaj vb.) temsil eder.",
       "action": "İlk maliyetini oluştur"
+    },
+    "noStore": {
+      "title": "Önce bir mağaza seçin",
+      "description": "Maliyet profilleri mağazaya özeldir. Oluşturmak ve yönetmek için bağlı bir mağaza seçin.",
+      "cta": "Mağazalara git"
     },
     "table": {
       "columns": {

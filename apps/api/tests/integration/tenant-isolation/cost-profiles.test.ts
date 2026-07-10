@@ -17,7 +17,7 @@ import { prisma } from '@pazarsync/db';
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 
 describe('Tenant isolation — cost-profile routes', () => {
   const app = createApp();
@@ -34,9 +34,11 @@ describe('Tenant isolation — cost-profile routes', () => {
 
   async function seedOrgBProfile() {
     const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
     const profile = await prisma.costProfile.create({
       data: {
         organizationId: orgB.id,
+        storeId: storeB.id,
         name: 'Org B COGS',
         type: 'COGS',
         amountGross: new Decimal('15.00'),
@@ -73,12 +75,14 @@ describe('Tenant isolation — cost-profile routes', () => {
 
   it("Org A list does not include Org B's profiles", async () => {
     const { userA, orgA } = await setupOrgAUser();
+    const storeA = await createStore(orgA.id);
     await seedOrgBProfile();
 
     // Create one profile in Org A to confirm the list still works for own profiles
     await prisma.costProfile.create({
       data: {
         organizationId: orgA.id,
+        storeId: storeA.id,
         name: 'Org A COGS',
         type: 'COGS',
         amountGross: new Decimal('10.00'),
@@ -88,9 +92,10 @@ describe('Tenant isolation — cost-profile routes', () => {
       },
     });
 
-    const res = await app.request(`/v1/organizations/${orgA.id}/cost-profiles`, {
-      headers: { Authorization: bearer(userA.accessToken) },
-    });
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/cost-profiles?storeId=${storeA.id}`,
+      { headers: { Authorization: bearer(userA.accessToken) } },
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { name: string }[] };
     // Only Org A's profile should appear

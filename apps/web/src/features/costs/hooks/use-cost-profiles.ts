@@ -15,6 +15,8 @@ import { costsKeys } from './costs-keys';
 
 export interface UseCostProfilesArgs {
   orgId: string;
+  // Cost profiles are store-scoped: the list is always for the active store.
+  storeId: string;
   filters?: ListCostProfileFilters;
 }
 
@@ -24,11 +26,11 @@ export function useCostProfiles(
   return useQuery<ListCostProfilesResponse>({
     queryKey:
       args !== null
-        ? costsKeys.profilesList(args.orgId, args.filters)
+        ? costsKeys.profilesList(args.orgId, args.storeId, args.filters)
         : ['costs', 'profiles', '__disabled__'],
     queryFn: () => {
       if (args === null) throw new Error('useCostProfiles called with null args');
-      return listCostProfiles({ orgId: args.orgId, filters: args.filters });
+      return listCostProfiles({ orgId: args.orgId, storeId: args.storeId, filters: args.filters });
     },
     enabled: args !== null,
   });
@@ -52,12 +54,13 @@ export function useCostProfilesInfinite(
   >({
     queryKey:
       args !== null
-        ? ([...costsKeys.profilesList(args.orgId, args.filters), 'infinite'] as const)
+        ? ([...costsKeys.profilesList(args.orgId, args.storeId, args.filters), 'infinite'] as const)
         : (['costs', 'profiles', '__disabled__', 'infinite'] as const),
     queryFn: ({ pageParam }) => {
       if (args === null) throw new Error('useCostProfilesInfinite called with null args');
       return listCostProfiles({
         orgId: args.orgId,
+        storeId: args.storeId,
         filters: { ...args.filters, ...(pageParam !== undefined ? { cursor: pageParam } : {}) },
       });
     },

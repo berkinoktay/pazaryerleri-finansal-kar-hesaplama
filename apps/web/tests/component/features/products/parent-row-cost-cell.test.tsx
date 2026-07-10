@@ -73,7 +73,7 @@ vi.mock('@/features/costs/hooks/use-attach-cost-profiles', () => ({
 
 function renderCell(product: ProductWithVariants) {
   // The shared render wrapper provides the real Turkish catalog + QueryClient.
-  return render(<ParentRowCostCell orgId="org-1" product={product} />);
+  return render(<ParentRowCostCell orgId="org-1" storeId="store-1" product={product} />);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

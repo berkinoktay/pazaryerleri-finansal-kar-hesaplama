@@ -2,6 +2,8 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
+import { keepPreviousWithinStore } from '@/lib/query-scope-placeholder';
+
 import { listClaims, type ListClaimsArgs, type ListClaimsResponse } from '../api/list-claims.api';
 import { returnKeys, type ClaimListFilters } from '../query-keys';
 
@@ -22,7 +24,9 @@ export function useReturns(args: ListClaimsArgs | null): UseQueryResult<ListClai
       return listClaims(args);
     },
     enabled: args !== null,
-    placeholderData: (prev) => prev,
+    // Keep the previous page for smooth in-store pagination, but drop it on a
+    // store switch so another store's rows never flash on this store's screen.
+    placeholderData: keepPreviousWithinStore<ListClaimsResponse>(args?.storeId ?? ''),
   });
 }
 

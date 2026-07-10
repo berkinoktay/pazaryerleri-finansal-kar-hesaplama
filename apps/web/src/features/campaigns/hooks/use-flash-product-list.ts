@@ -2,6 +2,8 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
+import { keepPreviousWithinStore } from '@/lib/query-scope-placeholder';
+
 import { listFlashProducts, type FlashProductListItem } from '../api/list-flash-products.api';
 import { flashProductKeys } from '../query-keys';
 
@@ -24,6 +26,8 @@ export function useFlashProductList(
       return listFlashProducts(orgId, storeId);
     },
     enabled: storeId !== null,
-    placeholderData: (previous) => previous,
+    // Drop the previous rows on a store switch so another store's list never
+    // flashes on this store's screen; keep them for in-store refetches.
+    placeholderData: keepPreviousWithinStore<FlashProductListItem[]>(storeId ?? ''),
   });
 }

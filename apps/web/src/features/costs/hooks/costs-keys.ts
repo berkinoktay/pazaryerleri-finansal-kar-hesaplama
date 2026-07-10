@@ -25,8 +25,12 @@ import type { ListCostProfileFilters } from '../types/cost-profile.types';
 export const costsKeys = {
   all: ['costs'] as const,
   profiles: (orgId: string) => [...costsKeys.all, 'profiles', orgId] as const,
-  profilesList: (orgId: string, filters?: ListCostProfileFilters) =>
-    [...costsKeys.profiles(orgId), filters] as const,
+  // storeId sits AFTER orgId so `profiles(orgId)` stays a strict prefix — a
+  // mutation invalidating `profiles(orgId)` still matches every store's list.
+  // Including storeId means switching the active store addresses a different
+  // cache entry (cost profiles are store-scoped).
+  profilesList: (orgId: string, storeId: string, filters?: ListCostProfileFilters) =>
+    [...costsKeys.profiles(orgId), storeId, filters] as const,
   profile: (id: string) => [...costsKeys.all, 'profile', id] as const,
   profileVersions: (id: string) => [...costsKeys.profile(id), 'versions'] as const,
   profileAttachedVariants: (id: string) => [...costsKeys.profile(id), 'attached-variants'] as const,

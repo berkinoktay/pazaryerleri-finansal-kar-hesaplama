@@ -2,8 +2,10 @@
 
 import { can as roleCan, capabilitiesFor, type Capability } from '@pazarsync/utils';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useMemo, type ReactElement, type ReactNode } from 'react';
+import { toast } from 'sonner';
 
 import type { Organization } from '@/features/organization/api/organizations.api';
 import type { Store } from '@/features/stores/api/list-stores.api';
@@ -50,6 +52,7 @@ export function CurrentScopeProvider({
 }): ReactElement {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const t = useTranslations('orgStoreSwitcher');
 
   const value = useMemo<CurrentScope>(() => {
     const role = org.role;
@@ -61,8 +64,19 @@ export function CurrentScopeProvider({
       capabilities: capabilitiesFor(role),
       can: (capability) => roleCan(role, capability),
       setStore: (storeId) => {
-        void setActiveStoreIdAction(storeId);
-        router.refresh();
+        const target = accessibleStores.find((s) => s.id === storeId);
+        if (target !== undefined) {
+          toast.success(t('switchedStore', { name: target.name }));
+        }
+        // Persist the choice, THEN refresh. Awaiting the cookie write before
+        // router.refresh() closes a race where the server would re-render from
+        // the PREVIOUS store's cookie and briefly paint the old store's data.
+        // Refresh on both outcomes: a rejected cookie write still gets a refresh
+        // (best-effort) and never leaves an unhandled promise rejection.
+        void setActiveStoreIdAction(storeId).then(
+          () => router.refresh(),
+          () => router.refresh(),
+        );
       },
       setOrg: (orgId) => {
         // Tenant boundary crossing: every cached query is scoped to the
@@ -74,11 +88,16 @@ export function CurrentScopeProvider({
         // stay within one org (store-scoped keys carry storeId), so setStore
         // does not clear.
         queryClient.clear();
-        void setActiveOrgIdAction(orgId);
-        router.refresh();
+        // Await the cookie write before refreshing (same race as setStore);
+        // refresh on both outcomes so a rejected write can't leave an unhandled
+        // rejection or skip the refresh.
+        void setActiveOrgIdAction(orgId).then(
+          () => router.refresh(),
+          () => router.refresh(),
+        );
       },
     };
-  }, [org, store, accessibleStores, router, queryClient]);
+  }, [org, store, accessibleStores, router, queryClient, t]);
 
   return <CurrentScopeContext.Provider value={value}>{children}</CurrentScopeContext.Provider>;
 }

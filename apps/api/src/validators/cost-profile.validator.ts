@@ -28,7 +28,7 @@ const FxRateModeSchema = z.enum(FxRateMode).openapi({
 
 const costProfileBaseObject = z.object({
   name: z.string().trim().min(1, 'NAME_REQUIRED').max(120, 'NAME_TOO_LONG').openapi({
-    description: 'Profile display name. Unique within the organization.',
+    description: 'Profile display name. Unique within the store.',
     example: 'Hammadde COGS',
   }),
   type: CostProfileTypeSchema,
@@ -72,6 +72,14 @@ const costProfileBaseObject = z.object({
  *   2. currency === 'TRY' → fxRateMode must be 'AUTO' (TRY needs no conversion).
  */
 export const createCostProfileSchema = costProfileBaseObject
+  .extend({
+    // A cost profile belongs to exactly one store (store = operational boundary).
+    // The store the caller is creating under; validated store∈org + access at the route.
+    storeId: z
+      .string()
+      .uuid('INVALID_STORE_ID')
+      .openapi({ description: 'The store this cost profile belongs to.' }),
+  })
   .refine(
     (data) => {
       if (data.fxRateMode === 'MANUAL') {
@@ -117,6 +125,12 @@ export type UpdateCostProfileInput = z.infer<typeof updateCostProfileSchema>;
  */
 export const listCostProfilesQuerySchema = z
   .object({
+    // REQUIRED: cost profiles are store-scoped, so the list is always for one
+    // store (the active store). Validated store∈org + access at the route.
+    storeId: z
+      .string()
+      .uuid('INVALID_STORE_ID')
+      .openapi({ description: 'The store whose cost profiles to list.' }),
     type: CostProfileTypeSchema.optional().openapi({
       description: 'Filter by cost type. Omit to return all types.',
     }),
@@ -154,6 +168,7 @@ export const CostProfileSchema = z
   .object({
     id: z.string().uuid().openapi({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' }),
     organizationId: z.string().uuid().openapi({ example: 'b4e2c1a0-9d3f-47e5-8a1b-6c5d4e3f2a1b' }),
+    storeId: z.string().uuid().openapi({ example: 'c5f3d2b1-0e4a-58f6-9b2c-7d6e5f4a3b2c' }),
     name: z.string().openapi({ example: 'Hammadde COGS' }),
     type: CostProfileTypeSchema,
     amountGross: z

@@ -80,7 +80,7 @@ export function ProductsBulkCostActionBar({
   const [replaceConfirmOpen, setReplaceConfirmOpen] = React.useState(false);
 
   const profilesQuery = useCostProfiles(
-    activeDialog !== null ? { orgId, filters: { archived: 'false' } } : null,
+    activeDialog !== null ? { orgId, storeId, filters: { archived: 'false' } } : null,
   );
 
   const attachMutation = useAttachCostProfiles();

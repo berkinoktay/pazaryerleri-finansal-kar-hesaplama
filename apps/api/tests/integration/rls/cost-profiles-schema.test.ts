@@ -38,9 +38,21 @@ describe('cost-profile tables: RLS isolation', () => {
 
     const orgB = await createOrganization();
 
+    const storeB = await prisma.store.create({
+      data: {
+        organizationId: orgB.id,
+        name: 'Store B',
+        platform: 'TRENDYOL',
+        environment: 'PRODUCTION',
+        externalAccountId: randomUUID(),
+        credentials: 'test-encrypted-blob',
+      },
+    });
+
     const orgBProfile = await prisma.costProfile.create({
       data: {
         organizationId: orgB.id,
+        storeId: storeB.id,
         name: 'Org B COGS',
         type: 'COGS',
         amountGross: new Decimal('10.00'),
@@ -132,6 +144,7 @@ describe('cost-profile tables: RLS isolation', () => {
     const profileB = await prisma.costProfile.create({
       data: {
         organizationId: orgB.id,
+        storeId: storeB.id,
         name: 'Org B COGS variant',
         type: 'COGS',
         amountGross: new Decimal('5.00'),
@@ -205,6 +218,7 @@ describe('cost-profile tables: RLS isolation', () => {
     const profileB = await prisma.costProfile.create({
       data: {
         organizationId: orgB.id,
+        storeId: storeB.id,
         name: 'Org B COGS snapshot',
         type: 'COGS',
         amountGross: new Decimal('15.00'),

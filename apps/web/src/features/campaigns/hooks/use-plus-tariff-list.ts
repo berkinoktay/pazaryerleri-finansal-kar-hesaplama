@@ -2,6 +2,8 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
+import { keepPreviousWithinStore } from '@/lib/query-scope-placeholder';
+
 import { listPlusTariffs, type PlusTariffListItem } from '../api/list-plus-tariffs.api';
 import { plusCommissionTariffKeys } from '../query-keys';
 
@@ -24,6 +26,8 @@ export function usePlusTariffList(
       return listPlusTariffs(orgId, storeId);
     },
     enabled: storeId !== null,
-    placeholderData: (previous) => previous,
+    // Drop the previous rows on a store switch so another store's tariffs never
+    // flash on this store's screen; keep them for in-store refetches.
+    placeholderData: keepPreviousWithinStore<PlusTariffListItem[]>(storeId ?? ''),
   });
 }

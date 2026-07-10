@@ -1,7 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
+import { requireCostProfileStoreAccess } from '../../lib/cost-profile-store-access';
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as costProfileService from '../../services/cost-profile.service';
 import {
@@ -67,9 +67,13 @@ app.openapi(listAttachedVariantsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, id } = c.req.valid('param');
   const { cursor, limit } = c.req.valid('query');
-  const organizationId = await ensureOrgMember(userId, orgId);
 
-  const { items, nextCursor } = await costProfileService.getAttachedVariants(organizationId, id, {
+  // Membership → 403; store-access → 404 for a profile in an ungranted store
+  // (non-disclosure). Cost profiles are store-scoped, so this also hides the
+  // profile's attached variants from a MEMBER/VIEWER without a grant.
+  await requireCostProfileStoreAccess(userId, orgId, id);
+
+  const { items, nextCursor } = await costProfileService.getAttachedVariants(orgId, id, {
     cursor,
     limit,
   });

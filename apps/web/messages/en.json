@@ -450,6 +450,7 @@
     "dark": "Dark theme"
   },
   "orgStoreSwitcher": {
+    "switchedStore": "Switched to {name}",
     "search": "Search org or store…",
     "sectionOrgs": "Organizations",
     "sectionStores": "Stores",
@@ -2669,6 +2670,11 @@
       "title": "No cost profiles yet",
       "description": "Create cost profiles to attach to product variants. Each profile represents a cost type (raw materials, packaging, etc.).",
       "action": "Create your first cost profile"
+    },
+    "noStore": {
+      "title": "Select a store first",
+      "description": "Cost profiles are store-specific. Select a connected store to create and manage them.",
+      "cta": "Go to stores"
     },
     "table": {
       "columns": {

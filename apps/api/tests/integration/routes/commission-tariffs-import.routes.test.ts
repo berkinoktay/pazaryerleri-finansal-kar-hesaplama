@@ -116,6 +116,7 @@ async function setupStoreWithMatch(): Promise<Ctx> {
   const profile = await prisma.costProfile.create({
     data: {
       organizationId: org.id,
+      storeId: store.id,
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('300.00'),

@@ -1,7 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { requireStoreAccess } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as costProfileService from '../../services/cost-profile.service';
 import {
@@ -59,9 +59,11 @@ app.openapi(listCostProfilesRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId } = c.req.valid('param');
   const filters = c.req.valid('query');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  // Store-scoped: validate the caller can access the requested store (also
+  // enforces store∈org). 404 for a cross-org or ungranted store (non-disclosure).
+  await requireStoreAccess(userId, orgId, filters.storeId);
 
-  const { items, nextCursor } = await costProfileService.listCostProfiles(organizationId, {
+  const { items, nextCursor } = await costProfileService.listCostProfiles(orgId, filters.storeId, {
     type: filters.type,
     archived: filters.archived,
     q: filters.q,
@@ -73,6 +75,7 @@ app.openapi(listCostProfilesRoute, async (c) => {
     (p): z.infer<typeof CostProfileSchema> => ({
       id: p.id,
       organizationId: p.organizationId,
+      storeId: p.storeId,
       name: p.name,
       type: p.type,
       amountGross: p.amountGross.toString(),

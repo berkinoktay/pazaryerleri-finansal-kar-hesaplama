@@ -20,6 +20,11 @@ import { CostProfileForm, profileToFormValues } from './cost-profile-form';
 
 interface CostProfileCreateDialogProps {
   orgId: string;
+  /**
+   * The store a NEW profile is created under (cost profiles are store-scoped).
+   * Required for the create path; unused when editing (storeId is immutable).
+   */
+  storeId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /**
@@ -45,6 +50,7 @@ interface CostProfileCreateDialogProps {
  */
 export function CostProfileCreateDialog({
   orgId,
+  storeId,
   open,
   onOpenChange,
   editProfile,
@@ -80,7 +86,7 @@ export function CostProfileCreateDialog({
       );
     } else {
       createMutation.mutate(
-        { orgId, body: apiBody },
+        { orgId, body: { ...apiBody, storeId } },
         {
           onSuccess: (created) => {
             onOpenChange(false);

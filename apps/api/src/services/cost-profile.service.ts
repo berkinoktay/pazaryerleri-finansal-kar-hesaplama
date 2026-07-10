@@ -60,6 +60,7 @@ function toWireProfile(row: CostProfile): CostProfile {
   return {
     id: row.id,
     organizationId: row.organizationId,
+    storeId: row.storeId,
     name: row.name,
     type: row.type,
     amountGross: row.amountGross,
@@ -77,8 +78,8 @@ function toWireProfile(row: CostProfile): CostProfile {
 }
 
 /**
- * Intercept Prisma P2002 on the (organization_id, name) unique constraint
- * and translate to the domain-specific error. Re-throws everything else.
+ * Intercept Prisma P2002 on the (store_id, name) unique constraint and
+ * translate to the domain-specific error. Re-throws everything else.
  */
 function handlePrismaError(err: unknown, context: { name?: string }): never {
   if (
@@ -138,6 +139,7 @@ function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] 
  */
 export async function listCostProfiles(
   orgId: string,
+  storeId: string,
   filters: ListCostProfilesFilters,
 ): Promise<{ items: CostProfile[]; nextCursor: string | null }> {
   const limit = filters.limit ?? 25;
@@ -148,6 +150,8 @@ export async function listCostProfiles(
   const rows = await prisma.costProfile.findMany({
     where: {
       organizationId: orgId,
+      // Cost profiles are store-scoped: list only the active store's profiles.
+      storeId,
       ...(filters.type !== undefined ? { type: filters.type } : {}),
       // archived filter: undefined → only active (archivedAt IS NULL)
       ...(filters.archived === true
@@ -206,6 +210,7 @@ export async function createCostProfile(
       const row = await tx.costProfile.create({
         data: {
           organizationId: orgId,
+          storeId: input.storeId,
           name: input.name,
           type: input.type,
           amountGross,
@@ -515,7 +520,9 @@ export async function getAttachedVariants(
   profileId: string,
   opts: PaginationOpts,
 ): Promise<{ items: AttachedVariantDTO[]; nextCursor: string | null }> {
-  // Verify org ownership first (non-disclosure)
+  // Verify org ownership first (non-disclosure). Store-access narrowing for a
+  // MEMBER/VIEWER is enforced one layer up by requireCostProfileStoreAccess in
+  // the route, against the profile's own store.
   const profileExists = await prisma.costProfile.findFirst({
     where: { id: profileId, organizationId: orgId },
     select: { id: true },

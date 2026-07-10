@@ -484,7 +484,7 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
               const v = p.variants[0];
               if (v === undefined) return <span className="text-muted-foreground">—</span>;
               return (
-                <CostCellPopover orgId={props.orgId} variantId={v.id}>
+                <CostCellPopover orgId={props.orgId} storeId={props.storeId} variantId={v.id}>
                   <span>
                     <CostCell variant={v} />
                   </span>
@@ -492,12 +492,12 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
               );
             }
             // Multi-variant parent: aggregate cell (PR 10).
-            return <ParentRowCostCell orgId={props.orgId} product={p} />;
+            return <ParentRowCostCell orgId={props.orgId} storeId={props.storeId} product={p} />;
           }
           // Variant sub-row: interactive cost cell.
           const v = row.original.variant;
           return (
-            <CostCellPopover orgId={props.orgId} variantId={v.id}>
+            <CostCellPopover orgId={props.orgId} storeId={props.storeId} variantId={v.id}>
               <span>
                 <CostCell variant={v} />
               </span>

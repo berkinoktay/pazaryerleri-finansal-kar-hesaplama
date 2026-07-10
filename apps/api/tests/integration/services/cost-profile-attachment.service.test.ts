@@ -29,10 +29,20 @@ const ALL_STORES = null;
 
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
-async function seedProfile(orgId: string, opts: { archived?: boolean; name?: string } = {}) {
+// Cost profiles are store-scoped. A test that attaches a profile to a variant
+// MUST pass the variant's storeId so both share one store (assertSameStore
+// rejects a cross-store attach). Tests that only exercise the org/store guards
+// (cross-org profile/variant, ungranted store) fail before that assertion, so
+// they get a throwaway store auto-created here.
+async function seedProfile(
+  orgId: string,
+  opts: { storeId?: string; archived?: boolean; name?: string } = {},
+) {
+  const storeId = opts.storeId ?? (await createStore(orgId)).id;
   return prisma.costProfile.create({
     data: {
       organizationId: orgId,
+      storeId,
       name: opts.name ?? `Profile-${randomUUID().slice(0, 8)}`,
       type: 'COGS',
       amountGross: new Decimal('25.50'),
@@ -88,7 +98,7 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      const profile = await seedProfile(org.id, { storeId: store.id });
       const variant = await seedVariant(org.id, store.id);
 
       const result = await attachCostProfiles(
@@ -114,7 +124,7 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      const profile = await seedProfile(org.id, { storeId: store.id });
       const variant = await seedVariant(org.id, store.id);
 
       // First attach
@@ -149,7 +159,10 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const [profile1, profile2] = await Promise.all([seedProfile(org.id), seedProfile(org.id)]);
+      const [profile1, profile2] = await Promise.all([
+        seedProfile(org.id, { storeId: store.id }),
+        seedProfile(org.id, { storeId: store.id }),
+      ]);
       const [variant1, variant2] = await Promise.all([
         seedVariant(org.id, store.id),
         seedVariant(org.id, store.id),
@@ -171,7 +184,7 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const archived = await seedProfile(org.id, { archived: true });
+      const archived = await seedProfile(org.id, { storeId: store.id, archived: true });
       const variant = await seedVariant(org.id, store.id);
 
       await expect(
@@ -216,7 +229,7 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      const profile = await seedProfile(org.id, { storeId: store.id });
       const variant = await seedVariant(org.id, store.id);
 
       await attachCostProfiles(org.id, [profile.id], [variant.id], user.id, ALL_STORES);
@@ -266,9 +279,9 @@ describe('cost-profile-attachment service', () => {
       const store = await createStore(org.id);
 
       const [profile1, profile2, profile3] = await Promise.all([
-        seedProfile(org.id),
-        seedProfile(org.id),
-        seedProfile(org.id),
+        seedProfile(org.id, { storeId: store.id }),
+        seedProfile(org.id, { storeId: store.id }),
+        seedProfile(org.id, { storeId: store.id }),
       ]);
       const variant = await seedVariant(org.id, store.id);
 
@@ -305,7 +318,7 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      const profile = await seedProfile(org.id, { storeId: store.id });
       const variant = await seedVariant(org.id, store.id);
 
       await attachCostProfiles(org.id, [profile.id], [variant.id], user.id, ALL_STORES);
@@ -333,9 +346,9 @@ describe('cost-profile-attachment service', () => {
       const store = await createStore(org.id);
 
       const [profileA, profileB, profileC] = await Promise.all([
-        seedProfile(org.id),
-        seedProfile(org.id),
-        seedProfile(org.id),
+        seedProfile(org.id, { storeId: store.id }),
+        seedProfile(org.id, { storeId: store.id }),
+        seedProfile(org.id, { storeId: store.id }),
       ]);
       const variant = await seedVariant(org.id, store.id);
 
@@ -370,7 +383,7 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const archived = await seedProfile(org.id, { archived: true });
+      const archived = await seedProfile(org.id, { storeId: store.id, archived: true });
       const variant = await seedVariant(org.id, store.id);
 
       await expect(
@@ -406,7 +419,9 @@ describe('cost-profile-attachment service', () => {
       const storeA = await createStore(org.id);
       const storeB = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      // Profile is in the GRANTED store A; only the variant is in the ungranted
+      // store B — so the variant guard is what rejects (422), not the profile guard.
+      const profile = await seedProfile(org.id, { storeId: storeA.id });
       const variantB = await seedVariant(org.id, storeB.id);
 
       // Caller is granted only store A.
@@ -426,7 +441,7 @@ describe('cost-profile-attachment service', () => {
       const org = await createOrganization();
       const storeA = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      const profile = await seedProfile(org.id, { storeId: storeA.id });
       const variantA = await seedVariant(org.id, storeA.id);
 
       const result = await attachCostProfiles(org.id, [profile.id], [variantA.id], user.id, [
@@ -441,7 +456,7 @@ describe('cost-profile-attachment service', () => {
       const storeA = await createStore(org.id);
       const storeB = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      const profile = await seedProfile(org.id, { storeId: storeB.id });
       const variantB = await seedVariant(org.id, storeB.id);
       // Pre-existing link on store B (as if an OWNER attached it earlier).
       await attachCostProfiles(org.id, [profile.id], [variantB.id], user.id, ALL_STORES);
@@ -463,13 +478,16 @@ describe('cost-profile-attachment service', () => {
       const storeA = await createStore(org.id);
       const storeB = await createStore(org.id);
 
-      const profile = await seedProfile(org.id);
+      const profile = await seedProfile(org.id, { storeId: storeB.id });
       const variantB = await seedVariant(org.id, storeB.id);
       await attachCostProfiles(org.id, [profile.id], [variantB.id], user.id, ALL_STORES);
 
+      // Both the profile and the variant live in the ungranted store B; the
+      // profile guard runs first, so the ungranted-store profile is invisible → 404
+      // (uniform non-disclosure — no 422-vs-404 existence oracle).
       await expect(
         detachCostProfiles(org.id, [profile.id], [variantB.id], [storeA.id]),
-      ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
+      ).rejects.toBeInstanceOf(CostProfileNotFoundError);
     });
   });
 
@@ -482,15 +500,15 @@ describe('cost-profile-attachment service', () => {
       const store = await createStore(org.id);
 
       const [profile1, profile2] = await Promise.all([
-        seedProfile(org.id, { name: 'Profile One' }),
-        seedProfile(org.id, { name: 'Profile Two' }),
+        seedProfile(org.id, { storeId: store.id, name: 'Profile One' }),
+        seedProfile(org.id, { storeId: store.id, name: 'Profile Two' }),
       ]);
       const variant = await seedVariant(org.id, store.id);
 
       await attachCostProfiles(org.id, [profile1!.id], [variant.id], user.id, ALL_STORES);
       await attachCostProfiles(org.id, [profile2!.id], [variant.id], user.id, ALL_STORES);
 
-      const profiles = await listCostProfilesForVariant(org.id, variant.id);
+      const profiles = await listCostProfilesForVariant(org.id, variant.id, ALL_STORES);
 
       expect(profiles).toHaveLength(2);
       // Results ordered by attachedAt DESC — profile2 was attached later
@@ -503,7 +521,7 @@ describe('cost-profile-attachment service', () => {
       const store = await createStore(org.id);
       const variant = await seedVariant(org.id, store.id);
 
-      const profiles = await listCostProfilesForVariant(org.id, variant.id);
+      const profiles = await listCostProfilesForVariant(org.id, variant.id, ALL_STORES);
       expect(profiles).toHaveLength(0);
     });
 
@@ -514,9 +532,9 @@ describe('cost-profile-attachment service', () => {
 
       const variantB = await seedVariant(orgB.id, storeB.id);
 
-      await expect(listCostProfilesForVariant(orgA.id, variantB.id)).rejects.toBeInstanceOf(
-        CostProfileVariantOrgMismatchError,
-      );
+      await expect(
+        listCostProfilesForVariant(orgA.id, variantB.id, ALL_STORES),
+      ).rejects.toBeInstanceOf(CostProfileVariantOrgMismatchError);
     });
   });
 });

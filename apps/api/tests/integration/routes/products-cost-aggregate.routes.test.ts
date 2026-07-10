@@ -64,6 +64,7 @@ async function seedProduct(organizationId: string, storeId: string) {
 
 async function seedProfile(
   organizationId: string,
+  storeId: string,
   opts: {
     amount: string;
     currency?: 'TRY' | 'USD' | 'EUR';
@@ -75,6 +76,7 @@ async function seedProfile(
   const profile = await prisma.costProfile.create({
     data: {
       organizationId,
+      storeId,
       name: opts.name ?? `Profile ${randomUUID().slice(0, 6)}`,
       type: 'COGS',
       amountGross: new Decimal(opts.amount),
@@ -164,7 +166,7 @@ describe('GET /products — cost aggregate fields', () => {
     const ctx = await setup();
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, { amount: '25.50', currency: 'TRY' });
+    const profile = await seedProfile(ctx.orgId, ctx.storeId, { amount: '25.50', currency: 'TRY' });
     await attachProfile(ctx.orgId, profile.id, variant.id);
 
     const variants = await getVariants(ctx);
@@ -179,7 +181,7 @@ describe('GET /products — cost aggregate fields', () => {
     await seedFxRate('USD', '38.50', new Date());
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, {
+    const profile = await seedProfile(ctx.orgId, ctx.storeId, {
       amount: '10.00',
       currency: 'USD',
       fxRateMode: 'AUTO',
@@ -198,7 +200,7 @@ describe('GET /products — cost aggregate fields', () => {
     // No FX rate seeded
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, {
+    const profile = await seedProfile(ctx.orgId, ctx.storeId, {
       amount: '10.00',
       currency: 'USD',
       fxRateMode: 'AUTO',
@@ -216,12 +218,12 @@ describe('GET /products — cost aggregate fields', () => {
     await seedFxRate('USD', '40.00', new Date());
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const tryProfile = await seedProfile(ctx.orgId, {
+    const tryProfile = await seedProfile(ctx.orgId, ctx.storeId, {
       amount: '15.00',
       currency: 'TRY',
       name: 'TRY COGS',
     });
-    const usdProfile = await seedProfile(ctx.orgId, {
+    const usdProfile = await seedProfile(ctx.orgId, ctx.storeId, {
       amount: '5.00',
       currency: 'USD',
       fxRateMode: 'AUTO',
@@ -244,7 +246,7 @@ describe('GET /products — cost aggregate fields', () => {
     await seedFxRate('USD', '38.00', staleDate);
     const product = await seedProduct(ctx.orgId, ctx.storeId);
     const variant = await seedVariant(ctx.orgId, ctx.storeId, product.id);
-    const profile = await seedProfile(ctx.orgId, {
+    const profile = await seedProfile(ctx.orgId, ctx.storeId, {
       amount: '10.00',
       currency: 'USD',
       fxRateMode: 'AUTO',

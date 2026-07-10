@@ -45,10 +45,11 @@ async function seedVariant(organizationId: string, storeId: string) {
   });
 }
 
-async function attachProfile(organizationId: string, variantId: string) {
+async function attachProfile(organizationId: string, storeId: string, variantId: string) {
   const profile = await prisma.costProfile.create({
     data: {
       organizationId,
+      storeId,
       name: `Profile ${randomUUID().slice(0, 6)}`,
       type: 'COGS',
       amountGross: new Decimal('10.00'),
@@ -144,7 +145,7 @@ describe('GET /v1/organizations/:orgId/products/missing-cost-stats', () => {
     const variant1 = await seedVariant(org.id, store.id);
     const variant2 = await seedVariant(org.id, store.id);
     // Attach a profile to variant1 — it should NOT be counted as missing
-    await attachProfile(org.id, variant1.id);
+    await attachProfile(org.id, store.id, variant1.id);
 
     const { status, body } = await callStats(user.accessToken, org.id);
     expect(status).toBe(200);
@@ -166,7 +167,7 @@ describe('GET /v1/organizations/:orgId/products/missing-cost-stats', () => {
     await seedVariant(org.id, storeA.id);
     await seedVariant(org.id, storeA.id);
     const v = await seedVariant(org.id, storeB.id);
-    await attachProfile(org.id, v.id);
+    await attachProfile(org.id, storeB.id, v.id);
 
     const { status, body } = await callStats(user.accessToken, org.id);
     expect(status).toBe(200);

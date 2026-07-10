@@ -354,6 +354,7 @@ model Store {
   productVariants        ProductVariant[]
   orders                 Order[]
   expenses               Expense[]
+  costProfiles           CostProfile[]
   settlements            Settlement[]
   syncLogs               SyncLog[]
   webhookEvents          WebhookEvent[]
@@ -845,6 +846,11 @@ model SettlementItem {
 model CostProfile {
   id             String          @id @default(uuid()) @db.Uuid
   organizationId String          @map("organization_id") @db.Uuid
+  // Store = operational boundary: a cost profile belongs to exactly ONE store,
+  // is listed only under that store, and attaches only to that store's variants.
+  // organizationId is kept for the org-boundary RLS check (is_org_member); store
+  // isolation is enforced in the backend service (store-access + attach guard).
+  storeId        String          @map("store_id") @db.Uuid
   name           String
   type           CostProfileType
   // GROSS konvansiyon (2026-06-16): maliyet artık GROSS (KDV-dahil) girilir ve saklanır.
@@ -864,13 +870,16 @@ model CostProfile {
   updatedAt      DateTime        @updatedAt @map("updated_at")
 
   organization       Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store              Store                            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   versions           CostProfileVersion[]
   variantLinks       ProductVariantCostProfile[]
   snapshotComponents OrderItemCostSnapshotComponent[]
 
-  @@unique([organizationId, name])
-  @@index([organizationId, archivedAt])
-  @@index([organizationId, type])
+  // Names are unique PER STORE (not per org): two stores may each have a "Kargo
+  // Kutusu" profile. Deleting a store cascades its profiles.
+  @@unique([storeId, name])
+  @@index([storeId, archivedAt])
+  @@index([storeId, type])
   @@map("cost_profiles")
 }
 
@@ -912,7 +921,12 @@ model ProductVariantCostProfile {
   attachedBy       String?  @map("attached_by") @db.Uuid
 
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  profile        CostProfile    @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  // Cascade (not Restrict): a cost profile is store-scoped and only ever
+  // hard-deleted when its store is disconnected — at which point this link's
+  // variant is being deleted too (ProductVariant cascades from the same store).
+  // Restrict here deadlocked the store-delete cascade (RESTRICT is checked
+  // immediately, before the sibling variant-cascade can clear the link).
+  profile        CostProfile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([productVariantId, profileId])
   @@index([profileId])
@@ -940,7 +954,13 @@ model OrderItemCostSnapshotComponent {
   fxRateSource   String          @map("fx_rate_source")
 
   orderItem OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  profile   CostProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  // Cascade (not Restrict): a cost profile is store-scoped and only ever
+  // hard-deleted when its store is disconnected — at which point this snapshot
+  // component's order item is being deleted too (OrderItem cascades from the
+  // same store). Restrict here deadlocked the store-delete cascade. Historical
+  // integrity is unaffected: this row carries denormalized profileName/amounts
+  // and dies with its order regardless (disconnect wipes the whole store).
+  profile   CostProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([orderItemId])
   @@index([organizationId, profileType], map: "idx_oi_cost_snapshot_org_profile_type")

@@ -1,6 +1,7 @@
 import { CAPABILITIES } from '@pazarsync/utils';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook } from '@testing-library/react';
+import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +13,8 @@ import {
   useCurrentScope,
   useCurrentStore,
 } from '@/providers/current-scope';
+
+import messages from '../../../messages/tr.json';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('@/lib/active-store-actions', () => ({ setActiveStoreIdAction: vi.fn() }));
@@ -51,12 +54,16 @@ function wrapperFor(role: Organization['role']) {
   // tenant switch), so it must render under a QueryClientProvider.
   const queryClient = new QueryClient();
   return function Wrapper({ children }: { children: ReactNode }) {
+    // CurrentScopeProvider calls useTranslations (store-switch toast), so it
+    // must render under a NextIntlClientProvider too.
     return (
-      <QueryClientProvider client={queryClient}>
-        <CurrentScopeProvider org={makeOrg(role)} store={STORE} accessibleStores={[STORE]}>
-          {children}
-        </CurrentScopeProvider>
-      </QueryClientProvider>
+      <NextIntlClientProvider locale="tr" messages={messages}>
+        <QueryClientProvider client={queryClient}>
+          <CurrentScopeProvider org={makeOrg(role)} store={STORE} accessibleStores={[STORE]}>
+            {children}
+          </CurrentScopeProvider>
+        </QueryClientProvider>
+      </NextIntlClientProvider>
     );
   };
 }

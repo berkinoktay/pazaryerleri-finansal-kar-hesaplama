@@ -76,6 +76,7 @@ async function buildVariantWithProfiles(
     const costProfile = await prisma.costProfile.create({
       data: {
         organizationId: orgId,
+        storeId,
         name: p.name,
         type: 'COGS',
         amountGross: new Decimal(p.amountGross),
@@ -298,6 +299,7 @@ describe('cost-snapshot capture — GROSS convention (spec §5.8)', () => {
     await prisma.costProfile.create({
       data: {
         organizationId: org.id,
+        storeId: store.id,
         name: 'Late COGS',
         type: 'COGS',
         amountGross: new Decimal('25.00'),

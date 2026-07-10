@@ -6,7 +6,7 @@ import { prisma } from '@pazarsync/db';
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization } from '../../helpers/factories';
+import { createMembership, createOrganization, createStore } from '../../helpers/factories';
 
 describe('Cost profile routes', () => {
   const app = createApp();
@@ -21,11 +21,17 @@ describe('Cost profile routes', () => {
 
   // ─── Shared seed helper ─────────────────────────────────────────────────────
 
-  async function seedProfile(orgId: string, name = 'Test COGS') {
+  // Cost profiles are store-scoped. Tests that assert list results pass an
+  // explicit storeId so the seed lands in the store they query; the rest fetch
+  // the profile by id and don't care which store it belongs to, so a throwaway
+  // store is auto-created here.
+  async function seedProfile(orgId: string, opts: { storeId?: string; name?: string } = {}) {
+    const storeId = opts.storeId ?? (await createStore(orgId)).id;
     return prisma.costProfile.create({
       data: {
         organizationId: orgId,
-        name,
+        storeId,
+        name: opts.name ?? 'Test COGS',
         type: 'COGS',
         amountGross: new Decimal('25.50'),
         currency: 'TRY',
@@ -47,20 +53,26 @@ describe('Cost profile routes', () => {
     it('returns 403 when not a member', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
-      const res = await app.request(`/v1/organizations/${org.id}/cost-profiles`, {
-        headers: { Authorization: bearer(user.accessToken) },
-      });
+      // storeId is a required query param; a non-member is rejected at the
+      // membership gate (403) before the store existence check, so any valid
+      // uuid works.
+      const res = await app.request(
+        `/v1/organizations/${org.id}/cost-profiles?storeId=11111111-1111-4111-8111-111111111111`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
       expect(res.status).toBe(403);
     });
 
-    it('returns an empty list for an org with no profiles', async () => {
+    it('returns an empty list for a store with no profiles', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
 
-      const res = await app.request(`/v1/organizations/${org.id}/cost-profiles`, {
-        headers: { Authorization: bearer(user.accessToken) },
-      });
+      const res = await app.request(
+        `/v1/organizations/${org.id}/cost-profiles?storeId=${store.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: unknown[]; meta: { nextCursor: string | null } };
       expect(body.data).toEqual([]);
@@ -71,21 +83,44 @@ describe('Cost profile routes', () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
 
-      await seedProfile(org.id, 'Active COGS');
-      const archived = await seedProfile(org.id, 'Archived COGS');
+      await seedProfile(org.id, { storeId: store.id, name: 'Active COGS' });
+      const archived = await seedProfile(org.id, { storeId: store.id, name: 'Archived COGS' });
       await prisma.costProfile.update({
         where: { id: archived.id },
         data: { archivedAt: new Date() },
       });
 
-      const res = await app.request(`/v1/organizations/${org.id}/cost-profiles`, {
-        headers: { Authorization: bearer(user.accessToken) },
-      });
+      const res = await app.request(
+        `/v1/organizations/${org.id}/cost-profiles?storeId=${store.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { name: string }[] };
       expect(body.data).toHaveLength(1);
       expect(body.data[0]?.name).toBe('Active COGS');
+    });
+
+    it('scopes the list to the storeId query — excludes other stores in the org', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const storeA = await createStore(org.id);
+      const storeB = await createStore(org.id);
+
+      await seedProfile(org.id, { storeId: storeA.id, name: 'Store A COGS' });
+      await seedProfile(org.id, { storeId: storeB.id, name: 'Store B COGS' });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/cost-profiles?storeId=${storeA.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { name: string }[] };
+      // Only store A's profile — store B's is another store's data.
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]?.name).toBe('Store A COGS');
     });
   });
 
@@ -96,6 +131,7 @@ describe('Cost profile routes', () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
 
       const res = await app.request(`/v1/organizations/${org.id}/cost-profiles`, {
         method: 'POST',
@@ -104,6 +140,7 @@ describe('Cost profile routes', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          storeId: store.id,
           name: 'Hammadde COGS',
           type: 'COGS',
           amountGross: '25.50',
@@ -130,8 +167,10 @@ describe('Cost profile routes', () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
 
       const createBody = JSON.stringify({
+        storeId: store.id,
         name: 'Duplicate',
         type: 'PACKAGING',
         amountGross: '10.00',
@@ -158,11 +197,13 @@ describe('Cost profile routes', () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
 
       const res = await app.request(`/v1/organizations/${org.id}/cost-profiles`, {
         method: 'POST',
         headers: { Authorization: bearer(user.accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          storeId: store.id,
           name: 'X',
           type: 'COGS',
           amountGross: '10.00',

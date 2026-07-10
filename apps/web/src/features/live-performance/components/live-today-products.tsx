@@ -214,7 +214,7 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
             return <span className="text-muted-foreground">—</span>;
           }
           return (
-            <CostCellPopover orgId={orgId} variantId={product.variantId}>
+            <CostCellPopover orgId={orgId} storeId={storeId} variantId={product.variantId}>
               <Button type="button" size="sm" variant="outline" className="gap-2xs shrink-0">
                 <Alert02Icon className="size-icon-sm text-warning" />
                 {t('addCostButton')}

@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState, type ReactElement, type ReactNode } from 'react';
 
 import { CAPABILITIES } from '@pazarsync/utils';
@@ -11,9 +10,7 @@ import type { Organization as OrgApiData } from '@/features/organization/api/org
 import type { Store as ApiStore } from '@/features/stores/api/list-stores.api';
 import { useStores } from '@/features/stores/hooks/use-stores';
 import { toSwitcherStore } from '@/features/stores/lib/to-ui-store';
-import { setActiveOrgIdAction } from '@/lib/active-org-actions';
-import { setActiveStoreIdAction } from '@/lib/active-store-actions';
-import { useCan } from '@/providers/current-scope';
+import { useCurrentScope } from '@/providers/current-scope';
 
 import { ConnectStoreModal } from './connect-store-modal';
 
@@ -65,8 +62,8 @@ export function DashboardStoreLauncher({
   initialActiveStoreId,
   children,
 }: DashboardStoreLauncherProps): ReactElement {
-  const router = useRouter();
-  const canConnectStore = useCan(CAPABILITIES.STORES_CONNECT);
+  const { setStore, setOrg, can } = useCurrentScope();
+  const canConnectStore = can(CAPABILITIES.STORES_CONNECT);
   const [modalOpen, setModalOpen] = useState(false);
   const [activeStoreId, setActiveStoreId] = useState<string | undefined>(initialActiveStoreId);
 
@@ -76,19 +73,22 @@ export function DashboardStoreLauncher({
   const effectiveActiveId = activeStoreId ?? switcherStores[0]?.id;
 
   function handleSelectStore(storeId: string): void {
+    // Re-selecting the already-active store is a no-op — avoids a misleading
+    // "switched" toast and a wasted server refresh.
+    if (storeId === effectiveActiveId) return;
+    // Optimistically highlight the newly selected store in the switcher chip,
+    // then delegate to the scope provider — it toasts, persists the cookie, and
+    // refreshes the server-rendered pages (awaiting the cookie write so the
+    // refresh can't re-read the previous store's cookie and paint stale data).
     setActiveStoreId(storeId);
-    void setActiveStoreIdAction(storeId);
-    // Re-resolve server-rendered pages for the new store — they read the active
-    // store from the cookie on the server. Mirrors the org-switch path; without
-    // it a store switch updated the switcher chrome but left page content on the
-    // previous store until the next navigation.
-    router.refresh();
+    setStore(storeId);
   }
 
-  async function handleSelectOrg(orgId: string): Promise<void> {
+  function handleSelectOrg(orgId: string): void {
     if (orgId === activeOrgId) return;
-    await setActiveOrgIdAction(orgId);
-    router.refresh();
+    // Delegate to the scope provider — it clears the React Query cache (tenant
+    // boundary), persists the cookie, then refreshes.
+    setOrg(orgId);
   }
 
   return (
@@ -98,7 +98,7 @@ export function DashboardStoreLauncher({
         stores={switcherStores}
         activeOrgId={activeOrgId}
         activeStoreId={effectiveActiveId}
-        onSelectOrg={(orgId) => void handleSelectOrg(orgId)}
+        onSelectOrg={handleSelectOrg}
         onSelectStore={handleSelectStore}
         onAddStore={
           activeOrgId !== undefined && canConnectStore ? () => setModalOpen(true) : undefined

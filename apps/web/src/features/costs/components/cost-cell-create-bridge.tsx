@@ -8,6 +8,8 @@ import type { CostProfile } from '@/features/costs/types/cost-profile.types';
 
 export interface CostCellCreateBridgeProps {
   orgId: string;
+  /** Store the new profile is created under — the variant's store (store-scoped). */
+  storeId: string;
   variantId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -31,6 +33,7 @@ export interface CostCellCreateBridgeProps {
  */
 export function CostCellCreateBridge({
   orgId,
+  storeId,
   variantId,
   open,
   onOpenChange,
@@ -48,6 +51,7 @@ export function CostCellCreateBridge({
   return (
     <CostProfileCreateDialog
       orgId={orgId}
+      storeId={storeId}
       open={open}
       onOpenChange={onOpenChange}
       onSuccess={handleSuccess}

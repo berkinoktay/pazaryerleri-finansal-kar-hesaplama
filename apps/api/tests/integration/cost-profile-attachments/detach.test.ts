@@ -23,10 +23,11 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/detach', () => 
 
   // ─── Seed helpers ───────────────────────────────────────────────────────────
 
-  async function seedProfile(orgId: string) {
+  async function seedProfile(orgId: string, storeId: string) {
     return prisma.costProfile.create({
       data: {
         organizationId: orgId,
+        storeId,
         name: `Profile-${randomUUID().slice(0, 8)}`,
         type: 'COGS',
         amountGross: new Decimal('25.50'),
@@ -83,7 +84,7 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/detach', () => 
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    const profile = await seedProfile(org.id);
+    const profile = await seedProfile(org.id, store.id);
     const variant = await seedVariant(org.id, store.id);
     await seedLink(profile.id, variant.id, org.id);
 
@@ -109,7 +110,7 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/detach', () => 
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    const profile = await seedProfile(org.id);
+    const profile = await seedProfile(org.id, store.id);
     const variant = await seedVariant(org.id, store.id);
     // No link seeded
 
@@ -130,8 +131,9 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/detach', () => 
     await createMembership(orgA.id, user.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
+    const storeA = await createStore(orgA.id);
 
-    const profileA = await seedProfile(orgA.id);
+    const profileA = await seedProfile(orgA.id, storeA.id);
     const variantB = await seedVariant(orgB.id, storeB.id);
 
     const res = await app.request(`/v1/organizations/${orgA.id}/cost-profile-attachments/detach`, {

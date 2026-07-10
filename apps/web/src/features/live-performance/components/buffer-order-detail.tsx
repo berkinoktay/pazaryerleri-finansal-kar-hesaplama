@@ -97,7 +97,7 @@ export function BufferOrderDetail({
                 </TableCell>
                 <TableCell className="text-right">
                   {line.variantId !== null ? (
-                    <CostCellPopover orgId={orgId} variantId={line.variantId}>
+                    <CostCellPopover orgId={orgId} storeId={storeId} variantId={line.variantId}>
                       <Button variant="outline" size="sm" data-row-action>
                         {t('addCost')}
                       </Button>

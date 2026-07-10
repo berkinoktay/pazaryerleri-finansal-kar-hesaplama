@@ -2,6 +2,8 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
+import { keepPreviousWithinStore } from '@/lib/query-scope-placeholder';
+
 import { listTariffs, type CommissionTariffListItem } from '../api/list-tariffs.api';
 import { commissionTariffKeys } from '../query-keys';
 
@@ -24,6 +26,8 @@ export function useCommissionTariffList(
       return listTariffs(orgId, storeId);
     },
     enabled: storeId !== null,
-    placeholderData: (previous) => previous,
+    // Drop the previous rows on a store switch so another store's tariffs never
+    // flash on this store's screen; keep them for in-store refetches.
+    placeholderData: keepPreviousWithinStore<CommissionTariffListItem[]>(storeId ?? ''),
   });
 }

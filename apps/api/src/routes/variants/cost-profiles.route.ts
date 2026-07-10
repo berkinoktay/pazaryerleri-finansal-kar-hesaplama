@@ -1,7 +1,9 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
+import { ForbiddenError } from '../../lib/errors';
+import { getMembershipRole } from '../../lib/org-member-lookup';
+import { accessibleStoreIds } from '../../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as attachmentService from '../../services/cost-profile-attachment.service';
 import { CostProfileSchema } from '../../validators/cost-profile.validator';
@@ -58,14 +60,24 @@ const listVariantCostProfilesRoute = createRoute({
 app.openapi(listVariantCostProfilesRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, variantId } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
 
-  const profiles = await attachmentService.listCostProfilesForVariant(organizationId, variantId);
+  // Membership → 403. Then narrow to the caller's accessible stores so a
+  // MEMBER/VIEWER can't read the cost profiles of a variant in a store they
+  // weren't granted — 422 non-disclosure, same as a cross-org variant. `null`
+  // = OWNER/ADMIN (every store).
+  const role = await getMembershipRole(userId, orgId);
+  if (role === null) {
+    throw new ForbiddenError('Not a member of this organization');
+  }
+  const storeIds = await accessibleStoreIds(userId, orgId, role);
+
+  const profiles = await attachmentService.listCostProfilesForVariant(orgId, variantId, storeIds);
 
   const data = profiles.map(
     (profile): z.infer<typeof CostProfileSchema> => ({
       id: profile.id,
       organizationId: profile.organizationId,
+      storeId: profile.storeId,
       name: profile.name,
       type: profile.type,
       amountGross: profile.amountGross.toString(),

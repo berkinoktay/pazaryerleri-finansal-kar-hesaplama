@@ -2,6 +2,8 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
+import { keepPreviousWithinStore } from '@/lib/query-scope-placeholder';
+
 import {
   listCommissionRates,
   type ListCommissionRatesArgs,
@@ -30,7 +32,9 @@ export function useCommissionRates(
       return listCommissionRates(args);
     },
     enabled: args !== null,
-    placeholderData: (previous) => previous,
+    // Smooth in-store pagination, but drop the previous page on a store switch
+    // so another store's rows never flash on this store's screen.
+    placeholderData: keepPreviousWithinStore<ListCommissionRatesResponse>(args?.storeId ?? ''),
   });
 }
 

@@ -411,14 +411,21 @@ export async function createWebhookEvent(
 
 export async function createCostProfile(
   organizationId: string,
-  overrides: { name?: string; type?: CostProfileType; amountGross?: string } = {},
+  overrides: { storeId?: string; name?: string; type?: CostProfileType; amountGross?: string } = {},
 ) {
   // GROSS konvansiyon (2026-06-16): amountGross is GROSS (KDV-dahil) + vatRate.
   // A cost snapshot captured from this profile is fully specified (gross + rate),
   // which is what the estimate path needs to compute a non-null estimatedNetProfit.
+  //
+  // storeId is required on the model (cost profiles are store-scoped). Tests that
+  // attach a profile to a variant MUST pass the variant's storeId so both share a
+  // store (the attach guard rejects a cross-store attach); tests that don't care
+  // get a throwaway store auto-created here.
+  const storeId = overrides.storeId ?? (await createStore(organizationId)).id;
   return prisma.costProfile.create({
     data: {
       organizationId,
+      storeId,
       name: overrides.name ?? `COGS-${randomUUID().slice(0, 8)}`,
       type: overrides.type ?? 'COGS',
       amountGross: overrides.amountGross ?? '60.00',

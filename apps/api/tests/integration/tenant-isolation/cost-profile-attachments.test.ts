@@ -40,10 +40,16 @@ describe('Tenant isolation — cost-profile attachment routes', () => {
 
   // ─── Shared seed helpers ──────────────────────────────────────────────────────
 
-  async function seedProfile(orgId: string) {
+  // Most tests here are cross-org REJECTION cases where the profile only needs a
+  // valid (throwaway) store of its own. Pass an explicit storeId for the
+  // store-access test that must put the profile in a GRANTED store so the
+  // variant guard (not the profile guard) is what rejects.
+  async function seedProfile(orgId: string, storeId?: string) {
+    const sid = storeId ?? (await createStore(orgId)).id;
     return prisma.costProfile.create({
       data: {
         organizationId: orgId,
+        storeId: sid,
         name: `Profile-${randomUUID().slice(0, 8)}`,
         type: 'COGS',
         amountGross: new Decimal('25.50'),
@@ -260,7 +266,9 @@ describe('Tenant isolation — cost-profile attachment routes', () => {
     const storeB = await createStore(org.id);
     await createMemberStoreAccess(org.id, membership.id, storeA.id);
 
-    const profile = await seedProfile(org.id);
+    // Profile in the GRANTED store A; only the variant is in the ungranted store
+    // B — so the variant guard rejects (422), not the profile guard.
+    const profile = await seedProfile(org.id, storeA.id);
     const variantB = await seedVariant(org.id, storeB.id);
 
     const res = await app.request(`/v1/organizations/${org.id}/cost-profile-attachments/attach`, {
