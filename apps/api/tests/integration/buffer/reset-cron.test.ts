@@ -32,12 +32,13 @@ describe('reset_live_performance_buffer()', () => {
     await truncateAll();
   });
 
-  it('deletes a PERMANENT_FAILED past-day entry (un-graduatable safety-net)', async () => {
+  it('deletes a PERMANENT_FAILED entry older than the 7-day recovery window', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const yesterday = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // 8 days old: past the 7-day window, so the un-graduatable row is reaped.
+    const eightDaysAgo = getBusinessDateAnchor(new Date(Date.now() - 8 * ONE_DAY_MS));
     await createBufferEntry(org.id, store.id, {
-      orderDate: yesterday,
+      orderDate: eightDaysAgo,
       platformOrderId: 'perm',
       status: 'PERMANENT_FAILED',
     });
@@ -48,11 +49,13 @@ describe('reset_live_performance_buffer()', () => {
     expect(await prisma.livePerformanceBuffer.count()).toBe(0);
   });
 
-  it('KEEPS a PENDING past-day entry (the worker graduates it, cron must not delete)', async () => {
+  it('KEEPS a PENDING entry even older than 7 days (the worker graduates it, never the cron)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
+    // Age is irrelevant for recoverable statuses: the 7-day window applies ONLY to
+    // PERMANENT_FAILED, so an 8-day-old PENDING row must still survive the reset.
     const entry = await createBufferEntry(org.id, store.id, {
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 8 * ONE_DAY_MS)),
       platformOrderId: 'pending-keep',
       status: 'PENDING',
     });
@@ -63,11 +66,11 @@ describe('reset_live_performance_buffer()', () => {
     expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(1);
   });
 
-  it('KEEPS a FAILED past-day entry (promote retry owns it, not the cron)', async () => {
+  it('KEEPS a FAILED entry even older than 7 days (promote retry owns it, not the cron)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     const entry = await createBufferEntry(org.id, store.id, {
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 8 * ONE_DAY_MS)),
       platformOrderId: 'failed-keep',
       status: 'FAILED',
     });
@@ -78,12 +81,33 @@ describe('reset_live_performance_buffer()', () => {
     expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(1);
   });
 
-  it('KEEPS a PERMANENT_FAILED entry whose business date is today (strict past-day only)', async () => {
+  it('KEEPS a PERMANENT_FAILED entry exactly 7 days old (boundary is strict: predicate is < today - 7)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
+    // Exactly on the 7-day boundary. The DELETE predicate is strictly
+    // `order_date < (istanbul_today - 7)`, so a row dated exactly today-7 is
+    // NOT yet past the recovery window — the flush tick may still graduate it,
+    // and the cron must not reap it a day early.
+    const entry = await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 7 * ONE_DAY_MS)),
+      platformOrderId: 'perm-boundary',
+      status: 'PERMANENT_FAILED',
+    });
+
+    const deleted = await runReset();
+
+    expect(deleted).toBe(0);
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(1);
+  });
+
+  it('KEEPS a PERMANENT_FAILED entry only 3 days old (inside the 7-day recovery window)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // 3 days old: still inside the 7-day window, so the flush tick may yet
+    // graduate it. The cron must not delete it early.
     await createBufferEntry(org.id, store.id, {
-      orderDate: getBusinessDateAnchor(),
-      platformOrderId: 'perm-today',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 3 * ONE_DAY_MS)),
+      platformOrderId: 'perm-recent',
       status: 'PERMANENT_FAILED',
     });
 
@@ -97,7 +121,7 @@ describe('reset_live_performance_buffer()', () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     await createBufferEntry(org.id, store.id, {
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 8 * ONE_DAY_MS)),
       platformOrderId: 'perm-idem',
       status: 'PERMANENT_FAILED',
     });
@@ -117,7 +141,9 @@ describe('reset_live_performance_buffer()', () => {
   it('mixed past-day statuses → deletes only PERMANENT_FAILED, keeps PENDING and FAILED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const pastDay = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // All 8 days old (past the window): only PERMANENT_FAILED is reaped; PENDING
+    // and FAILED are recoverable and survive regardless of age.
+    const pastDay = getBusinessDateAnchor(new Date(Date.now() - 8 * ONE_DAY_MS));
     await createBufferEntry(org.id, store.id, {
       orderDate: pastDay,
       platformOrderId: 'mixed-perm',
