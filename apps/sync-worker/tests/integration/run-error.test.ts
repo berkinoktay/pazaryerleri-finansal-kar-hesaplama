@@ -7,10 +7,12 @@
 // failing terminally. These tests lock both sides of the gate.
 
 import { prisma } from '@pazarsync/db';
-import { MarketplaceUnreachable } from '@pazarsync/sync-core';
+import { MarketplaceUnreachable, MAX_SYNC_ATTEMPTS } from '@pazarsync/sync-core';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { handleRunError, MAX_ATTEMPTS } from '../../src/run-error';
+import { handleRunError } from '../../src/run-error';
+
+const WORKER_ID = 'worker-test';
 
 import {
   createMembership,
@@ -26,6 +28,9 @@ async function setupExhaustedRow(syncType: 'CLAIMS' | 'SETTLEMENTS' | 'PRODUCTS'
   await createMembership(org.id, user.id);
   const store = await createStore(org.id);
 
+  // RUNNING + claimed by WORKER_ID: handleRunError's terminal writes
+  // (fail / recordSkippedPageAndContinue) are lease-fenced on this exact
+  // claim, so the row must be held by the worker driving the error.
   const log = await prisma.syncLog.create({
     data: {
       organizationId: org.id,
@@ -33,8 +38,11 @@ async function setupExhaustedRow(syncType: 'CLAIMS' | 'SETTLEMENTS' | 'PRODUCTS'
       syncType,
       status: 'RUNNING',
       startedAt: new Date(),
+      claimedAt: new Date(),
+      claimedBy: WORKER_ID,
+      lastTickAt: new Date(),
       progressCurrent: 0,
-      attemptCount: MAX_ATTEMPTS,
+      attemptCount: MAX_SYNC_ATTEMPTS,
     },
   });
   return log.id;
@@ -52,7 +60,7 @@ describe('handleRunError — skip-bad-page syncType gate', () => {
     const id = await setupExhaustedRow('CLAIMS');
     const err = new MarketplaceUnreachable('TRENDYOL', { httpStatus: 0, url: 'http://x' });
 
-    await handleRunError(id, 'CLAIMS', MAX_ATTEMPTS, err);
+    await handleRunError(id, 'CLAIMS', MAX_SYNC_ATTEMPTS, err, WORKER_ID);
 
     const row = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
     expect(row.status).toBe('FAILED');
@@ -64,7 +72,7 @@ describe('handleRunError — skip-bad-page syncType gate', () => {
     const id = await setupExhaustedRow('SETTLEMENTS');
     const err = new MarketplaceUnreachable('TRENDYOL', { httpStatus: 0, url: 'http://x' });
 
-    await handleRunError(id, 'SETTLEMENTS', MAX_ATTEMPTS, err);
+    await handleRunError(id, 'SETTLEMENTS', MAX_SYNC_ATTEMPTS, err, WORKER_ID);
 
     const row = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
     expect(row.status).toBe('FAILED');
@@ -75,7 +83,7 @@ describe('handleRunError — skip-bad-page syncType gate', () => {
     const id = await setupExhaustedRow('PRODUCTS');
     const err = new MarketplaceUnreachable('TRENDYOL', { httpStatus: 502, url: 'http://x' });
 
-    await handleRunError(id, 'PRODUCTS', MAX_ATTEMPTS, err);
+    await handleRunError(id, 'PRODUCTS', MAX_SYNC_ATTEMPTS, err, WORKER_ID);
 
     const row = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
     expect(row.status).toBe('PENDING');

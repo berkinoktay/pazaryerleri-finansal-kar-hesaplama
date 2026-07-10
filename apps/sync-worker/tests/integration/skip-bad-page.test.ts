@@ -33,6 +33,8 @@ import {
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 
+const WORKER_ID = 'worker-test';
+
 describe('advanceCursorPastBadPage', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -50,20 +52,24 @@ describe('advanceCursorPastBadPage', () => {
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
+    // The worker still HOLDS the claim (RUNNING, claimed by this worker)
+    // when handleRunError drives the skip recovery — recordSkippedPageAndContinue
+    // is lease-fenced, so the row must be RUNNING under WORKER_ID for the
+    // fenced updateMany to match.
     const row = await prisma.syncLog.create({
       data: {
         organizationId: org.id,
         storeId: store.id,
         syncType: 'PRODUCTS',
-        status: 'FAILED_RETRYABLE',
+        status: 'RUNNING',
         startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: WORKER_ID,
+        lastTickAt: new Date(),
         attemptCount: 5,
         progressCurrent: opts.progressCurrent,
         progressTotal: opts.progressTotal,
         pageCursor: opts.cursor as never,
-        errorCode: 'MARKETPLACE_UNREACHABLE',
-        errorMessage: 'Marketplace unreachable (500) — upstream issue',
-        nextAttemptAt: new Date(Date.now() + 30_000),
       },
     });
     return row.id;
@@ -86,7 +92,7 @@ describe('advanceCursorPastBadPage', () => {
       responseBodySnippet: '{"errors":[{"code":"INTERNAL_SERVER_ERROR"}]}',
     });
 
-    const advanced = await advanceCursorPastBadPage(id, err);
+    const advanced = await advanceCursorPastBadPage(id, err, WORKER_ID);
 
     expect(advanced).toBe(true);
 
@@ -125,7 +131,7 @@ describe('advanceCursorPastBadPage', () => {
 
     const err = new MarketplaceUnreachable('TRENDYOL', { httpStatus: 502 });
 
-    const advanced = await advanceCursorPastBadPage(id, err);
+    const advanced = await advanceCursorPastBadPage(id, err, WORKER_ID);
 
     // We can't synthesize a "next page" from a token cursor — the worker
     // should fall through to terminal FAIL.
@@ -133,8 +139,9 @@ describe('advanceCursorPastBadPage', () => {
 
     const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
     // No state change expected — the caller (handleRunError) is the one
-    // that calls fail() when this returns false.
-    expect(after.status).toBe('FAILED_RETRYABLE');
+    // that calls fail() when this returns false, so the row is still the
+    // RUNNING claim it came in as.
+    expect(after.status).toBe('RUNNING');
     expect(after.skippedPages).toBeNull();
   });
 
@@ -149,12 +156,12 @@ describe('advanceCursorPastBadPage', () => {
 
     const err = new MarketplaceUnreachable('TRENDYOL', { httpStatus: 500 });
 
-    const advanced = await advanceCursorPastBadPage(id, err);
+    const advanced = await advanceCursorPastBadPage(id, err, WORKER_ID);
 
     expect(advanced).toBe(false);
 
     const after = await prisma.syncLog.findUniqueOrThrow({ where: { id } });
-    expect(after.status).toBe('FAILED_RETRYABLE');
+    expect(after.status).toBe('RUNNING');
     expect(after.skippedPages).toBeNull();
   });
 });

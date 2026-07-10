@@ -12,5 +12,5 @@ export {
 export { mapPrismaError } from './map-prisma-error';
 export * as syncLogService from './sync-log.service';
 export { markRetryable } from './sync-log.service';
-export { tryClaimNext } from './claim';
+export { tryClaimNext, MAX_SYNC_ATTEMPTS } from './claim';
 export { syncLog, type LogContext, type LogLevel } from './logger';

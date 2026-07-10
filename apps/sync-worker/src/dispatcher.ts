@@ -10,13 +10,17 @@ export type Registry = Partial<Record<SyncType, ModuleHandler>>;
  * registered module handler. Throws if no handler is registered for the
  * SyncLog's type.
  */
-export async function dispatch(registry: Registry, syncLog: SyncLog): Promise<ChunkResult> {
+export async function dispatch(
+  registry: Registry,
+  syncLog: SyncLog,
+  workerId: string,
+): Promise<ChunkResult> {
   const handler = registry[syncLog.syncType];
   if (handler === undefined) {
     throw new Error(`No handler registered for syncType=${syncLog.syncType}`);
   }
   const cursor = decodeCursor(syncLog);
-  return handler.processChunk({ syncLog, cursor });
+  return handler.processChunk({ syncLog, cursor, workerId });
 }
 
 function decodeCursor(syncLog: SyncLog): unknown | null {

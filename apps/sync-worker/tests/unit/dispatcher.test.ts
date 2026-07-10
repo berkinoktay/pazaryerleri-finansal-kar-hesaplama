@@ -10,13 +10,17 @@ describe('dispatcher', () => {
       processChunk: vi.fn().mockResolvedValue({ kind: 'done', finalCount: 0 }),
     };
     const fakeRegistry = { PRODUCTS: handler } as never;
-    const result = await dispatch(fakeRegistry, syncLog);
-    expect(handler.processChunk).toHaveBeenCalledWith({ syncLog, cursor: null });
+    const result = await dispatch(fakeRegistry, syncLog, 'worker-test');
+    expect(handler.processChunk).toHaveBeenCalledWith({
+      syncLog,
+      cursor: null,
+      workerId: 'worker-test',
+    });
     expect(result.kind).toBe('done');
   });
 
   it('throws on an unregistered syncType', async () => {
     const syncLog = { syncType: 'ORDERS', id: 'log-2', pageCursor: null } as unknown as SyncLog;
-    await expect(dispatch({} as never, syncLog)).rejects.toThrow(/no handler/i);
+    await expect(dispatch({} as never, syncLog, 'worker-test')).rejects.toThrow(/no handler/i);
   });
 });

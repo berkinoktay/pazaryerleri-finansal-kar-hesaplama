@@ -280,12 +280,15 @@ describe('handleCargoInvoiceItems (PR-8)', () => {
         syncType: 'SETTLEMENTS',
         status: 'RUNNING',
         startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
         progressCurrent: 0,
       },
     });
 
     await processSettlementsChunk(
-      { syncLog: log, cursor: null },
+      { syncLog: log, cursor: null, workerId: 'worker-test' },
       {
         fetchSettlements: async function* () {
           // no settlement rows in this scenario

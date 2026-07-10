@@ -1,7 +1,7 @@
 import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { tryClaimNext } from '../../src/claim';
+import { MAX_SYNC_ATTEMPTS, tryClaimNext } from '../../src/claim';
 
 // Reuses apps/api test helpers — packages/sync-core does not yet have its own DB factories.
 import {
@@ -92,6 +92,55 @@ describe('tryClaimNext', () => {
 
     const claimed = await tryClaimNext('worker-test-3');
     expect(claimed).toBeNull();
+  });
+
+  // ─── Attempt cap (lease-hardening) ───────────────────────────────────
+  // Rows that have burned every attempt are unclaimable — the cap on
+  // tryClaimNext stops a worker from picking one back up (the watchdog
+  // reaper terminates it instead so it never starves the slot).
+
+  it('does not claim a PENDING row whose attempt_count has reached MAX_SYNC_ATTEMPTS', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        syncType: 'PRODUCTS',
+        status: 'PENDING',
+        startedAt: new Date(),
+        attemptCount: MAX_SYNC_ATTEMPTS,
+      },
+    });
+
+    const claimed = await tryClaimNext('worker-cap');
+    expect(claimed).toBeNull();
+  });
+
+  it('claims a row one attempt below the cap and bumps it to the final attempt', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        syncType: 'PRODUCTS',
+        status: 'PENDING',
+        startedAt: new Date(),
+        attemptCount: MAX_SYNC_ATTEMPTS - 1,
+      },
+    });
+
+    // attempt_count 4 < 5 → claimable; the claim increments it to exactly
+    // MAX_SYNC_ATTEMPTS, which is the legitimate "executing its final
+    // attempt" state the watchdog must leave alone while fresh.
+    const claimed = await tryClaimNext('worker-final');
+    expect(claimed?.id).toBe(log.id);
+    expect(claimed?.attemptCount).toBe(MAX_SYNC_ATTEMPTS);
   });
 
   // ─── Multi-worker race coverage (spec §12 T2) ────────────────────────

@@ -133,6 +133,29 @@ export class SyncInProgressError extends Error {
 }
 
 /**
+ * A lease-fenced write on a claimed sync_logs row matched zero rows,
+ * meaning the row is no longer RUNNING under this worker's id — a peer
+ * (or the watchdog reaper) has already taken it over or terminated it.
+ * Thrown by the fenced sync-log helpers (tick / heartbeat / complete /
+ * fail / markRetryable / releaseToPending / recordSkippedPageAndContinue).
+ *
+ * The worker's poll loop catches this BEFORE any error classification and
+ * returns without writing any sync-log state — the row belongs to another
+ * worker now, so touching it would clobber the new owner's progress.
+ */
+export class LostLeaseError extends Error {
+  readonly syncLogId: string;
+  readonly workerId: string;
+
+  constructor(syncLogId: string, workerId: string) {
+    super(`sync log lease lost for ${syncLogId} (worker ${workerId})`);
+    this.name = 'LostLeaseError';
+    this.syncLogId = syncLogId;
+    this.workerId = workerId;
+  }
+}
+
+/**
  * Marketplace itself is down / timed out / 5xx. 503 tells the client to
  * retry later; the underlying issue is upstream, not our data.
  *

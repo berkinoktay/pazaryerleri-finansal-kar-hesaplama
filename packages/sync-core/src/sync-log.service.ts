@@ -4,12 +4,38 @@
 // is the one that knows what "a batch" means.
 
 import { prisma } from '@pazarsync/db';
-import type { SyncLog, SyncType } from '@pazarsync/db';
+import type { Prisma, SyncLog, SyncType } from '@pazarsync/db';
 import { SyncErrorCode } from '@pazarsync/db/enums';
 
 import { parseSkippedPages, type ProductsCursor, type SkippedPageEntry } from './checkpoint';
-import { NotFoundError, SyncInProgressError } from './errors';
+import { LostLeaseError, NotFoundError, SyncInProgressError } from './errors';
 import { syncLog } from './logger';
+
+// ─── Lease fencing ────────────────────────────────────────────────────
+//
+// Every write issued by the worker that CURRENTLY HOLDS a claim goes
+// through this fence instead of a bare `update({ where: { id } })`. The
+// updateMany only matches while the row is still RUNNING AND claimed by
+// this exact worker; a zero-row result means the watchdog reaper (or a
+// peer that re-claimed after a stale sweep) has taken the row over, so we
+// throw LostLeaseError and the worker abandons it WITHOUT clobbering the
+// new owner's state. Read/API-side helpers (acquireSlot, advance,
+// listActiveAndRecent, listOrgActiveAndRecent, getById) are intentionally
+// NOT fenced — they are not claim-holder writes.
+
+async function fencedUpdate(
+  syncLogId: string,
+  workerId: string,
+  data: Prisma.SyncLogUpdateManyMutationInput,
+): Promise<void> {
+  const { count } = await prisma.syncLog.updateMany({
+    where: { id: syncLogId, claimedBy: workerId, status: 'RUNNING' },
+    data,
+  });
+  if (count === 0) {
+    throw new LostLeaseError(syncLogId, workerId);
+  }
+}
 
 export async function advance(
   id: string,
@@ -27,20 +53,17 @@ export async function advance(
   });
 }
 
-export async function complete(id: string, syncedCount: number): Promise<void> {
+export async function complete(id: string, syncedCount: number, workerId: string): Promise<void> {
   syncLog.info('sync.completed', { syncLogId: id, finalCount: syncedCount });
-  await prisma.syncLog.update({
-    where: { id },
-    data: {
-      status: 'COMPLETED',
-      completedAt: new Date(),
-      recordsProcessed: syncedCount,
-      progressCurrent: syncedCount,
-      // A run that recovered via markRetryable carries the last transient
-      // error in these fields — a COMPLETED row must not advertise one.
-      errorCode: null,
-      errorMessage: null,
-    },
+  await fencedUpdate(id, workerId, {
+    status: 'COMPLETED',
+    completedAt: new Date(),
+    recordsProcessed: syncedCount,
+    progressCurrent: syncedCount,
+    // A run that recovered via markRetryable carries the last transient
+    // error in these fields — a COMPLETED row must not advertise one.
+    errorCode: null,
+    errorMessage: null,
   });
 }
 
@@ -48,16 +71,14 @@ export async function fail(
   id: string,
   errorCode: SyncErrorCode,
   errorMessage: string,
+  workerId: string,
 ): Promise<void> {
   syncLog.error('sync.failed', { syncLogId: id, errorCode, errorMessage });
-  await prisma.syncLog.update({
-    where: { id },
-    data: {
-      status: 'FAILED',
-      completedAt: new Date(),
-      errorCode,
-      errorMessage,
-    },
+  await fencedUpdate(id, workerId, {
+    status: 'FAILED',
+    completedAt: new Date(),
+    errorCode,
+    errorMessage,
   });
 }
 
@@ -261,7 +282,7 @@ export interface TickInput {
  * stores the cursor / progress / stage so the SyncCenter UI sees motion
  * and a redeploy mid-sync resumes from the right place.
  */
-export async function tick(syncLogId: string, input: TickInput): Promise<void> {
+export async function tick(syncLogId: string, input: TickInput, workerId: string): Promise<void> {
   syncLog.info('chunk.tick', {
     syncLogId,
     progress: input.progress,
@@ -269,15 +290,12 @@ export async function tick(syncLogId: string, input: TickInput): Promise<void> {
     stage: input.stage,
     cursor: input.cursor,
   });
-  await prisma.syncLog.update({
-    where: { id: syncLogId },
-    data: {
-      lastTickAt: new Date(),
-      pageCursor: input.cursor as never,
-      progressCurrent: input.progress,
-      progressTotal: input.total,
-      progressStage: input.stage,
-    },
+  await fencedUpdate(syncLogId, workerId, {
+    lastTickAt: new Date(),
+    pageCursor: input.cursor as never,
+    progressCurrent: input.progress,
+    progressTotal: input.total,
+    progressStage: input.stage,
   });
 }
 
@@ -289,11 +307,8 @@ export async function tick(syncLogId: string, input: TickInput): Promise<void> {
  * call it periodically mid-loop or a >90s scan gets reaped and re-run
  * concurrently by a peer.
  */
-export async function heartbeat(syncLogId: string): Promise<void> {
-  await prisma.syncLog.update({
-    where: { id: syncLogId },
-    data: { lastTickAt: new Date() },
-  });
+export async function heartbeat(syncLogId: string, workerId: string): Promise<void> {
+  await fencedUpdate(syncLogId, workerId, { lastTickAt: new Date() });
 }
 
 /**
@@ -302,16 +317,23 @@ export async function heartbeat(syncLogId: string): Promise<void> {
  * cursor is already persisted from the last tick, so dropping the
  * claim (claimedAt/claimedBy → null) is enough — `pageCursor` is
  * intentionally NOT cleared so the next claimer resumes mid-run.
+ *
+ * `attemptCount` is reset to 0 as well. This release is reachable ONLY after
+ * a chunk completed cleanly (no thrown error — the loop checks shuttingDown
+ * BETWEEN chunks), so it can never mask a poison job. Resetting the budget
+ * prevents a redeploy storm from burning a healthy long-running sync toward
+ * terminal FAILED: each graceful hand-off would otherwise leave the claim
+ * increment in place, and a few rolling restarts could exhaust MAX_ATTEMPTS
+ * on a sync that was making steady progress. A genuinely stuck run is still
+ * caught by the watchdog reaper + the per-attempt cap on the error path.
  */
-export async function releaseToPending(syncLogId: string): Promise<void> {
+export async function releaseToPending(syncLogId: string, workerId: string): Promise<void> {
   syncLog.info('sync.released', { syncLogId });
-  await prisma.syncLog.update({
-    where: { id: syncLogId },
-    data: {
-      status: 'PENDING',
-      claimedAt: null,
-      claimedBy: null,
-    },
+  await fencedUpdate(syncLogId, workerId, {
+    status: 'PENDING',
+    claimedAt: null,
+    claimedBy: null,
+    attemptCount: 0,
   });
 }
 
@@ -336,6 +358,7 @@ export async function markRetryable(
   attemptCount: number,
   errorCode: SyncErrorCode,
   errorMessage: string,
+  workerId: string,
 ): Promise<void> {
   const backoffMs = Math.min(30_000 * Math.pow(2, attemptCount - 1), 30 * 60_000);
   const nextAttemptAt = new Date(Date.now() + backoffMs);
@@ -345,16 +368,13 @@ export async function markRetryable(
     errorCode,
     nextAttemptAt: nextAttemptAt.toISOString(),
   });
-  await prisma.syncLog.update({
-    where: { id: syncLogId },
-    data: {
-      status: 'FAILED_RETRYABLE',
-      errorCode,
-      errorMessage,
-      nextAttemptAt,
-      claimedAt: null,
-      claimedBy: null,
-    },
+  await fencedUpdate(syncLogId, workerId, {
+    status: 'FAILED_RETRYABLE',
+    errorCode,
+    errorMessage,
+    nextAttemptAt,
+    claimedAt: null,
+    claimedBy: null,
   });
 }
 
@@ -390,6 +410,7 @@ export async function recordSkippedPageAndContinue(
   syncLogId: string,
   skipEntry: SkippedPageEntry,
   nextCursor: ProductsCursor | null,
+  workerId: string,
 ): Promise<void> {
   syncLog.warn('sync.page-skipped', {
     syncLogId,
@@ -404,8 +425,11 @@ export async function recordSkippedPageAndContinue(
       select: { skippedPages: true },
     });
     const existing = parseSkippedPages(current.skippedPages);
-    await tx.syncLog.update({
-      where: { id: syncLogId },
+    // Lease-fenced inside the transaction: the worker still holds the
+    // RUNNING claim when handleRunError drives the skip recovery, so a
+    // zero-row result means a reaper/peer took the row — abandon it.
+    const { count } = await tx.syncLog.updateMany({
+      where: { id: syncLogId, claimedBy: workerId, status: 'RUNNING' },
       data: {
         status: 'PENDING',
         attemptCount: 0,
@@ -418,5 +442,8 @@ export async function recordSkippedPageAndContinue(
         nextAttemptAt: null,
       },
     });
+    if (count === 0) {
+      throw new LostLeaseError(syncLogId, workerId);
+    }
   });
 }

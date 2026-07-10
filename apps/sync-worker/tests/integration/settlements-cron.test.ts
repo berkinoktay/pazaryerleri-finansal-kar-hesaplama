@@ -31,6 +31,10 @@ import {
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
 
+// Settlements heartbeat is lease-fenced: the syncLog is created RUNNING and
+// claimed by this id, and every direct processSettlementsChunk call passes it.
+const WORKER_ID = 'worker-test';
+
 const BARCODE = 'EAN13-CRON';
 const SHIPMENT_PACKAGE_ID = 444_555_666;
 const PAYMENT_ORDER_ID = 99_999_111;
@@ -159,6 +163,9 @@ async function buildScenario(): Promise<BuiltCtx> {
       syncType: 'SETTLEMENTS',
       status: 'RUNNING',
       startedAt: new Date(),
+      claimedAt: new Date(),
+      claimedBy: WORKER_ID,
+      lastTickAt: new Date(),
       progressCurrent: 0,
     },
   });
@@ -372,7 +379,7 @@ describe('processSettlementsChunk — state machine mega-test', () => {
     // PARTIALLY_SETTLED.
     const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
     const result1 = await processSettlementsChunk(
-      { syncLog, cursor: null },
+      { syncLog, cursor: null, workerId: WORKER_ID },
       makeMockFetchers({
         settlements: { Sale: [makeSaleRow()] },
         otherFinancials: { Stoppage: [makeStoppageRow()] },
@@ -387,7 +394,7 @@ describe('processSettlementsChunk — state machine mega-test', () => {
 
     // ─── Tick 2: PSF + PaymentOrder — full settlement ──────────────────
     const result2 = await processSettlementsChunk(
-      { syncLog, cursor: null },
+      { syncLog, cursor: null, workerId: WORKER_ID },
       makeMockFetchers({
         settlements: {}, // Sale row already processed; re-poll absorbs no-op
         otherFinancials: {
@@ -420,7 +427,7 @@ describe('processSettlementsChunk — state machine mega-test', () => {
     // ─── Tick 3: Idempotent re-poll — same rows, no state change ───────
     const settledNetBefore = orderAfter2.settledNetProfit?.toFixed(2);
     const result3 = await processSettlementsChunk(
-      { syncLog, cursor: null },
+      { syncLog, cursor: null, workerId: WORKER_ID },
       makeMockFetchers({
         settlements: { Sale: [makeSaleRow()] },
         otherFinancials: {
@@ -460,7 +467,7 @@ describe('processSettlementsChunk — state machine mega-test', () => {
     const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
 
     const result = await processSettlementsChunk(
-      { syncLog, cursor: null },
+      { syncLog, cursor: null, workerId: WORKER_ID },
       makeMockFetchers({
         settlements: { Return: [makeReturnRow()] },
         otherFinancials: {},
@@ -488,7 +495,7 @@ describe('processSettlementsChunk — state machine mega-test', () => {
 
     // Re-poll tick: same row again — the trio must not duplicate.
     const result2 = await processSettlementsChunk(
-      { syncLog, cursor: null },
+      { syncLog, cursor: null, workerId: WORKER_ID },
       makeMockFetchers({
         settlements: { Return: [makeReturnRow()] },
         otherFinancials: {},
@@ -503,7 +510,7 @@ describe('processSettlementsChunk — state machine mega-test', () => {
     const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
 
     const result = await processSettlementsChunk(
-      { syncLog, cursor: null },
+      { syncLog, cursor: null, workerId: WORKER_ID },
       makeMockFetchers({ settlements: {}, otherFinancials: {} }),
     );
     expect(result.kind).toBe('done');

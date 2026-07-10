@@ -57,7 +57,11 @@ const TRENDYOL_APPROVED_PAGE_CAP_ITEMS = 10_000;
  * line reads consistently. Visual cost: the progress bar pauses at
  * the pre-skip value for one chunk before page 26 ticks.
  */
-export async function advanceCursorPastBadPage(syncLogId: string, err: unknown): Promise<boolean> {
+export async function advanceCursorPastBadPage(
+  syncLogId: string,
+  err: unknown,
+  workerId: string,
+): Promise<boolean> {
   const row = await prisma.syncLog.findUnique({
     where: { id: syncLogId },
     select: { pageCursor: true, progressCurrent: true },
@@ -108,7 +112,7 @@ export async function advanceCursorPastBadPage(syncLogId: string, err: unknown):
     responseBodySnippet: extractBodySnippet(err),
   };
 
-  await syncLogService.recordSkippedPageAndContinue(syncLogId, skipEntry, nextCursor);
+  await syncLogService.recordSkippedPageAndContinue(syncLogId, skipEntry, nextCursor, workerId);
   return true;
 }
 
