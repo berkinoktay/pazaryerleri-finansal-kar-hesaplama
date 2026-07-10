@@ -1,7 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
+import { requireCostProfileStoreAccess } from '../../lib/cost-profile-store-access';
 import { createSubApp } from '../../lib/create-hono-app';
-import { ensureOrgMember } from '../../lib/ensure-org-member';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
 import * as costProfileService from '../../services/cost-profile.service';
 import { CostProfileSchema } from '../../validators/cost-profile.validator';
@@ -51,13 +51,16 @@ const getCostProfileRoute = createRoute({
 app.openapi(getCostProfileRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, id } = c.req.valid('param');
-  const organizationId = await ensureOrgMember(userId, orgId);
+  // Membership → 403; store-access → 404 for a profile in an ungranted store
+  // (cost profiles are store-scoped; non-disclosure).
+  await requireCostProfileStoreAccess(userId, orgId, id);
 
-  const profile = await costProfileService.getCostProfile(organizationId, id);
+  const profile = await costProfileService.getCostProfile(orgId, id);
 
   const body: z.infer<typeof CostProfileSchema> = {
     id: profile.id,
     organizationId: profile.organizationId,
+    storeId: profile.storeId,
     name: profile.name,
     type: profile.type,
     amountGross: profile.amountGross.toString(),

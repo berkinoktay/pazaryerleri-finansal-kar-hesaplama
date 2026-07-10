@@ -31,6 +31,13 @@ import { CostCellCreateBridge } from './cost-cell-create-bridge';
 export interface CostCellPopoverProps {
   orgId: string;
   /**
+   * The store the variant belongs to. Cost profiles are store-scoped, so the
+   * attach picker lists (and creates) only THIS store's profiles. Every caller
+   * is already store-scoped (products table, live-performance) and passes its
+   * active store.
+   */
+  storeId: string;
+  /**
    * The variant whose cost profiles this popover attaches/detaches. Only the
    * id is needed — the popover resolves everything else from the costs hooks —
    * so callers pass a bare id (products table row, live-performance missing-cost
@@ -62,6 +69,7 @@ export interface CostCellPopoverProps {
  */
 export function CostCellPopover({
   orgId,
+  storeId,
   variantId,
   children,
 }: CostCellPopoverProps): React.ReactElement {
@@ -71,7 +79,9 @@ export function CostCellPopover({
   const [createOpen, setCreateOpen] = React.useState(false);
 
   const attachedQuery = useVariantCostProfiles(open ? { orgId, variantId } : null);
-  const allProfilesQuery = useCostProfiles(open ? { orgId, filters: { archived: 'false' } } : null);
+  const allProfilesQuery = useCostProfiles(
+    open ? { orgId, storeId, filters: { archived: 'false' } } : null,
+  );
 
   const attachMutation = useAttachCostProfiles();
   const detachMutation = useDetachCostProfiles();
@@ -220,6 +230,7 @@ export function CostCellPopover({
 
       <CostCellCreateBridge
         orgId={orgId}
+        storeId={storeId}
         variantId={variantId}
         open={createOpen}
         onOpenChange={setCreateOpen}

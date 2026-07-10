@@ -4,6 +4,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { CostsPageClient } from '@/features/costs/components/costs-page-client';
 import { resolveActiveOrgId } from '@/lib/active-org';
+import { resolveActiveStoreId } from '@/lib/active-store';
 import { getServerApiClient } from '@/lib/api-client/server';
 import { routing } from '@/i18n/routing';
 
@@ -21,9 +22,10 @@ export async function generateMetadata({
 /**
  * Server component shell for the /costs list page.
  *
- * Resolves the active org from cookies (same pattern as products page) and
- * hands orgId down to CostsPageClient which owns query state, filters, and
- * mutation wiring. No store-scoping needed — cost profiles are org-scoped.
+ * Resolves the active org AND active store from cookies (same pattern as the
+ * products page) and hands both down to CostsPageClient. Cost profiles are
+ * store-scoped (store = operational boundary), so the page shows only the
+ * active store's profiles.
  */
 export default async function CostsPage({
   params,
@@ -39,5 +41,14 @@ export default async function CostsPage({
   const orgs = orgsResponse?.data ?? [];
   const activeOrgId = await resolveActiveOrgId(orgs);
 
-  return <CostsPageClient orgId={activeOrgId ?? null} />;
+  let activeStoreId: string | undefined;
+  if (activeOrgId !== undefined) {
+    const { data: storesResponse } = await api.GET('/v1/organizations/{orgId}/stores', {
+      params: { path: { orgId: activeOrgId } },
+    });
+    const stores = storesResponse?.data ?? [];
+    activeStoreId = await resolveActiveStoreId(stores);
+  }
+
+  return <CostsPageClient orgId={activeOrgId ?? null} storeId={activeStoreId ?? null} />;
 }

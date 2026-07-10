@@ -1,6 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { CAPABILITIES } from '@pazarsync/utils';
 
+import { assertProfileStoreAccess } from '../../lib/cost-profile-store-access';
 import { createSubApp } from '../../lib/create-hono-app';
 import { requireCapability } from '../../lib/require-capability';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
@@ -55,13 +56,17 @@ app.openapi(restoreCostProfileRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, id } = c.req.valid('param');
   // DATA_WRITE gate — a VIEWER (read-only) must not restore cost profiles.
-  await requireCapability(userId, orgId, CAPABILITIES.DATA_WRITE);
+  const role = await requireCapability(userId, orgId, CAPABILITIES.DATA_WRITE);
+  // Store-access gate — a MEMBER may only restore a profile in a granted store
+  // (404 non-disclosure). OWNER/ADMIN see every store.
+  await assertProfileStoreAccess(userId, orgId, id, role);
 
   const profile = await costProfileService.restoreCostProfile(orgId, id, userId);
 
   const body: z.infer<typeof CostProfileSchema> = {
     id: profile.id,
     organizationId: profile.organizationId,
+    storeId: profile.storeId,
     name: profile.name,
     type: profile.type,
     amountGross: profile.amountGross.toString(),

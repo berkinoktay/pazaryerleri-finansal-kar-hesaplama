@@ -23,10 +23,11 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/replace', () =>
 
   // ─── Seed helpers ───────────────────────────────────────────────────────────
 
-  async function seedProfile(orgId: string) {
+  async function seedProfile(orgId: string, storeId: string) {
     return prisma.costProfile.create({
       data: {
         organizationId: orgId,
+        storeId,
         name: `Profile-${randomUUID().slice(0, 8)}`,
         type: 'COGS',
         amountGross: new Decimal('25.50'),
@@ -77,7 +78,10 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/replace', () =>
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    const [profile1, profile2] = await Promise.all([seedProfile(org.id), seedProfile(org.id)]);
+    const [profile1, profile2] = await Promise.all([
+      seedProfile(org.id, store.id),
+      seedProfile(org.id, store.id),
+    ]);
     const variant = await seedVariant(org.id, store.id);
 
     // Attach profile1 first
@@ -113,7 +117,7 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/replace', () =>
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    const profile = await seedProfile(org.id);
+    const profile = await seedProfile(org.id, store.id);
     const variant = await seedVariant(org.id, store.id);
 
     await prisma.productVariantCostProfile.create({
@@ -148,6 +152,7 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/replace', () =>
     const archived = await prisma.costProfile.create({
       data: {
         organizationId: org.id,
+        storeId: store.id,
         name: 'Archived',
         type: 'COGS',
         amountGross: new Decimal('10.00'),

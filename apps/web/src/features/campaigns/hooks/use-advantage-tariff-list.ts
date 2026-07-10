@@ -2,6 +2,8 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
+import { keepPreviousWithinStore } from '@/lib/query-scope-placeholder';
+
 import {
   listAdvantageTariffs,
   type AdvantageTariffListItem,
@@ -27,6 +29,8 @@ export function useAdvantageTariffList(
       return listAdvantageTariffs(orgId, storeId);
     },
     enabled: storeId !== null,
-    placeholderData: (previous) => previous,
+    // Drop the previous rows on a store switch so another store's tariffs never
+    // flash on this store's screen; keep them for in-store refetches.
+    placeholderData: keepPreviousWithinStore<AdvantageTariffListItem[]>(storeId ?? ''),
   });
 }

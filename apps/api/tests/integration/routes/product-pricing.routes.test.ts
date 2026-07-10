@@ -150,6 +150,7 @@ async function setupFullyConfiguredStore(): Promise<FullySetupCtx> {
   const profile = await prisma.costProfile.create({
     data: {
       organizationId: org.id,
+      storeId: store.id,
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
@@ -502,6 +503,7 @@ async function setupRichFixture(): Promise<RichFixtureCtx> {
   const lowCost = await prisma.costProfile.create({
     data: {
       organizationId: org.id,
+      storeId: store.id,
       name: 'Low COGS',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
@@ -513,6 +515,7 @@ async function setupRichFixture(): Promise<RichFixtureCtx> {
   const highCost = await prisma.costProfile.create({
     data: {
       organizationId: org.id,
+      storeId: store.id,
       name: 'High COGS',
       type: 'COGS',
       amountGross: new Decimal('480.00'),

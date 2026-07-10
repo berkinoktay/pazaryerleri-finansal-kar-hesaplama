@@ -77,6 +77,8 @@ export function computeCostAggregate(variants: VariantSummary[]): CostAggregate 
 
 export interface ParentRowCostCellProps {
   orgId: string;
+  /** Active store — cost profiles are store-scoped (the product belongs to it). */
+  storeId: string;
   product: ProductWithVariants;
 }
 
@@ -96,14 +98,20 @@ export interface ParentRowCostCellProps {
  * Section header is intentionally dropped — the title + sub-line plus the
  * input placeholder convey intent without an additional uppercase label.
  */
-export function ParentRowCostCell({ orgId, product }: ParentRowCostCellProps): React.ReactElement {
+export function ParentRowCostCell({
+  orgId,
+  storeId,
+  product,
+}: ParentRowCostCellProps): React.ReactElement {
   const t = useTranslations('products.costCell');
   const tParent = useTranslations('products.parentCostCell');
   const tCommon = useTranslations('common');
   const formatter = useFormatter();
   const [open, setOpen] = React.useState(false);
 
-  const allProfilesQuery = useCostProfiles(open ? { orgId, filters: { archived: 'false' } } : null);
+  const allProfilesQuery = useCostProfiles(
+    open ? { orgId, storeId, filters: { archived: 'false' } } : null,
+  );
   const attachMutation = useAttachCostProfiles();
 
   const allVariantIds = React.useMemo(() => product.variants.map((v) => v.id), [product.variants]);

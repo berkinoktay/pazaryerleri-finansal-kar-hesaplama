@@ -144,6 +144,7 @@ async function setupTariffFixture(): Promise<TariffFixture> {
   const profile = await prisma.costProfile.create({
     data: {
       organizationId: org.id,
+      storeId: store.id,
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),
@@ -410,6 +411,7 @@ describe('Commission Tariffs — list / detail / delete', () => {
     const profile = await prisma.costProfile.create({
       data: {
         organizationId: org.id,
+        storeId: store.id,
         name: 'COGS Base',
         type: 'COGS',
         amountGross: new Decimal('200.00'),

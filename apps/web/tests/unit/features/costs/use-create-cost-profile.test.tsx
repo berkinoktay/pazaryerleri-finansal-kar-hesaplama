@@ -10,6 +10,7 @@ import { HttpResponse, http, server } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000099';
 const OTHER_ORG_ID = '00000000-0000-0000-0000-0000000000ff';
+const STORE_ID = '00000000-0000-0000-0000-0000000000a1';
 const PROFILE_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
 function makeQueryClient(): QueryClient {
@@ -30,6 +31,7 @@ function makeWrapper(client: QueryClient) {
 const PROFILE_RESPONSE = {
   id: PROFILE_ID,
   organizationId: ORG_ID,
+  storeId: STORE_ID,
   name: 'Test COGS',
   type: 'COGS' as const,
   amountGross: '10.00',
@@ -66,6 +68,7 @@ describe('useCreateCostProfile', () => {
     result.current.mutate({
       orgId: ORG_ID,
       body: {
+        storeId: STORE_ID,
         name: 'Test COGS',
         type: 'COGS',
         amountGross: '10.00',

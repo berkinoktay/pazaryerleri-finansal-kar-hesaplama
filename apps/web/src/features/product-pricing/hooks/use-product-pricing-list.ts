@@ -2,6 +2,8 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
+import { keepPreviousWithinStore } from '@/lib/query-scope-placeholder';
+
 import {
   listProductPricing,
   type ListProductPricingArgs,
@@ -30,7 +32,9 @@ export function useProductPricingList(
       return listProductPricing(args);
     },
     enabled: args !== null,
-    placeholderData: (previous) => previous,
+    // Smooth in-store pagination, but drop the previous page on a store switch
+    // so another store's rows never flash on this store's screen.
+    placeholderData: keepPreviousWithinStore<ListProductPricingResponse>(args?.storeId ?? ''),
   });
 }
 

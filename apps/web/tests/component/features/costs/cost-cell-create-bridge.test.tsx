@@ -9,12 +9,14 @@ import { server, http, HttpResponse } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const VARIANT_ID = 'variant-uuid-001';
+const STORE_ID = '00000000-0000-0000-0000-0000000000a1';
 const NEW_PROFILE_ID = 'new-profile-uuid-001';
 const TEST_API_BASE = 'http://localhost:3001';
 
 const newProfile = {
   id: NEW_PROFILE_ID,
   organizationId: ORG_ID,
+  storeId: STORE_ID,
   name: 'Yeni Maliyet',
   type: 'COGS',
   amountGross: '30.00',
@@ -38,6 +40,7 @@ describe('CostCellCreateBridge', () => {
       <CostCellCreateBridge
         orgId={ORG_ID}
         variantId={VARIANT_ID}
+        storeId={STORE_ID}
         open={true}
         onOpenChange={() => {}}
       />,
@@ -51,6 +54,7 @@ describe('CostCellCreateBridge', () => {
       <CostCellCreateBridge
         orgId={ORG_ID}
         variantId={VARIANT_ID}
+        storeId={STORE_ID}
         open={false}
         onOpenChange={() => {}}
       />,
@@ -90,6 +94,7 @@ describe('CostCellCreateBridge', () => {
       <CostCellCreateBridge
         orgId={ORG_ID}
         variantId={VARIANT_ID}
+        storeId={STORE_ID}
         open={true}
         onOpenChange={() => {}}
       />,

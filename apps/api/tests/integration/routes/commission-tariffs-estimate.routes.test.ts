@@ -120,6 +120,7 @@ async function setupFixture(): Promise<EstimateFixture> {
   const profile = await prisma.costProfile.create({
     data: {
       organizationId: org.id,
+      storeId: store.id,
       name: 'COGS Test',
       type: 'COGS',
       amountGross: new Decimal('200.00'),

@@ -9,6 +9,7 @@ import { server, http, HttpResponse } from '../../../helpers/msw';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const VARIANT_ID = 'variant-uuid-001';
+const STORE_ID = '00000000-0000-0000-0000-0000000000a1';
 const TEST_API_BASE = 'http://localhost:3001';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ const attachedProfilesResponse = {
     {
       id: 'profile-uuid-001',
       organizationId: ORG_ID,
+      storeId: STORE_ID,
       name: 'COGS Profil',
       type: 'COGS',
       amountGross: '25.00',
@@ -40,6 +42,7 @@ const allProfilesResponse = {
     {
       id: 'profile-uuid-001',
       organizationId: ORG_ID,
+      storeId: STORE_ID,
       name: 'COGS Profil',
       type: 'COGS',
       amountGross: '25.00',
@@ -57,6 +60,7 @@ const allProfilesResponse = {
     {
       id: 'profile-uuid-002',
       organizationId: ORG_ID,
+      storeId: STORE_ID,
       name: 'Paketleme',
       type: 'PACKAGING',
       amountGross: '10.00',
@@ -90,7 +94,7 @@ describe('CostCellPopover', () => {
     );
 
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID} storeId={STORE_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );
@@ -114,7 +118,7 @@ describe('CostCellPopover', () => {
     );
 
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID} storeId={STORE_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );
@@ -149,7 +153,7 @@ describe('CostCellPopover', () => {
     );
 
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID} storeId={STORE_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );
@@ -196,7 +200,7 @@ describe('CostCellPopover', () => {
     );
 
     const { user } = render(
-      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID}>
+      <CostCellPopover orgId={ORG_ID} variantId={VARIANT_ID} storeId={STORE_ID}>
         <button type="button">Open</button>
       </CostCellPopover>,
     );

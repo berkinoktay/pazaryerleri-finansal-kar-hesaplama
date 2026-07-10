@@ -23,10 +23,11 @@ describe('GET /v1/organizations/:orgId/variants/:variantId/cost-profiles', () =>
 
   // ─── Seed helpers ───────────────────────────────────────────────────────────
 
-  async function seedProfile(orgId: string, name?: string) {
+  async function seedProfile(orgId: string, storeId: string, name?: string) {
     return prisma.costProfile.create({
       data: {
         organizationId: orgId,
+        storeId,
         name: name ?? `Profile-${randomUUID().slice(0, 8)}`,
         type: 'COGS',
         amountGross: new Decimal('25.50'),
@@ -101,8 +102,8 @@ describe('GET /v1/organizations/:orgId/variants/:variantId/cost-profiles', () =>
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    const profile1 = await seedProfile(org.id, 'Profile Alpha');
-    const profile2 = await seedProfile(org.id, 'Profile Beta');
+    const profile1 = await seedProfile(org.id, store.id, 'Profile Alpha');
+    const profile2 = await seedProfile(org.id, store.id, 'Profile Beta');
     const variant = await seedVariant(org.id, store.id);
 
     // Attach in order: alpha first, then beta

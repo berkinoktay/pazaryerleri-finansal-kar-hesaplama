@@ -3,7 +3,7 @@ import { prisma } from '@pazarsync/db';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createOrganization } from '../../helpers/factories';
+import { createOrganization, createStore } from '../../helpers/factories';
 
 /**
  * GROSS convention (2026-06-16): `amountGross` (KDV-dahil) + `vatRate` (%).
@@ -29,15 +29,17 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
 
   async function setup() {
     const org = await createOrganization();
-    return { org };
+    const store = await createStore(org.id);
+    return { org, store };
   }
 
   describe('CostProfile.amountGross + vatRate', () => {
     it('stores amountGross (KDV-dahil) and vatRate as given', async () => {
-      const { org } = await setup();
+      const { org, store } = await setup();
       const profile = await prisma.costProfile.create({
         data: {
           organizationId: org.id,
+          storeId: store.id,
           name: 'Test',
           type: 'COGS',
           amountGross: '120.00', // KDV-dahil: 100 net + 20 KDV @ %20
@@ -49,10 +51,11 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
     });
 
     it('accepts vatRate 0 (exempt supplier)', async () => {
-      const { org } = await setup();
+      const { org, store } = await setup();
       const profile = await prisma.costProfile.create({
         data: {
           organizationId: org.id,
+          storeId: store.id,
           name: 'Zero VAT',
           type: 'COGS',
           amountGross: '50.00',
@@ -73,10 +76,11 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
     ])(
       'amountGross=$amountGross vatRate=$vatRate round-trips correctly',
       async ({ amountGross, vatRate }) => {
-        const { org } = await setup();
+        const { org, store } = await setup();
         const profile = await prisma.costProfile.create({
           data: {
             organizationId: org.id,
+            storeId: store.id,
             name: `Test ${vatRate}`,
             type: 'COGS',
             amountGross,
@@ -92,10 +96,11 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
 
   describe('CostProfileVersion.amountGross + vatRate', () => {
     it('version row stores gross fields matching the parent profile', async () => {
-      const { org } = await setup();
+      const { org, store } = await setup();
       const profile = await prisma.costProfile.create({
         data: {
           organizationId: org.id,
+          storeId: store.id,
           name: 'Test',
           type: 'COGS',
           amountGross: '120.00',
@@ -123,10 +128,11 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
 
   describe('OrderItemCostSnapshotComponent.amountGross + amountInTryGross', () => {
     it('snapshot component stores gross fields (TRY-native, fx=1)', async () => {
-      const { org } = await setup();
+      const { org, store: profileStore } = await setup();
       const profile = await prisma.costProfile.create({
         data: {
           organizationId: org.id,
+          storeId: profileStore.id,
           name: 'Test',
           type: 'COGS',
           amountGross: '120.00',
@@ -185,10 +191,11 @@ describe('CostProfile gross convention storage (amountGross + vatRate)', () => {
     });
 
     it('snapshot component stores gross fields for USD AUTO (fx applied)', async () => {
-      const { org } = await setup();
+      const { org, store: profileStore } = await setup();
       const profile = await prisma.costProfile.create({
         data: {
           organizationId: org.id,
+          storeId: profileStore.id,
           name: 'USD COGS',
           type: 'COGS',
           amountGross: new Decimal('10.00'),

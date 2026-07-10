@@ -1,6 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { CAPABILITIES } from '@pazarsync/utils';
 
+import { assertProfileStoreAccess } from '../../lib/cost-profile-store-access';
 import { createSubApp } from '../../lib/create-hono-app';
 import { requireCapability } from '../../lib/require-capability';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../../openapi';
@@ -59,7 +60,7 @@ const updateCostProfileRoute = createRoute({
     },
     409: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
-      description: 'New name is already taken within the organization',
+      description: 'New name is already taken within the store',
     },
     422: {
       content: { 'application/json': { schema: ProblemDetailsSchema } },
@@ -74,13 +75,17 @@ app.openapi(updateCostProfileRoute, async (c) => {
   const { orgId, id } = c.req.valid('param');
   const patch = c.req.valid('json');
   // DATA_WRITE gate — a VIEWER (read-only) must not update cost profiles.
-  await requireCapability(userId, orgId, CAPABILITIES.DATA_WRITE);
+  const role = await requireCapability(userId, orgId, CAPABILITIES.DATA_WRITE);
+  // Store-access gate — a MEMBER may only edit a profile in a store they were
+  // granted (404 non-disclosure). OWNER/ADMIN see every store.
+  await assertProfileStoreAccess(userId, orgId, id, role);
 
   const profile = await costProfileService.updateCostProfile(orgId, id, patch, userId);
 
   const body: z.infer<typeof CostProfileSchema> = {
     id: profile.id,
     organizationId: profile.organizationId,
+    storeId: profile.storeId,
     name: profile.name,
     type: profile.type,
     amountGross: profile.amountGross.toString(),

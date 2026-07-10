@@ -5,17 +5,19 @@ import type { ListCostProfileFilters, ListCostProfilesResponse } from '../types/
 
 export interface ListCostProfilesArgs {
   orgId: string;
+  storeId: string;
   filters?: ListCostProfileFilters;
 }
 
 export async function listCostProfiles(
   args: ListCostProfilesArgs,
 ): Promise<ListCostProfilesResponse> {
-  const { orgId, filters } = args;
+  const { orgId, storeId, filters } = args;
   const { data, error, response } = await apiClient.GET('/v1/organizations/{orgId}/cost-profiles', {
     params: {
       path: { orgId },
       query: {
+        storeId,
         ...(filters?.type !== undefined
           ? {
               type: filters.type as

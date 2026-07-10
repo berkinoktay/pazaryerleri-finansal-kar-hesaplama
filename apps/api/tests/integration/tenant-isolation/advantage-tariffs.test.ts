@@ -359,6 +359,7 @@ describe('advantage-tariffs: route-layer authorization', () => {
     const profileA = await prisma.costProfile.create({
       data: {
         organizationId: orgA.id,
+        storeId: storeA.id,
         name: 'COGS Test',
         type: 'COGS',
         amountGross: new Decimal('200.00'),

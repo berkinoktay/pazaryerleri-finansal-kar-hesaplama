@@ -12,7 +12,12 @@ import {
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '@/lib/errors';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
-import { createMembership, createOrganization, createUserProfile } from '../../helpers/factories';
+import {
+  createMembership,
+  createOrganization,
+  createStore,
+  createUserProfile,
+} from '../../helpers/factories';
 
 const BASE_INPUT = {
   name: 'Hammadde COGS',
@@ -22,6 +27,15 @@ const BASE_INPUT = {
   vatRate: 18,
   fxRateMode: 'AUTO' as const,
 };
+
+// createCostProfile now requires a storeId — cost profiles are store-scoped.
+// Most tests just need SOME store in the org, so this pairs BASE_INPUT with a
+// freshly-created store. The (store, name) uniqueness test reuses one input so
+// both creates target the same store.
+async function makeInput(orgId: string): Promise<Parameters<typeof createCostProfile>[1]> {
+  const store = await createStore(orgId);
+  return { ...BASE_INPUT, storeId: store.id };
+}
 
 describe('cost-profile service', () => {
   beforeAll(async () => {
@@ -40,7 +54,7 @@ describe('cost-profile service', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(org.id, await makeInput(org.id), user.id);
 
       expect(profile.id).toBeDefined();
       expect(profile.name).toBe('Hammadde COGS');
@@ -62,7 +76,7 @@ describe('cost-profile service', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(org.id, await makeInput(org.id), user.id);
 
       // BASE_INPUT: amountGross 25.50, vatRate 18 (GROSS convention — KDV-dahil)
       expect(profile.amountGross.toFixed(2)).toBe('25.50');
@@ -76,26 +90,33 @@ describe('cost-profile service', () => {
       expect(Number(versions[0]?.vatRate)).toBe(18);
     });
 
-    it('throws CostProfileNameTakenError on duplicate name within the org', async () => {
+    it('throws CostProfileNameTakenError on duplicate name within the store', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      await createCostProfile(org.id, BASE_INPUT, user.id);
+      // Both creates target the same store, so the (store_id, name) unique
+      // constraint collides on the second.
+      const input = await makeInput(org.id);
+      await createCostProfile(org.id, input, user.id);
 
-      await expect(createCostProfile(org.id, BASE_INPUT, user.id)).rejects.toBeInstanceOf(
+      await expect(createCostProfile(org.id, input, user.id)).rejects.toBeInstanceOf(
         CostProfileNameTakenError,
       );
     });
 
-    it('allows the same name in a different org', async () => {
+    it('allows the same name in a different store', async () => {
       const user = await createUserProfile();
       const orgA = await createOrganization();
       await createMembership(orgA.id, user.id);
       const orgB = await createOrganization();
 
-      await expect(createCostProfile(orgA.id, BASE_INPUT, user.id)).resolves.toBeDefined();
-      await expect(createCostProfile(orgB.id, BASE_INPUT, user.id)).resolves.toBeDefined();
+      await expect(
+        createCostProfile(orgA.id, await makeInput(orgA.id), user.id),
+      ).resolves.toBeDefined();
+      await expect(
+        createCostProfile(orgB.id, await makeInput(orgB.id), user.id),
+      ).resolves.toBeDefined();
     });
   });
 
@@ -107,7 +128,7 @@ describe('cost-profile service', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(org.id, await makeInput(org.id), user.id);
 
       const updated = await updateCostProfile(
         org.id,
@@ -135,7 +156,7 @@ describe('cost-profile service', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(org.id, await makeInput(org.id), user.id);
       const updated = await updateCostProfile(
         org.id,
         profile.id,
@@ -152,7 +173,7 @@ describe('cost-profile service', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(org.id, await makeInput(org.id), user.id);
       const updated = await updateCostProfile(org.id, profile.id, { vatRate: 20 }, user.id);
 
       // vatRate stored as-is; amountGross unchanged
@@ -166,7 +187,7 @@ describe('cost-profile service', () => {
       await createMembership(orgA.id, user.id);
       const orgB = await createOrganization();
 
-      const profile = await createCostProfile(orgA.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(orgA.id, await makeInput(orgA.id), user.id);
 
       await expect(
         updateCostProfile(orgB.id, profile.id, { name: 'Hijack' }, user.id),
@@ -182,7 +203,7 @@ describe('cost-profile service', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(org.id, await makeInput(org.id), user.id);
       const archived = await archiveCostProfile(org.id, profile.id, user.id);
 
       expect(archived.archivedAt).not.toBeNull();
@@ -206,7 +227,7 @@ describe('cost-profile service', () => {
       await createMembership(orgA.id, user.id);
       const orgB = await createOrganization();
 
-      const profile = await createCostProfile(orgA.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(orgA.id, await makeInput(orgA.id), user.id);
 
       // Org B should NOT see Org A's profile
       await expect(getCostProfile(orgB.id, profile.id)).rejects.toBeInstanceOf(
@@ -223,7 +244,7 @@ describe('cost-profile service', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
 
-      const profile = await createCostProfile(org.id, BASE_INPUT, user.id);
+      const profile = await createCostProfile(org.id, await makeInput(org.id), user.id);
 
       // Fire two concurrent updates. Because the service uses SELECT FOR UPDATE,
       // one will block until the other commits, ensuring both succeed and produce

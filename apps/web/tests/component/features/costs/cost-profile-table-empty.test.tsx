@@ -24,6 +24,7 @@ function makeProfile(
 ): CostProfile {
   return {
     organizationId: 'org-1',
+    storeId: 'store-1',
     type: 'COGS',
     amountGross: '10.00',
     currency: 'TRY',

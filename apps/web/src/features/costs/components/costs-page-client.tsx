@@ -22,6 +22,8 @@ import { CostProfileTable } from './cost-profile-table';
 
 interface CostsPageClientProps {
   orgId: string | null;
+  /** Active store. Cost profiles are store-scoped; null = the org has no store. */
+  storeId: string | null;
 }
 
 /**
@@ -29,9 +31,9 @@ interface CostsPageClientProps {
  *
  * Owns filter state, dialog state, and wires query + mutation hooks.
  * The server page shell (app/[locale]/(dashboard)/costs/page.tsx) resolves
- * orgId and hands it here.
+ * the active org AND store and hands both here — profiles are store-scoped.
  */
-export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactElement {
+export function CostsPageClient({ orgId, storeId }: CostsPageClientProps): React.ReactElement {
   const t = useTranslations('costs');
 
   // ─── Filter state — URL-owned (nuqs): reload/share reproduces the view. ──
@@ -64,9 +66,10 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
 
   // ─── Queries (cursor-paginated — every page reachable via load-more) ────
   const query = useCostProfilesInfinite(
-    orgId !== null
+    orgId !== null && storeId !== null
       ? {
           orgId,
+          storeId,
           filters: {
             ...(q.length > 0 ? { q } : {}),
             ...(showArchived ? { archived: 'true' as const } : {}),
@@ -110,6 +113,19 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
   function handleEdit(profile: CostProfile) {
     setEditProfile(profile);
     setCreateOpen(true);
+  }
+
+  // Cost profiles are store-scoped: with no active store there is nothing to
+  // create against. Replace the body with a no-store empty state (a store-less
+  // "New cost" CTA would open a dialog that can't mount) — mirrors the products
+  // page's no-store gate.
+  if (orgId === null || storeId === null) {
+    return (
+      <div className="gap-lg flex flex-col">
+        <PageHeader variant="framed" title={t('page.title')} intent={t('page.description')} />
+        <CostProfileEmptyState variant="no-store" />
+      </div>
+    );
   }
 
   return (
@@ -158,9 +174,10 @@ export function CostsPageClient({ orgId }: CostsPageClientProps): React.ReactEle
         onRestoreClick={handleRestore}
       />
 
-      {orgId !== null ? (
+      {orgId !== null && storeId !== null ? (
         <CostProfileCreateDialog
           orgId={orgId}
+          storeId={storeId}
           open={createOpen}
           editProfile={editProfile}
           onOpenChange={(open) => {

@@ -12,18 +12,36 @@ import {
 // ─── Cross-org guard helpers ─────────────────────────────────────────────────
 
 /**
- * Verify all profileIds belong to `orgId` and are not archived.
+ * Verify all profileIds belong to `orgId`, are in a store the caller may access,
+ * and are not archived.
+ *
+ * `accessibleStoreIds` is `null` for OWNER/ADMIN (every store, no narrowing) or
+ * the caller's granted store-id list for MEMBER/VIEWER. When non-null, a profile
+ * in an ungranted store is filtered out and treated as missing — the SAME 404 as
+ * a nonexistent/cross-org profile. This keeps non-disclosure uniform with the
+ * by-id routes: without it, attaching a real in-org/ungranted-store profile
+ * returned 422 (via assertSameStore) while a nonexistent one returned 404, a
+ * bounded existence oracle over profile UUIDs.
  *
  * Throws:
  *  - `CostProfileArchivedCannotAttachError` for the first archived profile found.
- *  - `CostProfileNotFoundError` for the first missing or cross-org profile.
+ *  - `CostProfileNotFoundError` for the first missing, cross-org, or
+ *    ungranted-store profile.
  *
  * The backend uses the postgres service role which bypasses RLS, so this
  * check is the service-layer enforcement (SECURITY.md §3).
  */
-async function guardProfiles(orgId: string, profileIds: string[]): Promise<void> {
+async function guardProfiles(
+  orgId: string,
+  profileIds: string[],
+  accessibleStoreIds: string[] | null,
+): Promise<void> {
   const rows = await prisma.costProfile.findMany({
-    where: { id: { in: profileIds }, organizationId: orgId },
+    where: {
+      id: { in: profileIds },
+      organizationId: orgId,
+      ...(accessibleStoreIds !== null ? { storeId: { in: accessibleStoreIds } } : {}),
+    },
     select: { id: true, archivedAt: true },
   });
 
@@ -33,7 +51,7 @@ async function guardProfiles(orgId: string, profileIds: string[]): Promise<void>
     throw new CostProfileArchivedCannotAttachError(archived.id);
   }
 
-  // Check if all requested profiles were found (missing = cross-org or non-existent)
+  // Missing = nonexistent, cross-org, OR in an ungranted store (filtered above).
   if (rows.length !== profileIds.length) {
     const foundIds = new Set(rows.map((r) => r.id));
     const missingId = profileIds.find((id) => !foundIds.has(id));
@@ -72,6 +90,39 @@ async function guardVariants(
 
   if (count !== variantIds.length) {
     throw new CostProfileVariantOrgMismatchError('(multiple)', '(multiple)');
+  }
+}
+
+/**
+ * Cost profiles are store-scoped: a profile may only attach to variants IN ITS
+ * OWN store. Attach/replace produce the Cartesian product of profiles × variants,
+ * so every profile AND every variant must resolve to a SINGLE common store. This
+ * fetches the distinct storeIds of both sets and rejects (422, reusing the
+ * variant-mismatch error — the frontend already localizes it) unless the union
+ * collapses to one store. Guards against attaching store A's profile onto store
+ * B's variant even within one org. (guardProfiles/guardVariants run first, so by
+ * here every id is a real in-org profile/variant.)
+ */
+async function assertSameStore(
+  orgId: string,
+  profileIds: string[],
+  variantIds: string[],
+): Promise<void> {
+  const [profiles, variants] = await Promise.all([
+    prisma.costProfile.findMany({
+      where: { id: { in: profileIds }, organizationId: orgId },
+      select: { storeId: true },
+      distinct: ['storeId'],
+    }),
+    prisma.productVariant.findMany({
+      where: { id: { in: variantIds }, organizationId: orgId },
+      select: { storeId: true },
+      distinct: ['storeId'],
+    }),
+  ]);
+  const stores = new Set([...profiles.map((p) => p.storeId), ...variants.map((v) => v.storeId)]);
+  if (stores.size > 1) {
+    throw new CostProfileVariantOrgMismatchError('(cross-store)', '(cross-store)');
   }
 }
 
@@ -168,8 +219,9 @@ export async function attachCostProfiles(
   actorId: string,
   accessibleStoreIds: string[] | null,
 ): Promise<{ attached: number; bufferEntriesPromoted: number }> {
-  await guardProfiles(orgId, profileIds);
+  await guardProfiles(orgId, profileIds, accessibleStoreIds);
   await guardVariants(orgId, variantIds, accessibleStoreIds);
+  await assertSameStore(orgId, profileIds, variantIds);
 
   // Build Cartesian product of (profileId, variantId) pairs
   const data = profileIds.flatMap((profileId) =>
@@ -207,7 +259,7 @@ export async function detachCostProfiles(
   variantIds: string[],
   accessibleStoreIds: string[] | null,
 ): Promise<{ detached: number }> {
-  await guardProfiles(orgId, profileIds);
+  await guardProfiles(orgId, profileIds, accessibleStoreIds);
   await guardVariants(orgId, variantIds, accessibleStoreIds);
 
   const result = await prisma.productVariantCostProfile.deleteMany({
@@ -247,9 +299,10 @@ export async function replaceCostProfilesForVariants(
   bufferEntriesPromoted: number;
 }> {
   if (profileIds.length > 0) {
-    await guardProfiles(orgId, profileIds);
+    await guardProfiles(orgId, profileIds, accessibleStoreIds);
   }
   await guardVariants(orgId, variantIds, accessibleStoreIds);
+  await assertSameStore(orgId, profileIds, variantIds);
 
   const bufferEntriesPromoted = await prisma.$transaction(async (tx) => {
     // Delete all existing links for these variants within the org
@@ -288,16 +341,24 @@ export async function replaceCostProfilesForVariants(
 /**
  * List cost profiles attached to a product variant.
  *
- * Verifies the variant belongs to `orgId` (non-disclosure: returns
- * `CostProfileVariantOrgMismatchError` if the variant doesn't exist for the
- * org). Returns non-archived profiles ordered by `attachedAt` DESC.
+ * Verifies the variant belongs to `orgId` AND — for a MEMBER/VIEWER — to a
+ * store the caller was granted (non-disclosure: returns
+ * `CostProfileVariantOrgMismatchError` if the variant doesn't exist for the org
+ * or lives in an ungranted store). `accessibleStoreIds` is `null` for
+ * OWNER/ADMIN (every store, no narrowing). Returns non-archived profiles
+ * ordered by `attachedAt` DESC.
  */
 export async function listCostProfilesForVariant(
   orgId: string,
   variantId: string,
+  accessibleStoreIds: string[] | null,
 ): Promise<CostProfile[]> {
   const variant = await prisma.productVariant.findFirst({
-    where: { id: variantId, organizationId: orgId },
+    where: {
+      id: variantId,
+      organizationId: orgId,
+      ...(accessibleStoreIds !== null ? { storeId: { in: accessibleStoreIds } } : {}),
+    },
     select: { id: true },
   });
 
