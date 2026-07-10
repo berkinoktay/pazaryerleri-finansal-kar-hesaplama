@@ -124,7 +124,7 @@ describe('Store routes', () => {
       expect(String(row.credentials)).not.toContain('seed-trendyol-api-key');
     });
 
-    it('bootstraps the initial sync chain in priority order (PRODUCTS → ORDERS → SETTLEMENTS → CLAIMS)', async () => {
+    it('bootstraps only PRODUCTS → ORDERS in priority order (settlements/claims left to cron)', async () => {
       const user = await createAuthenticatedTestUser();
       const org = await createOrganization();
       await createMembership(org.id, user.id, 'OWNER');
@@ -146,9 +146,12 @@ describe('Store routes', () => {
         orderBy: { startedAt: 'asc' },
       });
 
-      // One PENDING row per type, FIFO order = priority order. The worker
+      // Exactly two PENDING rows, FIFO order = priority order. The worker
       // claims `ORDER BY started_at`, so this ordering is the execution order.
-      expect(logs.map((l) => l.syncType)).toEqual(['PRODUCTS', 'ORDERS', 'SETTLEMENTS', 'CLAIMS']);
+      // Settlements/claims are intentionally NOT bootstrapped (owner decision
+      // 2026-07-10) — a fresh store has no orders for their rows to attach to;
+      // the 6-hourly pg_cron fan-out owns them.
+      expect(logs.map((l) => l.syncType)).toEqual(['PRODUCTS', 'ORDERS']);
       expect(logs.every((l) => l.status === 'PENDING')).toBe(true);
       expect(logs.every((l) => l.organizationId === org.id)).toBe(true);
       // started_at strictly increasing — same-millisecond ties would make

@@ -405,4 +405,57 @@ describe('processPastDayBufferFlush', () => {
     expect(after.attempts).toBe(1);
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
   });
+
+  it('graduates a past-day PERMANENT_FAILED entry PROFIT-EXCLUDED via the flush tick (loss-proofing)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // A row that exhausted its promote attempts (PERMANENT_FAILED) but now carries
+    // graduatable data gets a final graduation attempt on the flush tick BEFORE
+    // the 7-day reset cron may reap it: it lands in orders (profit-excluded) and
+    // never vanishes.
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-perm-recover',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      status: 'PERMANENT_FAILED',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-perm-recover',
+        barcode: 'EAN13-FLUSH',
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-perm-recover');
+    expect(order.estimatedNetProfit).toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+    expect(order.promotedFromBufferAt).not.toBeNull();
+  });
+
+  it('keeps a past-day PERMANENT_FAILED entry in the buffer when its flush retry still fails', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // Still-corrupt mapped_order, so the flush-tick retry throws again. The row
+    // must STAY put (no status demotion, no attempts churn, no order written);
+    // only the 7-day reset cron may remove it, and only after the recovery window.
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-perm-stuck',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      status: 'PERMANENT_FAILED',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'flush-perm-stuck', invalid: true }),
+    });
+    // Faithful PERMANENT_FAILED shape: 4 attempts already spent.
+    await prisma.livePerformanceBuffer.update({
+      where: { id: entry.id },
+      data: { attempts: 4, lastError: 'x' },
+    });
+
+    await processPastDayBufferFlush();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('PERMANENT_FAILED');
+    expect(after.attempts).toBe(4);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
 });

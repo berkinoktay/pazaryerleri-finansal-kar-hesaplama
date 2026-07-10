@@ -4,7 +4,7 @@
 // union of what those copies enforced — do not fork this back into modules.
 
 import type { StoreEnvironment } from '@pazarsync/db';
-import { MarketplaceUnreachable, RateLimitedError } from '@pazarsync/sync-core';
+import { MarketplaceUnreachable, RateLimitedError, syncLog } from '@pazarsync/sync-core';
 
 import { sleep } from '../lib/sleep';
 import { mapTrendyolResponseToDomainError } from './errors';
@@ -15,6 +15,11 @@ const PLATFORM = 'TRENDYOL';
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_BACKOFF_RETRIES = 4; // 1s + 2s + 4s + 8s = 15s — under any reasonable Trendyol Retry-After
 const INITIAL_BACKOFF_MS = 1_000;
+// A vendor Retry-After is honored, but capped: the sync worker is serial, so a
+// pathological header (e.g. "Retry-After: 86400") would park the whole worker
+// for a day. 120s is comfortably longer than any legitimate Trendyol throttle
+// window while keeping a stuck header bounded.
+const RETRY_AFTER_CAP_MS = 120_000;
 
 export interface FetcherDeps {
   credentials: TrendyolCredentials;
@@ -22,6 +27,8 @@ export interface FetcherDeps {
   signal?: AbortSignal;
   /** Test hook: backoff base in ms (default 1s). */
   initialBackoffMs?: number;
+  /** Test hook: per-request timeout in ms (default REQUEST_TIMEOUT_MS). */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -65,15 +72,31 @@ export async function fetchOnce<T>(url: string, deps: FetcherDeps): Promise<T> {
     let res: Response | undefined;
     let networkError = false;
     try {
+      // Compose the caller's cancellation signal with a per-request timeout.
+      // Passing `deps.signal` alone (the old behavior) silently dropped the
+      // timeout whenever a caller supplied its own signal, so a hung socket
+      // stalled the serial worker until the chunk watchdog reaped it.
+      // AbortSignal.any aborts as soon as EITHER source fires (Node >= 20.19).
+      const timeoutMs = deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const signal =
+        deps.signal !== undefined ? AbortSignal.any([deps.signal, timeoutSignal]) : timeoutSignal;
       res = await fetch(url, {
         headers: {
           Authorization: buildAuthHeader(deps.credentials),
           'User-Agent': buildUserAgent(deps.credentials),
           Accept: 'application/json',
         },
-        signal: deps.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal,
       });
     } catch (err) {
+      // A caller-initiated abort surfaces as a DOMException named 'AbortError'
+      // and is rethrown untouched — cancellation is not a fault. An elapsed
+      // per-request timeout surfaces as a DOMException named 'TimeoutError',
+      // which is NOT an AbortError, so it falls through to networkError=true and
+      // is retried like a 5xx/network blip. That matches the pre-composition
+      // behavior: the sole-timeout path already classified an elapsed timeout
+      // as a transient network error.
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
       networkError = true;
     }
@@ -90,8 +113,9 @@ export async function fetchOnce<T>(url: string, deps: FetcherDeps): Promise<T> {
     if (isTransient && attempt < MAX_BACKOFF_RETRIES) {
       const headerSeconds =
         res !== undefined ? parseRetryAfterSeconds(res.headers.get('Retry-After')) : null;
-      const waitMs =
+      const requestedWaitMs =
         headerSeconds !== null ? headerSeconds * 1000 : initialBackoffMs * Math.pow(2, attempt);
+      const waitMs = clampRetryWait(requestedWaitMs, url);
       attempt += 1;
       await sleep(waitMs, deps.signal);
       continue;
@@ -128,6 +152,23 @@ async function safeReadBody(res: Response): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Clamp a computed retry wait to RETRY_AFTER_CAP_MS. A pathological vendor
+ * `Retry-After` (e.g. 86400) would otherwise park the serial worker for a day;
+ * when the clamp kicks in we log a warning so the excess wait is visible in the
+ * logs instead of a silent stall. Exponential-backoff waits are always well
+ * under the cap, so in practice this only ever fires on a Retry-After header.
+ */
+function clampRetryWait(requestedWaitMs: number, url: string): number {
+  if (requestedWaitMs <= RETRY_AFTER_CAP_MS) return requestedWaitMs;
+  syncLog.warn('trendyol.retry-after-clamped', {
+    url,
+    requestedWaitMs,
+    cappedWaitMs: RETRY_AFTER_CAP_MS,
+  });
+  return RETRY_AFTER_CAP_MS;
 }
 
 function parseRetryAfterSeconds(header: string | null): number | null {

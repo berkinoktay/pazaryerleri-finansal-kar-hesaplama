@@ -99,23 +99,29 @@ export async function requireOwnedStore(
  * Initial sync types in PRIORITY order — the worker claims FIFO by
  * `started_at`, so this array order IS the execution order:
  *
- *   1. PRODUCTS    — variants must exist or webhook order intake skips the
- *                    order entirely (observed: 9 orders silently dropped on
- *                    2026-06-11 because the catalog synced 4 h after connect).
- *   2. ORDERS      — first run scans `[store.createdAt, now]` (no historical
- *                    backfill by design); settlements/claims attach to these.
- *   3. SETTLEMENTS — books fees onto existing orders (60 d window, idempotent).
- *   4. CLAIMS      — matches returns to orders; unmatched rows self-heal on
- *                    the next 6 h cron pass.
+ *   1. PRODUCTS — variants must exist before webhook order intake, or the
+ *                 order is skipped entirely (observed: 9 orders silently
+ *                 dropped on 2026-06-11 because the catalog synced 4 h after
+ *                 connect). This is why PRODUCTS runs first.
+ *   2. ORDERS   — first run scans the forward-only seam `[store.createdAt, now]`
+ *                 (no historical backfill by design). It closes three gaps the
+ *                 webhook alone leaves open: a connect-time webhook registration
+ *                 failure, a vendor-side activation delay before Trendyol starts
+ *                 POSTing, and full order payloads for sparse CREATED webhooks.
+ *
+ * SETTLEMENTS and CLAIMS were removed from the bootstrap chain (owner decision
+ * 2026-07-10). A freshly connected store has no local orders yet, so there is
+ * nothing for settlement/claim financial rows to attach to — every row would
+ * miss on write (order_not_found) and self-heal later anyway. The first
+ * meaningful settlement work only arrives via the 6-hourly pg_cron fan-out days
+ * after connect (Trendyol's payment cycle runs up to T+45), so enqueueing these
+ * two at bootstrap merely burned vendor API quota and a serial worker slot on
+ * guaranteed-empty scans. The pg_cron fan-outs still cover both types on their
+ * normal cadence — this change is bootstrap-only.
  *
  * Design: docs/plans/2026-06-11-sync-bootstrap-cron-parity.md
  */
-const BOOTSTRAP_SYNC_SEQUENCE: readonly SyncType[] = [
-  'PRODUCTS',
-  'ORDERS',
-  'SETTLEMENTS',
-  'CLAIMS',
-];
+const BOOTSTRAP_SYNC_SEQUENCE: readonly SyncType[] = ['PRODUCTS', 'ORDERS'];
 
 /**
  * Enqueue the initial sync chain for a freshly connected store.
@@ -126,8 +132,8 @@ const BOOTSTRAP_SYNC_SEQUENCE: readonly SyncType[] = [
  * same dedupe guard, so a missed bootstrap heals itself on the next tick.
  *
  * Each type gets `started_at = base + index` (ms) so the worker's
- * `ORDER BY started_at` claim preserves the priority order even when all
- * four rows land in the same millisecond.
+ * `ORDER BY started_at` claim preserves the priority order even when both
+ * rows land in the same millisecond.
  */
 async function bootstrapInitialSyncs(organizationId: string, storeId: string): Promise<void> {
   const baseTimeMs = Date.now();
@@ -237,9 +243,10 @@ export async function connect(organizationId: string, input: ConnectStoreInput):
   }
 
   // ─── Initial sync bootstrap — priority-ordered, non-blocking ───────────
-  // The seller's data starts flowing the moment the store is connected
-  // instead of waiting for the first cron tick (worst case: 1 h for orders,
-  // 6 h for settlements/claims, and PRODUCTS had no schedule at all).
+  // Products + orders start flowing the moment the store is connected instead
+  // of waiting for the first cron tick (PRODUCTS had no schedule at all; orders
+  // otherwise wait up to 1 h). Settlements/claims are intentionally NOT
+  // bootstrapped — see BOOTSTRAP_SYNC_SEQUENCE; the 6-hourly cron owns them.
   await bootstrapInitialSyncs(organizationId, row.id);
 
   return toStoreResponse(row);

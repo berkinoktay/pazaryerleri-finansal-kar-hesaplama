@@ -146,6 +146,9 @@ async function buildScenario(): Promise<BuiltCtx> {
       syncType: 'CLAIMS',
       status: 'RUNNING',
       startedAt: new Date(),
+      claimedAt: new Date(),
+      claimedBy: 'worker-test',
+      lastTickAt: new Date(),
       progressCurrent: 0,
     },
   });
@@ -222,7 +225,10 @@ function makeMockFetchers(claims: TrendyolClaim[]): ClaimsFetchers {
 
 async function runChunk(syncLogId: string, claims: TrendyolClaim[]) {
   const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
-  return processClaimsChunk({ syncLog, cursor: null }, makeMockFetchers(claims));
+  return processClaimsChunk(
+    { syncLog, cursor: null, workerId: 'worker-test' },
+    makeMockFetchers(claims),
+  );
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────

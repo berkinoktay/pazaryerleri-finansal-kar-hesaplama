@@ -147,7 +147,7 @@ describe('sync engine end-to-end', () => {
     // 4. Drive the chunk loop to completion. shuttingDown=false so the
     //    loop exits only when the handler signals 'done'.
     if (claimed === null) throw new Error('claim failed');
-    await runSyncToCompletion(claimed, { PRODUCTS: productsHandler }, () => false);
+    await runSyncToCompletion(claimed, { PRODUCTS: productsHandler }, () => false, 'worker-e2e');
 
     // 5. Final state: COMPLETED, both products upserted, exactly two
     //    Trendyol page fetches issued.

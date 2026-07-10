@@ -2,20 +2,23 @@
 -- (e.g., trigger functions, RLS helper functions)
 
 -- ─── Live Performance buffer daily reset (Slice 0: narrowed safety-net) ───────
--- Hard-deletes ONLY past-day buffer entries that are PERMANENT_FAILED — rows the
--- worker tried to graduate into `orders` and could not (a corrupt mapped_order
--- that makes upsertOrderWithSnapshot throw on every retry). Those rows cannot be
--- written to `orders` at all, so deleting them loses no recoverable sale; this
--- just bounds table growth. Recoverable entries (PENDING / PROMOTING / FAILED)
+-- Hard-deletes ONLY PERMANENT_FAILED buffer entries whose order_date (business
+-- date) is OLDER THAN 7 DAYS: rows the worker tried to graduate into `orders` and
+-- could not (a corrupt mapped_order that makes upsertOrderWithSnapshot throw on
+-- every retry). The sync-worker's past-day flush (processPastDayBufferFlush)
+-- retries every such row on each tick, so a mapped_order that becomes graduatable
+-- still lands in `orders`; this cron only reaps rows STILL PERMANENT_FAILED after
+-- a 7-day recovery window, so deleting one never loses a recoverable sale.
+-- Recoverable entries (PENDING / PROMOTING / FAILED)
 -- are graduated by apps/sync-worker (processPastDayBufferFlush + the promote
 -- tick) and must NEVER be deleted here — that is the "never lose an order"
 -- guarantee. The worker already logs each row on the PERMANENT_FAILED transition
 -- (markFailed → syncLog.error 'buffer.promote-permanent-failed' with lastError),
 -- so this delete is never silent.
 --
--- The predicate is self-correcting: it removes "every past-day PERMANENT_FAILED"
--- whenever it runs, so the exact cron fire time only affects how soon stale rows
--- are purged, never which rows.
+-- The predicate is self-correcting: it removes "every PERMANENT_FAILED row older
+-- than 7 days" whenever it runs, so the exact cron fire time only affects how
+-- soon over-retained rows are purged, never which rows.
 --
 -- System-wide (all orgs/stores) — a maintenance job, not a tenant-scoped query.
 -- Returns the number of rows deleted (for the cron log + the integration test).
@@ -35,7 +38,10 @@ SET search_path = public
 AS $$
   WITH deleted AS (
     DELETE FROM live_performance_buffer
-    WHERE order_date < (now() AT TIME ZONE 'Europe/Istanbul')::date
+    -- Retention window: reap PERMANENT_FAILED rows only once their business date
+    -- is older than 7 days. The sync-worker's flush retries them until then, so a
+    -- row is deleted only after either landing in `orders` or surviving 7 days.
+    WHERE order_date < ((now() AT TIME ZONE 'Europe/Istanbul')::date - 7)
       AND status = 'PERMANENT_FAILED'
     RETURNING 1
   )

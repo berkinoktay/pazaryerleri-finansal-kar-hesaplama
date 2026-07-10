@@ -56,6 +56,7 @@ import {
   type TrendyolFinancialTransaction,
 } from '@pazarsync/marketplace';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
+import { computeOrdersCutoffMs } from '../orders';
 import { bumpReconciliationStatusForStore } from './status-bump';
 import { dispatchOtherFinancialRow, dispatchSettlementRow } from './dispatcher';
 import { handleCargoInvoiceItems } from './cargo-invoice-fees';
@@ -103,10 +104,10 @@ const DEFAULT_FETCHERS: SettlementsFetchers = {
  * dispatcher doesn't iterate further).
  */
 export async function processSettlementsChunk(
-  input: { syncLog: SyncLog; cursor: unknown | null },
+  input: { syncLog: SyncLog; cursor: unknown | null; workerId: string },
   fetchers: SettlementsFetchers = DEFAULT_FETCHERS,
 ): Promise<ChunkResult> {
-  const { syncLog: log } = input;
+  const { syncLog: log, workerId } = input;
 
   syncLog.info('settlements.chunk.start', { syncLogId: log.id, storeId: log.storeId });
 
@@ -114,7 +115,20 @@ export async function processSettlementsChunk(
   const credentials = decryptStoreCredentials(store);
 
   const endDate = new Date();
-  const overallStartTime = endDate.getTime() - SCAN_WINDOW_DAYS * MS_PER_DAY;
+  // Overall scan start clamps to the same cutoff the orders backfill uses
+  // (computeOrdersCutoffMs) instead of a bare store.createdAt. In production
+  // (SYNC_HISTORICAL_BACKFILL_DAYS=0) that cutoff IS store.createdAt, so the
+  // behavior is unchanged: a store connected less than 60 days ago has no
+  // transactions dated before it existed, and requesting slices before the
+  // cutoff only burns vendor quota on guaranteed-empty windows. In dev/stage
+  // with a positive backfill the settlement scan honors the same historical
+  // window as the orders it reconciles (env.ts documents this escape hatch).
+  // The write layer's order_not_found skips remain the correctness net if the
+  // clamp is ever too generous.
+  const overallStartTime = Math.max(
+    endDate.getTime() - SCAN_WINDOW_DAYS * MS_PER_DAY,
+    computeOrdersCutoffMs({ storeCreatedAt: store.createdAt, endDate: endDate.getTime() }),
+  );
   const chunkCount = Math.ceil(SCAN_WINDOW_DAYS / FINANCIAL_WINDOW_MAX_DAYS);
 
   let totalProcessed = 0;
@@ -124,13 +138,20 @@ export async function processSettlementsChunk(
   // values (e.g. 50d / 15d → 4 chunks but the 4th is 5d) still respect the
   // configured scan window.
   for (let chunkIdx = 0; chunkIdx < chunkCount; chunkIdx += 1) {
+    const chunkEndMs = endDate.getTime() - chunkIdx * FINANCIAL_WINDOW_MAX_DAYS * MS_PER_DAY;
+    // A slice whose end is at/before overallStartTime falls entirely before
+    // store.createdAt (fresh store). Chunks march monotonically older, so once
+    // one is fully out of range every later chunk is too — stop requesting.
+    if (chunkEndMs <= overallStartTime) {
+      break;
+    }
+
     // Heartbeat: this handler is single-chunk (never ticks via loop.ts),
     // and a full 60d scan can outlive the 90s stale-claim watchdog —
     // stamp lastTickAt once per window slice so a live scan is never
     // reaped and re-run concurrently by a peer worker.
-    await syncLogService.heartbeat(log.id);
+    await syncLogService.heartbeat(log.id, workerId);
 
-    const chunkEndMs = endDate.getTime() - chunkIdx * FINANCIAL_WINDOW_MAX_DAYS * MS_PER_DAY;
     const chunkStartMs = Math.max(
       chunkEndMs - FINANCIAL_WINDOW_MAX_DAYS * MS_PER_DAY,
       overallStartTime,
@@ -139,7 +160,7 @@ export async function processSettlementsChunk(
     const chunkStart = new Date(chunkStartMs);
 
     for (const transactionType of SETTLEMENT_TYPES) {
-      await syncLogService.heartbeat(log.id);
+      await syncLogService.heartbeat(log.id, workerId);
       const generator = fetchers.fetchSettlements({
         environment: store.environment,
         credentials,
@@ -167,7 +188,7 @@ export async function processSettlementsChunk(
     }
 
     for (const transactionType of OTHER_FINANCIAL_TYPES) {
-      await syncLogService.heartbeat(log.id);
+      await syncLogService.heartbeat(log.id, workerId);
       const generator = fetchers.fetchOtherFinancials({
         environment: store.environment,
         credentials,

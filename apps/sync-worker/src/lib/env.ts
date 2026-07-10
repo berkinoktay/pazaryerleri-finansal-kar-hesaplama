@@ -4,7 +4,16 @@
  * SYNC_HISTORICAL_BACKFILL_DAYS — how many days backward the initial
  * sync window walks. Production default = 0 (strict forward-only —
  * only orders created after store.createdAt). Dev/stage may set 90
- * for settlement testing against historical orders.
+ * for settlement testing against historical orders. A positive value is
+ * fail-closed: validateRequiredEnv() rejects it unless
+ * ALLOW_HISTORICAL_BACKFILL=true is also set (see below), so it can never
+ * be enabled by accident in production.
+ *
+ * ALLOW_HISTORICAL_BACKFILL — explicit acknowledgement that a positive
+ * SYNC_HISTORICAL_BACKFILL_DAYS is intended. Must be the literal 'true'.
+ * Dev/stage-only: backfilled pre-connect orders carry cost snapshots from
+ * before the store's costs existed, so their profit numbers are wrong — this
+ * opt-in exists so that footgun is never armed silently.
  *
  * SYNC_SAFETY_NET_HOURS — cron's per-tick lookback window. Webhook
  * is the primary ingest path; cron sweeps the trailing N hours to
@@ -89,6 +98,30 @@ export function validateRequiredEnv(): void {
   for (const key of REQUIRED_ENV) {
     requireEnv(key);
   }
+
+  // SYNC_HISTORICAL_BACKFILL_DAYS is a dev/stage-only escape hatch for testing
+  // settlement reconciliation against historical orders. Backfilling pre-connect
+  // orders predates the store's cost snapshots, so their profit would be computed
+  // against costs that did not exist yet — silently wrong numbers. This is
+  // fail-closed and does NOT key off NODE_ENV: production images do not set
+  // NODE_ENV (verified in the worker Dockerfile), so a NODE_ENV gate would fail
+  // OPEN in prod. Instead any positive backfill requires an explicit
+  // ALLOW_HISTORICAL_BACKFILL=true acknowledgement — absent it, boot fails.
+  const historicalBackfillDays = parseNonNegativeInt(
+    'SYNC_HISTORICAL_BACKFILL_DAYS',
+    process.env['SYNC_HISTORICAL_BACKFILL_DAYS'],
+    0,
+  );
+  if (historicalBackfillDays > 0 && process.env['ALLOW_HISTORICAL_BACKFILL'] !== 'true') {
+    throw new Error(
+      `SYNC_HISTORICAL_BACKFILL_DAYS is a dev/stage-only escape hatch and is set to ` +
+        `"${process.env['SYNC_HISTORICAL_BACKFILL_DAYS']}". Historical backfill reads pre-connect ` +
+        `orders whose cost snapshots would be wrong (silently incorrect profit), so it must NEVER ` +
+        `be enabled in production. To acknowledge this in dev/stage, set ` +
+        `ALLOW_HISTORICAL_BACKFILL=true; otherwise leave SYNC_HISTORICAL_BACKFILL_DAYS at 0.`,
+    );
+  }
+
   const publicApiBaseUrl = process.env['PUBLIC_API_BASE_URL'];
   if (publicApiBaseUrl === undefined || publicApiBaseUrl.length === 0) {
     syncLog.warn('worker.config.webhook-disabled', {

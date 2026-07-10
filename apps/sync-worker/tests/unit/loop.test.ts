@@ -51,11 +51,16 @@ describe('runSyncToCompletion', () => {
     }));
 
     const { runSyncToCompletion } = await import('../../src/loop');
-    await runSyncToCompletion(fakeSyncLog, { PRODUCTS: handler } as never, () => false);
+    await runSyncToCompletion(
+      fakeSyncLog,
+      { PRODUCTS: handler } as never,
+      () => false,
+      'worker-test',
+    );
 
     expect(handler.processChunk).toHaveBeenCalledTimes(3);
     expect(tickMock).toHaveBeenCalledTimes(2); // ticks only on continue, not on done
-    expect(completeMock).toHaveBeenCalledWith('log-1', 200);
+    expect(completeMock).toHaveBeenCalledWith('log-1', 200, 'worker-test');
   });
 
   it('stops between chunks when shuttingDown returns true and releases the row', async () => {
@@ -84,12 +89,17 @@ describe('runSyncToCompletion', () => {
 
     const { runSyncToCompletion } = await import('../../src/loop');
     let shutdownTriggered = false;
-    await runSyncToCompletion(fakeSyncLog, { PRODUCTS: handler } as never, () => {
-      const was = shutdownTriggered;
-      shutdownTriggered = true; // first call returns false, second returns true
-      return was;
-    });
+    await runSyncToCompletion(
+      fakeSyncLog,
+      { PRODUCTS: handler } as never,
+      () => {
+        const was = shutdownTriggered;
+        shutdownTriggered = true; // first call returns false, second returns true
+        return was;
+      },
+      'worker-test',
+    );
 
-    expect(releaseMock).toHaveBeenCalledWith('log-2');
+    expect(releaseMock).toHaveBeenCalledWith('log-2', 'worker-test');
   });
 });

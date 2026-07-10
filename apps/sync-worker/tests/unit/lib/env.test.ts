@@ -66,6 +66,13 @@ describe('validateRequiredEnv', () => {
       TRENDYOL_SANDBOX_BASE_URL: 'https://stageapigw.trendyol.com',
       PUBLIC_API_BASE_URL: 'https://app.example.com',
     };
+    // Normalize the backfill escape hatch to its safe default (unset ->
+    // parses to 0). A developer's local .env may set
+    // SYNC_HISTORICAL_BACKFILL_DAYS=90 for settlement testing; without this
+    // it would leak in through `...original` and trip the fail-closed guard in
+    // cases that never opt in. Each case that needs a positive value sets it.
+    delete process.env['SYNC_HISTORICAL_BACKFILL_DAYS'];
+    delete process.env['ALLOW_HISTORICAL_BACKFILL'];
   });
 
   afterEach(() => {
@@ -101,5 +108,39 @@ describe('validateRequiredEnv', () => {
     const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => {});
     validateRequiredEnv();
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('throws when SYNC_HISTORICAL_BACKFILL_DAYS > 0 without the ALLOW_HISTORICAL_BACKFILL opt-in (regardless of NODE_ENV)', () => {
+    // Fail-closed: prod images do not set NODE_ENV, so the guard must not key
+    // off it. Even in 'development' a positive backfill is rejected until the
+    // operator explicitly acknowledges via ALLOW_HISTORICAL_BACKFILL=true.
+    process.env['NODE_ENV'] = 'development';
+    process.env['SYNC_HISTORICAL_BACKFILL_DAYS'] = '90';
+    delete process.env['ALLOW_HISTORICAL_BACKFILL'];
+    expect(() => validateRequiredEnv()).toThrow(/SYNC_HISTORICAL_BACKFILL_DAYS/);
+  });
+
+  it('throws when SYNC_HISTORICAL_BACKFILL_DAYS > 0 and ALLOW_HISTORICAL_BACKFILL is not the literal "true"', () => {
+    process.env['SYNC_HISTORICAL_BACKFILL_DAYS'] = '90';
+    process.env['ALLOW_HISTORICAL_BACKFILL'] = '1';
+    expect(() => validateRequiredEnv()).toThrow(/SYNC_HISTORICAL_BACKFILL_DAYS/);
+  });
+
+  it('does not throw when SYNC_HISTORICAL_BACKFILL_DAYS > 0 and ALLOW_HISTORICAL_BACKFILL=true (dev/stage escape hatch acknowledged)', () => {
+    process.env['SYNC_HISTORICAL_BACKFILL_DAYS'] = '90';
+    process.env['ALLOW_HISTORICAL_BACKFILL'] = 'true';
+    expect(() => validateRequiredEnv()).not.toThrow();
+  });
+
+  it('does not throw when SYNC_HISTORICAL_BACKFILL_DAYS is 0 (opt-in irrelevant)', () => {
+    process.env['SYNC_HISTORICAL_BACKFILL_DAYS'] = '0';
+    delete process.env['ALLOW_HISTORICAL_BACKFILL'];
+    expect(() => validateRequiredEnv()).not.toThrow();
+  });
+
+  it('does not throw when SYNC_HISTORICAL_BACKFILL_DAYS is unset (default 0)', () => {
+    delete process.env['SYNC_HISTORICAL_BACKFILL_DAYS'];
+    delete process.env['ALLOW_HISTORICAL_BACKFILL'];
+    expect(() => validateRequiredEnv()).not.toThrow();
   });
 });

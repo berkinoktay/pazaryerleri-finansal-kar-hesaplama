@@ -4,12 +4,10 @@
 
 import type { SyncType } from '@pazarsync/db';
 import { SyncErrorCode } from '@pazarsync/db/enums';
-import { markRetryable, syncLogService } from '@pazarsync/sync-core';
+import { markRetryable, MAX_SYNC_ATTEMPTS, syncLogService } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
 import { advanceCursorPastBadPage } from './skip-bad-page';
-
-export const MAX_ATTEMPTS = 5;
 
 // Permanent failure codes — markFailed terminally, never markRetryable.
 // Adding a new permanent code? Update this set + add a comment in the
@@ -31,16 +29,17 @@ export async function handleRunError(
   syncType: SyncType,
   attemptCount: number,
   err: unknown,
+  workerId: string,
 ): Promise<void> {
   const code = errorCodeOf(err);
   const message = errorMessageOf(err);
 
   if (PERMANENT_FAILURE_CODES.has(code)) {
-    await syncLogService.fail(syncLogId, code, message);
+    await syncLogService.fail(syncLogId, code, message, workerId);
     return;
   }
 
-  if (attemptCount >= MAX_ATTEMPTS) {
+  if (attemptCount >= MAX_SYNC_ATTEMPTS) {
     // Skip-bad-page recovery: a single deterministic upstream 5xx on
     // one Trendyol page (real-world: a corrupted seller record at a
     // specific catalog offset) used to terminate the whole sync at
@@ -56,12 +55,12 @@ export async function handleRunError(
     // of failing terminally (the next 6h cron re-scans everything
     // anyway, so terminal FAIL is the correct outcome for them).
     if (syncType === 'PRODUCTS' && code === SyncErrorCode.MARKETPLACE_UNREACHABLE) {
-      const advanced = await advanceCursorPastBadPage(syncLogId, err);
+      const advanced = await advanceCursorPastBadPage(syncLogId, err, workerId);
       if (advanced) return;
     }
-    await syncLogService.fail(syncLogId, code, `${message} (max retries reached)`);
+    await syncLogService.fail(syncLogId, code, `${message} (max retries reached)`, workerId);
     return;
   }
 
-  await markRetryable(syncLogId, attemptCount, code, message);
+  await markRetryable(syncLogId, attemptCount, code, message, workerId);
 }

@@ -53,6 +53,13 @@ const STREAM_CHUNK_DAYS = STREAM_WINDOW_MAX_DAYS; // 14, vendor enforced per cal
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MS_PER_HOUR = 60 * 60 * 1000;
 
+// Overlap subtracted from the last completed sync's completion time when
+// deriving the delta cutoff. Re-sweeping the final hour of the previous run
+// absorbs races at its edge — webhooks that were still in flight when it
+// finished and a last stream page that cut mid-window — at negligible cost
+// (the order upsert is idempotent, so re-reading a handful of orders is free).
+const ORDERS_DELTA_OVERLAP_MS = 60 * 60 * 1000; // 1h
+
 /**
  * Inclusive lower-bound timestamp (ms) of the initial orders backfill window.
  *
@@ -79,15 +86,35 @@ export function computeOrdersCutoffMs(args: { storeCreatedAt: Date; endDate: num
 }
 
 /**
- * Cutoff for a periodic (delta) sync: only the trailing SYNC_SAFETY_NET_HOURS,
- * clamped by `store.createdAt`. Webhook is the primary ingest path; the cron
- * tick is a safety net, so after the initial backfill it sweeps just the
- * recent hours a webhook delivery may have missed — not the whole history.
+ * Cutoff for a periodic (delta) sync. Webhook is the primary ingest path; the
+ * cron tick is the safety net. The window must sweep AT LEAST the trailing
+ * SYNC_SAFETY_NET_HOURS, and MORE when the last completed sync is older than
+ * that — so an outage of ANY length (webhook down, worker down, a missed tick)
+ * is healed by the first successful tick instead of leaving a permanent
+ * unswept order gap. A fixed trailing window could never catch up: after an
+ * 8h+ outage the next tick would still look back only 8h.
+ *
+ * `lastCompletedAtMs` is the completion time of the most recent COMPLETED
+ * ORDERS sync. It is null defensively — a COMPLETED row whose `completedAt`
+ * was somehow never stamped — in which case we fall back to the plain
+ * safety-net window clamped by `store.createdAt`. Otherwise the cutoff walks
+ * back to the last completed run (minus ORDERS_DELTA_OVERLAP_MS to absorb
+ * edge races) or the safety-net floor, whichever is older, still clamped so it
+ * can never precede store connection.
  */
-export function computeDeltaCutoffMs(args: { storeCreatedAt: Date; endDate: number }): number {
+export function computeDeltaCutoffMs(args: {
+  storeCreatedAt: Date;
+  endDate: number;
+  lastCompletedAtMs: number | null;
+}): number {
   const { safetyNetHours } = readSyncEnv();
-  const floorMs = args.endDate - safetyNetHours * MS_PER_HOUR;
-  return Math.max(args.storeCreatedAt.getTime(), floorMs);
+  const storeCreatedAtMs = args.storeCreatedAt.getTime();
+  const safetyNetFloorMs = args.endDate - safetyNetHours * MS_PER_HOUR;
+  if (args.lastCompletedAtMs === null) {
+    return Math.max(storeCreatedAtMs, safetyNetFloorMs);
+  }
+  const sinceLastCompletedMs = args.lastCompletedAtMs - ORDERS_DELTA_OVERLAP_MS;
+  return Math.max(storeCreatedAtMs, Math.min(sinceLastCompletedMs, safetyNetFloorMs));
 }
 
 /**
@@ -182,18 +209,38 @@ export async function processOrdersChunk(input: {
   const credentials = decryptStoreCredentials(store);
 
   // Initial vs delta window. The first sync for a store (no prior COMPLETED
-  // ORDERS sync) walks the full backfill window from store.createdAt; every
-  // periodic cron tick afterward sweeps only the trailing SYNC_SAFETY_NET_HOURS
-  // — webhook is the primary ingest path, so re-scanning the whole history
-  // hourly is wasteful. The in-flight sync (RUNNING) doesn't count; only a
-  // prior COMPLETED ORDERS sync flips us to delta.
+  // ORDERS sync) walks the full backfill window from store.createdAt. Every
+  // periodic tick afterward runs in delta mode: it sweeps at least the trailing
+  // SYNC_SAFETY_NET_HOURS, and back to the last completed sync's completion time
+  // (minus an overlap) when that is older — so an outage longer than the safety
+  // net leaves no permanent gap; the first successful tick heals it. The
+  // in-flight sync (RUNNING) doesn't count; only a prior COMPLETED ORDERS sync
+  // (newest by completedAt) flips us to delta.
+  //
+  // `completedAt: { not: null }` is load-bearing, not defensive noise: Postgres
+  // orders NULLs FIRST on a DESC sort, so a legacy COMPLETED row whose
+  // completedAt was never stamped would sort ABOVE every real completion and
+  // shadow it — silently collapsing the delta window to the plain 8h safety
+  // net. Filtering those out means an all-null history falls through to INITIAL
+  // mode (cutoffMsOverride stays undefined) instead. The `?? null` fallback in
+  // the caller stays as defense in depth.
   const priorCompletedOrdersSync = await prisma.syncLog.findFirst({
-    where: { storeId: log.storeId, syncType: 'ORDERS', status: 'COMPLETED' },
-    select: { id: true },
+    where: {
+      storeId: log.storeId,
+      syncType: 'ORDERS',
+      status: 'COMPLETED',
+      completedAt: { not: null },
+    },
+    orderBy: { completedAt: 'desc' },
+    select: { completedAt: true },
   });
   const cutoffMsOverride =
     priorCompletedOrdersSync !== null
-      ? computeDeltaCutoffMs({ storeCreatedAt: store.createdAt, endDate: cursor.endDate })
+      ? computeDeltaCutoffMs({
+          storeCreatedAt: store.createdAt,
+          endDate: cursor.endDate,
+          lastCompletedAtMs: priorCompletedOrdersSync.completedAt?.getTime() ?? null,
+        })
       : undefined;
 
   const bounds = computeChunkBounds({

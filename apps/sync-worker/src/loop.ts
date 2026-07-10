@@ -25,23 +25,28 @@ export async function runSyncToCompletion(
   syncLog: SyncLog,
   registry: Registry,
   shuttingDown: () => boolean,
+  workerId: string,
 ): Promise<void> {
   let workingLog: SyncLog = syncLog;
 
   while (!shuttingDown()) {
-    const result = await dispatch(registry, workingLog);
+    const result = await dispatch(registry, workingLog, workerId);
 
     if (result.kind === 'done') {
-      await syncLogService.complete(workingLog.id, result.finalCount);
+      await syncLogService.complete(workingLog.id, result.finalCount, workerId);
       return;
     }
 
-    await syncLogService.tick(workingLog.id, {
-      cursor: result.cursor,
-      progress: result.progress,
-      total: result.total,
-      stage: result.stage,
-    });
+    await syncLogService.tick(
+      workingLog.id,
+      {
+        cursor: result.cursor,
+        progress: result.progress,
+        total: result.total,
+        stage: result.stage,
+      },
+      workerId,
+    );
 
     workingLog = {
       ...workingLog,
@@ -52,5 +57,5 @@ export async function runSyncToCompletion(
   }
 
   // Graceful shutdown path: hand the row back to PENDING.
-  await syncLogService.releaseToPending(workingLog.id);
+  await syncLogService.releaseToPending(workingLog.id, workerId);
 }

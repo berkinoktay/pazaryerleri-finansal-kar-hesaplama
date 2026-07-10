@@ -165,14 +165,17 @@ SELECT cron.schedule(
 
 -- ─── Live Performance buffer daily safety-net (Slice 0) ───────────────────────
 -- Calls reset_live_performance_buffer() (supabase/sql/db-functions.sql), which
--- now deletes ONLY past-day PERMANENT_FAILED entries — un-graduatable corrupt
--- rows that the sync-worker could not write to `orders`. Recoverable entries are
--- graduated by the worker (processPastDayBufferFlush), never by this cron, so a
--- real sale is never deleted. db-functions.sql is the single source of truth for
--- the predicate, so the integration test exercises the exact same logic (pg_cron
--- cannot run in CI). The predicate is self-correcting: it removes every past-day
--- PERMANENT_FAILED row whenever it fires, so the fire time only changes how soon
--- stale rows are purged, never which rows.
+-- deletes ONLY PERMANENT_FAILED entries whose order_date is older than 7 days:
+-- un-graduatable corrupt rows the sync-worker could not write to `orders`. Every
+-- PERMANENT_FAILED past-day row is retried on each flush tick
+-- (processPastDayBufferFlush) for a final graduation attempt, and recoverable
+-- entries (PENDING / PROMOTING / FAILED) are graduated by the worker, never by
+-- this cron, so no buffer row is deleted without either landing in `orders` or
+-- surviving the 7-day recovery window. db-functions.sql is the single source of
+-- truth for the predicate, so the integration test exercises the exact same
+-- logic (pg_cron cannot run in CI). The predicate is self-correcting: it removes
+-- every PERMANENT_FAILED row older than 7 days whenever it fires, so the fire
+-- time only changes how soon over-retained rows are purged, never which rows.
 --
 -- Schedule: '0 21 * * *' — 21:00 UTC = 00:00 business time. Türkiye is permanent
 -- GMT+3 (no DST since 2016), so this lands at business midnight, matching the

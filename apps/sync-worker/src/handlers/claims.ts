@@ -48,6 +48,8 @@ import {
 import { estimateReturnOnClaim } from '@pazarsync/profit';
 import { syncLog, syncLogService } from '@pazarsync/sync-core';
 
+import { computeOrdersCutoffMs } from './orders';
+
 import type { ChunkResult, ModuleHandler } from './types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -84,10 +86,10 @@ const DEFAULT_FETCHERS: ClaimsFetchers = { fetchClaims };
  * upserts absorb the 6h-tick overlap.
  */
 export async function processClaimsChunk(
-  input: { syncLog: SyncLog; cursor: unknown | null },
+  input: { syncLog: SyncLog; cursor: unknown | null; workerId: string },
   fetchers: ClaimsFetchers = DEFAULT_FETCHERS,
 ): Promise<ChunkResult> {
-  const { syncLog: log } = input;
+  const { syncLog: log, workerId } = input;
 
   syncLog.info('claims.chunk.start', { syncLogId: log.id, storeId: log.storeId });
 
@@ -95,7 +97,22 @@ export async function processClaimsChunk(
   const credentials = decryptStoreCredentials(store);
 
   const endDate = new Date();
-  const startDate = new Date(endDate.getTime() - SCAN_WINDOW_DAYS * MS_PER_DAY);
+  // Clamp the scan start to the same cutoff the orders backfill uses
+  // (computeOrdersCutoffMs) rather than a bare store.createdAt. The getClaims
+  // filter is on the claim's CREATION date, and no claim for a post-connect
+  // order can be dated before the store existed. In production
+  // (SYNC_HISTORICAL_BACKFILL_DAYS=0) that cutoff IS store.createdAt, so the
+  // behavior is unchanged: the pre-cutoff slice can only be empty and
+  // requesting it just wastes a vendor call. In dev/stage with a positive
+  // backfill the claims scan honors the same historical window as the orders
+  // it reconciles (env.ts documents this escape hatch). The write layer's
+  // order_not_found skips remain the correctness net.
+  const startDate = new Date(
+    Math.max(
+      endDate.getTime() - SCAN_WINDOW_DAYS * MS_PER_DAY,
+      computeOrdersCutoffMs({ storeCreatedAt: store.createdAt, endDate: endDate.getTime() }),
+    ),
+  );
 
   let written = 0;
   let unmatched = 0;
@@ -113,7 +130,7 @@ export async function processClaimsChunk(
   for await (const raw of generator) {
     processed += 1;
     if (processed % HEARTBEAT_EVERY_N_CLAIMS === 0) {
-      await syncLogService.heartbeat(log.id);
+      await syncLogService.heartbeat(log.id, workerId);
     }
     try {
       const mapped = mapTrendyolClaim(raw);

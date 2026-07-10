@@ -1345,7 +1345,9 @@ describe('processOrdersChunk — delta window (periodic sync)', () => {
   it('prior COMPLETED ORDERS sync → window floor is now − SAFETY_NET_HOURS, not createdAt', async () => {
     // setupStoreAndSyncLog backdates store.createdAt to 100d ago.
     const { org, store, log } = await setupStoreAndSyncLog([]);
-    // A prior COMPLETED ORDERS sync flips the handler into delta mode.
+    // A prior COMPLETED ORDERS sync (with a stamped completedAt) flips the
+    // handler into delta mode. completedAt ≈ now → the safety-net floor still
+    // wins, so the window floor is now − 8h (asserted below).
     await prisma.syncLog.create({
       data: {
         organizationId: org.id,
@@ -1353,6 +1355,7 @@ describe('processOrdersChunk — delta window (periodic sync)', () => {
         syncType: 'ORDERS',
         status: 'COMPLETED',
         startedAt: new Date(),
+        completedAt: new Date(),
       },
     });
 

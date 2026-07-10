@@ -141,11 +141,16 @@ describe('graceful shutdown', () => {
     // ticks), true thereafter — so the loop exits between chunks 0 and
     // 1 without touching the second mocked fetch.
     let calls = 0;
-    await runSyncToCompletion(claimed, { PRODUCTS: productsHandler }, () => {
-      const wasShuttingDown = calls > 0;
-      calls += 1;
-      return wasShuttingDown;
-    });
+    await runSyncToCompletion(
+      claimed,
+      { PRODUCTS: productsHandler },
+      () => {
+        const wasShuttingDown = calls > 0;
+        calls += 1;
+        return wasShuttingDown;
+      },
+      'worker-shutdown',
+    );
 
     const after = await prisma.syncLog.findUniqueOrThrow({ where: { id: claimed.id } });
 
@@ -153,6 +158,9 @@ describe('graceful shutdown', () => {
     expect(after.status).toBe('PENDING');
     expect(after.claimedAt).toBeNull();
     expect(after.claimedBy).toBeNull();
+    // A clean shutdown hand-off resets the attempt budget (started at 1) so
+    // rolling redeploys never march a progressing sync toward terminal FAILED.
+    expect(after.attemptCount).toBe(0);
 
     // Progress from chunk 0 committed; cursor saved for the next claim.
     expect(after.progressCurrent).toBeGreaterThan(0);

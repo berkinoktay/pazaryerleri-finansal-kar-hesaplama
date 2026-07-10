@@ -30,7 +30,8 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { syncLog, tryClaimNext } from '@pazarsync/sync-core';
+import { prisma } from '@pazarsync/db';
+import { LostLeaseError, syncLog, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
@@ -38,6 +39,7 @@ import { processVariantResolution } from './handlers/variant-resolution';
 import { processWebhookEventCleanup } from './handlers/webhook-event-cleanup';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { dbConnectivity } from './lib/db-connectivity';
+import { assertCriticalDdl, MissingCriticalDdlError } from './lib/ddl-assertions';
 import { validateRequiredEnv } from './lib/env';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
@@ -96,6 +98,38 @@ async function main(): Promise<void> {
       errorMessage: err instanceof Error ? err.message : String(err),
       hint: 'Fix the environment configuration (workspace-root .env) and restart the worker.',
     });
+    process.exit(1);
+  }
+
+  // Fail fast if the connected database is missing a correctness-critical
+  // partial unique index that lives ONLY in supabase/sql (not mirrored into
+  // Prisma migrations). A DB bootstrapped without the apply-policies step comes
+  // up valid to Prisma but silently missing duplicate-job protection and fee
+  // idempotency, producing wrong profit numbers with no error. This is the
+  // first DB interaction, so it doubles as the boot connectivity check. Exit
+  // non-zero (same contract as env validation) so a supervisor restarts once
+  // the operator applies supabase/sql to the database.
+  try {
+    await assertCriticalDdl(prisma);
+  } catch (err) {
+    // Branch on the cause. A MissingCriticalDdlError means the DB is reachable
+    // but supabase/sql was never applied — the actionable remediation is to run
+    // apply-policies. Any other error here is the first DB round-trip failing
+    // (connectivity, auth, wrong DATABASE_URL): the db:push hint would be
+    // misleading, so route it to a distinct event with a generic message.
+    if (err instanceof MissingCriticalDdlError) {
+      syncLog.error('worker.ddl-invalid', {
+        workerId: WORKER_ID,
+        errorMessage: err.message,
+        hint: 'Run `pnpm db:push` (dev) or the apply-policies deploy step so supabase/sql is applied to this database, then restart the worker.',
+      });
+    } else {
+      syncLog.error('worker.boot-db-error', {
+        workerId: WORKER_ID,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        hint: 'The boot DDL check could not reach the database. Verify DATABASE_URL and that the database is up, then restart the worker.',
+      });
+    }
     process.exit(1);
   }
 
@@ -214,20 +248,50 @@ async function main(): Promise<void> {
           syncType: claimed.syncType,
         });
         const runStartedAt = Date.now();
-        await runSyncToCompletion(claimed, REGISTRY, isShuttingDown);
+        await runSyncToCompletion(claimed, REGISTRY, isShuttingDown, WORKER_ID);
         syncLog.info('worker.run.complete', {
           workerId: WORKER_ID,
           syncLogId: claimed.id,
           durationMs: Date.now() - runStartedAt,
         });
       } catch (err) {
+        // Lease lost: a fenced write matched zero rows because the watchdog
+        // reaper (or a peer that re-claimed after a stale sweep) now owns
+        // this row. Check FIRST — the row belongs to another worker, so we
+        // must NOT write any sync-log state (no markRetryable, no fail);
+        // doing so would clobber the new owner's progress.
+        if (err instanceof LostLeaseError) {
+          syncLog.warn('sync.lease-lost', {
+            workerId: err.workerId,
+            syncLogId: err.syncLogId,
+          });
+          continue;
+        }
         syncLog.error('worker.run.error', {
           workerId: WORKER_ID,
           syncLogId: claimed.id,
           errorCode: errorCodeOf(err),
           errorMessage: errorMessageOf(err),
         });
-        await handleRunError(claimed.id, claimed.syncType, claimed.attemptCount, err);
+        try {
+          await handleRunError(claimed.id, claimed.syncType, claimed.attemptCount, err, WORKER_ID);
+        } catch (handleErr) {
+          // handleRunError issues fenced writes (fail / markRetryable). If the
+          // watchdog reaper (or a peer) took the row over WHILE we were handling
+          // the original error, the fence throws LostLeaseError — the same
+          // lease-lost outcome as the pre-check above. Absorb it here (one warn,
+          // then continue) instead of letting it escape to the outer catch,
+          // which would double-log and impose a full 5s backoff for a benign
+          // ownership change. Any other error still propagates as before.
+          if (handleErr instanceof LostLeaseError) {
+            syncLog.warn('sync.lease-lost', {
+              workerId: handleErr.workerId,
+              syncLogId: handleErr.syncLogId,
+            });
+            continue;
+          }
+          throw handleErr;
+        }
       }
     } catch (loopErr) {
       // Outer catch protects against systemic failures (DB connection

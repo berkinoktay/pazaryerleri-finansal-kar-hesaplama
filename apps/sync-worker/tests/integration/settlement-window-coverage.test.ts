@@ -1,6 +1,7 @@
-// Settlement scan window regression guard (PR-7 stage validation BUG #5 + #6).
+// Settlement scan window regression guard (PR-7 stage validation BUG #5 + #6,
+// plus the store.createdAt clamp — owner decision 2026-07-10).
 //
-// Two-layer contract pinned here:
+// Three-layer contract pinned here:
 //
 // 1. (BUG #5) Trendyol payment cycle T+45 worst-case (10 delivery + 28
 //    payment term + 7 Wednesday wait) — a 15-day overall scan misses
@@ -14,11 +15,17 @@
 //    call's window must respect the per-call cap, and the union of the
 //    chunk windows must cover the full 60d scan.
 //
+// 3. (createdAt clamp) The overall scan start is max(now - 60d, store.createdAt).
+//    A store connected less than 60 days ago has no transactions dated before
+//    it existed, so slices that fall entirely before store.createdAt are never
+//    requested and a partially overlapping slice starts at store.createdAt.
+//
 // Assertions:
-//   - Every fetcher call window ≤ 15 days (vendor per-call cap)
-//   - Union of windows ≈ 60 days (BUG #5 coverage)
-//   - A T-35d Sale row (falls inside the 3rd chunk) reaches handleSale
-//     and backfills Order.paymentOrderId
+//   - Store older than 60d: 4 slices, every window ≤ 15 days, union ≈ 60 days,
+//     and a T-35d Sale row (falls inside the 3rd chunk) reaches handleSale
+//     and backfills Order.paymentOrderId.
+//   - Fresh store (createdAt = yesterday): exactly ONE slice, starting at
+//     store.createdAt.
 
 import { randomUUID } from 'node:crypto';
 
@@ -50,12 +57,13 @@ const PAYMENT_ORDER_ID = 88_888_222;
 
 interface BuiltCtx {
   storeId: string;
+  storeCreatedAt: Date;
   organizationId: string;
   orderId: string;
   syncLogId: string;
 }
 
-async function buildScenario(): Promise<BuiltCtx> {
+async function buildScenario(storeCreatedAt: Date): Promise<BuiltCtx> {
   const user = await createUserProfile();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -74,6 +82,9 @@ async function buildScenario(): Promise<BuiltCtx> {
       externalAccountId: '123456',
       credentials,
       status: 'ACTIVE',
+      // The scan-start clamp reads store.createdAt, so the fixture controls it
+      // explicitly instead of leaning on the DB default (= now).
+      createdAt: storeCreatedAt,
     },
   });
 
@@ -136,12 +147,16 @@ async function buildScenario(): Promise<BuiltCtx> {
       syncType: 'SETTLEMENTS',
       status: 'RUNNING',
       startedAt: new Date(),
+      claimedAt: new Date(),
+      claimedBy: 'worker-test',
+      lastTickAt: new Date(),
       progressCurrent: 0,
     },
   });
 
   return {
     storeId: store.id,
+    storeCreatedAt: store.createdAt,
     organizationId: org.id,
     orderId: order.id,
     syncLogId: syncLog.id,
@@ -180,6 +195,17 @@ function makeOldSaleRow(
   };
 }
 
+// Distinct chunk windows captured across all fetchSettlements calls. Each
+// chunk fires one call per SETTLEMENT_TYPE (3), all sharing the same window,
+// so the distinct-window count IS the slice count.
+function distinctWindows(windows: { start: Date; end: Date }[]): { start: Date; end: Date }[] {
+  const byKey = new Map<string, { start: Date; end: Date }>();
+  for (const win of windows) {
+    byKey.set(`${win.start.getTime()}-${win.end.getTime()}`, win);
+  }
+  return [...byKey.values()];
+}
+
 describe('processSettlementsChunk — scan window coverage', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -191,9 +217,10 @@ describe('processSettlementsChunk — scan window coverage', () => {
     await ensureFeeDefinitions();
   });
 
-  it('chunks the 60-day scan into ≤15-day slices and backfills a T-35d Sale row', async () => {
-    const { storeId, syncLogId, orderId } = await buildScenario();
+  it('store older than 60d: chunks the 60-day scan into 4 ≤15-day slices and backfills a T-35d Sale row', async () => {
     const now = Date.now();
+    // Store connected 90 days ago → clamp is inert (max(now-60d, now-90d) = now-60d).
+    const { storeId, syncLogId, orderId } = await buildScenario(new Date(now - 90 * MS_PER_DAY));
     const t35d = now - 35 * MS_PER_DAY;
     const saleRow = makeOldSaleRow(t35d, t35d + 10 * MS_PER_DAY);
 
@@ -226,7 +253,12 @@ describe('processSettlementsChunk — scan window coverage', () => {
     };
 
     const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
-    await processSettlementsChunk({ syncLog, cursor: null }, mockFetchers);
+    await processSettlementsChunk({ syncLog, cursor: null, workerId: 'worker-test' }, mockFetchers);
+
+    // 0. Slice count: an older-than-60d store is unaffected by the clamp →
+    //    the full 4 sliding chunks are requested.
+    const slices = distinctWindows(capturedWindows);
+    expect(slices.length).toBe(4);
 
     // 1. Per-call window cap (BUG #6): every chunk respects the vendor
     //    15-day limit. 0.1d tolerance for execution drift.
@@ -256,5 +288,49 @@ describe('processSettlementsChunk — scan window coverage', () => {
     // Sanity: scenario actually wired up the store we built (no silent
     // cross-store leak through a stale fixture).
     expect(syncLog.storeId).toBe(storeId);
+  });
+
+  it('fresh store (createdAt = yesterday): requests exactly one slice, starting at store.createdAt', async () => {
+    const now = Date.now();
+    // Integer-ms createdAt → the DB roundtrip is exact, so the clamped start
+    // can be asserted for equality.
+    const createdAt = new Date(now - MS_PER_DAY);
+    const { syncLogId, storeCreatedAt } = await buildScenario(createdAt);
+
+    const capturedWindows: { start: Date; end: Date }[] = [];
+    const mockFetchers = {
+      fetchSettlements: async function* (
+        opts: FetchSettlementsOpts,
+      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+        capturedWindows.push({ start: opts.startDate, end: opts.endDate });
+        // Record the window only; this scenario yields no rows.
+        yield* [];
+      },
+      fetchOtherFinancials: async function* (
+        _opts: FetchOtherFinancialsOpts,
+      ): AsyncGenerator<TrendyolFinancialTransaction, void> {
+        // empty
+      },
+      fetchCargoInvoiceItems: async () => [],
+    };
+
+    const syncLog = await prisma.syncLog.findUniqueOrThrow({ where: { id: syncLogId } });
+    await processSettlementsChunk({ syncLog, cursor: null, workerId: 'worker-test' }, mockFetchers);
+
+    // Exactly one slice: chunks older than store.createdAt (a store one day
+    // old means chunks 2..4 fall entirely before it) are never requested.
+    const slices = distinctWindows(capturedWindows);
+    expect(slices.length).toBe(1);
+
+    const only = slices[0];
+    if (only === undefined) throw new Error('unreachable — one slice asserted above');
+
+    // The single slice starts exactly at store.createdAt (clamped), not at
+    // now - 60d.
+    expect(only.start.getTime()).toBe(storeCreatedAt.getTime());
+    // ...and spans only ~1 day, well within the 15-day per-call cap.
+    const days = (only.end.getTime() - only.start.getTime()) / MS_PER_DAY;
+    expect(days).toBeGreaterThan(0);
+    expect(days).toBeLessThan(15.1);
   });
 });

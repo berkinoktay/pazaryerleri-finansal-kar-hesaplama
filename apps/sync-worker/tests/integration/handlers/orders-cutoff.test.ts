@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { computeDeltaCutoffMs, computeOrdersCutoffMs } from '../../../src/handlers/orders';
+import { computeOrdersCutoffMs } from '../../../src/handlers/orders';
 
 import { ensureDbReachable, truncateAll } from '../../../../api/tests/helpers/db';
 import { createOrganization, createStore } from '../../../../api/tests/helpers/factories';
@@ -62,28 +62,5 @@ describe('computeOrdersCutoffMs — forward-only window (PR-A)', () => {
   });
 });
 
-describe('computeDeltaCutoffMs — periodic delta window', () => {
-  beforeEach(() => {
-    process.env = { ...ORIGINAL_ENV };
-  });
-
-  afterEach(() => {
-    process.env = ORIGINAL_ENV;
-  });
-
-  it('cutoff is endDate − SAFETY_NET_HOURS for a store older than the window', () => {
-    process.env['SYNC_SAFETY_NET_HOURS'] = '8';
-    const endDate = Date.now();
-    const oldCreatedAt = new Date(endDate - 90 * MS_PER_DAY);
-    const cutoff = computeDeltaCutoffMs({ storeCreatedAt: oldCreatedAt, endDate });
-    expect(cutoff).toBe(endDate - 8 * 60 * 60 * 1000);
-  });
-
-  it('clamps to store.createdAt when the store is younger than the safety-net window', () => {
-    process.env['SYNC_SAFETY_NET_HOURS'] = '8';
-    const endDate = Date.now();
-    const recentCreatedAt = new Date(endDate - 2 * 60 * 60 * 1000); // 2h < 8h
-    const cutoff = computeDeltaCutoffMs({ storeCreatedAt: recentCreatedAt, endDate });
-    expect(cutoff).toBe(recentCreatedAt.getTime());
-  });
-});
+// computeDeltaCutoffMs is a pure function (no DB) — its self-healing delta
+// window cases live in the fast unit suite: tests/unit/handlers/orders-cutoff.test.ts.

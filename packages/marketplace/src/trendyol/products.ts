@@ -196,6 +196,18 @@ export async function* fetchApprovedProducts(
         // Past the 10k cap with no token — Trendyol gave us no way
         // forward. Stop iteration; this catalog's tail beyond 10k is
         // unreachable through this endpoint without a token.
+        //
+        // This is the generator-internal parallel of the chunk handler's
+        // same-condition exit (apps/sync-worker/src/handlers/products.ts).
+        // The pure fetcher stays log-free by design: it has no syncLogId /
+        // storeId context to attach, and the truncation is already exposed
+        // to every consumer via the last yielded page's
+        // `pageMeta.nextPageToken` (null at/after the cap). The production
+        // consumer is the chunk handler, which drives paging one page at a
+        // time, inspects that same signal, and logs it there with full
+        // context (`products.catalog-truncated-10k`). A direct
+        // full-generator consumer can detect the identical condition from
+        // `pageMeta`.
         return;
       }
     } else {

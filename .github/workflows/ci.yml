@@ -293,7 +293,11 @@ jobs:
           TRENDYOL_INTEGRATOR_UA_SUFFIX: SelfIntegration
           # PR-A sync-worker defaults — prod forward-only (0) + 8h cron safety net.
           # Tests override per-case via process.env; these document the prod baseline.
+          # ALLOW_HISTORICAL_BACKFILL stays 'false': backfill is 0 here so the opt-in
+          # is inert, and this documents the fail-closed prod default (env.test.ts
+          # sets its own values per case).
           SYNC_HISTORICAL_BACKFILL_DAYS: 0
+          ALLOW_HISTORICAL_BACKFILL: 'false'
           SYNC_SAFETY_NET_HOURS: 8
           # Webhook-events retention cleanup baseline (default 90). Tests override
           # per-case via process.env; this documents the prod default.
