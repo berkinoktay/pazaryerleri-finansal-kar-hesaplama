@@ -56,6 +56,20 @@ export function CurrentScopeProvider({
 
   const value = useMemo<CurrentScope>(() => {
     const role = org.role;
+
+    // Persist a scope choice to its cookie, then re-render the server components
+    // that read it. The refresh runs only AFTER the cookie write settles, so it
+    // can't re-read the previous scope's cookie and paint stale data. A failed
+    // write is logged (a broken switch stays debuggable) and still refreshes
+    // (best-effort); catching the rejection also avoids an unhandled promise.
+    const persistThenRefresh = (write: Promise<void>, label: string): void => {
+      void write
+        .catch((err: unknown) => {
+          console.error(`[current-scope] failed to persist ${label}`, err);
+        })
+        .then(() => router.refresh());
+    };
+
     return {
       org,
       store,
@@ -68,33 +82,16 @@ export function CurrentScopeProvider({
         if (target !== undefined) {
           toast.success(t('switchedStore', { name: target.name }));
         }
-        // Persist the choice, THEN refresh. Awaiting the cookie write before
-        // router.refresh() closes a race where the server would re-render from
-        // the PREVIOUS store's cookie and briefly paint the old store's data.
-        // Refresh on both outcomes: a rejected cookie write still gets a refresh
-        // (best-effort) and never leaves an unhandled promise rejection.
-        void setActiveStoreIdAction(storeId).then(
-          () => router.refresh(),
-          () => router.refresh(),
-        );
+        persistThenRefresh(setActiveStoreIdAction(storeId), 'active store');
       },
       setOrg: (orgId) => {
         // Tenant boundary crossing: every cached query is scoped to the
-        // now-previous org. Store/org switch only calls router.refresh() (server
-        // re-render) and does NOT reset the React Query cache, so a query whose
-        // key omits orgId would otherwise serve the previous tenant's data from
-        // cache. Clearing here makes that whole bug class non-exploitable —
-        // belt-and-suspenders on top of org-scoped query keys. Store switches
-        // stay within one org (store-scoped keys carry storeId), so setStore
-        // does not clear.
+        // now-previous org. Clearing the React Query cache stops a query whose
+        // key omits orgId from serving the previous tenant's data — belt-and-
+        // suspenders on top of org-scoped query keys. Store switches stay within
+        // one org (store-scoped keys carry storeId), so setStore does not clear.
         queryClient.clear();
-        // Await the cookie write before refreshing (same race as setStore);
-        // refresh on both outcomes so a rejected write can't leave an unhandled
-        // rejection or skip the refresh.
-        void setActiveOrgIdAction(orgId).then(
-          () => router.refresh(),
-          () => router.refresh(),
-        );
+        persistThenRefresh(setActiveOrgIdAction(orgId), 'active org');
       },
     };
   }, [org, store, accessibleStores, router, queryClient, t]);
