@@ -3423,14 +3423,20 @@
                   "type": "integer",
                   "minimum": 0,
                   "example": 15
+                },
+                "totalVariants": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "example": 120
                 }
               },
               "required": [
                 "storeId",
-                "missingCount"
+                "missingCount",
+                "totalVariants"
               ]
             },
-            "description": "Per-store breakdown. Only includes stores that have at least one variant. Stores with missingCount = 0 are still included so the UI can calculate totals."
+            "description": "Per-store breakdown. Only includes stores that have at least one variant. Stores with missingCount = 0 are still included so the UI can calculate totals. Each row carries the store’s own missingCount AND totalVariants so a store-scoped view can render \"N missing of M\" for just the active store."
           }
         },
         "required": [

@@ -186,6 +186,7 @@ export function ProductsPageClient({
 
         <MissingCostWarningBanner
           orgId={orgId}
+          storeId={storeId}
           onFilterClick={() => void setFilters({ overrideMissing: 'cost', page: 1 })}
         />
 

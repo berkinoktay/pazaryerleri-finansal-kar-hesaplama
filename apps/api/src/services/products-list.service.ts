@@ -354,7 +354,7 @@ export async function fetchCostAggregates(
 export interface MissingCostStats {
   count: number;
   totalVariants: number;
-  byStore: { storeId: string; missingCount: number }[];
+  byStore: { storeId: string; missingCount: number; totalVariants: number }[];
 }
 
 /**
@@ -397,14 +397,18 @@ export async function missingCostStats(
 
   let totalMissing = 0;
   let totalVariants = 0;
-  const byStore: { storeId: string; missingCount: number }[] = [];
+  const byStore: MissingCostStats['byStore'] = [];
 
   for (const row of rows) {
     const missingCount = Number(row.missing_count);
     const variantCount = Number(row.total_variants);
     totalMissing += missingCount;
     totalVariants += variantCount;
-    byStore.push({ storeId: row.store_id, missingCount });
+    // Carry per-store totalVariants too: a store-scoped consumer (products-page
+    // banner, dashboard widget) needs BOTH the store's missing count and its
+    // own catalog size to show "N missing of M" for the active store — the
+    // org-wide totals would otherwise mix in other stores' variants.
+    byStore.push({ storeId: row.store_id, missingCount, totalVariants: variantCount });
   }
 
   return { count: totalMissing, totalVariants, byStore };
