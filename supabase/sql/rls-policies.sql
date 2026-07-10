@@ -231,13 +231,21 @@ CREATE POLICY orders_org_member_read ON orders
 -- expenses.store_id is nullable: org-level expenses (NULL) follow org
 -- membership; store-attributed expenses follow store access, so a MEMBER
 -- granted only store A never sees store B's costs.
+--
+-- The store-attributed branch ANDs is_org_member(organization_id) ON TOP of
+-- can_access_store(store_id). Reason: store_id is only a plain FK (references
+-- stores.id, not a composite (id, organization_id)), so an expense row could
+-- carry organization_id = A while store_id points at a store in org B. Without
+-- the org check, a member of org B would then read org A's expense amount via
+-- can_access_store(B). Requiring is_org_member(organization_id) too means the
+-- reader must belong to the row's OWN org, closing that cross-org read.
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS expenses_org_member_read ON expenses;
 CREATE POLICY expenses_org_member_read ON expenses
   FOR SELECT TO authenticated
   USING (
-    (store_id IS NULL AND is_org_member(organization_id))
-    OR (store_id IS NOT NULL AND can_access_store(store_id))
+    is_org_member(organization_id)
+    AND (store_id IS NULL OR can_access_store(store_id))
   );
 
 -- ─── order_items — reach via parent order ──────────────────────────────
