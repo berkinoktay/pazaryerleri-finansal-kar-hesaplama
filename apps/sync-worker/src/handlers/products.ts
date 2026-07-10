@@ -148,7 +148,15 @@ export async function processProductsChunk(input: {
     } else {
       // Past the 10k cap and no token — Trendyol gave us no way
       // forward. Treat as done; the catalog beyond 10k is unreachable
-      // through this endpoint without a token.
+      // through this endpoint without a token. The truncation used to
+      // return silently and looked identical to a clean completion; it is
+      // now observable in the logs, so a catalog quietly capped at 10k
+      // items surfaces instead of masquerading as a finished sync.
+      syncLog.warn('products.catalog-truncated-10k', {
+        syncLogId: log.id,
+        storeId: log.storeId,
+        progress: newProgress,
+      });
       return { kind: 'done', finalCount: newProgress };
     }
   } else {

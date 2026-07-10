@@ -6,7 +6,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { encryptCredentials } from '@pazarsync/sync-core';
+import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
 
 import { processProductsChunk } from '../../src/handlers/products';
 
@@ -265,6 +265,72 @@ describe('processProductsChunk', () => {
     expect(result.kind).toBe('done');
     if (result.kind !== 'done') return;
     expect(result.finalCount).toBe(5490); // 5489 + 1 from this last page's batch
+  });
+
+  it('warns on silent 10k-catalog truncation: past the page cap with no nextPageToken', async () => {
+    // Trendyol paginates ?page=N&size=100 only while page*size <= 10,000; item
+    // 10,000+ needs a nextPageToken the vendor sometimes never returns. When
+    // the next page would cross the cap AND no token was provided, the tail of
+    // the catalog is unreachable. The handler still returns `done`, but that
+    // used to look identical to a clean completion — it now emits a warn so a
+    // catalog quietly capped at 10k items is observable in the logs.
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    // Processing page 99 (items 9900-9999). The next page (100) would cross the
+    // 10k cap, and totalElements (20000) / totalPages (200) sit well beyond it,
+    // so neither the totalElements nor the last-documented-page exit fires — we
+    // land squarely in the past-cap-without-token branch.
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 20000,
+        totalPages: 200,
+        page: 99,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 99001,
+            productMainId: 'pm-99001',
+            title: 'Cap Boundary Product',
+            variants: [{ variantId: 990010, barcode: 'cap-1', stockCode: 'cap-sk-1', size: 'M' }],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+        progressCurrent: 9900,
+        progressTotal: 20000,
+      },
+    });
+
+    const result = await processProductsChunk({
+      syncLog: log,
+      cursor: { kind: 'page', n: 99 },
+    });
+
+    expect(result.kind).toBe('done');
+    if (result.kind !== 'done') return;
+    expect(result.finalCount).toBe(9901); // 9900 + this page's single item
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'products.catalog-truncated-10k',
+      expect.objectContaining({ syncLogId: log.id, storeId, progress: 9901 }),
+    );
   });
 
   it('falls back from a saved token cursor to page-based when below the 10k cap', async () => {
