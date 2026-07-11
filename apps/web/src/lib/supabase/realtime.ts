@@ -203,6 +203,33 @@ function normalizeSkippedPages(raw: unknown): SkippedPageWireShape[] | null {
   return out.length > 0 ? out : null;
 }
 
+// R2d one-time diagnostic (mirrors warnedNonStringOrderDate below): logical
+// decoding can drift so a sync_logs INSERT/UPDATE arrives without the id/status
+// this cache patch keys on. We skip the patch (the trickle poll reconciles the
+// row) and warn ONCE per page session (this flag is module-scoped, not per
+// channel) so the drift is diagnosable without spamming the console -- naming
+// only the table, never any payload contents.
+let warnedMalformedSyncLogsRow = false;
+
+/**
+ * Minimal, cheap wire guard for a sync_logs INSERT/UPDATE row before it is
+ * mapped into the React Query cache. The Realtime payload's `new` is typed but
+ * only at compile time; a drifted row could be missing the fields the patch
+ * keys on. We validate just those two — a non-empty string `id` and a string
+ * `status` — and trust snakeToCamel + the trickle poll for the rest.
+ */
+function isPatchableSyncLogsRow(row: unknown): row is SyncLogsRowWire {
+  return (
+    typeof row === 'object' &&
+    row !== null &&
+    'id' in row &&
+    typeof row.id === 'string' &&
+    row.id.length > 0 &&
+    'status' in row &&
+    typeof row.status === 'string'
+  );
+}
+
 export interface SubscribeToOrgSyncsOptions {
   /** Per-event handler. Fires once per Realtime postgres_changes payload. */
   onEvent: (event: SyncLogRealtimeEvent) => void;
@@ -215,6 +242,339 @@ export interface SubscribeToOrgSyncsOptions {
    * `hidden` → `'paused'`).
    */
   onHealthChange?: (health: RealtimeHealth) => void;
+  /**
+   * R2c delivery watchdog opt-in. Returns whether the consumer currently expects
+   * events (for the org-syncs surface: the cache holds an active sync). When it
+   * reports `true` but the channel has gone silent past DELIVERY_TIMEOUT_MS while
+   * still 'healthy', the core degrades health to 'errored' so the poll fallback
+   * and resubscribe kick in. Omit it to leave the watchdog off.
+   */
+  expectDelivery?: () => boolean;
+}
+
+/**
+ * PostgreSQL change events a postgres_changes binding can listen to. Mirrors
+ * supabase-js's `${REALTIME_POSTGRES_CHANGES_LISTEN_EVENT}` string union, where
+ * '*' means "all events".
+ */
+type PostgresChangesListenEvent = '*' | 'INSERT' | 'UPDATE' | 'DELETE';
+
+// supabase-js's RealtimeChannel.on() bounds its postgres_changes row generic to
+// `{ [key: string]: any }`. We mirror that exact bound so the wire-row interfaces
+// above (which have no index signature and therefore do NOT satisfy
+// Record<string, unknown>) are accepted here just as the standalone `.on<Row>(...)`
+// calls accepted them before this extraction. Narrowing to unknown would reject
+// the interfaces and force casts, which this refactor must not introduce.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors supabase-js's own .on() row bound
+type RealtimeRowShape = { [key: string]: any };
+
+/**
+ * One postgres_changes binding: the server-side row filter plus the handler that
+ * maps the delivered payload. The row type is per-binding so each handler keeps
+ * its own wire shape and casts, exactly as the standalone `.on<Row>(...)` calls did.
+ */
+interface ChannelBinding<Row extends RealtimeRowShape> {
+  event: PostgresChangesListenEvent;
+  schema: string;
+  table: string;
+  filter: string;
+  handler: (payload: RealtimePostgresChangesPayload<Row>) => void;
+}
+
+interface ChannelLifecycleConfig<Row extends RealtimeRowShape> {
+  /** supabase channel name, e.g. `sync_logs:org:<id>` or `live-performance:<id>`. */
+  topic: string;
+  /**
+   * postgres_changes bindings, attached to the channel in array order. Order is
+   * observable (it is the order supabase-js registers the listeners), so it is
+   * preserved verbatim from the caller.
+   */
+  bindings: ReadonlyArray<ChannelBinding<Row>>;
+  /** Channel health transition sink; see RealtimeHealth for the state contract. */
+  onHealthChange?: (health: RealtimeHealth) => void;
+  /**
+   * R2c delivery watchdog opt-in. When present, the core polls it every
+   * DELIVERY_CHECK_INTERVAL_MS: if it returns `true` (the consumer is expecting
+   * events) while the channel reads 'healthy' but has delivered nothing for
+   * longer than DELIVERY_TIMEOUT_MS, health is degraded to 'errored'. Left
+   * undefined by consumers whose freshness does not depend on a steady event
+   * stream (the live-performance notifier self-heals via signal+refetch).
+   */
+  expectDelivery?: () => boolean;
+}
+
+interface ChannelLifecycle {
+  /** Unsubscribe the channel and detach the visibility listener. */
+  cleanup: () => void;
+}
+
+/**
+ * R2b auto-resubscribe timing. Once a channel has been continuously 'errored'
+ * for RESUBSCRIBE_AFTER_MS, the core tears it down and rebuilds it, then keeps
+ * retrying with capped exponential backoff between consecutive rebuild attempts
+ * (INITIAL, doubling each attempt, clamped at MAX). A successful SUBSCRIBED
+ * resets the backoff and cancels the loop.
+ */
+export const RESUBSCRIBE_AFTER_MS = 15_000;
+export const RESUBSCRIBE_BACKOFF_INITIAL_MS = 5_000;
+export const RESUBSCRIBE_BACKOFF_MAX_MS = 60_000;
+
+/**
+ * R2c delivery watchdog timing. When a consumer's `expectDelivery()` reports
+ * events are due but none have arrived for DELIVERY_TIMEOUT_MS while the channel
+ * still reads 'healthy', the watchdog degrades health to 'errored' — which wakes
+ * both the poll fallback (#435) and the R2b resubscribe. The check runs on a
+ * DELIVERY_CHECK_INTERVAL_MS cadence.
+ */
+export const DELIVERY_TIMEOUT_MS = 20_000;
+export const DELIVERY_CHECK_INTERVAL_MS = 5_000;
+
+/**
+ * Shared Realtime channel lifecycle used by both subscription helpers below.
+ * Owns every mechanic they used to duplicate: the browser Supabase client, the
+ * channel build, the postgres_changes bindings, the subscribe-status ->
+ * RealtimeHealth mapping (SUBSCRIBED -> 'healthy'; CHANNEL_ERROR / TIMED_OUT /
+ * CLOSED -> 'errored'), the one-shot suppression of the CLOSED that a visibility
+ * teardown emits (so health stays 'paused', not 'errored', in a hidden tab), the
+ * channel-identity guard that drops a late status from a channel we already
+ * replaced during a fast hidden->visible rebuild, and the visibilitychange
+ * pause/teardown + resume/rebuild.
+ *
+ * Callers stay thin: each passes its `topic` (channel name), its postgres_changes
+ * `bindings` (server-side filters + row handlers), and an optional
+ * `onHealthChange` sink. Returns `{ cleanup }`; the helpers hand their own callers
+ * `cleanup` directly so their unsubscribe contract is unchanged.
+ *
+ * See RealtimeHealth for the meaning of each health state and why the consumer's
+ * polling fallback is gated on it.
+ */
+function createChannelLifecycle<Row extends RealtimeRowShape>(
+  config: ChannelLifecycleConfig<Row>,
+): ChannelLifecycle {
+  const { topic, bindings, onHealthChange, expectDelivery } = config;
+  const supabase = createClient();
+  let channel: RealtimeChannel | null = null;
+  let unsubscribed = false;
+  // One-shot flag: a visibility-triggered teardown removes the channel, which
+  // makes supabase-js fire the subscribe callback once with 'CLOSED'. That is
+  // our own teardown, not a real drop -- swallow exactly one CLOSED so health
+  // stays 'paused'. It is one-shot on purpose: a genuine later CLOSED (an actual
+  // outage) must still surface as 'errored'.
+  let suppressClosedOnce = false;
+  // Wall-clock ms of the most recently delivered payload on the live channel,
+  // ALSO reset on every SUBSCRIBED (a fresh join is itself a delivery signal).
+  // Read by the R2c delivery watchdog to detect a channel that is SUBSCRIBED but
+  // has gone silent while the consumer expects events.
+  let lastEventAt: number | null = null;
+  // Latest health we reported. Tracked so the resubscribe loop and the delivery
+  // watchdog can read the current state without racing the onHealthChange sink.
+  let currentHealth: RealtimeHealth = 'connecting';
+  // R2b resubscribe scheduling. `resubscribeTimer` holds either the 15s
+  // "continuously errored" countdown or a pending backoff rebuild; `backoffMs`
+  // is the delay for the NEXT rebuild after the current one (reset on SUBSCRIBED).
+  let resubscribeTimer: number | null = null;
+  let backoffMs = RESUBSCRIBE_BACKOFF_INITIAL_MS;
+  // R2c delivery watchdog interval handle. Armed on mount and on visibility
+  // resume when a consumer opted in; disarmed on hide and on cleanup so a hidden
+  // background tab holds no timer.
+  let deliveryCheckInterval: number | null = null;
+
+  const clearResubscribeTimer = (): void => {
+    if (resubscribeTimer !== null) {
+      window.clearTimeout(resubscribeTimer);
+      resubscribeTimer = null;
+    }
+  };
+
+  const reportHealth = (next: RealtimeHealth): void => {
+    currentHealth = next;
+    if (onHealthChange !== undefined) onHealthChange(next);
+
+    // R2b: drive the auto-resubscribe loop off health transitions.
+    if (next === 'errored') {
+      // Start the "continuously errored" countdown once. If a backoff rebuild is
+      // already pending (we are mid-loop), let it keep ticking -- do NOT restart
+      // the clock on repeated 'errored' emits.
+      if (resubscribeTimer === null) {
+        resubscribeTimer = window.setTimeout(attemptResubscribe, RESUBSCRIBE_AFTER_MS);
+      }
+    } else if (next === 'healthy') {
+      // A successful join cancels any pending rebuild and resets the backoff.
+      backoffMs = RESUBSCRIBE_BACKOFF_INITIAL_MS;
+      clearResubscribeTimer();
+    } else if (next === 'paused') {
+      // Never resubscribe while hidden -- the visibility resume rebuilds. Reset
+      // the backoff so the next visible cycle starts a fresh loop.
+      backoffMs = RESUBSCRIBE_BACKOFF_INITIAL_MS;
+      clearResubscribeTimer();
+    }
+    // 'connecting' -- a (re)build is in flight; leave any pending backoff timer.
+  };
+
+  const buildChannel = (): RealtimeChannel => {
+    // A stale flag from a silent teardown must not mask a later real outage.
+    suppressClosedOnce = false;
+    reportHealth('connecting');
+    // Capture the instance being built so the async subscribe callback can tell
+    // whether it still owns the current channel. A fast hidden->visible flip
+    // rebuilds the channel; the OLD channel's delayed teardown-CLOSED can still be
+    // in flight after the rebuild reset suppressClosedOnce, and would otherwise be
+    // misread as a genuine 'errored' against the NEW channel's health.
+    const thisChannel = supabase.channel(topic);
+    for (const binding of bindings) {
+      thisChannel.on<Row>(
+        'postgres_changes',
+        {
+          event: binding.event,
+          schema: binding.schema,
+          table: binding.table,
+          filter: binding.filter,
+        },
+        (payload) => {
+          lastEventAt = Date.now();
+          // A delivered event IS liveness proof. If a flap (or a watchdog
+          // false-positive) had degraded us to 'errored', recover to 'healthy':
+          // reportHealth then clears the pending resubscribe countdown so we do
+          // not needlessly tear down a channel that is actually delivering.
+          if (currentHealth === 'errored') reportHealth('healthy');
+          binding.handler(payload);
+        },
+      );
+    }
+    thisChannel.subscribe((status) => {
+      if (unsubscribed) return;
+      // Swallow the single CLOSED our own visibility teardown produces so
+      // health stays 'paused' (see suppressClosedOnce above).
+      if (status === 'CLOSED' && suppressClosedOnce) {
+        suppressClosedOnce = false;
+        return;
+      }
+      // Identity guard: a status delivered late for a channel we already
+      // replaced (fast hidden->visible rebuild) must not touch the current
+      // channel's health -- otherwise the old teardown-CLOSED spuriously errors.
+      if (channel !== thisChannel) return;
+      // Status values: SUBSCRIBED | TIMED_OUT | CLOSED | CHANNEL_ERROR | (transient others)
+      if (status === 'SUBSCRIBED') {
+        // A fresh join is itself a delivery signal -- reset the watchdog clock so
+        // it cannot instantly re-trip right after a resubscribe.
+        lastEventAt = Date.now();
+        reportHealth('healthy');
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        reportHealth('errored');
+      }
+    });
+    return thisChannel;
+  };
+
+  const teardown = async (): Promise<void> => {
+    if (channel === null) return;
+    const c = channel;
+    channel = null;
+    await supabase.removeChannel(c);
+  };
+
+  // R2b: tear the dead channel down and rebuild, then arm the next attempt with
+  // capped exponential backoff. Fired by the resubscribe timer (see reportHealth).
+  const attemptResubscribe = (): void => {
+    resubscribeTimer = null;
+    if (unsubscribed) return;
+    // A recovery ('healthy') or a hidden tab ('paused') already cleared the
+    // timer; guard defensively against a fire that raced past that.
+    if (currentHealth === 'healthy' || currentHealth === 'paused') return;
+
+    // teardown() nulls `channel` synchronously (before its await) so the rebuild
+    // sees a clean slot; the identity guard makes the torn-down channel's late
+    // status callbacks inert, so we deliberately do NOT arm suppressClosedOnce
+    // here (that is reserved for the visibility teardown, which stays 'paused').
+    void teardown();
+    channel = buildChannel();
+
+    // Arm the next attempt in case this rebuild also fails to reach SUBSCRIBED.
+    // A successful SUBSCRIBED resets backoffMs and clears this timer.
+    resubscribeTimer = window.setTimeout(attemptResubscribe, backoffMs);
+    backoffMs = Math.min(backoffMs * 2, RESUBSCRIBE_BACKOFF_MAX_MS);
+  };
+
+  // R2c delivery watchdog: only meaningful when a consumer opted in via
+  // `expectDelivery`. Runs on an interval and degrades a silently-dead channel.
+  const checkDelivery = (): void => {
+    if (unsubscribed) return;
+    if (expectDelivery === undefined) return;
+    if (currentHealth !== 'healthy') return;
+    if (lastEventAt === null) return;
+    if (!expectDelivery()) return;
+    if (Date.now() - lastEventAt <= DELIVERY_TIMEOUT_MS) return;
+    // Channel reads SUBSCRIBED but has delivered nothing past the timeout while
+    // the consumer expected events. Degrade so the poll fallback (#435) and the
+    // R2b resubscribe both take over. The health gate limits this to one warn
+    // per healthy window; a sustained dead-but-joinable outage (each rebuild
+    // reaches SUBSCRIBED yet delivers nothing) therefore warns roughly once per
+    // rebuild cycle -- about every 35s (15s countdown + 20s timeout) -- by design.
+    console.warn(
+      '[realtime] delivery watchdog: channel is SUBSCRIBED but has delivered no events ' +
+        "past the delivery timeout while delivery was expected; degrading to 'errored' so " +
+        'the poll fallback and resubscribe take over.',
+    );
+    reportHealth('errored');
+  };
+
+  // R2c: arm/disarm the watchdog interval. Guarded on `window` so a node-only
+  // (non-happy-dom) context can't crash on the timer API, and idempotent so
+  // repeated arm calls (mount + resume) never stack intervals.
+  const startDeliveryWatchdog = (): void => {
+    if (deliveryCheckInterval !== null) return;
+    if (expectDelivery === undefined || typeof window === 'undefined') return;
+    deliveryCheckInterval = window.setInterval(checkDelivery, DELIVERY_CHECK_INTERVAL_MS);
+  };
+
+  const stopDeliveryWatchdog = (): void => {
+    if (deliveryCheckInterval === null) return;
+    window.clearInterval(deliveryCheckInterval);
+    deliveryCheckInterval = null;
+  };
+
+  // Visibility handler -- only wired in real browsers. SSR / vitest-happy-dom
+  // both expose `document` so the typeof check is enough to keep node-only
+  // test contexts safe.
+  const handleVisibility = (): void => {
+    if (typeof document === 'undefined') return;
+    if (document.visibilityState === 'hidden') {
+      reportHealth('paused');
+      // Arm the CLOSED suppressor BEFORE teardown so the resulting CLOSED does
+      // not overwrite 'paused' with 'errored' and wake the polling fallback.
+      suppressClosedOnce = true;
+      // A hidden tab expects no delivery -- disarm the watchdog so a background
+      // tab holds no timer (mirrors the channel teardown below).
+      stopDeliveryWatchdog();
+      void teardown();
+    } else if (channel === null) {
+      channel = buildChannel();
+      // Re-arm the watchdog for the freshly rebuilt channel on resume.
+      startDeliveryWatchdog();
+    }
+  };
+
+  channel = buildChannel();
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibility);
+  }
+
+  // R2c: arm the watchdog for the initial channel (a no-op unless a consumer
+  // opted in and `window` exists).
+  startDeliveryWatchdog();
+
+  const cleanup = (): void => {
+    unsubscribed = true;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    }
+    clearResubscribeTimer();
+    stopDeliveryWatchdog();
+    void teardown();
+  };
+
+  return { cleanup };
 }
 
 /**
@@ -268,41 +628,16 @@ export function subscribeToOrgSyncs(
   orgId: string,
   options: SubscribeToOrgSyncsOptions,
 ): () => void {
-  const { onEvent, onHealthChange } = options;
-  const supabase = createClient();
-  let channel: RealtimeChannel | null = null;
-  let unsubscribed = false;
-  // One-shot flag: a visibility-triggered teardown removes the channel, which
-  // makes supabase-js fire the subscribe callback once with 'CLOSED'. That is
-  // our own teardown, not a real drop — swallow exactly one CLOSED so health
-  // stays 'paused'. It is one-shot on purpose: a genuine later CLOSED (an actual
-  // outage) must still surface as 'errored'.
-  let suppressClosedOnce = false;
-
-  const reportHealth = (next: RealtimeHealth): void => {
-    if (onHealthChange !== undefined) onHealthChange(next);
-  };
-
-  const buildChannel = (): RealtimeChannel => {
-    // A stale flag from a silent teardown must not mask a later real outage.
-    suppressClosedOnce = false;
-    reportHealth('connecting');
-    // Capture the instance being built so the async subscribe callback can tell
-    // whether it still owns the current channel. A fast hidden->visible flip
-    // rebuilds the channel; the OLD channel's delayed teardown-CLOSED can still be
-    // in flight after the rebuild reset suppressClosedOnce, and would otherwise be
-    // misread as a genuine 'errored' against the NEW channel's health.
-    const thisChannel = supabase.channel(`sync_logs:org:${orgId}`);
-    thisChannel
-      .on<SyncLogsRowWire>(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'sync_logs',
-          filter: `organization_id=eq.${orgId}`,
-        },
-        (payload: RealtimePostgresChangesPayload<SyncLogsRowWire>) => {
+  const { onEvent, onHealthChange, expectDelivery } = options;
+  return createChannelLifecycle<SyncLogsRowWire>({
+    topic: `sync_logs:org:${orgId}`,
+    bindings: [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'sync_logs',
+        filter: `organization_id=eq.${orgId}`,
+        handler: (payload) => {
           const eventType = payload.eventType;
           if (eventType === 'DELETE') {
             // With sync_logs at REPLICA IDENTITY DEFAULT the deleted row carries only
@@ -314,71 +649,33 @@ export function subscribeToOrgSyncs(
             onEvent({ eventType: 'DELETE', id: oldRow.id, row: null });
             return;
           }
-          const newRow = payload.new as SyncLogsRowWire;
+          // R2d wire cast guard: validate the fields this patch keys on before
+          // mapping the row. A malformed row (a logical-decoding drift) is
+          // skipped and the trickle poll reconciles it; we warn once so the
+          // drift is diagnosable. Replaces the former `payload.new as` cast.
+          const newRow = payload.new;
+          if (!isPatchableSyncLogsRow(newRow)) {
+            if (!warnedMalformedSyncLogsRow) {
+              warnedMalformedSyncLogsRow = true;
+              console.warn(
+                '[realtime] sync_logs cache patch skipped: an INSERT/UPDATE arrived with a ' +
+                  'malformed row (missing/non-string id or non-string status); the trickle ' +
+                  'poll will reconcile it. Suppressing further warnings for this page session.',
+              );
+            }
+            return;
+          }
           onEvent({
             eventType,
             id: newRow.id,
             row: snakeToCamel(newRow),
           });
         },
-      )
-      .subscribe((status) => {
-        if (unsubscribed) return;
-        // Swallow the single CLOSED our own visibility teardown produces so
-        // health stays 'paused' (see suppressClosedOnce above).
-        if (status === 'CLOSED' && suppressClosedOnce) {
-          suppressClosedOnce = false;
-          return;
-        }
-        // Identity guard: a status delivered late for a channel we already
-        // replaced (fast hidden->visible rebuild) must not touch the current
-        // channel's health -- otherwise the old teardown-CLOSED spuriously errors.
-        if (channel !== thisChannel) return;
-        // Status values: SUBSCRIBED | TIMED_OUT | CLOSED | CHANNEL_ERROR | (transient others)
-        if (status === 'SUBSCRIBED') reportHealth('healthy');
-        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          reportHealth('errored');
-        }
-      });
-    return thisChannel;
-  };
-
-  const teardown = async (): Promise<void> => {
-    if (channel === null) return;
-    const c = channel;
-    channel = null;
-    await supabase.removeChannel(c);
-  };
-
-  // Visibility handler — only wired in real browsers. SSR / vitest-happy-dom
-  // both expose `document` so the typeof check is enough to keep node-only
-  // test contexts safe.
-  const handleVisibility = (): void => {
-    if (typeof document === 'undefined') return;
-    if (document.visibilityState === 'hidden') {
-      reportHealth('paused');
-      // Arm the CLOSED suppressor BEFORE teardown so the resulting CLOSED does
-      // not overwrite 'paused' with 'errored' and wake the polling fallback.
-      suppressClosedOnce = true;
-      void teardown();
-    } else if (channel === null) {
-      channel = buildChannel();
-    }
-  };
-
-  channel = buildChannel();
-
-  if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', handleVisibility);
-  }
-
-  return () => {
-    unsubscribed = true;
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', handleVisibility);
-    }
-    void teardown();
-  };
+      },
+    ],
+    onHealthChange,
+    expectDelivery,
+  }).cleanup;
 }
 
 // One-time diagnostic: the generic constraint below is COMPILE-TIME only. If a
@@ -469,110 +766,32 @@ export function subscribeToLivePerformance(
   options: SubscribeToLivePerformanceOptions,
 ): () => void {
   const { onEvent, onNewOrder, onHealthChange } = options;
-  const supabase = createClient();
-  let channel: RealtimeChannel | null = null;
-  let unsubscribed = false;
-  // One-shot flag: a visibility-triggered teardown removes the channel, which
-  // makes supabase-js fire the subscribe callback once with 'CLOSED'. That is
-  // our own teardown, not a real drop — swallow exactly one CLOSED so health
-  // stays 'paused'. It is one-shot on purpose: a genuine later CLOSED (an actual
-  // outage) must still surface as 'errored'.
-  let suppressClosedOnce = false;
-
-  const reportHealth = (next: RealtimeHealth): void => {
-    if (onHealthChange !== undefined) onHealthChange(next);
-  };
-
-  const buildChannel = (): RealtimeChannel => {
-    // A stale flag from a silent teardown must not mask a later real outage.
-    suppressClosedOnce = false;
-    reportHealth('connecting');
-    // Capture the instance being built so the async subscribe callback can tell
-    // whether it still owns the current channel. A fast hidden->visible flip
-    // rebuilds the channel; the OLD channel's delayed teardown-CLOSED can still be
-    // in flight after the rebuild reset suppressClosedOnce, and would otherwise be
-    // misread as a genuine 'errored' against the NEW channel's health.
-    const thisChannel = supabase.channel(`live-performance:${storeId}`);
-    thisChannel
-      .on<BufferRowWire>(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'live_performance_buffer',
-          filter: `store_id=eq.${storeId}`,
-        },
-        (payload) => {
+  return createChannelLifecycle<BufferRowWire | OrdersRowWire>({
+    topic: `live-performance:${storeId}`,
+    bindings: [
+      {
+        event: '*',
+        schema: 'public',
+        table: 'live_performance_buffer',
+        filter: `store_id=eq.${storeId}`,
+        handler: (payload) => {
           const event = newOrderInsertEvent('buffer', payload);
           if (event !== null) onNewOrder?.(event);
           onEvent();
         },
-      )
-      .on<OrdersRowWire>(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'orders',
-          filter: `store_id=eq.${storeId}`,
-        },
-        (payload) => {
+      },
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'orders',
+        filter: `store_id=eq.${storeId}`,
+        handler: (payload) => {
           const event = newOrderInsertEvent('orders', payload);
           if (event !== null) onNewOrder?.(event);
           onEvent();
         },
-      )
-      .subscribe((status) => {
-        if (unsubscribed) return;
-        // Swallow the single CLOSED our own visibility teardown produces so
-        // health stays 'paused' (see suppressClosedOnce above).
-        if (status === 'CLOSED' && suppressClosedOnce) {
-          suppressClosedOnce = false;
-          return;
-        }
-        // Identity guard: a status delivered late for a channel we already
-        // replaced (fast hidden->visible rebuild) must not touch the current
-        // channel's health -- otherwise the old teardown-CLOSED spuriously errors.
-        if (channel !== thisChannel) return;
-        if (status === 'SUBSCRIBED') reportHealth('healthy');
-        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          reportHealth('errored');
-        }
-      });
-    return thisChannel;
-  };
-
-  const teardown = async (): Promise<void> => {
-    if (channel === null) return;
-    const c = channel;
-    channel = null;
-    await supabase.removeChannel(c);
-  };
-
-  const handleVisibility = (): void => {
-    if (typeof document === 'undefined') return;
-    if (document.visibilityState === 'hidden') {
-      reportHealth('paused');
-      // Arm the CLOSED suppressor BEFORE teardown so the resulting CLOSED does
-      // not overwrite 'paused' with 'errored' and wake the polling fallback.
-      suppressClosedOnce = true;
-      void teardown();
-    } else if (channel === null) {
-      channel = buildChannel();
-    }
-  };
-
-  channel = buildChannel();
-
-  if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', handleVisibility);
-  }
-
-  return () => {
-    unsubscribed = true;
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', handleVisibility);
-    }
-    void teardown();
-  };
+      },
+    ],
+    onHealthChange,
+  }).cleanup;
 }
