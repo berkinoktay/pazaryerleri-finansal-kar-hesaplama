@@ -301,6 +301,29 @@ interface ChannelLifecycleConfig<Row extends RealtimeRowShape> {
    * stream (the live-performance notifier self-heals via signal+refetch).
    */
   expectDelivery?: () => boolean;
+  /**
+   * Opt out of the visibilitychange teardown. When `true`, the channel is NOT
+   * removed when the tab reports `hidden`: it stays open and keeps delivering
+   * events (so toasts fire live) in the background. Omitted / `false` keeps the
+   * default behavior — tear the channel down while hidden, rebuild on return.
+   *
+   * Only the live-performance channel opts in (issue #452). Chrome can report a
+   * window as `hidden` even while it is fully visible on a second monitor when
+   * another application holds focus; under the default teardown that
+   * misclassification silently kills the live toast stream for a merchant who is
+   * actively watching the panel. Keeping this channel alive trades a little
+   * background socket cost for a live stream that never drops in that state.
+   *
+   * The org-syncs channel keeps the default teardown: its freshness is not
+   * time-critical, so freeing the background socket is the better trade there.
+   *
+   * Do NOT combine this with `expectDelivery`: keeping the channel alive skips the
+   * on-hide watchdog disarm, so a throttled background tab could trip a
+   * delivery-watchdog false positive and churn needless resubscribes. No caller
+   * pairs them today; anyone who wants to must resolve that watchdog interaction
+   * first.
+   */
+  keepAliveWhenHidden?: boolean;
 }
 
 interface ChannelLifecycle {
@@ -351,7 +374,7 @@ export const DELIVERY_CHECK_INTERVAL_MS = 5_000;
 function createChannelLifecycle<Row extends RealtimeRowShape>(
   config: ChannelLifecycleConfig<Row>,
 ): ChannelLifecycle {
-  const { topic, bindings, onHealthChange, expectDelivery } = config;
+  const { topic, bindings, onHealthChange, expectDelivery, keepAliveWhenHidden } = config;
   const supabase = createClient();
   let channel: RealtimeChannel | null = null;
   let unsubscribed = false;
@@ -574,6 +597,17 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
   // test contexts safe.
   const handleVisibility = (): void => {
     if (typeof document === 'undefined') return;
+    // keepAliveWhenHidden channels (live-performance, issue #452) are never torn
+    // down on hide: bail before any teardown, 'paused' report, or watchdog stop --
+    // and the visible branch is skipped too, because the channel was never closed.
+    // A consequence worth stating: health can therefore never read 'paused' on this
+    // channel, so shouldStopResubscribe() never latches on 'paused'. If the channel
+    // errors while hidden, the R2b errored->resubscribe chain runs in the background
+    // and self-heals automatically. One caveat: deep-background timer throttling can
+    // delay the heartbeat and drop the channel; that same errored->resubscribe chain
+    // rebuilds it, and the tab-return catch-up (#448) stays the safety net for any
+    // events missed in between.
+    if (keepAliveWhenHidden === true) return;
     if (document.visibilityState === 'hidden') {
       reportHealth('paused');
       // Arm the CLOSED suppressor BEFORE teardown so the resulting CLOSED does
@@ -655,7 +689,11 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
  * "channel is up and we're watching." Because teardown makes supabase-js
  * emit one CLOSED, we arm `suppressClosedOnce` before removing the
  * channel so health remains `paused` rather than briefly reading
- * `errored`.
+ * `errored`. The live-performance channel makes the opposite choice
+ * (`keepAliveWhenHidden: true`, see {@link subscribeToLivePerformance}): it
+ * stays open while hidden because a merchant may be watching a window Chrome
+ * has misreported as hidden — this org-syncs channel keeps the teardown because
+ * its freshness is not time-critical.
  *
  * Returns an unsubscribe function. Caller calls on unmount;
  * OrgSyncsProvider does this in its cleanup.
@@ -787,13 +825,21 @@ export interface SubscribeToLivePerformanceOptions {
  *     promote worker writing a promoted order (the promotion-complete signal).
  *     Refreshes KPIs + top-products + orders feed.
  *
- * Mirrors {@link subscribeToOrgSyncs}: browser Supabase client (the Realtime
- * WebSocket authenticates through the cookie session — no `setAuth` on this
- * path), health reported through `onHealthChange` so the consumer can gate a
- * polling fallback, and tab-visibility teardown to free the socket in
- * background tabs. Health stays `paused` while hidden — the CLOSED the teardown
- * triggers is suppressed (`suppressClosedOnce`) so the fallback doesn't wake in
- * a background tab. Returns an unsubscribe function.
+ * Shares {@link subscribeToOrgSyncs}'s client/auth setup: browser Supabase
+ * client (the Realtime WebSocket authenticates through the cookie session — no
+ * `setAuth` on this path) and health reported through `onHealthChange` so the
+ * consumer can gate a polling fallback.
+ *
+ * DIFFERS from subscribeToOrgSyncs on tab visibility: this channel passes
+ * `keepAliveWhenHidden: true`, so there is NO visibility teardown — it stays open
+ * in a hidden/background tab and keeps delivering events so live toasts never
+ * stop. This is the fix for issue #452: Chrome can misreport a fully-visible
+ * second-monitor window as `hidden` when another app holds focus, and the old
+ * teardown then killed the live toast stream while the merchant was actively
+ * watching the panel. Health therefore never reads `paused` on this channel. The
+ * cost of a background-open socket is the accepted trade; the tab-return catch-up
+ * (#448) still backfills anything missed if the channel does drop. Returns an
+ * unsubscribe function.
  *
  * Single store channel: `live-performance:${storeId}`.
  */
@@ -829,5 +875,6 @@ export function subscribeToLivePerformance(
       },
     ],
     onHealthChange,
+    keepAliveWhenHidden: true,
   }).cleanup;
 }

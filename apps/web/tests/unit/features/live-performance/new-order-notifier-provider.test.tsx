@@ -485,5 +485,49 @@ describe('NewOrderNotifierProvider', () => {
       expect(toastMock).not.toHaveBeenCalled();
       expect(getNotificationSummaryMock).not.toHaveBeenCalled();
     });
+
+    // Keep-alive regression (#452): the live channel now stays open in a hidden
+    // tab, so an order can arrive live (via capturedOnNewOrder) WHILE hidden and
+    // toast immediately; on tab return the catch-up diff sees that same order in
+    // the fresh list. The shared knownIds gate must stop catch-up from toasting it
+    // a second time. This proves keep-alive + catch-up never produce a double toast
+    // (the provider needs no change — knownIds already gates it; this only asserts).
+    it('does NOT double-toast when an order arrives live while hidden and reappears in the tab-return catch-up', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-08T12:00:00Z'));
+      getLiveOrdersMock.mockReset();
+      getLiveOrdersMock
+        .mockResolvedValueOnce(listOf([ROW_A])) // baseline at mount -> knownIds {orders:A}
+        .mockResolvedValue(listOf([ROW_A, ROW_B])); // catch-up on return sees A + B
+      getNotificationSummaryMock.mockResolvedValue(SUMMARY_B);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      // Let the baseline prime (knownIds := {orders:A}).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Tab goes hidden — but the keep-alive channel is still live, so the order
+      // event still reaches onNewOrder through capturedOnNewOrder while hidden.
+      // onNewOrder synchronously adds orders:B to knownIds and starts the coalesce
+      // timer BEFORE the toast (the toast fires later, when the window elapses).
+      act(() => setVisibility('hidden'));
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T13:00:00' });
+      });
+      // Coalesce window elapses while hidden -> toast #1 fires for the already-known B.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(toastMock).toHaveBeenCalledTimes(1);
+
+      // Tab returns -> catch-up diffs the fresh list [A, B] against knownIds. B was
+      // already shown live while hidden, so it is known -> NO second toast.
+      await act(async () => {
+        setVisibility('visible');
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(toastMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -168,10 +168,15 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('subscribeToLivePerformance lifecycle', () => {
+// These validate the DEFAULT visibility teardown (no keepAliveWhenHidden). They
+// run through subscribeToOrgSyncs, the channel that KEEPS that default:
+// subscribeToLivePerformance now opts into keep-alive (see the keepAliveWhenHidden
+// block below), so its channel no longer tears down on hide. The core teardown /
+// suppressor / identity-guard / fast-flip behavior asserted here is unchanged.
+describe('createChannelLifecycle visibility teardown (default, no keepAliveWhenHidden)', () => {
   it('keeps health paused when the tab hides — suppresses the teardown CLOSED', () => {
     const healthLog: RealtimeHealth[] = [];
-    const unsubscribe = subscribeToLivePerformance('store-1', {
+    const unsubscribe = subscribeToOrgSyncs('org-1', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
@@ -201,7 +206,7 @@ describe('subscribeToLivePerformance lifecycle', () => {
 
   it('still reports errored for a genuine CLOSED (no preceding teardown)', () => {
     const healthLog: RealtimeHealth[] = [];
-    const unsubscribe = subscribeToLivePerformance('store-2', {
+    const unsubscribe = subscribeToOrgSyncs('org-2', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
@@ -216,7 +221,7 @@ describe('subscribeToLivePerformance lifecycle', () => {
 
   it('clears a stale suppressor from a silent teardown so a later real CLOSED still errors', () => {
     const healthLog: RealtimeHealth[] = [];
-    const unsubscribe = subscribeToLivePerformance('store-3', {
+    const unsubscribe = subscribeToOrgSyncs('org-3', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
@@ -251,7 +256,7 @@ describe('subscribeToLivePerformance lifecycle', () => {
 
   it("ignores the old channel's delayed CLOSED after a fast hidden->visible rebuild", () => {
     const healthLog: RealtimeHealth[] = [];
-    const unsubscribe = subscribeToLivePerformance('store-4', {
+    const unsubscribe = subscribeToOrgSyncs('org-4', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
@@ -287,6 +292,85 @@ describe('subscribeToLivePerformance lifecycle', () => {
     subscribeCallbacks[1]?.('SUBSCRIBED');
     expect(healthLog.at(-1)).toBe('healthy');
     expect(healthLog).not.toContain('errored');
+
+    unsubscribe();
+  });
+});
+
+describe('createChannelLifecycle keepAliveWhenHidden (live-performance channel, #452)', () => {
+  it('keeps the channel open across a hide->visible cycle: no teardown, never paused, bindings keep firing, no rebuild', () => {
+    const healthLog: RealtimeHealth[] = [];
+    const newOrders: Array<{ table: 'orders' | 'buffer'; id: string }> = [];
+    const unsubscribe = subscribeToLivePerformance('store-keepalive', {
+      onEvent: () => {},
+      onNewOrder: (e) => newOrders.push({ table: e.table, id: e.id }),
+      onHealthChange: (h) => healthLog.push(h),
+    });
+
+    subscribeCallbacks[0]?.('SUBSCRIBED');
+    expect(healthLog.at(-1)).toBe('healthy');
+
+    // Tab hidden: keepAliveWhenHidden short-circuits handleVisibility. The channel
+    // is NOT removed and health never reads 'paused'.
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(removeChannelMock).not.toHaveBeenCalled();
+    expect(healthLog).not.toContain('paused');
+    expect(healthLog.at(-1)).toBe('healthy');
+
+    // A binding still delivers events while hidden -> the live toast keeps flowing.
+    // channelBindings[0][0] is the live_performance_buffer handler (table 'buffer').
+    const bufferHandler = channelBindings[0]?.[0];
+    expect(bufferHandler).toBeDefined();
+    bufferHandler?.({
+      eventType: 'INSERT',
+      new: { id: 'ord-hidden', order_date: '2026-07-11' },
+      old: {},
+    });
+    expect(newOrders).toEqual([{ table: 'buffer', id: 'ord-hidden' }]);
+
+    // Tab visible again: the channel was never closed, so the visible branch is
+    // skipped — NO rebuild. supabase.channel() is not re-called (no new subscribe
+    // callback, no new binding array), and health still never touched 'paused'.
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(subscribeCallbacks).toHaveLength(1);
+    expect(channelBindings).toHaveLength(1);
+    expect(healthLog).not.toContain('paused');
+
+    unsubscribe();
+  });
+
+  it('subscribeToLivePerformance opts INTO keep-alive: the channel survives a hidden tab', () => {
+    const healthLog: RealtimeHealth[] = [];
+    const unsubscribe = subscribeToLivePerformance('store-diff-live', {
+      onEvent: () => {},
+      onHealthChange: (h) => healthLog.push(h),
+    });
+
+    subscribeCallbacks[0]?.('SUBSCRIBED');
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(removeChannelMock).not.toHaveBeenCalled();
+    expect(healthLog).not.toContain('paused');
+
+    unsubscribe();
+  });
+
+  it('subscribeToOrgSyncs stays OUT of keep-alive: a hidden tab still tears the channel down', () => {
+    const healthLog: RealtimeHealth[] = [];
+    const unsubscribe = subscribeToOrgSyncs('org-diff-sync', {
+      onEvent: () => {},
+      onHealthChange: (h) => healthLog.push(h),
+    });
+
+    subscribeCallbacks[0]?.('SUBSCRIBED');
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(removeChannelMock).toHaveBeenCalledTimes(1);
+    expect(healthLog.at(-1)).toBe('paused');
 
     unsubscribe();
   });
@@ -388,7 +472,9 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
   it('cancels a pending resubscribe when the tab hides and never rebuilds while paused', async () => {
     vi.useFakeTimers();
     const healthLog: RealtimeHealth[] = [];
-    const unsubscribe = subscribeToLivePerformance('store-resub-paused', {
+    // subscribeToOrgSyncs — the default-teardown channel (live-performance keeps
+    // alive on hide now, so 'paused' never fires there; see keepAliveWhenHidden).
+    const unsubscribe = subscribeToOrgSyncs('org-resub-paused', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
@@ -507,7 +593,9 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
     // hand back the still-registered leaving channel, capturing NO new callback.
     setDeferRemovals(true);
     const healthLog: RealtimeHealth[] = [];
-    const unsubscribe = subscribeToLivePerformance('store-corpse-flip', {
+    // subscribeToOrgSyncs — the default-teardown channel, since this exercises the
+    // hide->fast-visible rebuild that keep-alive channels no longer perform.
+    const unsubscribe = subscribeToOrgSyncs('org-corpse-flip', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
