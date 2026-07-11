@@ -180,6 +180,9 @@ importers:
       '@pazarsync/utils':
         specifier: workspace:*
         version: link:../../packages/utils
+      '@pazarsync/webhook-ingest':
+        specifier: workspace:*
+        version: link:../../packages/webhook-ingest
       decimal.js:
         specifier: 'catalog:'
         version: 10.6.0
@@ -755,6 +758,9 @@ importers:
       '@pazarsync/utils':
         specifier: workspace:*
         version: link:../utils
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@pazarsync/eslint-config':
         specifier: workspace:*

@@ -11,6 +11,30 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Changed
+
+- **Trendyol order webhook becomes a durable queue with a deferred ingest mode**
+  (`POST /v1/webhooks/orders/{storeId}`, Paket D). The response semantics and the
+  processing model changed; no request/response body shape change:
+  - Transient processing faults now return **200** (not 5xx). The event row is
+    persisted and left unprocessed with an exponential backoff
+    (`[1, 5, 15, 60]` minutes, up to 5 attempts, then a terminal close); the
+    sync-worker consumer tick replays it. Trendyol's retry is no longer the
+    replay engine, so a permanently-failing store is never driven to PASSIVE by a
+    transient fault.
+  - A re-delivery of a still-unprocessed event returns **200** and is never
+    reprocessed in-request, at any age. A per-row lease (an in-request claim or
+    the consumer tick) is the sole processor, which makes concurrent
+    double-processing structurally impossible.
+  - In-request catalog repair is removed: the receiver makes **zero** marketplace
+    vendor calls in the request path (uncatalogued barcodes are resolved by the
+    60s variant-resolution tick), so intake is DB-only and never blocks on
+    Trendyol. The order is still always written.
+  - New `WEBHOOK_INTAKE_DEFERRED` env flag (default off, fail-safe). When set to
+    the literal `true`, the route validates + persists + returns 200 only and the
+    consumer tick does all processing (Live Performance latency shifts T+0 →
+    T+~5s) — the operational cutover switch.
+
 ### Added
 
 - **`VariantSummary.delistedAt`** (ISO 8601 date-time | null) — surfaced on every
@@ -66,11 +90,17 @@ section "Versioning" for details.
     payload that passes schema validation but crashes the mapper. The event is
     logged (issue codes / reason only — never the payload) and, where a row was
     already written, marked terminal (`processedAt` + `processingError`).
-  - Transient faults (fee-definition resolution, intake, DB) still return
-    **5xx** so Trendyol's retry becomes the replay engine.
-  - A re-delivery whose prior idempotency row is unprocessed **and** older than
-    2 minutes is now reprocessed on the retry (a failed first attempt is
-    replayed); a younger unprocessed row is treated as in-flight and left alone.
+  - Transient faults (fee-definition resolution, intake, DB) now return **200**
+    too (superseded within this Unreleased by the Paket D entry above): the event
+    is persisted and left unprocessed with a backoff, and the sync-worker consumer
+    tick — a durable queue over `webhook_events` — is the replay engine instead of
+    Trendyol's retry. Only a genuine infrastructure failure BEFORE the row is
+    persisted still surfaces as **5xx**.
+  - A re-delivery whose prior idempotency row is still unprocessed returns **200**
+    and is NOT reprocessed at any age (the earlier 2-minute stale-reprocess branch
+    is removed): a per-row lease — the consumer tick or an in-request claim — is
+    the sole owner of unprocessed rows, so a second writer can never double-insert
+    order items.
   - A non-UUID `storeId` path segment now returns **404** (guarded before the
     DB) instead of collapsing a Prisma error to `500`.
   - Repeated credential-mismatch / decrypt / shape failures for one store

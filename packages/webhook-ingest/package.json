@@ -21,7 +21,8 @@
     "@pazarsync/order-sync": "workspace:*",
     "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
-    "@pazarsync/utils": "workspace:*"
+    "@pazarsync/utils": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

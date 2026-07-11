@@ -305,6 +305,9 @@ jobs:
           # Webhook-events retention cleanup baseline (default 90). Tests override
           # per-case via process.env; this documents the prod default.
           WEBHOOK_EVENT_RETENTION_DAYS: 90
+          # Webhook ingest cutover flag (Paket D §D6). Default off = today's
+          # in-request processing; the deferred-mode test stubs 'true' per-case.
+          WEBHOOK_INTAKE_DEFERRED: 'false'
           # PR-C2 webhook callback URL builder — integration tests mock fetch,
           # so the value never reaches Trendyol. Production sets the real HTTPS
           # tunnel/host. Empty would fail validateRequiredEnv at boot.
