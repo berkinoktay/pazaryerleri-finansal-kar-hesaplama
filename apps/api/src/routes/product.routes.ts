@@ -8,6 +8,7 @@ import { requireStoreAccess } from '../lib/require-store-access';
 import { Common429Response, ProblemDetailsSchema, RateLimitHeaders } from '../openapi';
 import * as productsListService from '../services/products-list.service';
 import * as productVariantService from '../services/product-variant.service';
+import * as syncTriggerService from '../services/sync-trigger.service';
 import {
   BulkUpdateVariantDimensionalWeightBodySchema,
   BulkUpdateVariantDimensionalWeightResponseSchema,
@@ -101,11 +102,12 @@ app.openapi(startSyncRoute, async (c) => {
   const { store, role } = await requireStoreAccess(userId, orgId, storeId);
   assertCapability(role, CAPABILITIES.SYNC_TRIGGER);
 
-  // Pure enqueue: INSERT a PENDING SyncLog row and return. The worker
-  // process picks it up via tryClaimNext within ~1 s. P2002 from the
-  // partial unique index is mapped to SyncInProgressError(409) with
-  // meta.existingSyncLogId by acquireSlot itself.
-  const log = await syncLogService.acquireSlot(orgId, store.id, 'PRODUCTS');
+  // Manual enqueue: enforce the per-store cooldown, then INSERT a PENDING
+  // MANUAL SyncLog row and return. A second manual trigger inside the
+  // cooldown window returns 429 RATE_LIMITED (+ Retry-After); an already-
+  // active slot still returns 409 SyncInProgressError from acquireSlot. The
+  // worker picks the row up via tryClaimNext within ~1 s.
+  const log = await syncTriggerService.triggerManualSync(orgId, store.id, 'PRODUCTS');
 
   syncLog.info('trigger.enqueued', {
     syncLogId: log.id,

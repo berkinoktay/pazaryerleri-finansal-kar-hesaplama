@@ -129,6 +129,8 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/products/sync', () => {
     expect(logRow.storeId).toBe(storeId);
     expect(logRow.syncType).toBe('PRODUCTS');
     expect(logRow.status).toBe('PENDING');
+    // Manual trigger route stamps MANUAL so the cooldown check can find it.
+    expect(logRow.triggerSource).toBe('MANUAL');
   });
 
   it('returns 409 SYNC_IN_PROGRESS with existingSyncLogId when an active sync exists', async () => {
@@ -156,6 +158,120 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/products/sync', () => {
     expect(body.meta?.['syncType']).toBe('PRODUCTS');
     expect(body.meta?.['storeId']).toBe(storeId);
     expect(body.meta?.['existingSyncLogId']).toBe(existing.id);
+  });
+
+  it('returns 429 RATE_LIMITED with Retry-After when a MANUAL sync ran inside the cooldown window', async () => {
+    const { user, orgId, storeId } = await setupOrgWithStore();
+    // A completed MANUAL products sync one minute ago — still well inside
+    // the 30-minute PRODUCTS cooldown.
+    await prisma.syncLog.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'COMPLETED',
+        triggerSource: 'MANUAL',
+        startedAt: new Date(Date.now() - 60_000),
+        completedAt: new Date(Date.now() - 30_000),
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/products/sync`, {
+      method: 'POST',
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+
+    expect(res.status).toBe(429);
+    const retryAfter = Number(res.headers.get('Retry-After'));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(30 * 60);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('RATE_LIMITED');
+
+    // The cooldown short-circuits BEFORE acquireSlot — no new slot row.
+    const active = await prisma.syncLog.count({
+      where: { storeId, status: { in: ['PENDING', 'RUNNING'] } },
+    });
+    expect(active).toBe(0);
+  });
+
+  it('allows a MANUAL sync once the cooldown window has elapsed', async () => {
+    const { user, orgId, storeId } = await setupOrgWithStore();
+    // Same shape as the 429 case but the prior MANUAL run started 31 minutes
+    // ago — just outside the 30-minute PRODUCTS window.
+    await prisma.syncLog.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'COMPLETED',
+        triggerSource: 'MANUAL',
+        startedAt: new Date(Date.now() - 31 * 60_000),
+        completedAt: new Date(Date.now() - 31 * 60_000 + 30_000),
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/products/sync`, {
+      method: 'POST',
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { syncLogId: string; status: string };
+    expect(body.status).toBe('PENDING');
+    const inserted = await prisma.syncLog.findUniqueOrThrow({ where: { id: body.syncLogId } });
+    expect(inserted.triggerSource).toBe('MANUAL');
+  });
+
+  it('does not trip the cooldown for CRON-triggered rows inside the window', async () => {
+    const { user, orgId, storeId } = await setupOrgWithStore();
+    // A scheduled (CRON) products sync a minute ago must NOT block a manual
+    // trigger — only MANUAL rows count toward the cooldown.
+    await prisma.syncLog.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'COMPLETED',
+        triggerSource: 'CRON',
+        startedAt: new Date(Date.now() - 60_000),
+        completedAt: new Date(Date.now() - 30_000),
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/products/sync`, {
+      method: 'POST',
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+
+    expect(res.status).toBe(202);
+  });
+
+  it('returns 409 (not 429) when a MANUAL sync is currently active inside the window', async () => {
+    const { user, orgId, storeId } = await setupOrgWithStore();
+    // A RUNNING manual sync occupies the active slot. The cooldown check must
+    // NOT preempt it with a 429 — the existing SYNC_IN_PROGRESS conflict wins
+    // so the UI can navigate to the live run via meta.existingSyncLogId.
+    const running = await prisma.syncLog.create({
+      data: {
+        organizationId: orgId,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        triggerSource: 'MANUAL',
+        startedAt: new Date(),
+      },
+    });
+
+    const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/products/sync`, {
+      method: 'POST',
+      headers: { Authorization: bearer(user.accessToken) },
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; meta?: Record<string, unknown> };
+    expect(body.code).toBe('SYNC_IN_PROGRESS');
+    expect(body.meta?.['existingSyncLogId']).toBe(running.id);
   });
 });
 

@@ -147,4 +147,71 @@ describe('useStartProductSync', () => {
     // shouldn't have attempted any cache write at render.
     expect(result.current.isIdle).toBe(true);
   });
+
+  it('captures a cooldownUntil deadline from a 429 Retry-After response', async () => {
+    server.use(
+      http.post(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/sync`,
+        () =>
+          HttpResponse.json(
+            {
+              type: 'https://api.pazarsync.com/errors/rate-limited',
+              title: 'Too many requests',
+              status: 429,
+              code: 'RATE_LIMITED',
+              detail: 'Manual sync triggered before cooldown elapsed',
+            },
+            { status: 429, headers: { 'Retry-After': '300' } },
+          ),
+      ),
+    );
+
+    const queryClient = makeQueryClient();
+    const before = Date.now();
+    const { result } = renderHook(() => useStartProductSync(ORG_ID, STORE_ID), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    // No cooldown before the first attempt.
+    expect(result.current.cooldownUntil).toBeNull();
+
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    // The hook lifts the Retry-After (300s) into an absolute epoch-ms
+    // deadline ~5 minutes out. Generous slack for test-runner timing.
+    const cooldownUntil = result.current.cooldownUntil;
+    expect(cooldownUntil).not.toBeNull();
+    expect(cooldownUntil ?? 0).toBeGreaterThanOrEqual(before + 290_000);
+    expect(cooldownUntil ?? 0).toBeLessThanOrEqual(Date.now() + 300_000);
+  });
+
+  it('leaves cooldownUntil null on a non-429 error (no Retry-After)', async () => {
+    server.use(
+      http.post(
+        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/sync`,
+        () =>
+          HttpResponse.json(
+            {
+              type: 'https://api.pazarsync.com/errors/sync-in-progress',
+              title: 'Sync already running',
+              status: 409,
+              code: 'SYNC_IN_PROGRESS',
+              detail: 'A PRODUCTS sync is already running',
+            },
+            { status: 409 },
+          ),
+      ),
+    );
+
+    const queryClient = makeQueryClient();
+    const { result } = renderHook(() => useStartProductSync(ORG_ID, STORE_ID), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.cooldownUntil).toBeNull();
+  });
 });

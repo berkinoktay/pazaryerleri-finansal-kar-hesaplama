@@ -91,6 +91,13 @@ export interface SyncCenterTriggerSpec {
   onClick: () => void;
   /** True while a request is in flight; disables the button. */
   isPending: boolean;
+  /**
+   * Epoch-ms deadline for the manual-trigger cooldown, or null/undefined
+   * when no cooldown is active. Set from the last 429 Retry-After. While
+   * `now < cooldownUntil` the button is disabled and shows a live
+   * "Available in Ns" countdown instead of its normal label.
+   */
+  cooldownUntil?: number | null;
 }
 
 /**
@@ -183,26 +190,18 @@ export function SyncCenter({
           {triggers.length > 0 ? (
             <section className="gap-sm flex flex-col">
               {triggers.map((trigger) => (
-                <Button
+                <SyncTriggerButton
                   key={trigger.syncType}
-                  type="button"
-                  onClick={trigger.onClick}
+                  trigger={trigger}
                   // Disable while ANY active-slot row exists for this
                   // syncType (active OR retrying — both occupy the
                   // partial unique index slot, so a manual retrigger
                   // would 409 with SYNC_IN_PROGRESS).
-                  disabled={
-                    trigger.isPending ||
+                  slotOccupied={
                     active.some((l) => l.syncType === trigger.syncType) ||
                     retrying.some((l) => l.syncType === trigger.syncType)
                   }
-                  className="gap-xs justify-start"
-                >
-                  <RefreshIcon
-                    className={cn('size-icon-sm', trigger.isPending && 'animate-spin')}
-                  />
-                  {t(`triggers.${trigger.syncType}`)}
-                </Button>
+                />
               ))}
             </section>
           ) : null}
@@ -269,6 +268,55 @@ export function SyncCenter({
       </SheetContent>
     </Sheet>
   );
+}
+
+/**
+ * A single manual-sync trigger button. Disabled while a request is in
+ * flight, while the active-slot index is occupied (a duplicate would 409),
+ * or while the manual-trigger cooldown is still counting down. During a
+ * cooldown it shows a live "Available in Ns" label; the tick comes from
+ * `useNow`, so the 1 Hz re-render is scoped to this button rather than the
+ * whole page that owns the trigger state.
+ */
+function SyncTriggerButton({
+  trigger,
+  slotOccupied,
+}: {
+  trigger: SyncCenterTriggerSpec;
+  slotOccupied: boolean;
+}): React.ReactElement {
+  const t = useTranslations('syncCenter');
+  const now = useNow();
+  const cooldownRemaining = cooldownRemainingSeconds(trigger.cooldownUntil, now);
+
+  return (
+    <Button
+      type="button"
+      onClick={trigger.onClick}
+      disabled={trigger.isPending || slotOccupied || cooldownRemaining > 0}
+      className="gap-xs justify-start"
+    >
+      <RefreshIcon className={cn('size-icon-sm', trigger.isPending && 'animate-spin')} />
+      {cooldownRemaining > 0
+        ? t('triggers.cooldownRemaining', { seconds: cooldownRemaining })
+        : t(`triggers.${trigger.syncType}`)}
+    </Button>
+  );
+}
+
+/**
+ * Whole seconds remaining until `cooldownUntil`, or 0 when there is no
+ * active cooldown. Returns 0 while `now` is null (SSR / pre-mount) — the
+ * cooldown is always a post-interaction state, so treating it as absent
+ * before the first client tick keeps SSR markup deterministic.
+ */
+function cooldownRemainingSeconds(
+  cooldownUntil: number | null | undefined,
+  now: Date | null,
+): number {
+  if (cooldownUntil === null || cooldownUntil === undefined || now === null) return 0;
+  const remainingMs = cooldownUntil - now.getTime();
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
 }
 
 /**

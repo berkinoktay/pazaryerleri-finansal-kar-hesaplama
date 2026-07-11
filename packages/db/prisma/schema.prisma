@@ -110,6 +110,16 @@ enum SyncErrorCode {
   INTERNAL_ERROR
 }
 
+// Who initiated a SyncLog run. MANUAL = a user clicked "senkronize et";
+// CRON = a scheduled pg_cron fan-out; BOOTSTRAP = the store-connect initial
+// sync chain. Only MANUAL rows count toward the per-store manual-trigger
+// cooldown — scheduled/bootstrap fan-outs must never block a user's refresh.
+enum SyncTriggerSource {
+  MANUAL
+  CRON
+  BOOTSTRAP
+}
+
 enum CostProfileType {
   COGS
   PACKAGING
@@ -1022,6 +1032,11 @@ model SyncLog {
   storeId          String         @map("store_id") @db.Uuid
   syncType         SyncType       @map("sync_type")
   status           SyncStatus
+  // Provenance of this run. Defaults to CRON so the raw pg_cron INSERT
+  // blocks (which never name the column) stay valid; the API sets MANUAL on
+  // user-triggered syncs and BOOTSTRAP on the store-connect chain. Only
+  // MANUAL rows are consulted by the manual-trigger cooldown check.
+  triggerSource    SyncTriggerSource @default(CRON) @map("trigger_source")
   // Timestamp columns are @db.Timestamptz(3) so node-postgres reads
   // them as UTC instants (its default for plain TIMESTAMP is the
   // CLIENT'S local timezone, which silently shifted next_attempt_at

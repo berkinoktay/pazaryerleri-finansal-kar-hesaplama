@@ -139,7 +139,7 @@ async function bootstrapInitialSyncs(organizationId: string, storeId: string): P
   const baseTimeMs = Date.now();
   for (const [index, syncType] of BOOTSTRAP_SYNC_SEQUENCE.entries()) {
     try {
-      await syncLogService.acquireSlot(organizationId, storeId, syncType, {
+      await syncLogService.acquireSlot(organizationId, storeId, syncType, 'BOOTSTRAP', {
         startedAt: new Date(baseTimeMs + index),
       });
     } catch (err) {

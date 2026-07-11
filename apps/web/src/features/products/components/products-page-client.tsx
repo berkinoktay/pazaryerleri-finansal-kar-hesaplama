@@ -251,6 +251,7 @@ export function ProductsPageClient({
               startSync.mutate();
             },
             isPending: startSync.isPending,
+            cooldownUntil: startSync.cooldownUntil,
           },
         ]}
       />

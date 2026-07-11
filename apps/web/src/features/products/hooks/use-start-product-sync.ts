@@ -1,11 +1,26 @@
 'use client';
 
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { type SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
 import { orgSyncKeys } from '@/features/sync/query-keys';
+import { ApiError } from '@/lib/api-error';
 
 import { startProductSync, type StartSyncResponse } from '../api/start-product-sync.api';
+
+/**
+ * The mutation result augmented with the manual-trigger cooldown deadline.
+ * `cooldownUntil` is an epoch-ms timestamp when the cooldown expires, or
+ * `null` when no cooldown is active. It is set from the `Retry-After` on
+ * the last 429 RATE_LIMITED response and cleared once a trigger succeeds.
+ * It intentionally does NOT tick — the SyncCenter button derives the live
+ * remaining seconds via `useNow`, so the 1 Hz re-render stays localized to
+ * the sheet instead of the whole products page.
+ */
+export type StartProductSyncResult = UseMutationResult<StartSyncResponse, Error, void> & {
+  cooldownUntil: number | null;
+};
 
 /**
  * Mutation that kicks off a Trendyol product sync. Returns the new
@@ -32,9 +47,12 @@ import { startProductSync, type StartSyncResponse } from '../api/start-product-s
 export function useStartProductSync(
   orgId: string | null,
   storeId: string | null,
-): UseMutationResult<StartSyncResponse, Error, void> {
+): StartProductSyncResult {
   const queryClient = useQueryClient();
-  return useMutation<StartSyncResponse, Error, void>({
+  // Epoch-ms deadline for the manual-trigger cooldown, captured from the
+  // last 429 Retry-After. `null` when no cooldown is active.
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const mutation = useMutation<StartSyncResponse, Error, void>({
     mutationFn: () => {
       if (orgId === null || storeId === null) {
         throw new Error('useStartProductSync called without orgId/storeId');
@@ -42,6 +60,8 @@ export function useStartProductSync(
       return startProductSync(orgId, storeId);
     },
     onSuccess: (data) => {
+      // A trigger that actually enqueued clears any prior cooldown.
+      setCooldownUntil(null);
       if (orgId === null || storeId === null) return;
       const queryKey = orgSyncKeys.list(orgId);
       queryClient.setQueryData<SyncLog[] | undefined>(queryKey, (existing) => {
@@ -69,5 +89,21 @@ export function useStartProductSync(
       // Reconcile with the canonical row once Realtime/REST surfaces it.
       void queryClient.invalidateQueries({ queryKey });
     },
+    onError: (error) => {
+      // 429 RATE_LIMITED carries a Retry-After (seconds). Capture the
+      // absolute expiry so the SyncCenter trigger button can render a live
+      // countdown and disable itself. We do NOT toast here — the global
+      // MutationCache onError already localizes RATE_LIMITED (error
+      // contract: one toast, from the global layer).
+      if (
+        error instanceof ApiError &&
+        error.code === 'RATE_LIMITED' &&
+        error.retryAfterSeconds !== undefined
+      ) {
+        setCooldownUntil(Date.now() + error.retryAfterSeconds * 1000);
+      }
+    },
   });
+
+  return Object.assign(mutation, { cooldownUntil });
 }

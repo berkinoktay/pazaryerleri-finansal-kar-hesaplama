@@ -113,4 +113,42 @@ describe('throwApiError', () => {
       expect((err as ApiError).requestId).toBeUndefined();
     }
   });
+
+  it('lifts the Retry-After header into ApiError.retryAfterSeconds on a 429', () => {
+    const body = {
+      type: 'https://api.pazarsync.com/errors/rate-limited',
+      title: 'Too many requests',
+      status: 429,
+      code: 'RATE_LIMITED',
+      detail: 'Manual sync triggered before cooldown elapsed',
+    };
+    const response = new Response(JSON.stringify(body), {
+      status: 429,
+      headers: { 'Retry-After': '300' },
+    });
+
+    try {
+      throwApiError(body, response);
+    } catch (err) {
+      expect((err as ApiError).code).toBe('RATE_LIMITED');
+      expect((err as ApiError).retryAfterSeconds).toBe(300);
+    }
+  });
+
+  it('leaves retryAfterSeconds undefined when no Retry-After header is present', () => {
+    const body = {
+      type: 'https://api.pazarsync.com/errors/not-found',
+      title: 'Not Found',
+      status: 404,
+      code: 'NOT_FOUND',
+      detail: 'nope',
+    };
+    const response = new Response(JSON.stringify(body), { status: 404 });
+
+    try {
+      throwApiError(body, response);
+    } catch (err) {
+      expect((err as ApiError).retryAfterSeconds).toBeUndefined();
+    }
+  });
 });
