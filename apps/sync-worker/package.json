@@ -22,6 +22,7 @@
     "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",
+    "@pazarsync/webhook-ingest": "workspace:*",
     "decimal.js": "catalog:"
   },
   "devDependencies": {

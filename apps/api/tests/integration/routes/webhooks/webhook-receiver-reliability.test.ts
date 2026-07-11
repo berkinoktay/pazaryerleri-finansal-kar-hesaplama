@@ -4,10 +4,14 @@
  *
  * Central vendor fact (webhook-model.md "Webhook Önemli Notlar"): Trendyol
  * replays every FAILED delivery (4xx included) every 5 minutes until it
- * succeeds, then flips the webhook to PASSIVE. So the receiver:
+ * succeeds, then flips the webhook to PASSIVE. After Paket D the durable
+ * `webhook_events` queue + the consumer tick are the replay engine, so the
+ * receiver:
  *   - returns 200 for deterministic dead-ends (bad body, supplier mismatch),
- *   - returns 5xx only for transient faults (so the retry replays them),
- *   - reprocesses a stale unprocessed event on re-delivery,
+ *   - returns 200 for a transient processing fault too (the row is left
+ *     unprocessed with a backoff for a later replay — no 5xx),
+ *   - does NOT reprocess an unprocessed event on re-delivery (its lease owner
+ *     drives it), regardless of age,
  *   - self-heals a stale credential and a bad storeId shape without a 500.
  */
 
@@ -23,7 +27,6 @@ import {
   _backdateWebhookAuthFailureForTests,
   _resetWebhookAuthFailuresForTests,
 } from '../../../../src/middleware/verify-trendyol-webhook.middleware';
-import { STALE_REPROCESS_THRESHOLD_MS } from '../../../../src/routes/webhooks/trendyol-orders.routes';
 import { ensureDbReachable, truncateAll } from '../../../helpers/db';
 import {
   createCostProfile,
@@ -337,7 +340,7 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
     expect(await prisma.order.count({ where: { storeId } })).toBe(1);
   });
 
-  it('(d) unprocessed row received moments ago → 200, intake NOT re-run (in-flight)', async () => {
+  it('(d) re-delivery of a fresh unprocessed row → 200, intake NOT re-run (consumer owns it)', async () => {
     const { orgId, storeId } = await setupStore();
     await seedWebhookEvent(orgId, storeId, { processedAt: null, receivedAt: new Date() });
 
@@ -348,15 +351,21 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
     );
     expect(res.status).toBe(200);
 
-    // No order was created; the in-flight first attempt owns processing.
+    // No order was created; the unprocessed row's lease owner (an in-request
+    // claim or the consumer tick) is the sole processor, not this re-delivery.
     expect(await prisma.order.count({ where: { storeId } })).toBe(0);
     const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
     expect(event.processedAt).toBeNull();
   });
 
-  it('(e) unprocessed row older than the stale window → reprocessed (order created)', async () => {
+  it('(e) re-delivery of an OLD unprocessed row → 200, still NOT reprocessed (contract change: consumer owns unprocessed rows)', async () => {
+    // Behaviour change from the retired 2-minute stale-reprocess branch: an
+    // unprocessed row is NEVER reprocessed on a re-delivery, no matter how old.
+    // A second writer under Read Committed could double-insert order items, so
+    // the lease mechanism (consumer tick) is the sole owner — the re-delivery
+    // just acknowledges with 200.
     const { orgId, storeId } = await setupStore();
-    const staleReceivedAt = new Date(Date.now() - STALE_REPROCESS_THRESHOLD_MS - 60_000);
+    const staleReceivedAt = new Date(Date.now() - 60 * 60_000);
     const eventId = await seedWebhookEvent(orgId, storeId, {
       processedAt: null,
       receivedAt: staleReceivedAt,
@@ -369,11 +378,11 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
     );
     expect(res.status).toBe(200);
 
-    // The stale attempt is replayed on this re-delivery: the same row is
-    // finished (processedAt filled) and the order lands.
+    // The row stays unprocessed and no order is created — the re-delivery is a
+    // no-op; the consumer tick (unexercised here) is what will eventually drive it.
     const event = await prisma.webhookEvent.findUniqueOrThrow({ where: { id: eventId } });
-    expect(event.processedAt).not.toBeNull();
-    expect(await prisma.order.count({ where: { storeId } })).toBe(1);
+    expect(event.processedAt).toBeNull();
+    expect(await prisma.order.count({ where: { storeId } })).toBe(0);
   });
 
   it('(f) non-UUID storeId → 404 (guarded before Prisma, no 500)', async () => {

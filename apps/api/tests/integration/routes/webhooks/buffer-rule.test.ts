@@ -12,7 +12,6 @@ import {
   createUserProfile,
 } from '../../../helpers/factories';
 import { ensureFeeDefinitions } from '../../../helpers/seed-fee-definitions';
-import { approvedProductsResponse, jsonResponse } from '../../../helpers/trendyol-fixtures';
 
 /**
  * PR-B: webhook receiver Live Performance buffer rule.
@@ -216,59 +215,58 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
     expect(order.profitExcludedAt).not.toBeNull();
   });
 
-  it('katalogda olmayan barkod intake anında vendor sorgusuyla eklenir ve satır eşleşmiş olarak buffera düşer', async () => {
+  it('deferred katalog onarımı: katalogda olmayan barkod istek anında vendor sorgusu YAPMADAN eşleşmemiş satırla buffera düşer (D5)', async () => {
     const { storeId } = await setupStore();
+    // D5: the request path no longer repairs the catalog (catalogRepair
+    // 'deferred'), so the vendor is never called — the 60s variant-resolution
+    // tick is the backstop. The spy is a tripwire: ANY vendor call fails here.
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
-      const url = String(input);
-      if (url.includes('/products/approved') && url.includes('barcode=EAGER-NEW-1')) {
-        return Promise.resolve(jsonResponse(approvedProductsResponse('EAGER-NEW-1', 1)));
-      }
-      throw new Error(`beklenmeyen fetch: ${url}`);
+      throw new Error(`vendor must not be called in deferred mode: ${String(input)}`);
     });
 
     const res = await postWebhook(
       storeId,
       makeWebhookPayload({
         shipmentPackageId: 700000010,
-        orderNumber: 'eager-1',
-        barcode: 'EAGER-NEW-1',
+        orderNumber: 'deferred-1',
+        barcode: 'DEFERRED-NEW-1',
       }),
       authOk,
     );
     expect(res.status).toBe(200);
-    expect(fetchSpy).toHaveBeenCalled();
-    // Ürün kataloğa anında girdi…
-    expect(await prisma.productVariant.count({ where: { storeId, barcode: 'EAGER-NEW-1' } })).toBe(
-      1,
-    );
-    // …maliyetsiz doğduğu için sipariş bugünkü pencereye (buffer) düştü.
+    // Zero vendor calls in the request path (R6 resolved).
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // The barcode is NOT added to the catalog in-request…
+    expect(
+      await prisma.productVariant.count({ where: { storeId, barcode: 'DEFERRED-NEW-1' } }),
+    ).toBe(0);
+    // …the unmatched line still routes cost_missing → today → buffer (order always written).
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(1);
     expect(await prisma.order.count({ where: { storeId } })).toBe(0);
   });
 
-  it('vendor hatası intake sürecini bloke etmez — satır eşleşmeden buffera düşer (K6)', async () => {
+  it('deferred katalog onarımı: vendor 401 dönecek olsa bile istek ona hiç dokunmaz — satır eşleşmeden buffera düşer (K6 → D5)', async () => {
     const { storeId } = await setupStore();
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
-      const url = String(input);
-      if (url.includes('/products/approved')) {
-        return Promise.resolve(new Response('bad credentials', { status: 401 }));
-      }
-      throw new Error(`beklenmeyen fetch: ${url}`);
+    // Previously (eager repair) a vendor 401 was tolerated mid-intake; now the
+    // request never reaches the vendor at all, so there is nothing to tolerate.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      throw new Error(`vendor must not be called in deferred mode: ${String(input)}`);
     });
 
     const res = await postWebhook(
       storeId,
       makeWebhookPayload({
         shipmentPackageId: 700000011,
-        orderNumber: 'eager-2',
-        barcode: 'EAGER-GONE-2',
+        orderNumber: 'deferred-2',
+        barcode: 'DEFERRED-GONE-2',
       }),
       authOk,
     );
     expect(res.status).toBe(200);
-    expect(await prisma.productVariant.count({ where: { storeId, barcode: 'EAGER-GONE-2' } })).toBe(
-      0,
-    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      await prisma.productVariant.count({ where: { storeId, barcode: 'DEFERRED-GONE-2' } }),
+    ).toBe(0);
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(1);
   });
 

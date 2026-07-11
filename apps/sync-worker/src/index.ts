@@ -42,6 +42,7 @@ import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
 import { processVariantResolution } from './handlers/variant-resolution';
 import { processWebhookEventCleanup } from './handlers/webhook-event-cleanup';
+import { processWebhookEventsBatch } from './handlers/webhook-events-consumer';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { dbConnectivity } from './lib/db-connectivity';
 import { assertCriticalDdl, MissingCriticalDdlError } from './lib/ddl-assertions';
@@ -63,6 +64,15 @@ const WATCHDOG_INTERVAL_MS = 30_000;
 // correct if more than one worker instance is deployed (and across overlapping
 // ticks if a sweep ever runs longer than the interval).
 const BUFFER_PROMOTE_INTERVAL_MS = 5_000;
+// Webhook-events consumer tick — drains the durable `webhook_events` ingest queue
+// (Paket D): claims outstanding rows via a conditional-UPDATE lease and drives
+// each through the shared processor in DB-only ('deferred') mode. 5 s cadence for
+// the same near-real-time reason as the buffer promote tick — in deferred cutover
+// the seller's Live Performance page lands a fresh order within ~5 s of the
+// webhook. The lease closes the cross-writer simultaneous-claim race and the
+// handler's own tickInFlight guard closes same-process overlap; a multi-instance
+// deployment would need a renewed lease / SKIP LOCKED (single-instance today).
+const WEBHOOK_EVENTS_CONSUMER_INTERVAL_MS = 5_000;
 // Self-healing webhook reconcile tick — keeps every ACTIVE TRENDYOL store's
 // Trendyol webhook subscription healthy at the current PUBLIC_API_BASE_URL and
 // prunes orphans. 5-min cadence (plus once on boot): webhooks are the primary
@@ -276,6 +286,24 @@ async function main(): Promise<void> {
     });
   }, WEBHOOK_EVENT_CLEANUP_INTERVAL_MS);
 
+  // Webhook-events consumer: once on boot so a restarted worker drains any
+  // outstanding queue rows immediately (e.g. deliveries received while the worker
+  // was down), then on the 5 s interval. Wrapped like the other ticks so a
+  // vendor/DB hiccup never crashes the worker; the lease gate makes it safe to
+  // overlap a still-running tick.
+  void processWebhookEventsBatch(prisma).catch((err: unknown) => {
+    dbConnectivity.logBackgroundError('webhook.events-consumer-boot-error', err, {
+      workerId: WORKER_ID,
+    });
+  });
+  const webhookEventsConsumerTimer = setInterval(() => {
+    void processWebhookEventsBatch(prisma).catch((err: unknown) => {
+      dbConnectivity.logBackgroundError('webhook.events-consumer-tick-error', err, {
+        workerId: WORKER_ID,
+      });
+    });
+  }, WEBHOOK_EVENTS_CONSUMER_INTERVAL_MS);
+
   // Variant resolution: once on boot (a freshly restarted worker drains the
   // queue immediately — e.g. right after the daily product sync landed), then
   // on the interval. Wrapped like the other ticks so a vendor/DB hiccup never
@@ -375,6 +403,7 @@ async function main(): Promise<void> {
   clearInterval(bufferPromoteTimer);
   clearInterval(webhookReconcileTimer);
   clearInterval(webhookEventCleanupTimer);
+  clearInterval(webhookEventsConsumerTimer);
   clearInterval(variantResolutionTimer);
   syncLog.info('worker.stopped', { workerId: WORKER_ID });
 }
