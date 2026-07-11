@@ -29,6 +29,7 @@ function makeVariant(id: string, overrides: Partial<VariantSummary> = {}): Varia
     productUrl: null,
     locationBasedDelivery: 'DISABLED',
     status: 'onSale',
+    delistedAt: null,
     currentCostTry: null,
     profileCount: 0,
     costStatus: 'NO_PROFILES',

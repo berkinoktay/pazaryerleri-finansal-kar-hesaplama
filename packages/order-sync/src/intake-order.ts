@@ -30,6 +30,7 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
+import { incrementVariantStock, recomputeProductsTotalStock } from './stock';
 import { upsertOrderWithSnapshot } from './upsert-order';
 
 export type OrderIntakeOutcome =
@@ -65,18 +66,71 @@ export async function intakeOrder(args: {
   // Hard delete matches the project convention (no soft delete); the
   // WebhookEvent / SyncLog rows keep the audit trail.
   if (mapped.dematerialized) {
-    const [orderDel, bufferDel] = await prisma.$transaction([
-      prisma.order.deleteMany({
+    // Reverse the optimistic stock decrement before deleting the ghost. If the
+    // pre-split package was persisted as a real order, upsertOrderWithSnapshot
+    // may have decremented its lines from local variant stock. The split children
+    // re-carry that same content under NEW shipmentPackageIds and will decrement
+    // again as fresh lines, so re-adding the ghost's line quantities here nets
+    // the two out — otherwise the same units would be subtracted twice. This is
+    // the ONLY place the optimistic decrement is undone; every other cancel /
+    // return leaves it for the catalog scan to reconcile. Owner-approved
+    // 2026-07-11. Interactive transaction so the re-add + recompute + deletes
+    // commit atomically.
+    //
+    // Symmetry with the decrement gate (upsert-order.ts): the decrement fires
+    // only for an order whose business date is TODAY, so the reversal re-adds
+    // ONLY when the ghost's own business date is today. A past-day (backfilled /
+    // bootstrapped) ghost never decremented, so re-adding its quantities would
+    // over-credit stock the sale never consumed. The born-CANCELLED decrement
+    // gate has no mirror here: this branch is reached only for `dematerialized`
+    // (UnPacked) ghosts — the CANCELLED intake is a separate branch checked after
+    // this one — so business-today is the load-bearing reversal guard.
+    const { deletedOrder, deletedBufferEntries } = await prisma.$transaction(async (tx) => {
+      const ghost = await tx.order.findFirst({
         where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
-      }),
-      prisma.livePerformanceBuffer.deleteMany({
+        select: {
+          // Reversal-symmetry gate: re-add only when the ghost decremented in the
+          // first place, i.e. its own business date is today (see the decrement
+          // gate in upsert-order.ts). A past-day ghost never decremented.
+          orderDate: true,
+          items: {
+            where: { productVariantId: { not: null } },
+            select: {
+              quantity: true,
+              // Only lines that actually resolved a variant were decremented, so
+              // only they are re-added; productId drives the totalStock recompute.
+              productVariant: { select: { id: true, productId: true } },
+            },
+          },
+        },
+      });
+
+      // Reverse only a ghost whose business date is today — the exact condition
+      // under which the optimistic decrement fired. Skipping a past-day ghost
+      // avoids over-crediting stock that a backfilled/bootstrapped ghost never
+      // consumed (its decrement was gated off in upsert-order.ts).
+      if (ghost !== null && getBusinessDate(ghost.orderDate) === getBusinessDate()) {
+        const affectedProductIds = new Set<string>();
+        for (const item of ghost.items) {
+          if (item.productVariant === null) continue;
+          await incrementVariantStock(tx, item.productVariant.id, item.quantity);
+          affectedProductIds.add(item.productVariant.productId);
+        }
+        await recomputeProductsTotalStock(tx, [...affectedProductIds]);
+      }
+
+      const orderDel = await tx.order.deleteMany({
         where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
-      }),
-    ]);
+      });
+      const bufferDel = await tx.livePerformanceBuffer.deleteMany({
+        where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
+      });
+      return { deletedOrder: orderDel.count > 0, deletedBufferEntries: bufferDel.count };
+    });
     return {
       kind: 'dematerialized',
-      deletedOrder: orderDel.count > 0,
-      deletedBufferEntries: bufferDel.count,
+      deletedOrder,
+      deletedBufferEntries,
     };
   }
 

@@ -67,6 +67,7 @@ function commandOf(jobName: string): string {
 const FANOUT_JOBS: ReadonlyArray<{ jobName: string; syncType: SyncType }> = [
   { jobName: 'sync-orders-delta', syncType: 'ORDERS' },
   { jobName: 'sync-products-daily', syncType: 'PRODUCTS' },
+  { jobName: 'sync-products-delta-hourly', syncType: 'PRODUCTS_DELTA' },
   { jobName: 'sync-settlements-6h', syncType: 'SETTLEMENTS' },
   { jobName: 'sync-claims-6h', syncType: 'CLAIMS' },
 ];
@@ -79,6 +80,7 @@ describe('pg-cron-setup.sql — schedule contract (static)', () => {
         ['fx-rates-sync-daily', '0 13 * * 1-5'], // 16:00 İstanbul, hafta içi
         ['sync-orders-delta', '0 * * * *'], // saat başı güvenlik ağı (webhook birincil)
         ['sync-products-daily', '0 0 * * *'], // 03:00 İstanbul, günlük katalog
+        ['sync-products-delta-hourly', '15 * * * *'], // saat başı :15 hafif stok+fiyat yürüyüşü
         ['sync-settlements-6h', '30 */6 * * *'],
         ['sync-claims-6h', '45 */6 * * *'], // :45 — settlements ile çakışmasın
         ['live-performance-buffer-daily-reset', '0 21 * * *'], // 00:00 İstanbul

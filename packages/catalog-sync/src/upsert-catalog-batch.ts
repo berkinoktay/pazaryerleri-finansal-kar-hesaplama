@@ -134,6 +134,12 @@ export async function upsertCatalogBatch(
             // ProductVariant schema comment. Sync writes only the synced
             // half of the pair.
             update: {
+              // A variant returned by any full-scan page is, by definition,
+              // listed again — clear the absence-from-feed stamp. (The create
+              // clause needs nothing: delistedAt defaults to null.) The
+              // full-scan handler re-stamps variants that this scan no longer
+              // returned in its complete-done delist pass.
+              delistedAt: null,
               barcode: variant.barcode,
               stockCode: variant.stockCode,
               salePrice: variant.salePrice,

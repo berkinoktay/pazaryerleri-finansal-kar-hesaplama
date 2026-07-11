@@ -701,6 +701,74 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(await prisma.order.count({ where: { organizationId: orgA.id } })).toBe(1);
   });
 
+  it('(d) dematerialize reverses the ghost stock decrement — split children net to a single decrement (no double)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true); // variant + cost → calculable
+    // seedVariant leaves quantity at the 0 default; set a known starting stock
+    // and align the denormalized Product.totalStock.
+    await prisma.productVariant.updateMany({
+      where: { storeId: store.id, barcode: BARCODE },
+      data: { quantity: 10 },
+    });
+    const seeded = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    await prisma.product.update({ where: { id: seeded.productId }, data: { totalStock: 10 } });
+
+    // 1. Pre-split package persists as a real order (calculable, today) → the
+    //    optimistic decrement fires: 10 → 9.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'split-parent', orderDate: new Date() }),
+    });
+    expect(
+      (
+        await prisma.productVariant.findFirstOrThrow({
+          where: { storeId: store.id, barcode: BARCODE },
+        })
+      ).quantity,
+    ).toBe(9);
+
+    // 2. Trendyol reports the parent UnPacked (split happened) → the ghost order
+    //    is deleted AND its decrement reversed: 9 → 10.
+    const demat = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'split-parent',
+        orderDate: new Date(),
+        status: 'CANCELLED',
+        dematerialized: true,
+      }),
+    });
+    expect(demat).toEqual({ kind: 'dematerialized', deletedOrder: true, deletedBufferEntries: 0 });
+    const afterDemat = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(afterDemat.quantity).toBe(10); // reversal netted the parent decrement out
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: afterDemat.productId } })).totalStock,
+    ).toBe(10);
+
+    // 3. The createdBy="split" child re-carries the content under a NEW
+    //    shipmentPackageId → decrements exactly once: 10 → 9 (NOT 8, which a
+    //    double-decrement — ghost + child — would have produced).
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'split-child', orderDate: new Date() }),
+    });
+    const afterChild = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(afterChild.quantity).toBe(9);
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: afterChild.productId } })).totalStock,
+    ).toBe(9);
+  });
+
   it('CANCELLED → purges the buffer entry and persists an audit row', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);

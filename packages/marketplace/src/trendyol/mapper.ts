@@ -30,7 +30,7 @@ function epochMsToDate(ms: number | null | undefined): Date | null {
 // that haven't completed the pricing pipeline yet. Default to '0.00'
 // rather than crashing the whole sync — the table will show ₺0,00 for
 // these rows so the seller can spot and fix them.
-function priceToDecimalString(value: number | null | undefined): string {
+export function priceToDecimalString(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '0.00';
   return value.toFixed(2);
 }

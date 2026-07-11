@@ -1400,3 +1400,228 @@ describe('processOrdersChunk — delta window (periodic sync)', () => {
     expect(Math.abs(lastModifiedStartDate - recentCreatedAt.getTime())).toBeLessThan(5000);
   });
 });
+
+describe('upsertOrderWithSnapshot — optimistic stock decrement (product freshness)', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+  });
+
+  // A real instant that falls squarely inside TODAY's business day, so the
+  // business-today decrement gate (upsert-order.ts) fires deterministically.
+  // Mid-day avoids the midnight boundary a raw `new Date()` could straddle
+  // between the fixture build and the write.
+  function todayInstant(): Date {
+    return new Date(getBusinessDayRange().start.getTime() + 12 * MS_HOUR);
+  }
+
+  // Compact MappedOrder builder for stock cases — mirrors the direct-call block's
+  // GROSS shape but lets each test drive per-line barcode/quantity/lineId. The
+  // optimistic decrement only fires for a TODAY-dated order, so orderDate defaults
+  // to today; the past-day case passes an explicit historical date to prove the
+  // gate skips it.
+  function buildStockMapped(args: {
+    platformOrderId: string;
+    lines: Array<{ barcode: string; quantity: number; platformLineId: string }>;
+    orderDate?: Date;
+  }): MappedOrder {
+    return {
+      platformOrderId: args.platformOrderId,
+      platformOrderNumber: `TY-${args.platformOrderId}`,
+      orderDate: args.orderDate ?? todayInstant(),
+      lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
+      status: 'PROCESSING',
+      dematerialized: false,
+      saleGross: '120.00',
+      saleVat: '20.00',
+      listGross: '120.00',
+      sellerDiscountGross: '0.00',
+      promotionDisplays: null,
+      agreedDeliveryDate: null,
+      actualDeliveryDate: null,
+      actualShipDate: null,
+      fastDelivery: false,
+      fastDeliveryType: null,
+      micro: false,
+      estimatedDeliveryStartDate: null,
+      estimatedDeliveryEndDate: null,
+      cargoProviderName: null,
+      cargoTrackingNumber: null,
+      cargoDeci: null,
+      usesSellerCargoAgreement: false,
+      platformCreatedBy: 'order-creation',
+      originShipmentDate: null,
+      lines: args.lines.map((line) => ({
+        barcode: line.barcode,
+        quantity: line.quantity,
+        platformLineId: line.platformLineId,
+        lineListGross: '120.00',
+        lineSaleGross: '120.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '20',
+        commissionRate: '10',
+        commissionGross: '12.00',
+        refundedCommissionGross: '0.00',
+        commissionVatRate: '20',
+        categoryId: null,
+        commissionKnown: true,
+      })),
+    };
+  }
+
+  // setupStoreAndSyncLog seeds variants at the quantity=0 default, so tests set a
+  // known starting stock (variant.quantity + the denormalized Product.totalStock)
+  // before exercising the decrement.
+  async function seedStock(storeId: string, barcode: string, quantity: number): Promise<void> {
+    await prisma.productVariant.updateMany({ where: { storeId, barcode }, data: { quantity } });
+    const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+    const total = await prisma.productVariant.aggregate({
+      where: { productId: variant.productId },
+      _sum: { quantity: true },
+    });
+    await prisma.product.update({
+      where: { id: variant.productId },
+      data: { totalStock: total._sum.quantity ?? 0 },
+    });
+  }
+
+  it('(a) first insert decrements variant quantity + Product.totalStock; floors at 0 when line qty exceeds stock', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-STOCK-OK', 'EAN13-STOCK-FLOOR']);
+    await seedStock(store.id, 'EAN13-STOCK-OK', 10);
+    await seedStock(store.id, 'EAN13-STOCK-FLOOR', 2);
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildStockMapped({
+        platformOrderId: 'stock-a',
+        lines: [
+          { barcode: 'EAN13-STOCK-OK', quantity: 3, platformLineId: '9001' },
+          { barcode: 'EAN13-STOCK-FLOOR', quantity: 5, platformLineId: '9002' },
+        ],
+      }),
+    );
+
+    const ok = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-OK' },
+    });
+    expect(ok.quantity).toBe(7); // 10 − 3
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: ok.productId } })).totalStock,
+    ).toBe(7);
+
+    const floor = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-FLOOR' },
+    });
+    expect(floor.quantity).toBe(0); // GREATEST(2 − 5, 0) — floored, never negative
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: floor.productId } })).totalStock,
+    ).toBe(0);
+  });
+
+  it('(b) re-sync of the same order does not decrement a second time', async () => {
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-STOCK-RESYNC']);
+    await seedStock(store.id, 'EAN13-STOCK-RESYNC', 10);
+    const mapped = buildStockMapped({
+      platformOrderId: 'stock-b',
+      lines: [{ barcode: 'EAN13-STOCK-RESYNC', quantity: 2, platformLineId: '9101' }],
+    });
+
+    await upsertOrderWithSnapshot(store.id, org.id, mapped); // 10 → 8
+    // Same lastModifiedDate → equality passes the freshness guard, the line hits
+    // the existing-item `continue` branch → no second decrement.
+    await upsertOrderWithSnapshot(store.id, org.id, mapped);
+
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-RESYNC' },
+    });
+    expect(variant.quantity).toBe(8); // still one decrement, not 6
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: variant.productId } })).totalStock,
+    ).toBe(8);
+  });
+
+  it('(c) decrement targets only the matched variant — an unrelated sibling variant and an unmatched line are untouched', async () => {
+    // Seed a matching variant (referenced by the order) alongside an unrelated
+    // sibling variant (a catalog neighbor NOT in the order). The decrement must
+    // hit only the matched variant; the sibling's quantity must be identical
+    // afterwards, proving the movement is scoped to the resolved line's variant
+    // and never spills to other catalog rows. An unknown-barcode line rides along
+    // to re-assert that an unmatched line persists (barcode trail, null FK) and
+    // moves no stock.
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-STOCK-MATCH', 'EAN13-STOCK-SIBLING']);
+    await seedStock(store.id, 'EAN13-STOCK-MATCH', 10);
+    await seedStock(store.id, 'EAN13-STOCK-SIBLING', 7);
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildStockMapped({
+        platformOrderId: 'stock-c',
+        lines: [
+          { barcode: 'EAN13-STOCK-MATCH', quantity: 3, platformLineId: '9201' },
+          { barcode: 'EAN13-UNKNOWN-C', quantity: 4, platformLineId: '9202' },
+        ],
+      }),
+    );
+
+    // Matched variant decremented (10 − 3 = 7) + its denormalized totalStock.
+    const matched = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-MATCH' },
+    });
+    expect(matched.quantity).toBe(7);
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: matched.productId } })).totalStock,
+    ).toBe(7);
+
+    // Unrelated sibling variant is untouched — no spill from the matched line.
+    const sibling = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-SIBLING' },
+    });
+    expect(sibling.quantity).toBe(7); // unchanged from its seeded 7
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: sibling.productId } })).totalStock,
+    ).toBe(7);
+
+    // The unmatched line still persists (barcode trail) with a null variant FK,
+    // moving no stock.
+    const unmatched = await prisma.orderItem.findFirstOrThrow({
+      where: {
+        order: { storeId: store.id, platformOrderId: 'stock-c' },
+        barcode: 'EAN13-UNKNOWN-C',
+      },
+    });
+    expect(unmatched.productVariantId).toBeNull();
+  });
+
+  it('(d) past-day first insert does NOT decrement — bootstrap/backfill leaves stock to the scans', async () => {
+    // A freshly connected store's bootstrap ORDERS sync (window [createdAt, now])
+    // and dev/stage backfills first-insert historical orders. The optimistic
+    // decrement mirrors LIVE sales only, so a past-business-day order must leave
+    // catalog stock untouched — the authoritative catalog scan owns it.
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-STOCK-PAST']);
+    await seedStock(store.id, 'EAN13-STOCK-PAST', 10);
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildStockMapped({
+        platformOrderId: 'stock-d',
+        orderDate: new Date('2026-05-19T10:00:00Z'), // explicit past business day
+        lines: [{ barcode: 'EAN13-STOCK-PAST', quantity: 3, platformLineId: '9301' }],
+      }),
+    );
+
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-PAST' },
+    });
+    expect(variant.quantity).toBe(10); // unchanged — no live decrement for a past-day order
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: variant.productId } })).totalStock,
+    ).toBe(10);
+  });
+});

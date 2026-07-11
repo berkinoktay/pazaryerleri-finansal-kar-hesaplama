@@ -150,6 +150,45 @@ describe('processBufferPromote', () => {
     expect(order.actualShipDate?.toISOString()).toBe('2026-06-12T11:35:54.000Z');
   });
 
+  it('promotes a today entry without throwing on the JSONB string orderDate, and decrements the matched variant (regression)', async () => {
+    // Regression for the optimistic-decrement business-today gate: the buffer's
+    // mapped_order is JSONB, so `orderDate` revives as an ISO STRING. The gate
+    // must normalize that string (not throw `Invalid time value`) AND, because
+    // buildMappedOrder dates the entry today, treat it as a live sale and
+    // decrement the matched variant.
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedCalculableVariant(org.id, store.id, BARCODE);
+    // Give the variant a known starting stock so the decrement is observable
+    // (seedCalculableVariant leaves quantity at its 0 default).
+    await prisma.productVariant.updateMany({
+      where: { storeId: store.id, barcode: BARCODE },
+      data: { quantity: 5 },
+    });
+
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-stock',
+      platformOrderNumber: 'ord-stock',
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-stock',
+        platformOrderNumber: 'ord-stock',
+      }),
+    });
+
+    await processBufferPromote();
+
+    // Promote succeeded — the string orderDate no longer throws at the gate.
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('pkg-stock');
+    // Today-dated buffer entry → live sale → variant stock decremented 5 → 4.
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(4);
+  });
+
   it('does not pick up a FAILED entry before its backoff window elapses', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);

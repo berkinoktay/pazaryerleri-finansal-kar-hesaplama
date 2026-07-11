@@ -195,6 +195,61 @@ export interface MappedProductsPageMeta {
   nextPageToken: string | null;
 }
 
+// ─── /products/approved/inventory-and-price (v2) response shapes ──────────
+// The "stock and price only" projection of the approved-products endpoint.
+// Source-of-truth: docs/integrations/trendyol/7-trendyol-marketplace-
+// entegrasyonu/urun-entegrasyonu-v2/urun-filtreleme-onayli-urun-v2-stok-ve-
+// fiyat.md. Same page/size/nextPageToken pagination as /products/approved
+// (page x size <= 10,000, then nextPageToken). Prices/quantity are optional
+// because Trendyol omits them on freshly-listed variants whose pricing
+// pipeline has not completed.
+
+export interface TrendyolInventoryVariant {
+  variantId: number;
+  barcode: string;
+  salePrice?: number | null;
+  listPrice?: number | null;
+  quantity?: number | null;
+  stockCode?: string;
+  stockLastModifiedDate?: number | null;
+}
+
+export interface TrendyolInventoryContent {
+  contentId: number;
+  productMainId: string;
+  variants?: TrendyolInventoryVariant[];
+}
+
+export interface TrendyolInventoryAndPriceResponse {
+  totalElements: number;
+  totalPages: number;
+  page: number;
+  size: number;
+  nextPageToken?: string | null;
+  content: TrendyolInventoryContent[];
+}
+
+// ─── Mapped inventory delta DTO — flat per-variant, ready for the diff ────
+// The PRODUCTS_DELTA handler only cares about the variant-level stock+price
+// fields, so the fetcher flattens content.variants[] into one batch. Decimal
+// fields are 2-dp strings (same boundary contract as MappedProductVariant).
+
+export interface MappedInventoryVariant {
+  platformVariantId: bigint;
+  barcode: string;
+  quantity: number;
+  salePrice: string;
+  listPrice: string;
+}
+
+export interface MappedInventoryPage {
+  batch: MappedInventoryVariant[];
+  /** Number of content items on this page — the progress unit (matches the
+   * approved endpoint's totalElements, which counts content, not variants). */
+  contentCount: number;
+  pageMeta: MappedProductsPageMeta;
+}
+
 // ─── /orders (getShipmentPackages) response shapes ───────────────────────
 // Source-of-truth: docs/integrations/trendyol/research/2026-05-18-hakedis-
 // bulgulari.md §7 (canlı stage + prod API research), supplemented by

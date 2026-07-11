@@ -2668,6 +2668,7 @@
             "enum": [
               "ORDERS",
               "PRODUCTS",
+              "PRODUCTS_DELTA",
               "SETTLEMENTS",
               "CLAIMS"
             ],
@@ -3114,6 +3115,15 @@
             ],
             "description": "Computed status from variant flags. Order of precedence: archived → blacklisted → locked → onSale → inactive."
           },
+          "delistedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Stamped by the full catalog scan absence pass when this variant is no longer returned by a complete scan (delisted). Cleared on reappearance by both the full scan and the hourly inventory-and-price delta. ISO 8601 UTC. Null while the variant is listed. Drives the compact \"delisted\" badge on the products table variant rows.",
+            "example": null
+          },
           "currentCostTry": {
             "type": [
               "string",
@@ -3202,6 +3212,7 @@
           "productUrl",
           "locationBasedDelivery",
           "status",
+          "delistedAt",
           "currentCostTry",
           "profileCount",
           "costStatus",

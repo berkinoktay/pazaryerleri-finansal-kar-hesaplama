@@ -111,6 +111,44 @@ SELECT cron.schedule(
   $$
 );
 
+-- ─── Products delta sync (hourly stock+price refresh) ─────────────────────────
+-- Enqueues a PENDING PRODUCTS_DELTA sync_log per ACTIVE store every hour. The
+-- worker's products-delta handler walks Trendyol's approved inventory-and-price
+-- feed (stock + price only), diffs each page against the DB in memory, and
+-- writes back only the variants whose quantity or sale/list price drifted.
+--
+-- This endpoint has NO date filter, so every tick is a lightweight FULL walk of
+-- the approved catalog — but the in-memory diff keeps writes minimal. It is not
+-- a replacement for the daily full PRODUCTS scan: that scan remains the
+-- metadata reconciliation (titles, images, brand/category) and the delist
+-- diff (absence-from-feed), which the delta handler deliberately never touches.
+--
+-- Schedule: '15 * * * *' — quarter past every hour, offset from the orders
+-- safety-net tick (minute :00) so the two hourly fan-outs don't enqueue at once.
+--
+-- Dedupe: same NOT EXISTS in-flight guard as sync-orders-delta, scoped to the
+-- PRODUCTS_DELTA type. NOTE: the sync_logs active-slot uniqueness is per
+-- (store, sync_type), so a PRODUCTS_DELTA run and a full PRODUCTS run can be
+-- in flight for the same store at once. That is benign — both write authoritative
+-- vendor stock/price values, so whichever lands last simply reasserts the truth.
+--
+SELECT cron.schedule(
+  'sync-products-delta-hourly',
+  '15 * * * *',
+  $$
+  INSERT INTO sync_logs (id, organization_id, store_id, sync_type, status, started_at)
+  SELECT gen_random_uuid(), s.organization_id, s.id, 'PRODUCTS_DELTA', 'PENDING', now()
+  FROM stores s
+  WHERE s.status = 'ACTIVE'
+    AND NOT EXISTS (
+      SELECT 1 FROM sync_logs sl
+      WHERE sl.store_id = s.id
+        AND sl.sync_type = 'PRODUCTS_DELTA'
+        AND sl.status IN ('PENDING', 'RUNNING', 'FAILED_RETRYABLE')
+    );
+  $$
+);
+
 -- ─── Settlements scan (6h cadence) ────────────────────────────────────────────
 -- Enqueues a PENDING SETTLEMENTS sync_log per ACTIVE store every 6 hours.
 -- The worker's settlements handler scans the full 60-day window each tick

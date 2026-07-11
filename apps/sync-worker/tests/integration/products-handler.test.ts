@@ -93,6 +93,46 @@ async function createTestStore(orgId: string): Promise<{ storeId: string }> {
   return { storeId: store.id };
 }
 
+// Seed a product + one variant directly, bypassing the scan. Used by the
+// delist-by-absence tests to plant a row with a chosen lastSyncedAt (older than
+// the scan's startedAt = "not returned by this scan") and an optional existing
+// delistedAt stamp.
+async function seedVariant(
+  orgId: string,
+  storeId: string,
+  opts: { contentId: number; variantId: number; lastSyncedAt: Date; delistedAt?: Date | null },
+): Promise<{ variantDbId: string }> {
+  const product = await prisma.product.create({
+    data: {
+      organizationId: orgId,
+      storeId,
+      platformContentId: BigInt(opts.contentId),
+      productMainId: `seed-pm-${opts.contentId.toString()}`,
+      title: `Seed Product ${opts.contentId.toString()}`,
+      lastSyncedAt: opts.lastSyncedAt,
+    },
+  });
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId: orgId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(opts.variantId),
+      barcode: `seed-bc-${opts.variantId.toString()}`,
+      stockCode: `seed-sk-${opts.variantId.toString()}`,
+      salePrice: '100.00',
+      listPrice: '100.00',
+      lastSyncedAt: opts.lastSyncedAt,
+      delistedAt: opts.delistedAt ?? null,
+    },
+  });
+  return { variantDbId: variant.id };
+}
+
+// A date safely before any scan's startedAt (= "the last full scan that touched
+// this variant predates the current one" = absent from the current scan).
+const STALE_LAST_SYNCED_AT = new Date('2020-01-01T00:00:00.000Z');
+
 describe('processProductsChunk', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -736,5 +776,455 @@ describe('processProductsChunk', () => {
     });
     expect(missing.syncedDimensionalWeight.toString()).toBe('0');
     expect(zero.syncedDimensionalWeight.toString()).toBe('0');
+  });
+
+  it('delist-by-absence: a COMPLETE scan stamps a variant it no longer returned, leaving returned ones', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    // Stale variant: last touched by an OLD full scan, not present in the feed
+    // this scan returns.
+    await seedVariant(org.id, storeId, {
+      contentId: 4001,
+      variantId: 40010,
+      lastSyncedAt: STALE_LAST_SYNCED_AT,
+    });
+
+    // A single-page, fully-documented scan: page 0 of 1, totalElements=1. After
+    // upserting the one returned content, newProgress (1) reaches totalElements
+    // → reached-end done → the delist pass runs.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 5001,
+            productMainId: 'pm-5001',
+            title: 'Still Listed Product',
+            variants: [
+              { variantId: 50010, barcode: 'fresh-1', stockCode: 'fresh-sk-1', size: 'M' },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+
+    const result = await processProductsChunk({ syncLog: log, cursor: null });
+    expect(result.kind).toBe('done');
+
+    const stale = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(40010) },
+    });
+    const fresh = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(50010) },
+    });
+    // Absent from this complete scan → stamped.
+    expect(stale.delistedAt).not.toBeNull();
+    // Returned by this scan → untouched.
+    expect(fresh.delistedAt).toBeNull();
+  });
+
+  it('delist-by-absence: reappearance in the feed clears an existing delistedAt via the upsert', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    // A variant delisted by an earlier scan.
+    await seedVariant(org.id, storeId, {
+      contentId: 7001,
+      variantId: 70010,
+      lastSyncedAt: STALE_LAST_SYNCED_AT,
+      delistedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    // This scan returns that same content/variant again. Two pages
+    // (totalElements=200) so the handler returns `continue` — the reappearance
+    // clear is the upsert's job, isolated here from the complete-done pass.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 200,
+        totalPages: 2,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 7001,
+            productMainId: 'seed-pm-7001',
+            title: 'Reappeared Product',
+            variants: [{ variantId: 70010, barcode: 'seed-bc-70010', stockCode: 'seed-sk-70010' }],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+      },
+    });
+
+    const result = await processProductsChunk({ syncLog: log, cursor: null });
+    expect(result.kind).toBe('continue');
+
+    const reappeared = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(70010) },
+    });
+    expect(reappeared.delistedAt).toBeNull();
+  });
+
+  it('delist-by-absence: a scan that skipped a page does NOT delist (incomplete scan)', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    await seedVariant(org.id, storeId, {
+      contentId: 4001,
+      variantId: 40010,
+      lastSyncedAt: STALE_LAST_SYNCED_AT,
+    });
+
+    // Same complete-done shape as the happy-path test, but the SyncLog carries a
+    // skipped page — variants on the dropped page were never returned yet are
+    // still listed, so the pass must be skipped entirely.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 5001,
+            productMainId: 'pm-5001',
+            title: 'Still Listed Product',
+            variants: [
+              { variantId: 50010, barcode: 'fresh-1', stockCode: 'fresh-sk-1', size: 'M' },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+        skippedPages: [
+          {
+            page: 24,
+            attemptedAt: new Date().toISOString(),
+            errorCode: 'MARKETPLACE_UNREACHABLE',
+            httpStatus: 500,
+          },
+        ],
+      },
+    });
+
+    const result = await processProductsChunk({ syncLog: log, cursor: null });
+    expect(result.kind).toBe('done');
+
+    const stale = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(40010) },
+    });
+    // Skipped-page scan proves nothing about absence → never stamped.
+    expect(stale.delistedAt).toBeNull();
+  });
+
+  it('delist-by-absence: a truncated (past-cap, no-token) scan does NOT delist', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    await seedVariant(org.id, storeId, {
+      contentId: 4001,
+      variantId: 40010,
+      lastSyncedAt: STALE_LAST_SYNCED_AT,
+    });
+
+    // Processing page 99 (items 9900-9999); the next page crosses the 10k cap
+    // and no nextPageToken is provided → the truncation done branch. The tail of
+    // the catalog was never scanned, so absence is unknowable and the pass is
+    // skipped.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 20000,
+        totalPages: 200,
+        page: 99,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 99001,
+            productMainId: 'pm-99001',
+            title: 'Cap Boundary Product',
+            variants: [{ variantId: 990010, barcode: 'cap-1', stockCode: 'cap-sk-1', size: 'M' }],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+        progressCurrent: 9900,
+        progressTotal: 20000,
+      },
+    });
+
+    const result = await processProductsChunk({
+      syncLog: log,
+      cursor: { kind: 'page', n: 99 },
+    });
+    expect(result.kind).toBe('done');
+
+    const stale = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(40010) },
+    });
+    // Truncated scan proves nothing about the unscanned tail → never stamped.
+    expect(stale.delistedAt).toBeNull();
+  });
+
+  it('above the 10k cap: a token cursor WITH a nextPageToken continues the token chain (never resets to page 0)', async () => {
+    // Regression for the collapse bug: a token cursor used to fall through
+    // `cursor.kind === 'page' ? cursor.n : 0`, resetting the walk to page 1 and
+    // abandoning the >10k tail. Past the cap (progressCurrent >= 10k so the
+    // recovery path leaves the token intact) the handler must CONTINUE the token
+    // chain with Trendyol's next token.
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 20000,
+        totalPages: 200,
+        page: 100,
+        size: 100,
+        nextPageToken: 'tok-next',
+        content: [
+          buildContent({
+            contentId: 100_001,
+            productMainId: 'pm-100001',
+            title: 'Past Cap Product',
+            variants: [{ variantId: 1_000_010, barcode: 'pc-1', stockCode: 'pc-sk-1', size: 'M' }],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+        progressCurrent: 10000,
+        progressTotal: 20000,
+      },
+    });
+
+    const result = await processProductsChunk({
+      syncLog: log,
+      cursor: { kind: 'token', token: 'tok-current' },
+    });
+
+    // The request rode the CURRENT token (no page fallback).
+    const firstArg = fetchSpy.mock.calls[0]?.[0];
+    const url = typeof firstArg === 'string' ? firstArg : '';
+    expect(url).toContain('nextPageToken=tok-current');
+    expect(url).not.toContain('page=');
+
+    // The next cursor is Trendyol's NEXT token, and progress advanced.
+    expect(result.kind).toBe('continue');
+    if (result.kind !== 'continue') return;
+    expect(result.cursor).toEqual({ kind: 'token', token: 'tok-next' });
+    expect(result.progress).toBe(10001);
+  });
+
+  it('above the 10k cap: a token cursor with NO nextPageToken ends as truncated and SKIPS the delist pass', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    // A stale variant that WOULD be delisted if the pass ran — it must survive,
+    // because the token chain ran dry past the cap and the tail is unscanned.
+    await seedVariant(org.id, storeId, {
+      contentId: 4001,
+      variantId: 40010,
+      lastSyncedAt: STALE_LAST_SYNCED_AT,
+    });
+
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 20000,
+        totalPages: 200,
+        page: 100,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 100_002,
+            productMainId: 'pm-100002',
+            title: 'Past Cap No Token Product',
+            variants: [{ variantId: 1_000_020, barcode: 'pc-2', stockCode: 'pc-sk-2', size: 'L' }],
+          }),
+        ],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+        progressCurrent: 10000,
+        progressTotal: 20000,
+      },
+    });
+
+    const result = await processProductsChunk({
+      syncLog: log,
+      cursor: { kind: 'token', token: 'tok-current' },
+    });
+
+    expect(result.kind).toBe('done');
+    if (result.kind !== 'done') return;
+    expect(result.finalCount).toBe(10001);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'products.catalog-truncated-10k',
+      expect.objectContaining({ syncLogId: log.id, storeId, progress: 10001 }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'products.delist-pass-skipped',
+      expect.objectContaining({ doneReason: 'truncated-past-cap', reason: 'truncated-past-cap' }),
+    );
+
+    const stale = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(40010) },
+    });
+    expect(stale.delistedAt).toBeNull();
+  });
+
+  it('delist guard: an empty FIRST page over a nonzero catalog does NOT mass-delist (untrusted emptiness)', async () => {
+    // The dangerous case FIX 2 closes: a transient empty content[] on page 0
+    // while Trendyol still claims totalElements > 0. Every variant carries a
+    // stale lastSyncedAt (none refreshed this run), so an unguarded pass would
+    // delist the WHOLE catalog. The guard skips it (progressCurrent 0 AND no
+    // vendor-confirmed empty catalog).
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    await seedVariant(org.id, storeId, {
+      contentId: 4001,
+      variantId: 40010,
+      lastSyncedAt: STALE_LAST_SYNCED_AT,
+    });
+
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({
+        totalElements: 200,
+        totalPages: 2,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [],
+      }),
+    );
+
+    const log = await prisma.syncLog.create({
+      data: {
+        organizationId: org.id,
+        storeId,
+        syncType: 'PRODUCTS',
+        status: 'RUNNING',
+        startedAt: new Date(),
+        claimedAt: new Date(),
+        claimedBy: 'worker-test',
+        lastTickAt: new Date(),
+        attemptCount: 1,
+        progressCurrent: 0,
+        progressTotal: 200,
+      },
+    });
+
+    const result = await processProductsChunk({ syncLog: log, cursor: null });
+    expect(result.kind).toBe('done');
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'products.delist-pass-skipped',
+      expect.objectContaining({ doneReason: 'empty-page', reason: 'untrusted-empty-scan' }),
+    );
+
+    const stale = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId, platformVariantId: BigInt(40010) },
+    });
+    // Untrusted empty scan → the whole catalog is spared.
+    expect(stale.delistedAt).toBeNull();
   });
 });

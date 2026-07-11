@@ -2398,12 +2398,14 @@
     },
     "triggers": {
       "PRODUCTS": "Sync products now",
+      "PRODUCTS_DELTA": "Refresh price and stock now",
       "ORDERS": "Sync orders now",
       "SETTLEMENTS": "Sync settlements now",
       "CLAIMS": "Sync returns now"
     },
     "syncTypeLabel": {
       "PRODUCTS": "Product sync",
+      "PRODUCTS_DELTA": "Price/stock sweep",
       "ORDERS": "Order sync",
       "SETTLEMENTS": "Settlement sync",
       "CLAIMS": "Return sync"
@@ -2511,6 +2513,9 @@
       "fast": "Fast delivery",
       "standard": "Standard delivery",
       "mixed": "Mixed"
+    },
+    "table": {
+      "variantDelisted": "Delisted"
     },
     "multiVariantPlaceholder": "{n} variants",
     "empty": {

@@ -86,6 +86,8 @@ enum ExpenseCategory {
 enum SyncType {
   ORDERS
   PRODUCTS
+  // Hourly lightweight stock+price walk via Trendyol inventory-and-price; full PRODUCTS scan remains the daily metadata reconciliation.
+  PRODUCTS_DELTA
   SETTLEMENTS
   CLAIMS
 }
@@ -503,6 +505,10 @@ model ProductVariant {
   locationBasedDelivery   String?  @map("location_based_delivery")
   onSale                  Boolean  @default(true) @map("on_sale")
   archived                Boolean  @default(false)
+  // Stamped when a COMPLETE full catalog scan no longer returns this variant
+  // (absence-from-feed), cleared on reappearance; never hard-delete because
+  // order history references variants.
+  delistedAt              DateTime? @map("delisted_at")
   blacklisted             Boolean  @default(false)
   locked                  Boolean  @default(false)
   size                    String?
@@ -533,6 +539,7 @@ model ProductVariant {
   @@index([productId])
   @@index([storeId, stockCode])
   @@index([storeId, onSale, archived])
+  @@index([storeId, delistedAt])
   @@map("product_variants")
 }
 

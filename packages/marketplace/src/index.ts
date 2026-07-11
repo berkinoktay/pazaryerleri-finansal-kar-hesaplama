@@ -27,6 +27,11 @@ export {
   type MappedProductImage,
   type MappedProductVariant,
   type MappedProductsPageMeta,
+  type TrendyolInventoryVariant,
+  type TrendyolInventoryContent,
+  type TrendyolInventoryAndPriceResponse,
+  type MappedInventoryVariant,
+  type MappedInventoryPage,
   type TrendyolOrderLine,
   type TrendyolPackageHistory,
   type TrendyolShipmentPackage,
@@ -48,6 +53,10 @@ export {
   fetchProductsByBarcode,
   type FetchApprovedProductsOpts,
 } from './trendyol/products';
+export {
+  fetchInventoryAndPrice,
+  type FetchInventoryAndPriceOpts,
+} from './trendyol/inventory-price';
 export {
   ORDERS_PAGE_SIZE,
   STREAM_WINDOW_MAX_DAYS,

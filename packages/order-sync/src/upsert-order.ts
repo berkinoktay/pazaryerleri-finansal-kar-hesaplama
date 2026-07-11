@@ -42,6 +42,9 @@ import type {
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { applyEstimateOnOrderCreate, resolveCommissionRate } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
+import { getBusinessDate } from '@pazarsync/utils';
+
+import { decrementVariantStock, recomputeProductsTotalStock } from './stock';
 
 interface SnapshotComponentData {
   orderItemId: string;
@@ -271,6 +274,42 @@ async function resolveEffectiveCommission(
  *     olarak çağrılır — PSF + Stopaj + Kargo ESTIMATE OrderFee rows + Order.estimated*.
  *     Cost snapshot eksikse profit null kalır.
  */
+/**
+ * Whether `orderDate` falls on the current business day — the gate for the
+ * optimistic stock decrement below.
+ *
+ * Defensive by contract: `orderDate` is a real `Date` on the live sync / webhook
+ * path, but an ISO STRING on the buffer-promote path — the order is revived from
+ * `live_performance_buffer.mapped_order` JSONB, and a JSON round-trip serializes
+ * a `Date` into a string (the static `MappedOrder.orderDate: Date` type does not
+ * reflect that runtime reality). `getBusinessDate` feeds its argument to
+ * `Intl.DateTimeFormat.format`, which throws `RangeError: Invalid time value` on
+ * a non-`Date`, so the value is normalized (`Date | string | number`) via
+ * `new Date(...)` and NaN-checked BEFORE the format call — mirroring how the rest
+ * of this file coerces buffer-JSONB dates (see the `lastModifiedDate` /
+ * `actualShipDate` handling).
+ *
+ * Any failure resolves to `false` (skip the decrement): the decrement is a
+ * best-effort optimization and MUST never throw — a throw here would abort the
+ * entire order persist inside the upsert transaction. The outer try/catch is a
+ * belt-and-suspenders guard on top of the NaN check so no `Intl` edge case can
+ * escape; it logs rather than swallowing silently.
+ */
+function isOrderOnBusinessToday(orderDate: Date | string | number): boolean {
+  try {
+    const parsed = new Date(orderDate);
+    if (Number.isNaN(parsed.getTime())) {
+      return false;
+    }
+    return getBusinessDate(parsed) === getBusinessDate();
+  } catch (err) {
+    syncLog.warn('stock.decrement-date-gate-skip', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
 export interface UpsertOrderOpts {
   /**
    * Kâr-dondurma (spec 2026-06-12): set'liyse sipariş KÂR-DIŞI yazılır —
@@ -493,11 +532,31 @@ export async function upsertOrderWithSnapshot(
           ?.platform ?? null)
       : null;
 
+    // Optimistic between-scans stock: the distinct products whose variant stock
+    // we decrement below (one first-insert per line). Recomputed once after the
+    // loop so Product.totalStock stays consistent with the touched variants.
+    const affectedProductIds = new Set<string>();
+
+    // Optimistic decrement mirrors LIVE sales only, so it fires only for an order
+    // whose business date is TODAY. Without this gate a freshly connected store's
+    // bootstrap ORDERS sync (window [store.createdAt, now]) or a dev/stage backfill
+    // would floor catalog stock toward 0 for every historical first-insert until
+    // the next authoritative scan. Past-day first-inserts (bootstrap seam,
+    // backfill, late arrivals) leave stock to the authoritative catalog scans.
+    // Business date via the canonical @pazarsync/utils helper — APP_TIME_ZONE
+    // single source, never a hand-rolled AT TIME ZONE. Loop-invariant (the whole
+    // order shares one orderDate), so it is computed once here. The helper
+    // normalizes a JSONB-revived string orderDate (buffer-promote path) and can
+    // never throw — a bad date just skips the decrement.
+    const orderIsBusinessToday = isOrderOnBusinessToday(order.orderDate);
+
     // 2. OrderItem'lar: variant lookup (barcode) + INSERT-if-new + snapshot.
     for (const line of order.lines) {
       const variant = await tx.productVariant.findFirst({
         where: { storeId, barcode: line.barcode },
-        select: { id: true },
+        // productId is selected so the first-insert stock decrement below can
+        // recompute the owning product's denormalized totalStock.
+        select: { id: true, productId: true },
       });
 
       // Dedupe (write-once item): platformLineId platform-taraflı satır
@@ -614,12 +673,40 @@ export async function upsertOrderWithSnapshot(
         },
       });
 
+      // Optimistic between-scans stock decrement. This is the TRUE first insert
+      // of this line (the existing-line branch above returned via `continue`, so
+      // re-syncs and re-deliveries never reach here), so subtract the sold
+      // quantity from the local variant stock to reflect the sale on the
+      // products surface within seconds. Only when the variant resolved — an
+      // unmatched line carries no stock to move. Catalog scans overwrite with the
+      // authoritative vendor value; cancellations/returns deliberately do not
+      // re-add (one-way simplicity, the scan reconciles). Owner-approved
+      // 2026-07-11. See ./stock for the full contract.
+      //
+      // Two gates keep the decrement to genuine live sales:
+      //   - orderIsBusinessToday: skip past-day first-inserts (bootstrap seam,
+      //     backfill, late arrivals) — see the note where it is computed above.
+      //   - status !== CANCELLED: a sale whose FIRST event is already cancelled
+      //     never consumed stock, so it must not decrement. The decrement is
+      //     one-way (never re-added on cancel — the scan reconciles), so
+      //     decrementing a born-cancelled order would understate stock until the
+      //     next authoritative scan.
+      if (variant !== null && orderIsBusinessToday && order.status !== 'CANCELLED') {
+        await decrementVariantStock(tx, variant.id, line.quantity);
+        affectedProductIds.add(variant.productId);
+      }
+
       // Cost snapshot capture (write-once iç guard).
       // Kâr-dışı yazım — para alanları donuk; item yalnız barkod iziyle yazıldı.
       if (opts?.profitExclusion === undefined) {
         await captureCostSnapshot(item.id, tx);
       }
     }
+
+    // Recompute Product.totalStock for every product whose variant stock we just
+    // decremented, from the live SUM(variants.quantity). No-op when nothing was
+    // decremented (all lines re-syncs or unmatched variants).
+    await recomputeProductsTotalStock(tx, [...affectedProductIds]);
 
     // 3. applyEstimateOnOrderCreate — "tahmini kâr" (PSF + Stopaj + SHIPPING
     //    ESTIMATE OrderFee + Order.estimatedNetProfit). HER upsert'te çağrılır

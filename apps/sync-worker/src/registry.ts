@@ -8,10 +8,12 @@ import type { Registry } from './dispatcher';
 import { claimsHandler } from './handlers/claims';
 import { ordersHandler } from './handlers/orders';
 import { productsHandler } from './handlers/products';
+import { productsDeltaHandler } from './handlers/products-delta';
 import { settlementsHandler } from './handlers/settlements/cron';
 
 export const REGISTRY: Registry = {
   PRODUCTS: productsHandler,
+  PRODUCTS_DELTA: productsDeltaHandler,
   ORDERS: ordersHandler,
   SETTLEMENTS: settlementsHandler,
   CLAIMS: claimsHandler,

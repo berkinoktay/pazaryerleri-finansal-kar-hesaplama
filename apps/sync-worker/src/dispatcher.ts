@@ -26,6 +26,8 @@ export async function dispatch(
 function decodeCursor(syncLog: SyncLog): unknown | null {
   switch (syncLog.syncType) {
     case 'PRODUCTS':
+    case 'PRODUCTS_DELTA':
+      // PRODUCTS_DELTA reuses the products page/token cursor model verbatim.
       return parseProductsCursor(syncLog.pageCursor);
     case 'ORDERS':
     case 'SETTLEMENTS':

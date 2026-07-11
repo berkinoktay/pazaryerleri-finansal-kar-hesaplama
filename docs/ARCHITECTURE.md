@@ -43,8 +43,8 @@
 ├──────────────────────────────┼──────────────────────────────────────┤
 │                     BACKGROUND LAYER                                │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
-│  │  Supabase Edge Functions (Deno)                               │  │
-│  │  sync-trendyol │ sync-hepsiburada │ sync-settlements          │  │
+│  │  sync-worker (Node): claims SyncLog jobs (SKIP LOCKED)        │  │
+│  │  Edge Functions (Deno): fx-rates-sync only                    │  │
 │  └───────────────────────────┬───────────────────────────────────┘  │
 │                              │ HTTP API calls                       │
 ├──────────────────────────────┼──────────────────────────────────────┤
@@ -287,14 +287,10 @@ pazaryerleri-finansal-kar-hesaplama-saas/
 │       └── package.json
 │
 ├── supabase/
-│   ├── functions/                    # Edge Functions
-│   │   ├── sync-trendyol/
+│   ├── functions/                    # Edge Functions (Deno), fx-rates-sync only
+│   │   ├── fx-rates-sync/            # TCMB USD/EUR to fx_rates (daily, pg_cron)
 │   │   │   └── index.ts
-│   │   ├── sync-hepsiburada/
-│   │   │   └── index.ts
-│   │   └── _shared/                 # Shared code between functions
-│   │       ├── supabase-client.ts
-│   │       └── sync-utils.ts
+│   │   └── _shared/                 # Shared Deno modules (placeholder, empty)
 │   ├── sql/                          # SQL scripts (not managed by Prisma)
 │   │   ├── rls-policies.sql          # Row-Level Security policies
 │   │   ├── pg-cron-setup.sql         # Cron job definitions
@@ -944,6 +940,12 @@ interface MarketplaceAdapter {
 | **Trendyol**    | REST     | API Key + Secret + Seller ID   | 10 req/sec |
 | **Hepsiburada** | REST     | API Key + Secret + Merchant ID | TBD        |
 
+> **Implementation status:** only **Trendyol** is live. `getAdapter`
+> (`packages/marketplace/src/registry.ts`) rejects `HEPSIBURADA` with
+> `PLATFORM_NOT_YET_AVAILABLE`, and its adapter directory is an empty
+> placeholder — the Hepsiburada row above is the planned contract, not
+> shipped code.
+
 ### Credential Storage
 
 ```
@@ -951,50 +953,126 @@ interface MarketplaceAdapter {
 2. Frontend sends credentials to backend
 3. Backend encrypts credentials using AES-256-GCM with ENCRYPTION_KEY
 4. Encrypted JSON stored in stores.credentials column
-5. Decrypted only when sync functions need to call marketplace API
+5. Decrypted only inside marketplace adapters, in-memory, for a single API call
 ```
 
 ---
 
 ## 8. Background Sync Architecture
 
-### Flow
+Sync is **queue-driven**, not run at the edge. The authoritative runner is
+`apps/sync-worker` — a long-running Node process that claims `sync_logs` rows and
+drives each one to completion. `pg_cron` only ever *enqueues* work (it INSERTs
+PENDING `sync_logs` rows); it never calls a marketplace API itself. Real-time
+order ingest is handled separately by a webhook receiver in `apps/api`, with the
+hourly cron sync as the safety net.
+
+### Order ingest: webhook-primary, poll safety-net
 
 ```
-pg_cron (every 15 min)
-  │
-  ├── SELECT active stores with stale last_sync_at
-  │
-  └── For each store:
-        │
-        ├── Call Supabase Edge Function via pg_net
-        │   POST /functions/v1/sync-trendyol  { storeId, syncType }
-        │   POST /functions/v1/sync-hepsiburada { storeId, syncType }
-        │
-        └── Edge Function:
-              1. Read encrypted credentials from DB
-              2. Decrypt credentials
-              3. Call marketplace API (paginated)
-              4. Map response to internal schema
-              5. Upsert records (ON CONFLICT DO UPDATE)
-              6. Update store.last_sync_at
-              7. Write sync_log entry
+   Trendyol (order status change, T+0)
+        |
+        v   POST /v1/webhooks/orders/:storeId
+   apps/api webhook receiver
+     - store-scoped Basic Auth, 1 MB body cap, per-store rate limit
+     - idempotency log key (storeId, platformOrderId, status, lastModifiedDate)
+        |
+        v
+   intake -> orders (or the cost-missing buffer) -> Live Performance
 ```
 
-### Sync Types & Frequencies
+- **Webhook is the primary path** (real-time, T+0). The HTTP response code is a
+  control signal for Trendyol's 5-minute retry: `200` closes the event (success
+  OR a deterministic dead-end — malformed body, unknown status, supplier
+  mismatch); `5xx` keeps it open so Trendyol replays a transient fault. The
+  composite idempotency key dedupes re-deliveries within the retry window.
+- **Hourly poll is the safety net.** The `sync-orders-delta` cron enqueues one
+  PENDING `ORDERS` `sync_logs` row per ACTIVE store every hour; the worker claims
+  it and re-scans the delta window to recover anything a webhook missed (delivery
+  failure, worker downtime). The delta window starts from the completion time of
+  the last COMPLETED `ORDERS` sync (`computeDeltaCutoffMs`), widens automatically
+  after an outage of any length, and is clamped so it never precedes store
+  connection.
+- A self-healing reconcile tick in the worker keeps each ACTIVE store's Trendyol
+  webhook subscription registered at the current public base URL and prunes
+  orphans.
 
-| Sync Type   | Default Frequency | Window        |
-| ----------- | ----------------- | ------------- |
-| Orders      | Every 15 minutes  | Last 24 hours |
-| Products    | Every 6 hours     | Full catalog  |
-| Settlements | Every 24 hours    | Last 7 days   |
+### The sync-worker claim loop
 
-### Error Handling
+`apps/sync-worker/src/index.ts` runs a poll-and-claim loop plus maintenance
+timers:
 
-- Failed syncs are logged in `sync_logs` with error details
-- After 3 consecutive failures, store is marked for attention (UI warning)
-- Sync never blocks user operations — it's fully asynchronous
-- Manual sync trigger available via API
+- **Claim** — `tryClaimNext` runs `SELECT ... FOR UPDATE SKIP LOCKED` over
+  claimable rows (PENDING, or FAILED_RETRYABLE whose backoff has elapsed), so
+  multiple worker instances can drain the queue without contending.
+- **Chunk checkpoints** — a run is processed in chunks (e.g. sliding 14-day
+  order-stream slices); after each chunk the cursor/progress is persisted onto
+  the `sync_logs` row, so a resumed claim continues from the saved cursor instead
+  of restarting.
+- **Lease fencing** — every progress write is fenced on the claim owner. A write
+  that matches zero rows means the watchdog (or a peer) re-claimed the row; the
+  worker raises `LostLeaseError` and abandons the run WITHOUT writing any status,
+  so it never clobbers the new owner's progress.
+- **Watchdog** — a 30-second sweep reclaims stale claims: a RUNNING row whose
+  `last_tick_at` is older than 90 s is handed back to PENDING for a peer to
+  resume (or terminally FAILED once it has already burned `MAX_SYNC_ATTEMPTS`).
+- **Attempt caps + backoff** — a transient failure bumps the row to
+  FAILED_RETRYABLE with an exponential-backoff `nextAttemptAt`; auth/access-denied
+  failures are terminal (FAILED) because retrying cannot help. After
+  `MAX_SYNC_ATTEMPTS` the row is terminally FAILED.
+
+### pg_cron fan-out schedule
+
+`supabase/sql/pg-cron-setup.sql` defines the enqueue jobs. Each INSERTs a PENDING
+`sync_logs` row per ACTIVE store (skipping stores with an in-flight run of the
+same type via a `NOT EXISTS` guard); the worker does the actual marketplace
+calls.
+
+| Job                                   | Schedule (UTC)  | Enqueues         | Notes                                       |
+| ------------------------------------- | --------------- | ---------------- | ------------------------------------------- |
+| `sync-orders-delta`                   | `0 * * * *`     | `ORDERS`         | Hourly safety net behind the webhook        |
+| `sync-products-daily`                 | `0 0 * * *`     | `PRODUCTS`       | Full catalog scan at the low-traffic hour   |
+| `sync-products-delta-hourly`          | `15 * * * *`    | `PRODUCTS_DELTA` | Stock + price sweep, offset from minute :00  |
+| `sync-settlements-6h`                 | `30 */6 * * *`  | `SETTLEMENTS`    | 60-day window, idempotent per-row anchors   |
+| `sync-claims-6h`                      | `45 */6 * * *`  | `CLAIMS`         | Returns/refunds, offset from settlements    |
+| `live-performance-buffer-daily-reset` | `0 21 * * *`    | (SQL function)   | 21:00 UTC = 00:00 business time             |
+| `fx-rates-sync-daily`                 | `0 13 * * 1-5`  | (Edge Function)  | Only cron that leaves the DB, via `pg_net`  |
+
+Türkiye is permanent GMT+3 (no DST), and pg_cron has no per-job timezone, so each
+local wall-clock time is hardcoded as its UTC equivalent: `0 0 * * *` = 03:00
+Istanbul, `0 21 * * *` = 00:00 Istanbul, `0 13 * * 1-5` = 16:00 Istanbul.
+
+The buffer daily reset calls `reset_live_performance_buffer()`, which deletes
+ONLY `PERMANENT_FAILED` Live Performance buffer entries older than 7 days —
+un-graduatable rows the worker could never write to `orders`. Recoverable entries
+are graduated into `orders` by the worker, never deleted by this cron.
+
+### Edge Functions: fx-rates only
+
+`supabase/functions/` holds a single active function, `fx-rates-sync` (Deno): it
+fetches TCMB USD/EUR rates and upserts `fx_rates`, triggered by the
+`fx-rates-sync-daily` cron via `pg_net`. There is **no** `sync-trendyol` /
+`sync-hepsiburada` Edge Function — marketplace order/product/settlement sync is
+owned entirely by `apps/sync-worker`. Earlier boilerplate Edge stubs that implied
+an edge sync path were removed.
+
+### Marketplace coverage
+
+Only **Trendyol** is implemented. The `getAdapter` registry
+(`packages/marketplace/src/registry.ts`) rejects `HEPSIBURADA` with
+`PLATFORM_NOT_YET_AVAILABLE`, and the Hepsiburada adapter directory is an empty
+placeholder. Adding Hepsiburada is a matter of implementing the
+`MarketplaceAdapter` interface and registering its factory — no worker or route
+changes required.
+
+### Error handling
+
+- Failed syncs are recorded on the `sync_logs` row (`error_code` +
+  `error_message`); the SyncCenter UI renders terminal failures for user action.
+- Auth/access-denied errors are terminal (the user must fix credentials); every
+  other error is retried with backoff up to `MAX_SYNC_ATTEMPTS`.
+- Sync is fully asynchronous and never blocks user operations; a manual sync can
+  be enqueued via the API.
 
 ---
 

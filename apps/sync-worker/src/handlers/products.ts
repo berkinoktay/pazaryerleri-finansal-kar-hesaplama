@@ -21,7 +21,13 @@ import {
   fetchApprovedProducts,
   PRODUCTS_PAGE_SIZE,
 } from '@pazarsync/marketplace';
-import { parseProductsCursor, syncLog, type ProductsCursor } from '@pazarsync/sync-core';
+import {
+  parseProductsCursor,
+  parseSkippedPages,
+  syncLog,
+  type ProductsCursor,
+  type SkippedPageEntry,
+} from '@pazarsync/sync-core';
 
 import type { ChunkResult, ModuleHandler } from './types';
 
@@ -42,6 +48,157 @@ import type { ChunkResult, ModuleHandler } from './types';
 // PRODUCTS_PAGE_SIZE / APPROVED_PAGE_CAP_ITEMS imported from the
 // marketplace package — single source of truth so the worker's
 // token→page fallback math stays consistent with the fetcher.
+
+// Which terminal ('done') branch reached completion. The handler has four
+// physical `kind: 'done'` returns; the delist pass must run on the three that
+// prove the catalog was fully scanned and MUST be skipped on the truncation
+// one, which proves nothing about absence past Trendyol's 10k page cap.
+//
+//   - 'empty-page'         generator finished / yielded no value (catalog exhausted)
+//   - 'empty-batch'        the page came back with an empty batch (catalog exhausted)
+//   - 'reached-end'        newProgress >= totalElements OR the last documented page
+//   - 'truncated-past-cap' past the 10k cap with no nextPageToken — tail unscanned
+export type DelistDoneReason = 'empty-page' | 'empty-batch' | 'reached-end' | 'truncated-past-cap';
+
+// Why a complete-looking done was NOT trusted enough to run the delist pass.
+// Surfaced as the `reason` field of 'products.delist-pass-skipped' so an
+// operator can tell a deliberate skip from a bug.
+//   - 'skipped-pages'        skip-bad-page recovery dropped a page this run
+//   - 'truncated-past-cap'   the scan stopped past the 10k cap with no token
+//   - 'untrusted-empty-scan' the scan ended empty without having walked any real
+//                            page AND the vendor did not confirm an empty catalog
+export type DelistSkipReason = 'skipped-pages' | 'truncated-past-cap' | 'untrusted-empty-scan';
+
+// The outcome of the delist decision: run, or skip with a named reason.
+export type DelistDecision = { run: true } | { run: false; reason: DelistSkipReason };
+
+// What this run observed, threaded into the decision so the empty-done reasons
+// are trusted only when the emptiness is real.
+export interface DelistScanContext {
+  // Items upserted across this run so far (SyncLog.progressCurrent). > 0 means
+  // at least one real page was walked before the empty terminal was reached.
+  progressCurrent: number;
+  // totalElements from the page this chunk actually observed, or null when no
+  // page was observed (the generator returned done/undefined before yielding).
+  observedTotalElements: number | null;
+}
+
+// Pure decision: may the absence-from-feed delist pass run for this done? Only
+// when the scan was COMPLETE and its terminal state is trustworthy.
+//
+// Incompleteness that leaves still-listed variants unseen (never run):
+//   (a) skip-bad-page recovery dropped a page (skippedPages non-empty) — the
+//       variants on that page were never returned by this run.
+//   (b) the scan truncated past Trendyol's 10k page cap with no token — the
+//       tail of the catalog was never fetched.
+//
+// Untrustworthy emptiness (never run): an 'empty-page'/'empty-batch' terminal is
+// proof of an exhausted catalog ONLY when we actually walked pages this run
+// (progressCurrent > 0) OR the vendor explicitly reported an empty catalog
+// (observedTotalElements === 0). An empty FIRST response over a nonzero catalog
+// is a transient vendor blip; running the pass there would mass-delist the whole
+// catalog, because every variant carries a stale lastSyncedAt when no page
+// refreshed it this run.
+//
+// Exhaustive over DelistDoneReason so a future done branch forces a decision.
+export function shouldRunDelistPass(
+  skippedPages: SkippedPageEntry[],
+  doneReason: DelistDoneReason,
+  scan: DelistScanContext,
+): DelistDecision {
+  if (skippedPages.length > 0) return { run: false, reason: 'skipped-pages' };
+  switch (doneReason) {
+    case 'reached-end':
+      return { run: true };
+    case 'empty-page':
+    case 'empty-batch':
+      if (scan.progressCurrent > 0 || scan.observedTotalElements === 0) {
+        return { run: true };
+      }
+      return { run: false, reason: 'untrusted-empty-scan' };
+    case 'truncated-past-cap':
+      return { run: false, reason: 'truncated-past-cap' };
+    default: {
+      const _exhaustive: never = doneReason;
+      throw new Error(`Unhandled delist done reason: ${_exhaustive}`);
+    }
+  }
+}
+
+// Absence-from-feed delisting, run right before a complete-done return. Factored
+// out of the multi-done-path handler so every complete branch calls the exact
+// same pass and the truncation branch is the only one that skips it (via the
+// decision above).
+//
+// Correctness: `lastSyncedAt` is written ONLY by the full-scan catalog upsert
+// (upsertCatalogBatch); the hourly delta sync deliberately does NOT touch it.
+// So "lastSyncedAt older than this scan's startedAt" is EXACTLY "absent from
+// this complete scan": every variant a page of this scan returned had its
+// lastSyncedAt refreshed to now() (> startedAt) and is excluded, while a
+// variant no page returned still carries an older timestamp. `delistedAt IS
+// NULL` keeps the stamp idempotent — a variant already delisted in a prior
+// scan keeps its original timestamp instead of being re-stamped.
+//
+// Resume-safe: on a scan resumed mid-way (cursor advanced after
+// releaseToPending), `log.startedAt` stays the ORIGINAL enqueue time and every
+// page upserted before the resume stamped lastSyncedAt AFTER startedAt, so the
+// "older than startedAt" comparison still correctly treats those variants as
+// present across the resume.
+async function runDelistPassIfComplete(
+  log: SyncLog,
+  doneReason: DelistDoneReason,
+  observedTotalElements: number | null,
+): Promise<void> {
+  const skippedPages = parseSkippedPages(log.skippedPages);
+  const decision = shouldRunDelistPass(skippedPages, doneReason, {
+    progressCurrent: log.progressCurrent,
+    observedTotalElements,
+  });
+  if (!decision.run) {
+    syncLog.warn('products.delist-pass-skipped', {
+      syncLogId: log.id,
+      storeId: log.storeId,
+      doneReason,
+      reason: decision.reason,
+      skippedPageCount: skippedPages.length,
+    });
+    return;
+  }
+
+  const stamped = await prisma.productVariant.updateMany({
+    where: {
+      storeId: log.storeId,
+      lastSyncedAt: { lt: log.startedAt },
+      delistedAt: null,
+    },
+    data: { delistedAt: new Date() },
+  });
+
+  syncLog.info('products.delisted-by-absence', {
+    syncLogId: log.id,
+    storeId: log.storeId,
+    count: stamped.count,
+  });
+}
+
+// Terminal for a scan that ran past Trendyol's 10k page cap with no
+// nextPageToken to continue: the tail beyond 10k is unreachable through this
+// endpoint, so the run ends here. Surfaced in the logs so a catalog quietly
+// capped at 10k items does not masquerade as a clean completion, and the delist
+// pass is skipped — a truncated scan proves nothing about absence past the cap.
+async function finishTruncatedPastCap(
+  log: SyncLog,
+  newProgress: number,
+  observedTotalElements: number,
+): Promise<ChunkResult> {
+  syncLog.warn('products.catalog-truncated-10k', {
+    syncLogId: log.id,
+    storeId: log.storeId,
+    progress: newProgress,
+  });
+  await runDelistPassIfComplete(log, 'truncated-past-cap', observedTotalElements);
+  return { kind: 'done', finalCount: newProgress };
+}
 
 export async function processProductsChunk(input: {
   syncLog: SyncLog;
@@ -93,13 +250,18 @@ export async function processProductsChunk(input: {
   const { value, done } = await generator.next();
 
   // Trendyol returned no more content (empty content[]) — sync is complete.
+  // No page was observed here (the generator returned before yielding), so the
+  // delist decision gets observedTotalElements = null and falls back to the
+  // progressCurrent > 0 trust check.
   if (done === true || value === undefined) {
+    await runDelistPassIfComplete(log, 'empty-page', null);
     return { kind: 'done', finalCount: log.progressCurrent };
   }
 
   const { batch, pageMeta } = value;
 
   if (batch.length === 0) {
+    await runDelistPassIfComplete(log, 'empty-batch', pageMeta.totalElements);
     return { kind: 'done', finalCount: log.progressCurrent };
   }
 
@@ -128,39 +290,44 @@ export async function processProductsChunk(input: {
     justProcessedPage >= pageMeta.totalPages - 1;
 
   if (newProgress >= pageMeta.totalElements || isLastDocumentedPage) {
+    await runDelistPassIfComplete(log, 'reached-end', pageMeta.totalElements);
     return { kind: 'done', finalCount: newProgress };
   }
 
-  // Advance to the next page. Per Trendyol's documented contract,
-  // page-based pagination is the default below the 10k cap and
-  // nextPageToken is reserved for past-cap walks. Compute next page
-  // index from the cursor we just consumed; switch to token only when
-  // the next page would cross the 10k boundary AND Trendyol gave us
-  // a token to continue with.
-  const currentPageN = cursor === null ? 0 : cursor.kind === 'page' ? cursor.n : 0;
-  const nextPageN = currentPageN + 1;
-  const nextWouldCrossCap = nextPageN * PRODUCTS_PAGE_SIZE >= APPROVED_PAGE_CAP_ITEMS;
-
+  // Advance to the next page. Two cursor regimes:
+  //   - token cursor: we are past Trendyol's 10k page cap (below it, the
+  //     recovery path above rewrote any saved token to a page). Continue the
+  //     TOKEN CHAIN — never fall back to page arithmetic, which would collapse
+  //     the token to page 0, restart the walk at page 1, and abandon the >10k
+  //     tail (the delist pass would then mass-stamp that unfetched tail). If
+  //     Trendyol returned no further token, the tail is unreachable → truncation.
+  //   - page cursor (or null = page 0): page-based arithmetic. The next cursor is
+  //     cursor.n + 1; switch to a token only when the NEXT page would cross the
+  //     10k cap AND Trendyol returned one. The cap guard is progress-based, so it
+  //     stays correct even when a skip-bad-page recovery made cursor.n and real
+  //     progress diverge.
   let nextCursor: ProductsCursor;
-  if (nextWouldCrossCap) {
+  if (cursor !== null && cursor.kind === 'token') {
     if (pageMeta.nextPageToken !== null && pageMeta.nextPageToken !== undefined) {
       nextCursor = { kind: 'token', token: pageMeta.nextPageToken };
     } else {
-      // Past the 10k cap and no token — Trendyol gave us no way
-      // forward. Treat as done; the catalog beyond 10k is unreachable
-      // through this endpoint without a token. The truncation used to
-      // return silently and looked identical to a clean completion; it is
-      // now observable in the logs, so a catalog quietly capped at 10k
-      // items surfaces instead of masquerading as a finished sync.
-      syncLog.warn('products.catalog-truncated-10k', {
-        syncLogId: log.id,
-        storeId: log.storeId,
-        progress: newProgress,
-      });
-      return { kind: 'done', finalCount: newProgress };
+      return finishTruncatedPastCap(log, newProgress, pageMeta.totalElements);
     }
   } else {
-    nextCursor = { kind: 'page', n: nextPageN };
+    const nextPageN = (cursor === null ? 0 : cursor.n) + 1;
+    const currentPageFromProgress = Math.floor(log.progressCurrent / PRODUCTS_PAGE_SIZE);
+    const nextWouldCrossCap =
+      (currentPageFromProgress + 1) * PRODUCTS_PAGE_SIZE >= APPROVED_PAGE_CAP_ITEMS;
+
+    if (nextWouldCrossCap) {
+      if (pageMeta.nextPageToken !== null && pageMeta.nextPageToken !== undefined) {
+        nextCursor = { kind: 'token', token: pageMeta.nextPageToken };
+      } else {
+        return finishTruncatedPastCap(log, newProgress, pageMeta.totalElements);
+      }
+    } else {
+      nextCursor = { kind: 'page', n: nextPageN };
+    }
   }
 
   syncLog.info('chunk.complete', {
