@@ -15,10 +15,12 @@ export type LiveOrdersFilter = 'all' | 'calculated' | 'pending';
 export const LIVE_QUERY_STALE_MS = 30_000;
 
 /**
- * Polling-fallback cadence used ONLY while the Realtime channel is unhealthy
- * (errored). When Realtime is delivering events we don't poll at all — the
- * subscription invalidates on every change. Matches the 10s tempo OrgSyncsProvider
- * settled on (a true fallback, not the primary freshness mechanism).
+ * Polling-fallback cadence used while the Realtime channel is NOT delivering —
+ * any health that is neither 'healthy' nor 'paused' (i.e. 'errored' OR the
+ * 'connecting' handshake). When Realtime is delivering events we don't poll at
+ * all (the subscription invalidates on every change); when 'paused' the tab is
+ * hidden so nobody is watching. Matches the 10s tempo OrgSyncsProvider settled on
+ * (a true fallback, not the primary freshness mechanism).
  */
 export const LIVE_POLL_INTERVAL_MS = 10_000;
 

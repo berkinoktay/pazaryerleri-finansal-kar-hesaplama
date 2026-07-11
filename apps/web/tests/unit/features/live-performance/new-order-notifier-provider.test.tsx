@@ -5,7 +5,7 @@ import { type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { NotificationSummaryLike } from '@/features/live-performance/lib/new-order-notification-core';
-import { liveKeys } from '@/features/live-performance/query-keys';
+import { LIVE_POLL_INTERVAL_MS, liveKeys } from '@/features/live-performance/query-keys';
 import type { RealtimeHealth } from '@/lib/supabase/realtime';
 import {
   NewOrderNotifierProvider,
@@ -230,6 +230,47 @@ describe('NewOrderNotifierProvider', () => {
     });
 
     expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  // Poll gate: the fallback must run whenever the channel is NOT delivering, i.e.
+  // any health that is not 'healthy' and not 'paused'. A channel stuck at
+  // 'connecting' previously never polled — the gate now covers it.
+  it('polls the fallback while the channel is connecting (not healthy, not paused)', async () => {
+    vi.useFakeTimers();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    renderHook(() => useNewOrderNotifier(), { wrapper });
+
+    // Mount health is 'connecting' -> the fallback interval must fire.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LIVE_POLL_INTERVAL_MS + 100);
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: liveKeys.all });
+  });
+
+  it('does NOT poll while the channel is healthy', async () => {
+    vi.useFakeTimers();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    renderHook(() => useNewOrderNotifier(), { wrapper });
+
+    act(() => emitHealthChange('healthy'));
+    invalidateSpy.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LIVE_POLL_INTERVAL_MS + 100);
+    });
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it('does NOT poll while paused (tab hidden — nobody is watching)', async () => {
+    vi.useFakeTimers();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    renderHook(() => useNewOrderNotifier(), { wrapper });
+
+    act(() => emitHealthChange('paused'));
+    invalidateSpy.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LIVE_POLL_INTERVAL_MS + 100);
+    });
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
   it('throws when used outside the provider', () => {

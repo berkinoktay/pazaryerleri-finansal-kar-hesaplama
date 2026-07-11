@@ -212,7 +212,7 @@ describe('useOrgSyncs', () => {
     expect(getCount).toBe(1);
   }, 15_000);
 
-  it('fires invalidateQueries on `errored` → `healthy` recovery to reconcile missed events', async () => {
+  it('fires invalidateQueries on outage entry AND on `errored` → `healthy` recovery', async () => {
     let getCount = 0;
     server.use(
       http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/sync-logs`, () => {
@@ -236,16 +236,20 @@ describe('useOrgSyncs', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 100));
     expect(getCount).toBe(1);
 
-    // Now simulate an outage and recovery.
+    // Outage-entry edge: dropping to `errored` fires one immediate reconcile so
+    // a silently dead pipe's missed events get picked up without waiting for the
+    // first outage poll tick.
     act(() => {
       emitHealthChange('errored');
     });
+    await waitFor(() => expect(getCount).toBe(2), { timeout: 2_000 });
+
+    // Recovery edge: returning to `healthy` after the outage fires a second
+    // reconcile for anything emitted during the outage window.
     act(() => {
       emitHealthChange('healthy');
     });
-
-    // Recovery edge SHOULD fire one invalidate, which triggers a refetch.
-    await waitFor(() => expect(getCount).toBe(2), { timeout: 2_000 });
+    await waitFor(() => expect(getCount).toBe(3), { timeout: 2_000 });
   });
 
   it('cleans up the Realtime subscription on unmount', async () => {

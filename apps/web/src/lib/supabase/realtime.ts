@@ -284,9 +284,16 @@ export function subscribeToOrgSyncs(
   };
 
   const buildChannel = (): RealtimeChannel => {
+    // A stale flag from a silent teardown must not mask a later real outage.
+    suppressClosedOnce = false;
     reportHealth('connecting');
-    return supabase
-      .channel(`sync_logs:org:${orgId}`)
+    // Capture the instance being built so the async subscribe callback can tell
+    // whether it still owns the current channel. A fast hidden->visible flip
+    // rebuilds the channel; the OLD channel's delayed teardown-CLOSED can still be
+    // in flight after the rebuild reset suppressClosedOnce, and would otherwise be
+    // misread as a genuine 'errored' against the NEW channel's health.
+    const thisChannel = supabase.channel(`sync_logs:org:${orgId}`);
+    thisChannel
       .on<SyncLogsRowWire>(
         'postgres_changes',
         {
@@ -298,6 +305,10 @@ export function subscribeToOrgSyncs(
         (payload: RealtimePostgresChangesPayload<SyncLogsRowWire>) => {
           const eventType = payload.eventType;
           if (eventType === 'DELETE') {
+            // With sync_logs at REPLICA IDENTITY DEFAULT the deleted row carries only
+            // the PK, so postgres_changes cannot evaluate the organization_id filter
+            // against it — in practice this branch does not fire. Kept as defense in
+            // depth; stale deleted rows are reconciled by the polling fallback.
             const oldRow = payload.old as Partial<SyncLogsRowWire>;
             if (oldRow.id === undefined) return;
             onEvent({ eventType: 'DELETE', id: oldRow.id, row: null });
@@ -319,12 +330,17 @@ export function subscribeToOrgSyncs(
           suppressClosedOnce = false;
           return;
         }
+        // Identity guard: a status delivered late for a channel we already
+        // replaced (fast hidden->visible rebuild) must not touch the current
+        // channel's health -- otherwise the old teardown-CLOSED spuriously errors.
+        if (channel !== thisChannel) return;
         // Status values: SUBSCRIBED | TIMED_OUT | CLOSED | CHANNEL_ERROR | (transient others)
         if (status === 'SUBSCRIBED') reportHealth('healthy');
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           reportHealth('errored');
         }
       });
+    return thisChannel;
   };
 
   const teardown = async (): Promise<void> => {
@@ -468,9 +484,16 @@ export function subscribeToLivePerformance(
   };
 
   const buildChannel = (): RealtimeChannel => {
+    // A stale flag from a silent teardown must not mask a later real outage.
+    suppressClosedOnce = false;
     reportHealth('connecting');
-    return supabase
-      .channel(`live-performance:${storeId}`)
+    // Capture the instance being built so the async subscribe callback can tell
+    // whether it still owns the current channel. A fast hidden->visible flip
+    // rebuilds the channel; the OLD channel's delayed teardown-CLOSED can still be
+    // in flight after the rebuild reset suppressClosedOnce, and would otherwise be
+    // misread as a genuine 'errored' against the NEW channel's health.
+    const thisChannel = supabase.channel(`live-performance:${storeId}`);
+    thisChannel
       .on<BufferRowWire>(
         'postgres_changes',
         {
@@ -507,11 +530,16 @@ export function subscribeToLivePerformance(
           suppressClosedOnce = false;
           return;
         }
+        // Identity guard: a status delivered late for a channel we already
+        // replaced (fast hidden->visible rebuild) must not touch the current
+        // channel's health -- otherwise the old teardown-CLOSED spuriously errors.
+        if (channel !== thisChannel) return;
         if (status === 'SUBSCRIBED') reportHealth('healthy');
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           reportHealth('errored');
         }
       });
+    return thisChannel;
   };
 
   const teardown = async (): Promise<void> => {

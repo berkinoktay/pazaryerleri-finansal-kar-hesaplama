@@ -270,10 +270,13 @@ export function NewOrderNotifierProvider({
     };
   }, [orgId, storeId, queryClient]);
 
-  // Health-gated polling fallback (moved from useLiveRealtime): only while errored.
+  // Health-gated polling fallback (moved from useLiveRealtime): poll whenever the
+  // channel is not delivering — any state that is not 'healthy' or 'paused'
+  // ('connecting' included, so a channel stuck mid-handshake still reconciles).
+  // 'paused' means the tab is hidden: nobody is watching, so don't poll.
   React.useEffect(() => {
     if (storeId === null) return;
-    if (health !== 'errored') return;
+    if (health === 'healthy' || health === 'paused') return;
     const intervalId = setInterval(() => {
       void queryClient.invalidateQueries({ queryKey: liveKeys.all });
     }, LIVE_POLL_INTERVAL_MS);
