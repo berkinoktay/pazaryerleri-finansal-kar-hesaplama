@@ -378,6 +378,11 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
   // resume when a consumer opted in; disarmed on hide and on cleanup so a hidden
   // background tab holds no timer.
   let deliveryCheckInterval: number | null = null;
+  // Monotonic per-lifecycle counter that suffixes each build's phoenix topic (see
+  // buildChannel for the mechanism). It guarantees every rebuild asks for a topic
+  // realtime-js has never seen, so a channel(topic) call can never hand the rebuild
+  // the still-registered corpse of the channel we are tearing down.
+  let generation = 0;
 
   const clearResubscribeTimer = (): void => {
     if (resubscribeTimer !== null) {
@@ -396,7 +401,7 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
       // already pending (we are mid-loop), let it keep ticking -- do NOT restart
       // the clock on repeated 'errored' emits.
       if (resubscribeTimer === null) {
-        resubscribeTimer = window.setTimeout(attemptResubscribe, RESUBSCRIBE_AFTER_MS);
+        resubscribeTimer = window.setTimeout(() => void attemptResubscribe(), RESUBSCRIBE_AFTER_MS);
       }
     } else if (next === 'healthy') {
       // A successful join cancels any pending rebuild and resets the backoff.
@@ -415,12 +420,27 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
     // A stale flag from a silent teardown must not mask a later real outage.
     suppressClosedOnce = false;
     reportHealth('connecting');
+    // Suffix the phoenix topic with a per-lifecycle generation counter so
+    // supabase.channel() can NEVER return a previous instance. realtime-js's
+    // RealtimeClient.channel(topic) DEDUPES BY TOPIC: while a channel with the same
+    // topic is still registered -- e.g. mid phx_leave, because removeChannel only
+    // unregisters after the leave ack resolves -- channel(topic) returns THAT
+    // leaving corpse instead of minting a fresh one. .on() would then bind onto the
+    // corpse, .subscribe() would no-op (the channel is not closed yet), and the
+    // pending removal would wipe the bindings, leaving a silently dead channel. A
+    // monotonic suffix makes every build a distinct topic, so a teardown still in
+    // flight can never be re-acquired -- this also neutralizes the React dev
+    // StrictMode double-mount, whose un-awaited cleanup leave would otherwise be
+    // re-acquired by the immediate second mount. The suffix is client-namespace
+    // only; the postgres_changes bindings below carry the real server-side filters,
+    // so it does not change which rows the channel receives.
+    const suffixedTopic = `${topic}#g${(generation += 1)}`;
     // Capture the instance being built so the async subscribe callback can tell
     // whether it still owns the current channel. A fast hidden->visible flip
     // rebuilds the channel; the OLD channel's delayed teardown-CLOSED can still be
     // in flight after the rebuild reset suppressClosedOnce, and would otherwise be
     // misread as a genuine 'errored' against the NEW channel's health.
-    const thisChannel = supabase.channel(topic);
+    const thisChannel = supabase.channel(suffixedTopic);
     for (const binding of bindings) {
       thisChannel.on<Row>(
         'postgres_changes',
@@ -473,25 +493,41 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
     await supabase.removeChannel(c);
   };
 
+  // A resubscribe must not fire once the subscription is torn down ('unsubscribed'),
+  // while the tab is hidden ('paused'), or after the channel recovered ('healthy').
+  // Read as a nested predicate so both call sites re-evaluate the live values fresh
+  // -- a read inside this function is not subject to the caller's control-flow
+  // narrowing, so the after-await re-check sees a concurrent hide/recovery.
+  const shouldStopResubscribe = (): boolean =>
+    unsubscribed || currentHealth === 'healthy' || currentHealth === 'paused';
+
   // R2b: tear the dead channel down and rebuild, then arm the next attempt with
   // capped exponential backoff. Fired by the resubscribe timer (see reportHealth).
-  const attemptResubscribe = (): void => {
+  const attemptResubscribe = async (): Promise<void> => {
     resubscribeTimer = null;
-    if (unsubscribed) return;
-    // A recovery ('healthy') or a hidden tab ('paused') already cleared the
-    // timer; guard defensively against a fire that raced past that.
-    if (currentHealth === 'healthy' || currentHealth === 'paused') return;
+    // A recovery, a hidden tab, or a teardown already cleared the timer; guard
+    // defensively against a fire that raced past that.
+    if (shouldStopResubscribe()) return;
 
-    // teardown() nulls `channel` synchronously (before its await) so the rebuild
-    // sees a clean slot; the identity guard makes the torn-down channel's late
-    // status callbacks inert, so we deliberately do NOT arm suppressClosedOnce
-    // here (that is reserved for the visibility teardown, which stays 'paused').
-    void teardown();
+    // AWAIT the teardown before rebuilding. removeChannel only unregisters the
+    // channel after its phx_leave ack resolves, so building before that returns
+    // would race the leave. The generation-suffixed topic already makes
+    // re-acquiring the leaving instance impossible; awaiting keeps the leave->build
+    // ordering clean and gives us the re-check point below. We deliberately do NOT
+    // arm suppressClosedOnce here (that is reserved for the visibility teardown,
+    // which stays 'paused'); the identity guard makes the torn-down channel's late
+    // status callbacks inert.
+    await teardown();
+    // cleanup() (unsubscribed) or a visibility hide ('paused') may have run while we
+    // awaited the leave; a late recovery could have flipped us back to 'healthy'. In
+    // any of those cases we must NOT rebuild -- resurrecting a channel after
+    // unsubscribe, while hidden, or after a recovery would all be wrong.
+    if (shouldStopResubscribe()) return;
     channel = buildChannel();
 
     // Arm the next attempt in case this rebuild also fails to reach SUBSCRIBED.
     // A successful SUBSCRIBED resets backoffMs and clears this timer.
-    resubscribeTimer = window.setTimeout(attemptResubscribe, backoffMs);
+    resubscribeTimer = window.setTimeout(() => void attemptResubscribe(), backoffMs);
     backoffMs = Math.min(backoffMs * 2, RESUBSCRIBE_BACKOFF_MAX_MS);
   };
 

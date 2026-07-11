@@ -11,55 +11,145 @@ import {
   type SyncLogRealtimeEvent,
 } from '@/lib/supabase/realtime';
 
-// Minimal chainable channel stub: `.on()` returns the channel AND captures the
-// postgres_changes handler (so a test can deliver a payload), `.subscribe(cb)`
-// captures the status callback so the test can drive lifecycle transitions, and
-// `removeChannel` records the teardown. Each `createClient().channel()` call
-// mints a DISTINCT channel object so the identity guard (which compares the
-// live channel against the one a late callback closed over) is exercisable — a
-// rebuild after a teardown yields a new instance, mirroring supabase-js.
-const { createChannelMock, removeChannelMock, subscribeCallbacks, channelBindings } = vi.hoisted(
-  () => {
-    const captured: Array<(status: string) => void> = [];
-    // Per-channel list of postgres_changes handlers, in binding order.
-    const bindings: Array<Array<(payload: unknown) => void>> = [];
-    const createChannel = (): {
-      on: ReturnType<typeof vi.fn>;
-      subscribe: ReturnType<typeof vi.fn>;
-    } => {
-      const myBindings: Array<(payload: unknown) => void> = [];
-      bindings.push(myBindings);
-      const channel = {
-        on: vi.fn(),
-        subscribe: vi.fn(),
-      };
-      channel.on.mockImplementation(
-        (_event: string, _config: unknown, handler: (payload: unknown) => void) => {
-          myBindings.push(handler);
-          return channel;
-        },
-      );
-      channel.subscribe.mockImplementation((cb: (status: string) => void) => {
+// Channel stub harness that SIMULATES realtime-js's topic dedup so the corpse-
+// rebuild bug is observable in a unit test. Faithful to two real behaviors:
+//
+//   1. `client.channel(topic)` DEDUPES BY TOPIC — while a channel with a given
+//      topic is still registered (its removeChannel leave has not resolved yet),
+//      the same instance is returned rather than a fresh one. Only a not-yet-seen
+//      (or already-removed) topic mints a new stub. A reused stub's `.subscribe()`
+//      is a no-op (it captures NO new status callback), mirroring realtime-js
+//      short-circuiting a re-subscribe on a channel that is already joining/leaving.
+//   2. `removeChannel(channel)` unregisters the topic ONLY when its promise
+//      resolves. In default mode that promise is resolved immediately; in deferred
+//      mode (setDeferRemovals(true)) it stays pending until flushRemovals() runs,
+//      modeling the mid-phx_leave window where the corpse is still registered.
+//
+// The production code suffixes every build's topic with a monotonic generation
+// counter, so under the fix each build asks for a distinct topic and always gets a
+// fresh stub. If that suffix regressed, a rebuild during an in-flight leave would
+// re-request the same topic, the dedup would hand back the corpse, and `.subscribe`
+// would capture nothing — which the regression tests below assert against.
+interface ChannelStub {
+  topic: string;
+  removed: boolean;
+  subscribed: boolean;
+  on: ReturnType<typeof vi.fn>;
+  subscribe: ReturnType<typeof vi.fn>;
+}
+
+const {
+  createClientChannel,
+  removeChannelMock,
+  subscribeCallbacks,
+  channelBindings,
+  setDeferRemovals,
+  flushRemovals,
+  resetHarness,
+} = vi.hoisted(() => {
+  const captured: Array<(status: string) => void> = [];
+  // Per-channel list of postgres_changes handlers, in binding order.
+  const bindings: Array<Array<(payload: unknown) => void>> = [];
+  // Live topic -> stub registry; dedup reads it, removal deletes from it.
+  const registry = new Map<string, ChannelStub>();
+  // Pending removal finalizers, drained by flushRemovals() when in deferred mode.
+  let pendingRemovals: Array<() => void> = [];
+  let deferRemovals = false;
+
+  const mintStub = (topic: string): ChannelStub => {
+    const myBindings: Array<(payload: unknown) => void> = [];
+    bindings.push(myBindings);
+    const stub: ChannelStub = {
+      topic,
+      removed: false,
+      subscribed: false,
+      on: vi.fn(),
+      subscribe: vi.fn(),
+    };
+    stub.on.mockImplementation(
+      (_event: string, _config: unknown, handler: (payload: unknown) => void) => {
+        myBindings.push(handler);
+        return stub;
+      },
+    );
+    stub.subscribe.mockImplementation((cb: (status: string) => void) => {
+      // A reused (deduped) corpse is already subscribed — re-subscribe is a no-op,
+      // so it captures NO new status callback. Only a fresh stub's first subscribe
+      // registers a callback the test can drive.
+      if (!stub.subscribed) {
+        stub.subscribed = true;
         captured.push(cb);
-        return channel;
+      }
+      return stub;
+    });
+    return stub;
+  };
+
+  const channelFor = (topic: string): ChannelStub => {
+    const existing = registry.get(topic);
+    if (existing !== undefined && !existing.removed) return existing;
+    const stub = mintStub(topic);
+    registry.set(topic, stub);
+    return stub;
+  };
+
+  const finalizeRemoval = (stub: ChannelStub): void => {
+    stub.removed = true;
+    if (registry.get(stub.topic) === stub) registry.delete(stub.topic);
+  };
+
+  const removeChannel = vi.fn((stub: ChannelStub): Promise<void> => {
+    if (deferRemovals) {
+      return new Promise<void>((resolve) => {
+        pendingRemovals.push(() => {
+          finalizeRemoval(stub);
+          resolve();
+        });
       });
-      return channel;
-    };
-    return {
-      createChannelMock: createChannel,
-      removeChannelMock: vi.fn(),
-      subscribeCallbacks: captured,
-      channelBindings: bindings,
-    };
-  },
-);
+    }
+    finalizeRemoval(stub);
+    return Promise.resolve();
+  });
+
+  return {
+    createClientChannel: channelFor,
+    removeChannelMock: removeChannel,
+    subscribeCallbacks: captured,
+    channelBindings: bindings,
+    setDeferRemovals: (value: boolean): void => {
+      deferRemovals = value;
+    },
+    flushRemovals: (): void => {
+      const drained = pendingRemovals;
+      pendingRemovals = [];
+      for (const finalize of drained) finalize();
+    },
+    resetHarness: (): void => {
+      captured.length = 0;
+      bindings.length = 0;
+      registry.clear();
+      pendingRemovals = [];
+      deferRemovals = false;
+      removeChannel.mockClear();
+    },
+  };
+});
 
 vi.mock('@/lib/supabase/client', () => ({
   createClient: () => ({
-    channel: () => createChannelMock(),
+    channel: (topic: string) => createClientChannel(topic),
     removeChannel: removeChannelMock,
   }),
 }));
+
+// Drain the microtask queue so an awaited teardown->rebuild in attemptResubscribe
+// runs to completion. Fake timers do not fake promises, so a handful of awaits is
+// enough to walk the removeChannel-promise -> teardown -> attemptResubscribe chain.
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await Promise.resolve();
+  }
+}
 
 function setVisibility(state: 'visible' | 'hidden'): void {
   Object.defineProperty(document, 'visibilityState', {
@@ -69,9 +159,7 @@ function setVisibility(state: 'visible' | 'hidden'): void {
 }
 
 beforeEach(() => {
-  subscribeCallbacks.length = 0;
-  channelBindings.length = 0;
-  removeChannelMock.mockClear();
+  resetHarness();
   setVisibility('visible');
 });
 
@@ -205,7 +293,7 @@ describe('subscribeToLivePerformance lifecycle', () => {
 });
 
 describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
-  it('rebuilds the channel after RESUBSCRIBE_AFTER_MS of continuous errored', () => {
+  it('rebuilds the channel after RESUBSCRIBE_AFTER_MS of continuous errored', async () => {
     vi.useFakeTimers();
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToLivePerformance('store-resub-1', {
@@ -219,25 +307,26 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
     expect(healthLog.at(-1)).toBe('errored');
 
     // One tick short of the threshold: no teardown, no rebuild.
-    vi.advanceTimersByTime(RESUBSCRIBE_AFTER_MS - 1_000);
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_AFTER_MS - 1_000);
     expect(removeChannelMock).not.toHaveBeenCalled();
     expect(subscribeCallbacks).toHaveLength(1);
 
-    // At the threshold: the dead channel is torn down and a fresh one built.
-    vi.advanceTimersByTime(1_000);
+    // At the threshold: the dead channel is torn down and, once the awaited leave
+    // resolves, a fresh one is built (advanceTimersByTimeAsync flushes the awaits).
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(removeChannelMock).toHaveBeenCalledTimes(1);
     expect(subscribeCallbacks).toHaveLength(2);
 
     unsubscribe();
   });
 
-  it('doubles the backoff between failed rebuilds and caps at RESUBSCRIBE_BACKOFF_MAX_MS', () => {
+  it('doubles the backoff between failed rebuilds and caps at RESUBSCRIBE_BACKOFF_MAX_MS', async () => {
     vi.useFakeTimers();
     const unsubscribe = subscribeToLivePerformance('store-resub-2', { onEvent: () => {} });
 
     // Initial drop, then the first rebuild after the fixed 15s threshold.
     subscribeCallbacks[0]?.('CHANNEL_ERROR');
-    vi.advanceTimersByTime(RESUBSCRIBE_AFTER_MS);
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_AFTER_MS);
     expect(subscribeCallbacks).toHaveLength(2); // channel #2
 
     // Sanity-check the schedule the implementation is expected to walk: the
@@ -252,10 +341,10 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
       // The freshly built channel also fails to reach SUBSCRIBED.
       subscribeCallbacks[channelCount - 1]?.('CHANNEL_ERROR');
       // One tick short of the current backoff: no rebuild yet.
-      vi.advanceTimersByTime(backoff - 1_000);
+      await vi.advanceTimersByTimeAsync(backoff - 1_000);
       expect(subscribeCallbacks).toHaveLength(channelCount);
       // Crossing the backoff boundary rebuilds.
-      vi.advanceTimersByTime(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       channelCount += 1;
       removeCount += 1;
       expect(subscribeCallbacks).toHaveLength(channelCount);
@@ -265,38 +354,38 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
     unsubscribe();
   });
 
-  it('resets the backoff on SUBSCRIBED so a later outage restarts at the initial delay', () => {
+  it('resets the backoff on SUBSCRIBED so a later outage restarts at the initial delay', async () => {
     vi.useFakeTimers();
     const unsubscribe = subscribeToLivePerformance('store-resub-3', { onEvent: () => {} });
 
     // Walk the backoff up a few steps: 15s -> #2, +5s -> #3, +10s -> #4.
     subscribeCallbacks[0]?.('CHANNEL_ERROR');
-    vi.advanceTimersByTime(RESUBSCRIBE_AFTER_MS);
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_AFTER_MS);
     subscribeCallbacks[1]?.('CHANNEL_ERROR');
-    vi.advanceTimersByTime(RESUBSCRIBE_BACKOFF_INITIAL_MS);
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_BACKOFF_INITIAL_MS);
     subscribeCallbacks[2]?.('CHANNEL_ERROR');
-    vi.advanceTimersByTime(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(subscribeCallbacks).toHaveLength(4); // channel #4, backoff now elevated (20s)
 
     // Channel #4 reaches SUBSCRIBED -> the loop is cancelled and the backoff reset.
     subscribeCallbacks[3]?.('SUBSCRIBED');
-    vi.advanceTimersByTime(120_000);
+    await vi.advanceTimersByTimeAsync(120_000);
     expect(subscribeCallbacks).toHaveLength(4); // no further rebuilds while healthy
 
     // A brand-new outage restarts at the fixed threshold, then the INITIAL
     // backoff (not the elevated 20s) — proving the reset. Advancing only the
     // initial backoff is enough to trigger the next rebuild.
     subscribeCallbacks[3]?.('CHANNEL_ERROR');
-    vi.advanceTimersByTime(RESUBSCRIBE_AFTER_MS);
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_AFTER_MS);
     expect(subscribeCallbacks).toHaveLength(5); // channel #5
     subscribeCallbacks[4]?.('CHANNEL_ERROR');
-    vi.advanceTimersByTime(RESUBSCRIBE_BACKOFF_INITIAL_MS);
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_BACKOFF_INITIAL_MS);
     expect(subscribeCallbacks).toHaveLength(6); // channel #6 at the reset (initial) backoff
 
     unsubscribe();
   });
 
-  it('cancels a pending resubscribe when the tab hides and never rebuilds while paused', () => {
+  it('cancels a pending resubscribe when the tab hides and never rebuilds while paused', async () => {
     vi.useFakeTimers();
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToLivePerformance('store-resub-paused', {
@@ -315,7 +404,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
     expect(removeChannelMock).toHaveBeenCalledTimes(1);
 
     // Far past the threshold and every backoff step: NO rebuild while hidden.
-    vi.advanceTimersByTime(300_000);
+    await vi.advanceTimersByTimeAsync(300_000);
     expect(subscribeCallbacks).toHaveLength(1);
     expect(removeChannelMock).toHaveBeenCalledTimes(1);
     expect(healthLog).not.toContain('healthy');
@@ -323,7 +412,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
     unsubscribe();
   });
 
-  it('neutralizes a queued resubscribe after cleanup: no rebuild fires post-unsubscribe', () => {
+  it('neutralizes a queued resubscribe after cleanup: no rebuild fires post-unsubscribe', async () => {
     vi.useFakeTimers();
     const unsubscribe = subscribeToLivePerformance('store-cleanup-race', { onEvent: () => {} });
 
@@ -335,12 +424,12 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
 
     // Even far past every threshold, the queued countdown must NOT rebuild: the
     // timer was cleared by cleanup and attemptResubscribe also bails on `unsubscribed`.
-    vi.advanceTimersByTime(300_000);
+    await vi.advanceTimersByTimeAsync(300_000);
     expect(subscribeCallbacks).toHaveLength(1);
     expect(removeChannelMock).toHaveBeenCalledTimes(1);
   });
 
-  it('treats a delivered event as liveness: a real event cancels the errored countdown (no teardown)', () => {
+  it('treats a delivered event as liveness: a real event cancels the errored countdown (no teardown)', async () => {
     vi.useFakeTimers();
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToLivePerformance('store-liveness', {
@@ -354,7 +443,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
 
     // A real event is delivered mid-countdown (t=10s). Delivery IS liveness, so
     // health recovers to 'healthy' and the pending countdown is cleared.
-    vi.advanceTimersByTime(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     const handler = channelBindings[0]?.[0];
     expect(handler).toBeDefined();
     handler?.({ eventType: 'INSERT', new: { id: 'ord-1', order_date: '2026-07-11' }, old: {} });
@@ -362,9 +451,85 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
 
     // Past the original 15s threshold: NO teardown, NO rebuild -- the recovered
     // channel is left in place.
-    vi.advanceTimersByTime(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(removeChannelMock).not.toHaveBeenCalled();
     expect(subscribeCallbacks).toHaveLength(1);
+
+    unsubscribe();
+  });
+
+  it('resubscribe yields a genuinely NEW subscribed channel even with a deferred leave (corpse-dedup regression)', async () => {
+    // REGRESSION for the corpse-rebuild bug: with removeChannel deferred (modeling
+    // the mid-phx_leave window where the old topic is still registered), the rebuild
+    // must end up on a fresh channel — a new subscribe callback that drives to
+    // 'healthy'. On the pre-fix code the rebuild re-requested the same topic, the
+    // dedup handed back the still-registered corpse, .subscribe() no-op'd, and NO
+    // new callback was captured (this assertion would fail).
+    vi.useFakeTimers();
+    setDeferRemovals(true);
+    const healthLog: RealtimeHealth[] = [];
+    const unsubscribe = subscribeToLivePerformance('store-corpse-resub', {
+      onEvent: () => {},
+      onHealthChange: (h) => healthLog.push(h),
+    });
+
+    // Channel #1 joins, then drops -> the errored countdown is armed.
+    subscribeCallbacks[0]?.('SUBSCRIBED');
+    expect(healthLog.at(-1)).toBe('healthy');
+    subscribeCallbacks[0]?.('CHANNEL_ERROR');
+    expect(healthLog.at(-1)).toBe('errored');
+
+    // Countdown fires -> attemptResubscribe awaits teardown, whose removeChannel is
+    // deferred (pending). Because the rebuild AWAITS the leave, no new channel yet.
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_AFTER_MS);
+    expect(removeChannelMock).toHaveBeenCalledTimes(1);
+    expect(subscribeCallbacks).toHaveLength(1);
+
+    // Resolve the deferred leave; the awaited teardown completes and the rebuild
+    // runs on a distinct (generation-suffixed) topic -> a genuinely fresh channel.
+    flushRemovals();
+    await flushMicrotasks();
+    expect(subscribeCallbacks).toHaveLength(2);
+
+    // The new channel is real: driving it to SUBSCRIBED reads healthy.
+    subscribeCallbacks[1]?.('SUBSCRIBED');
+    expect(healthLog.at(-1)).toBe('healthy');
+
+    unsubscribe();
+  });
+
+  it('visibility fast-flip mints a fresh working channel before the leave resolves (corpse-dedup regression)', () => {
+    // REGRESSION for the visibility hide->fast-visible race: the hide starts an
+    // (un-awaited) teardown whose deferred removeChannel leaves the old topic
+    // registered; the immediate visible rebuilds synchronously. The build must NOT
+    // re-acquire the corpse — the generation-suffixed topic guarantees a fresh
+    // channel. Pre-fix, the same topic would be re-requested and the dedup would
+    // hand back the still-registered leaving channel, capturing NO new callback.
+    setDeferRemovals(true);
+    const healthLog: RealtimeHealth[] = [];
+    const unsubscribe = subscribeToLivePerformance('store-corpse-flip', {
+      onEvent: () => {},
+      onHealthChange: (h) => healthLog.push(h),
+    });
+
+    subscribeCallbacks[0]?.('SUBSCRIBED');
+    expect(healthLog.at(-1)).toBe('healthy');
+
+    // Hide: teardown starts, removeChannel deferred (pending), channel nulled.
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(healthLog.at(-1)).toBe('paused');
+    expect(removeChannelMock).toHaveBeenCalledTimes(1);
+
+    // Immediate visible BEFORE the leave resolves -> synchronous rebuild on a fresh
+    // topic. A new subscribe callback (#2) is captured; the corpse (#1) is not reused.
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(subscribeCallbacks).toHaveLength(2);
+
+    // The fresh channel reaches SUBSCRIBED and reads healthy.
+    subscribeCallbacks[1]?.('SUBSCRIBED');
+    expect(healthLog.at(-1)).toBe('healthy');
 
     unsubscribe();
   });
