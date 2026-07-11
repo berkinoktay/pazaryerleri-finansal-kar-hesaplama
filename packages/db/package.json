@@ -13,7 +13,7 @@
   },
   "scripts": {
     "generate": "prisma generate",
-    "migrate:dev": "prisma migrate dev",
+    "migrate:dev": "prisma migrate dev && pnpm apply-policies",
     "push": "prisma db push && pnpm apply-policies",
     "deploy": "prisma migrate deploy && pnpm apply-policies",
     "apply-policies": "tsx --env-file-if-exists=../../.env scripts/apply-policies.ts",
