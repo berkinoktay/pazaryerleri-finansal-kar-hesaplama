@@ -93,6 +93,13 @@ export function OrgSyncsProvider({
           applyEvent(existing ?? [], event),
         );
       },
+      // R2c delivery watchdog: we expect a steady event stream only while an
+      // active sync is in flight. Read live from the cache (not a captured
+      // snapshot) so the watchdog reflects the current rows on every check.
+      expectDelivery: () => {
+        const rows = queryClient.getQueryData<SyncLog[]>(queryKey);
+        return (rows ?? []).some((row) => isActive(row.status));
+      },
       onHealthChange: (next) => {
         const prev = prevHealthRef.current;
         prevHealthRef.current = next;
