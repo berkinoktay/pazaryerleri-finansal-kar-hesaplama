@@ -27,6 +27,7 @@ import {
   type NotificationSummaryLike,
 } from '../lib/new-order-notification-core';
 import { playNotificationDing, resumeNotificationAudio } from '../lib/play-notification-sound';
+import { clearTabBadge, setTabBadgeCount } from '../lib/tab-badge';
 import { LIVE_POLL_INTERVAL_MS, LIVE_QUERY_STALE_MS, liveKeys } from '../query-keys';
 
 const COALESCE_WINDOW_MS = 1_200;
@@ -166,6 +167,10 @@ export function NewOrderNotifierProvider({
     // Latches that the tab went hidden at least once, so the FIRST foreground mount
     // (never hidden) does not run catch-up — there is nothing to catch up on.
     let wasHidden = false;
+    // Running count of notifications the seller has not yet seen because the tab was
+    // hidden when they fired. Drives the "(N) " tab-title badge and resets to 0 on
+    // return (visible again).
+    let badgeCount = 0;
 
     const invalidateAll = (): void => {
       void queryClient.invalidateQueries({ queryKey: liveKeys.all });
@@ -271,6 +276,21 @@ export function NewOrderNotifierProvider({
         playNotificationDing();
         lastDingAt = now;
       }
+
+      // Tab-title unread badge. Keep-alive (#453) keeps events flowing while the tab
+      // is hidden, so a toast/ding can fire that the seller never sees. When that
+      // happens, count it into the "(N) " title prefix — the only surface visible in
+      // the tab strip while away. The tab-return catch-up windows run while VISIBLE
+      // (handleCatchupVisibility resets the count before runCatchup), so they
+      // naturally never bump the badge.
+      if (
+        plan.kind !== 'none' &&
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'hidden'
+      ) {
+        badgeCount += plan.kind === 'single' ? 1 : plan.count;
+        setTabBadgeCount(badgeCount);
+      }
     };
 
     // Tab-return catch-up: pull the live list fresh and diff it against knownIds to
@@ -346,6 +366,10 @@ export function NewOrderNotifierProvider({
       }
       if (!wasHidden) return;
       wasHidden = false;
+      // The seller is looking again: clear the away-count badge before the catch-up
+      // window runs, so any catch-up toast is seen live rather than re-counted.
+      badgeCount = 0;
+      clearTabBadge();
       void runCatchup();
     };
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
@@ -385,6 +409,8 @@ export function NewOrderNotifierProvider({
       }
       if (coalesceTimer !== null) clearTimeout(coalesceTimer);
       if (invalidateTimer !== null) clearTimeout(invalidateTimer);
+      // Store switch / unmount must not leave a stale "(N) " badge on the title.
+      clearTabBadge();
       unsubscribe();
     };
   }, [orgId, storeId, queryClient]);
