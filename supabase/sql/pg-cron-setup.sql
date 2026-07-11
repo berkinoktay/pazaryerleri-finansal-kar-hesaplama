@@ -61,10 +61,12 @@ SELECT cron.schedule(
 -- default (Prisma fills them app-side), so they are set explicitly here —
 -- gen_random_uuid() + now(). sync_logs has no created_at/updated_at columns.
 --
--- NOTE: each enqueued sync currently runs forward-only from the cutoff
--- (computeOrdersCutoffMs — store.createdAt by default). The intended per-tick
--- delta window (start from now − SYNC_SAFETY_NET_HOURS) is a follow-up handler
--- optimization; until then an hourly tick re-scans [cutoff, now] idempotently.
+-- NOTE: each enqueued sync walks a per-tick delta window (PR #433). The worker
+-- derives the cutoff from the completion time of the last COMPLETED ORDERS sync
+-- via computeDeltaCutoffMs (widening automatically after an outage of any
+-- length), clamped so it never precedes store.createdAt; the first sync for a
+-- store still runs forward-only from that floor, and each hourly tick re-scans
+-- its window idempotently.
 --
 SELECT cron.schedule(
   'sync-orders-delta',

@@ -72,13 +72,13 @@ When adding a NEW dependency: install whatever `latest` resolves to (no `@x.y.z`
 │   ├── db/               # Prisma 7 schema, client (→ generated/prisma), migrations, domain enums
 │   ├── utils/            # Shared utilities (currency, date, business-timezone, cursor, permissions, validation)
 │   ├── api-client/       # Generated typed API contracts (OpenAPI → openapi-fetch); cross-app types live here
-│   ├── marketplace/      # Marketplace adapters (Trendyol, Hepsiburada) + MarketplaceAdapter interface + registry
+│   ├── marketplace/      # Marketplace adapters (Trendyol; Hepsiburada planned) + MarketplaceAdapter interface + registry
 │   ├── sync-core/        # Sync primitives: job claim, checkpoint, crypto wrappers, logger, sync-log service
 │   ├── crypto-core/      # Dependency-free AES-256-GCM envelope (shared by sync-core + db seed)
 │   ├── order-sync/       # Idempotent order upsert (marketplace payload → domain Order)
 │   └── profit/           # Profit engine: formula, on-create estimates, settlement reconcile, fee resolution
 ├── supabase/
-│   ├── functions/        # Edge Functions (marketplace sync: sync-trendyol, sync-hepsiburada, fx-rates-sync)
+│   ├── functions/        # Edge Functions: fx-rates-sync only (marketplace sync lives in apps/sync-worker)
 │   └── sql/              # RLS policies, pg_cron setup, DB functions
 ├── docs/                 # Local-only knowledge base (gitignored)
 │   ├── SECURITY.md       # CRITICAL: Tenant isolation, encryption, auth rules
@@ -183,11 +183,11 @@ Store-scoped endpoints follow: `/api/v1/organizations/:orgId/stores/:storeId/...
 ### Data Flow
 
 ```
-Marketplace API → sync-worker / Edge Functions (pg_cron-scheduled) → PostgreSQL
+Marketplace API → webhook (apps/api) + sync-worker (pg_cron-enqueued jobs) → PostgreSQL
 PostgreSQL → Hono API (Prisma) → Next.js Frontend (React Query)
 ```
 
-Sync is queue-driven: a `SyncLog` row is enqueued (PENDING), and `apps/sync-worker` (a long-running process) polls, claims, and drives each job through chunks with a watchdog reclaiming stale claims. Edge Functions under `supabase/functions/` cover scheduled/lightweight sync paths (Trendyol, Hepsiburada, fx-rates).
+Sync is queue-driven: a `SyncLog` row is enqueued (PENDING), and `apps/sync-worker` (a long-running process) polls, claims, and drives each job through chunks with a watchdog reclaiming stale claims. Edge Functions under `supabase/functions/` cover only the fx-rates-sync path; marketplace order/product/settlement sync (Trendyol) is owned entirely by `apps/sync-worker`.
 
 ## Coding Standards (Shared)
 
@@ -559,7 +559,7 @@ If you genuinely need a cross-feature edge (e.g. a `dashboard` feature that aggr
 - `@pazarsync/db` — Prisma 7 client (generated to `../generated/prisma`), driver adapter (`@prisma/adapter-pg`), migration scripts, domain enums (`@pazarsync/db/enums`)
 - `@pazarsync/utils` — Currency formatting (TRY), date + business-timezone helpers, cursor, permissions, Zod schemas shared between frontend and backend
 - `@pazarsync/api-client` — Generated typed API contracts (backend OpenAPI → `openapi-fetch`); the home for cross-app request/response types
-- `@pazarsync/marketplace` — Marketplace adapters (Trendyol, Hepsiburada), the `MarketplaceAdapter` interface, and the platform registry. Consumed by both `apps/api` and `apps/sync-worker`
+- `@pazarsync/marketplace` — Marketplace adapters: Trendyol adapter (Hepsiburada planned; the registry rejects it today), the `MarketplaceAdapter` interface, and the platform registry. Consumed by both `apps/api` and `apps/sync-worker`
 - `@pazarsync/crypto-core` — Dependency-free AES-256-GCM envelope (`encrypt`/`decrypt`) shared by `@pazarsync/sync-core` and the db seed — single source of truth for the credential wire format, importable by any package without a workspace cycle
 - `@pazarsync/sync-core` — Sync engine primitives: job claim, checkpoint, credential-crypto wrappers (envelope in `@pazarsync/crypto-core`), logger, `sync-log` service, `mapPrismaError`
 - `@pazarsync/order-sync` — Idempotent order upsert (marketplace payload → domain `Order`)
