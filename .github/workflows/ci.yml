@@ -299,6 +299,9 @@ jobs:
           SYNC_HISTORICAL_BACKFILL_DAYS: 0
           ALLOW_HISTORICAL_BACKFILL: 'false'
           SYNC_SAFETY_NET_HOURS: 8
+          # In-process worker-pool size (default 4). Documents the prod default;
+          # the integration suite does not drive the poll loop.
+          SYNC_WORKER_CONCURRENCY: 4
           # Webhook-events retention cleanup baseline (default 90). Tests override
           # per-case via process.env; this documents the prod default.
           WEBHOOK_EVENT_RETENTION_DAYS: 90

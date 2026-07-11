@@ -12,10 +12,14 @@
 //   2. Start a watchdog timer that sweeps stale RUNNING claims back to
 //      PENDING every WATCHDOG_INTERVAL_MS so a crashed peer's work is
 //      reclaimable.
-//   3. Poll-and-claim loop with exponential backoff when no row is
-//      claimable. On a successful claim, hand off to runSyncToCompletion;
-//      on a thrown error, classify it (permanent → FAIL, transient →
-//      markRetryable with exponential backoff up to MAX_ATTEMPTS).
+//   3. Poll-and-claim loop feeding a bounded in-process worker pool
+//      (SYNC_WORKER_CONCURRENCY, default 4). The loop keeps claiming while
+//      the active set has room; a claimed job runs runSyncToCompletion +
+//      handleRunError as an independent task. When the pool is full it
+//      awaits the first task to finish (Promise.race); when nothing is
+//      claimable it backs off exponentially. On a thrown error each task
+//      classifies it (permanent → FAIL, transient → markRetryable with
+//      exponential backoff up to MAX_ATTEMPTS) independently.
 //
 // Error classification rationale:
 //   - MARKETPLACE_AUTH_FAILED / MARKETPLACE_ACCESS_DENIED → user must
@@ -31,6 +35,7 @@
 import { randomBytes } from 'node:crypto';
 
 import { prisma } from '@pazarsync/db';
+import type { SyncLog } from '@pazarsync/db';
 import { LostLeaseError, syncLog, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
@@ -40,7 +45,7 @@ import { processWebhookEventCleanup } from './handlers/webhook-event-cleanup';
 import { processWebhookReconcile } from './handlers/webhook-reconcile';
 import { dbConnectivity } from './lib/db-connectivity';
 import { assertCriticalDdl, MissingCriticalDdlError } from './lib/ddl-assertions';
-import { validateRequiredEnv } from './lib/env';
+import { readWorkerConcurrency, validateRequiredEnv } from './lib/env';
 import { runSyncToCompletion } from './loop';
 import { REGISTRY } from './registry';
 import { errorMessageOf, handleRunError } from './run-error';
@@ -83,6 +88,75 @@ function isShuttingDown(): boolean {
   return shuttingDown;
 }
 
+/**
+ * Drive one claimed sync job to completion and route any error, exactly as
+ * the old single-job loop body did — extracted so the bounded pool can run
+ * several of these concurrently as independent tasks.
+ *
+ * Contract: this NEVER rejects. Each error class is handled in place so a
+ * task settling can only ever resolve — the pool tracks tasks in a Set and
+ * races them, so a rejected task would surface as an unhandled rejection and
+ * break slot accounting. LostLeaseError (the row was reaped/re-claimed by a
+ * peer) is absorbed with a single warn and NO sync-log write, identical to
+ * the pre-pool semantics.
+ */
+async function runClaimedJob(claimed: SyncLog): Promise<void> {
+  try {
+    syncLog.info('worker.run.start', {
+      workerId: WORKER_ID,
+      syncLogId: claimed.id,
+      syncType: claimed.syncType,
+    });
+    const runStartedAt = Date.now();
+    await runSyncToCompletion(claimed, REGISTRY, isShuttingDown, WORKER_ID);
+    syncLog.info('worker.run.complete', {
+      workerId: WORKER_ID,
+      syncLogId: claimed.id,
+      durationMs: Date.now() - runStartedAt,
+    });
+  } catch (err) {
+    // Lease lost: a fenced write matched zero rows because the watchdog
+    // reaper (or a peer that re-claimed after a stale sweep) now owns this
+    // row. Check FIRST — the row belongs to another worker, so we must NOT
+    // write any sync-log state (no markRetryable, no fail); doing so would
+    // clobber the new owner's progress.
+    if (err instanceof LostLeaseError) {
+      syncLog.warn('sync.lease-lost', { workerId: err.workerId, syncLogId: err.syncLogId });
+      return;
+    }
+    syncLog.error('worker.run.error', {
+      workerId: WORKER_ID,
+      syncLogId: claimed.id,
+      errorCode: errorCodeOf(err),
+      errorMessage: errorMessageOf(err),
+    });
+    try {
+      await handleRunError(claimed.id, claimed.syncType, claimed.attemptCount, err, WORKER_ID);
+    } catch (handleErr) {
+      // handleRunError issues fenced writes (fail / markRetryable). If the
+      // watchdog reaper (or a peer) took the row over WHILE we were handling
+      // the original error, the fence throws LostLeaseError — the same
+      // lease-lost outcome as the pre-check above. Absorb it here (one warn).
+      if (handleErr instanceof LostLeaseError) {
+        syncLog.warn('sync.lease-lost', {
+          workerId: handleErr.workerId,
+          syncLogId: handleErr.syncLogId,
+        });
+        return;
+      }
+      // A non-lease failure from the error handler is systemic (a DB write
+      // failed while failing/retrying the row). In the single-job loop this
+      // escaped to the outer catch. Here the task must not reject, so route it
+      // to the same connectivity-aware event; if the DB is genuinely
+      // unreachable the claim loop's own outer catch throttles polling.
+      dbConnectivity.logBackgroundError('worker.run.handle-error', handleErr, {
+        workerId: WORKER_ID,
+        syncLogId: claimed.id,
+      });
+    }
+  }
+}
+
 async function main(): Promise<void> {
   syncLog.info('worker.starting', { workerId: WORKER_ID });
 
@@ -90,8 +164,10 @@ async function main(): Promise<void> {
   // .env) with one clear message, instead of a Prisma/crypto error deep
   // inside the first sync. Exit non-zero so a supervisor restarts after the
   // operator fixes the config.
+  let concurrency: number;
   try {
     validateRequiredEnv();
+    concurrency = readWorkerConcurrency();
   } catch (err) {
     syncLog.error('worker.config-invalid', {
       workerId: WORKER_ID,
@@ -213,11 +289,41 @@ async function main(): Promise<void> {
     });
   }, VARIANT_RESOLUTION_INTERVAL_MS);
 
+  syncLog.info('worker.pool.starting', { workerId: WORKER_ID, concurrency });
+
   let backoff = POLL_BACKOFF_INITIAL_MS;
   let lastIdleLogAt = 0;
 
+  // The bounded worker pool: every in-flight job's task is tracked here so the
+  // claim loop can (a) stop claiming once the set is full and (b) await all of
+  // them at graceful shutdown. Each task self-removes on settle (see below),
+  // so `active.size` is always the live in-flight count.
+  const active = new Set<Promise<void>>();
+
+  const spawnJob = (claimed: SyncLog): void => {
+    // runClaimedJob never rejects by contract; this catch is defense so an
+    // unnoticed future throw cannot surface as an unhandled rejection or kill
+    // the Promise.race loop by rejecting the raced task.
+    const task = runClaimedJob(claimed).catch(() => {});
+    active.add(task);
+    // Self-remove on settle. This reaction is registered at spawn time —
+    // strictly before any `Promise.race(active)` reaction the loop attaches
+    // later — so a task the race sees settle is already out of `active` (no
+    // stale-slot double count). The task above always resolves, so `.finally`
+    // always fires and the void'd derived promise never surfaces a rejection.
+    void task.finally(() => {
+      active.delete(task);
+    });
+  };
+
   while (!shuttingDown) {
     try {
+      // Pool full — wait for the first job to finish before claiming more.
+      if (active.size >= concurrency) {
+        await Promise.race(active);
+        continue;
+      }
+
       const claimed = await tryClaimNext(WORKER_ID);
       // A poll that returns (claim or null) proves the DB is reachable —
       // clears any standing "db.unreachable" state with one "reconnected" line.
@@ -241,67 +347,28 @@ async function main(): Promise<void> {
         attemptCount: claimed.attemptCount,
       });
 
-      try {
-        syncLog.info('worker.run.start', {
-          workerId: WORKER_ID,
-          syncLogId: claimed.id,
-          syncType: claimed.syncType,
-        });
-        const runStartedAt = Date.now();
-        await runSyncToCompletion(claimed, REGISTRY, isShuttingDown, WORKER_ID);
-        syncLog.info('worker.run.complete', {
-          workerId: WORKER_ID,
-          syncLogId: claimed.id,
-          durationMs: Date.now() - runStartedAt,
-        });
-      } catch (err) {
-        // Lease lost: a fenced write matched zero rows because the watchdog
-        // reaper (or a peer that re-claimed after a stale sweep) now owns
-        // this row. Check FIRST — the row belongs to another worker, so we
-        // must NOT write any sync-log state (no markRetryable, no fail);
-        // doing so would clobber the new owner's progress.
-        if (err instanceof LostLeaseError) {
-          syncLog.warn('sync.lease-lost', {
-            workerId: err.workerId,
-            syncLogId: err.syncLogId,
-          });
-          continue;
-        }
-        syncLog.error('worker.run.error', {
-          workerId: WORKER_ID,
-          syncLogId: claimed.id,
-          errorCode: errorCodeOf(err),
-          errorMessage: errorMessageOf(err),
-        });
-        try {
-          await handleRunError(claimed.id, claimed.syncType, claimed.attemptCount, err, WORKER_ID);
-        } catch (handleErr) {
-          // handleRunError issues fenced writes (fail / markRetryable). If the
-          // watchdog reaper (or a peer) took the row over WHILE we were handling
-          // the original error, the fence throws LostLeaseError — the same
-          // lease-lost outcome as the pre-check above. Absorb it here (one warn,
-          // then continue) instead of letting it escape to the outer catch,
-          // which would double-log and impose a full 5s backoff for a benign
-          // ownership change. Any other error still propagates as before.
-          if (handleErr instanceof LostLeaseError) {
-            syncLog.warn('sync.lease-lost', {
-              workerId: handleErr.workerId,
-              syncLogId: handleErr.syncLogId,
-            });
-            continue;
-          }
-          throw handleErr;
-        }
-      }
+      // Fire the job onto the pool and immediately loop to claim the next one
+      // (up to the concurrency ceiling). runClaimedJob owns all error routing.
+      spawnJob(claimed);
     } catch (loopErr) {
-      // Outer catch protects against systemic failures (DB connection
-      // dropped, malformed claim row, etc.). DB-unreachable errors collapse
-      // into a single throttled connectivity warning; anything else logs
-      // loudly. Either way, back off the full max window so we do not
-      // hot-spin while the underlying issue resolves.
+      // Outer catch protects against systemic CLAIM-side failures (DB
+      // connection dropped, malformed claim row, etc.). DB-unreachable errors
+      // collapse into a single throttled connectivity warning; anything else
+      // logs loudly. Either way, back off the full max window so we do not
+      // hot-spin while the underlying issue resolves. In-flight jobs keep
+      // running — their own error routing is independent.
       dbConnectivity.logBackgroundError('worker.outer.error', loopErr, { workerId: WORKER_ID });
       await sleep(POLL_BACKOFF_MAX_MS);
     }
+  }
+
+  // Graceful shutdown: we stopped claiming when `shuttingDown` flipped. Let
+  // every in-flight job drain — each checks shuttingDown() between chunks and
+  // hands its row back to PENDING via releaseToPending, so a peer resumes from
+  // the saved cursor. Tasks never reject, so allSettled is purely defensive.
+  if (active.size > 0) {
+    syncLog.info('worker.pool.draining', { workerId: WORKER_ID, inFlight: active.size });
+    await Promise.allSettled(active);
   }
 
   clearInterval(watchdogTimer);

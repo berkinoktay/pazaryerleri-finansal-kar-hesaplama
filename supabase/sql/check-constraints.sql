@@ -126,6 +126,30 @@ CREATE INDEX order_items_resolution_due_idx
   ON order_items (next_resolution_at)
   WHERE product_variant_id IS NULL AND barcode IS NOT NULL;
 
+-- ─── sync_logs claim-scan ordering index (tryClaimNext) ────────────────
+-- Serves packages/sync-core/src/claim.ts::tryClaimNext, whose hot path is
+--   SELECT id FROM sync_logs
+--    WHERE status IN ('PENDING','FAILED_RETRYABLE') AND ...
+--    ORDER BY COALESCE(next_attempt_at, started_at)
+--    FOR UPDATE SKIP LOCKED LIMIT 1
+-- run once per poll tick by every worker in the pool. A partial expression
+-- index over the same COALESCE expression, restricted to the two claimable
+-- statuses, lets Postgres walk straight to the next-ready row instead of a
+-- full scan + sort of the whole (mostly-terminal) sync_logs table as the
+-- queue grows. The runtime-only predicates (attempt_count < MAX,
+-- started_at <= now()) can't live in the index (now() is not immutable), so
+-- they filter the already-narrow partial scan.
+--
+-- Performance ONLY — deliberately NOT a boot invariant. It is intentionally
+-- absent from the worker's REQUIRED_INDEXES DDL assertions
+-- (apps/sync-worker/src/lib/ddl-assertions.ts), which guard the
+-- correctness-critical partial UNIQUE indexes (duplicate-job / fee
+-- idempotency): a missing performance index degrades claim speed, never
+-- correctness, so failing boot over it would be wrong.
+CREATE INDEX IF NOT EXISTS sync_logs_claim_order_idx
+  ON sync_logs ((COALESCE(next_attempt_at, started_at)))
+  WHERE status IN ('PENDING', 'FAILED_RETRYABLE');
+
 -- catalog_barcode_miss indexes are owned by the Prisma schema, not this script.
 -- schema.prisma declares @@unique([storeId, barcode]) and @@index([storeId,
 -- nextRetryAt]) on CatalogBarcodeMiss; the Prisma migrations (0_init baseline)
