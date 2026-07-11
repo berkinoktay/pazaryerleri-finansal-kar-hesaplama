@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   decideCoalesce,
   dedupeEvents,
+  diffMissedOrders,
   isBusinessToday,
+  knownOrderKey,
   MAX_FETCH_PER_WINDOW,
   MIN_DING_INTERVAL_MS,
   planToast,
   selectSurvivors,
   shouldPlaySound,
+  type LiveOrderRowLike,
   type NewOrderEvent,
   type NotificationSummaryLike,
 } from '@/features/live-performance/lib/new-order-notification-core';
@@ -201,6 +204,79 @@ describe('planToast', () => {
   });
   it('burstTotal forces a burst even with no survivors', () => {
     expect(planToast([], 9)).toEqual({ kind: 'burst', count: 9, newest: null });
+  });
+});
+
+function liveRow(over: Partial<LiveOrderRowLike> = {}): LiveOrderRowLike {
+  return {
+    source: 'orders',
+    orderId: 'o1',
+    bufferId: null,
+    orderDate: '2026-07-08T09:00:00',
+    ...over,
+  };
+}
+
+describe('knownOrderKey', () => {
+  it('namespaces the id by table', () => {
+    expect(knownOrderKey('orders', 'abc')).toBe('orders:abc');
+    expect(knownOrderKey('buffer', 'abc')).toBe('buffer:abc');
+  });
+});
+
+describe('diffMissedOrders', () => {
+  it('emits an event for a row not in the known set', () => {
+    const rows = [liveRow({ source: 'orders', orderId: 'new-1' })];
+    const diff = diffMissedOrders(rows, new Set());
+    expect(diff.events).toEqual([
+      { table: 'orders', id: 'new-1', orderDate: '2026-07-08T09:00:00' },
+    ]);
+    expect(diff.allKeys).toEqual(['orders:new-1']);
+  });
+
+  it('skips a known row but still records it in allKeys', () => {
+    const rows = [liveRow({ source: 'orders', orderId: 'seen-1' })];
+    const diff = diffMissedOrders(rows, new Set(['orders:seen-1']));
+    expect(diff.events).toEqual([]);
+    expect(diff.allKeys).toEqual(['orders:seen-1']);
+  });
+
+  it('skips a row with a null id entirely (fail closed on a malformed row)', () => {
+    // An orders row whose orderId is null: neither toasted nor recorded.
+    const rows = [liveRow({ source: 'orders', orderId: null })];
+    const diff = diffMissedOrders(rows, new Set());
+    expect(diff.events).toEqual([]);
+    expect(diff.allKeys).toEqual([]);
+  });
+
+  it('dedupes a repeated row within the batch to one event and one key', () => {
+    const rows = [
+      liveRow({ source: 'orders', orderId: 'dup' }),
+      liveRow({ source: 'orders', orderId: 'dup' }),
+    ];
+    const diff = diffMissedOrders(rows, new Set());
+    expect(diff.events).toHaveLength(1);
+    expect(diff.allKeys).toEqual(['orders:dup']);
+  });
+
+  it('keys a buffer row by its bufferId', () => {
+    const rows = [liveRow({ source: 'buffer', orderId: null, bufferId: 'buf-1' })];
+    const diff = diffMissedOrders(rows, new Set());
+    expect(diff.events).toEqual([
+      { table: 'buffer', id: 'buf-1', orderDate: '2026-07-08T09:00:00' },
+    ]);
+    expect(diff.allKeys).toEqual(['buffer:buf-1']);
+  });
+
+  it('preserves input order in the emitted events', () => {
+    const rows = [
+      liveRow({ source: 'orders', orderId: 'a' }),
+      liveRow({ source: 'orders', orderId: 'b' }),
+      liveRow({ source: 'orders', orderId: 'c' }),
+    ];
+    const diff = diffMissedOrders(rows, new Set());
+    expect(diff.events.map((e) => e.id)).toEqual(['a', 'b', 'c']);
+    expect(diff.allKeys).toEqual(['orders:a', 'orders:b', 'orders:c']);
   });
 });
 
