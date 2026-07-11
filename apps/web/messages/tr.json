@@ -3367,7 +3367,8 @@
       "costMissingLine": "Maliyeti eksik ürünler var, kâr henüz belirlenemiyor",
       "orderNumberLabel": "· Sipariş no {number}",
       "detail": "Detayı gör",
-      "burstTitle": "{count} yeni sipariş geldi"
+      "burstTitle": "{count} yeni sipariş geldi",
+      "catchupTitle": "Siz yokken {count} yeni sipariş geldi"
     }
   }
 }

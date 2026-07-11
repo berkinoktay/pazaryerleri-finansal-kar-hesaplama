@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { LivePerformanceOrders } from '@/features/live-performance/api/get-live-orders.api';
 import type { NotificationSummaryLike } from '@/features/live-performance/lib/new-order-notification-core';
 import { LIVE_POLL_INTERVAL_MS, liveKeys } from '@/features/live-performance/query-keys';
 import type { RealtimeHealth } from '@/lib/supabase/realtime';
@@ -24,6 +25,64 @@ const COALESCE_WINDOW_MS = 1_200;
 
 type NewOrderEventArg = { table: 'orders' | 'buffer'; id: string; orderDate: string };
 
+type LiveOrderRow = LivePerformanceOrders['data'][number];
+
+// Build a full LivePerformanceOrders row — every schema-required field present so
+// the fetched list matches what the real endpoint returns.
+function orderRow(over: Partial<LiveOrderRow> = {}): LiveOrderRow {
+  return {
+    source: 'orders',
+    platformOrderId: 'PID-1',
+    platformOrderNumber: 'N-1',
+    orderId: 'o1',
+    bufferId: null,
+    orderDate: '2026-07-08T09:00:00',
+    status: 'PROCESSING',
+    revenue: '100.00',
+    profit: '25.00',
+    margin: '25.00',
+    promotionDisplays: null,
+    ...over,
+  };
+}
+
+function listOf(rows: LiveOrderRow[]): LivePerformanceOrders {
+  return {
+    data: rows,
+    total: rows.length,
+    counts: { all: rows.length, calculated: rows.length, pending: 0 },
+  };
+}
+
+// Drive the tab hidden/visible transition the catch-up listens for. happy-dom's
+// visibilityState is a getter, so redefine it before dispatching.
+function setVisibility(state: 'hidden' | 'visible'): void {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+const ROW_A = orderRow({ orderId: 'A', platformOrderId: 'PID-A', platformOrderNumber: 'TY-A' });
+const ROW_B = orderRow({ orderId: 'B', platformOrderId: 'PID-B', platformOrderNumber: 'TY-B' });
+
+const SUMMARY_B: NotificationSummaryLike = {
+  source: 'orders',
+  orderId: 'B',
+  bufferId: null,
+  platformOrderNumber: 'TY-B',
+  revenue: '100.00',
+  profit: '25.00',
+  costStatus: 'costed',
+  isToday: true,
+  status: 'PROCESSING',
+  isPromotion: false,
+};
+
+// Rendered-title fragments read from the message catalog (no Turkish literals in
+// source): the single (rich) toast uses `newOrderTitle`, the catch-up burst uses
+// `catchupTitle`.
+const SINGLE_TITLE_PREFIX =
+  trMessages.livePerformance.realtime.newOrderTitle.split('{amount}')[0] ?? '';
+
 let emitHealthChange: (h: RealtimeHealth) => void = () => {};
 let capturedOnNewOrder: (e: NewOrderEventArg) => void = () => {};
 const unsubscribeMock = vi.fn();
@@ -31,10 +90,12 @@ const unsubscribeMock = vi.fn();
 // Probe the summary fetch: the provider only fetches for events that pass the
 // isBusinessToday gate, so the call count tells us whether a past-day event was
 // dropped before the coalesce window. toastMock lets us assert the coalesce
-// window's toast is suppressed after cancellation.
-const { getNotificationSummaryMock, toastMock } = vi.hoisted(() => ({
+// window's toast is suppressed after cancellation. getLiveOrdersMock backs both
+// the baseline prime and the tab-return catch-up's list fetch.
+const { getNotificationSummaryMock, toastMock, getLiveOrdersMock } = vi.hoisted(() => ({
   getNotificationSummaryMock: vi.fn(),
   toastMock: vi.fn(),
+  getLiveOrdersMock: vi.fn(),
 }));
 
 interface MockOptions {
@@ -58,6 +119,10 @@ vi.mock('@/lib/supabase/realtime', async () => {
 
 vi.mock('@/features/live-performance/api/get-notification-summary.api', () => ({
   getNotificationSummary: getNotificationSummaryMock,
+}));
+
+vi.mock('@/features/live-performance/api/get-live-orders.api', () => ({
+  getLiveOrders: getLiveOrdersMock,
 }));
 
 // Deterministic no-op sound: avoids any Web Audio interaction under happy-dom.
@@ -97,8 +162,15 @@ beforeEach(() => {
   emitHealthChange = () => {};
   capturedOnNewOrder = () => {};
   getNotificationSummaryMock.mockReset();
+  // Default: the baseline / catch-up list fetch returns an empty list, so the
+  // pre-existing tests are unaffected by the baseline prime that now runs on mount.
+  getLiveOrdersMock.mockReset();
+  getLiveOrdersMock.mockResolvedValue(listOf([]));
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  setVisibility('visible');
+});
 
 describe('NewOrderNotifierProvider', () => {
   it('exposes channel health and reflects transitions', async () => {
@@ -286,5 +358,132 @@ describe('NewOrderNotifierProvider', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  // Tab-return catch-up: while the tab is hidden the Realtime channel is torn down,
+  // so orders that land while away never reach onNewOrder. On return the provider
+  // diffs a fresh live-orders list against the session known-set and replays the
+  // gap through the same coalesce -> toast/sound window.
+  describe('missed-order catch-up', () => {
+    it('toasts a single missed order on tab return', async () => {
+      getLiveOrdersMock.mockReset();
+      getLiveOrdersMock
+        .mockResolvedValueOnce(listOf([ROW_A])) // baseline at mount
+        .mockResolvedValue(listOf([ROW_A, ROW_B])); // catch-up on return
+      getNotificationSummaryMock.mockResolvedValue(SUMMARY_B);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      await waitFor(() => expect(getLiveOrdersMock).toHaveBeenCalledTimes(1));
+
+      act(() => setVisibility('hidden'));
+      act(() => setVisibility('visible'));
+
+      await waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1));
+      // The rich single toast carries a description (order line); the burst does not.
+      expect(toastMock).toHaveBeenCalledWith(
+        expect.stringContaining(SINGLE_TITLE_PREFIX),
+        expect.objectContaining({ description: expect.any(String) }),
+      );
+    });
+
+    it('emits ONE catch-up burst toast (no per-order fetch) when more than five are missed', async () => {
+      const missed = Array.from({ length: 6 }, (_, i) =>
+        orderRow({
+          orderId: `B${i}`,
+          platformOrderId: `PID-B${i}`,
+          platformOrderNumber: `TY-B${i}`,
+        }),
+      );
+      getLiveOrdersMock.mockReset();
+      getLiveOrdersMock
+        .mockResolvedValueOnce(listOf([ROW_A]))
+        .mockResolvedValue(listOf([ROW_A, ...missed]));
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      await waitFor(() => expect(getLiveOrdersMock).toHaveBeenCalledTimes(1));
+
+      act(() => setVisibility('hidden'));
+      act(() => setVisibility('visible'));
+
+      await waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1));
+      // Over the cap -> burst, so no per-order summary fetch.
+      expect(getNotificationSummaryMock).not.toHaveBeenCalled();
+      const expectedTitle = trMessages.livePerformance.realtime.catchupTitle.replace(
+        '{count}',
+        String(6),
+      );
+      expect(toastMock).toHaveBeenCalledWith(expectedTitle, expect.anything());
+    });
+
+    it('does NOT re-toast on tab return an order already shown live', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-08T12:00:00Z'));
+      getLiveOrdersMock.mockReset();
+      getLiveOrdersMock
+        .mockResolvedValueOnce(listOf([ROW_A])) // baseline
+        .mockResolvedValue(listOf([ROW_A, ROW_B])); // catch-up sees A + B
+      getNotificationSummaryMock.mockResolvedValue(SUMMARY_B);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      // Let the baseline prime (knownIds := {orders:A}).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // B arrives live while visible -> coalesce -> one toast, knownIds += orders:B.
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T13:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(toastMock).toHaveBeenCalledTimes(1);
+
+      // Tab hidden then visible: catch-up diffs [A, B]; both known -> no 2nd toast.
+      act(() => setVisibility('hidden'));
+      await act(async () => {
+        setVisibility('visible');
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(toastMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays silent (fail closed) when the baseline never primed, then works once re-primed', async () => {
+      getLiveOrdersMock.mockReset();
+      getLiveOrdersMock
+        .mockRejectedValueOnce(new Error('baseline unavailable')) // mount prime fails
+        .mockResolvedValueOnce(listOf([ROW_A])) // 1st return: re-prime
+        .mockResolvedValue(listOf([ROW_A, ROW_B])); // 2nd return: catch-up
+      getNotificationSummaryMock.mockResolvedValue(SUMMARY_B);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      await waitFor(() => expect(getLiveOrdersMock).toHaveBeenCalledTimes(1));
+
+      // First return: unprimed baseline -> re-prime and bail, no toast.
+      act(() => setVisibility('hidden'));
+      act(() => setVisibility('visible'));
+      await waitFor(() => expect(getLiveOrdersMock).toHaveBeenCalledTimes(2));
+      expect(toastMock).not.toHaveBeenCalled();
+
+      // Second return: now primed -> B is newly missed -> single toast.
+      act(() => setVisibility('hidden'));
+      act(() => setVisibility('visible'));
+      await waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1));
+    });
+
+    it('stays silent on tab return when nothing new arrived', async () => {
+      getLiveOrdersMock.mockReset();
+      getLiveOrdersMock.mockResolvedValue(listOf([ROW_A])); // baseline and catch-up identical
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      await waitFor(() => expect(getLiveOrdersMock).toHaveBeenCalledTimes(1));
+
+      act(() => setVisibility('hidden'));
+      act(() => setVisibility('visible'));
+      await waitFor(() => expect(getLiveOrdersMock).toHaveBeenCalledTimes(2));
+
+      expect(toastMock).not.toHaveBeenCalled();
+      expect(getNotificationSummaryMock).not.toHaveBeenCalled();
+    });
   });
 });

@@ -229,3 +229,77 @@ export function shouldPlaySound(args: {
   if (args.lastDingAt === null) return true;
   return args.now - args.lastDingAt >= min;
 }
+
+/**
+ * A live-performance orders row reduced to the fields the missed-order catch-up
+ * needs. Structurally a subset of the API's LivePerformanceOrders row (same
+ * pattern as {@link NotificationSummaryLike}): this module stays free of the
+ * generated api-client type, so the provider passes a freshly-fetched row
+ * straight in.
+ */
+export interface LiveOrderRowLike {
+  source: 'orders' | 'buffer';
+  orderId: string | null;
+  bufferId: string | null;
+  orderDate: string;
+}
+
+/**
+ * The session "known orders" key for a row. Namespaced by table because an
+ * `orders.id` and a `buffer.id` are distinct entities that could otherwise
+ * collide as bare UUIDs. A buffer row that later graduates into `orders` gets a
+ * NEW key (a different row id) and so looks like a newcomer in the diff — that is
+ * INTENTIONAL: the summary's `isPromotion === true` drops it in
+ * {@link selectSurvivors}, so the existing promotion gate (not this key) owns the
+ * graduation dedup.
+ */
+export function knownOrderKey(table: 'orders' | 'buffer', id: string): string {
+  return `${table}:${id}`;
+}
+
+/** The outcome of diffing a fresh live-orders list against the known-key set. */
+export interface MissedOrderDiff {
+  /** Rows not in `known`, as {@link NewOrderEvent}s ready for the notification
+   *  window. */
+  events: NewOrderEvent[];
+  /** Every (batch-deduped) row's key, whether or not it became an event — the
+   *  caller folds these into the known set so a later diff can't re-surface them. */
+  allKeys: string[];
+}
+
+/**
+ * Diff a freshly-fetched live-orders list against the session's known keys to
+ * find orders that arrived while the tab was hidden (the Realtime channel is torn
+ * down when hidden, so their INSERTs never reached the live notifier). Behavior:
+ *
+ *   - A row whose id is null (an `orders` row with a null `orderId`, or a `buffer`
+ *     row with a null `bufferId` — a source/id mismatch) is SKIPPED entirely: it
+ *     is neither toasted nor recorded, failing closed on a malformed row.
+ *   - Rows are keyed via {@link knownOrderKey} and deduped within the batch, so a
+ *     row that appears twice contributes exactly one key and at most one event.
+ *   - Every surviving (deduped) key lands in `allKeys` so the caller can prime or
+ *     extend the known set; only keys NOT already in `known` become `events`.
+ *   - Input order is preserved verbatim. Note the backend returns the 'all' list
+ *     newest-first (descending order_date), so `events` are NOT newest-last —
+ *     harmless today because {@link planToast}'s only order-sensitive field
+ *     (`newest`) is never read by the provider's burst path.
+ */
+export function diffMissedOrders(
+  rows: readonly LiveOrderRowLike[],
+  known: ReadonlySet<string>,
+): MissedOrderDiff {
+  const events: NewOrderEvent[] = [];
+  const allKeys: string[] = [];
+  const batchSeen = new Set<string>();
+  for (const row of rows) {
+    const rowId = row.source === 'orders' ? row.orderId : row.bufferId;
+    if (rowId === null) continue; // fail closed: a malformed row toasts nothing
+    const key = knownOrderKey(row.source, rowId);
+    if (batchSeen.has(key)) continue;
+    batchSeen.add(key);
+    allKeys.push(key);
+    if (known.has(key)) continue;
+    events.push({ table: row.source, id: rowId, orderDate: row.orderDate });
+  }
+  return { events, allKeys };
+}
