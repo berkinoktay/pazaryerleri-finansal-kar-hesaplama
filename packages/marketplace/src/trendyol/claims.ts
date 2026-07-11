@@ -116,7 +116,8 @@ export interface TrendyolClaimsResponse {
   size: number;
   totalPages: number;
   totalElements: number;
-  content: TrendyolClaim[];
+  /** Trendyol returns null (not []) for a narrow/empty window — observed live. */
+  content: TrendyolClaim[] | null;
 }
 
 // ─── Mapped domain shapes (PII dropped here) ────────────────────────────
@@ -274,10 +275,14 @@ export async function* fetchClaims(opts: FetchClaimsOpts): AsyncGenerator<Trendy
 
     if (totalElements === null) totalElements = res.totalElements;
 
-    if (res.content.length === 0) return;
+    // Normalize before any .length/iteration: a narrow/empty window returns
+    // content:null (not []), which must finish exactly like the documented
+    // empty-content[] case rather than throwing on null.length.
+    const content = res.content ?? [];
+    if (content.length === 0) return;
 
-    for (const claim of res.content) yield claim;
-    processedSoFar += res.content.length;
+    for (const claim of content) yield claim;
+    processedSoFar += content.length;
 
     if (totalElements !== null && processedSoFar >= totalElements) return;
     page += 1;
