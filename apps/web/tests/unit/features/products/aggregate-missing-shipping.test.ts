@@ -26,6 +26,7 @@ function makeVariant(overrides: Partial<VariantSummary> = {}): VariantSummary {
     productUrl: null,
     locationBasedDelivery: 'DISABLED',
     status: 'onSale',
+    delistedAt: null,
     currentCostTry: null,
     profileCount: 0,
     costStatus: 'NO_PROFILES',

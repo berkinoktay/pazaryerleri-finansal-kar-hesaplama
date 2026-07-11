@@ -45,6 +45,7 @@ import { ProductImageCell } from '@/components/patterns/product-image-cell';
 import { ProductsBulkCostActionBar } from './products-bulk-cost-action-bar';
 import type { ProductRow } from './products-bulk-cost-action-bar.types';
 import { ProductsTabStrip, type ProductsOverrideTab } from './products-tab-strip';
+import { VariantDelistedBadge } from './variant-delisted-badge';
 
 function projectRows(products: ProductWithVariants[]): ProductRow[] {
   return products.map((p) => ({ kind: 'parent', product: p }));
@@ -406,11 +407,21 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
         meta: { numeric: true },
         enableSorting: true,
         cell: ({ row }) => {
-          const count =
-            row.original.kind === 'variant'
-              ? row.original.variant.quantity
-              : totalStock(row.original.product.variants);
-          return <StockCount count={count} />;
+          // Variant rows can additionally carry a "delisted" chip when the
+          // full catalog scan's absence pass has stamped delistedAt (the
+          // variant was missing from a complete catalog sweep); the hourly
+          // delta only clears it again when the variant reappears. Parent
+          // rows only show the aggregate count.
+          if (row.original.kind === 'variant') {
+            const v = row.original.variant;
+            return (
+              <div className="gap-3xs flex flex-col items-end">
+                <StockCount count={v.quantity} />
+                {v.delistedAt !== null ? <VariantDelistedBadge /> : null}
+              </div>
+            );
+          }
+          return <StockCount count={totalStock(row.original.product.variants)} />;
         },
       },
       {

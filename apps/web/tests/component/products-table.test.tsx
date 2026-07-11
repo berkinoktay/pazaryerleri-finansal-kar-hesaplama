@@ -34,6 +34,9 @@ const messages = {
       standard: 'Standart Teslimat',
       mixed: 'Karışık',
     },
+    table: {
+      variantDelisted: 'Delisted',
+    },
     multiVariantPlaceholder: '{n} varyant',
     empty: { filtered: 'Filtreyle eşleşen ürün yok.' },
     a11y: { expandRow: 'Varyantları göster', collapseRow: 'Varyantları gizle' },
@@ -130,6 +133,7 @@ function makeVariant(
     productUrl: null,
     locationBasedDelivery: 'DISABLED',
     status: 'onSale',
+    delistedAt: null,
     currentCostTry: null,
     profileCount: 0,
     costStatus: 'NO_PROFILES',
@@ -332,5 +336,35 @@ describe('ProductsTable', () => {
     renderTable([product]);
     const cell = screen.getByText('5');
     expect(cell.className).toMatch(/text-warning/);
+  });
+
+  it('renders the delisted badge only on delisted variant sub-rows', async () => {
+    const product = makeProduct({
+      title: 'Freshness Product',
+      variantCount: 2,
+      variants: [
+        makeVariant({
+          id: 'v-del',
+          size: 'S',
+          stockCode: 'STK-DEL',
+          delistedAt: '2026-05-01T09:00:00Z',
+        }),
+        makeVariant({ id: 'v-live', size: 'L', stockCode: 'STK-LIVE', delistedAt: null }),
+      ],
+    });
+    const { user } = renderTable([product]);
+    // Collapsed: variant sub-rows (and their badges) are not rendered yet.
+    expect(screen.queryByText('Delisted')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Varyantları göster' }));
+
+    // Exactly one badge, and it lives on the delisted variant's row — the
+    // listed sibling stays chip-free (there is no positive counterpart).
+    const badges = screen.getAllByText('Delisted');
+    expect(badges).toHaveLength(1);
+    const delistedRow = screen.getByText(/STK-DEL/).closest('tr');
+    const listedRow = screen.getByText(/STK-LIVE/).closest('tr');
+    expect(delistedRow?.textContent).toContain('Delisted');
+    expect(listedRow?.textContent).not.toContain('Delisted');
   });
 });

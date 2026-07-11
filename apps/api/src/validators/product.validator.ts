@@ -393,6 +393,18 @@ const VariantSummarySchema = z
     productUrl: z.string().nullable(),
     locationBasedDelivery: z.string().nullable(),
     status: VariantStatusSchema,
+    delistedAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .openapi({
+        description:
+          'Stamped by the full catalog scan absence pass when this variant is no longer returned ' +
+          'by a complete scan (delisted). Cleared on reappearance by both the full scan and the ' +
+          'hourly inventory-and-price delta. ISO 8601 UTC. Null while the variant is listed. ' +
+          'Drives the compact "delisted" badge on the products table variant rows.',
+        example: null,
+      }),
     currentCostTry: z
       .string()
       .nullable()
@@ -581,6 +593,7 @@ export function toVariantSummary(
     productUrl: variant.productUrl,
     locationBasedDelivery: variant.locationBasedDelivery,
     status: computeVariantStatus(variant),
+    delistedAt: variant.delistedAt?.toISOString() ?? null,
     currentCostTry: cost.currentCostTry,
     profileCount: cost.profileCount,
     costStatus: cost.costStatus,

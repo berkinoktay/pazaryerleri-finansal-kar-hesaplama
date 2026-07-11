@@ -11,6 +11,19 @@ section "Versioning" for details.
 
 ## [Unreleased]
 
+### Added
+
+- **`VariantSummary.delistedAt`** (ISO 8601 date-time | null) — surfaced on every
+  product-list variant row (`GET /v1/organizations/{orgId}/stores/{storeId}/products`
+  and the shared `VariantSummary` shape). Set when the marketplace catalog delta last
+  reported the variant as delisted (removed from the active catalog); `null` while it
+  is still listed. Drives the compact "delisted" badge on the products table variant
+  rows. Read straight from `ProductVariant.delistedAt` — no computation.
+- **`SyncLogResponse.syncType` gained `PRODUCTS_DELTA`** — the incremental
+  product-freshness delta sync added in the earlier product-freshness wave. Additive
+  enum widening; the existing `ORDERS` / `PRODUCTS` / `SETTLEMENTS` / `CLAIMS` values
+  are unchanged. The spec snapshot was regenerated to pick it up.
+
 ### Changed
 
 - **`QuoteBreakdown` now carries three grouped allocation totals** (every

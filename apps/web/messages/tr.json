@@ -2398,12 +2398,14 @@
     },
     "triggers": {
       "PRODUCTS": "Ürünleri şimdi senkronize et",
+      "PRODUCTS_DELTA": "Fiyat ve stoku şimdi tazele",
       "ORDERS": "Siparişleri şimdi senkronize et",
       "SETTLEMENTS": "Hakedişleri şimdi senkronize et",
       "CLAIMS": "İadeleri şimdi senkronize et"
     },
     "syncTypeLabel": {
       "PRODUCTS": "Ürün senkronu",
+      "PRODUCTS_DELTA": "Fiyat/stok taraması",
       "ORDERS": "Sipariş senkronu",
       "SETTLEMENTS": "Hakediş senkronu",
       "CLAIMS": "İade senkronu"
@@ -2511,6 +2513,9 @@
       "fast": "Hızlı Teslimat",
       "standard": "Standart Teslimat",
       "mixed": "Karışık"
+    },
+    "table": {
+      "variantDelisted": "Yayından kaldırıldı"
     },
     "multiVariantPlaceholder": "{n} varyant",
     "empty": {
