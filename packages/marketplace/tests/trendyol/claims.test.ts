@@ -198,6 +198,12 @@ describe('mapTrendyolClaim', () => {
     expect(mapped.items).toEqual([]);
   });
 
+  it('maps a claim with items:null without throwing (zero items, never resolved)', () => {
+    const mapped = mapTrendyolClaim(claim({ items: null }));
+    expect(mapped.items).toEqual([]);
+    expect(mapped.resolved).toBe(false);
+  });
+
   it('tolerates sparse fields with loose guards (JSONB-undefined lesson)', () => {
     const sparse = mapTrendyolClaim(
       claim({
@@ -324,6 +330,30 @@ describe('fetchClaims', () => {
       .fn()
       .mockResolvedValueOnce(
         pageResponse({ page: 0, totalPages: 0, totalElements: 0, content: [] }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const seen: TrendyolClaim[] = [];
+    for await (const c of fetchClaims({
+      baseUrl: BASE,
+      credentials: CREDS,
+      startDate: new Date(0),
+      endDate: new Date(1),
+    })) {
+      seen.push(c);
+    }
+    expect(seen).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes cleanly when Trendyol returns content:null (narrow window)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ page: 0, size: 200, totalPages: 0, totalElements: 0, content: null }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
       );
     vi.stubGlobal('fetch', fetchMock);
 
