@@ -1624,4 +1624,37 @@ describe('upsertOrderWithSnapshot — optimistic stock decrement (product freshn
       (await prisma.product.findFirstOrThrow({ where: { id: variant.productId } })).totalStock,
     ).toBe(10);
   });
+
+  it('(e) a buffer graduation (promotedFromBuffer) does NOT decrement — the buffered intake already did', async () => {
+    // Owner ruling 2026-07-11: the optimistic decrement fires at buffer INTAKE, so
+    // a buffer→orders promotion (promotedFromBuffer=true) must NOT decrement again
+    // or the same units drop twice. This is the SAME today-dated order that case
+    // (a) decrements on a direct insert — only the flag differs.
+    const { org, store } = await setupStoreAndSyncLog(['EAN13-STOCK-PROMO']);
+    await seedStock(store.id, 'EAN13-STOCK-PROMO', 10);
+
+    await upsertOrderWithSnapshot(
+      store.id,
+      org.id,
+      buildStockMapped({
+        platformOrderId: 'stock-e',
+        lines: [{ barcode: 'EAN13-STOCK-PROMO', quantity: 3, platformLineId: '9401' }],
+      }),
+      undefined,
+      { promotedFromBuffer: true },
+    );
+
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: 'EAN13-STOCK-PROMO' },
+    });
+    expect(variant.quantity).toBe(10); // unchanged — the graduation moves no stock
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: variant.productId } })).totalStock,
+    ).toBe(10);
+    // But it IS a graduation — the promotion marker is stamped.
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'stock-e' },
+    });
+    expect(order.promotedFromBufferAt).not.toBeNull();
+  });
 });

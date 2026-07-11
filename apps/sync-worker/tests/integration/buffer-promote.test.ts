@@ -1,5 +1,7 @@
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
+import type { MappedOrder } from '@pazarsync/marketplace';
+import { intakeOrder } from '@pazarsync/order-sync';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -71,6 +73,61 @@ function buildMappedOrder(over: {
     ],
   };
   return value as unknown as Prisma.InputJsonValue;
+}
+
+// A real MappedOrder (Date objects, not the JSON round-trip shape) for driving
+// `intakeOrder` directly — the end-to-end intake→promote decrement test needs the
+// in-memory DTO the way the webhook / sync worker hands it to intake.
+function buildMappedForIntake(over: {
+  platformOrderId: string;
+  barcode: string;
+  quantity: number;
+  orderDate: Date;
+}): MappedOrder {
+  return {
+    platformOrderId: over.platformOrderId,
+    platformOrderNumber: `ord-${over.platformOrderId}`,
+    orderDate: over.orderDate,
+    lastModifiedDate: over.orderDate,
+    status: 'PROCESSING',
+    dematerialized: false,
+    saleGross: '100.00',
+    saleVat: '15.25',
+    listGross: '100.00',
+    sellerDiscountGross: '0.00',
+    promotionDisplays: null,
+    agreedDeliveryDate: null,
+    actualDeliveryDate: null,
+    actualShipDate: null,
+    fastDelivery: false,
+    fastDeliveryType: null,
+    micro: false,
+    estimatedDeliveryStartDate: null,
+    estimatedDeliveryEndDate: null,
+    cargoProviderName: null,
+    cargoTrackingNumber: null,
+    cargoDeci: null,
+    usesSellerCargoAgreement: false,
+    platformCreatedBy: null,
+    originShipmentDate: null,
+    lines: [
+      {
+        barcode: over.barcode,
+        quantity: over.quantity,
+        platformLineId: null,
+        lineListGross: '100.00',
+        lineSaleGross: '100.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '18',
+        commissionRate: '15',
+        commissionGross: '15.00',
+        refundedCommissionGross: '0.00',
+        commissionVatRate: '20',
+        categoryId: null,
+        commissionKnown: true,
+      },
+    ],
+  };
 }
 
 async function seedCalculableVariant(
@@ -150,17 +207,20 @@ describe('processBufferPromote', () => {
     expect(order.actualShipDate?.toISOString()).toBe('2026-06-12T11:35:54.000Z');
   });
 
-  it('promotes a today entry without throwing on the JSONB string orderDate, and decrements the matched variant (regression)', async () => {
+  it('promotes a today entry without throwing on the JSONB string orderDate, and does NOT decrement at promote (intake-time semantics)', async () => {
     // Regression for the optimistic-decrement business-today gate: the buffer's
     // mapped_order is JSONB, so `orderDate` revives as an ISO STRING. The gate
-    // must normalize that string (not throw `Invalid time value`) AND, because
-    // buildMappedOrder dates the entry today, treat it as a live sale and
-    // decrement the matched variant.
+    // must normalize that string (not throw `Invalid time value`). Under the
+    // intake-time-decrement ruling (2026-07-11) the promote itself moves NO stock:
+    // the decrement fires when an order first enters the buffer, and the
+    // graduation is flagged promotedFromBuffer so it never subtracts again. This
+    // row was seeded directly (bypassing intake), so no decrement ever fired —
+    // the stock must be unchanged after promote (previously this asserted 5 → 4).
     const org = await createOrganization();
     const store = await createStore(org.id);
     await seedCalculableVariant(org.id, store.id, BARCODE);
-    // Give the variant a known starting stock so the decrement is observable
-    // (seedCalculableVariant leaves quantity at its 0 default).
+    // Give the variant a known starting stock so a stray promote-time decrement
+    // would be observable (seedCalculableVariant leaves quantity at its 0 default).
     await prisma.productVariant.updateMany({
       where: { storeId: store.id, barcode: BARCODE },
       data: { quantity: 5 },
@@ -182,11 +242,86 @@ describe('processBufferPromote', () => {
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('pkg-stock');
-    // Today-dated buffer entry → live sale → variant stock decremented 5 → 4.
+    // The graduation carries promotedFromBuffer → no promote-time decrement. This
+    // row never went through intake, so stock stays at its seeded 5.
     const variant = await prisma.productVariant.findFirstOrThrow({
       where: { storeId: store.id, barcode: BARCODE },
     });
-    expect(variant.quantity).toBe(4);
+    expect(variant.quantity).toBe(5);
+  });
+
+  it('(b) intake decrements at buffer time; a later promote does NOT decrement again (end-to-end 40 → 39, stays 39)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // Variant WITHOUT a cost profile so intake routes to the buffer (cost-missing
+    // today), seeded with a known starting stock.
+    const product = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        productMainId: `pm-${BARCODE}`,
+        title: 'E2E Stock Product',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: product.id,
+        platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+        barcode: BARCODE,
+        stockCode: `sk-${BARCODE}`,
+        salePrice: '100',
+        listPrice: '120',
+        quantity: 40,
+      },
+    });
+    await prisma.product.update({ where: { id: product.id }, data: { totalStock: 40 } });
+
+    // A real instant inside today's business day (noon UTC → 15:00 Istanbul) so
+    // the intake business-today gate fires deterministically.
+    const todayInstant = new Date(getBusinessDateAnchor().getTime() + 12 * 60 * 60 * 1000);
+
+    // 1. Intake the cost-missing order → buffered; stock drops immediately 40 → 39.
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMappedForIntake({
+        platformOrderId: 'e2e-stock',
+        barcode: BARCODE,
+        quantity: 1,
+        orderDate: todayInstant,
+      }),
+    });
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(
+      (await prisma.productVariant.findUniqueOrThrow({ where: { id: variant.id } })).quantity,
+    ).toBe(39);
+
+    // 2. Cost arrives: attach a profile + flip the buffer row to PROMOTING (what
+    //    the cost-attach service does when a same-day cost lands).
+    const profile = await createCostProfile(org.id, { amountGross: '48.00' });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: org.id, productVariantId: variant.id, profileId: profile.id },
+    });
+    await prisma.livePerformanceBuffer.updateMany({
+      where: { storeId: store.id, platformOrderId: 'e2e-stock' },
+      data: { status: 'PROMOTING' },
+    });
+
+    // 3. Promote graduates the order → buffer row consumed, but the graduation
+    //    carries promotedFromBuffer, so it must NOT decrement a second time.
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('e2e-stock');
+    expect(order.promotedFromBufferAt).not.toBeNull();
+    // Stock stayed at the single intake-time decrement — promote added no second.
+    expect(
+      (await prisma.productVariant.findUniqueOrThrow({ where: { id: variant.id } })).quantity,
+    ).toBe(39);
   });
 
   it('does not pick up a FAILED entry before its backoff window elapses', async () => {

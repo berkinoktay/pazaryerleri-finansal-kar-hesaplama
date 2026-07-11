@@ -42,9 +42,12 @@ import type {
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { applyEstimateOnOrderCreate, resolveCommissionRate } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
-import { getBusinessDate } from '@pazarsync/utils';
 
-import { decrementVariantStock, recomputeProductsTotalStock } from './stock';
+import {
+  decrementVariantStock,
+  isOrderOnBusinessToday,
+  recomputeProductsTotalStock,
+} from './stock';
 
 interface SnapshotComponentData {
   orderItemId: string;
@@ -274,42 +277,6 @@ async function resolveEffectiveCommission(
  *     olarak çağrılır — PSF + Stopaj + Kargo ESTIMATE OrderFee rows + Order.estimated*.
  *     Cost snapshot eksikse profit null kalır.
  */
-/**
- * Whether `orderDate` falls on the current business day — the gate for the
- * optimistic stock decrement below.
- *
- * Defensive by contract: `orderDate` is a real `Date` on the live sync / webhook
- * path, but an ISO STRING on the buffer-promote path — the order is revived from
- * `live_performance_buffer.mapped_order` JSONB, and a JSON round-trip serializes
- * a `Date` into a string (the static `MappedOrder.orderDate: Date` type does not
- * reflect that runtime reality). `getBusinessDate` feeds its argument to
- * `Intl.DateTimeFormat.format`, which throws `RangeError: Invalid time value` on
- * a non-`Date`, so the value is normalized (`Date | string | number`) via
- * `new Date(...)` and NaN-checked BEFORE the format call — mirroring how the rest
- * of this file coerces buffer-JSONB dates (see the `lastModifiedDate` /
- * `actualShipDate` handling).
- *
- * Any failure resolves to `false` (skip the decrement): the decrement is a
- * best-effort optimization and MUST never throw — a throw here would abort the
- * entire order persist inside the upsert transaction. The outer try/catch is a
- * belt-and-suspenders guard on top of the NaN check so no `Intl` edge case can
- * escape; it logs rather than swallowing silently.
- */
-function isOrderOnBusinessToday(orderDate: Date | string | number): boolean {
-  try {
-    const parsed = new Date(orderDate);
-    if (Number.isNaN(parsed.getTime())) {
-      return false;
-    }
-    return getBusinessDate(parsed) === getBusinessDate();
-  } catch (err) {
-    syncLog.warn('stock.decrement-date-gate-skip', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return false;
-  }
-}
-
 export interface UpsertOrderOpts {
   /**
    * Kâr-dondurma (spec 2026-06-12): set'liyse sipariş KÂR-DIŞI yazılır —
@@ -548,7 +515,18 @@ export async function upsertOrderWithSnapshot(
     // order shares one orderDate), so it is computed once here. The helper
     // normalizes a JSONB-revived string orderDate (buffer-promote path) and can
     // never throw — a bad date just skips the decrement.
+    //
+    // promotedFromBuffer skip (owner ruling 2026-07-11): a buffer graduation must
+    // NOT decrement again. The sale is real the moment the order arrives, so the
+    // buffered-intake path (intake-order.ts) already dropped this order's stock
+    // when it first parked in the cost-missing buffer; decrementing again here
+    // would subtract the same units twice. Only a DIRECT first insert (never
+    // buffered) decrements at persist. Evaluated after isOrderOnBusinessToday so
+    // the string-orderDate gate is still exercised on the promote path (it must
+    // never throw), even though the graduation itself moves no stock.
     const orderIsBusinessToday = isOrderOnBusinessToday(order.orderDate);
+    const shouldDecrement =
+      orderIsBusinessToday && order.status !== 'CANCELLED' && opts?.promotedFromBuffer !== true;
 
     // 2. OrderItem'lar: variant lookup (barcode) + INSERT-if-new + snapshot.
     for (const line of order.lines) {
@@ -683,15 +661,18 @@ export async function upsertOrderWithSnapshot(
       // re-add (one-way simplicity, the scan reconciles). Owner-approved
       // 2026-07-11. See ./stock for the full contract.
       //
-      // Two gates keep the decrement to genuine live sales:
+      // `shouldDecrement` (computed once above) keeps the decrement to genuine
+      // live, direct sales:
       //   - orderIsBusinessToday: skip past-day first-inserts (bootstrap seam,
-      //     backfill, late arrivals) — see the note where it is computed above.
+      //     backfill, late arrivals).
       //   - status !== CANCELLED: a sale whose FIRST event is already cancelled
       //     never consumed stock, so it must not decrement. The decrement is
       //     one-way (never re-added on cancel — the scan reconciles), so
       //     decrementing a born-cancelled order would understate stock until the
       //     next authoritative scan.
-      if (variant !== null && orderIsBusinessToday && order.status !== 'CANCELLED') {
+      //   - !promotedFromBuffer: a buffer graduation already decremented at
+      //     intake — see the note where shouldDecrement is computed.
+      if (variant !== null && shouldDecrement) {
         await decrementVariantStock(tx, variant.id, line.quantity);
         affectedProductIds.add(variant.productId);
       }
