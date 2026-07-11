@@ -54,6 +54,11 @@ export async function handleRunError(
     // skipped-page entries and reset attemptCount in a loop instead
     // of failing terminally (the next 6h cron re-scans everything
     // anyway, so terminal FAIL is the correct outcome for them).
+    //
+    // DELIBERATELY NOT extended to PRODUCTS_DELTA: it reruns hourly and re-walks
+    // the whole catalog each tick, so a cheap re-run next hour beats advancing
+    // the cursor past a bad page (which would silently skip that page's stock/
+    // price refresh until the following tick anyway). Terminal FAIL here is fine.
     if (syncType === 'PRODUCTS' && code === SyncErrorCode.MARKETPLACE_UNREACHABLE) {
       const advanced = await advanceCursorPastBadPage(syncLogId, err, workerId);
       if (advanced) return;
