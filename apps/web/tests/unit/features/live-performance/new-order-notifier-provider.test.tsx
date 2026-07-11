@@ -77,6 +77,18 @@ const SUMMARY_B: NotificationSummaryLike = {
   isPromotion: false,
 };
 
+// A distinct second order so two hidden-tab notifications survive the seen-set
+// dedup and bump the tab-title badge from (1) to (2).
+const SUMMARY_C: NotificationSummaryLike = {
+  ...SUMMARY_B,
+  orderId: 'C',
+  platformOrderNumber: 'TY-C',
+};
+
+// Deterministic base tab title so the "(N) " badge assertions are stable; reset
+// around every test so one case's prefix never bleeds into the next.
+const DEFAULT_TAB_TITLE = 'PazarSync';
+
 // Rendered-title fragments read from the message catalog (no Turkish literals in
 // source): the single (rich) toast uses `newOrderTitle`, the catch-up burst uses
 // `catchupTitle`.
@@ -166,10 +178,12 @@ beforeEach(() => {
   // pre-existing tests are unaffected by the baseline prime that now runs on mount.
   getLiveOrdersMock.mockReset();
   getLiveOrdersMock.mockResolvedValue(listOf([]));
+  document.title = DEFAULT_TAB_TITLE;
 });
 afterEach(() => {
   vi.useRealTimers();
   setVisibility('visible');
+  document.title = DEFAULT_TAB_TITLE;
 });
 
 describe('NewOrderNotifierProvider', () => {
@@ -528,6 +542,101 @@ describe('NewOrderNotifierProvider', () => {
         await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
       });
       expect(toastMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Tab-title unread badge: keep-alive (#453) keeps notifications firing while the
+  // tab is hidden, so the provider prefixes the document title with a "(N) " count
+  // of notifications the seller has not yet seen, and resets it on return.
+  describe('tab-title badge', () => {
+    it('prefixes the title with the away-count while hidden, incrementing per notification', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-08T12:00:00Z'));
+      getNotificationSummaryMock.mockReset();
+      getNotificationSummaryMock.mockResolvedValueOnce(SUMMARY_B).mockResolvedValueOnce(SUMMARY_C);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      // Let the baseline prime (empty list -> knownIds stays empty).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      act(() => setVisibility('hidden'));
+
+      // First order arrives live while hidden -> toast + badge (1).
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T13:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(document.title).toBe(`(1) ${DEFAULT_TAB_TITLE}`);
+
+      // Second, distinct order -> the badge advances to (2), not a stacked prefix.
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'C', orderDate: '2026-07-08T13:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(document.title).toBe(`(2) ${DEFAULT_TAB_TITLE}`);
+    });
+
+    it('clears the badge on return and does not re-add it when catch-up finds nothing new', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-08T12:00:00Z'));
+      getLiveOrdersMock.mockReset();
+      getLiveOrdersMock
+        .mockResolvedValueOnce(listOf([])) // baseline at mount -> knownIds empty
+        .mockResolvedValue(listOf([ROW_B])); // catch-up on return sees only the known B
+      getNotificationSummaryMock.mockReset();
+      getNotificationSummaryMock.mockResolvedValue(SUMMARY_B);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Hidden: an order arrives live -> badge (1).
+      act(() => setVisibility('hidden'));
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T13:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(document.title).toBe(`(1) ${DEFAULT_TAB_TITLE}`);
+
+      // Return to visible -> badge cleared; catch-up diffs [B] (already known) -> no
+      // new toast, so the prefix does not come back.
+      await act(async () => {
+        setVisibility('visible');
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(document.title).toBe(DEFAULT_TAB_TITLE);
+    });
+
+    it('does NOT bump the badge for an order that arrives while the tab is visible', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-08T12:00:00Z'));
+      getNotificationSummaryMock.mockReset();
+      getNotificationSummaryMock.mockResolvedValue(SUMMARY_B);
+
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Tab is visible: an order arrives live -> toast, but the title stays bare.
+      act(() => setVisibility('visible'));
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T13:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(toastMock).toHaveBeenCalledTimes(1);
+      expect(document.title).toBe(DEFAULT_TAB_TITLE);
     });
   });
 });
