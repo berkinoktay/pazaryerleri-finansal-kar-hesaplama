@@ -2401,7 +2401,8 @@
       "PRODUCTS_DELTA": "Refresh price and stock now",
       "ORDERS": "Sync orders now",
       "SETTLEMENTS": "Sync settlements now",
-      "CLAIMS": "Sync returns now"
+      "CLAIMS": "Sync returns now",
+      "cooldownRemaining": "Available in {seconds}s"
     },
     "syncTypeLabel": {
       "PRODUCTS": "Product sync",

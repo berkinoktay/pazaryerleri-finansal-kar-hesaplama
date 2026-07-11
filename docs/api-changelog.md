@@ -47,7 +47,15 @@ section "Versioning" for details.
     buffer (its `promotedFromBufferAt` is set), meaning the seller already saw it
     as a cost-missing buffer entry; always `false` for buffer sources. The client
     suppresses a duplicate ding for an already-shown order.
-- **Trendyol order webhook receiver hardened around the vendor retry model**
+- **Manual product sync now enforces a per-store cooldown**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/products/sync`). A second
+  user-initiated (MANUAL) trigger inside the cooldown window returns **429
+  RATE_LIMITED** with a `Retry-After` header of the remaining seconds
+  (PRODUCTS window: 30 minutes). Scheduled (CRON) and store-connect (BOOTSTRAP)
+  runs never count toward the cooldown, and a currently-active sync still
+  returns **409 SYNC_IN_PROGRESS** (the cooldown check runs before the slot
+  acquire and does not preempt it). No schema change to the response shape —
+  the route already documented `429` via `Common429Response`.
   (`POST /v1/webhooks/orders/{storeId}`). Trendyol replays every failed request
   (4xx included) every 5 minutes until it succeeds, then flips the webhook to
   PASSIVE, so the response code is now a control signal:

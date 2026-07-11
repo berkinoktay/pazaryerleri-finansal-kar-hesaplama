@@ -39,6 +39,7 @@ const messages = {
       PRODUCTS: 'Ürünleri şimdi senkronize et',
       ORDERS: 'Siparişleri şimdi senkronize et',
       SETTLEMENTS: 'Hakedişleri şimdi senkronize et',
+      cooldownRemaining: 'Available in {seconds}s',
     },
     syncTypeLabel: {
       PRODUCTS: 'Ürün senkronu',
@@ -173,6 +174,35 @@ describe('SyncCenter — FAILED_RETRYABLE rendering', () => {
     renderCenter({ logs: [makeRetryableLog()] });
     const button = screen.getByRole('button', { name: 'Ürünleri şimdi senkronize et' });
     expect(button).toBeDisabled();
+  });
+
+  it('disables the trigger and shows a countdown while cooldownUntil is in the future', async () => {
+    // A recent 429 set a cooldown deadline ~2 minutes out. The button MUST
+    // be disabled and swap its label to the localized "Available in Ns"
+    // countdown (the tick comes from useNow).
+    const trigger: SyncCenterTriggerSpec = {
+      syncType: 'PRODUCTS',
+      onClick: vi.fn(),
+      isPending: false,
+      cooldownUntil: Date.now() + 120_000,
+    };
+    render(
+      <NextIntlClientProvider locale="tr" messages={messages} formats={FORMATS} timeZone="UTC">
+        <SyncCenter open onOpenChange={vi.fn()} logs={[]} triggers={[trigger]} />
+      </NextIntlClientProvider>,
+    );
+
+    const button = await screen.findByRole('button', { name: /Available in/ });
+    expect(button).toBeDisabled();
+  });
+
+  it('keeps the trigger enabled with its normal label when cooldownUntil is null', () => {
+    // A null cooldown must not disable the button or change its label.
+    renderCenter({
+      triggers: [{ syncType: 'PRODUCTS', onClick: vi.fn(), isPending: false, cooldownUntil: null }],
+    });
+    const button = screen.getByRole('button', { name: 'Ürünleri şimdi senkronize et' });
+    expect(button).toBeEnabled();
   });
 
   it('keeps the manual retrigger enabled when only terminal rows exist', () => {

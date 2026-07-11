@@ -96,12 +96,26 @@ SELECT cron.schedule(
 --
 -- Dedupe: same NOT EXISTS in-flight guard as sync-orders-delta.
 --
+-- Thundering-herd stagger: every ACTIVE store used to be enqueued with
+-- started_at = now(), so at 00:00 the worker pool saw the entire fleet's
+-- heaviest sync (a full ~5-min catalog scan each) become claimable in the
+-- same instant. tryClaimNext now treats started_at as an EARLIEST-RUN time
+-- (it claims WHERE started_at <= now() ORDER BY COALESCE(next_attempt_at,
+-- started_at)), so spreading each store's started_at deterministically over a
+-- 30-minute window makes the claim scan release them gradually instead of all
+-- at once — no extra scheduler machinery. The offset is stable per store
+-- (hash of the store id) so re-runs land in the same slot, and the hourly
+-- PRODUCTS_DELTA delta sweep keeps stock/price fresh in the meantime.
 SELECT cron.schedule(
   'sync-products-daily',
   '0 0 * * *',
   $$
   INSERT INTO sync_logs (id, organization_id, store_id, sync_type, status, started_at)
-  SELECT gen_random_uuid(), s.organization_id, s.id, 'PRODUCTS', 'PENDING', now()
+  -- hashtext() returns int4 (full range, INT_MIN included); abs(INT_MIN) would
+  -- overflow int4 and abort the whole fan-out INSERT, so cast to bigint before
+  -- abs. Same 0..1799s distribution for every other store id.
+  SELECT gen_random_uuid(), s.organization_id, s.id, 'PRODUCTS', 'PENDING',
+         now() + make_interval(secs => (abs(hashtext(s.id::text)::bigint) % 1800)::int)
   FROM stores s
   WHERE s.status = 'ACTIVE'
     AND NOT EXISTS (

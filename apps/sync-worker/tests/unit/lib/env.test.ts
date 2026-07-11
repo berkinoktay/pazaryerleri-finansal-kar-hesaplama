@@ -1,7 +1,7 @@
 import { syncLog } from '@pazarsync/sync-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { readSyncEnv, validateRequiredEnv } from '../../../src/lib/env';
+import { readSyncEnv, readWorkerConcurrency, validateRequiredEnv } from '../../../src/lib/env';
 
 describe('readSyncEnv', () => {
   const original = process.env;
@@ -50,6 +50,47 @@ describe('readSyncEnv', () => {
     process.env['SYNC_SAFETY_NET_HOURS'] = '0';
     expect(() => readSyncEnv()).toThrow(
       'SYNC_SAFETY_NET_HOURS must be a positive integer, got "0"',
+    );
+  });
+});
+
+describe('readWorkerConcurrency', () => {
+  const original = process.env;
+
+  beforeEach(() => {
+    process.env = { ...original };
+  });
+
+  afterEach(() => {
+    process.env = original;
+  });
+
+  it('returns the default of 4 when unset', () => {
+    delete process.env['SYNC_WORKER_CONCURRENCY'];
+    expect(readWorkerConcurrency()).toBe(4);
+  });
+
+  it('returns the default of 4 when blank', () => {
+    process.env['SYNC_WORKER_CONCURRENCY'] = '';
+    expect(readWorkerConcurrency()).toBe(4);
+  });
+
+  it('parses a valid positive integer', () => {
+    process.env['SYNC_WORKER_CONCURRENCY'] = '8';
+    expect(readWorkerConcurrency()).toBe(8);
+  });
+
+  it('throws on zero', () => {
+    process.env['SYNC_WORKER_CONCURRENCY'] = '0';
+    expect(() => readWorkerConcurrency()).toThrow(
+      'SYNC_WORKER_CONCURRENCY must be a positive integer, got "0"',
+    );
+  });
+
+  it('throws on a non-numeric value', () => {
+    process.env['SYNC_WORKER_CONCURRENCY'] = 'abc';
+    expect(() => readWorkerConcurrency()).toThrow(
+      'SYNC_WORKER_CONCURRENCY must be a positive integer, got "abc"',
     );
   });
 });

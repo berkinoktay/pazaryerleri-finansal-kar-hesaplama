@@ -19,6 +19,14 @@
  * is the primary ingest path; cron sweeps the trailing N hours to
  * catch anything the webhook missed (delivery failure, our downtime).
  *
+ * SYNC_WORKER_CONCURRENCY — how many claimed sync jobs the worker runs at
+ * once in its in-process bounded pool (apps/sync-worker/src/index.ts).
+ * Optional; a positive integer, defaults to 4. Each concurrent job holds a
+ * Postgres connection for the duration of a chunk, so this must stay under
+ * the Prisma/pg pool ceiling — raise it only alongside the pool size. An
+ * unset/blank value falls back to the default; an invalid value throws at
+ * read time so a typo fails fast at boot.
+ *
  * WEBHOOK_PRUNE_EXTRA_BASE_URLS — optional, runtime-only (read directly by the
  * webhook-reconcile handler, not validated here): a comma-separated list of
  * RETIRED public base URLs whose leftover Trendyol subscriptions the reconciler
@@ -71,6 +79,28 @@ export function readSyncEnv(): SyncEnv {
       8,
     ),
   };
+}
+
+// Default in-process worker-pool size. Four keeps peak connection demand
+// (the pool jobs plus the handful of background ticks — watchdog,
+// buffer-promote, webhook-reconcile, variant-resolution, event-cleanup)
+// comfortably under the pg adapter's default pool ceiling.
+const DEFAULT_WORKER_CONCURRENCY = 4;
+
+/**
+ * How many claimed sync jobs the worker runs concurrently in its bounded
+ * in-process pool. Reads SYNC_WORKER_CONCURRENCY (positive integer, default
+ * 4). Kept separate from readSyncEnv so its consumer (the poll loop in
+ * index.ts) reads only what it needs, and so validateRequiredEnv stays
+ * unchanged — an unset value is valid (falls back to the default), while an
+ * invalid one throws here and is caught by the boot config-invalid guard.
+ */
+export function readWorkerConcurrency(): number {
+  return parsePositiveInt(
+    'SYNC_WORKER_CONCURRENCY',
+    process.env['SYNC_WORKER_CONCURRENCY'],
+    DEFAULT_WORKER_CONCURRENCY,
+  );
 }
 
 // Worker-specific required vars — deliberately NARROWER than apps/api's:

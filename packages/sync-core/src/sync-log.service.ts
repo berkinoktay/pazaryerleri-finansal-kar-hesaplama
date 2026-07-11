@@ -4,7 +4,7 @@
 // is the one that knows what "a batch" means.
 
 import { prisma } from '@pazarsync/db';
-import type { Prisma, SyncLog, SyncType } from '@pazarsync/db';
+import type { Prisma, SyncLog, SyncTriggerSource, SyncType } from '@pazarsync/db';
 import { SyncErrorCode } from '@pazarsync/db/enums';
 
 import { parseSkippedPages, type ProductsCursor, type SkippedPageEntry } from './checkpoint';
@@ -98,16 +98,25 @@ export async function fail(
  * acquire path.
  *
  * `opts.startedAt` lets a caller enqueueing SEVERAL types pin a strict
- * FIFO order: `tryClaimNext` claims `ORDER BY started_at`, and rows
- * created in the same millisecond would otherwise tie non-deterministically.
+ * FIFO order: `tryClaimNext` claims `ORDER BY COALESCE(next_attempt_at,
+ * started_at)`, which for PENDING rows (null next_attempt_at) falls back to
+ * started_at — so distinct per-type start stamps still preserve the bootstrap
+ * FIFO intent, and rows created in the same millisecond would otherwise tie
+ * non-deterministically.
+ *
+ * `triggerSource` records who initiated the run (default CRON so the
+ * scheduled fan-out path stays unchanged); the API passes MANUAL for
+ * user-triggered syncs and BOOTSTRAP for the store-connect chain. Only
+ * MANUAL rows are consulted by the manual-trigger cooldown check.
  */
 export async function acquireSlot(
   organizationId: string,
   storeId: string,
   syncType: SyncType,
+  triggerSource: SyncTriggerSource = 'CRON',
   opts?: { startedAt?: Date },
 ): Promise<SyncLog> {
-  syncLog.info('slot.acquire.attempt', { organizationId, storeId, syncType });
+  syncLog.info('slot.acquire.attempt', { organizationId, storeId, syncType, triggerSource });
   try {
     const created = await prisma.syncLog.create({
       data: {
@@ -115,6 +124,7 @@ export async function acquireSlot(
         storeId,
         syncType,
         status: 'PENDING',
+        triggerSource,
         startedAt: opts?.startedAt ?? new Date(),
       },
     });
@@ -260,6 +270,28 @@ export async function getById(
     throw new NotFoundError('SyncLog', syncLogId);
   }
   return row;
+}
+
+/**
+ * The most recent MANUAL-triggered sync for `(organizationId, storeId,
+ * syncType)` — any status, newest first — or null when the user has
+ * never manually triggered this sync type on this store.
+ *
+ * Powers the manual-trigger cooldown check in the API
+ * (apps/api/src/services/sync-trigger.service.ts). Scheduled (CRON) and
+ * store-connect (BOOTSTRAP) rows are excluded on purpose so an automated
+ * fan-out never counts against a user's manual refresh window. The API
+ * owns the window comparison and the 429; this helper only reads the row.
+ */
+export async function getMostRecentManualSync(
+  organizationId: string,
+  storeId: string,
+  syncType: SyncType,
+): Promise<SyncLog | null> {
+  return prisma.syncLog.findFirst({
+    where: { organizationId, storeId, syncType, triggerSource: 'MANUAL' },
+    orderBy: { startedAt: 'desc' },
+  });
 }
 
 // ─── Worker chunk-loop helpers (PR 4) ─────────────────────────────────

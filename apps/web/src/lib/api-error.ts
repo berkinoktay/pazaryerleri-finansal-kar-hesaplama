@@ -33,8 +33,21 @@ export class ApiError extends Error {
   readonly detail: string;
   readonly problem: ProblemDetails;
   readonly requestId: string | undefined;
+  /**
+   * Seconds to wait before retrying, lifted from the `Retry-After`
+   * response header on a 429 RATE_LIMITED. `undefined` for any response
+   * that carried no such header. Consumed by the SyncCenter manual-trigger
+   * cooldown countdown.
+   */
+  readonly retryAfterSeconds: number | undefined;
 
-  constructor(status: number, code: string, detail: string, problem: ProblemDetails) {
+  constructor(
+    status: number,
+    code: string,
+    detail: string,
+    problem: ProblemDetails,
+    retryAfterSeconds?: number,
+  ) {
     super(`[${status.toString()} ${code}] ${detail}`);
     this.name = 'ApiError';
     this.status = status;
@@ -42,6 +55,7 @@ export class ApiError extends Error {
     this.detail = detail;
     this.problem = problem;
     this.requestId = problem.meta?.requestId;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -68,8 +82,10 @@ function isProblemDetails(value: unknown): value is ProblemDetails {
  * openapi-fetch's `{ error, response }`.
  */
 export function throwApiError(error: unknown, response: Response | undefined): never {
+  const retryAfterSeconds = parseRetryAfterSeconds(response);
+
   if (isProblemDetails(error)) {
-    throw new ApiError(error.status, error.code, error.detail, error);
+    throw new ApiError(error.status, error.code, error.detail, error, retryAfterSeconds);
   }
 
   if (response === undefined) {
@@ -99,5 +115,20 @@ export function throwApiError(error: unknown, response: Response | undefined): n
       detail: `Unexpected response ${response.status.toString()}`,
       ...(headerRequestId !== undefined ? { meta: { requestId: headerRequestId } } : {}),
     },
+    retryAfterSeconds,
   );
+}
+
+/**
+ * Parse the `Retry-After` response header into whole seconds. The backend
+ * always emits the delta-seconds form (`RateLimitedError` → `Retry-After:
+ * <n>`), so only the integer case is handled; an HTTP-date value or a
+ * missing / non-numeric header yields `undefined`.
+ */
+function parseRetryAfterSeconds(response: Response | undefined): number | undefined {
+  if (response === undefined) return undefined;
+  const raw = response.headers.get('Retry-After');
+  if (raw === null) return undefined;
+  const seconds = Number.parseInt(raw, 10);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }

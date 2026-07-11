@@ -21,7 +21,12 @@ export const MAX_SYNC_ATTEMPTS = 5;
  *
  * Claimable rows (all require attempt_count < MAX_SYNC_ATTEMPTS):
  *   - status = 'PENDING'
- *   - status = 'FAILED_RETRYABLE' AND nextAttemptAt <= now()
+ *   - status = 'FAILED_RETRYABLE' AND next_attempt_at <= now()
+ *   - AND started_at <= now() — see the earliest-run note below
+ *
+ * Ordering: ORDER BY COALESCE(next_attempt_at, started_at) — a row's
+ * priority is when it became READY, not when it was first enqueued (see
+ * the fair-ordering note below).
  *
  * On success the row transitions to RUNNING with claimedAt/claimedBy
  * stamped and attemptCount incremented.
@@ -35,7 +40,20 @@ export async function tryClaimNext(workerId: string): Promise<SyncLog | null> {
                OR (status = 'FAILED_RETRYABLE' AND next_attempt_at <= now())
              )
          AND attempt_count < ${MAX_SYNC_ATTEMPTS}
-       ORDER BY started_at
+         -- Earliest-run gate: started_at doubles as an earliest-run time so a
+         -- fan-out can stagger its enqueues into the future (see the daily
+         -- products cron) and this scan naturally spreads them out instead of
+         -- hammering every store at the same instant. Existing callers all set
+         -- started_at <= now() (bootstrap uses base+index ms in the past,
+         -- acquireSlot uses now()), so this gate is a no-op for them.
+         AND started_at <= now()
+       -- Fair ordering: a retry's priority is when its backoff elapsed
+       -- (next_attempt_at), not its original enqueue time. Ordering by
+       -- started_at alone let an old FAILED_RETRYABLE row (ancient started_at)
+       -- permanently outrank fresh PENDING work. COALESCE falls back to
+       -- started_at for PENDING rows (next_attempt_at is null there), so plain
+       -- FIFO among PENDING work is preserved.
+       ORDER BY COALESCE(next_attempt_at, started_at)
        FOR UPDATE SKIP LOCKED
        LIMIT 1
     `;

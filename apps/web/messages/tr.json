@@ -2401,7 +2401,8 @@
       "PRODUCTS_DELTA": "Fiyat ve stoku şimdi tazele",
       "ORDERS": "Siparişleri şimdi senkronize et",
       "SETTLEMENTS": "Hakedişleri şimdi senkronize et",
-      "CLAIMS": "İadeleri şimdi senkronize et"
+      "CLAIMS": "İadeleri şimdi senkronize et",
+      "cooldownRemaining": "{seconds} sn sonra kullanılabilir"
     },
     "syncTypeLabel": {
       "PRODUCTS": "Ürün senkronu",
