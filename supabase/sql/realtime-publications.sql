@@ -18,8 +18,10 @@
 
 -- ─── sync_logs ────────────────────────────────────────────────────────
 -- Powers the SyncCenter UI (PR 5 of the products-page rollout). The UI
--- subscribes filtered by `store_id=eq.<id>` so only the user's active
--- store's syncs trigger client-side updates.
+-- subscribes filtered by `organization_id=eq.<id>` (the org-wide
+-- OrgSyncsProvider channel, see realtime.ts subscribeToOrgSyncs) so every sync
+-- across every store the user can see in the active org triggers client-side
+-- updates. RLS still narrows delivery to the user's granted stores (below).
 --
 -- RLS policy: see rls-policies.sql — `sync_logs_org_member_read` gates on
 -- `can_access_store(store_id)` (a SECURITY DEFINER STABLE plain-function call

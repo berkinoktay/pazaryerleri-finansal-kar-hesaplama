@@ -10,19 +10,10 @@ import {
 } from '@/lib/supabase/realtime';
 
 import { listOrgSyncLogs, type SyncLog } from '../api/list-org-sync-logs.api';
+import { computeSyncRefetchInterval, isActive } from '../lib/sync-refetch-interval';
 import { orgSyncKeys } from '../query-keys';
 
-// 10s, not 2s — polling is now a true fallback (only fires when the
-// Realtime channel is unhealthy), so the slower tempo is fine. The
-// 2s polling we used pre-PR-#59 burnt ~30 redundant DB queries per
-// minute per active merchant during a sync; almost all of those
-// duplicated work the WebSocket already did.
-const POLLING_INTERVAL_MS = 10_000;
 const RECENT_LIMIT = 5;
-
-function isActive(status: SyncLog['status']): boolean {
-  return status === 'PENDING' || status === 'RUNNING' || status === 'FAILED_RETRYABLE';
-}
 
 interface OrgSyncsContextValue {
   activeSyncs: SyncLog[];
@@ -42,13 +33,16 @@ const ctx = React.createContext<OrgSyncsContextValue | null>(null);
  *   1. REST hydration on mount via listOrgSyncLogs
  *   2. Realtime postgres_changes (subscribeToOrgSyncs) — sub-second
  *      cache updates via setQueryData
- *   3. Polling fallback — fires only when the Realtime channel is NOT
- *      healthy (errored / paused / connecting). Health is reported by
- *      `subscribeToOrgSyncs` via `onHealthChange`. While the channel
- *      is healthy, refetchInterval returns false and we save the DB
- *      the redundant query. On `errored`/`paused` → `healthy` we fire
- *      one `invalidateQueries` to reconcile any events missed during
- *      the outage.
+ *   3. Polling backstop — an unhealthy channel (errored / connecting)
+ *      polls unconditionally; a healthy channel still runs a slow
+ *      reconcile floor while a sync is active, because channel
+ *      membership is not delivery proof (a dead-but-SUBSCRIBED WAL pipe
+ *      would otherwise freeze the progress bar). See
+ *      `computeSyncRefetchInterval`. Health is reported by
+ *      `subscribeToOrgSyncs` via `onHealthChange`. On `errored` entry
+ *      and on `errored`/`paused` → `healthy` recovery we also fire one
+ *      `invalidateQueries` to reconcile any events missed around the
+ *      outage edges.
  */
 export function OrgSyncsProvider({
   orgId,
@@ -69,6 +63,11 @@ export function OrgSyncsProvider({
   // a prev-vs-next check would only ever see 'connecting' -> 'healthy' and the
   // outage-recovery reconcile would be dead code.
   const hadOutageRef = React.useRef(false);
+  // Previous health, tracked as a ref because onHealthChange closes over the
+  // effect's initial render (realtimeHealth state would be stale inside it).
+  // Used to fire the outage-entry reconcile only on the transition edge INTO
+  // 'errored', never on repeated 'errored' emits.
+  const prevHealthRef = React.useRef<RealtimeHealth>('connecting');
 
   const query: UseQueryResult<SyncLog[]> = useQuery<SyncLog[]>({
     queryKey: isEnabled && orgId !== null ? orgSyncKeys.list(orgId) : ['org-syncs', '__disabled__'],
@@ -79,16 +78,10 @@ export function OrgSyncsProvider({
       return listOrgSyncLogs(orgId);
     },
     enabled: isEnabled,
-    refetchInterval: (q) => {
-      // Polling is a fallback for an unhealthy channel — when Realtime
-      // is delivering events we don't need it. `paused` (tab hidden)
-      // also returns false because nobody is watching anyway.
-      if (realtimeHealth === 'healthy') return false;
-      if (realtimeHealth === 'paused') return false;
-      const data = q.state.data;
-      if (data === undefined) return false;
-      return data.some((log) => isActive(log.status)) ? POLLING_INTERVAL_MS : false;
-    },
+    // `realtimeHealth` is read from render state (not a ref) so each health
+    // transition re-renders, React Query re-evaluates this callback, and the
+    // new interval takes effect on the next tick instead of a stale one.
+    refetchInterval: (q) => computeSyncRefetchInterval(realtimeHealth, q.state.data),
   });
 
   React.useEffect(() => {
@@ -101,6 +94,19 @@ export function OrgSyncsProvider({
         );
       },
       onHealthChange: (next) => {
+        const prev = prevHealthRef.current;
+        prevHealthRef.current = next;
+
+        // Outage-entry edge: the moment the channel drops to 'errored' from a
+        // non-errored state, refetch once. A silently dead pipe may have never
+        // delivered its last events, so the UI must reconcile immediately
+        // instead of waiting for the first outage poll tick. Edge-guarded so
+        // repeated 'errored' emits don't stack refetches; the initial
+        // 'connecting' mount is not 'errored' so it never triggers this.
+        if (next === 'errored' && prev !== 'errored') {
+          void queryClient.invalidateQueries({ queryKey });
+        }
+
         // Recovery edge: when health returns to healthy after a real outage,
         // refetch once so any events emitted during the outage window get
         // reconciled. Ref-latched (see hadOutageRef) so the interim
