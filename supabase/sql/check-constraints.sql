@@ -162,6 +162,27 @@ CREATE INDEX IF NOT EXISTS sync_logs_claim_order_idx
 -- columns, dropped with the 2026-07-08 migration-history baseline. Unlike the
 -- partial (WHERE-clause) uniques above, these are plain indexes Prisma owns.
 
+-- ─── Paket D: webhook_events ingest-queue scan index ───────────────────
+-- webhook_events doubles as a durable ingest queue: the consumer tick in
+-- apps/sync-worker (webhook-events-consumer) scans for outstanding work with
+--   SELECT id FROM webhook_events
+--    WHERE processed_at IS NULL
+--      AND (next_process_at IS NULL OR next_process_at <= now())
+--    ORDER BY received_at ASC LIMIT <batch>
+-- every few seconds. The overwhelming majority of rows are terminal
+-- (processed_at IS NOT NULL) and must never be walked; a PARTIAL index over
+-- received_at restricted to the unprocessed set keeps that scan on the small
+-- live tail instead of the ever-growing audit log. The now()-based
+-- next_process_at predicate can't live in the index (now() is not immutable),
+-- so it filters the already-narrow partial scan. Prisma 7 has no WHERE-clause
+-- index syntax, so it lives here + is registered in the worker's
+-- REQUIRED_INDEXES DDL assertions (a db reset that skips supabase/sql must not
+-- silently drop the queue's scan support). Mirror it into the introducing
+-- migration for prod `prisma migrate deploy`.
+CREATE INDEX IF NOT EXISTS webhook_events_unprocessed_idx
+  ON webhook_events (received_at)
+  WHERE processed_at IS NULL;
+
 -- ─── 2026-06-12 profit-freeze: calculated-or-excluded ──────────────────
 -- Orders'a giren her sipariş iki nihai durumdan birindedir: HESAPLANMIŞ
 -- (estimated_net_profit NOT NULL) ya da KÂR-DIŞI (profit_excluded_at NOT

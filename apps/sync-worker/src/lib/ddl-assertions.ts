@@ -5,11 +5,15 @@
 // database recreated by `prisma migrate dev` / `supabase db reset` comes up
 // structurally valid to Prisma but silently missing them:
 //
-//   1. Partial UNIQUE indexes (Prisma 7 has no native WHERE-clause syntax):
-//        - one-active-job-per-(store, sync_type): duplicate sync jobs run in
-//          parallel and double-write orders/fees;
-//        - fee idempotency: a racing settlement re-poll or a late cost re-entry
-//          double-books a fee row and corrupts the write-once profit numbers.
+//   1. Partial indexes (Prisma 7 has no native WHERE-clause syntax):
+//        - one-active-job-per-(store, sync_type) UNIQUE: duplicate sync jobs run
+//          in parallel and double-write orders/fees;
+//        - fee idempotency UNIQUE: a racing settlement re-poll or a late cost
+//          re-entry double-books a fee row and corrupts the write-once profit
+//          numbers;
+//        - webhook ingest-queue scan (non-unique): the consumer tick scans the
+//          small unprocessed tail of webhook_events; without it the queue scan
+//          degrades to a full walk of the ever-growing audit log.
 //   2. supabase_realtime publication membership: the frontend's live surfaces
 //        subscribe to sync_logs UPDATE, orders INSERT, and
 //        live_performance_buffer '*' (INSERT + UPDATE) events. When a table is
@@ -24,16 +28,21 @@
 
 import type { PrismaClient } from '@pazarsync/db';
 
-// The correctness-critical partial UNIQUE indexes that live only in supabase/sql
+// The correctness-critical partial indexes that live only in supabase/sql
 // (NOT in Prisma migrations). Keep this list in sync with its two canonical
 // source files:
 //   supabase/sql/rls-policies.sql      -> sync_logs_active_slot_uniq
 //   supabase/sql/check-constraints.sql -> order_fees_estimate_fee_type_uniq,
-//                                         org_period_fees_settlement_row_uniq
+//                                         org_period_fees_settlement_row_uniq,
+//                                         webhook_events_unprocessed_idx
+// The first three are UNIQUE guards; webhook_events_unprocessed_idx is a
+// non-unique queue-scan index registered here so a db reset that skips
+// supabase/sql can't silently drop the webhook ingest queue's scan support.
 export const REQUIRED_INDEXES = [
   'sync_logs_active_slot_uniq',
   'order_fees_estimate_fee_type_uniq',
   'org_period_fees_settlement_row_uniq',
+  'webhook_events_unprocessed_idx',
 ] as const;
 
 // The tables that MUST be members of the supabase_realtime publication for the
@@ -76,9 +85,10 @@ function buildMessage(missing: MissingDdl): string {
   const parts: string[] = [];
   if (missing.indexes.length > 0) {
     parts.push(
-      `missing partial unique index(es): ${missing.indexes.join(', ')} ` +
-        `(without them the worker silently loses duplicate-job protection and/or ` +
-        `fee idempotency -> wrong profit numbers, no error)`,
+      `missing partial index(es): ${missing.indexes.join(', ')} ` +
+        `(without them the worker silently loses duplicate-job protection, ` +
+        `fee idempotency -> wrong profit numbers, or webhook ingest-queue scan ` +
+        `support, no error)`,
     );
   }
   if (missing.publicationTables.length > 0) {

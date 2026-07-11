@@ -60,6 +60,16 @@ describe('assertCriticalDdl (boot-time DDL guard)', () => {
         missing: [bogus],
       });
     });
+
+    it('resolves for the webhook ingest-queue scan index (Paket D)', async () => {
+      // The non-unique queue-scan index is registered alongside the UNIQUE
+      // guards so a db reset that skips supabase/sql fails boot loudly instead
+      // of silently degrading the consumer tick's scan to a full-table walk.
+      expect(REQUIRED_INDEXES).toContain('webhook_events_unprocessed_idx');
+      await expect(
+        assertIndexesExist(prisma, ['webhook_events_unprocessed_idx']),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe('supabase_realtime publication tables', () => {

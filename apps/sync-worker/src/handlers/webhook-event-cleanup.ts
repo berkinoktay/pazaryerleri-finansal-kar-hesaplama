@@ -1,9 +1,17 @@
 /**
  * Webhook-event retention cleanup tick.
  *
- * `webhook_events` is an idempotency + raw-audit log that only ever grows — the
- * webhook receiver INSERTs one row per delivery and nothing deletes them. This
- * tick prunes rows older than the retention window so the table stays bounded.
+ * `webhook_events` is an idempotency + raw-audit log AND a durable ingest queue
+ * (Paket D): the webhook receiver INSERTs one row per delivery and the sync-worker
+ * consumer tick processes them. This tick prunes rows older than the retention
+ * window so the table stays bounded.
+ *
+ * Queue durability: only CLOSED rows (processed_at IS NOT NULL) are eligible for
+ * pruning. An unprocessed event is still outstanding queue work — it MUST survive
+ * at the retention boundary so the consumer can eventually pick it up; deleting it
+ * would drop the order silently. Terminal rows (success OR an exhausted/deterministic
+ * failure) all carry processed_at, so they age out normally and the table cannot
+ * grow unbounded.
  *
  * Retention window is WEBHOOK_EVENT_RETENTION_DAYS (optional; DEFAULT_RETENTION_DAYS
  * when unset/invalid). Deletion is BATCHED — a single unbounded DELETE would take a
@@ -65,6 +73,7 @@ export async function processWebhookEventCleanup(): Promise<void> {
       WHERE id IN (
         SELECT id FROM webhook_events
         WHERE received_at < ${cutoff}
+          AND processed_at IS NOT NULL
         LIMIT ${BATCH_SIZE}
       )
     `;
