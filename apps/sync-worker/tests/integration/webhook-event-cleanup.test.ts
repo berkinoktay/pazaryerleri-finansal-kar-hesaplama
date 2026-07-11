@@ -16,16 +16,26 @@ const DAY_MS = 24 * 60 * 60_000;
  * Seed a webhook_events row aged `ageDays` in the past. `receivedAt` has a
  * `now()` default with no factory override, so it is pulled back via a follow-up
  * update.
+ *
+ * Rows default to PROCESSED (processed_at stamped) because cleanup only prunes
+ * closed rows — an aged row that should be deletable must be processed. Pass
+ * `{ processed: false }` to seed an outstanding (unprocessed) queue row, which
+ * cleanup must never touch regardless of age.
  */
 async function seedEventAged(
   organizationId: string,
   storeId: string,
   ageDays: number,
+  options: { processed?: boolean } = {},
 ): Promise<string> {
-  const event = await createWebhookEvent(organizationId, storeId);
+  const agedDate = new Date(Date.now() - ageDays * DAY_MS);
+  const processed = options.processed ?? true;
+  const event = await createWebhookEvent(organizationId, storeId, {
+    processedAt: processed ? agedDate : null,
+  });
   await prisma.webhookEvent.update({
     where: { id: event.id },
-    data: { receivedAt: new Date(Date.now() - ageDays * DAY_MS) },
+    data: { receivedAt: agedDate },
   });
   return event.id;
 }
@@ -84,6 +94,22 @@ describe('processWebhookEventCleanup', () => {
 
     expect(await exists(beyond)).toBe(false);
     expect(await exists(within)).toBe(true);
+  });
+
+  it('never prunes an unprocessed event even when it is older than the retention window', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // Both aged 120 days — well beyond the 90-day default. The processed one ages
+    // out normally; the unprocessed one is still outstanding queue work (Paket D
+    // ingest queue) and must survive so the consumer tick can eventually pick it
+    // up. Deleting it would silently drop the order.
+    const processedOld = await seedEventAged(org.id, store.id, 120, { processed: true });
+    const unprocessedOld = await seedEventAged(org.id, store.id, 120, { processed: false });
+
+    await processWebhookEventCleanup();
+
+    expect(await exists(processedOld)).toBe(false);
+    expect(await exists(unprocessedOld)).toBe(true);
   });
 
   it('falls back to the 90-day default when the env value is invalid', async () => {

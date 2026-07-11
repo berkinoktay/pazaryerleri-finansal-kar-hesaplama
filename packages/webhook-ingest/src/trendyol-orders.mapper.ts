@@ -1,5 +1,5 @@
 /**
- * Webhook payload → MappedOrder DTO.
+ * Webhook payload -> MappedOrder DTO.
  *
  * Reuses `@pazarsync/marketplace`'s `mapTrendyolShipmentPackage` (PR-A) but
  * applies two webhook-specific overrides:
@@ -8,7 +8,7 @@
  *      a non-null OrderStatus via `mapTrendyolStatusToEnum`). We override
  *      the mapper's status fallback so the routed status sticks.
  *
- *   2. `createdBy === 'transfer'` → status forced to CANCELLED. Per
+ *   2. `createdBy === 'transfer'` -> status forced to CANCELLED. Per
  *      webhook-model.md, a transfer means Trendyol forwarded the package to
  *      another seller; from our DB's POV the package is no longer ours.
  *      Sync flow doesn't see transfers (getShipmentPackages excludes them),
@@ -32,8 +32,8 @@ export function mapTrendyolWebhookPayload(
   routedStatus: MappedOrder['status'],
   commissionVatRate?: number,
 ): MappedOrder {
-  // commissionVatRate: DB'den çözülen komisyon KDV oranı (denetim A). Omit →
-  // mapper TRENDYOL_COMMISSION_VAT_RATE fallback'ini kullanır (sync ile aynı yol).
+  // commissionVatRate: commission VAT rate resolved from the DB (audit A). Omit
+  // -> the mapper uses its TRENDYOL_COMMISSION_VAT_RATE fallback (same path as sync).
   const base = mapTrendyolShipmentPackage(payload, commissionVatRate);
 
   // Apply the route's resolved status (the route already short-circuits

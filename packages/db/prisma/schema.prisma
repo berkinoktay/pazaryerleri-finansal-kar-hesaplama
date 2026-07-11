@@ -1954,6 +1954,14 @@ model WebhookEvent {
   receivedAt               DateTime  @default(now()) @map("received_at")
   processedAt              DateTime? @map("processed_at")
   processingError          String?   @map("processing_error")
+  // Queue fields (Paket D): the route lease and the sync-worker consumer tick
+  // coordinate through these to make concurrent double-processing structurally
+  // impossible. `processAttempts` counts lease attempts so the consumer can give
+  // up after a cap (terminal → stamp processedAt). `nextProcessAt` gates
+  // eligibility: null = processable now; a future timestamp = a held lease or a
+  // backoff delay before the next retry, so a scanner skips the row until then.
+  processAttempts          Int       @default(0) @map("process_attempts")
+  nextProcessAt            DateTime? @map("next_process_at")
   // Full payload (jsonb) — debugging + forward-compat
   rawPayload               Json      @map("raw_payload")
 

@@ -32,6 +32,7 @@
     "@pazarsync/profit": "workspace:*",
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",
+    "@pazarsync/webhook-ingest": "workspace:*",
     "@scalar/hono-api-reference": "^0.10.14",
     "@supabase/supabase-js": "catalog:",
     "decimal.js": "catalog:",
