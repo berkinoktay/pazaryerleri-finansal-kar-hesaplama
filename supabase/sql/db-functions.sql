@@ -20,6 +20,13 @@
 -- than 7 days" whenever it runs, so the exact cron fire time only affects how
 -- soon over-retained rows are purged, never which rows.
 --
+-- STOCK: a reaped row had already decremented local variant stock at intake
+-- (owner ruling 2026-07-11 — the sale is real the moment the order arrives, even
+-- if it never gets booked into `orders`). That decrement is deliberately NOT
+-- reversed here: the unit genuinely left the shelf, so leaving stock down is
+-- correct. Only the split-dematerialize path (intake-order.ts) ever re-adds a
+-- decrement, and only because the split children re-book the same units.
+--
 -- System-wide (all orgs/stores) — a maintenance job, not a tenant-scoped query.
 -- Returns the number of rows deleted (for the cron log + the integration test).
 --

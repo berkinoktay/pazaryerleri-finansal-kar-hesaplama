@@ -30,7 +30,12 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
-import { incrementVariantStock, recomputeProductsTotalStock } from './stock';
+import {
+  decrementVariantStock,
+  incrementVariantStock,
+  isOrderOnBusinessToday,
+  recomputeProductsTotalStock,
+} from './stock';
 import { upsertOrderWithSnapshot } from './upsert-order';
 
 export type OrderIntakeOutcome =
@@ -66,32 +71,39 @@ export async function intakeOrder(args: {
   // Hard delete matches the project convention (no soft delete); the
   // WebhookEvent / SyncLog rows keep the audit trail.
   if (mapped.dematerialized) {
-    // Reverse the optimistic stock decrement before deleting the ghost. If the
-    // pre-split package was persisted as a real order, upsertOrderWithSnapshot
-    // may have decremented its lines from local variant stock. The split children
+    // Reverse the optimistic stock decrement before deleting the ghost. The
+    // pre-split package may have decremented local variant stock either as a
+    // persisted ORDER (direct-calculable first insert) or as a BUFFER row
+    // (cost-missing-today intake — owner ruling 2026-07-11). The split children
     // re-carry that same content under NEW shipmentPackageIds and will decrement
-    // again as fresh lines, so re-adding the ghost's line quantities here nets
-    // the two out — otherwise the same units would be subtracted twice. This is
-    // the ONLY place the optimistic decrement is undone; every other cancel /
-    // return leaves it for the catalog scan to reconcile. Owner-approved
-    // 2026-07-11. Interactive transaction so the re-add + recompute + deletes
-    // commit atomically.
+    // again as fresh lines, so re-adding the ghost's line quantities here nets the
+    // two out — otherwise the same units would be subtracted twice. This is the
+    // ONLY place the optimistic decrement is undone; every other cancel / return
+    // leaves it for the catalog scan to reconcile. Owner-approved 2026-07-11.
+    // Interactive transaction so the re-add + recompute + deletes commit atomically.
     //
-    // Symmetry with the decrement gate (upsert-order.ts): the decrement fires
-    // only for an order whose business date is TODAY, so the reversal re-adds
-    // ONLY when the ghost's own business date is today. A past-day (backfilled /
-    // bootstrapped) ghost never decremented, so re-adding its quantities would
-    // over-credit stock the sale never consumed. The born-CANCELLED decrement
-    // gate has no mirror here: this branch is reached only for `dematerialized`
-    // (UnPacked) ghosts — the CANCELLED intake is a separate branch checked after
-    // this one — so business-today is the load-bearing reversal guard.
+    // Reversal source is EXCLUSIVE — the order row OR the buffer rows, never both.
+    // Invariant: an order row and a buffer row do NOT coexist for one
+    // (org, store, platformOrderId). The buffered path only inserts a buffer row
+    // when no order exists (the routing persists calculable / already-in-orders /
+    // past-day BEFORE reaching the buffer branch), and buffer promotion deletes
+    // the buffer row atomically with the order write. So exactly one source owns
+    // the single decrement; re-adding from just that source both undoes the
+    // decrement and guarantees no variant is double-credited even in a rare
+    // cross-path race — preferring the order row when present.
+    //
+    // Symmetry with the decrement gate: the decrement fires only for an order
+    // whose business date is TODAY, so the reversal re-adds ONLY when the source's
+    // own business date is today. A past-day (backfilled / bootstrapped) ghost
+    // never decremented, so re-adding would over-credit stock the sale never
+    // consumed. The born-CANCELLED decrement gate has no mirror here: this branch
+    // is reached only for `dematerialized` (UnPacked) ghosts — the CANCELLED
+    // intake is a separate branch checked after this one — so business-today is
+    // the load-bearing reversal guard.
     const { deletedOrder, deletedBufferEntries } = await prisma.$transaction(async (tx) => {
       const ghost = await tx.order.findFirst({
         where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
         select: {
-          // Reversal-symmetry gate: re-add only when the ghost decremented in the
-          // first place, i.e. its own business date is today (see the decrement
-          // gate in upsert-order.ts). A past-day ghost never decremented.
           orderDate: true,
           items: {
             where: { productVariantId: { not: null } },
@@ -105,19 +117,44 @@ export async function intakeOrder(args: {
         },
       });
 
-      // Reverse only a ghost whose business date is today — the exact condition
-      // under which the optimistic decrement fired. Skipping a past-day ghost
-      // avoids over-crediting stock that a backfilled/bootstrapped ghost never
-      // consumed (its decrement was gated off in upsert-order.ts).
-      if (ghost !== null && getBusinessDate(ghost.orderDate) === getBusinessDate()) {
-        const affectedProductIds = new Set<string>();
-        for (const item of ghost.items) {
-          if (item.productVariant === null) continue;
-          await incrementVariantStock(tx, item.productVariant.id, item.quantity);
-          affectedProductIds.add(item.productVariant.productId);
+      const affectedProductIds = new Set<string>();
+
+      if (ghost !== null) {
+        // The order row owns the decrement. Re-add its resolved-variant line
+        // quantities when the ghost's business date is today — the exact condition
+        // under which the optimistic decrement fired.
+        if (isOrderOnBusinessToday(ghost.orderDate)) {
+          for (const item of ghost.items) {
+            if (item.productVariant === null) continue;
+            await incrementVariantStock(tx, item.productVariant.id, item.quantity);
+            affectedProductIds.add(item.productVariant.productId);
+          }
         }
-        await recomputeProductsTotalStock(tx, [...affectedProductIds]);
+      } else {
+        // No order row → a buffered ghost may have decremented at intake with no
+        // orders row ever written. Re-add each buffer row's resolved-variant line
+        // quantities, gated on the BUFFER row's own business date (the same gate
+        // the buffered-intake decrement used). Lines are parsed out of the
+        // mapped_order JSONB with this file's runtime-narrowing convention.
+        const bufferRows = await tx.livePerformanceBuffer.findMany({
+          where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
+          select: { orderDate: true, mappedOrder: true },
+        });
+        for (const row of bufferRows) {
+          if (!isOrderOnBusinessToday(row.orderDate)) continue;
+          for (const line of parseBufferResolvableLines(row.mappedOrder)) {
+            const variant = await tx.productVariant.findFirst({
+              where: { storeId, barcode: line.barcode },
+              select: { id: true, productId: true },
+            });
+            if (variant === null) continue;
+            await incrementVariantStock(tx, variant.id, line.quantity);
+            affectedProductIds.add(variant.productId);
+          }
+        }
       }
+
+      await recomputeProductsTotalStock(tx, [...affectedProductIds]);
 
       const orderDel = await tx.order.deleteMany({
         where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
@@ -181,18 +218,38 @@ export async function intakeOrder(args: {
 
   // Today's cost-missing, new → buffer (PENDING). Idempotent on (storeId,
   // platformOrderId): a re-delivery hits the composite unique → P2002 → dedupe.
+  //
+  // The create and the optimistic stock decrement share ONE transaction so the
+  // buffer row and the stock movement commit atomically. A P2002 from the create
+  // aborts the tx BEFORE the decrement runs, so a re-delivery (buffered_deduped)
+  // never decrements a second time — the idempotency unique is what distinguishes
+  // the genuinely-new 'buffered' outcome from a dedupe.
   try {
-    await prisma.livePerformanceBuffer.create({
-      data: {
-        organizationId,
-        storeId,
-        orderDate: getBusinessDateAnchor(mapped.orderDate),
-        platformOrderId: mapped.platformOrderId,
-        platformOrderNumber: mapped.platformOrderNumber,
-        rawPayload: args.rawPayload ?? (mapped as unknown as Prisma.InputJsonValue),
-        mappedOrder: mapped as unknown as Prisma.InputJsonValue,
-        status: 'PENDING',
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.livePerformanceBuffer.create({
+        data: {
+          organizationId,
+          storeId,
+          orderDate: getBusinessDateAnchor(mapped.orderDate),
+          platformOrderId: mapped.platformOrderId,
+          platformOrderNumber: mapped.platformOrderNumber,
+          rawPayload: args.rawPayload ?? (mapped as unknown as Prisma.InputJsonValue),
+          mappedOrder: mapped as unknown as Prisma.InputJsonValue,
+          status: 'PENDING',
+        },
+      });
+
+      // Optimistic stock decrement at INTAKE (owner ruling 2026-07-11): the sale
+      // happened on the marketplace the moment the order arrived, so local stock
+      // drops immediately even while the order parks in the cost-missing buffer —
+      // cost only affects profitability, never whether the unit left the shelf.
+      // Same gates as the direct-persist decrement (upsert-order.ts): business-today
+      // and non-CANCELLED. When this order later graduates from the buffer,
+      // upsertOrderWithSnapshot is called with promotedFromBuffer=true and skips its
+      // own decrement, so the units drop exactly once across the buffer→orders life.
+      if (isOrderOnBusinessToday(mapped.orderDate) && mapped.status !== 'CANCELLED') {
+        await decrementBufferedOrderStock(tx, storeId, mapped.lines);
+      }
     });
     return { kind: 'buffered' };
   } catch (err) {
@@ -201,6 +258,33 @@ export async function intakeOrder(args: {
     }
     throw err;
   }
+}
+
+/**
+ * Decrement local variant stock for a buffered order's resolved lines, in the
+ * SAME transaction as the buffer insert. Mirrors the first-insert decrement in
+ * upsert-order.ts: variant lookup by (storeId, barcode), subtract the sold
+ * quantity, then recompute the owning products' denormalized totalStock. Only
+ * lines whose barcode resolves to a variant move stock — an unmatched line
+ * carries none. The business-today / non-CANCELLED gates are order-level, applied
+ * by the caller.
+ */
+async function decrementBufferedOrderStock(
+  tx: Prisma.TransactionClient,
+  storeId: string,
+  lines: MappedOrder['lines'],
+): Promise<void> {
+  const affectedProductIds = new Set<string>();
+  for (const line of lines) {
+    const variant = await tx.productVariant.findFirst({
+      where: { storeId, barcode: line.barcode },
+      select: { id: true, productId: true },
+    });
+    if (variant === null) continue;
+    await decrementVariantStock(tx, variant.id, line.quantity);
+    affectedProductIds.add(variant.productId);
+  }
+  await recomputeProductsTotalStock(tx, [...affectedProductIds]);
 }
 
 /**
@@ -285,4 +369,38 @@ function parseBufferLastModified(mappedOrder: Prisma.JsonValue): Date | null {
   }
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+interface BufferResolvableLine {
+  barcode: string;
+  quantity: number;
+}
+
+/**
+ * Extract the resolvable (barcode + quantity) lines from a buffer row's
+ * `mappedOrder` JSONB, using the same defensive runtime narrowing as
+ * `parseBufferLastModified` — anything whose shape does not match is skipped.
+ * Used by the dematerialize reversal to re-add a buffered ghost's optimistic
+ * decrement when no orders row was ever written for it.
+ */
+function parseBufferResolvableLines(mappedOrder: Prisma.JsonValue): BufferResolvableLine[] {
+  if (typeof mappedOrder !== 'object' || mappedOrder === null || Array.isArray(mappedOrder)) {
+    return [];
+  }
+  const rawLines = mappedOrder['lines'];
+  if (!Array.isArray(rawLines)) {
+    return [];
+  }
+  const lines: BufferResolvableLine[] = [];
+  for (const raw of rawLines) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      continue;
+    }
+    const barcode = raw['barcode'];
+    const quantity = raw['quantity'];
+    if (typeof barcode === 'string' && typeof quantity === 'number') {
+      lines.push({ barcode, quantity });
+    }
+  }
+  return lines;
 }

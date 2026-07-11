@@ -138,6 +138,18 @@ async function seedVariant(
   });
 }
 
+// Set a known starting stock on the single variant behind `barcode` and align the
+// denormalized Product.totalStock (seedVariant leaves quantity at its 0 default),
+// so the optimistic-decrement assertions have an observable baseline.
+async function setStock(storeId: string, barcode: string, quantity: number): Promise<void> {
+  await prisma.productVariant.updateMany({ where: { storeId, barcode }, data: { quantity } });
+  const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+  await prisma.product.update({
+    where: { id: variant.productId },
+    data: { totalStock: quantity },
+  });
+}
+
 // 36h back so the date is unambiguously a previous business day even if the test
 // runs just after midnight (the routing reads getBusinessDate(orderDate)).
 const PAST_DAY_MS = 36 * 60 * 60 * 1000;
@@ -798,5 +810,122 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.platformOrderId).toBe('cancel-1');
     expect(order.status).toBe('CANCELLED');
+  });
+
+  // ── Optimistic stock decrement at INTAKE (owner ruling 2026-07-11) ──
+  // The sale is real the moment the order arrives, so local stock drops
+  // immediately even when the order parks in the cost-missing buffer.
+
+  it('(stock a) cost-missing today buffered intake decrements the matched variant immediately (40 → 39, no orders row)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // cost-missing → buffer
+    await setStock(store.id, BARCODE, 40);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'stock-buf', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    // Stock dropped the moment the order arrived, even though it sits in the
+    // buffer waiting for cost — 40 → 39, with NO persisted orders row.
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(39);
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: variant.productId } })).totalStock,
+    ).toBe(39);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+  });
+
+  it('(stock c) a buffered_deduped re-delivery does NOT decrement a second time', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    await setStock(store.id, BARCODE, 40);
+    const mapped = buildMapped({ platformOrderId: 'stock-dedupe', orderDate: new Date() });
+
+    const first = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+    const second = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+
+    expect(first).toEqual({ kind: 'buffered' });
+    expect(second).toEqual({ kind: 'buffered_deduped' });
+    // Only the genuinely-new 'buffered' outcome moved stock. The dedupe path hits
+    // the buffer unique (P2002), which aborts the tx BEFORE its decrement runs, so
+    // stock stays at the single 40 → 39 drop.
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(39);
+  });
+
+  it('(stock d) calculable intake decrements at persist (direct, never buffered)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true); // variant + cost → calculable
+    await setStock(store.id, BARCODE, 40);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'stock-calc', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'calculable' });
+    // A direct persist (never buffered) still decrements at write time — 40 → 39.
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(39);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
+  });
+
+  it('(stock e) dematerialize of a buffered ghost re-adds the intake decrement (no orders row ever written)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false); // cost-missing → buffer
+    await setStock(store.id, BARCODE, 40);
+
+    // Cost-missing today → buffered; the intake decrement drops stock 40 → 39,
+    // with NO orders row ever written for this platformOrderId.
+    await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'split-buffered-ghost', orderDate: new Date() }),
+    });
+    expect(
+      (
+        await prisma.productVariant.findFirstOrThrow({
+          where: { storeId: store.id, barcode: BARCODE },
+        })
+      ).quantity,
+    ).toBe(39);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+
+    // The split dissolves the pre-split package (UnPacked) → the buffer row is
+    // deleted AND its intake decrement reversed from the BUFFER lines: 39 → 40.
+    const demat = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'split-buffered-ghost',
+        orderDate: new Date(),
+        status: 'CANCELLED',
+        dematerialized: true,
+      }),
+    });
+    expect(demat).toEqual({ kind: 'dematerialized', deletedOrder: false, deletedBufferEntries: 1 });
+    const afterDemat = await prisma.productVariant.findFirstOrThrow({
+      where: { storeId: store.id, barcode: BARCODE },
+    });
+    expect(afterDemat.quantity).toBe(40); // reversal netted the buffered decrement out
+    expect(
+      (await prisma.product.findFirstOrThrow({ where: { id: afterDemat.productId } })).totalStock,
+    ).toBe(40);
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
   });
 });
