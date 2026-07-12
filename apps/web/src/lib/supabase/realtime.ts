@@ -406,6 +406,11 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
   // realtime-js has never seen, so a channel(topic) call can never hand the rebuild
   // the still-registered corpse of the channel we are tearing down.
   let generation = 0;
+  // True once the async `initialize()` below has built the first channel. Read by
+  // the visibility handler's visible branch so a `visible` event that lands while
+  // initialize() is still awaiting session hydration does NOT race a second build:
+  // initialize() owns the first build unconditionally (see issue #456).
+  let initialized = false;
 
   const clearResubscribeTimer = (): void => {
     if (resubscribeTimer !== null) {
@@ -617,21 +622,78 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
       // tab holds no timer (mirrors the channel teardown below).
       stopDeliveryWatchdog();
       void teardown();
-    } else if (channel === null) {
-      channel = buildChannel();
-      // Re-arm the watchdog for the freshly rebuilt channel on resume.
-      startDeliveryWatchdog();
+    } else {
+      // Visible branch. If the async initialize() below has not built the first
+      // channel yet (a `visible` event landed while it was awaiting session
+      // hydration), do nothing: initialize() owns that first build and would
+      // otherwise race a second one here (a double subscribe). Once initialized,
+      // a null channel means a hide tore it down -- rebuild and re-arm the watchdog.
+      if (!initialized) return;
+      if (channel === null) {
+        channel = buildChannel();
+        // Re-arm the watchdog for the freshly rebuilt channel on resume.
+        startDeliveryWatchdog();
+      }
     }
   };
 
-  channel = buildChannel();
+  // Build the first channel only after the auth session has hydrated. On a fresh
+  // page load the cookie session is not yet available when this runs; joining at
+  // that moment registers the subscription with ANON claims, and RLS then delivers
+  // nothing -- permanently, because join-time claims stick to the subscription and
+  // a later socket-level setAuth does not upgrade them (live-verified, issue #456).
+  // Rebuild paths (visibility resume, R2b resubscribe) reuse buildChannel directly:
+  // by the time they run the socket token is long since set.
+  const initialize = async (): Promise<void> => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (unsubscribed) return;
+      const token = data.session?.access_token;
+      if (token !== undefined) await supabase.realtime.setAuth(token);
+      if (unsubscribed) return;
+      // Init-window visibility race: the tab may have hidden WHILE we awaited
+      // hydration. For a default-teardown channel, handleVisibility already reported
+      // 'paused' and skipped its teardown (the channel was still null). Building now
+      // would leave a live channel open in a hidden tab with the delivery watchdog
+      // off, and the visible-return branch -- seeing channel !== null -- would neither
+      // rebuild nor arm the watchdog. So skip the build here: mark initialized and
+      // leave the channel null; the visible-return branch then builds the channel AND
+      // arms the watchdog. keepAlive channels build unconditionally (they never tear
+      // down or rebuild on visibility, so there is no return path to defer to).
+      const hiddenNow = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if (keepAliveWhenHidden !== true && hiddenNow) {
+        initialized = true;
+        return;
+      }
+      channel = buildChannel();
+      initialized = true;
+    } catch (error) {
+      // Session hydration failed (getSession / setAuth rejected). Degrade to
+      // 'errored' so the R2b loop recovers: reportHealth('errored') arms the ~15s
+      // countdown, then attemptResubscribe tears down (a no-op while channel is null)
+      // and buildChannel()s a fresh channel. By then supabase-js's own accessToken
+      // bridge has set the socket token, so the rebuilt channel joins authenticated.
+      // Mark initialized so the visible-return branch can also recover if it runs.
+      console.warn(
+        '[realtime] initial session hydration failed; degrading to errored so the ' +
+          'resubscribe loop can recover.',
+        error,
+      );
+      initialized = true;
+      reportHealth('errored');
+    }
+  };
+  void initialize();
 
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', handleVisibility);
   }
 
   // R2c: arm the watchdog for the initial channel (a no-op unless a consumer
-  // opted in and `window` exists).
+  // opted in and `window` exists). Safe to arm before initialize() finishes:
+  // checkDelivery is a no-op while lastEventAt is null (no channel has delivered
+  // or subscribed yet). Likewise no R2b resubscribe timer can be armed before the
+  // first build -- health starts at 'connecting' and nothing has reported 'errored'.
   startDeliveryWatchdog();
 
   const cleanup = (): void => {
@@ -652,6 +714,11 @@ function createChannelLifecycle<Row extends RealtimeRowShape>(
  * `organization_id`. Org-wide subscription — used by the dashboard-shell
  * OrgSyncsProvider so a single channel surfaces every sync across every
  * store the user can see in the active org.
+ *
+ * The initial channel build waits for the auth session to hydrate before joining
+ * (issue #456): on a fresh page load the cookie session is not yet loaded, and
+ * joining then would register the subscription with anon claims that RLS silently
+ * mutes forever. See {@link createChannelLifecycle} for the mechanism.
  *
  * The `can_access_store(store_id)` RLS policy on sync_logs (a SECURITY DEFINER
  * STABLE plain-function call) lets Realtime's postgres_changes evaluator gate
@@ -826,9 +893,11 @@ export interface SubscribeToLivePerformanceOptions {
  *     Refreshes KPIs + top-products + orders feed.
  *
  * Shares {@link subscribeToOrgSyncs}'s client/auth setup: browser Supabase
- * client (the Realtime WebSocket authenticates through the cookie session — no
- * `setAuth` on this path) and health reported through `onHealthChange` so the
- * consumer can gate a polling fallback.
+ * client, and health reported through `onHealthChange` so the consumer can gate a
+ * polling fallback. Like every channel through {@link createChannelLifecycle}, the
+ * initial build waits for the auth session to hydrate and sets the socket token
+ * once before joining, so a fresh page load never subscribes with anon claims that
+ * RLS would silently mute (issue #456).
  *
  * DIFFERS from subscribeToOrgSyncs on tab visibility: this channel passes
  * `keepAliveWhenHidden: true`, so there is NO visibility teardown — it stays open
