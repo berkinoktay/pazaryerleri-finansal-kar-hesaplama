@@ -17,11 +17,11 @@ import { cn } from '@/lib/utils';
  * `useFormatter().relativeTime`) and supplies icons + tones from the
  * domain-specific event type.
  *
- * For sync-state surfaces use `SyncBadge`; for the user-facing
+ * For sync-state surfaces use `SyncControl`; for the user-facing
  * notification dropdown use `NotificationBell`. Reach for ActivityFeed
  * when the UI dedicates a full region to the chronological log itself.
  *
- * @useWhen rendering a chronological list of events with per-entry tone, title, description, optional detail, and optional timestamp/source meta (use NotificationBell for the popover surface, SyncBadge for single-state freshness)
+ * @useWhen rendering a chronological list of events with per-entry tone, title, description, optional detail, and optional timestamp/source meta (use NotificationBell for the popover surface, SyncControl for single-state freshness)
  */
 
 export type ActivityFeedTone = 'neutral' | 'success' | 'warning' | 'destructive' | 'info';

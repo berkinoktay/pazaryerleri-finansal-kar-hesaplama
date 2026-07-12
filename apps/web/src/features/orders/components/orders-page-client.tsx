@@ -1,18 +1,15 @@
 'use client';
 
-import { RefreshIcon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { DateRangePicker } from '@/components/patterns/date-range-picker';
 import { PageHeader } from '@/components/patterns/page-header';
-import { SyncBadge, type SyncState } from '@/components/patterns/sync-badge';
-import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-center';
-import { Button } from '@/components/ui/button';
-import { type SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
+import { SyncCenter } from '@/components/patterns/sync-center';
+import { PageSyncControl } from '@/features/sync/components/page-sync-control';
+import { PageSyncFooterTrace } from '@/features/sync/components/page-sync-footer-trace';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
+import { toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
 import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
-import { cn } from '@/lib/utils';
 
 import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
@@ -39,13 +36,13 @@ interface OrdersPageClientProps {
  * connecting a marketplace account yet.
  *
  * The header is the framed PageHeader: the orderDate DateRangePicker sits in
- * the `filters` slot, the SyncBadge freshness pill rides the `meta` status row
- * (the top line of the right cluster), the Refresh action sits alone in
- * `actions` (the controls row directly below the status row), and the KPI
- * summary docks into the `summary` slot as a bare StatStrip. The summary is
- * omitted only on a summary-query error with NO previously-cached data — a
- * stale-but-present summary keeps rendering; the failure still surfaces via the
- * global QueryCache toast.
+ * the `filters` slot, the `actions` row holds the unified PageSyncControl
+ * (freshness + manual ORDERS sync + source breakdown), and the KPI summary docks
+ * into the `summary` slot as a bare StatStrip. The list + KPI refresh
+ * automatically when an orders-page sync finishes (PageSyncControl's
+ * onFlowsSettled). The summary is omitted only on a summary-query error with NO
+ * previously-cached data — a stale-but-present summary keeps rendering; the
+ * failure still surfaces via the global QueryCache toast.
  */
 export function OrdersPageClient({
   orgId,
@@ -53,8 +50,6 @@ export function OrdersPageClient({
   pageTitle,
   pageIntent,
 }: OrdersPageClientProps): React.ReactElement {
-  const tOrders = useTranslations('ordersPage');
-  const tSync = useTranslations('syncCenter');
   const { filters, setFilters } = useOrdersFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
   const [selectedOrder, setSelectedOrder] = React.useState<OrderDetailSelection | null>(null);
@@ -124,41 +119,18 @@ export function OrdersPageClient({
     filters.from.length > 0 ||
     filters.to.length > 0;
 
-  const orderSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
-  // Refresh is a client-side cache invalidate only (no vendor POST), so the
-  // button only guards its own brief in-flight state.
-  const refreshButtonDisabled = refresh.isPending;
-
-  // SyncBadge (freshness) rides the framed header's status row — the top line of
-  // the right cluster, directly ABOVE the controls row (design spec D10: the
-  // freshness pill sits right above the Refresh button). Passed via `meta`.
-  const headerMeta = (
-    <SyncBadge
-      state={orderSyncSnapshot.state}
-      lastSyncedAt={orderSyncSnapshot.lastSyncedAt}
-      progress={orderSyncSnapshot.progress}
-      activeCount={activeSyncs.length}
-      source="Trendyol"
-      onClick={() => setSyncCenterOpen(true)}
-      ariaLabel={tSync('openLabel')}
-    />
-  );
-
-  // Controls row: the Refresh action alone now that the freshness pill moved to
-  // the status row above it.
+  // Controls row: the unified freshness control owns freshness + the manual
+  // ORDERS sync + the source breakdown popover. onFlowsSettled invalidates the
+  // list + KPI caches the moment an orders-page sync completes (replaces the
+  // former client-side "Yenile" button).
   const headerActions = (
-    <Button
-      type="button"
-      size="sm"
-      onClick={() => refresh.mutate()}
-      disabled={refreshButtonDisabled}
-      className="gap-xs"
-    >
-      <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
-      {refreshButtonDisabled ? tOrders('refreshButton.refreshing') : tOrders('refreshButton.label')}
-    </Button>
+    <PageSyncControl
+      pageKey="orders"
+      onOpenHistory={() => setSyncCenterOpen(true)}
+      onFlowsSettled={() => refresh.mutate()}
+    />
   );
 
   // orderDate range as a page-scope filter — it recomputes the summary + list,
@@ -186,7 +158,6 @@ export function OrdersPageClient({
           variant="framed"
           title={pageTitle}
           intent={pageIntent}
-          meta={headerMeta}
           filters={headerFilters}
           actions={headerActions}
           summary={
@@ -202,6 +173,7 @@ export function OrdersPageClient({
           rows={rows}
           loading={ordersQuery.isLoading}
           empty={ordersEmptyBody}
+          paginationLeading={<PageSyncFooterTrace pageKey="orders" />}
           pagination={pagination}
           filters={{
             q: filters.q,
@@ -263,59 +235,4 @@ export function OrdersPageClient({
       />
     </>
   );
-}
-
-interface SyncSnapshot {
-  state: SyncState;
-  lastSyncedAt: Date | string | null;
-  progress?: { current: number; total: number | null };
-}
-
-/**
- * Project the ORDERS sync log slice into a SyncBadge-friendly snapshot.
- * Mirrors the PRODUCTS variant in features/products — provider already
- * splits rows into active (PENDING/RUNNING/FAILED_RETRYABLE) vs recent
- * (COMPLETED/FAILED) buckets, so this is a thin "first ORDERS log per
- * bucket wins" projection.
- */
-function derivedSyncSnapshot(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncSnapshot {
-  const active = activeSyncs.find((l) => l.syncType === 'ORDERS');
-  if (active !== undefined) {
-    return {
-      state: active.status === 'FAILED_RETRYABLE' ? 'retrying' : 'syncing',
-      lastSyncedAt: active.startedAt,
-      progress: { current: active.progressCurrent, total: active.progressTotal },
-    };
-  }
-  const recent = recentSyncs.find((l) => l.syncType === 'ORDERS');
-  if (recent === undefined) {
-    return { state: 'fresh', lastSyncedAt: null };
-  }
-  if (recent.status === 'FAILED') {
-    return { state: 'failed', lastSyncedAt: recent.completedAt ?? recent.startedAt };
-  }
-  return { state: 'fresh', lastSyncedAt: recent.completedAt ?? recent.startedAt };
-}
-
-function toSyncCenterLogs(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncCenterLog[] {
-  return [...activeSyncs, ...recentSyncs].map(projectSyncLog);
-}
-
-function projectSyncLog(log: SyncLog): SyncCenterLog {
-  return {
-    id: log.id,
-    storeId: log.storeId,
-    syncType: log.syncType,
-    status: log.status,
-    startedAt: log.startedAt,
-    completedAt: log.completedAt,
-    recordsProcessed: log.recordsProcessed,
-    progressCurrent: log.progressCurrent,
-    progressTotal: log.progressTotal,
-    errorCode: log.errorCode,
-    errorMessage: log.errorMessage,
-    attemptCount: log.attemptCount,
-    nextAttemptAt: log.nextAttemptAt,
-    skippedPages: log.skippedPages,
-  };
 }

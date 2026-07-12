@@ -37,6 +37,8 @@ export interface ReturnsTableProps {
   onStatusChange: (next: ClaimStatusTabValue) => void;
   onFiltersChange: (next: ReturnsToolbarChange) => void;
   onPaginationChange: (next: { page?: number; perPage?: number }) => void;
+  /** Muted freshness trace rendered in the pagination footer's left cluster. */
+  paginationLeading?: React.ReactNode;
 }
 
 /**
@@ -56,6 +58,7 @@ export function ReturnsTable({
   onStatusChange,
   onFiltersChange,
   onPaginationChange,
+  paginationLeading,
 }: ReturnsTableProps): React.ReactElement {
   const t = useTranslations('returnsPage.table');
   const tPage = useTranslations('returnsPage');
@@ -190,7 +193,11 @@ export function ReturnsTable({
         />
       )}
       pagination={(table) => (
-        <DataTablePagination table={table} pageSizes={RETURNS_PER_PAGE_OPTIONS} />
+        <DataTablePagination
+          table={table}
+          pageSizes={RETURNS_PER_PAGE_OPTIONS}
+          leading={paginationLeading}
+        />
       )}
     />
   );

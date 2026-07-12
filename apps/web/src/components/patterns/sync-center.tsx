@@ -144,7 +144,7 @@ export interface SyncCenterProps {
  * Cross-feature (orders/settlements will reuse) so it lives in
  * components/patterns/ rather than features/products/components/.
  *
- * @useWhen surfacing live sync progress and recent history in a right-side sheet, with cross-store grouping when the logs span 2+ stores (entry point is SyncBadge with onClick)
+ * @useWhen surfacing live sync progress and recent history in a right-side sheet, with cross-store grouping when the logs span 2+ stores (entry point is the SyncSourcesPopover "full history" link)
  */
 export function SyncCenter({
   open,
@@ -430,7 +430,7 @@ function RetryingSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
       ? Math.min(100, Math.round((log.progressCurrent / log.progressTotal) * 100))
       : null;
 
-  // SSR-safe retry-time label — same hydration pattern as SyncBadge /
+  // SSR-safe retry-time label — same hydration pattern as SyncControl /
   // RecentSyncItem. While `now` is null (SSR + pre-mount), render an
   // absolute timestamp so server and client markup match. Once non-null,
   // swap to a relative label that ticks down each second.
@@ -508,7 +508,7 @@ function RecentSyncItem({ log }: { log: SyncCenterLog }): React.ReactElement {
         ? 'text-warning'
         : 'text-success';
 
-  // SSR-safe time label — same pattern as SyncBadge.
+  // SSR-safe time label — same pattern as SyncControl.
   const reference = log.completedAt ?? log.startedAt;
   const timeLabel = mounted
     ? formatter.relativeTime(new Date(reference), new Date())

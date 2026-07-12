@@ -1073,6 +1073,12 @@ model SyncLog {
   @@index([organizationId])
   @@index([storeId, startedAt])
   @@index([status, nextAttemptAt])
+  // Freshness feed (listLastSuccessfulPerType): DISTINCT ON (store_id,
+  // sync_type) … WHERE organization_id = $1 AND status = 'COMPLETED' ORDER BY
+  // store_id, sync_type, completed_at DESC. This composite lets Postgres scan
+  // the org's COMPLETED rows already grouped/ordered per (store, syncType)
+  // instead of a broad org scan + sort.
+  @@index([organizationId, status, storeId, syncType, completedAt(sort: Desc)])
   @@map("sync_logs")
 }
 

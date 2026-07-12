@@ -628,7 +628,7 @@ The live reference for every token, primitive, and pattern lives under `/design/
 
 - `/design/tokens` — colors, typography, spacing, radius, shadow, motion (live swatches)
 - `/design/primitives/*` — every shadcn primitive with variants and states
-- `/design/patterns` — PazarSync-specific composites (StatCard family, chart kit, TrendDelta, Currency, SyncBadge, PageHeader, EmptyState)
+- `/design/patterns` — PazarSync-specific composites (StatCard family, chart kit, TrendDelta, Currency, SyncControl, PageHeader, EmptyState)
 - `/design/data` — DataTable with filters, sorting, selection, import/export
 - `/design/layout-demo` — three-column AppShell with mock store data
 - `/design/manifest` + `/design/checklist` — generated component manifest and design-system coverage checklist

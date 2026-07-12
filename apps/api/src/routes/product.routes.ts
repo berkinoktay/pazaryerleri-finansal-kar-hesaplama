@@ -60,7 +60,12 @@ const startSyncRoute = createRoute({
   path: '/organizations/{orgId}/stores/{storeId}/products/sync',
   tags: ['Products'],
   summary: 'Enqueue a Trendyol product sync',
+  deprecated: true,
   description:
+    'Deprecated: use the generic `POST /v1/organizations/:orgId/stores/:storeId/syncs` with ' +
+    '`{ "syncType": "PRODUCTS" }` instead — it applies the identical auth / cooldown / conflict ' +
+    'contract across every sync type. This PRODUCTS-only route stays live during the web ' +
+    'client migration and will be removed once no caller depends on it. ' +
     'Inserts a PENDING SyncLog row and returns 202 with the new syncLogId. The ' +
     'dedicated worker process (apps/sync-worker) claims the row and runs the sync ' +
     'in the background; clients poll ' +
@@ -175,7 +180,8 @@ const listActiveSyncLogsRoute = createRoute({
     'Returns every RUNNING sync log for the store plus the last 5 completed/failed runs. ' +
     'Generic across SyncType (PRODUCTS today, ORDERS / SETTLEMENTS later). Used by the ' +
     'SyncCenter UI to hydrate before the Supabase Realtime channel takes over — and as ' +
-    'the polling fallback when the WebSocket drops.',
+    'the polling fallback when the WebSocket drops. The `freshness` array carries the last ' +
+    'successful run per sync type for this store, independent of the recent-5 cap on `data`.',
   security: [{ bearerAuth: [] }],
   request: { params: storeIdParams },
   responses: {
@@ -203,9 +209,15 @@ const listActiveSyncLogsRoute = createRoute({
 app.openapi(listActiveSyncLogsRoute, async (c) => {
   const userId = c.get('userId');
   const { orgId, storeId } = c.req.valid('param');
+  // Store-access gate already scopes the caller to this single store, so the
+  // freshness feed is scoped to it too — keeps the shared SyncLogList response
+  // shape consistent with the org-wide endpoint.
   await requireStoreAccess(userId, orgId, storeId);
-  const logs = await syncLogService.listActiveAndRecent(orgId, storeId);
-  return c.json({ data: logs.map(toSyncLogResponse) }, 200);
+  const [logs, freshness] = await Promise.all([
+    syncLogService.listActiveAndRecent(orgId, storeId),
+    syncLogService.listLastSuccessfulPerType(orgId, { storeIds: [storeId] }),
+  ]);
+  return c.json({ data: logs.map(toSyncLogResponse), freshness }, 200);
 });
 
 app.openapi(getSyncLogRoute, async (c) => {

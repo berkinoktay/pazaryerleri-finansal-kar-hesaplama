@@ -7,7 +7,7 @@ import { useRefreshOrders } from '@/features/orders/hooks/use-refresh-orders';
 import { orderKeys } from '@/features/orders/query-keys';
 
 describe('useRefreshOrders', () => {
-  it('invalidates orders list query key when mutated', async () => {
+  it('invalidates the orders list + KPI summary query keys when mutated', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
 
@@ -22,6 +22,9 @@ describe('useRefreshOrders', () => {
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: orderKeys.lists('org-1', 'store-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: orderKeys.summaries('org-1', 'store-1'),
       });
     });
   });

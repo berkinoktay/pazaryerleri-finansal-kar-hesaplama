@@ -105,6 +105,8 @@ interface ProductsTableProps {
   onSortChange: (next: ProductListSortExtended) => void;
   onPageChange: (next: number) => void;
   onPerPageChange: (next: number) => void;
+  /** Muted freshness trace rendered in the pagination footer's left cluster. */
+  paginationLeading?: React.ReactNode;
 }
 
 /**
@@ -587,7 +589,9 @@ export function ProductsTable(props: ProductsTableProps): React.ReactElement {
           }}
         />
       )}
-      pagination={(table) => <DataTablePagination table={table} />}
+      pagination={(table) => (
+        <DataTablePagination table={table} leading={props.paginationLeading} />
+      )}
       // Always mounted (not gated on selection) so BulkActionBar's own presence
       // machine can play the exit animation when the selection clears — gating
       // here would unmount it mid-transition. The bar self-hides below its

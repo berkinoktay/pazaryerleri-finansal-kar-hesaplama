@@ -10,8 +10,8 @@ import { type Organization, type Store } from '@/components/patterns/org-store-s
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatCard } from '@/components/patterns/stat-card';
 import { StatGroup } from '@/components/patterns/stat-group';
-import { SyncBadge } from '@/components/patterns/sync-badge';
 import { buildMockOrders } from '@/components/showcase/showcase-mocks';
+import { SyncControlDemo } from '@/components/showcase/sync-control-demo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { QuickAccessPanel } from '@/features/dashboard/components/quick-access-panel';
@@ -19,10 +19,6 @@ import { QuickAccessPanel } from '@/features/dashboard/components/quick-access-p
 const recentOrders = buildMockOrders(8);
 const MOCK_REVENUE = new Decimal('284390.45');
 const MOCK_PROFIT = new Decimal('48120.80');
-// Fixed ISO timestamp — `Date.now()` at module scope evaluates at different
-// moments on server vs client in client components, producing a hydration
-// mismatch when minute-precision labels straddle a minute boundary.
-const MOCK_LAST_SYNCED = new Date('2026-04-20T21:00:00Z');
 
 // Canonical demo of the new tek-sidebar AppShell.  Two orgs are
 // deliberate so OrgStoreSwitcher's multi-org behavior (search, role
@@ -110,19 +106,12 @@ export default function LayoutDemoPage(): React.ReactElement {
         <PageHeader
           title={activeStore.name}
           intent={`Nisan 2026 dönemi · ${activeStore.platform === 'TRENDYOL' ? 'Trendyol' : 'Hepsiburada'} · son 30 günün özeti`}
-          meta={
-            <SyncBadge
-              state="fresh"
-              lastSyncedAt={MOCK_LAST_SYNCED}
-              source={activeStore.platform === 'TRENDYOL' ? 'Trendyol' : 'Hepsiburada'}
-            />
-          }
           actions={
             <>
+              <SyncControlDemo state="fresh" />
               <Button variant="outline" size="sm">
                 Rapor al
               </Button>
-              <Button size="sm">Senkronize et</Button>
             </>
           }
         />

@@ -3,9 +3,10 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { type SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
+import type { SyncFreshness, SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
+import { useStartSync } from '@/features/sync/hooks/use-start-sync';
+import type { OrgSyncsCache } from '@/features/sync/lib/org-syncs-cache';
 import { orgSyncKeys } from '@/features/sync/query-keys';
-import { useStartProductSync } from '@/features/products/hooks/use-start-product-sync';
 
 import { HttpResponse, http, server } from '../../../helpers/msw';
 
@@ -33,44 +34,43 @@ function makeWrapper(client: QueryClient) {
   };
 }
 
-describe('useStartProductSync', () => {
-  it('writes an optimistic PENDING row to the cache on success', async () => {
+describe('useStartSync', () => {
+  it('writes an optimistic PENDING row of the requested syncType to the cache on success', async () => {
     server.use(
-      http.post(
-        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/sync`,
-        () =>
-          HttpResponse.json(
-            {
-              syncLogId: SYNC_LOG_ID,
-              status: 'PENDING' as const,
-              enqueuedAt: '2026-04-28T10:00:00.000Z',
-            },
-            { status: 202 },
-          ),
+      http.post(`http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/syncs`, () =>
+        HttpResponse.json(
+          {
+            syncLogId: SYNC_LOG_ID,
+            status: 'PENDING' as const,
+            enqueuedAt: '2026-04-28T10:00:00.000Z',
+          },
+          { status: 202 },
+        ),
       ),
     );
 
     const queryClient = makeQueryClient();
     const queryKey = orgSyncKeys.list(ORG_ID);
 
-    const { result } = renderHook(() => useStartProductSync(ORG_ID, STORE_ID), {
+    const { result } = renderHook(() => useStartSync(ORG_ID, STORE_ID, 'ORDERS'), {
       wrapper: makeWrapper(queryClient),
     });
 
     // No cache entry before the mutation runs.
-    expect(queryClient.getQueryData<SyncLog[] | undefined>(queryKey)).toBeUndefined();
+    expect(queryClient.getQueryData<OrgSyncsCache | undefined>(queryKey)).toBeUndefined();
 
     result.current.mutate();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    const cached = queryClient.getQueryData<SyncLog[] | undefined>(queryKey);
+    const cached = queryClient.getQueryData<OrgSyncsCache | undefined>(queryKey);
     expect(cached).toBeDefined();
-    expect(cached).toHaveLength(1);
-    expect(cached?.[0]).toMatchObject({
+    expect(cached?.logs).toHaveLength(1);
+    expect(cached?.freshness).toEqual([]);
+    expect(cached?.logs[0]).toMatchObject({
       id: SYNC_LOG_ID,
       organizationId: ORG_ID,
       storeId: STORE_ID,
-      syncType: 'PRODUCTS',
+      syncType: 'ORDERS',
       status: 'PENDING',
       startedAt: '2026-04-28T10:00:00.000Z',
       progressCurrent: 0,
@@ -80,19 +80,17 @@ describe('useStartProductSync', () => {
     });
   });
 
-  it('preserves existing rows and dedups against the new syncLogId', async () => {
+  it('preserves existing logs + freshness and dedups against the new syncLogId', async () => {
     server.use(
-      http.post(
-        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/sync`,
-        () =>
-          HttpResponse.json(
-            {
-              syncLogId: SYNC_LOG_ID,
-              status: 'PENDING' as const,
-              enqueuedAt: '2026-04-28T10:00:00.000Z',
-            },
-            { status: 202 },
-          ),
+      http.post(`http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/syncs`, () =>
+        HttpResponse.json(
+          {
+            syncLogId: SYNC_LOG_ID,
+            status: 'PENDING' as const,
+            enqueuedAt: '2026-04-28T10:00:00.000Z',
+          },
+          { status: 202 },
+        ),
       ),
     );
 
@@ -100,14 +98,14 @@ describe('useStartProductSync', () => {
     const queryKey = orgSyncKeys.list(ORG_ID);
 
     // Pre-seed: a stale completed row + a pre-existing optimistic row that
-    // shares the new syncLogId (e.g. user double-clicked, or Realtime
-    // beat the mutation's resolution path on a slow network). The dedup
-    // by id keeps the cache at exactly one entry per syncLogId.
+    // shares the new syncLogId (e.g. user double-clicked, or Realtime beat
+    // the mutation's resolution path). The dedup by id keeps the cache at
+    // exactly one entry per syncLogId; freshness must survive untouched.
     const existingCompleted: SyncLog = {
       id: 'old-completed',
       organizationId: ORG_ID,
       storeId: STORE_ID,
-      syncType: 'PRODUCTS',
+      syncType: 'ORDERS',
       status: 'COMPLETED',
       startedAt: '2026-04-27T10:00:00.000Z',
       completedAt: '2026-04-27T10:05:00.000Z',
@@ -122,25 +120,36 @@ describe('useStartProductSync', () => {
       skippedPages: null,
     };
     const racingDup: SyncLog = { ...existingCompleted, id: SYNC_LOG_ID, status: 'RUNNING' };
-    queryClient.setQueryData<SyncLog[]>(queryKey, [existingCompleted, racingDup]);
+    const freshness: SyncFreshness = {
+      storeId: STORE_ID,
+      syncType: 'ORDERS',
+      completedAt: '2026-04-27T10:05:00.000Z',
+      recordsProcessed: 10,
+    };
+    queryClient.setQueryData<OrgSyncsCache>(queryKey, {
+      logs: [existingCompleted, racingDup],
+      freshness: [freshness],
+    });
 
-    const { result } = renderHook(() => useStartProductSync(ORG_ID, STORE_ID), {
+    const { result } = renderHook(() => useStartSync(ORG_ID, STORE_ID, 'ORDERS'), {
       wrapper: makeWrapper(queryClient),
     });
 
     result.current.mutate();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    const cached = queryClient.getQueryData<SyncLog[] | undefined>(queryKey);
-    expect(cached).toHaveLength(2);
-    expect(cached?.[0]?.id).toBe(SYNC_LOG_ID);
-    expect(cached?.[0]?.status).toBe('PENDING'); // optimistic replaces the racing dup
-    expect(cached?.[1]?.id).toBe('old-completed');
+    const cached = queryClient.getQueryData<OrgSyncsCache | undefined>(queryKey);
+    expect(cached?.logs).toHaveLength(2);
+    expect(cached?.logs[0]?.id).toBe(SYNC_LOG_ID);
+    expect(cached?.logs[0]?.status).toBe('PENDING'); // optimistic replaces the racing dup
+    expect(cached?.logs[1]?.id).toBe('old-completed');
+    // Freshness feed is left intact by the trigger.
+    expect(cached?.freshness).toEqual([freshness]);
   });
 
   it('does nothing when orgId or storeId is null', () => {
     const queryClient = makeQueryClient();
-    const { result } = renderHook(() => useStartProductSync(null, STORE_ID), {
+    const { result } = renderHook(() => useStartSync(null, STORE_ID, 'ORDERS'), {
       wrapper: makeWrapper(queryClient),
     });
     // Mutation throws synchronously when called, but the hook itself
@@ -150,25 +159,23 @@ describe('useStartProductSync', () => {
 
   it('captures a cooldownUntil deadline from a 429 Retry-After response', async () => {
     server.use(
-      http.post(
-        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/sync`,
-        () =>
-          HttpResponse.json(
-            {
-              type: 'https://api.pazarsync.com/errors/rate-limited',
-              title: 'Too many requests',
-              status: 429,
-              code: 'RATE_LIMITED',
-              detail: 'Manual sync triggered before cooldown elapsed',
-            },
-            { status: 429, headers: { 'Retry-After': '300' } },
-          ),
+      http.post(`http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/syncs`, () =>
+        HttpResponse.json(
+          {
+            type: 'https://api.pazarsync.com/errors/rate-limited',
+            title: 'Too many requests',
+            status: 429,
+            code: 'RATE_LIMITED',
+            detail: 'Manual sync triggered before cooldown elapsed',
+          },
+          { status: 429, headers: { 'Retry-After': '300' } },
+        ),
       ),
     );
 
     const queryClient = makeQueryClient();
     const before = Date.now();
-    const { result } = renderHook(() => useStartProductSync(ORG_ID, STORE_ID), {
+    const { result } = renderHook(() => useStartSync(ORG_ID, STORE_ID, 'ORDERS'), {
       wrapper: makeWrapper(queryClient),
     });
 
@@ -188,24 +195,22 @@ describe('useStartProductSync', () => {
 
   it('leaves cooldownUntil null on a non-429 error (no Retry-After)', async () => {
     server.use(
-      http.post(
-        `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/sync`,
-        () =>
-          HttpResponse.json(
-            {
-              type: 'https://api.pazarsync.com/errors/sync-in-progress',
-              title: 'Sync already running',
-              status: 409,
-              code: 'SYNC_IN_PROGRESS',
-              detail: 'A PRODUCTS sync is already running',
-            },
-            { status: 409 },
-          ),
+      http.post(`http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/syncs`, () =>
+        HttpResponse.json(
+          {
+            type: 'https://api.pazarsync.com/errors/sync-in-progress',
+            title: 'Sync already running',
+            status: 409,
+            code: 'SYNC_IN_PROGRESS',
+            detail: 'An ORDERS sync is already running',
+          },
+          { status: 409 },
+        ),
       ),
     );
 
     const queryClient = makeQueryClient();
-    const { result } = renderHook(() => useStartProductSync(ORG_ID, STORE_ID), {
+    const { result } = renderHook(() => useStartSync(ORG_ID, STORE_ID, 'ORDERS'), {
       wrapper: makeWrapper(queryClient),
     });
 

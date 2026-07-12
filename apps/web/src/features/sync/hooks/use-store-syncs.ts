@@ -2,12 +2,13 @@
 
 import { useMemo } from 'react';
 
-import type { SyncLog } from '../api/list-org-sync-logs.api';
+import type { SyncFreshness, SyncLog } from '../api/list-org-sync-logs.api';
 import { useOrgSyncs } from '../providers/org-syncs-provider';
 
 interface UseStoreSyncsResult {
   activeSyncs: SyncLog[];
   recentSyncs: SyncLog[];
+  freshness: SyncFreshness[];
 }
 
 /**
@@ -16,14 +17,15 @@ interface UseStoreSyncsResult {
  * memoized filter over the org-wide cache.
  */
 export function useStoreSyncs(storeId: string | null): UseStoreSyncsResult {
-  const { activeSyncs, recentSyncs } = useOrgSyncs();
+  const { activeSyncs, recentSyncs, freshness } = useOrgSyncs();
   return useMemo(() => {
     if (storeId === null || storeId.length === 0) {
-      return { activeSyncs: [], recentSyncs: [] };
+      return { activeSyncs: [], recentSyncs: [], freshness: [] };
     }
     return {
       activeSyncs: activeSyncs.filter((s) => s.storeId === storeId),
       recentSyncs: recentSyncs.filter((s) => s.storeId === storeId),
+      freshness: freshness.filter((f) => f.storeId === storeId),
     };
-  }, [storeId, activeSyncs, recentSyncs]);
+  }, [storeId, activeSyncs, recentSyncs, freshness]);
 }

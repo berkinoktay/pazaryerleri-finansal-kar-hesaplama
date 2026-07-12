@@ -6,12 +6,12 @@ import { Banner } from '@/components/patterns/banner';
 import { NotificationBell, type NotificationEntry } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
 import { RailWarningCard } from '@/components/patterns/rail-warning-card';
-import { SyncBadge, type SyncState } from '@/components/patterns/sync-badge';
 import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-center';
 import { CategoryNav } from '@/components/showcase/category-nav';
 import { Playground, control } from '@/components/showcase/playground';
 import { Preview } from '@/components/showcase/preview';
 import { ShowcaseSection } from '@/components/showcase/section';
+import { SyncControlDemo, SYNC_CONTROL_DEMO_STATES } from '@/components/showcase/sync-control-demo';
 import { Button } from '@/components/ui/button';
 import { Link } from '@/i18n/navigation';
 
@@ -21,13 +21,8 @@ import { StepperShowcase } from '../stepper-showcase';
 import { WizardShowcase } from '../wizard-showcase';
 
 // Fixed ISO reference so the relative-time labels never read a runtime clock at
-// module scope (SSR-safe). The badge swaps to a relative label after mount.
+// module scope (SSR-safe). The rows swap to a relative label after mount.
 const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
-const MOCK_SYNCING_AT = new Date(MOCK_SYNC_REF.getTime() - 30 * 1000);
-
-// SyncBadge's only config prop is `state`; tone is derived from it (failed →
-// destructive, stale/retrying → warning, syncing → info, fresh → neutral).
-const SYNC_STATES: readonly SyncState[] = ['fresh', 'stale', 'syncing', 'retrying', 'failed'];
 
 // Banner exposes a 4-tone vocabulary (no neutral/primary) — local const so the
 // Playground options match the real BannerTone union exactly.
@@ -93,50 +88,42 @@ const SYNC_CENTER_LOGS: SyncCenterLog[] = [
 ];
 
 export default function StatusPatternsPage(): React.ReactElement {
-  // Single SyncCenter instance for the whole page — both the interactive
-  // SyncBadge and the standalone trigger open this one sheet.
+  // Single SyncCenter instance for the whole page — both the SyncControl
+  // popover's "Tüm geçmiş" link and the standalone trigger open this one sheet.
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
 
   return (
     <>
       <PageHeader
         title="Durum & sync pattern'ları"
-        intent="Veri güncelliği, hata bildirimleri, çalışan iş takibi: SyncBadge, SyncCenter, NotificationBell, Banner, Stepper, Wizard, ActivityFeed, ConfirmDialog, RailWarningCard."
+        intent="Veri güncelliği, hata bildirimleri, çalışan iş takibi: SyncControl, SyncCenter, NotificationBell, Banner, Stepper, Wizard, ActivityFeed, ConfirmDialog, RailWarningCard."
       />
       <CategoryNav section="patterns" />
 
       <ShowcaseSection
-        title="SyncBadge & SyncCenter"
-        description="Verinin güncelliğini tek bakışta iletir ve çalışan sync'lere giriş noktası olur. state lifecycle'ı (fresh / stale / syncing / retrying / failed) ikon + tone'u sürer; tone state'ten türetilir."
+        title="SyncControl & SyncCenter"
+        description="Tazelik + manuel eşitleme + kaynak dökümü tek pill'de. Sol yarı (durum) kaynak dökümü popover'ını açar; sağ yarı (Eşitle) manuel senkronu tetikler. state lifecycle'ı (fresh / syncing / stale / failed) nokta/ikon tonunu sürer."
       >
-        <Playground
-          title="SyncBadge — state · source"
-          description="Tek config prop'u state; tone otomatik türetilir (failed→destructive, stale/retrying→warning, syncing→info, fresh→nötr). lastSyncedAt sabit mock; mount sonrası göreli zamana döner."
-          controls={{
-            state: control.segment(SYNC_STATES, 'fresh'),
-            source: control.text('Trendyol', 'source', 'Pazaryeri adı'),
-          }}
-          render={(v) => (
-            <SyncBadge
-              state={v.state}
-              lastSyncedAt={MOCK_SYNC_REF}
-              source={v.source === '' ? undefined : v.source}
-            />
-          )}
-        />
+        <Preview
+          title="SyncControl — durum galerisi"
+          description="Dört durum yan yana: fresh (yeşil nokta + göreli zaman), syncing (canlı ilerleme), stale (sarı nokta), failed (kırmızı nokta + tekrar zamanı). onSync no-op; zamanlar sabit ISO, mount sonrası göreli etikete döner."
+        >
+          <div className="gap-lg flex flex-wrap items-end">
+            {SYNC_CONTROL_DEMO_STATES.map((state) => (
+              <div key={state} className="gap-2xs flex flex-col items-start">
+                <span className="text-2xs text-muted-foreground">{state}</span>
+                <SyncControlDemo state={state} />
+              </div>
+            ))}
+          </div>
+        </Preview>
 
         <Preview
-          title="SyncBadge — interaktif (SyncCenter giriş noktası)"
-          description="onClick verildiğinde Badge clickable button'a dönüşür ve SyncCenter sheet'ini açar. Aşağıdaki standalone tetikleyici de aynı sheet'i açar."
+          title="SyncControl — SyncCenter giriş noktası"
+          description="Kaynak dökümü popover'ındaki 'Tüm geçmiş' bağlantısı SyncCenter sheet'ini açar. Aşağıdaki standalone tetikleyici de aynı sheet'i açar."
         >
           <div className="gap-md flex flex-wrap items-center">
-            <SyncBadge
-              state="syncing"
-              lastSyncedAt={MOCK_SYNCING_AT}
-              source="Trendyol"
-              onClick={() => setSyncCenterOpen(true)}
-              ariaLabel="Sync detayını aç"
-            />
+            <SyncControlDemo state="fresh" onOpenHistory={() => setSyncCenterOpen(true)} />
             <Button variant="outline" onClick={() => setSyncCenterOpen(true)}>
               SyncCenter&apos;ı aç
             </Button>
@@ -148,8 +135,9 @@ export default function StatusPatternsPage(): React.ReactElement {
           description="Aktif + son tamamlanan + hatalı sync'leri gösterir. Triggers slot'una 'Şimdi senkronize et' butonu konur. Mağaza bazlı gruplama otomatik (2+ mağaza → header)."
         >
           <span className="text-2xs text-muted-foreground">
-            Yukarıdaki interaktif Badge ya da &quot;SyncCenter&apos;ı aç&quot; butonu bu
-            sheet&apos;i açar — sayfada tek instance olarak mount edilir.
+            Yukarıdaki SyncControl&apos;ün &quot;Tüm geçmiş&quot; bağlantısı ya da
+            &quot;SyncCenter&apos;ı aç&quot; butonu bu sheet&apos;i açar — sayfada tek instance
+            olarak mount edilir.
           </span>
         </Preview>
       </ShowcaseSection>

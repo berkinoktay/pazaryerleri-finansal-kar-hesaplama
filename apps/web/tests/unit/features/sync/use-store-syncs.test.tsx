@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
+import type { SyncFreshness, SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 
 // Mock the provider module — useStoreSyncs is a pure derivation over
@@ -20,6 +20,15 @@ interface MakeLogOverrides {
   storeId?: string;
   status?: SyncLog['status'];
   startedAt?: string;
+}
+
+function makeFreshness(storeId: string, syncType: SyncFreshness['syncType']): SyncFreshness {
+  return {
+    storeId,
+    syncType,
+    completedAt: '2026-04-27T10:00:00Z',
+    recordsProcessed: 42,
+  };
 }
 
 function makeLog(overrides: MakeLogOverrides = {}): SyncLog {
@@ -52,6 +61,7 @@ describe('useStoreSyncs', () => {
     mockUseOrgSyncs.mockReturnValue({
       activeSyncs: [makeLog({ id: 'a', storeId: STORE_A })],
       recentSyncs: [makeLog({ id: 'b', storeId: STORE_A, status: 'COMPLETED' })],
+      freshness: [],
       isLoading: false,
     });
 
@@ -64,6 +74,7 @@ describe('useStoreSyncs', () => {
     mockUseOrgSyncs.mockReturnValue({
       activeSyncs: [makeLog({ id: 'a', storeId: STORE_A })],
       recentSyncs: [],
+      freshness: [],
       isLoading: false,
     });
 
@@ -79,6 +90,7 @@ describe('useStoreSyncs', () => {
         makeLog({ id: 'b-running', storeId: STORE_B }),
       ],
       recentSyncs: [],
+      freshness: [],
       isLoading: false,
     });
 
@@ -95,6 +107,7 @@ describe('useStoreSyncs', () => {
         makeLog({ id: 'b-done', storeId: STORE_B, status: 'COMPLETED' }),
         makeLog({ id: 'a-fail', storeId: STORE_A, status: 'FAILED' }),
       ],
+      freshness: [],
       isLoading: false,
     });
 
@@ -107,6 +120,7 @@ describe('useStoreSyncs', () => {
     mockUseOrgSyncs.mockReturnValue({
       activeSyncs: [makeLog({ id: 'b-running', storeId: STORE_B })],
       recentSyncs: [makeLog({ id: 'b-done', storeId: STORE_B, status: 'COMPLETED' })],
+      freshness: [],
       isLoading: false,
     });
 
@@ -115,10 +129,39 @@ describe('useStoreSyncs', () => {
     expect(result.current.recentSyncs).toEqual([]);
   });
 
+  it('filters freshness to the matching storeId', () => {
+    mockUseOrgSyncs.mockReturnValue({
+      activeSyncs: [],
+      recentSyncs: [],
+      freshness: [
+        makeFreshness(STORE_A, 'ORDERS'),
+        makeFreshness(STORE_B, 'ORDERS'),
+        makeFreshness(STORE_A, 'PRODUCTS'),
+      ],
+      isLoading: false,
+    });
+
+    const { result } = renderHook(() => useStoreSyncs(STORE_A));
+    expect(result.current.freshness).toHaveLength(2);
+    expect(result.current.freshness.map((f) => f.syncType)).toEqual(['ORDERS', 'PRODUCTS']);
+  });
+
+  it('returns an empty freshness array when storeId is null', () => {
+    mockUseOrgSyncs.mockReturnValue({
+      activeSyncs: [],
+      recentSyncs: [],
+      freshness: [makeFreshness(STORE_A, 'ORDERS')],
+      isLoading: false,
+    });
+
+    const { result } = renderHook(() => useStoreSyncs(null));
+    expect(result.current.freshness).toEqual([]);
+  });
+
   it('memoizes derivation — same input refs yield the same output ref', () => {
     const activeSyncs = [makeLog({ id: 'a-running', storeId: STORE_A })];
     const recentSyncs = [makeLog({ id: 'a-done', storeId: STORE_A, status: 'COMPLETED' })];
-    mockUseOrgSyncs.mockReturnValue({ activeSyncs, recentSyncs, isLoading: false });
+    mockUseOrgSyncs.mockReturnValue({ activeSyncs, recentSyncs, freshness: [], isLoading: false });
 
     const { result, rerender } = renderHook(() => useStoreSyncs(STORE_A));
     const first = result.current;

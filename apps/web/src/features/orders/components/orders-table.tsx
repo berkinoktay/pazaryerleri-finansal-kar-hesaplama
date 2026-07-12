@@ -74,6 +74,8 @@ export interface OrdersTableProps {
   onSortChange: (next: OrderSortValue) => void;
   /** Opens the in-page detail modal for the clicked row (replaces route nav). */
   onRowOpen?: (id: string) => void;
+  /** Muted freshness trace rendered in the pagination footer's left cluster. */
+  paginationLeading?: React.ReactNode;
 }
 
 /**
@@ -96,6 +98,7 @@ export function OrdersTable({
   onPaginationChange,
   onSortChange,
   onRowOpen,
+  paginationLeading,
 }: OrdersTableProps): React.ReactElement {
   const t = useTranslations('ordersPage.table');
   const tPage = useTranslations('ordersPage');
@@ -435,7 +438,11 @@ export function OrdersTable({
         />
       )}
       pagination={(table) => (
-        <DataTablePagination table={table} pageSizes={ORDER_PER_PAGE_OPTIONS} />
+        <DataTablePagination
+          table={table}
+          pageSizes={ORDER_PER_PAGE_OPTIONS}
+          leading={paginationLeading}
+        />
       )}
     />
   );

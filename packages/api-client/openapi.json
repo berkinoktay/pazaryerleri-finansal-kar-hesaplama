@@ -2636,12 +2636,20 @@
             "items": {
               "$ref": "#/components/schemas/SyncLogResponse"
             }
+          },
+          "freshness": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncFreshness"
+            },
+            "description": "Per (store, syncType) last-successful-run feed, independent of the recent-N cap on `data`. Empty when no sync of any type has ever completed for the scoped stores."
           }
         },
         "required": [
-          "data"
+          "data",
+          "freshness"
         ],
-        "description": "Active + recent sync logs for a store, ordered: every RUNNING row first, then the most-recent N completed/failed rows. Used to hydrate the SyncCenter UI before the Realtime channel takes over."
+        "description": "Active + recent sync logs for a store, ordered: every RUNNING row first, then the most-recent N completed/failed rows. Used to hydrate the SyncCenter UI before the Realtime channel takes over. `freshness` carries the per-type last success independent of that recent cap."
       },
       "SyncLogResponse": {
         "type": "object",
@@ -2831,6 +2839,48 @@
           "skippedPages"
         ],
         "description": "Generic sync_logs row representation. Used by the SyncCenter UI to render live progress for any active sync (PRODUCTS today, ORDERS / SETTLEMENTS later)."
+      },
+      "SyncFreshness": {
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "1c1b9b3a-4f2d-49a8-9c5e-3a2f1d8b9c0e",
+            "description": "Store the freshness row belongs to."
+          },
+          "syncType": {
+            "type": "string",
+            "enum": [
+              "ORDERS",
+              "PRODUCTS",
+              "PRODUCTS_DELTA",
+              "SETTLEMENTS",
+              "CLAIMS"
+            ],
+            "example": "ORDERS",
+            "description": "Which marketplace surface this last-success timestamp is for."
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-27T14:23:11.482Z",
+            "description": "When the most-recent COMPLETED run of this (store, syncType) finished. ISO 8601 UTC."
+          },
+          "recordsProcessed": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 234,
+            "description": "How many records that last successful run processed."
+          }
+        },
+        "required": [
+          "storeId",
+          "syncType",
+          "completedAt",
+          "recordsProcessed"
+        ],
+        "description": "Last successful (COMPLETED) sync per (store, syncType). Computed with a raw DISTINCT ON so it survives the recent-N cap on `data` — a nightly PRODUCTS scan that last succeeded before five newer ORDERS runs is still reported here."
       },
       "ListProductsResponse": {
         "type": "object",
@@ -3897,6 +3947,25 @@
         "required": [
           "variantId",
           "salePrice"
+        ]
+      },
+      "TriggerSyncBody": {
+        "type": "object",
+        "properties": {
+          "syncType": {
+            "type": "string",
+            "enum": [
+              "ORDERS",
+              "PRODUCTS",
+              "SETTLEMENTS",
+              "CLAIMS"
+            ],
+            "description": "Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. PRODUCTS_DELTA is not accepted here — it is a cron-internal lightweight stock/price walk, not a user-triggerable sync.",
+            "example": "ORDERS"
+          }
+        },
+        "required": [
+          "syncType"
         ]
       },
       "ListCostProfilesResponse": {
@@ -10555,7 +10624,8 @@
           "Products"
         ],
         "summary": "Enqueue a Trendyol product sync",
-        "description": "Inserts a PENDING SyncLog row and returns 202 with the new syncLogId. The dedicated worker process (apps/sync-worker) claims the row and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime postgres_changes on the same row to track progress. Concurrent sync attempts return 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId` pointing at the live run.",
+        "deprecated": true,
+        "description": "Deprecated: use the generic `POST /v1/organizations/:orgId/stores/:storeId/syncs` with `{ \"syncType\": \"PRODUCTS\" }` instead — it applies the identical auth / cooldown / conflict contract across every sync type. This PRODUCTS-only route stays live during the web client migration and will be removed once no caller depends on it. Inserts a PENDING SyncLog row and returns 202 with the new syncLogId. The dedicated worker process (apps/sync-worker) claims the row and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime postgres_changes on the same row to track progress. Concurrent sync attempts return 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId` pointing at the live run.",
         "security": [
           {
             "bearerAuth": []
@@ -10687,7 +10757,7 @@
           "Sync"
         ],
         "summary": "List active + recent sync logs",
-        "description": "Returns every RUNNING sync log for the store plus the last 5 completed/failed runs. Generic across SyncType (PRODUCTS today, ORDERS / SETTLEMENTS later). Used by the SyncCenter UI to hydrate before the Supabase Realtime channel takes over — and as the polling fallback when the WebSocket drops.",
+        "description": "Returns every RUNNING sync log for the store plus the last 5 completed/failed runs. Generic across SyncType (PRODUCTS today, ORDERS / SETTLEMENTS later). Used by the SyncCenter UI to hydrate before the Supabase Realtime channel takes over — and as the polling fallback when the WebSocket drops. The `freshness` array carries the last successful run per sync type for this store, independent of the recent-5 cap on `data`.",
         "security": [
           {
             "bearerAuth": []
@@ -12363,7 +12433,7 @@
           "Sync"
         ],
         "summary": "List active + recent sync logs across the organization",
-        "description": "Returns every active sync (PENDING / RUNNING / FAILED_RETRYABLE) plus the last 5 completed/failed runs across every store the user can see. Drives the org-wide SyncBadge in the dashboard header (PR 5c). Active rows come first, sorted newest first.",
+        "description": "Returns every active sync (PENDING / RUNNING / FAILED_RETRYABLE) plus the last 5 completed/failed runs across every store the user can see. Active rows come first, sorted newest first. The `freshness` array carries the last successful run per (store, syncType) independent of the recent-5 cap on `data`, and is returned in both the default and `active=true` modes. The `active=true` mode has no web caller today — the org-wide SyncBadge that drove it was removed; the query param is kept for backward compatibility.",
         "security": [
           {
             "bearerAuth": []
@@ -12386,10 +12456,10 @@
                 "true",
                 "false"
               ],
-              "description": "When `true`, omit recent COMPLETED/FAILED rows and return only active syncs."
+              "description": "When `true`, omit recent COMPLETED/FAILED rows and return only active syncs. Retained for backward compatibility — no web caller uses it today (the org-wide SyncBadge that consumed active-only mode was removed). `freshness` is still returned in this mode."
             },
             "required": false,
-            "description": "When `true`, omit recent COMPLETED/FAILED rows and return only active syncs.",
+            "description": "When `true`, omit recent COMPLETED/FAILED rows and return only active syncs. Retained for backward compatibility — no web caller uses it today (the org-wide SyncBadge that consumed active-only mode was removed). `freshness` is still returned in this mode.",
             "name": "active",
             "in": "query"
           }
@@ -12443,6 +12513,157 @@
           },
           "403": {
             "description": "Not a member of this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{orgId}/stores/{storeId}/syncs": {
+      "post": {
+        "tags": [
+          "Sync"
+        ],
+        "summary": "Enqueue a manual marketplace sync (generic across sync type)",
+        "description": "Inserts a PENDING MANUAL SyncLog row for the requested `syncType` and returns 202 with the new syncLogId. The dedicated worker (apps/sync-worker) claims it within ~1 s and runs the sync in the background; clients poll `GET /v1/organizations/:orgId/stores/:storeId/sync-logs/:syncLogId` or subscribe to Supabase Realtime to track progress. A second manual trigger for the same (store, syncType) inside its cooldown window returns 429 RATE_LIMITED with `Retry-After`; an already-active sync for that slot returns 409 SYNC_IN_PROGRESS with `meta.existingSyncLogId`. Accepts ORDERS / PRODUCTS / SETTLEMENTS / CLAIMS — PRODUCTS_DELTA is rejected as a cron-internal type.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSyncBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Sync queued",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Maximum requests permitted in the current window"
+                },
+                "required": true,
+                "description": "Maximum requests permitted in the current window"
+              },
+              "X-RateLimit-Remaining": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Requests remaining in the current window"
+                },
+                "required": true,
+                "description": "Requests remaining in the current window"
+              },
+              "X-RateLimit-Reset": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Epoch seconds when the current window resets"
+                },
+                "required": true,
+                "description": "Epoch seconds when the current window resets"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartSyncResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member of this organization, or role lacks the sync capability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Store not found (or not accessible to the caller)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A sync of this type is already running for this store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body (unknown or non-triggerable syncType)",
             "content": {
               "application/json": {
                 "schema": {

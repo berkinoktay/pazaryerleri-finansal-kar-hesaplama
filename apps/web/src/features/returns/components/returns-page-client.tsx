@@ -1,18 +1,15 @@
 'use client';
 
-import { RefreshIcon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { DateRangePicker } from '@/components/patterns/date-range-picker';
 import { PageHeader } from '@/components/patterns/page-header';
-import { SyncBadge } from '@/components/patterns/sync-badge';
 import { SyncCenter } from '@/components/patterns/sync-center';
-import { Button } from '@/components/ui/button';
+import { PageSyncControl } from '@/features/sync/components/page-sync-control';
+import { PageSyncFooterTrace } from '@/features/sync/components/page-sync-footer-trace';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
-import { deriveSyncSnapshot, toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
+import { toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
 import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
-import { cn } from '@/lib/utils';
 
 import { useRefreshReturns } from '../hooks/use-refresh-returns';
 import { useReturns } from '../hooks/use-returns';
@@ -33,9 +30,10 @@ interface ReturnsPageClientProps {
 /**
  * Top-level client component for the returns page. Owns URL state via
  * useReturnsFilters and server state via useReturns / useReturnsSummary.
- * Read-only V1: claim rows arrive from the 6h CLAIMS cron; the header
- * pairs a CLAIMS SyncBadge (freshness + sync center) with a cache-refresh
- * button (no vendor call — mirrors the orders page contract).
+ * Read-only V1: claim rows arrive from the 6h CLAIMS cron; the header holds
+ * the unified PageSyncControl (freshness + manual CLAIMS sync + source
+ * breakdown). Its onFlowsSettled refreshes the list + KPI caches when a
+ * returns-page sync completes (no vendor call — mirrors the orders page).
  *
  * The KPI strip and table ALWAYS render once a store is selected — an
  * empty dataset shows the table's embedded empty state instead of a
@@ -52,8 +50,6 @@ export function ReturnsPageClient({
   pageTitle,
   pageIntent,
 }: ReturnsPageClientProps): React.ReactElement {
-  const tReturns = useTranslations('returnsPage');
-  const tSync = useTranslations('syncCenter');
   const { filters, setFilters } = useReturnsFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
 
@@ -104,43 +100,18 @@ export function ReturnsPageClient({
   };
   const counts = returnsQuery.data?.counts ?? { all: 0, open: 0, resolved: 0 };
 
-  const claimsSyncSnapshot = deriveSyncSnapshot('CLAIMS', activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
-  // Refresh is a client-side cache invalidate only (no vendor POST), so the
-  // button only guards its own brief in-flight state.
-  const refreshButtonDisabled = refresh.isPending;
-
-  // SyncBadge (freshness) rides the framed header's status row — the top line of
-  // the right cluster, directly ABOVE the controls row — so the freshness pill
-  // does not crowd the Yenile button on one line. Passed via `meta`.
-  const headerMeta = (
-    <SyncBadge
-      state={claimsSyncSnapshot.state}
-      lastSyncedAt={claimsSyncSnapshot.lastSyncedAt}
-      progress={claimsSyncSnapshot.progress}
-      activeCount={activeSyncs.length}
-      source="Trendyol"
-      onClick={() => setSyncCenterOpen(true)}
-      ariaLabel={tSync('openLabel')}
-    />
-  );
-
-  // Controls row: the Yenile action alone now that the freshness pill moved to
-  // the status row above it.
+  // Controls row: the unified freshness control owns freshness + the manual
+  // CLAIMS sync + the source breakdown popover. onFlowsSettled invalidates the
+  // list + KPI caches the moment a returns-page sync completes (replaces the
+  // former client-side "Yenile" button).
   const headerActions = (
-    <Button
-      type="button"
-      size="sm"
-      onClick={() => refresh.mutate()}
-      disabled={refreshButtonDisabled}
-      className="gap-xs"
-    >
-      <RefreshIcon className={cn('size-icon-sm', refreshButtonDisabled && 'animate-spin')} />
-      {refreshButtonDisabled
-        ? tReturns('refreshButton.refreshing')
-        : tReturns('refreshButton.label')}
-    </Button>
+    <PageSyncControl
+      pageKey="returns"
+      onOpenHistory={() => setSyncCenterOpen(true)}
+      onFlowsSettled={() => refresh.mutate()}
+    />
   );
 
   // claimDate range as a page-scope filter — it recomputes the summary + list,
@@ -162,7 +133,6 @@ export function ReturnsPageClient({
           variant="framed"
           title={pageTitle}
           intent={pageIntent}
-          meta={headerMeta}
           filters={headerFilters}
           actions={headerActions}
           summary={
@@ -177,6 +147,7 @@ export function ReturnsPageClient({
         <ReturnsTable
           rows={rows}
           loading={returnsQuery.isLoading}
+          paginationLeading={<PageSyncFooterTrace pageKey="returns" />}
           pagination={pagination}
           filters={{ q: filters.q, from: filters.from, to: filters.to }}
           status={filters.status}

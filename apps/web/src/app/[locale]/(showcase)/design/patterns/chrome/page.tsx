@@ -6,10 +6,10 @@ import { DateRangePicker } from '@/components/patterns/date-range-picker';
 import { PageHeader } from '@/components/patterns/page-header';
 import { StatStrip } from '@/components/patterns/stat-strip';
 import { SubNavList } from '@/components/patterns/sub-nav-list';
-import { SyncBadge } from '@/components/patterns/sync-badge';
 import { CategoryNav } from '@/components/showcase/category-nav';
 import { Preview } from '@/components/showcase/preview';
 import { ShowcaseSection } from '@/components/showcase/section';
+import { SyncControlDemo } from '@/components/showcase/sync-control-demo';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -17,11 +17,6 @@ import { BottomDockShowcase } from '../bottom-dock-showcase';
 import { NavGroupShowcase } from '../nav-group-showcase';
 import { OrgStoreSwitcherShowcase } from '../org-store-switcher-showcase';
 import { ThemeToggleShowcase } from '../theme-toggle-showcase';
-
-const MOCK_SYNC_REF = new Date('2026-04-20T21:00:00Z');
-const MOCK = {
-  syncMeta: new Date(MOCK_SYNC_REF.getTime() - 4 * 60 * 1000),
-};
 
 export default function ChromePatternsPage(): React.ReactElement {
   return (
@@ -34,18 +29,18 @@ export default function ChromePatternsPage(): React.ReactElement {
 
       <ShowcaseSection
         title="PageHeader"
-        description="Her sayfanın taşıdığı başlık bloğu — başlık + intent + aksiyonlar. intent başlığı tekrarlamaz; bağlam, dönem veya scope verir. Sayfanın en üstündeki başlık (bu showcase'in kendi PageHeader'ı) canlı örnektir; aşağıdaki Preview aksiyon + SyncBadge kompozisyonunu gösterir."
+        description="Her sayfanın taşıdığı başlık bloğu — başlık + intent + aksiyonlar. intent başlığı tekrarlamaz; bağlam, dönem veya scope verir. Sayfanın en üstündeki başlık (bu showcase'in kendi PageHeader'ı) canlı örnektir; aşağıdaki Preview aksiyon + SyncControl kompozisyonunu gösterir."
       >
         <Preview
-          title="actions + SyncBadge kompozisyonu"
-          description="SyncBadge (tazelik) sağdaki `actions` kümesinde aksiyonla birlikte gruplanır; opsiyonel `summary` slotu metrik-yoğun sayfalarda KPI şeridi taşır, metriksiz sayfalarda hiç render edilmez. Tek inline örnek — sayfa başlığı zaten salt başlık + intent halini gösterir."
+          title="actions + SyncControl kompozisyonu"
+          description="SyncControl (tazelik + manuel eşitleme + kaynak dökümü) sağdaki `actions` kümesinde aksiyonlarla birlikte gruplanır; opsiyonel `summary` slotu metrik-yoğun sayfalarda KPI şeridi taşır, metriksiz sayfalarda hiç render edilmez. Tek inline örnek — sayfa başlığı zaten salt başlık + intent halini gösterir."
         >
           <PageHeader
             title="Sipariş mutabakatı"
             intent="Nisan 2026 dönemi · Trendyol Ana Mağaza · Hakediş karşılığını sipariş bazında doğrula."
             actions={
               <>
-                <SyncBadge state="fresh" lastSyncedAt={MOCK.syncMeta} source="Trendyol" />
+                <SyncControlDemo state="fresh" />
                 <Button variant="outline" size="sm">
                   Dışa aktar
                 </Button>
@@ -57,18 +52,20 @@ export default function ChromePatternsPage(): React.ReactElement {
 
         <Preview
           title="Çerçeveli — liste"
-          description="Başlık ve KPI şeridi tek yükseltilmiş kartta birleşir; sağ küme iki satıra ayrılır — üstte tazelik rozeti (SyncBadge) durum satırı, altında sayfa-kapsamı filtre (tarih aralığı) ve aksiyon kontrolleri."
+          description="Başlık ve KPI şeridi tek yükseltilmiş kartta birleşir; sağdaki `actions` kontrol satırı birleşik SyncControl'ü (tazelik + manuel eşitleme) sayfa-kapsamı filtre (tarih aralığı) ve Yenile aksiyonuyla birlikte taşır."
         >
           <PageHeader
             variant="framed"
             title="Siparişler"
             intent="Bağlı mağazalardan akan siparişler. Filtrele, mutabakat durumunu izle."
-            meta={<SyncBadge state="fresh" lastSyncedAt={MOCK.syncMeta} source="Trendyol" />}
             filters={<DateRangePicker />}
             actions={
-              <Button size="sm" leadingIcon={<RefreshIcon aria-hidden />}>
-                Yenile
-              </Button>
+              <>
+                <SyncControlDemo state="fresh" />
+                <Button size="sm" leadingIcon={<RefreshIcon aria-hidden />}>
+                  Yenile
+                </Button>
+              </>
             }
             summary={
               <StatStrip
