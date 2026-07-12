@@ -2498,7 +2498,12 @@
     },
     "fullHistory": "Full history",
     "statusButtonLabel": "Sync status and source breakdown",
-    "tableFooter": "Last updated"
+    "tableFooter": "Last updated",
+    "staleBanner": {
+      "message": "This data hasn't been updated in {hours} hours",
+      "action": "Sync now"
+    },
+    "failureToast": "Couldn't update {domain}"
   },
   "products": {
     "page": {

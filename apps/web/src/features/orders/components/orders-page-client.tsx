@@ -7,13 +7,16 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { SyncCenter } from '@/components/patterns/sync-center';
 import { PageSyncControl } from '@/features/sync/components/page-sync-control';
 import { PageSyncFooterTrace } from '@/features/sync/components/page-sync-footer-trace';
+import { StaleDataBanner } from '@/features/sync/components/stale-data-banner';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 import { toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
 import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
 
 import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
+import { useOrdersRealtimeRefresh } from '../hooks/use-orders-realtime-refresh';
 import { useOrdersSummary } from '../hooks/use-orders-summary';
+import { RecentOrderIdsProvider } from '../hooks/use-recent-order-ids';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
 
 import { OrderDetailSheet, type OrderDetailSelection } from './order-detail-sheet';
@@ -92,6 +95,14 @@ export function OrdersPageClient({
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
   const refresh = useRefreshOrders(orgId, storeId);
 
+  // Realtime new-order inserts (#467): when the live notifier announces a new
+  // order over the recent-orders bus, refetch the list + KPI so the new row
+  // actually appears (and its row highlight paints against a fetched row rather
+  // than arming for nothing). Reuses the page's own refresh — the SAME
+  // invalidation the header control runs on onFlowsSettled — and coalesces a
+  // burst of ids into one refetch.
+  useOrdersRealtimeRefresh(() => refresh.mutate());
+
   if (noStoreSelected) {
     return (
       <>
@@ -152,7 +163,7 @@ export function OrdersPageClient({
     !hasAnyFilter && noOrdersAtAll ? <OrdersEmptyState variant="no-orders" embedded /> : undefined;
 
   return (
-    <>
+    <RecentOrderIdsProvider>
       <div className="gap-lg flex flex-col">
         <PageHeader
           variant="framed"
@@ -169,6 +180,8 @@ export function OrdersPageClient({
             )
           }
         />
+        {/* Aged-data warning strip (in content flow, between header and table). */}
+        <StaleDataBanner pageKey="orders" />
         <OrdersTable
           rows={rows}
           loading={ordersQuery.isLoading}
@@ -233,6 +246,6 @@ export function OrdersPageClient({
         logs={syncCenterLogs}
         triggers={[]}
       />
-    </>
+    </RecentOrderIdsProvider>
   );
 }

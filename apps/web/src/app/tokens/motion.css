@@ -227,6 +227,26 @@
   animation: panel-enter var(--duration-base) var(--ease-out-quart) 50ms both;
 }
 
+/* New-row live highlight — a realtime order landing in the orders table enters
+   with a soft brand fill (--primary-soft) that fades to transparent over ~3s
+   (issue #467). Fires once when the `.animate-row-highlight` class is applied to
+   the row. No fill-mode: after the run the row reverts to its own transparent
+   background, so nothing lingers. Under prefers-reduced-motion the global rule
+   above collapses it to its end frame (transparent) — the row arrives already
+   normal, no flash. */
+@keyframes row-highlight {
+  from {
+    background-color: var(--primary-soft);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.animate-row-highlight {
+  animation: row-highlight 3s var(--ease-out-quart);
+}
+
 /* Hover elevation for INTERACTIVE cards only (a static info card lifting on
    hover falsely advertises clickability): resting shadow-xs rises to
    shadow-sm. Pair with an existing cursor/selection affordance. The

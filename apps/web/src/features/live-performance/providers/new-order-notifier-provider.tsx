@@ -9,6 +9,7 @@ import { formatCurrency } from '@pazarsync/utils';
 
 import { toast } from '@/components/ui/sonner';
 import { useRouter } from '@/i18n/navigation';
+import { publishRecentOrder } from '@/lib/recent-orders-bus';
 import { subscribeToLivePerformance, type RealtimeHealth } from '@/lib/supabase/realtime';
 import { useOrderSoundPref } from '@/lib/use-order-sound-pref';
 import { useCurrentScope } from '@/providers/current-scope';
@@ -339,6 +340,11 @@ export function NewOrderNotifierProvider({
       const key = knownOrderKey(event.table, event.id);
       if (knownIds.has(key)) return;
       knownIds.add(key);
+      // Flag the new row for the orders-table live highlight (#467). Only
+      // `orders`-table inserts map to an orders-list row id; buffer rows do not
+      // appear in that list. Fire-and-forget — additive to the #424 toast/sound
+      // pipeline below, whose semantics are untouched.
+      if (event.table === 'orders') publishRecentOrder(event.id);
       pending.push(event);
       if (coalesceTimer === null) {
         coalesceTimer = setTimeout(() => {
