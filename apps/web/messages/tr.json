@@ -1690,10 +1690,6 @@
         "title": "Henüz iade yok",
         "description": "İade talepleri 6 saatte bir Trendyol'dan çekilir; ilk iade düştüğünde burada görünür."
       }
-    },
-    "refreshButton": {
-      "label": "Yenile",
-      "refreshing": "Yenileniyor…"
     }
   },
   "ordersPage": {
@@ -1772,10 +1768,6 @@
         "title": "Henüz sipariş yok",
         "description": "Bağlı mağazadan ilk sipariş senkronlandığında burada görünecek."
       }
-    },
-    "refreshButton": {
-      "label": "Yenile",
-      "refreshing": "Yenileniyor…"
     },
     "excludedList": {
       "label": "Kâr hesabı dışı",
@@ -2454,6 +2446,59 @@
         "description": "Bir aksaklık oldu. Sorun devam ederse destek ekibimize ulaş."
       }
     }
+  },
+  "syncControl": {
+    "pageData": {
+      "orders": "Siparişler verisi",
+      "returns": "İadeler verisi",
+      "products": "Ürünler verisi",
+      "profitability": "Kârlılık verisi",
+      "dashboard": "Tüm veriler"
+    },
+    "justSynced": {
+      "orders": "Tüm siparişleriniz güncellendi",
+      "returns": "Tüm iadeleriniz güncellendi",
+      "products": "Tüm ürünleriniz güncellendi",
+      "profitability": "Verileriniz güncellendi",
+      "dashboard": "Verileriniz güncellendi"
+    },
+    "action": {
+      "sync": "Eşitle",
+      "syncing": "Eşitleniyor",
+      "cooldown": "{seconds} sn sonra tekrar deneyebilirsiniz"
+    },
+    "state": {
+      "neverSynced": "Henüz eşitlenmedi",
+      "failed": "Başarısız",
+      "retrying": "Yeniden denenecek",
+      "starting": "Başlatılıyor…"
+    },
+    "domain": {
+      "ORDERS": "Sipariş bilgileri",
+      "PRODUCTS": "Ürün bilgileri",
+      "PRODUCTS_DELTA": "Fiyat ve stok",
+      "SETTLEMENTS": "Hakediş ve kâr verisi",
+      "CLAIMS": "İade bilgileri"
+    },
+    "row": {
+      "updated": "güncellendi",
+      "neverSynced": "henüz eşitlenmedi",
+      "syncing": "eşitleniyor",
+      "failed": "güncellenemedi",
+      "retryAt": "{time} yeniden denenecek",
+      "justNow": "birkaç saniye önce"
+    },
+    "othersSection": "Panelin geri kalanı · {count} akış",
+    "schedule": {
+      "orders": "Siparişler webhook ile anında düşer · saatlik tarama yedeği",
+      "returns": "Otomatik eşitleme 6 saatte bir",
+      "products": "Stok/fiyat her saat 15 geçe · tam tarama her gece",
+      "profitability": "Otomatik eşitleme 6 saatte bir",
+      "dashboard": "Akışlar zamanlanmış aralıklarla kendiliğinden eşitlenir"
+    },
+    "fullHistory": "Tüm geçmiş",
+    "statusButtonLabel": "Senkron durumu ve kaynak dökümü",
+    "tableFooter": "Son güncelleme"
   },
   "products": {
     "page": {

@@ -88,4 +88,42 @@ describe('<TimeAgo>', () => {
       expect(time?.getAttribute('datetime')).toBe(iso);
     });
   });
+
+  describe('recentLabel', () => {
+    it('renders the recentLabel when the value is inside the threshold', () => {
+      const value = new Date(NOW.getTime() - 10 * 1000);
+      renderWithIntl(<TimeAgo value={value} now={NOW} recentLabel="birkaç saniye önce" />);
+      expect(screen.getByText('birkaç saniye önce')).toBeInTheDocument();
+    });
+
+    it('falls back to the relative label outside the threshold', () => {
+      const value = new Date(NOW.getTime() - 5 * 60 * 1000);
+      const { container } = renderWithIntl(
+        <TimeAgo value={value} now={NOW} recentLabel="birkaç saniye önce" />,
+      );
+      expect(screen.queryByText('birkaç saniye önce')).not.toBeInTheDocument();
+      expect(container.querySelector('time')?.textContent).toMatch(/\d/);
+    });
+
+    it('honors a custom recentThresholdMs', () => {
+      const value = new Date(NOW.getTime() - 90 * 1000);
+      // 90s is outside the 60s default but inside a 120s window.
+      renderWithIntl(
+        <TimeAgo
+          value={value}
+          now={NOW}
+          recentLabel="birkaç saniye önce"
+          recentThresholdMs={120_000}
+        />,
+      );
+      expect(screen.getByText('birkaç saniye önce')).toBeInTheDocument();
+    });
+
+    it('is unchanged without recentLabel even for a very recent value', () => {
+      const value = new Date(NOW.getTime() - 10 * 1000);
+      const { container } = renderWithIntl(<TimeAgo value={value} now={NOW} />);
+      expect(screen.queryByText('birkaç saniye önce')).not.toBeInTheDocument();
+      expect(container.querySelector('time')).not.toBeNull();
+    });
+  });
 });

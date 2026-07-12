@@ -9,15 +9,17 @@ import {
   type SyncLogRealtimeEvent,
 } from '@/lib/supabase/realtime';
 
-import { listOrgSyncLogs, type SyncLog } from '../api/list-org-sync-logs.api';
+import { listOrgSyncLogs, type SyncFreshness, type SyncLog } from '../api/list-org-sync-logs.api';
+import { applySyncLogEvent, type OrgSyncsCache } from '../lib/org-syncs-cache';
 import { computeSyncRefetchInterval, isActive } from '../lib/sync-refetch-interval';
 import { orgSyncKeys } from '../query-keys';
 
-const RECENT_LIMIT = 5;
+const EMPTY_CACHE: OrgSyncsCache = { logs: [], freshness: [] };
 
 interface OrgSyncsContextValue {
   activeSyncs: SyncLog[];
   recentSyncs: SyncLog[];
+  freshness: SyncFreshness[];
   isLoading: boolean;
 }
 
@@ -27,7 +29,7 @@ const ctx = React.createContext<OrgSyncsContextValue | null>(null);
  * Mounts the org-wide Realtime channel for sync_logs and exposes
  * activeSyncs / recentSyncs through context. One channel per user per
  * org — surfaces every sync from every store the user can see, so the
- * dashboard SyncBadge updates regardless of which page is active.
+ * dashboard freshness control updates regardless of which page is active.
  *
  * Three resilience layers:
  *   1. REST hydration on mount via listOrgSyncLogs
@@ -69,7 +71,7 @@ export function OrgSyncsProvider({
   // 'errored', never on repeated 'errored' emits.
   const prevHealthRef = React.useRef<RealtimeHealth>('connecting');
 
-  const query: UseQueryResult<SyncLog[]> = useQuery<SyncLog[]>({
+  const query: UseQueryResult<OrgSyncsCache> = useQuery<OrgSyncsCache>({
     queryKey: isEnabled && orgId !== null ? orgSyncKeys.list(orgId) : ['org-syncs', '__disabled__'],
     queryFn: () => {
       if (orgId === null) {
@@ -80,8 +82,10 @@ export function OrgSyncsProvider({
     enabled: isEnabled,
     // `realtimeHealth` is read from render state (not a ref) so each health
     // transition re-renders, React Query re-evaluates this callback, and the
-    // new interval takes effect on the next tick instead of a stale one.
-    refetchInterval: (q) => computeSyncRefetchInterval(realtimeHealth, q.state.data),
+    // new interval takes effect on the next tick instead of a stale one. The
+    // liveness backstop keys on the log list, so pass `.logs` (freshness has
+    // no bearing on whether an active sync needs a reconcile floor).
+    refetchInterval: (q) => computeSyncRefetchInterval(realtimeHealth, q.state.data?.logs),
   });
 
   React.useEffect(() => {
@@ -89,16 +93,16 @@ export function OrgSyncsProvider({
     const queryKey = orgSyncKeys.list(orgId);
     return subscribeToOrgSyncs(orgId, {
       onEvent: (event: SyncLogRealtimeEvent) => {
-        queryClient.setQueryData<SyncLog[] | undefined>(queryKey, (existing) =>
-          applyEvent(existing ?? [], event),
+        queryClient.setQueryData<OrgSyncsCache | undefined>(queryKey, (existing) =>
+          applySyncLogEvent(existing ?? EMPTY_CACHE, event),
         );
       },
       // R2c delivery watchdog: we expect a steady event stream only while an
       // active sync is in flight. Read live from the cache (not a captured
       // snapshot) so the watchdog reflects the current rows on every check.
       expectDelivery: () => {
-        const rows = queryClient.getQueryData<SyncLog[]>(queryKey);
-        return (rows ?? []).some((row) => isActive(row.status));
+        const cache = queryClient.getQueryData<OrgSyncsCache>(queryKey);
+        return (cache?.logs ?? []).some((row) => isActive(row.status));
       },
       onHealthChange: (next) => {
         const prev = prevHealthRef.current;
@@ -132,10 +136,11 @@ export function OrgSyncsProvider({
   }, [isEnabled, orgId, queryClient]);
 
   const value = React.useMemo<OrgSyncsContextValue>(() => {
-    const all = query.data ?? [];
+    const cache = query.data ?? EMPTY_CACHE;
     return {
-      activeSyncs: all.filter((s) => isActive(s.status)),
-      recentSyncs: all.filter((s) => !isActive(s.status)),
+      activeSyncs: cache.logs.filter((s) => isActive(s.status)),
+      recentSyncs: cache.logs.filter((s) => !isActive(s.status)),
+      freshness: cache.freshness,
       isLoading: query.isLoading,
     };
   }, [query.data, query.isLoading]);
@@ -149,50 +154,4 @@ export function useOrgSyncs(): OrgSyncsContextValue {
     throw new Error('useOrgSyncs must be used inside OrgSyncsProvider');
   }
   return value;
-}
-
-/**
- * Reconcile a Realtime event against the cached list. Active rows
- * always come first; recent rows are kept newest-first and capped at
- * RECENT_LIMIT to match the REST endpoint's response shape.
- */
-function applyEvent(existing: SyncLog[], event: SyncLogRealtimeEvent): SyncLog[] {
-  const filtered = existing.filter((log) => log.id !== event.id);
-
-  if (event.eventType === 'DELETE' || event.row === null) {
-    return filtered;
-  }
-
-  const incoming: SyncLog = {
-    id: event.row.id,
-    organizationId: event.row.organizationId,
-    storeId: event.row.storeId,
-    syncType: event.row.syncType,
-    status: event.row.status,
-    startedAt: event.row.startedAt,
-    completedAt: event.row.completedAt,
-    recordsProcessed: event.row.recordsProcessed,
-    progressCurrent: event.row.progressCurrent,
-    progressTotal: event.row.progressTotal,
-    progressStage: event.row.progressStage,
-    errorCode: event.row.errorCode,
-    errorMessage: event.row.errorMessage,
-    attemptCount: event.row.attemptCount,
-    nextAttemptAt: event.row.nextAttemptAt,
-    skippedPages: event.row.skippedPages,
-  };
-
-  const next = [...filtered, incoming];
-  next.sort((a, b) => {
-    const aActive = isActive(a.status);
-    const bActive = isActive(b.status);
-    if (aActive !== bActive) return aActive ? -1 : 1;
-    return Date.parse(b.startedAt) - Date.parse(a.startedAt);
-  });
-
-  // Cap the recent (non-active) tail at RECENT_LIMIT so the cache
-  // doesn't grow unbounded under a high-event stream.
-  const activeCount = next.findIndex((log) => !isActive(log.status));
-  if (activeCount === -1) return next;
-  return next.slice(0, activeCount + RECENT_LIMIT);
 }

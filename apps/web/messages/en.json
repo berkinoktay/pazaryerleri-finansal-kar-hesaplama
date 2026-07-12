@@ -1690,10 +1690,6 @@
         "title": "No returns yet",
         "description": "Return claims sync from Trendyol every 6 hours; the first one will show up here."
       }
-    },
-    "refreshButton": {
-      "label": "Refresh",
-      "refreshing": "Refreshing…"
     }
   },
   "ordersPage": {
@@ -1772,10 +1768,6 @@
         "title": "No orders yet",
         "description": "Once the first order syncs from the connected store, it will land here."
       }
-    },
-    "refreshButton": {
-      "label": "Refresh",
-      "refreshing": "Refreshing…"
     },
     "excludedList": {
       "label": "Outside profit",
@@ -2454,6 +2446,59 @@
         "description": "Something went wrong. If the issue persists, please contact support."
       }
     }
+  },
+  "syncControl": {
+    "pageData": {
+      "orders": "Orders data",
+      "returns": "Returns data",
+      "products": "Products data",
+      "profitability": "Profitability data",
+      "dashboard": "All data"
+    },
+    "justSynced": {
+      "orders": "All your orders are up to date",
+      "returns": "All your returns are up to date",
+      "products": "All your products are up to date",
+      "profitability": "Your data is up to date",
+      "dashboard": "Your data is up to date"
+    },
+    "action": {
+      "sync": "Sync",
+      "syncing": "Syncing",
+      "cooldown": "You can try again in {seconds}s"
+    },
+    "state": {
+      "neverSynced": "Not synced yet",
+      "failed": "Failed",
+      "retrying": "Retry scheduled",
+      "starting": "Starting…"
+    },
+    "domain": {
+      "ORDERS": "Order data",
+      "PRODUCTS": "Product data",
+      "PRODUCTS_DELTA": "Price and stock",
+      "SETTLEMENTS": "Settlement and profit data",
+      "CLAIMS": "Return data"
+    },
+    "row": {
+      "updated": "updated",
+      "neverSynced": "not synced yet",
+      "syncing": "syncing",
+      "failed": "couldn't update",
+      "retryAt": "will retry {time}",
+      "justNow": "a few seconds ago"
+    },
+    "othersSection": "Rest of the app · {count} flows",
+    "schedule": {
+      "orders": "Orders arrive instantly via webhook · hourly scan as backup",
+      "returns": "Auto-sync every 6 hours",
+      "products": "Stock/price at 15 past each hour · full scan every night",
+      "profitability": "Auto-sync every 6 hours",
+      "dashboard": "Flows sync themselves on scheduled intervals"
+    },
+    "fullHistory": "Full history",
+    "statusButtonLabel": "Sync status and source breakdown",
+    "tableFooter": "Last updated"
   },
   "products": {
     "page": {

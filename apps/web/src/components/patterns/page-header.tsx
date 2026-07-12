@@ -30,7 +30,7 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
    */
   actions?: React.ReactNode;
   /**
-   * Meta slot — typically a SyncBadge for data-freshness signaling. Its
+   * Meta slot — typically a SyncControl for data-freshness signaling. Its
    * placement depends on the variant and mode:
    * - Plain: inside the heading column, below the intent line, so context
    *   stacks title → intent → meta.
@@ -101,11 +101,11 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
  *   ─────────────────────────────────────────────────
  *   title (large, semibold)  · actions (right-aligned)
  *   intent (muted body)
- *   meta (SyncBadge / freshness)
+ *   meta (SyncControl / freshness)
  *
  * The `intent` prop carries one-line context (period, scope, store) —
  * never restate the title; the sidebar already shows the section. Slot
- * the SyncBadge into `meta` so freshness lives next to the heading it
+ * the SyncControl into `meta` so freshness lives next to the heading it
  * describes. Slot the primary action (e.g. "Eşitle") into `actions`
  * so it's reachable in one glance from the top-right.
  *
@@ -114,7 +114,7 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
  * title steps down to a small identity. Both are opt-in — the default
  * `'plain'` variant renders exactly as it always has.
  *
- * @useWhen anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb), trailing actions, and a meta row (typically SyncBadge)
+ * @useWhen anchoring a dashboard page with a title, optional context line, leading slot (breadcrumb), trailing actions, and a meta row (typically SyncControl)
  */
 export function PageHeader({
   title,
@@ -144,7 +144,7 @@ export function PageHeader({
     ) : null;
 
   // Title-first column — the classic stack (30px title + badge + intent, with an
-  // optional meta row). `withMeta` governs whether the meta row (SyncBadge /
+  // optional meta row). `withMeta` governs whether the meta row (SyncControl /
   // freshness) stacks under the intent line: the plain variant keeps it here
   // (byte-identical to the pre-split markup), while framed's title mode drops it
   // (`false`) and re-renders it in the right cluster's status row instead.
@@ -224,7 +224,7 @@ export function PageHeader({
       </div>
     );
 
-  // Framed right cluster: two rows. The status row (meta / SyncBadge) sits ABOVE
+  // Framed right cluster: two rows. The status row (meta / SyncControl) sits ABOVE
   // the controls row (filters + actions) so the freshness signal reads clearly
   // instead of crowding the DateRangePicker + button on one line. The outer band
   // is already flex-col on mobile; `items-start sm:items-end` keeps the status

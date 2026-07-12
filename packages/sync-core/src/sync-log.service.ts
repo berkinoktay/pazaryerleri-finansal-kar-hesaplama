@@ -3,8 +3,8 @@
 // across SyncType — the per-resource service (e.g. ProductSyncService)
 // is the one that knows what "a batch" means.
 
-import { prisma } from '@pazarsync/db';
-import type { Prisma, SyncLog, SyncTriggerSource, SyncType } from '@pazarsync/db';
+import { prisma, SyncType } from '@pazarsync/db';
+import type { Prisma, SyncLog, SyncTriggerSource } from '@pazarsync/db';
 import { SyncErrorCode } from '@pazarsync/db/enums';
 
 import { parseSkippedPages, type ProductsCursor, type SkippedPageEntry } from './checkpoint';
@@ -247,6 +247,104 @@ export async function listOrgActiveAndRecent(
         }),
   ]);
   return [...active, ...recent];
+}
+
+// ─── Freshness feed (last successful run per store × sync type) ────────
+
+const SYNC_TYPE_VALUES: ReadonlySet<string> = new Set(Object.values(SyncType));
+
+/**
+ * Narrow a raw enum string coming back from a `$queryRaw` column to the
+ * `SyncType` union. The value always originates from our own
+ * `sync_logs.sync_type` enum column, so this is a defensive guard rather
+ * than genuine input validation — a row that somehow fails it is skipped
+ * instead of poisoning the whole freshness response.
+ */
+function isSyncType(value: string): value is SyncType {
+  return SYNC_TYPE_VALUES.has(value);
+}
+
+export interface LastSuccessfulSync {
+  storeId: string;
+  syncType: SyncType;
+  completedAt: string;
+  recordsProcessed: number;
+}
+
+interface LastSuccessfulRow {
+  storeId: string;
+  syncType: string;
+  completedAt: Date;
+  recordsProcessed: number;
+}
+
+/**
+ * The single most-recent COMPLETED run for every `(store, syncType)` pair
+ * in the org — the "freshness" feed that tells the dashboard how stale
+ * each data surface is per store.
+ *
+ * Independent of `listOrgActiveAndRecent`'s recent-N cap: that list is
+ * ordered by recency and trimmed to the last 5 rows org-wide, so a sync
+ * type that last succeeded a while ago (e.g. a nightly PRODUCTS scan)
+ * falls off it the moment five newer ORDERS runs land. This query keeps
+ * exactly one row per (store, syncType) regardless of how many newer runs
+ * of other types exist, so "last successful PRODUCTS sync" is always
+ * answerable.
+ *
+ * Uses a raw `DISTINCT ON (store_id, sync_type) … ORDER BY store_id,
+ * sync_type, completed_at DESC` so Postgres picks the newest COMPLETED row
+ * per pair in a single scan — Prisma's in-memory `distinct` would fetch
+ * every COMPLETED row first, which defeats the point.
+ *
+ * `opts.storeIds` mirrors `listOrgActiveAndRecent`: omit it for OWNER/ADMIN
+ * (all stores), pass the granted set for MEMBER/VIEWER (possibly empty →
+ * no rows). An empty array yields `ANY('{}')`, which matches nothing.
+ */
+export async function listLastSuccessfulPerType(
+  organizationId: string,
+  opts: { storeIds?: string[] } = {},
+): Promise<LastSuccessfulSync[]> {
+  const storeFilter = opts.storeIds ?? null;
+  // `completed_at IS NOT NULL` is load-bearing, not defensive noise (same
+  // rationale as the delta-cutoff query in apps/sync-worker/src/handlers/
+  // orders.ts): Postgres sorts NULLs FIRST on a DESC sort, so a COMPLETED
+  // row whose completed_at was never stamped would sort ABOVE every real
+  // completion and win the DISTINCT ON per (store, sync_type) — shadowing
+  // the true last success. Worse, its null completed_at would then blow up
+  // `row.completedAt.toISOString()` below and 500 the whole sync-logs feed.
+  // Filtering those rows out means such a pair falls back to its newest
+  // genuinely-completed run — the WHERE clause carries that load on its own.
+  // The ORDER BY deliberately omits `NULLS LAST`: a btree DESC index defaults
+  // to NULLS FIRST, so spelling out NULLS LAST would break the index pathkey
+  // match and force the planner to bolt on a redundant Sort node. With the
+  // nulls already eliminated by the WHERE clause the result is byte-for-byte
+  // identical either way, so we keep the ordering aligned with the index.
+  const rows = await prisma.$queryRaw<LastSuccessfulRow[]>`
+    SELECT DISTINCT ON (store_id, sync_type)
+      store_id          AS "storeId",
+      sync_type         AS "syncType",
+      completed_at      AS "completedAt",
+      records_processed AS "recordsProcessed"
+    FROM sync_logs
+    WHERE organization_id = ${organizationId}::uuid
+      AND status = 'COMPLETED'
+      AND completed_at IS NOT NULL
+      AND (${storeFilter}::uuid[] IS NULL OR store_id = ANY(${storeFilter}::uuid[]))
+    ORDER BY store_id, sync_type, completed_at DESC
+  `;
+
+  const result: LastSuccessfulSync[] = [];
+  for (const row of rows) {
+    if (!isSyncType(row.syncType)) continue;
+    result.push({
+      storeId: row.storeId,
+      syncType: row.syncType,
+      // Same ISO 8601 UTC formatting toSyncLogResponse applies to Date columns.
+      completedAt: row.completedAt.toISOString(),
+      recordsProcessed: row.recordsProcessed,
+    });
+  }
+  return result;
 }
 
 /**

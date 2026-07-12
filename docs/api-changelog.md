@@ -52,6 +52,30 @@ section "Versioning" for details.
 
 ### Added
 
+- **Generic manual-sync trigger endpoint** (`POST /v1/organizations/{orgId}/stores/{storeId}/syncs`).
+  Enqueues a PENDING MANUAL `SyncLog` for the `syncType` chosen in the body
+  (`{ "syncType": "ORDERS" | "PRODUCTS" | "SETTLEMENTS" | "CLAIMS" }`) and returns
+  **202** `{ syncLogId, status: "PENDING", enqueuedAt }`. Applies the same
+  auth / store-access / cooldown contract as the old PRODUCTS-only route: **409**
+  `SYNC_IN_PROGRESS` (with `meta.existingSyncLogId`) when a sync of that type is
+  already active for the store, **429** `RATE_LIMITED` (with `Retry-After`) inside
+  the per-`(store, syncType)` cooldown window. `PRODUCTS_DELTA` is rejected with a
+  **422** `VALIDATION_ERROR` (`errors[].code = INVALID_SYNC_TYPE`) — it is a
+  cron-internal lightweight walk, not a user-triggerable sync. The prior
+  `POST /v1/organizations/{orgId}/stores/{storeId}/products/sync` route is now
+  **deprecated** (marked `deprecated: true` in the spec) but stays live during the
+  web-client migration; it behaves identically to this route with
+  `syncType: "PRODUCTS"`.
+- **`SyncLogListResponse.freshness`** (array) — added to both sync-log list
+  endpoints (`GET /v1/organizations/{orgId}/sync-logs` and
+  `GET /v1/organizations/{orgId}/stores/{storeId}/sync-logs`). Each entry is
+  `{ storeId, syncType, completedAt, recordsProcessed }` and reports the single
+  most-recent COMPLETED run per `(store, syncType)`. Computed with a raw
+  `DISTINCT ON`, so it survives the recent-5 cap on `data`: a sync type whose last
+  success scrolled off the recent list (e.g. a nightly PRODUCTS scan behind five
+  newer ORDERS runs) is still reported here. Returned in both default and
+  `active=true` modes, and scoped to the caller's accessible stores for
+  MEMBER/VIEWER.
 - **`VariantSummary.delistedAt`** (ISO 8601 date-time | null) — surfaced on every
   product-list variant row (`GET /v1/organizations/{orgId}/stores/{storeId}/products`
   and the shared `VariantSummary` shape). Set when the marketplace catalog delta last

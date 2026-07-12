@@ -6,11 +6,11 @@ import { redirect } from 'next/navigation';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { NotificationBell } from '@/components/patterns/notification-bell';
 import { PageHeader } from '@/components/patterns/page-header';
-import { SyncBadge } from '@/components/patterns/sync-badge';
 import {
   QuickAccessPanel,
   type QuickAccessItem,
 } from '@/features/dashboard/components/quick-access-panel';
+import { DashboardSyncControl } from '@/features/sync/components/dashboard-sync-control';
 import type { Organization } from '@/features/organization/api/organizations.api';
 import { routing } from '@/i18n/routing';
 import { resolveActiveOrgId } from '@/lib/active-org';
@@ -26,12 +26,6 @@ export async function generateMetadata({
   const t = await getTranslations({ locale: effectiveLocale, namespace: 'dashboardPage' });
   return { title: t('title') };
 }
-
-// Mock value hoisted out of render so it doesn't re-construct on every pass
-// and so React Compiler doesn't flag `new Date(...)` as an impure call in
-// the render body. Real value will flow from the latest sync log when the
-// backend ships that endpoint.
-const MOCK_LAST_SYNCED = new Date('2026-04-22T00:13:00Z');
 
 // MOCK ENTRIES — replaced by useNotifications() when the feed endpoint ships.
 // Inline TR is acceptable for mock fixtures; production strings come from
@@ -89,7 +83,7 @@ export default async function DashboardPage({
         intent={activeOrg?.name}
         actions={
           <>
-            <SyncBadge state="fresh" lastSyncedAt={MOCK_LAST_SYNCED} source="Trendyol" />
+            <DashboardSyncControl />
             <NotificationBell entries={MOCK_NOTIFICATIONS} unreadCount={2} />
           </>
         }

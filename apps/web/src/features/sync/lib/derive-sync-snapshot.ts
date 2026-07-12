@@ -1,46 +1,13 @@
-import type { SyncState } from '@/components/patterns/sync-badge';
 import type { SyncCenterLog } from '@/components/patterns/sync-center';
 
 import type { SyncLog } from '../api/list-org-sync-logs.api';
 
-export interface SyncSnapshot {
-  state: SyncState;
-  lastSyncedAt: Date | string | null;
-  progress?: { current: number; total: number | null };
-}
-
 /**
- * Project one sync-type's log slice into a SyncBadge-friendly snapshot.
- * The provider already splits rows into active (PENDING/RUNNING/
- * FAILED_RETRYABLE) vs recent (COMPLETED/FAILED) buckets, so this is a thin
- * "first matching log per bucket wins" projection.
- *
- * Shared home (third consumer triggered the promotion — orders and products
- * still carry their own file-local copies; migrate them here on next touch).
+ * Flatten the provider's active + recent sync-log buckets into the
+ * SyncCenterLog[] shape the SyncCenter sheet consumes. The projection is a
+ * plain field passthrough — the pattern owns the sectioning (active / retrying /
+ * recent) internally.
  */
-export function deriveSyncSnapshot(
-  syncType: SyncLog['syncType'],
-  activeSyncs: SyncLog[],
-  recentSyncs: SyncLog[],
-): SyncSnapshot {
-  const active = activeSyncs.find((l) => l.syncType === syncType);
-  if (active !== undefined) {
-    return {
-      state: active.status === 'FAILED_RETRYABLE' ? 'retrying' : 'syncing',
-      lastSyncedAt: active.startedAt,
-      progress: { current: active.progressCurrent, total: active.progressTotal },
-    };
-  }
-  const recent = recentSyncs.find((l) => l.syncType === syncType);
-  if (recent === undefined) {
-    return { state: 'fresh', lastSyncedAt: null };
-  }
-  if (recent.status === 'FAILED') {
-    return { state: 'failed', lastSyncedAt: recent.completedAt ?? recent.startedAt };
-  }
-  return { state: 'fresh', lastSyncedAt: recent.completedAt ?? recent.startedAt };
-}
-
 export function toSyncCenterLogs(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncCenterLog[] {
   return [...activeSyncs, ...recentSyncs].map(projectSyncLog);
 }

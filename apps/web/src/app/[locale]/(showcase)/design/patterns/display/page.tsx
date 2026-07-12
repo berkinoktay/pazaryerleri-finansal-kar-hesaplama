@@ -290,7 +290,7 @@ export default function DisplayPatternsPage(): React.ReactElement {
 
         <Preview
           title="TimeAgo"
-          description="Geçmiş tarih için relative label (&quot;2 dk önce&quot;) + tooltip'te tam zaman + opsiyonel timezone. SSR-safe: ilk paint deterministic absolute date, mount sonrası relative'e döner. SyncBadge / NotificationBell / ActivityFeed bu atomu paylaşacak."
+          description="Geçmiş tarih için relative label (&quot;2 dk önce&quot;) + tooltip'te tam zaman + opsiyonel timezone. SSR-safe: ilk paint deterministic absolute date, mount sonrası relative'e döner. SyncControl / NotificationBell / ActivityFeed bu atomu paylaşacak."
         >
           <TimeAgoShowcase />
         </Preview>

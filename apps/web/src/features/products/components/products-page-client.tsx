@@ -1,22 +1,19 @@
 'use client';
 
-import { RefreshIcon } from 'hugeicons-react';
-import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { PageHeader } from '@/components/patterns/page-header';
-import { SyncBadge, type SyncState } from '@/components/patterns/sync-badge';
-import { SyncCenter, type SyncCenterLog } from '@/components/patterns/sync-center';
-import { Button } from '@/components/ui/button';
-import type { SyncLog } from '@/features/sync/api/list-org-sync-logs.api';
+import { SyncCenter } from '@/components/patterns/sync-center';
+import { PageSyncControl } from '@/features/sync/components/page-sync-control';
+import { PageSyncFooterTrace } from '@/features/sync/components/page-sync-footer-trace';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
-import { cn } from '@/lib/utils';
+import { toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
 
 import { useProductFacets } from '../hooks/use-product-facets';
 import { useProductFilterFields } from '../hooks/use-product-filter-fields';
 import { useProducts } from '../hooks/use-products';
 import { useProductsFilters } from '../hooks/use-products-filters';
-import { useStartProductSync } from '../hooks/use-start-product-sync';
+import { useRefreshProducts } from '../hooks/use-refresh-products';
 import { aggregateMissingShipping } from '../lib/aggregate-missing-shipping';
 import { filterRowsToProductParams } from '../lib/products-filter-fields';
 
@@ -40,8 +37,9 @@ interface ProductsPageClientProps {
  *     carrying status/brand/category and the range dimensions),
  *     overrideMissing, productId, page, perPage, sort.
  *   - Server state (via useProducts / useProductFacets — React Query).
- *   - Sync surface (active sync logs via REST + Realtime overlay,
- *     manual trigger via mutation).
+ *   - Sync surface (active sync logs via REST + Realtime overlay). Freshness
+ *     and the manual PRODUCTS trigger live in the header's PageSyncControl; the
+ *     SyncCenter sheet is a history-only surface here.
  *   - Composition of header + tab strip + table + sync center.
  *
  * The toolbar (search input + the advancedFilter add-button/chip row) and
@@ -54,8 +52,6 @@ export function ProductsPageClient({
   pageTitle,
   pageIntent,
 }: ProductsPageClientProps): React.ReactElement {
-  const tSync = useTranslations('syncCenter');
-  const tProducts = useTranslations('products');
   const { filters, setFilters } = useProductsFilters();
   const [syncCenterOpen, setSyncCenterOpen] = React.useState(false);
 
@@ -83,8 +79,8 @@ export function ProductsPageClient({
   );
   const facetsQuery = useProductFacets(orgId, storeId);
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
-  const startSync = useStartProductSync(orgId, storeId);
   const filterFields = useProductFilterFields(facetsQuery.data);
+  const refresh = useRefreshProducts(orgId, storeId);
 
   if (noStoreSelected) {
     return (
@@ -117,7 +113,6 @@ export function ProductsPageClient({
   // status/brand/category all live inside filters.filters.
   const hasActiveSearchOrFilter = filters.q.length > 0 || filters.filters.length > 0;
 
-  const productSyncSnapshot = derivedSyncSnapshot(activeSyncs, recentSyncs);
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
   const tabValue: ProductsOverrideTab = filters.overrideMissing ?? 'all';
@@ -131,12 +126,6 @@ export function ProductsPageClient({
     if (hasActiveSearchOrFilter) return 'filtered';
     return 'no-products';
   })();
-
-  // The Eşitle button can fire only when no products sync is already in
-  // flight — mirrors the SyncCenter trigger guard so we never POST a
-  // duplicate that would 409 with SYNC_IN_PROGRESS.
-  const productsSyncInFlight = activeSyncs.some((l) => l.syncType === 'PRODUCTS');
-  const syncButtonDisabled = startSync.isPending || productsSyncInFlight;
 
   return (
     <>
@@ -154,33 +143,16 @@ export function ProductsPageClient({
               <ProductsSummary counts={facetsQuery.data?.overrideCounts} />
             )
           }
-          // SyncBadge (freshness) rides the framed header's status row — the top
-          // line of the right cluster, directly ABOVE the controls row — so the
-          // freshness pill does not crowd the Eşitle button on one line.
-          meta={
-            <SyncBadge
-              state={productSyncSnapshot.state}
-              lastSyncedAt={productSyncSnapshot.lastSyncedAt}
-              progress={productSyncSnapshot.progress}
-              activeCount={activeSyncs.length}
-              source="Trendyol"
-              onClick={() => setSyncCenterOpen(true)}
-              ariaLabel={tSync('openLabel')}
-            />
-          }
-          // Controls row: the Eşitle action alone now that the freshness pill
-          // moved to the status row above it.
+          // Controls row: the unified PageSyncControl owns freshness + the manual
+          // PRODUCTS sync trigger + the source breakdown popover. onFlowsSettled
+          // invalidates the list + facet caches when a products-page sync
+          // completes (there was never a standalone "Yenile" button here).
           actions={
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => startSync.mutate()}
-              disabled={syncButtonDisabled}
-              className="gap-xs"
-            >
-              <RefreshIcon className={cn('size-icon-sm', syncButtonDisabled && 'animate-spin')} />
-              {syncButtonDisabled ? tProducts('syncButton.syncing') : tProducts('syncButton.label')}
-            </Button>
+            <PageSyncControl
+              pageKey="products"
+              onOpenHistory={() => setSyncCenterOpen(true)}
+              onFlowsSettled={() => refresh.mutate()}
+            />
           }
         />
 
@@ -209,6 +181,7 @@ export function ProductsPageClient({
           storeId={storeId}
           data={data}
           loading={isInitialLoad}
+          paginationLeading={<PageSyncFooterTrace pageKey="products" />}
           empty={
             emptyVariant !== undefined ? (
               <ProductsEmptyState
@@ -244,16 +217,10 @@ export function ProductsPageClient({
         open={syncCenterOpen}
         onOpenChange={setSyncCenterOpen}
         logs={syncCenterLogs}
-        triggers={[
-          {
-            syncType: 'PRODUCTS',
-            onClick: () => {
-              startSync.mutate();
-            },
-            isPending: startSync.isPending,
-            cooldownUntil: startSync.cooldownUntil,
-          },
-        ]}
+        // History-only surface: the manual PRODUCTS trigger lives solely in the
+        // header's PageSyncControl (single source of truth), matching the
+        // orders/returns pages. Duplicating it here raced the shared cooldown.
+        triggers={[]}
       />
     </>
   );
@@ -265,58 +232,3 @@ type ProductsEmptyVariant =
   | 'filtered'
   | 'missing-cost-none'
   | 'missing-vat-none';
-
-interface SyncSnapshot {
-  state: SyncState;
-  lastSyncedAt: Date | string | null;
-  progress?: { current: number; total: number | null };
-}
-
-/**
- * Derive the SyncBadge's display state from the active+recent sync
- * logs for the PRODUCTS sync type. Provider already classifies rows
- * into active (PENDING / RUNNING / FAILED_RETRYABLE) vs recent
- * (COMPLETED / FAILED), so this is a thin "first PRODUCTS log per
- * bucket wins" projection.
- */
-function derivedSyncSnapshot(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncSnapshot {
-  const active = activeSyncs.find((l) => l.syncType === 'PRODUCTS');
-  if (active !== undefined) {
-    return {
-      state: active.status === 'FAILED_RETRYABLE' ? 'retrying' : 'syncing',
-      lastSyncedAt: active.startedAt,
-      progress: { current: active.progressCurrent, total: active.progressTotal },
-    };
-  }
-  const recent = recentSyncs.find((l) => l.syncType === 'PRODUCTS');
-  if (recent === undefined) {
-    return { state: 'fresh', lastSyncedAt: null };
-  }
-  if (recent.status === 'FAILED') {
-    return { state: 'failed', lastSyncedAt: recent.completedAt ?? recent.startedAt };
-  }
-  return { state: 'fresh', lastSyncedAt: recent.completedAt ?? recent.startedAt };
-}
-
-function toSyncCenterLogs(activeSyncs: SyncLog[], recentSyncs: SyncLog[]): SyncCenterLog[] {
-  return [...activeSyncs, ...recentSyncs].map(projectSyncLog);
-}
-
-function projectSyncLog(log: SyncLog): SyncCenterLog {
-  return {
-    id: log.id,
-    storeId: log.storeId,
-    syncType: log.syncType,
-    status: log.status,
-    startedAt: log.startedAt,
-    completedAt: log.completedAt,
-    recordsProcessed: log.recordsProcessed,
-    progressCurrent: log.progressCurrent,
-    progressTotal: log.progressTotal,
-    errorCode: log.errorCode,
-    errorMessage: log.errorMessage,
-    attemptCount: log.attemptCount,
-    nextAttemptAt: log.nextAttemptAt,
-    skippedPages: log.skippedPages,
-  };
-}

@@ -22,6 +22,29 @@ export const StartSyncResponseSchema = z
   })
   .openapi('StartSyncResponse');
 
+// ─── Generic manual-sync trigger body ──────────────────────────────────
+// Body for POST /v1/organizations/:orgId/stores/:storeId/syncs — the
+// generic manual-sync trigger that supersedes the PRODUCTS-only
+// products/sync route. PRODUCTS_DELTA is intentionally excluded: it's the
+// cron-internal hourly stock/price walk, never a user-facing button, so
+// the enum is the four merchant-triggerable types only. An out-of-set
+// value fails with the SCREAMING_SNAKE code `INVALID_SYNC_TYPE`.
+
+export const MANUAL_SYNC_TRIGGER_TYPES = ['ORDERS', 'PRODUCTS', 'SETTLEMENTS', 'CLAIMS'] as const;
+export type ManualSyncTriggerType = (typeof MANUAL_SYNC_TRIGGER_TYPES)[number];
+
+export const TriggerSyncBodySchema = z
+  .object({
+    syncType: z.enum(MANUAL_SYNC_TRIGGER_TYPES, { message: 'INVALID_SYNC_TYPE' }).openapi({
+      description:
+        'Which marketplace surface to sync. One of ORDERS, PRODUCTS, SETTLEMENTS, CLAIMS. ' +
+        'PRODUCTS_DELTA is not accepted here — it is a cron-internal lightweight stock/price ' +
+        'walk, not a user-triggerable sync.',
+      example: 'ORDERS',
+    }),
+  })
+  .openapi('TriggerSyncBody');
+
 // ─── SyncLog response ──────────────────────────────────────────────────
 // Public representation of a sync_logs row. Generic across SyncType so the
 // same endpoint serves orders/settlements when those land. `progressTotal`
@@ -119,15 +142,54 @@ export const SyncLogResponseSchema = z
       'live progress for any active sync (PRODUCTS today, ORDERS / SETTLEMENTS later).',
   });
 
+// ─── Freshness entry (last successful run per store × sync type) ───────
+// One row per (store, syncType): the last time that surface completed a
+// sync successfully. Independent of the recent-N cap on `data`, so a sync
+// type whose last success has scrolled off the recent list is still
+// reported here. Drives the "son güncelleme" staleness indicators.
+
+export const SyncFreshnessSchema = z
+  .object({
+    storeId: z.string().uuid().openapi({
+      example: '1c1b9b3a-4f2d-49a8-9c5e-3a2f1d8b9c0e',
+      description: 'Store the freshness row belongs to.',
+    }),
+    syncType: z.enum(SyncType).openapi({
+      example: 'ORDERS',
+      description: 'Which marketplace surface this last-success timestamp is for.',
+    }),
+    completedAt: z.string().datetime().openapi({
+      example: '2026-04-27T14:23:11.482Z',
+      description:
+        'When the most-recent COMPLETED run of this (store, syncType) finished. ISO 8601 UTC.',
+    }),
+    recordsProcessed: z.number().int().nonnegative().openapi({
+      example: 234,
+      description: 'How many records that last successful run processed.',
+    }),
+  })
+  .openapi('SyncFreshness', {
+    description:
+      'Last successful (COMPLETED) sync per (store, syncType). Computed with a raw ' +
+      'DISTINCT ON so it survives the recent-N cap on `data` — a nightly PRODUCTS scan ' +
+      'that last succeeded before five newer ORDERS runs is still reported here.',
+  });
+
 export const SyncLogListResponseSchema = z
   .object({
     data: z.array(SyncLogResponseSchema),
+    freshness: z.array(SyncFreshnessSchema).openapi({
+      description:
+        'Per (store, syncType) last-successful-run feed, independent of the recent-N cap ' +
+        'on `data`. Empty when no sync of any type has ever completed for the scoped stores.',
+    }),
   })
   .openapi('SyncLogListResponse', {
     description:
       'Active + recent sync logs for a store, ordered: every RUNNING row first, then ' +
       'the most-recent N completed/failed rows. Used to hydrate the SyncCenter UI ' +
-      'before the Realtime channel takes over.',
+      'before the Realtime channel takes over. `freshness` carries the per-type last ' +
+      'success independent of that recent cap.',
   });
 
 // ─── Product list query + response ─────────────────────────────────────

@@ -36,6 +36,12 @@ export interface DataTablePaginationProps<TData> {
   table: Table<TData>;
   /** Choices for the per-page Select. Defaults to [10, 25, 50]. */
   pageSizes?: readonly number[];
+  /**
+   * Optional muted trace rendered beside the rows summary (e.g. a "Son
+   * güncelleme" freshness note). Shares the rows-summary's narrow-viewport
+   * hide behavior, so it never crowds the mobile footer.
+   */
+  leading?: React.ReactNode;
   className?: string;
 }
 
@@ -62,6 +68,7 @@ export interface DataTablePaginationProps<TData> {
 export function DataTablePagination<TData>({
   table,
   pageSizes = DEFAULT_PAGE_SIZES,
+  leading,
   className,
 }: DataTablePaginationProps<TData>): React.ReactElement {
   const t = useTranslations('common.dataTable.pagination');
@@ -101,9 +108,15 @@ export function DataTablePagination<TData>({
 
   return (
     <div className={cn('gap-md flex flex-wrap items-center justify-between', className)}>
-      <span className="text-2xs text-muted-foreground hidden tabular-nums sm:inline">
-        {loading ? <Skeleton className="inline-block h-3 w-24 align-middle" /> : rowsLabel}
-      </span>
+      {/* Left cluster: rows summary + optional leading trace. Hidden on narrow
+          viewports (same as the standalone rows summary always was) so the
+          footer never crowds under the pagination controls on mobile. */}
+      <div className="gap-sm text-2xs text-muted-foreground hidden min-w-0 items-center tabular-nums sm:flex">
+        <span>
+          {loading ? <Skeleton className="inline-block h-3 w-24 align-middle" /> : rowsLabel}
+        </span>
+        {leading !== undefined ? <span className="min-w-0 truncate">{leading}</span> : null}
+      </div>
 
       <div className="gap-md flex flex-wrap items-center">
         <div className="gap-xs flex items-center">

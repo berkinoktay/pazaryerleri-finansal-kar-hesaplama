@@ -90,7 +90,10 @@ describe('useOrgSyncs', () => {
   it('hydrates from REST then merges Realtime UPDATE events into the cache', async () => {
     server.use(
       http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/sync-logs`, () =>
-        HttpResponse.json({ data: [makeLog({ id: 'log-1', progressCurrent: 100 })] }),
+        HttpResponse.json({
+          data: [makeLog({ id: 'log-1', progressCurrent: 100 })],
+          freshness: [],
+        }),
       ),
     );
 
@@ -143,6 +146,7 @@ describe('useOrgSyncs', () => {
               startedAt: '2026-04-27T10:00:00Z',
             }),
           ],
+          freshness: [],
         });
       }),
     );
@@ -164,6 +168,7 @@ describe('useOrgSyncs', () => {
         getCount += 1;
         return HttpResponse.json({
           data: [makeLog({ id: 'log-running', status: 'RUNNING' })],
+          freshness: [],
         });
       }),
     );
@@ -192,6 +197,7 @@ describe('useOrgSyncs', () => {
         getCount += 1;
         return HttpResponse.json({
           data: [makeLog({ id: 'log-running', status: 'RUNNING' })],
+          freshness: [],
         });
       }),
     );
@@ -219,6 +225,7 @@ describe('useOrgSyncs', () => {
         getCount += 1;
         return HttpResponse.json({
           data: [makeLog({ id: 'log-running', status: 'RUNNING' })],
+          freshness: [],
         });
       }),
     );
@@ -255,7 +262,7 @@ describe('useOrgSyncs', () => {
   it('cleans up the Realtime subscription on unmount', async () => {
     server.use(
       http.get(`http://localhost:3001/v1/organizations/${ORG_ID}/sync-logs`, () =>
-        HttpResponse.json({ data: [] }),
+        HttpResponse.json({ data: [], freshness: [] }),
       ),
     );
 
