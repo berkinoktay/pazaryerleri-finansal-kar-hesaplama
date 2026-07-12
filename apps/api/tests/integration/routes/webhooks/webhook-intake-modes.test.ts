@@ -1,15 +1,20 @@
 /**
- * Webhook ingest modes + transient contract (Paket D §D3/D5/D6).
+ * Webhook ingest modes + transient contract (Paket D §D3/D5/D6; cutover #460).
  *
- * Covers the behaviour that changed when the durable `webhook_events` queue +
- * the sync-worker consumer tick became the replay engine:
- *   (a) a transient processing fault now returns 200 with a backoff instead of a
- *       5xx — the row is left unprocessed for a later replay.
- *   (b) deferred mode (WEBHOOK_INTAKE_DEFERRED='true') persists the row UNLEASED
- *       and returns 200 without processing — the consumer tick claims it.
- *   (c) a re-delivery of an unprocessed row is a no-op (its lease owner drives it).
- *   (d) the default in-request path makes ZERO vendor calls (catalogRepair
- *       'deferred'), yet still writes the order.
+ * After the permanent cutover, DEFERRED intake is the DEFAULT (persist + 200; the
+ * sync-worker consumer tick processes the row) and in-request processing is an
+ * emergency escape hatch behind WEBHOOK_INTAKE_INLINE='true'. This file tests
+ * BOTH modes explicitly:
+ *   (a) default (no flag) → a fresh event persists UNLEASED and returns 200
+ *       WITHOUT processing — no order yet (the consumer tick, unexercised here,
+ *       claims it).
+ *   (b) inline flag → the row is leased + processed in-request with ZERO vendor
+ *       calls (catalogRepair 'deferred'), and the order is written.
+ *   (c) inline flag + a transient processing fault → 200 with a backoff instead
+ *       of a 5xx (the queue + consumer tick are the replay engine), row left
+ *       unprocessed for a later replay.
+ *   (d) a re-delivery of an unprocessed row is a no-op regardless of mode (its
+ *       lease owner drives it).
  */
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -159,7 +164,75 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     _resetRateLimitStoreForTests();
   });
 
-  it('(a) transient processing fault → 200 + backoff (unprocessed, attempts=1, no order)', async () => {
+  it('(a) default (no flag) → deferred: fresh row persisted UNLEASED (attempts 0, next_process_at null), no order, 200', async () => {
+    const { storeId } = await setupStore();
+
+    const res = await postWebhook(storeId, makeWebhookPayload());
+    expect(res.status).toBe(200);
+
+    // Persisted but NOT leased or processed — the consumer tick will claim it.
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+    expect(event.processedAt).toBeNull();
+    expect(event.processingError).toBeNull();
+    expect(event.processAttempts).toBe(0);
+    expect(event.nextProcessAt).toBeNull();
+    // No in-request processing → no order yet (it lands via the tick, unexercised here).
+    expect(await prisma.order.count({ where: { storeId } })).toBe(0);
+  });
+
+  it('(b) inline flag → 200 + order + processedAt, ZERO vendor calls (catalogRepair deferred, uncatalogued barcode)', async () => {
+    vi.stubEnv('WEBHOOK_INTAKE_INLINE', 'true');
+    const { storeId } = await setupStore();
+    // Tripwire: the request path must never touch the vendor (D5). ensureBarcodes
+    // would fetch this uncatalogued barcode in the retired eager mode.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      throw new Error(`vendor must not be called in the request path: ${String(input)}`);
+    });
+
+    const res = await postWebhook(
+      storeId,
+      makeWebhookPayload({
+        shipmentPackageId: 4834026802,
+        orderNumber: 'inline-catalog-1',
+        barcode: UNCATALOGUED_BARCODE,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // The order is written even though the barcode is not in the catalog: the
+    // unmatched line persists PROFIT-EXCLUDED (past-day cost-missing) with its
+    // barcode trail, and the event closes.
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
+    expect(order.platformOrderId).toBe('4834026802');
+    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(item.productVariantId).toBeNull();
+    expect(item.barcode).toBe(UNCATALOGUED_BARCODE);
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+    expect(event.processedAt).not.toBeNull();
+    expect(event.processingError).toBeNull();
+  });
+
+  it('(b2) inline flag, calculable barcode → order with estimate + processedAt, still no vendor call', async () => {
+    vi.stubEnv('WEBHOOK_INTAKE_INLINE', 'true');
+    const { storeId } = await setupStore();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      throw new Error(`vendor must not be called in the request path: ${String(input)}`);
+    });
+
+    const res = await postWebhook(storeId, makeWebhookPayload());
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
+    expect(order.status).toBe('DELIVERED');
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+    expect(event.processedAt).not.toBeNull();
+    expect(event.processingError).toBeNull();
+  });
+
+  it('(c) inline flag + transient processing fault → 200 + backoff (unprocessed, attempts=1, no order)', async () => {
+    vi.stubEnv('WEBHOOK_INTAKE_INLINE', 'true');
     const { storeId } = await setupStore();
     // Remove the COMMISSION_INVOICE fee definition the intake resolves FIRST so
     // `resolveFeeDefinition` throws FeeDefinitionNotFoundError — a transient
@@ -183,24 +256,7 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     expect(await prisma.order.count({ where: { storeId } })).toBe(0);
   });
 
-  it('(b) deferred mode → 200 + row persisted UNLEASED (next_process_at null, attempts 0), no order', async () => {
-    vi.stubEnv('WEBHOOK_INTAKE_DEFERRED', 'true');
-    const { storeId } = await setupStore();
-
-    const res = await postWebhook(storeId, makeWebhookPayload());
-    expect(res.status).toBe(200);
-
-    // Persisted but NOT leased or processed — the consumer tick will claim it.
-    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
-    expect(event.processedAt).toBeNull();
-    expect(event.processingError).toBeNull();
-    expect(event.processAttempts).toBe(0);
-    expect(event.nextProcessAt).toBeNull();
-    // No in-request processing → no order yet (it lands via the tick, unexercised here).
-    expect(await prisma.order.count({ where: { storeId } })).toBe(0);
-  });
-
-  it('(c) re-delivery of an unprocessed row → 200, NOT reprocessed (attempts unchanged)', async () => {
+  it('(d) re-delivery of an unprocessed row → 200, NOT reprocessed (attempts unchanged), regardless of mode', async () => {
     const { orgId, storeId } = await setupStore();
     const payload = makeWebhookPayload();
     // Seed an unprocessed idempotency row matching the payload's composite key.
@@ -220,54 +276,5 @@ describe('Webhook ingest modes + transient contract (Paket D §D3/D5/D6)', () =>
     expect(event.processAttempts).toBe(0);
     expect(await prisma.order.count({ where: { storeId } })).toBe(0);
     expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(1);
-  });
-
-  it('(d) default mode success → order + processedAt, and ZERO vendor calls (catalogRepair deferred)', async () => {
-    const { storeId } = await setupStore();
-    // Tripwire: the request path must never touch the vendor (D5). ensureBarcodes
-    // would fetch this uncatalogued barcode in the retired eager mode.
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
-      throw new Error(`vendor must not be called in the request path: ${String(input)}`);
-    });
-
-    const res = await postWebhook(
-      storeId,
-      makeWebhookPayload({
-        shipmentPackageId: 4834026802,
-        orderNumber: 'deferred-catalog-1',
-        barcode: UNCATALOGUED_BARCODE,
-      }),
-    );
-    expect(res.status).toBe(200);
-    expect(fetchSpy).not.toHaveBeenCalled();
-
-    // The order is written even though the barcode is not in the catalog: the
-    // unmatched line persists PROFIT-EXCLUDED (past-day cost-missing) with its
-    // barcode trail, and the event closes.
-    const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
-    expect(order.platformOrderId).toBe('4834026802');
-    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(item.productVariantId).toBeNull();
-    expect(item.barcode).toBe(UNCATALOGUED_BARCODE);
-    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
-    expect(event.processedAt).not.toBeNull();
-    expect(event.processingError).toBeNull();
-  });
-
-  it('(d2) default mode, calculable barcode → order with estimate + processedAt, still no vendor call', async () => {
-    const { storeId } = await setupStore();
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
-      throw new Error(`vendor must not be called in the request path: ${String(input)}`);
-    });
-
-    const res = await postWebhook(storeId, makeWebhookPayload());
-    expect(res.status).toBe(200);
-    expect(fetchSpy).not.toHaveBeenCalled();
-
-    const order = await prisma.order.findFirstOrThrow({ where: { storeId } });
-    expect(order.status).toBe('DELIVERED');
-    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
-    expect(event.processedAt).not.toBeNull();
-    expect(event.processingError).toBeNull();
   });
 });

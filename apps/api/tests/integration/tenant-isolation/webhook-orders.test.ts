@@ -1,6 +1,15 @@
+/**
+ * Runs under the INLINE escape hatch (WEBHOOK_INTAKE_INLINE='true', set in
+ * beforeAll/afterAll). After Paket D §D6's permanent cutover (#460) the route
+ * defaults to DEFERRED intake, so a fresh webhook writes no order in-request. The
+ * cross-org leak guard here proves that when an order IS written it lands only
+ * under the owning org, so this suite opts into inline mode to exercise the
+ * in-request write path. The credential-mismatch / supplier-mismatch guards are
+ * mode-independent (they fire before any write).
+ */
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../src/app';
 import { _resetRateLimitStoreForTests } from '../../../src/middleware/rate-limit.middleware';
@@ -116,6 +125,11 @@ const app = createApp();
 describe('Tenant isolation — webhook receiver cross-store/cross-org safety', () => {
   beforeAll(async () => {
     await ensureDbReachable();
+    process.env['WEBHOOK_INTAKE_INLINE'] = 'true';
+  });
+
+  afterAll(() => {
+    delete process.env['WEBHOOK_INTAKE_INLINE'];
   });
 
   beforeEach(async () => {

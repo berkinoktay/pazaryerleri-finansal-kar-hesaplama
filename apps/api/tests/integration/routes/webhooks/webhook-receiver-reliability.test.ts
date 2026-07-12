@@ -13,6 +13,13 @@
  *   - does NOT reprocess an unprocessed event on re-delivery (its lease owner
  *     drives it), regardless of age,
  *   - self-heals a stale credential and a bad storeId shape without a 500.
+ *
+ * Runs under the INLINE escape hatch (WEBHOOK_INTAKE_INLINE='true', set in
+ * beforeAll/afterAll). After Paket D §D6's permanent cutover (#460) the route
+ * defaults to DEFERRED intake, so a fresh webhook does no in-request processing.
+ * This suite's subject is the in-request intake processing semantics, so it opts
+ * into inline mode to keep exercising that contract with the least diff. The
+ * deferred default is covered by webhook-intake-modes.test.ts.
  */
 
 import { prisma } from '@pazarsync/db';
@@ -178,6 +185,7 @@ async function seedWebhookEvent(
 describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
+    process.env['WEBHOOK_INTAKE_INLINE'] = 'true';
   });
 
   beforeEach(async () => {
@@ -190,6 +198,7 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
   afterAll(() => {
     _resetRateLimitStoreForTests();
     _resetWebhookAuthFailuresForTests();
+    delete process.env['WEBHOOK_INTAKE_INLINE'];
   });
 
   it('(a) Zod-invalid payload (lines missing) → 200 + no webhook_events row', async () => {
