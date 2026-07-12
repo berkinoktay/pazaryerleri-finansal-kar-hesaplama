@@ -1,3 +1,13 @@
+/**
+ * Runs under the INLINE escape hatch (WEBHOOK_INTAKE_INLINE='true', set in
+ * beforeAll/afterAll below). After Paket D §D6's permanent cutover (#460) the
+ * route defaults to DEFERRED intake (persist + 200; the sync-worker consumer tick
+ * processes the row), so a fresh webhook writes no order in-request. This suite's
+ * subject is the in-request intake processing semantics (order upsert, status
+ * mapping, calculability gate, RETURNED→CLAIMS, production gate), so it opts into
+ * inline mode to keep exercising that contract with the least diff. The deferred
+ * default is covered by webhook-intake-modes.test.ts.
+ */
 import { Decimal } from 'decimal.js';
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
@@ -151,6 +161,10 @@ async function postWebhook(
 describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
+    // Opt into the inline escape hatch so the route processes in-request. Set via
+    // process.env directly (not vi.stubEnv) so the nested `vi.unstubAllEnvs()` in
+    // the production-gate describe cannot clear it mid-suite.
+    process.env['WEBHOOK_INTAKE_INLINE'] = 'true';
   });
 
   beforeEach(async () => {
@@ -166,6 +180,7 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
 
   afterAll(async () => {
     _resetRateLimitStoreForTests();
+    delete process.env['WEBHOOK_INTAKE_INLINE'];
   });
 
   describe('Auth', () => {

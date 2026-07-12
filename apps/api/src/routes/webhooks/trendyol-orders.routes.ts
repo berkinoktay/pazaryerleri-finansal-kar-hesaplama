@@ -30,14 +30,17 @@
  *     — the intended heal path. 429 (rate limit) and the oversize / sandbox /
  *     supplier-mismatch 200-drops are unchanged.
  *
- * Two ingest modes (design §D6, `WEBHOOK_INTAKE_DEFERRED`):
- *   - default (flag off) → persist the row, WIN a processing lease, and process
- *     it in-request with `catalogRepair: 'deferred'` (zero vendor calls in the
- *     request path; the 60s variant-resolution tick is the backstop). Live
- *     Performance stays at T+0.
- *   - deferred (flag on) → persist the row and return 200 immediately, leaving
- *     it unleased; the consumer tick claims the fresh row within ~5s. The
- *     operational cutover step.
+ * Two ingest modes (design §D6, permanent cutover #460):
+ *   - default (STANDARD) → persist the row and return 200 immediately, leaving it
+ *     unleased; the sync-worker consumer tick claims the fresh row within ~5s (~1s
+ *     measured live). The API process does no processing/vendor work — webhook
+ *     order processing now depends on the sync-worker running (the durable queue
+ *     holds events until it is).
+ *   - inline escape hatch (`WEBHOOK_INTAKE_INLINE='true'`) → persist the row, WIN
+ *     a processing lease, and process it in-request with `catalogRepair:
+ *     'deferred'` (zero vendor calls in the request path; the 60s
+ *     variant-resolution tick is the backstop). ONLY for the rare stretch the
+ *     sync-worker is down; off by default.
  *
  * Request hardening (before auth): a 1 MB body limit and a per-store rate limit
  * both fail SAFE (drop with 200 / 429) so a malformed or flooding caller cannot
@@ -61,7 +64,7 @@ import { HTTPException } from 'hono/http-exception';
 import { RATE_LIMITS } from '../../config/rate-limits';
 import { createSubApp } from '../../lib/create-hono-app';
 import { problemDetailsResponse } from '../../lib/problem-details';
-import { isWebhookIntakeDeferred } from '../../lib/webhook-intake-mode';
+import { isWebhookIntakeInline } from '../../lib/webhook-intake-mode';
 import { rateLimit } from '../../middleware/rate-limit.middleware';
 import { verifyTrendyolWebhookMiddleware } from '../../middleware/verify-trendyol-webhook.middleware';
 import { Common429Response, ProblemDetailsSchema } from '../../openapi';
@@ -260,19 +263,23 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
     throw err;
   }
 
-  // ─── 3. Fresh event: process in-request (default) or defer to the tick ──
-  // Deferred mode (D6 cutover): the row is persisted and unleased; return 200
-  // right away and let the sync-worker consumer tick claim it (<=5s). No lease,
-  // no processing here — the tick's prefilter (processed_at IS NULL AND
-  // next_process_at eligible) picks the fresh row up on its next pass.
-  if (isWebhookIntakeDeferred()) {
+  // ─── 3. Fresh event: defer to the consumer tick (default) or, only under the
+  //        emergency inline escape hatch, process it in-request ───────────────
+  // Deferred is the STANDARD path (design §D6, permanent cutover #460): the row
+  // is persisted and left unleased, so return 200 right away and let the
+  // sync-worker consumer tick claim it (<=5s; ~1s measured live). No lease, no
+  // processing here — the tick's prefilter (processed_at IS NULL AND
+  // next_process_at eligible) picks the fresh row up on its next pass. This keeps
+  // the API process free of processing/vendor work.
+  if (!isWebhookIntakeInline()) {
     return c.body(null, 200);
   }
 
-  // Default mode (T+0): win the processing lease before touching the row so the
-  // consumer tick can never double-process it. A false here means the tick
-  // grabbed the fresh row first (a theoretical race in the sub-second window) —
-  // it now owns processing, so we simply close with 200.
+  // Inline escape hatch (WEBHOOK_INTAKE_INLINE='true'): restore in-request
+  // processing for the rare stretch the sync-worker is down. Win the processing
+  // lease before touching the row so the consumer tick can never double-process
+  // it. A false here means the tick grabbed the fresh row first (a theoretical
+  // race in the sub-second window) — it now owns processing, so we close with 200.
   const leased = await claimWebhookEventLease(prisma, created.id);
   if (!leased) {
     return c.body(null, 200);

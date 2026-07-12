@@ -30,10 +30,15 @@ section "Versioning" for details.
     vendor calls in the request path (uncatalogued barcodes are resolved by the
     60s variant-resolution tick), so intake is DB-only and never blocks on
     Trendyol. The order is still always written.
-  - New `WEBHOOK_INTAKE_DEFERRED` env flag (default off, fail-safe). When set to
-    the literal `true`, the route validates + persists + returns 200 only and the
-    consumer tick does all processing (Live Performance latency shifts T+0 →
-    T+~5s) — the operational cutover switch.
+  - Deferred intake is now the **default** processing model (permanent cutover,
+    issue #460): the route validates + persists + returns 200 only, and the
+    sync-worker consumer tick does all processing (order processing latency ≤5s;
+    ~1s measured live). In-request processing is now an **emergency escape hatch**
+    behind `WEBHOOK_INTAKE_INLINE=true` (literal `true`, fail-safe default off) —
+    used only when the sync-worker is down for a long stretch. The earlier
+    `WEBHOOK_INTAKE_DEFERRED` flag is removed. Processing webhook orders therefore
+    requires the sync-worker to be running (the durable queue holds events until
+    it is; nothing is lost while it is down).
 
 ### Added
 

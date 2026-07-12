@@ -23,6 +23,12 @@ import { ensureFeeDefinitions } from '../../../helpers/seed-fee-definitions';
  * window is the order day, missing it is permanent). Unresolved variants route
  * the same way — cost_missing (spec 2026-06-11, no hard skip). Mirrors the
  * proven store/Basic-Auth setup from trendyol-orders.routes.test.ts.
+ *
+ * Runs under the INLINE escape hatch (WEBHOOK_INTAKE_INLINE='true', set in
+ * beforeAll/afterAll). After Paket D §D6's permanent cutover (#460) the route
+ * defaults to DEFERRED intake, so a fresh webhook does no in-request buffer/order
+ * write. This suite's subject is the in-request buffer routing semantics, so it
+ * opts into inline mode to keep exercising that contract with the least diff.
  */
 const STORE_PLATFORM = 'TRENDYOL' as const;
 const SUPPLIER_ID = '99999';
@@ -153,6 +159,7 @@ async function postWebhook(
 describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR-B)', () => {
   beforeAll(async () => {
     await ensureDbReachable();
+    process.env['WEBHOOK_INTAKE_INLINE'] = 'true';
   });
 
   beforeEach(async () => {
@@ -166,6 +173,7 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
 
   afterAll(() => {
     _resetRateLimitStoreForTests();
+    delete process.env['WEBHOOK_INTAKE_INLINE'];
   });
 
   afterEach(() => {
