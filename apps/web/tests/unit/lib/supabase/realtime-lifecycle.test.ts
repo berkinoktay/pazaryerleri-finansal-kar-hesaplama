@@ -30,6 +30,12 @@ import {
 // fresh stub. If that suffix regressed, a rebuild during an in-flight leave would
 // re-request the same topic, the dedup would hand back the corpse, and `.subscribe`
 // would capture nothing — which the regression tests below assert against.
+//
+// The client also exposes `auth.getSession()` and `realtime.setAuth()`: the core
+// awaits session hydration before the FIRST channel build (issue #456). The harness
+// resolves getSession immediately by default; setDeferGetSession(true) holds it
+// pending until resolveGetSession(...) runs, so the hydration-race tests can drive
+// the exact ordering.
 interface ChannelStub {
   topic: string;
   removed: boolean;
@@ -38,13 +44,22 @@ interface ChannelStub {
   subscribe: ReturnType<typeof vi.fn>;
 }
 
+interface MockSession {
+  access_token: string;
+}
+
 const {
-  createClientChannel,
+  channelMock,
   removeChannelMock,
+  setAuthMock,
+  getSessionMock,
   subscribeCallbacks,
   channelBindings,
   setDeferRemovals,
   flushRemovals,
+  setDeferGetSession,
+  resolveGetSession,
+  rejectGetSession,
   resetHarness,
 } = vi.hoisted(() => {
   const captured: Array<(status: string) => void> = [];
@@ -55,6 +70,36 @@ const {
   // Pending removal finalizers, drained by flushRemovals() when in deferred mode.
   let pendingRemovals: Array<() => void> = [];
   let deferRemovals = false;
+
+  // Auth-session hydration control (issue #456). initialize() awaits
+  // supabase.auth.getSession() before the first build; the harness resolves it
+  // immediately (default) or defers it (setDeferGetSession) to drive the race tests.
+  type GetSessionResult = { data: { session: MockSession | null } };
+  const DEFAULT_SESSION: MockSession = { access_token: 'token-fresh' };
+  let deferGetSession = false;
+  interface PendingGetSession {
+    resolve: (session: MockSession | null) => void;
+    reject: (error: unknown) => void;
+  }
+  let pendingGetSessions: PendingGetSession[] = [];
+
+  const getSession = vi.fn((): Promise<GetSessionResult> => {
+    if (deferGetSession) {
+      return new Promise<GetSessionResult>((resolve, reject) => {
+        pendingGetSessions.push({
+          resolve: (session) => resolve({ data: { session } }),
+          reject,
+        });
+      });
+    }
+    return Promise.resolve({ data: { session: DEFAULT_SESSION } });
+  });
+
+  // realtime.setAuth is awaited by initialize(); it resolves immediately here. The
+  // token argument is not declared on the mock's signature (apps/web's ESLint flags
+  // an unused trailing param), but vi.fn still records the actual call args, so the
+  // token-assert below via toHaveBeenCalledWith works.
+  const setAuth = vi.fn((): Promise<void> => Promise.resolve());
 
   const mintStub = (topic: string): ChannelStub => {
     const myBindings: Array<(payload: unknown) => void> = [];
@@ -93,6 +138,10 @@ const {
     return stub;
   };
 
+  // Wrap channelFor in a vi.fn so tests can read its invocationCallOrder (used to
+  // assert setAuth fires BEFORE the first build) and its call count.
+  const channel = vi.fn((topic: string): ChannelStub => channelFor(topic));
+
   const finalizeRemoval = (stub: ChannelStub): void => {
     stub.removed = true;
     if (registry.get(stub.topic) === stub) registry.delete(stub.topic);
@@ -112,8 +161,10 @@ const {
   });
 
   return {
-    createClientChannel: channelFor,
+    channelMock: channel,
     removeChannelMock: removeChannel,
+    setAuthMock: setAuth,
+    getSessionMock: getSession,
     subscribeCallbacks: captured,
     channelBindings: bindings,
     setDeferRemovals: (value: boolean): void => {
@@ -124,27 +175,48 @@ const {
       pendingRemovals = [];
       for (const finalize of drained) finalize();
     },
+    setDeferGetSession: (value: boolean): void => {
+      deferGetSession = value;
+    },
+    resolveGetSession: (session: MockSession | null): void => {
+      const drained = pendingGetSessions;
+      pendingGetSessions = [];
+      for (const pending of drained) pending.resolve(session);
+    },
+    rejectGetSession: (error: unknown): void => {
+      const drained = pendingGetSessions;
+      pendingGetSessions = [];
+      for (const pending of drained) pending.reject(error);
+    },
     resetHarness: (): void => {
       captured.length = 0;
       bindings.length = 0;
       registry.clear();
       pendingRemovals = [];
       deferRemovals = false;
+      deferGetSession = false;
+      pendingGetSessions = [];
       removeChannel.mockClear();
+      channel.mockClear();
+      getSession.mockClear();
+      setAuth.mockClear();
     },
   };
 });
 
 vi.mock('@/lib/supabase/client', () => ({
   createClient: () => ({
-    channel: (topic: string) => createClientChannel(topic),
+    channel: channelMock,
     removeChannel: removeChannelMock,
+    auth: { getSession: getSessionMock },
+    realtime: { setAuth: setAuthMock },
   }),
 }));
 
-// Drain the microtask queue so an awaited teardown->rebuild in attemptResubscribe
-// runs to completion. Fake timers do not fake promises, so a handful of awaits is
-// enough to walk the removeChannel-promise -> teardown -> attemptResubscribe chain.
+// Drain the microtask queue so the async initialize() (await getSession -> await
+// setAuth -> build) and an awaited teardown->rebuild in attemptResubscribe both run
+// to completion. Fake timers do not fake promises, so a handful of awaits is enough
+// to walk each chain. A few extra iterations keep it robust as chains grow.
 async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 5; i += 1) {
     await Promise.resolve();
@@ -168,20 +240,175 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// Initial-build session hydration (#456). The first channel build is deferred until
+// supabase.auth.getSession() resolves so a fresh page load never joins with anon
+// claims that RLS silently mutes. These tests exercise that timing directly; the
+// suites below simply flush the hydration microtasks (getSession resolves
+// immediately) before driving the channel — a timing adaptation, not a behavior
+// change, since the delivered assertions are unchanged.
+describe('createChannelLifecycle initial session hydration (#456)', () => {
+  it('does not build the channel until getSession resolves, then setAuth runs BEFORE the build', async () => {
+    setDeferGetSession(true);
+    const unsubscribe = subscribeToOrgSyncs('org-hydrate', { onEvent: () => {} });
+
+    // initialize() is suspended awaiting the (still pending) getSession: NO build yet.
+    await flushMicrotasks();
+    expect(channelMock).not.toHaveBeenCalled();
+    expect(subscribeCallbacks).toHaveLength(0);
+
+    // The session hydrates. Now the token is set on the socket, then the channel
+    // builds — and setAuth MUST precede the build so the join carries the token.
+    resolveGetSession({ access_token: 'token-hydrated' });
+    await flushMicrotasks();
+    expect(setAuthMock).toHaveBeenCalledWith('token-hydrated');
+    expect(channelMock).toHaveBeenCalledTimes(1);
+    expect(subscribeCallbacks).toHaveLength(1);
+    const setAuthOrder = setAuthMock.mock.invocationCallOrder[0];
+    const channelOrder = channelMock.mock.invocationCallOrder[0];
+    expect(setAuthOrder).toBeDefined();
+    expect(channelOrder).toBeDefined();
+    expect(setAuthOrder ?? 0).toBeLessThan(channelOrder ?? 0);
+
+    unsubscribe();
+  });
+
+  it('never builds the channel when cleanup() runs while getSession is still pending', async () => {
+    setDeferGetSession(true);
+    const unsubscribe = subscribeToOrgSyncs('org-cleanup-init', { onEvent: () => {} });
+    await flushMicrotasks();
+
+    // Fast unmount before the session resolves: the unsubscribed guard must abort
+    // initialize() so no channel is ever built and no token is set.
+    unsubscribe();
+    resolveGetSession({ access_token: 'token' });
+    await flushMicrotasks();
+
+    expect(channelMock).not.toHaveBeenCalled();
+    expect(setAuthMock).not.toHaveBeenCalled();
+    expect(subscribeCallbacks).toHaveLength(0);
+  });
+
+  it('does not double-build when a visibilitychange(visible) lands before getSession resolves', async () => {
+    setDeferGetSession(true);
+    const unsubscribe = subscribeToOrgSyncs('org-visible-init', { onEvent: () => {} });
+    await flushMicrotasks();
+
+    // A visible event arrives while initialize() is still pending. The visible
+    // branch must bail on the `initialized` flag (initialize() owns the first
+    // build) — otherwise it would race a second build here.
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(channelMock).not.toHaveBeenCalled();
+
+    // Session resolves: exactly ONE build, from initialize().
+    resolveGetSession({ access_token: 'token' });
+    await flushMicrotasks();
+    expect(channelMock).toHaveBeenCalledTimes(1);
+    expect(subscribeCallbacks).toHaveLength(1);
+
+    unsubscribe();
+  });
+
+  it('still builds the channel when there is no session, without calling setAuth', async () => {
+    setDeferGetSession(true);
+    const unsubscribe = subscribeToOrgSyncs('org-null-session', { onEvent: () => {} });
+    await flushMicrotasks();
+
+    // No build until getSession resolves (would also fail against the pre-fix code
+    // that built synchronously at mount).
+    expect(channelMock).not.toHaveBeenCalled();
+
+    // No session (token undefined): the build still happens (no worse than the old
+    // synchronous behavior), but setAuth is skipped since there is no token.
+    resolveGetSession(null);
+    await flushMicrotasks();
+    expect(setAuthMock).not.toHaveBeenCalled();
+    expect(channelMock).toHaveBeenCalledTimes(1);
+    expect(subscribeCallbacks).toHaveLength(1);
+
+    unsubscribe();
+  });
+
+  it('when the tab hides DURING hydration, skips the hidden build and the visible return builds the channel', async () => {
+    setDeferGetSession(true);
+    const healthLog: RealtimeHealth[] = [];
+    const unsubscribe = subscribeToOrgSyncs('org-hidden-init', {
+      onEvent: () => {},
+      onHealthChange: (h) => healthLog.push(h),
+    });
+    await flushMicrotasks();
+
+    // Tab hides while getSession is still pending. handleVisibility reports 'paused'
+    // and, with the channel still null, its teardown is a no-op.
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(healthLog.at(-1)).toBe('paused');
+
+    // Session resolves: initialize() must NOT build while hidden -- otherwise a live
+    // channel sits in a hidden tab with the watchdog off, and the visible return
+    // (channel !== null) would neither rebuild nor arm it.
+    resolveGetSession({ access_token: 'token' });
+    await flushMicrotasks();
+    expect(channelMock).not.toHaveBeenCalled();
+
+    // Returning to visible builds the channel (and, for an opted-in channel, arms
+    // the watchdog) through the existing visible-return branch.
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(channelMock).toHaveBeenCalledTimes(1);
+    expect(subscribeCallbacks).toHaveLength(1);
+    subscribeCallbacks[0]?.('SUBSCRIBED');
+    expect(healthLog.at(-1)).toBe('healthy');
+
+    unsubscribe();
+  });
+
+  it('degrades to errored and lets the R2b loop rebuild when session hydration rejects', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setDeferGetSession(true);
+    const healthLog: RealtimeHealth[] = [];
+    const unsubscribe = subscribeToOrgSyncs('org-hydrate-fail', {
+      onEvent: () => {},
+      onHealthChange: (h) => healthLog.push(h),
+    });
+    await flushMicrotasks();
+    expect(channelMock).not.toHaveBeenCalled();
+
+    // getSession rejects: the catch warns once, degrades health to 'errored', and
+    // builds NO channel (the R2b countdown is armed by reportHealth('errored')).
+    rejectGetSession(new Error('session hydration failed'));
+    await flushMicrotasks();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(healthLog.at(-1)).toBe('errored');
+    expect(channelMock).not.toHaveBeenCalled();
+
+    // The ~15s countdown fires -> attemptResubscribe tears down (a no-op, channel is
+    // null) and rebuilds a fresh channel: the loop self-heals the failed init.
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_AFTER_MS);
+    expect(channelMock).toHaveBeenCalledTimes(1);
+    expect(subscribeCallbacks).toHaveLength(1);
+
+    unsubscribe();
+    warnSpy.mockRestore();
+  });
+});
+
 // These validate the DEFAULT visibility teardown (no keepAliveWhenHidden). They
 // run through subscribeToOrgSyncs, the channel that KEEPS that default:
 // subscribeToLivePerformance now opts into keep-alive (see the keepAliveWhenHidden
 // block below), so its channel no longer tears down on hide. The core teardown /
 // suppressor / identity-guard / fast-flip behavior asserted here is unchanged.
 describe('createChannelLifecycle visibility teardown (default, no keepAliveWhenHidden)', () => {
-  it('keeps health paused when the tab hides — suppresses the teardown CLOSED', () => {
+  it('keeps health paused when the tab hides — suppresses the teardown CLOSED', async () => {
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToOrgSyncs('org-1', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
-    // buildChannel reports 'connecting' synchronously on subscribe.
+    // Once hydration resolves, the first build reports 'connecting' on subscribe.
     expect(healthLog).toEqual(['connecting']);
 
     // The channel goes live.
@@ -204,12 +431,13 @@ describe('createChannelLifecycle visibility teardown (default, no keepAliveWhenH
     unsubscribe();
   });
 
-  it('still reports errored for a genuine CLOSED (no preceding teardown)', () => {
+  it('still reports errored for a genuine CLOSED (no preceding teardown)', async () => {
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToOrgSyncs('org-2', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     subscribeCallbacks[0]?.('SUBSCRIBED');
     // A real drop with the suppressor unarmed must surface as 'errored'.
@@ -219,12 +447,13 @@ describe('createChannelLifecycle visibility teardown (default, no keepAliveWhenH
     unsubscribe();
   });
 
-  it('clears a stale suppressor from a silent teardown so a later real CLOSED still errors', () => {
+  it('clears a stale suppressor from a silent teardown so a later real CLOSED still errors', async () => {
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToOrgSyncs('org-3', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     // Channel #1 goes live.
     subscribeCallbacks[0]?.('SUBSCRIBED');
@@ -254,12 +483,13 @@ describe('createChannelLifecycle visibility teardown (default, no keepAliveWhenH
     unsubscribe();
   });
 
-  it("ignores the old channel's delayed CLOSED after a fast hidden->visible rebuild", () => {
+  it("ignores the old channel's delayed CLOSED after a fast hidden->visible rebuild", async () => {
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToOrgSyncs('org-4', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     // Channel #1 goes live.
     subscribeCallbacks[0]?.('SUBSCRIBED');
@@ -298,7 +528,7 @@ describe('createChannelLifecycle visibility teardown (default, no keepAliveWhenH
 });
 
 describe('createChannelLifecycle keepAliveWhenHidden (live-performance channel, #452)', () => {
-  it('keeps the channel open across a hide->visible cycle: no teardown, never paused, bindings keep firing, no rebuild', () => {
+  it('keeps the channel open across a hide->visible cycle: no teardown, never paused, bindings keep firing, no rebuild', async () => {
     const healthLog: RealtimeHealth[] = [];
     const newOrders: Array<{ table: 'orders' | 'buffer'; id: string }> = [];
     const unsubscribe = subscribeToLivePerformance('store-keepalive', {
@@ -306,6 +536,7 @@ describe('createChannelLifecycle keepAliveWhenHidden (live-performance channel, 
       onNewOrder: (e) => newOrders.push({ table: e.table, id: e.id }),
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     subscribeCallbacks[0]?.('SUBSCRIBED');
     expect(healthLog.at(-1)).toBe('healthy');
@@ -341,12 +572,13 @@ describe('createChannelLifecycle keepAliveWhenHidden (live-performance channel, 
     unsubscribe();
   });
 
-  it('subscribeToLivePerformance opts INTO keep-alive: the channel survives a hidden tab', () => {
+  it('subscribeToLivePerformance opts INTO keep-alive: the channel survives a hidden tab', async () => {
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToLivePerformance('store-diff-live', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     subscribeCallbacks[0]?.('SUBSCRIBED');
     setVisibility('hidden');
@@ -358,12 +590,13 @@ describe('createChannelLifecycle keepAliveWhenHidden (live-performance channel, 
     unsubscribe();
   });
 
-  it('subscribeToOrgSyncs stays OUT of keep-alive: a hidden tab still tears the channel down', () => {
+  it('subscribeToOrgSyncs stays OUT of keep-alive: a hidden tab still tears the channel down', async () => {
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToOrgSyncs('org-diff-sync', {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     subscribeCallbacks[0]?.('SUBSCRIBED');
     setVisibility('hidden');
@@ -384,6 +617,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
     expect(subscribeCallbacks).toHaveLength(1);
 
     // Channel #1 drops -> the "continuously errored" countdown is armed.
@@ -407,6 +641,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
   it('doubles the backoff between failed rebuilds and caps at RESUBSCRIBE_BACKOFF_MAX_MS', async () => {
     vi.useFakeTimers();
     const unsubscribe = subscribeToLivePerformance('store-resub-2', { onEvent: () => {} });
+    await flushMicrotasks();
 
     // Initial drop, then the first rebuild after the fixed 15s threshold.
     subscribeCallbacks[0]?.('CHANNEL_ERROR');
@@ -441,6 +676,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
   it('resets the backoff on SUBSCRIBED so a later outage restarts at the initial delay', async () => {
     vi.useFakeTimers();
     const unsubscribe = subscribeToLivePerformance('store-resub-3', { onEvent: () => {} });
+    await flushMicrotasks();
 
     // Walk the backoff up a few steps: 15s -> #2, +5s -> #3, +10s -> #4.
     subscribeCallbacks[0]?.('CHANNEL_ERROR');
@@ -478,6 +714,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     // Channel drops -> the 15s resubscribe countdown is armed.
     subscribeCallbacks[0]?.('CHANNEL_ERROR');
@@ -501,6 +738,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
   it('neutralizes a queued resubscribe after cleanup: no rebuild fires post-unsubscribe', async () => {
     vi.useFakeTimers();
     const unsubscribe = subscribeToLivePerformance('store-cleanup-race', { onEvent: () => {} });
+    await flushMicrotasks();
 
     // Arm the errored countdown, then tear the whole subscription down.
     subscribeCallbacks[0]?.('CHANNEL_ERROR');
@@ -522,6 +760,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     // Channel drops -> the 15s resubscribe countdown is armed.
     subscribeCallbacks[0]?.('CHANNEL_ERROR');
@@ -558,6 +797,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     // Channel #1 joins, then drops -> the errored countdown is armed.
     subscribeCallbacks[0]?.('SUBSCRIBED');
@@ -584,7 +824,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
     unsubscribe();
   });
 
-  it('visibility fast-flip mints a fresh working channel before the leave resolves (corpse-dedup regression)', () => {
+  it('visibility fast-flip mints a fresh working channel before the leave resolves (corpse-dedup regression)', async () => {
     // REGRESSION for the visibility hide->fast-visible race: the hide starts an
     // (un-awaited) teardown whose deferred removeChannel leaves the old topic
     // registered; the immediate visible rebuilds synchronously. The build must NOT
@@ -599,6 +839,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
       onEvent: () => {},
       onHealthChange: (h) => healthLog.push(h),
     });
+    await flushMicrotasks();
 
     subscribeCallbacks[0]?.('SUBSCRIBED');
     expect(healthLog.at(-1)).toBe('healthy');
@@ -624,7 +865,7 @@ describe('createChannelLifecycle auto-resubscribe (R2b)', () => {
 });
 
 describe('createChannelLifecycle delivery watchdog (R2c)', () => {
-  it('degrades healthy -> errored when delivery stalls while expected, and SUBSCRIBED resets the clock', () => {
+  it('degrades healthy -> errored when delivery stalls while expected, and SUBSCRIBED resets the clock', async () => {
     vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const healthLog: RealtimeHealth[] = [];
@@ -633,6 +874,7 @@ describe('createChannelLifecycle delivery watchdog (R2c)', () => {
       onHealthChange: (h) => healthLog.push(h),
       expectDelivery: () => true,
     });
+    await flushMicrotasks();
 
     // Channel joins -> healthy; the watchdog clock is reset to the join instant.
     subscribeCallbacks[0]?.('SUBSCRIBED');
@@ -659,7 +901,7 @@ describe('createChannelLifecycle delivery watchdog (R2c)', () => {
     warnSpy.mockRestore();
   });
 
-  it('does not degrade while expectDelivery() returns false, even past the timeout', () => {
+  it('does not degrade while expectDelivery() returns false, even past the timeout', async () => {
     vi.useFakeTimers();
     const healthLog: RealtimeHealth[] = [];
     const unsubscribe = subscribeToOrgSyncs('org-watchdog-idle', {
@@ -667,6 +909,7 @@ describe('createChannelLifecycle delivery watchdog (R2c)', () => {
       onHealthChange: (h) => healthLog.push(h),
       expectDelivery: () => false,
     });
+    await flushMicrotasks();
 
     subscribeCallbacks[0]?.('SUBSCRIBED');
     expect(healthLog.at(-1)).toBe('healthy');
@@ -680,12 +923,13 @@ describe('createChannelLifecycle delivery watchdog (R2c)', () => {
 });
 
 describe('subscribeToOrgSyncs wire cast guard (R2d)', () => {
-  it('skips a malformed sync_logs row with a single warn and lets well-formed rows through', () => {
+  it('skips a malformed sync_logs row with a single warn and lets well-formed rows through', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const events: SyncLogRealtimeEvent[] = [];
     const unsubscribe = subscribeToOrgSyncs('org-guard', {
       onEvent: (e) => events.push(e),
     });
+    await flushMicrotasks();
 
     const handler = channelBindings[0]?.[0];
     expect(handler).toBeDefined();
