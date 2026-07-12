@@ -171,9 +171,15 @@ export async function processTrendyolWebhookEvent(
     }
   }
 
+  // Clear any stale `processingError` from an earlier TRANSIENT attempt: a prior
+  // pass may have written a fault note (e.g. fee resolution failed) before this
+  // replay succeeded, and leaving that note on a now-processed row is misleading in
+  // the audit trail (live observation, issue #458). The deterministic dead-end
+  // stamps (unknown status, payload-map failure) are unaffected — they return
+  // before reaching this success stamp.
   await prisma.webhookEvent.update({
     where: { id: webhookEventId },
-    data: { processedAt: new Date() },
+    data: { processedAt: new Date(), processingError: null },
   });
 
   // ─── RETURNED -> CLAIMS acceleration (Task 8) ──────────────────────────

@@ -3368,7 +3368,8 @@
       "orderNumberLabel": "· Sipariş no {number}",
       "detail": "Detayı gör",
       "burstTitle": "{count} yeni sipariş geldi",
-      "catchupTitle": "Siz yokken {count} yeni sipariş geldi"
+      "catchupTitle": "Siz yokken {count} yeni sipariş geldi",
+      "tabBadge": "🛍️ {count, plural, one {Yeni sipariş geldi!} other {# yeni sipariş geldi!}}"
     }
   }
 }
