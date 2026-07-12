@@ -70,6 +70,17 @@ describe('assertCriticalDdl (boot-time DDL guard)', () => {
         assertIndexesExist(prisma, ['webhook_events_unprocessed_idx']),
       ).resolves.toBeUndefined();
     });
+
+    it('resolves for the order_items dedup defense-in-depth UNIQUE index', async () => {
+      // The (order_id, platform_line_id) partial UNIQUE is the DB-layer safety
+      // belt against a future bug double-counting a line's revenue/profit; it is
+      // registered here so a db reset that skips supabase/sql fails boot loudly
+      // instead of silently dropping the guard.
+      expect(REQUIRED_INDEXES).toContain('order_items_order_platform_line_uniq');
+      await expect(
+        assertIndexesExist(prisma, ['order_items_order_platform_line_uniq']),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe('supabase_realtime publication tables', () => {

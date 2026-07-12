@@ -324,7 +324,7 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
     expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(0);
   });
 
-  it('(b) supplier mismatch → 200 + no webhook_events row', async () => {
+  it('(b) supplier mismatch → 200 + CLOSED audit row (dropped: prefix)', async () => {
     const { storeId } = await setupStore();
     const res = await postWebhook(
       storeId,
@@ -332,7 +332,14 @@ describe('Webhook receiver reliability (fix/webhook-receiver-reliability)', () =
       basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS),
     );
     expect(res.status).toBe(200);
-    expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(0);
+    // The mismatch body cleared Zod (it holds trustworthy idempotency fields), so
+    // the deterministic drop now leaves a durable audit trail: a CLOSED
+    // webhook_events row (processedAt set + 'dropped:'-prefixed processingError),
+    // but never an order.
+    const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+    expect(event.processedAt).not.toBeNull();
+    expect(event.processingError).toBe('dropped: supplier mismatch');
+    expect(await prisma.order.count({ where: { storeId } })).toBe(0);
   });
 
   it('(c) re-delivery of a processed event → 200 + single row (existing dedup)', async () => {

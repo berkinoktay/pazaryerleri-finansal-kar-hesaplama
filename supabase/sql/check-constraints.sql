@@ -126,6 +126,25 @@ CREATE INDEX order_items_resolution_due_idx
   ON order_items (next_resolution_at)
   WHERE product_variant_id IS NULL AND barcode IS NOT NULL;
 
+-- ─── order_items dedup: defense-in-depth partial UNIQUE (2026-07-12) ────
+-- OrderItem dedup is enforced today only at the application layer: the upsert
+-- does a platform_line_id-first findFirst before inserting, and concurrent
+-- double-processing is structurally impossible (one sync job holds the store's
+-- active-slot lease; one webhook_event holds the processing lease). This
+-- partial UNIQUE is the DB-layer safety belt against a future bug that slips
+-- past both -- two rows for the same (order, line) would double-count revenue
+-- and profit, which this index makes impossible. If a P2002 ever fires from
+-- here it lands in intake's transient class: the event is retried with backoff
+-- and the next replay's findFirst sees the existing row and skips (self-
+-- healing). platform_line_id NULL (legacy / unmapped) rows are deliberately out
+-- of scope -- the same variant can legitimately span multiple such lines, so a
+-- unique over NULLs would be wrong. Prisma 7 has no WHERE-clause unique syntax,
+-- so it lives here + is registered in the worker's REQUIRED_INDEXES DDL
+-- assertions (a db reset that skips supabase/sql must not silently drop it).
+CREATE UNIQUE INDEX IF NOT EXISTS order_items_order_platform_line_uniq
+  ON public.order_items (order_id, platform_line_id)
+  WHERE platform_line_id IS NOT NULL;
+
 -- ─── sync_logs claim-scan ordering index (tryClaimNext) ────────────────
 -- Serves packages/sync-core/src/claim.ts::tryClaimNext, whose hot path is
 --   SELECT id FROM sync_logs

@@ -39,6 +39,16 @@ section "Versioning" for details.
     `WEBHOOK_INTAKE_DEFERRED` flag is removed. Processing webhook orders therefore
     requires the sync-worker to be running (the durable queue holds events until
     it is; nothing is lost while it is down).
+- **Parseable deterministic drops now leave an audit trail**
+  (`POST /v1/webhooks/orders/{storeId}`). No request/response body change; still
+  200. The two drops whose payload clears Zod — a SANDBOX store's delivery in
+  production and a supplier-mismatch body — now persist a CLOSED `webhook_events`
+  row (`processedAt` stamped + `processingError` carrying a machine-scannable
+  `dropped:` prefix) before answering 200, instead of returning 200 with no
+  trace. A re-delivery of the same drop stays 200 and writes no second row. The
+  oversize drop (rejected before parsing) and the Zod-invalid drop
+  (missing/untrustworthy key fields) still write no row — they hold no reliable
+  idempotency tuple to key one against.
 
 ### Added
 
