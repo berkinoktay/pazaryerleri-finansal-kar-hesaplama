@@ -5,7 +5,9 @@
  * cross-org leak guard here proves that when an order IS written it lands only
  * under the owning org, so this suite opts into inline mode to exercise the
  * in-request write path. The credential-mismatch / supplier-mismatch guards are
- * mode-independent (they fire before any write).
+ * mode-independent: the credential mismatch fires before any write (401), and the
+ * supplier mismatch leaves only a CLOSED audit row (no order) attributed to the
+ * authenticated store — neither depends on the intake mode.
  */
 import { prisma } from '@pazarsync/db';
 import { encryptCredentials } from '@pazarsync/sync-core';
@@ -163,7 +165,7 @@ describe('Tenant isolation — webhook receiver cross-store/cross-org safety', (
     expect(await prisma.webhookEvent.count({ where: { storeId: a.storeId } })).toBe(0);
   });
 
-  it('Store A credentials on Store A URL but payload carries Store B supplierId → 200 drop, no data', async () => {
+  it('Store A credentials on Store A URL but payload carries Store B supplierId → 200 drop, no order + audit row under the authenticated store', async () => {
     const a = await setupOrgStore({
       supplierId: SUPPLIER_ID_A,
       username: WEBHOOK_USER_A,
@@ -179,12 +181,17 @@ describe('Tenant isolation — webhook receiver cross-store/cross-org safety', (
       body: JSON.stringify(makePayload(Number.parseInt(SUPPLIER_ID_B, 10))),
     });
     // Retry-model (webhook-model.md): the defense-in-depth supplierId check is a
-    // deterministic drop → 200 closes the event (retrying never helps). The
-    // isolation guarantee is unchanged: no Order or WebhookEvent is created for
-    // a body naming another seller.
+    // deterministic drop → 200 closes the event (retrying never helps). Isolation
+    // guarantee: a body naming another seller creates NO Order (financial data),
+    // and the deterministic-drop audit row it now leaves is attributed to the
+    // AUTHENTICATED store A / org A — never fabricated under the impersonated seller.
     expect(res.status).toBe(200);
     expect(await prisma.order.count({ where: { storeId: a.storeId } })).toBe(0);
-    expect(await prisma.webhookEvent.count({ where: { storeId: a.storeId } })).toBe(0);
+    const events = await prisma.webhookEvent.findMany({ where: { storeId: a.storeId } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.organizationId).toBe(a.orgId);
+    expect(events[0]?.processedAt).not.toBeNull();
+    expect(events[0]?.processingError).toBe('dropped: supplier mismatch');
   });
 
   it('Webhook for Store A writes Order only under Org A — cross-org leak guard', async () => {

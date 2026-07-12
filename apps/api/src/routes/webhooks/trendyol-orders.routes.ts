@@ -27,8 +27,20 @@
  *     (e.g. the idempotency INSERT itself throws) still bubbles out as 5xx.
  *   - 401 / 404 (verify middleware) stay in the normal flow: a stale secret's
  *     401s drive Trendyol to PASSIVE, which the reconciler prunes + re-registers
- *     — the intended heal path. 429 (rate limit) and the oversize / sandbox /
- *     supplier-mismatch 200-drops are unchanged.
+ *     — the intended heal path. 429 (rate limit) and the oversize 200-drop are
+ *     unchanged; the sandbox / supplier-mismatch 200-drops now also persist an
+ *     audit row (see "Drop audit trail" below).
+ *
+ * Drop audit trail: a deterministic drop whose payload already cleared Zod
+ * persists a CLOSED webhook_events row (processedAt set + processingError =
+ * 'dropped: <reason>') BEFORE answering 200, so it leaves the same durable trail
+ * as an intook event. This covers the two parseable drops — sandbox-in-
+ * production and supplier-mismatch — both of which hold trustworthy idempotency
+ * fields (shipmentPackageId / status / lastModifiedDate). The oversize drop
+ * (body rejected before it was ever parsed) and the Zod-invalid drop
+ * (missing / untrustworthy key fields) write NO row — there is no reliable tuple
+ * to key one against. A re-delivery of the same drop (P2002 on the audit INSERT)
+ * is a silent 200: the row already exists.
  *
  * Two ingest modes (design §D6, permanent cutover #460):
  *   - default (STANDARD) → persist the row and return 200 immediately, leaving it
@@ -72,6 +84,17 @@ import { processTrendyolWebhookEvent } from '../../services/webhooks/trendyol-we
 
 type WebhookEnv = { Variables: { store: Store } };
 
+/**
+ * The composite key that identifies a delivery (the webhook_events unique
+ * constraint). Shared by the main intake INSERT, the deterministic-drop audit
+ * rows, and the re-delivery decision tree so they all key on the same tuple.
+ */
+interface WebhookIdempotencyKey {
+  platformOrderId: string;
+  platformStatus: string;
+  lastModifiedDate: Date;
+}
+
 /** Max webhook body Trendyol should ever send us; larger = malformed/hostile. */
 const WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024;
 
@@ -92,6 +115,10 @@ function webhookValidationHook(
 ): Response | undefined {
   if (!result.success && result.error !== undefined) {
     const issues = result.error.issues.map((issue) => issue.message);
+    // No webhook_events audit row here (unlike the sandbox / supplier-mismatch
+    // drops): the payload failed Zod, so the idempotency key fields
+    // (shipmentPackageId / status / lastModifiedDate) may be missing or
+    // untrustworthy — there is no reliable tuple to key a row against.
     syncLog.error('webhook.payload-invalid', {
       storeId: c.req.param('storeId'),
       issues,
@@ -165,6 +192,9 @@ webhookApp.use(
       // legitimately approaches 1 MB, so the alternative — letting an oversize
       // body through, or 4xx-ing it into Trendyol's infinite 5-minute retry
       // loop — is worse than losing the pathological outlier.
+      // No webhook_events audit row here (unlike the sandbox / supplier-mismatch
+      // drops): the body is rejected at the size gate before it is ever parsed,
+      // so there are no idempotency key fields to key a row against.
       syncLog.warn('webhook.body-too-large', { path: c.req.path });
       return c.body(null, 200);
     },
@@ -185,18 +215,34 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
   // (Trendyol payload has 30+ fields that we just forward to the mapper).
   const payload = c.req.valid('json') as unknown as TrendyolShipmentPackage;
 
+  // Composite idempotency key — computed up front so the two deterministic-drop
+  // branches below (sandbox-in-production, supplier-mismatch) write the SAME
+  // durable webhook_events trail as the main intake INSERT, not a silent 200.
+  const idempotencyKey: WebhookIdempotencyKey = {
+    platformOrderId: String(payload.shipmentPackageId),
+    platformStatus: payload.status,
+    lastModifiedDate: new Date(payload.lastModifiedDate),
+  };
+
   // ─── 0. PRODUCTION-only intake gate (defense-in-depth) ─────────────────
   // The `connect` path already blocks SANDBOX store creation in production
   // via the ALLOW_SANDBOX_CONNECTIONS env flag (services/store.service.ts).
   // This is the receiver-side mirror: if a SANDBOX store ever ends up in a
-  // production deployment, drop the webhook silently with 200 OK so prod data
-  // sets stay clean of test orders. Non-production environments still intake
+  // production deployment, drop the webhook with 200 OK so prod data sets stay
+  // clean of test orders. The drop is recorded as a CLOSED webhook_events row
+  // (audit trail) before answering 200. Non-production environments still intake
   // SANDBOX webhooks normally so stage runbooks keep working.
   if (process.env['NODE_ENV'] === 'production' && store.environment === 'SANDBOX') {
     syncLog.info('webhook.sandbox-dropped-in-production', {
       storeId: store.id,
-      platformOrderId: String(payload.shipmentPackageId),
+      platformOrderId: idempotencyKey.platformOrderId,
     });
+    await recordDroppedEvent(
+      store,
+      payload,
+      idempotencyKey,
+      'dropped: sandbox delivery in production',
+    );
     return c.body(null, 200);
   }
 
@@ -224,18 +270,16 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
   if (!isSingleMatch) {
     // Deterministic drop: the caller authenticated as this store, but the body
     // names a different seller. Retrying the same body never helps, so CLOSE
-    // the event with 200 (identity was already proven at the auth layer).
+    // the event with 200 (identity was already proven at the auth layer). The
+    // drop is recorded as a CLOSED webhook_events row (audit trail) first.
     syncLog.error('webhook.supplier-mismatch', {
       storeId: store.id,
       payloadSupplierIds: Array.from(payloadSupplierIds),
       storeSupplierId: store.externalAccountId,
     });
+    await recordDroppedEvent(store, payload, idempotencyKey, 'dropped: supplier mismatch');
     return c.body(null, 200);
   }
-
-  const platformOrderId = String(payload.shipmentPackageId);
-  const platformStatus = payload.status;
-  const lastModifiedDate = new Date(payload.lastModifiedDate);
 
   // ─── 2. Idempotency log INSERT (P2002 = re-delivery) ───────────────────
   let created: { id: string };
@@ -245,20 +289,16 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
         organizationId: store.organizationId,
         storeId: store.id,
         platform: 'TRENDYOL',
-        platformOrderId,
-        platformStatus,
-        platformLastModifiedDate: lastModifiedDate,
+        platformOrderId: idempotencyKey.platformOrderId,
+        platformStatus: idempotencyKey.platformStatus,
+        platformLastModifiedDate: idempotencyKey.lastModifiedDate,
         rawPayload: payload as unknown as Prisma.InputJsonValue,
       },
       select: { id: true },
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      return handleReDelivery(c, store, {
-        platformOrderId,
-        platformStatus,
-        lastModifiedDate,
-      });
+      return handleReDelivery(c, store, idempotencyKey);
     }
     throw err;
   }
@@ -305,6 +345,54 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
 });
 
 /**
+ * Persist a CLOSED (processedAt-stamped) webhook_events row for a deterministic
+ * drop whose payload already cleared Zod — so the drop leaves a durable audit
+ * trail instead of a silent 200. `processingError` carries a machine-scannable
+ * 'dropped:' prefix naming the reason. Two failure modes, both end in a plain
+ * 200 (the drop is a deterministic dead-end; retrying never helps, and identity
+ * was already proven at the auth layer — a 5xx here would only push Trendyol to
+ * retry a body it can never fix):
+ *   - P2002 → the SAME drop was re-delivered; its idempotency row already
+ *     exists, so there is nothing more to record. Swallow silently.
+ *   - any other error → an infra fault writing the audit trail. The event is
+ *     discarded regardless, so log it (never swallow) and still let the caller
+ *     answer 200 rather than bubbling a 5xx that would retry the drop.
+ */
+async function recordDroppedEvent(
+  store: Store,
+  payload: TrendyolShipmentPackage,
+  key: WebhookIdempotencyKey,
+  reason: string,
+): Promise<void> {
+  try {
+    await prisma.webhookEvent.create({
+      data: {
+        organizationId: store.organizationId,
+        storeId: store.id,
+        platform: 'TRENDYOL',
+        platformOrderId: key.platformOrderId,
+        platformStatus: key.platformStatus,
+        platformLastModifiedDate: key.lastModifiedDate,
+        rawPayload: payload as unknown as Prisma.InputJsonValue,
+        processedAt: new Date(),
+        processingError: reason,
+      },
+      select: { id: true },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return;
+    }
+    syncLog.warn('webhook.drop-audit-write-failed', {
+      storeId: store.id,
+      platformOrderId: key.platformOrderId,
+      reason,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * P2002 re-delivery decision tree. The composite idempotency key already exists,
  * so the delivery is a duplicate of a row we already hold. There are exactly two
  * cases now — reprocessing on the retry is GONE (design §D3):
@@ -319,7 +407,7 @@ webhookApp.openapi(trendyolOrderWebhookRoute, async (c) => {
 async function handleReDelivery(
   c: Context<WebhookEnv>,
   store: Store,
-  key: { platformOrderId: string; platformStatus: string; lastModifiedDate: Date },
+  key: WebhookIdempotencyKey,
 ): Promise<Response> {
   const existing = await prisma.webhookEvent.findUnique({
     where: {

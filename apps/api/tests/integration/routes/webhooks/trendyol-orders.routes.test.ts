@@ -259,7 +259,7 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
   });
 
   describe('Defense-in-depth supplierId check', () => {
-    it('200 (deterministic drop) when payload supplierId does not match store externalAccountId', async () => {
+    it('200 (deterministic drop) + writes a CLOSED audit row when payload supplierId does not match store externalAccountId', async () => {
       const { storeId } = await setupStore();
       const res = await postWebhook(
         storeId,
@@ -270,8 +270,30 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       // deterministic dead-end — 200 closes the event so Trendyol stops
       // retrying. Identity was already proven at the auth layer.
       expect(res.status).toBe(200);
-      // The supplier check fires before the idempotency INSERT — nothing persists.
-      expect(await prisma.webhookEvent.count()).toBe(0);
+
+      // The drop now leaves a durable audit trail: a CLOSED webhook_events row
+      // (processedAt set + 'dropped:'-prefixed processingError), but NO order.
+      const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+      expect(event.platformOrderId).toBe('3734026895');
+      expect(event.processedAt).not.toBeNull();
+      expect(event.processingError).toBe('dropped: supplier mismatch');
+      expect(await prisma.order.count({ where: { storeId } })).toBe(0);
+      expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
+    });
+
+    it('re-delivery of the same mismatch drop stays 200 and does NOT write a second audit row', async () => {
+      const { storeId } = await setupStore();
+      const auth = basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS);
+      const payload = makeWebhookPayload({ supplierId: 88888 });
+
+      const first = await postWebhook(storeId, payload, auth);
+      expect(first.status).toBe(200);
+      // Same body redelivered (Trendyol 5-minute retry) → P2002 on the audit
+      // INSERT → silent 200, no duplicate row.
+      const second = await postWebhook(storeId, payload, auth);
+      expect(second.status).toBe(200);
+
+      expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(1);
       expect(await prisma.order.count({ where: { storeId } })).toBe(0);
     });
   });
@@ -616,7 +638,7 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
       vi.unstubAllEnvs();
     });
 
-    it('drops SANDBOX-store webhooks in production with 200 + skip log, no DB write', async () => {
+    it('drops SANDBOX-store webhooks in production with 200 + skip log + CLOSED audit row, no order', async () => {
       vi.stubEnv('NODE_ENV', 'production');
       const { storeId } = await setupStore({ environment: 'SANDBOX' });
       const infoSpy = vi.spyOn(syncLog, 'info');
@@ -632,11 +654,32 @@ describe('POST /v1/webhooks/orders/:storeId (PR-C3b)', () => {
         'webhook.sandbox-dropped-in-production',
         expect.objectContaining({ storeId, platformOrderId: '3734026895' }),
       );
-      // Gate fires before the idempotency log INSERT, so nothing persists.
-      expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(0);
+      // The drop leaves a durable audit trail: a CLOSED webhook_events row
+      // (processedAt set + 'dropped:'-prefixed processingError), but NO order
+      // (the SANDBOX gate never runs intake).
+      const event = await prisma.webhookEvent.findFirstOrThrow({ where: { storeId } });
+      expect(event.processedAt).not.toBeNull();
+      expect(event.processingError).toBe('dropped: sandbox delivery in production');
       expect(await prisma.order.count({ where: { storeId } })).toBe(0);
+      expect(await prisma.livePerformanceBuffer.count({ where: { storeId } })).toBe(0);
 
       infoSpy.mockRestore();
+    });
+
+    it('re-delivery of the same SANDBOX drop in production stays 200 and writes no second audit row', async () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      const { storeId } = await setupStore({ environment: 'SANDBOX' });
+      const auth = basicAuthHeader(WEBHOOK_USER, WEBHOOK_PASS);
+      const payload = makeWebhookPayload();
+
+      const first = await postWebhook(storeId, payload, auth);
+      expect(first.status).toBe(200);
+      // Same body redelivered → P2002 on the audit INSERT → silent 200, no dup.
+      const second = await postWebhook(storeId, payload, auth);
+      expect(second.status).toBe(200);
+
+      expect(await prisma.webhookEvent.count({ where: { storeId } })).toBe(1);
+      expect(await prisma.order.count({ where: { storeId } })).toBe(0);
     });
 
     it('still intakes PRODUCTION-store webhooks normally when NODE_ENV=production', async () => {
