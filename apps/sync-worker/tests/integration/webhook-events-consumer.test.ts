@@ -201,6 +201,11 @@ describe('processWebhookEventsBatch', () => {
     expect(secondClosed).toBe(1);
     const afterReplay = await prisma.webhookEvent.findUniqueOrThrow({ where: { id: event.id } });
     expect(afterReplay.processedAt).not.toBeNull();
+    // The successful replay must scrub the transient fault note left by the first
+    // attempt — a processed row carrying a stale processingError is misleading in
+    // the audit trail (issue #458). This falls under the old write-processedAt-only
+    // behaviour, which left the note behind.
+    expect(afterReplay.processingError).toBeNull();
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
   });
 

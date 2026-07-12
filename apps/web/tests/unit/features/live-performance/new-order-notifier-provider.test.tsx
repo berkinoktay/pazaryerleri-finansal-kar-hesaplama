@@ -1,6 +1,6 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { NextIntlClientProvider } from 'next-intl';
+import { createTranslator, NextIntlClientProvider } from 'next-intl';
 import { type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ import {
   NewOrderNotifierProvider,
   useNewOrderNotifier,
 } from '@/features/live-performance/providers/new-order-notifier-provider';
+import { resetTabBadgeForTesting } from '@/features/live-performance/lib/tab-badge';
 
 import { createTestQueryClient } from '../../../helpers/render';
 import trMessages from '../../../../messages/tr.json';
@@ -78,16 +79,27 @@ const SUMMARY_B: NotificationSummaryLike = {
 };
 
 // A distinct second order so two hidden-tab notifications survive the seen-set
-// dedup and bump the tab-title badge from (1) to (2).
+// dedup and advance the tab-title badge from a one-order to a two-order label.
 const SUMMARY_C: NotificationSummaryLike = {
   ...SUMMARY_B,
   orderId: 'C',
   platformOrderNumber: 'TY-C',
 };
 
-// Deterministic base tab title so the "(N) " badge assertions are stable; reset
-// around every test so one case's prefix never bleeds into the next.
+// Deterministic base tab title so the badge-label assertions are stable; reset
+// around every test so one case's label never bleeds into the next.
 const DEFAULT_TAB_TITLE = 'PazarSync';
+
+// Render the tab-badge label straight from the catalog (no Turkish literals in
+// source): the provider prepends `t('tabBadge', { count })` to the base title as
+// "<label> · <base>", so the expected title is derived the same way.
+const tRealtime = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'livePerformance.realtime',
+});
+const badgeTitle = (count: number): string =>
+  `${tRealtime('tabBadge', { count })} · ${DEFAULT_TAB_TITLE}`;
 
 // Rendered-title fragments read from the message catalog (no Turkish literals in
 // source): the single (rich) toast uses `newOrderTitle`, the catch-up burst uses
@@ -179,11 +191,13 @@ beforeEach(() => {
   getLiveOrdersMock.mockReset();
   getLiveOrdersMock.mockResolvedValue(listOf([]));
   document.title = DEFAULT_TAB_TITLE;
+  resetTabBadgeForTesting();
 });
 afterEach(() => {
   vi.useRealTimers();
   setVisibility('visible');
   document.title = DEFAULT_TAB_TITLE;
+  resetTabBadgeForTesting();
 });
 
 describe('NewOrderNotifierProvider', () => {
@@ -546,10 +560,11 @@ describe('NewOrderNotifierProvider', () => {
   });
 
   // Tab-title unread badge: keep-alive (#453) keeps notifications firing while the
-  // tab is hidden, so the provider prefixes the document title with a "(N) " count
-  // of notifications the seller has not yet seen, and resets it on return.
+  // tab is hidden, so the provider prepends an attention-grabbing label (keyed on
+  // the count of notifications the seller has not yet seen) to the document title,
+  // and resets it on return.
   describe('tab-title badge', () => {
-    it('prefixes the title with the away-count while hidden, incrementing per notification', async () => {
+    it('prepends the away-count label while hidden, advancing per notification', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-07-08T12:00:00Z'));
       getNotificationSummaryMock.mockReset();
@@ -563,23 +578,24 @@ describe('NewOrderNotifierProvider', () => {
 
       act(() => setVisibility('hidden'));
 
-      // First order arrives live while hidden -> toast + badge (1).
+      // First order arrives live while hidden -> toast + one-order label.
       act(() => {
         capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T13:00:00' });
       });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
       });
-      expect(document.title).toBe(`(1) ${DEFAULT_TAB_TITLE}`);
+      expect(document.title).toBe(badgeTitle(1));
 
-      // Second, distinct order -> the badge advances to (2), not a stacked prefix.
+      // Second, distinct order -> the label advances to the two-order copy, prepended
+      // onto the same captured base rather than stacking.
       act(() => {
         capturedOnNewOrder({ table: 'orders', id: 'C', orderDate: '2026-07-08T13:00:00' });
       });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
       });
-      expect(document.title).toBe(`(2) ${DEFAULT_TAB_TITLE}`);
+      expect(document.title).toBe(badgeTitle(2));
     });
 
     it('clears the badge on return and does not re-add it when catch-up finds nothing new', async () => {
@@ -597,7 +613,7 @@ describe('NewOrderNotifierProvider', () => {
         await vi.advanceTimersByTimeAsync(0);
       });
 
-      // Hidden: an order arrives live -> badge (1).
+      // Hidden: an order arrives live -> one-order label.
       act(() => setVisibility('hidden'));
       act(() => {
         capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T13:00:00' });
@@ -605,10 +621,10 @@ describe('NewOrderNotifierProvider', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
       });
-      expect(document.title).toBe(`(1) ${DEFAULT_TAB_TITLE}`);
+      expect(document.title).toBe(badgeTitle(1));
 
       // Return to visible -> badge cleared; catch-up diffs [B] (already known) -> no
-      // new toast, so the prefix does not come back.
+      // new toast, so the label does not come back.
       await act(async () => {
         setVisibility('visible');
         await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);

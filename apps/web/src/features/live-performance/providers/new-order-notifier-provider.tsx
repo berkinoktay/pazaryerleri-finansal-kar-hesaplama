@@ -27,7 +27,7 @@ import {
   type NotificationSummaryLike,
 } from '../lib/new-order-notification-core';
 import { playNotificationDing, resumeNotificationAudio } from '../lib/play-notification-sound';
-import { clearTabBadge, setTabBadgeCount } from '../lib/tab-badge';
+import { clearTabBadge, setTabBadge } from '../lib/tab-badge';
 import { LIVE_POLL_INTERVAL_MS, LIVE_QUERY_STALE_MS, liveKeys } from '../query-keys';
 
 const COALESCE_WINDOW_MS = 1_200;
@@ -168,8 +168,8 @@ export function NewOrderNotifierProvider({
     // (never hidden) does not run catch-up — there is nothing to catch up on.
     let wasHidden = false;
     // Running count of notifications the seller has not yet seen because the tab was
-    // hidden when they fired. Drives the "(N) " tab-title badge and resets to 0 on
-    // return (visible again).
+    // hidden when they fired. Drives the tab-title badge label (an attention-grabbing
+    // i18n string keyed on this count) and resets to 0 on return (visible again).
     let badgeCount = 0;
 
     const invalidateAll = (): void => {
@@ -279,8 +279,8 @@ export function NewOrderNotifierProvider({
 
       // Tab-title unread badge. Keep-alive (#453) keeps events flowing while the tab
       // is hidden, so a toast/ding can fire that the seller never sees. When that
-      // happens, count it into the "(N) " title prefix — the only surface visible in
-      // the tab strip while away. The tab-return catch-up windows run while VISIBLE
+      // happens, count it into the title label — the only surface visible in the tab
+      // strip while away. The tab-return catch-up windows run while VISIBLE
       // (handleCatchupVisibility resets the count before runCatchup), so they
       // naturally never bump the badge.
       if (
@@ -289,7 +289,7 @@ export function NewOrderNotifierProvider({
         document.visibilityState === 'hidden'
       ) {
         badgeCount += plan.kind === 'single' ? 1 : plan.count;
-        setTabBadgeCount(badgeCount);
+        setTabBadge(tRef.current('tabBadge', { count: badgeCount }));
       }
     };
 
@@ -409,7 +409,7 @@ export function NewOrderNotifierProvider({
       }
       if (coalesceTimer !== null) clearTimeout(coalesceTimer);
       if (invalidateTimer !== null) clearTimeout(invalidateTimer);
-      // Store switch / unmount must not leave a stale "(N) " badge on the title.
+      // Store switch / unmount must not leave a stale badge label on the title.
       clearTabBadge();
       unsubscribe();
     };
