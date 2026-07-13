@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { SyncCenter } from '@/components/patterns/sync-center';
 import { PageSyncControl } from '@/features/sync/components/page-sync-control';
 import { PageSyncFooterTrace } from '@/features/sync/components/page-sync-footer-trace';
+import { StaleDataBanner } from '@/features/sync/components/stale-data-banner';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 import { toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
 import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
@@ -144,6 +145,8 @@ export function ReturnsPageClient({
             )
           }
         />
+        {/* Aged-data warning strip (in content flow, between header and table). */}
+        <StaleDataBanner pageKey="returns" />
         <ReturnsTable
           rows={rows}
           loading={returnsQuery.isLoading}

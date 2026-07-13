@@ -21,6 +21,7 @@ import { marginColorStyle } from '@/lib/margin-color-style';
 import { profitToneClass } from '@/lib/profit-tone';
 
 import { type OrderListItem } from '../api/list-orders.api';
+import { useRecentOrderIds } from '../hooks/use-recent-order-ids';
 import {
   type CostStatusValue,
   type OrderSortValue,
@@ -105,6 +106,8 @@ export function OrdersTable({
   const formatter = useFormatter();
   // Read once at the component level — never inside cell render functions.
   const scale = useMarginColoring();
+  // Ids of orders that just arrived over Realtime — their rows flash briefly (#467).
+  const recentOrderIds = useRecentOrderIds();
 
   const columns = React.useMemo<ColumnDef<OrderListItem>[]>(() => {
     if (costStatus === 'excluded') {
@@ -389,6 +392,8 @@ export function OrdersTable({
       // o satırlar için sheet boş açılırdı — sebep zaten kolonda göründüğünden
       // satır-tıklaması bilinçli olarak kapalı (gereksiz boş sheet yok).
       onRowClick={undefined}
+      // A realtime-arrived order flashes its row once, then fades to normal.
+      rowClassName={(order) => (recentOrderIds.has(order.id) ? 'animate-row-highlight' : undefined)}
       sorting={sortingState}
       onSortingChange={handleSortingChange}
       paginationState={paginationState}

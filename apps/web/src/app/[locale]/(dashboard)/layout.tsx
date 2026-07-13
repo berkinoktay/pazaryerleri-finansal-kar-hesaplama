@@ -7,6 +7,7 @@ import { DashboardStoreLauncher } from '@/features/stores/components/dashboard-s
 import { StoreAccessGate } from '@/features/stores/components/store-access-gate';
 import { MarginColoringProvider } from '@/features/account/components/margin-coloring-provider';
 import { NewOrderNotifierProvider } from '@/features/live-performance/providers/new-order-notifier-provider';
+import { SyncFailureToaster } from '@/features/sync/components/sync-failure-toaster';
 import { OrgSyncsProvider } from '@/features/sync/providers/org-syncs-provider';
 import { resolveActiveOrgId } from '@/lib/active-org';
 import { resolveActiveStoreId } from '@/lib/active-store';
@@ -59,6 +60,8 @@ export default async function DashboardLayout({
       <OrgSyncsProvider orgId={activeOrgId ?? null}>
         <MarginColoringProvider>
           <CurrentScopeProvider org={activeOrg} store={activeStore} accessibleStores={stores}>
+            {/* Render-less: destructive toast when the active store's flow fails. */}
+            <SyncFailureToaster />
             <NewOrderNotifierProvider>
               {/* key={activeOrgId} remounts the launcher on an org switch so its
                   internal activeStoreId useState resets — otherwise the previous

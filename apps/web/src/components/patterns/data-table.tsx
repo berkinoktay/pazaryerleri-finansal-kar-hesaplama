@@ -287,6 +287,14 @@ export interface DataTableProps<TData, TValue> {
    */
   onRowClick?: (row: TData, event: React.MouseEvent | React.KeyboardEvent) => void;
   /**
+   * Optional per-row class hook. Called for each rendered data row with its
+   * `original` data; the returned class is merged onto the `<tr>`. Kept purely
+   * additive (a transient row flash, a status tint) — returning `undefined`
+   * leaves the row untouched. Does not affect sub-rows or the empty/loading
+   * states.
+   */
+  rowClassName?: (row: TData) => string | undefined;
+  /**
    * Controlled sorting state. When supplied alongside `onSortingChange`
    * DataTable hands ownership to the parent and flips TanStack into
    * `manualSorting: true` — the parent forwards the next sort to the
@@ -388,6 +396,7 @@ export function DataTable<TData, TValue>({
   columnPinning,
   onColumnPinningChange,
   onRowClick,
+  rowClassName,
   sorting,
   onSortingChange,
   initialSorting,
@@ -836,6 +845,7 @@ export function DataTable<TData, TValue>({
                       onClick={handleRowClick}
                       onKeyDown={handleRowKeyDown}
                       className={cn(
+                        rowClassName?.(row.original),
                         onRowClick &&
                           // The focus ring is painted on an overlay pseudo-element
                           // ABOVE the sticky pinned cells (z-10) so it wraps the

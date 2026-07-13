@@ -2498,7 +2498,12 @@
     },
     "fullHistory": "Tüm geçmiş",
     "statusButtonLabel": "Senkron durumu ve kaynak dökümü",
-    "tableFooter": "Son güncelleme"
+    "tableFooter": "Son güncelleme",
+    "staleBanner": {
+      "message": "Bu veriler {hours} saattir güncellenmedi",
+      "action": "Şimdi eşitle"
+    },
+    "failureToast": "{domain} güncellenemedi"
   },
   "products": {
     "page": {
