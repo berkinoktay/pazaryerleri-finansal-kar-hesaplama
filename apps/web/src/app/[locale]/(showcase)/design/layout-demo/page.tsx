@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
 import * as React from 'react';
 import { toast } from 'sonner';
@@ -15,6 +16,8 @@ import { SyncControlDemo } from '@/components/showcase/sync-control-demo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { QuickAccessPanel } from '@/features/dashboard/components/quick-access-panel';
+import { useSwitcherPreviewStores } from '@/features/stores/hooks/use-switcher-preview-stores';
+import { storeKeys } from '@/features/stores/query-keys';
 
 const recentOrders = buildMockOrders(8);
 const MOCK_REVENUE = new Decimal('284390.45');
@@ -29,17 +32,11 @@ const MOCK_ORGS: Organization[] = [
     id: 'org-demo',
     name: 'Demo Organizasyon',
     role: 'OWNER',
-    storeCount: 3,
-    lastSyncedAt: '2026-04-20T21:00:00Z',
-    lastAccessedAt: '2026-04-20T21:30:00Z',
   },
   {
     id: 'org-secondary',
     name: 'İkinci Şirket A.Ş.',
     role: 'ADMIN',
-    storeCount: 1,
-    lastSyncedAt: '2026-04-19T15:00:00Z',
-    lastAccessedAt: '2026-04-18T09:00:00Z',
   },
 ];
 
@@ -69,28 +66,35 @@ const MOCK_STORES: Store[] = [
     id: 'store-ty-main',
     name: 'Ana Mağaza',
     platform: 'TRENDYOL',
-    syncState: 'fresh',
-    lastSyncedAt: '2026-04-20T21:00:00Z',
   },
   {
     id: 'store-ty-outlet',
     name: 'Outlet',
     platform: 'TRENDYOL',
-    syncState: 'fresh',
-    lastSyncedAt: '2026-04-20T21:00:00Z',
   },
   {
     id: 'store-hb-main',
     name: 'Hepsiburada Mağazası',
     platform: 'HEPSIBURADA',
-    syncState: 'stale',
-    lastSyncedAt: '2026-04-19T15:00:00Z',
   },
 ];
 
 export default function LayoutDemoPage(): React.ReactElement {
   const [activeStoreId, setActiveStoreId] = React.useState(MOCK_STORES[0]!.id);
   const activeStore = MOCK_STORES.find((s) => s.id === activeStoreId) ?? MOCK_STORES[0]!;
+  const queryClient = useQueryClient();
+
+  // One-time: seed the secondary mock org's store list so previewing it in the
+  // switcher resolves from cache — this demo has no backend for org-secondary.
+  // Pin stale/gc to Infinity so a later preview never triggers a live fetch.
+  React.useEffect(() => {
+    const secondaryOrgId = MOCK_ORGS[1]!.id;
+    queryClient.setQueryDefaults(storeKeys.list(secondaryOrgId), {
+      staleTime: Infinity,
+      gcTime: Infinity,
+    });
+    queryClient.setQueryData(storeKeys.list(secondaryOrgId), []);
+  }, [queryClient]);
 
   return (
     <div className="h-shell-demo border-border-strong overflow-hidden rounded-xl border shadow-lg">
@@ -101,7 +105,9 @@ export default function LayoutDemoPage(): React.ReactElement {
         activeStoreId={activeStoreId}
         onSelectOrg={() => undefined}
         onSelectStore={setActiveStoreId}
+        onSelectScope={(_orgId, storeId) => setActiveStoreId(storeId)}
         onAddStore={() => toast.info('Mağaza bağla akışı burada açılır')}
+        usePreviewStores={useSwitcherPreviewStores}
       >
         <PageHeader
           title={activeStore.name}

@@ -40,6 +40,7 @@ vi.mock('@/providers/theme-provider', () => ({
 
 import { AppShell } from '@/components/layout/app-shell';
 import { type Organization, type Store } from '@/components/patterns/org-store-switcher';
+import { useSwitcherPreviewStores } from '@/features/stores/hooks/use-switcher-preview-stores';
 import { render, screen } from '@/../tests/helpers/render';
 
 const messages = {
@@ -142,14 +143,11 @@ const messages = {
     },
   },
   orgStoreSwitcher: {
-    search: 'Org veya mağaza ara…',
     sectionOrgs: 'Organizasyonlar',
     sectionStores: 'Mağazalar',
-    addOrg: '+ Yeni',
     connectStore: '+ Bağla',
     footerOrgSettings: 'Org ayarları',
     footerStoreManagement: 'Mağaza yönetimi',
-    footerNewOrg: '+ Yeni Org',
     emptyTitle: 'Henüz bir organizasyona sahip değilsin',
     emptyDescription: 'Bir organizasyon oluştur ya da bir davete katıl.',
     emptyCreate: '+ Yeni Organizasyon Oluştur',
@@ -157,9 +155,6 @@ const messages = {
     roleOwner: 'Owner',
     roleAdmin: 'Admin',
     roleMember: 'Member',
-    syncStateFresh: 'Senkron',
-    syncStateStale: 'Yenile',
-    syncStateFailed: 'Senkron başarısız',
     openShortcut: '⌘O ile değiştir',
   },
   themeToggle: { label: 'Tema' },
@@ -184,9 +179,6 @@ const mockOrgs: Organization[] = [
     id: 'org-a',
     name: 'Acme A.Ş.',
     role: 'OWNER',
-    storeCount: 2,
-    lastSyncedAt: '2026-04-25T11:55:00Z',
-    lastAccessedAt: '2026-04-25T12:00:00Z',
   },
 ];
 
@@ -195,8 +187,6 @@ const mockStores: Store[] = [
     id: 'store-1',
     name: 'Trendyol Acme TR',
     platform: 'TRENDYOL',
-    syncState: 'fresh',
-    lastSyncedAt: '2026-04-25T11:55:00Z',
   },
 ];
 
@@ -207,6 +197,7 @@ interface RenderProps {
   activeStoreId?: string | undefined;
   onSelectOrg?: (id: string) => void;
   onSelectStore?: (id: string) => void;
+  onSelectScope?: (orgId: string, storeId: string, storeName: string) => void;
 }
 
 function renderShell(props: RenderProps = {}) {
@@ -219,6 +210,8 @@ function renderShell(props: RenderProps = {}) {
         activeStoreId={props.activeStoreId ?? 'store-1'}
         onSelectOrg={props.onSelectOrg ?? vi.fn()}
         onSelectStore={props.onSelectStore ?? vi.fn()}
+        onSelectScope={props.onSelectScope ?? vi.fn()}
+        usePreviewStores={useSwitcherPreviewStores}
       >
         <div data-testid="page-content">Hello dashboard</div>
       </AppShell>

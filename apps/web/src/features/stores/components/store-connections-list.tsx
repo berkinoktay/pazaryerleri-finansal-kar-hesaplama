@@ -63,7 +63,7 @@ export function StoreConnectionsList({
   const tStatus = useTranslations('featureStatus');
   const format = useFormatter();
 
-  const { data } = useStores(orgId, initialStores);
+  const { data } = useStores(orgId, { initialData: initialStores });
   const stores = data ?? initialStores;
   const disconnect = useDisconnectStore(orgId);
 

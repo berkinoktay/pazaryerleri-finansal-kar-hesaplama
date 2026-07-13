@@ -6,128 +6,111 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
+import {
+  OrgStoreSwitcherEmpty,
+  OrgStoreSwitcherPanel,
+} from '@/components/patterns/org-store-switcher-panel';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { CountBadge } from '@/components/ui/count-badge';
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { getOrgAvatarPalette, type OrgAvatarPalette } from '@/lib/org-avatar-color';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { getOrgAvatarPalette, PALETTE_BG } from '@/lib/org-avatar-color';
 import { cn } from '@/lib/utils';
-
-import { OrgStoreSwitcherEmpty, OrgStoreSwitcherList } from './org-store-switcher-list';
 
 // Domain alias for the DB MemberRole enum.
 export type OrgRole = MemberRole;
-export type SyncState = 'fresh' | 'stale' | 'failed';
 
 export interface Organization {
   id: string;
   name: string;
   role: OrgRole;
-  storeCount: number;
-  lastSyncedAt: string | null;
-  /** ISO timestamp of when the caller last switched into this org;
-   * `null` means never accessed. Powers the "Son Kullanılan" section
-   * when the user belongs to 5+ orgs. */
-  lastAccessedAt: string | null;
 }
 
 export interface Store {
   id: string;
   name: string;
   platform: Platform;
-  syncState: SyncState;
-  lastSyncedAt: string | null;
 }
+
+/** Result of the injected preview-stores adapter (see `usePreviewStores`). */
+export interface SwitcherPreviewStores {
+  stores: Store[];
+  isLoading: boolean;
+  isError: boolean;
+}
+
+/**
+ * Adapter the shell injects so the pattern can preview a non-active org's
+ * stores WITHOUT importing feature internals. The feature owns the concrete
+ * hook (`useSwitcherPreviewStores`); the pattern only knows this type shape.
+ */
+export type UsePreviewStores = (orgId: string | null) => SwitcherPreviewStores;
 
 export interface OrgStoreSwitcherProps {
   orgs: Organization[];
+  /** Stores of the ACTIVE org (server-hydrated). */
   stores: Store[];
   activeOrgId: string | null;
   activeStoreId: string | null;
+  /** Org-only switch — used when the previewed org has no stores. */
   onSelectOrg: (orgId: string) => void;
+  /** Same-org store switch. */
   onSelectStore: (storeId: string) => void;
+  /** Cross-org store pick: switch org AND store in one step. */
+  onSelectScope: (orgId: string, storeId: string, storeName: string) => void;
   /**
-   * In-popover "connect a new store" action. When provided (the caller's role
+   * In-panel "connect a new store" action. When provided (the caller's role
    * grants it), the Stores section header surfaces a "+ Yeni Mağaza" button
-   * that closes the popover and runs this — typically opening the connect-store
+   * that closes the shell and runs this — typically opening the connect-store
    * modal. When omitted, the header falls back to a settings-page link.
    */
   onAddStore?: () => void;
-  /** Collapsed sidebar mode — render icon-only avatar trigger. */
+  /**
+   * Injected adapter that previews a non-active org's stores. Dependency
+   * injection keeps the pattern layer free of feature-folder imports — the
+   * feature passes `useSwitcherPreviewStores`.
+   */
+  usePreviewStores: UsePreviewStores;
+  /** Collapsed sidebar mode — render icon-only tile trigger. */
   collapsed?: boolean;
+  /**
+   * Register the global ⌘O / Ctrl+O toggle hotkey (default `true`). Set
+   * `false` for secondary instances (e.g. multiple showcase demos on one page)
+   * so a single keypress doesn't open every switcher at once.
+   */
+  hotkey?: boolean;
 }
 
-const PALETTE_BG: Record<OrgAvatarPalette, string> = {
-  primary: 'bg-primary text-primary-foreground',
-  success: 'bg-success text-success-foreground',
-  warning: 'bg-warning text-warning-foreground',
-  info: 'bg-info text-info-foreground',
-  destructive: 'bg-destructive text-destructive-foreground',
-  accent: 'bg-accent text-accent-foreground',
-};
-
-const SYNC_TONE: Record<SyncState, StatusDotProps['tone']> = {
-  fresh: 'success',
-  stale: 'warning',
-  failed: 'destructive',
-};
-
-/** Border tint applied to the chip itself when the active store has a
- * non-fresh sync state. Default `border-border` is a soft persistent
- * frame that — paired with shadow-sm — gives the chip its "elevated
- * dropdown trigger" identity. Stale/failed override the color to surface
- * a glanceable warning cue (width stays stable across states). */
-const SYNC_CHIP_BORDER: Record<SyncState, string> = {
-  fresh: 'border-border',
-  stale: 'border-warning',
-  failed: 'border-destructive',
-};
-
-/** When the user belongs to this many orgs, the collapsed avatar
- * shows a "+N" indicator on its bottom-left to signal "there are more
- * orgs to switch to". */
-const MULTI_ORG_INDICATOR_THRESHOLD = 3;
-
 /**
- * Combined org+store switcher chip with layered popover dropdown.
+ * Combined org+store switcher — a store-first identity card trigger backed by
+ * a two-pane picker. The trigger reads as "you're working in store X (of org
+ * Y)"; the picker previews any org's stores before you commit.
  *
  * Surface design:
- *   - Default: `bg-card` + `shadow-xs` — hairline elevation that signals
- *     "this is a control, not a label" without reading as a floating
- *     popup. Per `tokens/shadow.css`, xs is the right level for raised
- *     chips (md/lg are reserved for genuine overlays). Pairs with a
- *     SidebarSeparator below in AppShell to structurally anchor the
- *     "context zone" away from the navigation list.
- *   - Hover / popover-open: `bg-muted` + drop the shadow flat. The bg
- *     shift becomes the active elevation signal; a flat-hover feels
- *     more "engaged" than a hovered card. No border bump on open.
- *   - Sync warning (stale/failed): the otherwise-transparent border
- *     tints to `border-warning` / `border-destructive`. Width stays
- *     stable because the border slot is always present.
+ *   - Default: `bg-card` + `border-border` + `shadow-sm` — the trio reads as
+ *     "primary dropdown trigger", distinct from nav rows (no card/shadow) and
+ *     from overlays (md/lg shadow). Pairs with a SidebarSeparator below in
+ *     AppShell to frame the "context zone".
+ *   - Hover / open: `bg-muted` + drop the shadow flat — the bg shift becomes
+ *     the active elevation signal, so a flat hover feels "engaged".
  *
- * Avatar:
- *   - When an active store is selected, shows the marketplace's brand
- *     wordmark (Trendyol/Hepsiburada) on a card surface — the user is
- *     "currently working in marketplace X for org Y", and the brand
- *     identity is the primary glanceable signal.
- *   - When an active org has no store yet, falls back to the org's
- *     initial on a deterministic palette tile (info/success/warning/etc).
- *   - When there's no org at all, shows a `+` placeholder.
- *   - No corner overlays. Sync state and platform identity surface
- *     through the secondary text line and the popover dropdown — the
- *     avatar carries one concept at a time.
+ * Leading visual carries exactly one concept:
+ *   - Active store → the marketplace brand wordmark on a card surface (the
+ *     user is "working in marketplace X"). In collapsed mode a corner chip
+ *     adds the org initial, since the org name has no text line to live on.
+ *   - Active org without a store → the org initial on a deterministic palette.
+ *   - No org at all → a `+` placeholder.
  *
- * Power features:
- *   - **⌘O / Ctrl+O** opens the popover from anywhere on the page.
- *   - **Sync warning border** — when the active store's sync state is
- *     `stale` or `failed`, the chip's outer border tints to surface
- *     the warning at the sidebar level.
- *   - **Multi-org +N indicator** — collapsed avatar's bottom-left
- *     shows "+N" when the user belongs to 3+ orgs.
+ * Three shells, one picker body: a Popover on the expanded desktop rail, a
+ * Dialog when the rail is collapsed (the popover would have nowhere to anchor
+ * comfortably), and a bottom Drawer on mobile. **⌘O / Ctrl+O** toggles it open
+ * from anywhere on the page.
  *
- * @useWhen mounting the primary tenant context chip in the sidebar (combined org + store identity, ⌘O hotkey, sync-warning border, popover with full picker)
+ * @useWhen mounting the primary tenant context chip in the sidebar (store-first identity, ⌘O hotkey, two-pane org/store picker across popover/dialog/drawer shells)
  */
 export function OrgStoreSwitcher({
   orgs,
@@ -136,22 +119,24 @@ export function OrgStoreSwitcher({
   activeStoreId,
   onSelectOrg,
   onSelectStore,
+  onSelectScope,
   onAddStore,
+  usePreviewStores,
   collapsed = false,
+  hotkey = true,
 }: OrgStoreSwitcherProps): React.ReactElement {
   const t = useTranslations('orgStoreSwitcher');
+  const isMobile = useIsMobile();
   const [open, setOpen] = React.useState(false);
 
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null;
   const activeStore = stores.find((s) => s.id === activeStoreId) ?? null;
   const isEmpty = orgs.length === 0;
-  const otherOrgCount = Math.max(0, orgs.length - 1);
-  const showMultiOrgIndicator =
-    collapsed && orgs.length >= MULTI_ORG_INDICATOR_THRESHOLD && otherOrgCount > 0;
-  const chipBorder = activeStore ? SYNC_CHIP_BORDER[activeStore.syncState] : 'border-border';
 
-  // Global ⌘O / Ctrl+O hotkey.
+  // Global ⌘O / Ctrl+O hotkey. The effect stays registered so hook order is
+  // stable; when `hotkey` is off it early-returns before binding the listener.
   React.useEffect(() => {
+    if (!hotkey) return;
     function onKeyDown(e: KeyboardEvent): void {
       if (e.key.toLowerCase() === 'o' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
@@ -160,13 +145,14 @@ export function OrgStoreSwitcher({
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [hotkey]);
 
   const triggerLabel = activeOrg
     ? activeStore
       ? `${activeOrg.name} · ${activeStore.name}`
       : activeOrg.name
     : t('emptyCreate');
+  const primaryLabel = activeStore?.name ?? activeOrg?.name ?? t('emptyCreate');
 
   const triggerButton = (
     <button
@@ -174,59 +160,40 @@ export function OrgStoreSwitcher({
       aria-label={triggerLabel}
       data-state={open ? 'open' : 'closed'}
       className={cn(
-        'group duration-fast flex items-center rounded-md border transition-all',
-        // Confident elevation: bg-card + visible border + shadow-sm.
-        // The trio reads as "primary dropdown trigger" — distinct from
-        // both nav rows (no card/shadow) and from popovers (md/lg shadow).
-        // Pairs with the separator below for IA-level zone framing.
-        'bg-card hover:bg-muted shadow-sm',
+        'group duration-fast flex cursor-pointer items-center rounded-md border transition-all',
+        // Confident elevation: bg-card + visible border + shadow-sm. Distinct
+        // from both nav rows and popovers. Pairs with the separator below for
+        // IA-level zone framing.
+        'bg-card border-border hover:bg-muted shadow-sm',
         // Drop the shadow on hover/open: the bg shift becomes the active
         // elevation signal, flat-hover feels engaged ("being clicked").
         'data-[state=open]:bg-muted hover:shadow-none data-[state=open]:shadow-none',
         'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
-        // chipBorder is `border-border` for fresh, warning/destructive for
-        // stale/failed — overrides the base `border` color via twMerge.
-        chipBorder,
         collapsed
           ? 'size-10 justify-center p-0 pointer-coarse:size-11'
           : 'gap-xs px-2xs py-xs w-full',
       )}
     >
-      <SwitcherAvatar
-        org={activeOrg}
-        activeStore={activeStore}
-        showMultiOrgIndicator={showMultiOrgIndicator}
-        multiOrgLabel={t('multiOrgIndicator', { count: otherOrgCount })}
-        multiOrgMoreLabel={t('multiOrgMore', { count: otherOrgCount })}
-      />
+      <SwitcherLeading org={activeOrg} activeStore={activeStore} collapsed={collapsed} />
       {!collapsed ? (
         <>
           <span className="gap-3xs flex min-w-0 flex-1 flex-col items-start overflow-hidden">
             <span className="text-foreground w-full truncate text-left text-sm leading-tight font-semibold">
-              {activeOrg?.name ?? t('emptyCreate')}
+              {primaryLabel}
             </span>
-            {activeStore ? (
-              <span className="text-muted-foreground gap-3xs text-2xs flex w-full items-center truncate text-left leading-tight">
-                <StatusDot tone={SYNC_TONE[activeStore.syncState]} animatePulse />
-                <span className="truncate">{activeStore.name}</span>
+            {activeStore && activeOrg ? (
+              <span className="text-muted-foreground text-2xs w-full truncate text-left leading-tight">
+                {activeOrg.name}
               </span>
             ) : null}
           </span>
           <span
             aria-hidden
             className={cn(
-              // Chevron pill: a small bg-muted square that visually frames
-              // the chevron as a dedicated "open dropdown" affordance.
-              // Linear/Vercel/Mercury-style — separates the "info display"
-              // (org + store) from the "click target" semantic on the right.
+              // Chevron pill: a small bg-muted square that frames the chevron as
+              // a dedicated "open" affordance, separating the info display from
+              // the click-target semantic on the right.
               'flex size-7 shrink-0 items-center justify-center rounded-sm',
-              // Pill bg stays muted at rest AND on hover. On hover the chip
-              // bg shifts to muted too, so the pill visually blends — leaving
-              // the chevron itself (now darkened) as the focal "click here"
-              // signal. Reverting to bg-card on hover (previous version)
-              // collided with the inner Trendyol avatar tile (also bg-card),
-              // creating two competing white tiles inside a muted chip.
-              // Open state surfaces primary tint as a clear "dropdown is open" cue.
               'bg-muted text-muted-foreground duration-fast transition-colors',
               'group-hover:text-foreground',
               'group-data-[state=open]:bg-primary-soft group-data-[state=open]:text-primary-soft-foreground',
@@ -239,12 +206,50 @@ export function OrgStoreSwitcher({
     </button>
   );
 
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      {collapsed ? (
+  const content = isEmpty ? (
+    <OrgStoreSwitcherEmpty />
+  ) : (
+    <OrgStoreSwitcherPanel
+      // Defensive remount if the active org changes externally while the shell
+      // is open — resets the panel's internal previewOrgId to the new active org.
+      key={activeOrgId ?? 'none'}
+      orgs={orgs}
+      activeOrgId={activeOrgId}
+      activeStoreId={activeStoreId}
+      activeOrgStores={stores}
+      layout={isMobile ? 'stacked' : 'panes'}
+      onSelectOrg={onSelectOrg}
+      onSelectStore={onSelectStore}
+      onSelectScope={onSelectScope}
+      onAddStore={onAddStore}
+      usePreviewStores={usePreviewStores}
+      onRequestClose={() => setOpen(false)}
+    />
+  );
+
+  // Mobile: a bottom drawer, regardless of the rail's collapsed state.
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={setOpen}>
+        <DrawerTrigger asChild>{triggerButton}</DrawerTrigger>
+        <DrawerContent aria-describedby={undefined}>
+          <DrawerTitle className="text-foreground px-md py-sm text-sm font-semibold">
+            {t('dialogTitle')}
+          </DrawerTitle>
+          {content}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  // Collapsed rail: a Dialog (a popover has nowhere comfortable to anchor off a
+  // 40px tile), with the trigger's tooltip carrying the label + ⌘O hint.
+  if (collapsed) {
+    return (
+      <Dialog open={open} onOpenChange={setOpen}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+            <DialogTrigger asChild>{triggerButton}</DialogTrigger>
           </TooltipTrigger>
           <TooltipContent side="right" sideOffset={8} className="gap-2xs flex flex-col">
             <span className="text-2xs font-medium">{triggerLabel}</span>
@@ -254,90 +259,57 @@ export function OrgStoreSwitcher({
             </KbdGroup>
           </TooltipContent>
         </Tooltip>
-      ) : (
-        <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
-      )}
+        <DialogContent
+          aria-describedby={undefined}
+          className="max-w-modal gap-0 overflow-hidden p-0"
+        >
+          <DialogTitle className="border-border px-md py-sm border-b text-sm font-semibold">
+            {t('dialogTitle')}
+          </DialogTitle>
+          {content}
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  // Expanded desktop rail: a popover anchored to the chip.
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
       <PopoverContent
         align="start"
-        side={collapsed ? 'right' : 'bottom'}
-        // overflow-hidden caps the panel at w-dropdown-popover so footer
-        // buttons can't push the width beyond the sidebar — flex children
-        // with min-width:auto would otherwise expand the popover to fit
-        // their content. Pairs with icon-only secondary footer buttons.
-        // max-w opt-in: this is the one sidebar popover wider (384px) than a
-        // narrow phone, and it can open inside the mobile drawer — cap it to the
-        // viewport gap so it never overflows horizontally. (Width only, so the
-        // management footer below the scroll list is never clipped.)
-        className="w-dropdown-popover max-w-[var(--radix-popover-content-available-width)] overflow-hidden p-0"
+        side="bottom"
+        // overflow-hidden caps the panel at w-switcher-panel so footer/grid
+        // children can't push the width past the sidebar; the max-w opt-in caps
+        // it to the viewport gap so it never overflows on a narrow screen.
+        className="w-switcher-panel max-w-[var(--radix-popover-content-available-width)] overflow-hidden p-0"
       >
-        {isEmpty ? (
-          <OrgStoreSwitcherEmpty />
-        ) : (
-          <OrgStoreSwitcherList
-            orgs={orgs}
-            stores={stores}
-            activeOrgId={activeOrgId}
-            activeStoreId={activeStoreId}
-            onSelectOrg={(id) => {
-              onSelectOrg(id);
-              setOpen(false);
-            }}
-            onSelectStore={(id) => {
-              onSelectStore(id);
-              setOpen(false);
-            }}
-            onAddStore={
-              onAddStore
-                ? () => {
-                    setOpen(false);
-                    onAddStore();
-                  }
-                : undefined
-            }
-          />
-        )}
+        {content}
       </PopoverContent>
     </Popover>
   );
 }
 
-interface SwitcherAvatarProps {
+interface SwitcherLeadingProps {
   org: Organization | null;
   activeStore: Store | null;
-  showMultiOrgIndicator: boolean;
-  /** Visible "+N" text on the corner indicator. */
-  multiOrgLabel: string;
-  /** Localized accessible name for the corner indicator ("N more organizations"). */
-  multiOrgMoreLabel: string;
+  collapsed: boolean;
 }
 
 /**
- * 40px avatar that swaps identity based on what the user has selected:
+ * 40px leading visual that swaps identity by what the user has selected:
  *
- *   1. Active store present → marketplace brand wordmark on a card
- *      surface, contained by `overflow-hidden` so the wide-aspect SVG
- *      crops cleanly inside a 40×40 square. The wordmark itself is
- *      `size="md"` (28px tall) — large enough to read the brand at a
- *      glance both in expanded chip and collapsed-rail contexts.
- *   2. Active org without an active store → org initial on a palette-
- *      tinted tile (deterministic per-org color from `getOrgAvatarPalette`).
- *   3. No org at all → `+` placeholder on muted bg.
- *
- * No corner overlays. Sync state and platform-as-text are conveyed by
- * the chip's secondary text row and the dropdown panel — the avatar
- * carries exactly one signal.
- *
- * Multi-org indicator (collapsed-mode only) is the one exception: a
- * tiny "+N" tile clipped to the bottom-left, which only renders in the
- * icon-only sidebar where the org-count cue would otherwise be lost.
+ *   1. Active store → marketplace brand wordmark on a card surface, clipped by
+ *      `overflow-hidden` so the wide SVG crops cleanly. In collapsed mode a
+ *      corner org-initial chip is added (the org name has no text line there).
+ *   2. Active org without a store → org initial on a palette-tinted tile.
+ *   3. No org at all → a `+` placeholder on a muted tile.
  */
-function SwitcherAvatar({
+function SwitcherLeading({
   org,
   activeStore,
-  showMultiOrgIndicator,
-  multiOrgLabel,
-  multiOrgMoreLabel,
-}: SwitcherAvatarProps): React.ReactElement {
+  collapsed,
+}: SwitcherLeadingProps): React.ReactElement {
   if (org === null) {
     return (
       <span
@@ -358,49 +330,29 @@ function SwitcherAvatar({
         >
           <MarketplaceLogo platform={activeStore.platform} size="md" alt="" />
         </span>
-        {showMultiOrgIndicator ? (
-          <MultiOrgPlus label={multiOrgLabel} ariaLabel={multiOrgMoreLabel} />
+        {collapsed ? (
+          <CountBadge
+            tone="primary"
+            aria-label={org.name}
+            className="ring-card -bottom-3xs -left-3xs px-3xs absolute h-4 min-w-4 rounded-sm ring-2"
+          >
+            {org.name.charAt(0).toLocaleUpperCase('tr')}
+          </CountBadge>
         ) : null}
       </span>
     );
   }
 
   const palette = getOrgAvatarPalette(org.id);
-  const initial = org.name.charAt(0).toUpperCase();
+  const initial = org.name.charAt(0).toLocaleUpperCase('tr');
 
   return (
-    <span className="relative shrink-0">
+    <span className="shrink-0">
       <Avatar size="md" className={cn('rounded-md', PALETTE_BG[palette])}>
         <AvatarFallback className={cn('rounded-md text-sm', PALETTE_BG[palette])}>
           {initial}
         </AvatarFallback>
       </Avatar>
-      {showMultiOrgIndicator ? (
-        <MultiOrgPlus label={multiOrgLabel} ariaLabel={multiOrgMoreLabel} />
-      ) : null}
     </span>
-  );
-}
-
-/**
- * Corner "+N other orgs" indicator on the collapsed-rail avatar — the canonical
- * CountBadge primitive, ringed against the avatar so it reads as attached, with
- * a localized accessible name (the visible "+N" alone is not a good SR label).
- */
-function MultiOrgPlus({
-  label,
-  ariaLabel,
-}: {
-  label: string;
-  ariaLabel: string;
-}): React.ReactElement {
-  return (
-    <CountBadge
-      tone="primary"
-      aria-label={ariaLabel}
-      className="ring-card -bottom-3xs -left-3xs px-3xs absolute h-4 min-w-4 rounded-sm ring-2"
-    >
-      {label}
-    </CountBadge>
   );
 }
