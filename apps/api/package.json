@@ -33,11 +33,11 @@
     "@pazarsync/sync-core": "workspace:*",
     "@pazarsync/utils": "workspace:*",
     "@pazarsync/webhook-ingest": "workspace:*",
-    "@scalar/hono-api-reference": "^0.10.14",
+    "@scalar/hono-api-reference": "^0.11.9",
     "@supabase/supabase-js": "catalog:",
     "decimal.js": "catalog:",
     "fflate": "^0.8.3",
-    "hono": "^4.12.25",
+    "hono": "^4.12.30",
     "zod": "catalog:"
   },
   "devDependencies": {
