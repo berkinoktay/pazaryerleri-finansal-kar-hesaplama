@@ -304,6 +304,38 @@ describe('mapTrendyolContent', () => {
     const out = mapTrendyolContent(stripped);
     expect(out.variants).toEqual([]);
   });
+
+  it('maps variant commission to syncedCommissionRate as a 2-decimal string', () => {
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const out = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, commission: 7.83 }],
+    });
+    expect(out.variants[0]?.syncedCommissionRate).toBe('7.83');
+  });
+
+  it('collapses absent and zero commission to null', () => {
+    // Unlike desi there is no zero-floor: a real %0 commission does not exist
+    // on the wire, so both an omitted value and a literal 0 mean "unknown".
+    const variant = STAGING_SAMPLE_DFSF.variants?.[0];
+    if (variant === undefined) throw new Error('fixture variant missing');
+    const { commission: _droppedCommission, ...variantWithoutCommission } = {
+      ...variant,
+      commission: 0,
+    };
+    void _droppedCommission;
+    const outZero = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, commission: 0 }],
+    });
+    const outAbsent = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [variantWithoutCommission],
+    });
+    expect(outZero.variants[0]?.syncedCommissionRate).toBeNull();
+    expect(outAbsent.variants[0]?.syncedCommissionRate).toBeNull();
+  });
 });
 
 describe('mapTrendyolApprovedResponse', () => {

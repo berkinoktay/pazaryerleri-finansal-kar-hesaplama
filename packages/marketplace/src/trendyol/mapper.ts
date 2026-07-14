@@ -112,6 +112,7 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     // desi-0 ürün de gerçek (en alt kademe) kargo ücretini alır. Negatif zaten
     // imkânsız. `nullableDecimalString` 0/absent → null, `?? '0'` tabana indirir.
     syncedDimensionalWeight: nullableDecimalString(variant.dimensionalWeight) ?? '0',
+    syncedCommissionRate: nullableDecimalString(variant.commission),
   };
 }
 
