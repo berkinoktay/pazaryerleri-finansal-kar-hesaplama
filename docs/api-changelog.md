@@ -59,10 +59,23 @@ section "Versioning" for details.
     discount configuration (type + per-type parameters), item count, included count and
     the exported flag. Money fields are GROSS decimal strings, dates ISO.
   - `GET .../discount-lists/{listId}` returns the list with a summary card and every item
-    carrying a `current` and a `discounted` price scenario. Profit is computed on read and
-    never stored. (In this slice the scenarios are fixed placeholders — `calculable:false`,
-    `reason:"NO_COST"`, profit fields `null`, discounted price equal to current — pending
-    the real per-item compute.)
+    carrying a `current` and a `discounted` price scenario, both computed on read and never
+    stored. Each scenario's reduced commission comes from a THREE-TIER chain resolved on
+    that scenario's OWN price: (1) the store's latest commission-tariff band covering the
+    price, else (2) the variant's synced commission, else (3) the category rate — so an
+    item's discounted price can land in a different band than its current price. When
+    nothing in the chain resolves the item is `calculable:false` with `reason:"NO_COMMISSION"`
+    (`NO_PRODUCT` / `NO_COST` / `NO_SHIPPING` cover the other gaps). The summary card reports
+    `perOrderCost` (Σ current − discounted over included items), `maxTotalCost`
+    (`perOrderCost × orderLimit`, or `null`) and `avgProfitDelta` (mean discounted − current
+    net profit over the included, calculable items). Money fields are GROSS decimal strings.
+  - `POST .../discount-lists/{listId}/items/{itemId}/estimate` returns the full profit
+    breakdown (income + commission / shipping / PSF / stoppage / VAT) for ONE item under the
+    `{ "scenario": "current" | "discounted" }` body, reusing the same chain + engine the
+    detail uses — so the breakdown modal never disagrees with the detail row. Read-only
+    (POST only because it carries a body). `DATA_READ` capability. `calculable:false` with a
+    `reason` and a `null` breakdown when the item is unmatched, uncostable or has no
+    resolvable commission; an unknown `scenario` is a **422** `VALIDATION_ERROR`.
   - `PATCH .../discount-lists/{listId}` full-replaces the discount configuration (the name
     changes only when provided); the same validator that gates the import gates this body,
     so an invalid combination is a **422** `VALIDATION_ERROR`. Returns `{ id }`.

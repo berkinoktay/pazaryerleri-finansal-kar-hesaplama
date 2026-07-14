@@ -1,7 +1,12 @@
 import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { effectiveUnitPrice, type DiscountConfig } from '@/services/discount-compute.service';
+import {
+  effectiveUnitPrice,
+  resolveDiscountCommission,
+  type DiscountConfig,
+} from '@/services/discount-compute.service';
+import type { StoredBand } from '@/services/commission-tariff.types';
 
 const d = (v: string | number): Decimal => new Decimal(v);
 const price = (config: DiscountConfig, p: string | number): string =>
@@ -101,5 +106,40 @@ describe('effectiveUnitPrice', () => {
         0,
       ),
     ).toBe('0');
+  });
+});
+
+describe('resolveDiscountCommission', () => {
+  const BANDS: StoredBand[] = [
+    { key: 'band1', lowerLimit: '200', upperLimit: null, commissionPct: '15' },
+    { key: 'band2', lowerLimit: null, upperLimit: '200', commissionPct: '18' },
+  ];
+  it('prefers the tariff band containing the price', () => {
+    const out = resolveDiscountCommission(
+      { bands: BANDS, productRate: new Decimal('21.5'), categoryRate: new Decimal('19') },
+      new Decimal('250'),
+    );
+    expect(out).toEqual({ pct: new Decimal('15'), source: 'band' });
+  });
+  it('falls back to the synced product rate when no band matches', () => {
+    const out = resolveDiscountCommission(
+      { bands: null, productRate: new Decimal('21.5'), categoryRate: new Decimal('19') },
+      new Decimal('250'),
+    );
+    expect(out).toEqual({ pct: new Decimal('21.5'), source: 'product' });
+  });
+  it('falls back to the category rate last, and to null when nothing resolves', () => {
+    expect(
+      resolveDiscountCommission(
+        { bands: null, productRate: null, categoryRate: new Decimal('19') },
+        new Decimal('250'),
+      ),
+    ).toEqual({ pct: new Decimal('19'), source: 'category' });
+    expect(
+      resolveDiscountCommission(
+        { bands: null, productRate: null, categoryRate: null },
+        new Decimal('250'),
+      ),
+    ).toBeNull();
   });
 });

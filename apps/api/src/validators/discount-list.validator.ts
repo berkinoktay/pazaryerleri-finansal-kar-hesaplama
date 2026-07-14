@@ -11,9 +11,11 @@
 import { z } from '@hono/zod-openapi';
 import { Decimal } from 'decimal.js';
 
+import type { Prisma } from '@pazarsync/db';
 import { DiscountType, DiscountValueKind } from '@pazarsync/db/enums';
 
 import type { DiscountConfig } from '../services/discount-compute.service';
+import { QuoteBreakdownSchema } from './product-pricing.validator';
 
 // ─── Shared enums ───────────────────────────────────────────────────────────
 
@@ -205,6 +207,38 @@ function nonFixedKind(f: z.infer<typeof DiscountConfigFieldsSchema>): 'AMOUNT' |
   return f.valueKind === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
 }
 
+/** Kaydedilmiş DiscountList satırının compute'e ilgili konfigürasyon alanları. */
+export interface DiscountListConfigRow {
+  discountType: DiscountType;
+  valueKind: DiscountValueKind | null;
+  value: Prisma.Decimal | null;
+  minBasketAmount: Prisma.Decimal | null;
+  minQuantity: number | null;
+  buyQuantity: number | null;
+  payQuantity: number | null;
+  nthIndex: number | null;
+}
+
+/**
+ * İkinci köprü: kaydedilmiş DiscountList satırından (Prisma) compute'ün DiscountConfig'ini
+ * kurar. `discountConfigFromFields` ile TEK gerçeği paylaşır — satırın Decimal/Int
+ * alanlarını string alanlara indirip aynı switch'ten geçirir (kopya switch yok). Satır
+ * yazılırken (import/PATCH) `refineDiscountConfig`'ten geçtiği için burada yeniden
+ * doğrulama gerekmez.
+ */
+export function discountConfigFromListRow(list: DiscountListConfigRow): DiscountConfig {
+  return discountConfigFromFields({
+    discountType: list.discountType,
+    valueKind: list.valueKind ?? undefined,
+    value: list.value !== null ? list.value.toString() : undefined,
+    minBasketAmount: list.minBasketAmount !== null ? list.minBasketAmount.toString() : undefined,
+    minQuantity: list.minQuantity !== null ? list.minQuantity.toString() : undefined,
+    buyQuantity: list.buyQuantity !== null ? list.buyQuantity.toString() : undefined,
+    payQuantity: list.payQuantity !== null ? list.payQuantity.toString() : undefined,
+    nthIndex: list.nthIndex !== null ? list.nthIndex.toString() : undefined,
+  });
+}
+
 // ─── List / detail response DTO (Görev 8) ────────────────────────────────────
 
 // discountType..endsAt config alanları HEM liste HEM detay yanıtında birebir aynı —
@@ -341,6 +375,37 @@ export const UpdateDiscountListBodySchema = DiscountConfigFieldsSchema.extend({
 export const UpdateDiscountListResponseSchema = z
   .object({ id: z.string().uuid() })
   .openapi('UpdateDiscountListResponse');
+
+// ─── Estimate (on-demand breakdown for a discount item) ──────────────────────
+//
+// The breakdown modal picks ONE of the two scenarios the detail row shows: `current`
+// (the current price at its resolved commission) or `discounted` (effectiveUnitPrice at
+// the commission RE-resolved on the discounted price). The service runs the SAME chain +
+// engine the detail uses, so the modal never disagrees with the row.
+
+export const EstimateDiscountItemBodySchema = z
+  .object({
+    scenario: z.enum(['current', 'discounted']).openapi({
+      description: 'Hangi senaryonun dökümü: current (cari fiyat) / discounted (indirimli fiyat).',
+    }),
+  })
+  .openapi('EstimateDiscountItemBody');
+
+export const EstimateDiscountItemResultSchema = z
+  .object({
+    itemId: z.string().uuid(),
+    scenario: z.enum(['current', 'discounted']),
+    price: z.string(),
+    commissionPct: z.string().nullable(),
+    commissionSource: DiscountCommissionSourceSchema.nullable(),
+    calculable: z.boolean(),
+    reason: DiscountItemReasonSchema.nullable(),
+    breakdown: QuoteBreakdownSchema.nullable(),
+  })
+  .openapi('EstimateDiscountItemResult');
+
+export type EstimateDiscountItemBody = z.infer<typeof EstimateDiscountItemBodySchema>;
+export type EstimateDiscountItemResult = z.infer<typeof EstimateDiscountItemResultSchema>;
 
 // ─── Inferred TS types (consumed by the service + route layers) ──────────────
 

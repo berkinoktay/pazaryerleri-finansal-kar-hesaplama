@@ -15,17 +15,33 @@
 // Every query is scoped by organizationId + storeId (tenant isolation). Money is
 // serialized to GROSS decimal strings; the frontend renders, never computes.
 
+import { Decimal } from 'decimal.js';
+
 import { Prisma, prisma } from '@pazarsync/db';
 import type { Store as PrismaStore } from '@pazarsync/db';
 import { mapPrismaError } from '@pazarsync/sync-core';
+import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import type {
-  DiscountListDetail,
-  DiscountListDetailItem,
-  DiscountListListItem,
-  DiscountSelection,
-  UpdateDiscountListBody,
+import { resolveCommissionSource } from './advantage-tariff.service';
+import { resolveCommissionRate } from './commission-rate-resolver';
+import {
+  computeDiscountItem,
+  type DiscountCommissionInputs,
+  type TariffAssemblyContext,
+  type TariffVariant,
+} from './discount-compute.service';
+import { fetchCostAggregates } from './products-list.service';
+import { batchResolveShipping, resolveFeeDefs } from './product-pricing.service';
+import { NO_SHIPPING } from './tariff-compute-commons';
+import type { VariantCostAggregate } from '../validators/product.validator';
+import {
+  discountConfigFromListRow,
+  type DiscountListDetail,
+  type DiscountListDetailItem,
+  type DiscountListListItem,
+  type DiscountSelection,
+  type UpdateDiscountListBody,
 } from '../validators/discount-list.validator';
 
 /** String config alanını DiscountList Int kolonuna indirir (yoksa null). */
@@ -97,11 +113,31 @@ export async function listDiscountLists(
 
 // ─── Detail ─────────────────────────────────────────────────────────────────
 
+/** The variant columns the detail compute reads — TariffVariant + its synced rate + image. */
+interface DiscountVariantRow {
+  id: string;
+  stockCode: string;
+  barcode: string;
+  salePrice: Prisma.Decimal;
+  vatRate: number | null;
+  isDigital: boolean;
+  syncedCommissionRate: Prisma.Decimal | null;
+  product: {
+    title: string;
+    categoryId: bigint | null;
+    brandId: bigint | null;
+    images: { url: string }[];
+  };
+}
+
 /**
- * Returns one discount list with its items. Throws `NotFoundError` when it does not
- * belong to this store. Batch-loads the matched variant's primary image by
- * `productVariantId`. The per-scenario profit is a FIXED placeholder in Görev 8 — see
- * the `Task 9 replaces:` markers below.
+ * Returns one discount list with its items, each carrying the current + discounted price
+ * SCENARIOS computed on read. Throws `NotFoundError` when it does not belong to this
+ * store. Resolves the store's latest commission tariff bands, batch-loads the matched
+ * variants + their synced commission + cost + shipping + a category-rate fallback, then
+ * runs the three-tier commission chain per item. The summary card (per-order discount
+ * cost, max total cost, average profit delta) is aggregated over the included items —
+ * all money math is Decimal, serialized at the DTO edge (the frontend never computes).
  */
 export async function getDiscountListDetail(
   orgId: string,
@@ -154,12 +190,18 @@ export async function getDiscountListDetail(
     throw new NotFoundError('DiscountList', listId);
   }
 
-  // ─── Batch-resolve the matched variant's primary image once ────────────────
+  const config = discountConfigFromListRow(list);
+
+  // ─── Batch-resolve matched variants + cost + shipping + image once ─────────
   const variantIds = list.items
     .map((i) => i.productVariantId)
     .filter((id): id is string => id !== null);
 
+  const variantMap = new Map<string, DiscountVariantRow>();
   const imageMap = new Map<string, string | null>();
+  let costMap = new Map<string, VariantCostAggregate>();
+  let shippingMap = new Map<string, EstimateOutcome>();
+
   if (variantIds.length > 0) {
     let variants;
     try {
@@ -167,8 +209,19 @@ export async function getDiscountListDetail(
         where: { id: { in: variantIds }, organizationId: orgId, storeId },
         select: {
           id: true,
+          stockCode: true,
+          barcode: true,
+          salePrice: true,
+          vatRate: true,
+          isDigital: true,
+          syncedCommissionRate: true,
           product: {
-            select: { images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 } },
+            select: {
+              title: true,
+              categoryId: true,
+              brandId: true,
+              images: { select: { url: true }, orderBy: { position: 'asc' }, take: 1 },
+            },
           },
         },
       });
@@ -176,24 +229,92 @@ export async function getDiscountListDetail(
       mapPrismaError(err);
     }
     for (const variant of variants) {
+      variantMap.set(variant.id, variant);
       imageMap.set(variant.id, variant.product.images[0]?.url ?? null);
     }
+
+    [costMap, shippingMap] = await Promise.all([
+      fetchCostAggregates(orgId, variantIds),
+      batchResolveShipping(orgId, storeId, variantIds),
+    ]);
   }
+
+  // ─── Resolve the store's LATEST commission tariff bands (1st tier) ─────────
+  let latestTariff;
+  try {
+    latestTariff = await prisma.commissionTariff.findFirst({
+      where: { organizationId: orgId, storeId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+  } catch (err) {
+    mapPrismaError(err);
+  }
+  const source =
+    latestTariff !== null
+      ? await resolveCommissionSource(orgId, storeId, latestTariff.id, new Date())
+      : null;
+
+  // ─── Category-rate fallback cache (3rd tier) — once per distinct (cat, brand) ──
+  const categoryRateByKey = new Map<string, Decimal | null>();
+  const distinctCatKeys = new Map<string, { categoryId: bigint; brandId: bigint | null }>();
+  for (const variant of variantMap.values()) {
+    const { categoryId, brandId } = variant.product;
+    if (categoryId === null) continue;
+    distinctCatKeys.set(`${categoryId}:${brandId ?? 'null'}`, { categoryId, brandId });
+  }
+  await Promise.all(
+    [...distinctCatKeys].map(async ([key, { categoryId, brandId }]) => {
+      const resolved = await resolveCommissionRate({
+        platform: store.platform,
+        categoryId,
+        brandId,
+        sellerSegment: null,
+      });
+      categoryRateByKey.set(key, resolved?.rate ?? null);
+    }),
+  );
+
+  const feeDefs = await prisma.$transaction((tx) => resolveFeeDefs(tx, store.platform));
+  const ctx: TariffAssemblyContext = { platform: store.platform, feeDefs };
 
   let selectedCount = 0;
   const items = list.items.map((item): DiscountListDetailItem => {
     if (item.included) selectedCount += 1;
-    const price = item.currentPrice.toFixed(2);
-    // Task 9 replaces: the current/discounted scenarios are fixed placeholders here —
-    // both prices equal the current price and every profit field is null until the real
-    // per-item compute (computeDiscountItems) lands. Görev 9 swaps this whole block.
-    const scenario = {
-      price,
-      commissionPct: null,
-      commissionSource: null,
-      netProfit: null,
-      marginPct: null,
-    };
+
+    const variantRow =
+      item.productVariantId !== null ? variantMap.get(item.productVariantId) : undefined;
+    const variant: TariffVariant | null = variantRow ?? null;
+    const cost = item.productVariantId !== null ? costMap.get(item.productVariantId) : undefined;
+    const shipping =
+      item.productVariantId !== null
+        ? (shippingMap.get(item.productVariantId) ?? NO_SHIPPING)
+        : NO_SHIPPING;
+
+    // Three-tier chain inputs: tariff bands (by barcode) → synced product rate → category.
+    const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
+    const productRate =
+      variantRow !== undefined && variantRow.syncedCommissionRate !== null
+        ? new Decimal(variantRow.syncedCommissionRate.toString())
+        : null;
+    const categoryRate =
+      variantRow !== undefined && variantRow.product.categoryId !== null
+        ? (categoryRateByKey.get(
+            `${variantRow.product.categoryId}:${variantRow.product.brandId ?? 'null'}`,
+          ) ?? null)
+        : null;
+
+    const commission: DiscountCommissionInputs = { bands, productRate, categoryRate };
+    const computed = computeDiscountItem(
+      ctx,
+      variant,
+      cost,
+      shipping,
+      commission,
+      new Decimal(item.currentPrice.toString()),
+      config,
+    );
+
     return {
       id: item.id,
       barcode: item.barcode,
@@ -206,12 +327,32 @@ export async function getDiscountListDetail(
         item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
       buyboxStatus: item.buyboxStatus,
       included: item.included,
-      calculable: false,
-      reason: 'NO_COST',
-      current: scenario,
-      discounted: scenario,
+      calculable: computed.calculable,
+      reason: computed.reason,
+      current: serializeScenario(computed.current),
+      discounted: serializeScenario(computed.discounted),
     };
   });
+
+  // ─── Summary card — aggregated over the INCLUDED items (Decimal math) ──────
+  const included = items.filter((i) => i.included);
+  let perOrderCost = new Decimal(0);
+  const deltas: Decimal[] = [];
+  for (const i of included) {
+    perOrderCost = perOrderCost.add(
+      new Decimal(i.current.price).sub(new Decimal(i.discounted.price)),
+    );
+    if (i.calculable && i.current.netProfit !== null && i.discounted.netProfit !== null) {
+      deltas.push(new Decimal(i.discounted.netProfit).sub(new Decimal(i.current.netProfit)));
+    }
+  }
+  const avgProfitDelta =
+    deltas.length > 0
+      ? deltas
+          .reduce((acc, d) => acc.add(d), new Decimal(0))
+          .div(deltas.length)
+          .toFixed(2)
+      : null;
 
   return {
     id: list.id,
@@ -228,16 +369,27 @@ export async function getDiscountListDetail(
     startsAt: list.startsAt !== null ? list.startsAt.toISOString() : null,
     endsAt: list.endsAt !== null ? list.endsAt.toISOString() : null,
     exported: list.exportedAt !== null,
-    // Task 9 replaces: perOrderCost / maxTotalCost / avgProfitDelta are fixed placeholders
-    // until the real cost aggregation lands. itemCount + selectedCount are real already.
     summary: {
       itemCount: list.items.length,
       selectedCount,
-      perOrderCost: '0.00',
-      maxTotalCost: null,
-      avgProfitDelta: null,
+      perOrderCost: perOrderCost.toFixed(2),
+      maxTotalCost: list.orderLimit !== null ? perOrderCost.mul(list.orderLimit).toFixed(2) : null,
+      avgProfitDelta,
     },
     items,
+  };
+}
+
+/** Serializes a computed scenario (Decimal price) to the wire scenario (money 2dp). */
+function serializeScenario(
+  s: ReturnType<typeof computeDiscountItem>['current'],
+): DiscountListDetailItem['current'] {
+  return {
+    price: s.price.toFixed(2),
+    commissionPct: s.commissionPct,
+    commissionSource: s.commissionSource,
+    netProfit: s.netProfit,
+    marginPct: s.marginPct,
   };
 }
 

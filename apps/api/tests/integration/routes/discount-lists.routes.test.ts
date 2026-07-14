@@ -1,11 +1,13 @@
 // Happy-path integration tests for the saved discount list endpoints
 // (list / detail / config PATCH / delete).
 //
-// Görev 8 ships the detail with FIXED placeholder scenarios (calculable:false,
-// reason:'NO_COST', profit fields null; discounted price == current price) — Görev 9
-// swaps that block for the real per-item compute. These tests lock the intermediate
-// contract: the config round-trips, the placeholder scenario shape is stable, the
-// config validator gates the PATCH, and delete cascades the list away.
+// The detail computes each item's current + discounted scenarios on read (Görev 9). The
+// seeded matched variant has no cost profile, no commission tariff, no synced commission
+// and no category rate, so its three-tier chain resolves NOTHING — the item is not
+// calculable with reason NO_COMMISSION (checked before cost). The discounted price still
+// reflects the config (NET -15% ⇒ 250 → 212.50) and the summary aggregates the included
+// items' per-order discount cost. These tests lock the config round-trip, the real
+// scenario shape, the PATCH validator gate, and the delete cascade.
 
 import { Decimal } from 'decimal.js';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -17,6 +19,7 @@ import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import { createMembership, createOrganization, createStore } from '../../helpers/factories';
+import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
 
@@ -167,6 +170,10 @@ async function setupFixture(): Promise<Fixture> {
     },
   });
 
+  // The detail computes profit on read, which resolves the loop-invariant fee
+  // definitions — seed them so the compute path does not 500 on a missing STOPPAGE/PSF.
+  await ensureFeeDefinitions();
+
   return {
     accessToken: user.accessToken,
     orgId: org.id,
@@ -213,7 +220,7 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(row?.exported).toBe(false);
   });
 
-  it('returns the detail with config, summary and the fixed placeholder scenarios', async () => {
+  it('returns the detail with config, summary and the computed current + discounted scenarios', async () => {
     const res = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
       { headers: { Authorization: bearer(fx.accessToken) } },
@@ -226,8 +233,11 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.value).toBe('15.00');
     expect(body.summary.itemCount).toBe(2);
     expect(body.summary.selectedCount).toBe(1);
-    expect(body.summary.perOrderCost).toBe('0.00');
+    // Only the matched item is included: 250.00 − 212.50 (NET -15%) = 37.50.
+    expect(body.summary.perOrderCost).toBe('37.50');
+    // No orderLimit on the list → no max-total ceiling.
     expect(body.summary.maxTotalCost).toBeNull();
+    // No included+calculable item → no average profit delta.
     expect(body.summary.avgProfitDelta).toBeNull();
 
     // Items come back in sortOrder.
@@ -236,11 +246,13 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     const matched = body.items.find((i) => i.id === fx.itemMatched);
     expect(matched?.imageUrl).toBe(IMAGE_URL);
     expect(matched?.included).toBe(true);
+    // No commission anywhere (no tariff / synced rate / category rate) → NO_COMMISSION,
+    // resolved before the cost gate; profit fields stay null.
     expect(matched?.calculable).toBe(false);
-    expect(matched?.reason).toBe('NO_COST');
-    // Placeholder scenario: discounted price == current price, profit fields null.
+    expect(matched?.reason).toBe('NO_COMMISSION');
+    // The discounted price reflects the config even when the item is not calculable.
     expect(matched?.current.price).toBe('250.00');
-    expect(matched?.discounted.price).toBe('250.00');
+    expect(matched?.discounted.price).toBe('212.50');
     expect(matched?.current.commissionPct).toBeNull();
     expect(matched?.current.commissionSource).toBeNull();
     expect(matched?.current.netProfit).toBeNull();

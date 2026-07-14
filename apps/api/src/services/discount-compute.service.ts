@@ -6,6 +6,28 @@
 
 import { Decimal } from 'decimal.js';
 
+import { computeUnitProfit, type EstimateOutcome, type ProfitBreakdown } from '@pazarsync/profit';
+
+import { bandForPrice } from './commission-tariff-compute.service';
+import type { StoredBand } from './commission-tariff.types';
+import {
+  assembleUnitEconomics,
+  serializeBreakdown,
+  type QuoteBreakdown,
+} from './product-pricing.service';
+import {
+  deriveReason,
+  tariffCommission,
+  type TariffAssemblyContext,
+  type TariffItemReason,
+  type TariffVariant,
+} from './tariff-compute-commons';
+import type { VariantCostAggregate } from '../validators/product.validator';
+
+// Re-exported so the detail + estimate services import the assembly context/variant
+// shapes from one place, alongside the discount-specific chain types below.
+export type { TariffAssemblyContext, TariffVariant };
+
 export type DiscountConfig =
   | { readonly type: 'NET'; readonly valueKind: 'AMOUNT' | 'PERCENT'; readonly value: Decimal }
   | {
@@ -97,4 +119,182 @@ export function effectiveUnitPrice(price: Decimal, config: DiscountConfig): Deci
       throw new Error(`Unhandled discount config: ${JSON.stringify(_exhaustive)}`);
     }
   }
+}
+
+// ─── Three-tier commission chain ─────────────────────────────────────────────
+
+/** Üç kademeli zincirin girdileri — kalem başına bir kez kurulur. */
+export interface DiscountCommissionInputs {
+  readonly bands: ReadonlyArray<StoredBand> | null; // 1. kademe: tarife bandı
+  readonly productRate: Decimal | null; // 2. kademe: syncedCommissionRate
+  readonly categoryRate: Decimal | null; // 3. kademe: kategori oranı
+}
+export type DiscountCommissionSource = 'band' | 'product' | 'category';
+export interface ResolvedDiscountCommission {
+  readonly pct: Decimal;
+  readonly source: DiscountCommissionSource;
+}
+
+/**
+ * Üç kademeli komisyon zinciri (Berkin kararı 2026-07-14): (1) fiyatı kapsayan
+ * komisyon tarifesi bandı, (2) ürünün senkronlanan komisyonu, (3) kategori oranı.
+ * Bant çözümü VERİLEN fiyattan yapılır — senaryo indirimliyse matrah indirim-sonrası
+ * tutardır, yani indirimli fiyat cari fiyattan FARKLI bir banda düşebilir (spec §5.2).
+ */
+export function resolveDiscountCommission(
+  inputs: DiscountCommissionInputs,
+  price: Decimal,
+): ResolvedDiscountCommission | null {
+  if (inputs.bands !== null && inputs.bands.length > 0) {
+    const band = bandForPrice(inputs.bands, price);
+    if (band !== null) return { pct: new Decimal(band.commissionPct), source: 'band' };
+  }
+  if (inputs.productRate !== null) return { pct: inputs.productRate, source: 'product' };
+  if (inputs.categoryRate !== null) return { pct: inputs.categoryRate, source: 'category' };
+  return null;
+}
+
+// ─── Per-scenario profit compute ─────────────────────────────────────────────
+
+export type DiscountItemReason = TariffItemReason | 'NO_COMMISSION';
+
+export interface ComputedDiscountScenario {
+  readonly price: Decimal;
+  readonly commissionPct: string | null; // toFixed(4)
+  readonly commissionSource: DiscountCommissionSource | null;
+  readonly netProfit: string | null; // toFixed(2)
+  readonly marginPct: string | null; // toFixed(2)
+}
+
+export interface ComputedDiscountItem {
+  readonly calculable: boolean;
+  readonly reason: DiscountItemReason | null;
+  readonly current: ComputedDiscountScenario;
+  readonly discounted: ComputedDiscountScenario;
+}
+
+/** One scenario's resolution: the commission chain result + the assembled breakdown. */
+interface ScenarioCompute {
+  readonly resolved: ResolvedDiscountCommission | null;
+  readonly calculable: boolean;
+  readonly reason: DiscountItemReason | null;
+  readonly breakdown: ProfitBreakdown | null;
+}
+
+/**
+ * Resolves the commission AT `price` (the band lookup uses this exact price — the
+ * load-bearing subtlety: an item's discounted price may land in a different band than
+ * its current price), then assembles the variant's econ and runs the engine. Reason
+ * order (spec §5.2): commission null → NO_COMMISSION, variant null → NO_PRODUCT, else
+ * the cost/shipping gate (deriveReason).
+ */
+function priceScenario(
+  ctx: TariffAssemblyContext,
+  variant: TariffVariant | null,
+  cost: VariantCostAggregate | undefined,
+  shipping: EstimateOutcome,
+  commission: DiscountCommissionInputs,
+  price: Decimal,
+): ScenarioCompute {
+  const resolved = resolveDiscountCommission(commission, price);
+  if (resolved === null) {
+    return { resolved: null, calculable: false, reason: 'NO_COMMISSION', breakdown: null };
+  }
+  if (variant === null) {
+    return { resolved, calculable: false, reason: 'NO_PRODUCT', breakdown: null };
+  }
+  const probe = assembleUnitEconomics(ctx, variant, {
+    costAggregate: cost,
+    commission: tariffCommission(resolved.pct),
+    shipping,
+  });
+  if (probe.econ === null) {
+    return {
+      resolved,
+      calculable: false,
+      reason: deriveReason(probe.costStatus === 'OK', probe.shippingStatus === 'OK'),
+      breakdown: null,
+    };
+  }
+  return {
+    resolved,
+    calculable: true,
+    reason: null,
+    breakdown: computeUnitProfit(probe.econ, price),
+  };
+}
+
+/** Serializes a scenario compute to the wire scenario (money 2dp, commission 4dp). */
+function toScenario(price: Decimal, c: ScenarioCompute): ComputedDiscountScenario {
+  return {
+    price,
+    commissionPct: c.resolved !== null ? c.resolved.pct.toFixed(4) : null,
+    commissionSource: c.resolved !== null ? c.resolved.source : null,
+    netProfit: c.breakdown !== null ? c.breakdown.netProfit.toFixed(2) : null,
+    marginPct:
+      c.breakdown !== null && c.breakdown.saleMarginPct !== null
+        ? c.breakdown.saleMarginPct.toFixed(2)
+        : null,
+  };
+}
+
+/**
+ * Computes one discount item's TWO scenarios: `current` at `currentPrice` with the
+ * chain resolved at that price, and `discounted` at effectiveUnitPrice(currentPrice,
+ * config) with the chain RE-resolved at the discounted price (a lower price can land in
+ * a lower band). The item's calculability + reason follow the `current` (baseline)
+ * scenario — the "do nothing" state the list row shows.
+ */
+export function computeDiscountItem(
+  ctx: TariffAssemblyContext,
+  variant: TariffVariant | null,
+  cost: VariantCostAggregate | undefined,
+  shipping: EstimateOutcome,
+  commission: DiscountCommissionInputs,
+  currentPrice: Decimal,
+  config: DiscountConfig,
+): ComputedDiscountItem {
+  const discountedPrice = effectiveUnitPrice(currentPrice, config);
+  const current = priceScenario(ctx, variant, cost, shipping, commission, currentPrice);
+  const discounted = priceScenario(ctx, variant, cost, shipping, commission, discountedPrice);
+  return {
+    calculable: current.calculable,
+    reason: current.reason,
+    current: toScenario(currentPrice, current),
+    discounted: toScenario(discountedPrice, discounted),
+  };
+}
+
+// ─── Single-scenario estimate (breakdown modal) ──────────────────────────────
+
+export interface ComputedDiscountEstimate {
+  readonly calculable: boolean;
+  readonly reason: DiscountItemReason | null;
+  readonly commissionPct: string | null;
+  readonly commissionSource: DiscountCommissionSource | null;
+  readonly breakdown: QuoteBreakdown | null;
+}
+
+/**
+ * Full profit breakdown for ONE discount item at `price` (already chosen by the caller:
+ * the current price, or effectiveUnitPrice for the discounted scenario). Resolves the
+ * commission chain at that exact price and serializes the breakdown — the same numbers
+ * the detail row's matching scenario shows, so the modal never disagrees with the row.
+ */
+export function computeDiscountEstimate(
+  ctx: TariffAssemblyContext,
+  variant: TariffVariant | null,
+  cost: VariantCostAggregate | undefined,
+  shipping: EstimateOutcome,
+  commission: DiscountCommissionInputs,
+  price: Decimal,
+): ComputedDiscountEstimate {
+  const c = priceScenario(ctx, variant, cost, shipping, commission, price);
+  return {
+    calculable: c.calculable,
+    reason: c.reason,
+    commissionPct: c.resolved !== null ? c.resolved.pct.toFixed(4) : null,
+    commissionSource: c.resolved !== null ? c.resolved.source : null,
+    breakdown: c.breakdown !== null ? serializeBreakdown(c.breakdown) : null,
+  };
 }
