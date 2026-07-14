@@ -52,6 +52,25 @@ section "Versioning" for details.
 
 ### Added
 
+- **Discount list read / write endpoints** (İndirimler — `GET`, `PATCH`, `DELETE`
+  under `/v1/organizations/{orgId}/stores/{storeId}/discount-lists`). Siblings of the
+  Flash Products surface, on top of the existing import upload:
+  - `GET .../discount-lists` returns `{ data: [...] }`, one row per saved list with its
+    discount configuration (type + per-type parameters), item count, included count and
+    the exported flag. Money fields are GROSS decimal strings, dates ISO.
+  - `GET .../discount-lists/{listId}` returns the list with a summary card and every item
+    carrying a `current` and a `discounted` price scenario. Profit is computed on read and
+    never stored. (In this slice the scenarios are fixed placeholders — `calculable:false`,
+    `reason:"NO_COST"`, profit fields `null`, discounted price equal to current — pending
+    the real per-item compute.)
+  - `PATCH .../discount-lists/{listId}` full-replaces the discount configuration (the name
+    changes only when provided); the same validator that gates the import gates this body,
+    so an invalid combination is a **422** `VALIDATION_ERROR`. Returns `{ id }`.
+  - `PATCH .../discount-lists/{listId}/selections` toggles item inclusion: `mode:"set"`
+    updates the given `{ itemId, included }` rows (a foreign itemId is silently skipped),
+    `mode:"all"` / `"none"` flip the whole list. An empty `"set"` payload is a **422**
+    `SELECTIONS_REQUIRED`. Returns `{ updated }`.
+  - `DELETE .../discount-lists/{listId}` hard-deletes the list (items cascade); **204**.
 - **Generic manual-sync trigger endpoint** (`POST /v1/organizations/{orgId}/stores/{storeId}/syncs`).
   Enqueues a PENDING MANUAL `SyncLog` for the `syncType` chosen in the body
   (`{ "syncType": "ORDERS" | "PRODUCTS" | "SETTLEMENTS" | "CLAIMS" }`) and returns

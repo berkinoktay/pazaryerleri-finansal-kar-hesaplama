@@ -204,3 +204,148 @@ function nonFixedKind(f: z.infer<typeof DiscountConfigFieldsSchema>): 'AMOUNT' |
   // refineDiscountConfig zaten FIXED_PRICE'ı NTH dışında reddetti; burada daralt.
   return f.valueKind === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
 }
+
+// ─── List / detail response DTO (Görev 8) ────────────────────────────────────
+
+// discountType..endsAt config alanları HEM liste HEM detay yanıtında birebir aynı —
+// tek ortak shape'i iki şemaya da spread ederiz (kopyalama yok). Değerler wire'da
+// string: para Decimal→2 hane, tarih ISO; adet alanları tamsayı.
+const discountConfigShape = {
+  discountType: DiscountTypeSchema,
+  valueKind: DiscountValueKindSchema.nullable(),
+  value: z.string().nullable(),
+  minBasketAmount: z.string().nullable(),
+  minQuantity: z.number().int().nullable(),
+  buyQuantity: z.number().int().nullable(),
+  payQuantity: z.number().int().nullable(),
+  nthIndex: z.number().int().nullable(),
+  orderLimit: z.number().int().nullable(),
+  startsAt: z.string().nullable(),
+  endsAt: z.string().nullable(),
+};
+
+export const DiscountListListItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    ...discountConfigShape,
+    itemCount: z.number().int(),
+    selectedCount: z.number().int(),
+    exported: z.boolean(),
+    updatedAt: z.string(),
+  })
+  .openapi('DiscountListListItem');
+
+export const DiscountListListResponseSchema = z
+  .object({ data: z.array(DiscountListListItemSchema) })
+  .openapi('DiscountListListResponse');
+
+export const DiscountCommissionSourceSchema = z
+  .enum(['band', 'product', 'category'])
+  .openapi('DiscountCommissionSource', {
+    description:
+      'Komisyon nereden geldi: komisyon tarifesi bandı (band) / ürünün senkronlanan ' +
+      'komisyonu (product) / kategori oranı (category).',
+  });
+
+export const DiscountItemReasonSchema = z
+  .enum(['NO_PRODUCT', 'NO_COST', 'NO_SHIPPING', 'NO_COMMISSION'])
+  .openapi('DiscountItemReason', {
+    description:
+      'Kâr hesaplanamama nedeni: ürün eşleşmedi / maliyet yok / kargo yok / komisyon yok.',
+  });
+
+const DiscountScenarioSchema = z.object({
+  price: z.string(),
+  commissionPct: z.string().nullable(),
+  commissionSource: DiscountCommissionSourceSchema.nullable(),
+  netProfit: z.string().nullable(),
+  marginPct: z.string().nullable(),
+});
+
+export const DiscountListDetailItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    barcode: z.string(),
+    modelCode: z.string().nullable(),
+    externalId: z.string().nullable(),
+    productTitle: z.string(),
+    brand: z.string().nullable(),
+    color: z.string().nullable(),
+    imageUrl: z.string().nullable(),
+    buyboxStatus: z.string().nullable(),
+    included: z.boolean(),
+    calculable: z.boolean(),
+    reason: DiscountItemReasonSchema.nullable(),
+    current: DiscountScenarioSchema,
+    discounted: DiscountScenarioSchema,
+  })
+  .openapi('DiscountListDetailItem');
+
+export const DiscountListSummarySchema = z
+  .object({
+    itemCount: z.number().int(),
+    selectedCount: z.number().int(),
+    // Seçili kalemlerde sipariş başına tahmini indirim maliyeti: Σ(current.price −
+    // discounted.price). Backend hesaplar — frontend yalnız render eder.
+    perOrderCost: z.string(),
+    // orderLimit girilmişse perOrderCost × orderLimit, yoksa null.
+    maxTotalCost: z.string().nullable(),
+    // Seçili + hesaplanabilir kalemlerde ortalama kâr farkı (discounted − current).
+    avgProfitDelta: z.string().nullable(),
+  })
+  .openapi('DiscountListSummary');
+
+export const DiscountListDetailSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    ...discountConfigShape,
+    exported: z.boolean(),
+    summary: DiscountListSummarySchema,
+    items: z.array(DiscountListDetailItemSchema),
+  })
+  .openapi('DiscountListDetail');
+
+// ─── Selections + config update body (Görev 8) ───────────────────────────────
+
+export const DiscountSelectionSchema = z.object({
+  itemId: z.string().uuid(),
+  included: z.boolean(),
+});
+
+export const UpdateDiscountSelectionsBodySchema = z
+  .object({
+    // mode: 'set' tek tek satır günceller; 'all'/'none' TÜM listeyi işaretler/temizler
+    // (500 satırlık listede tek istek — happy-path varsaymama kuralı).
+    mode: z.enum(['set', 'all', 'none']).default('set'),
+    selections: z.array(DiscountSelectionSchema).max(5000).default([]),
+  })
+  .superRefine((val, ctx) => {
+    if (val.mode === 'set' && val.selections.length === 0) {
+      ctx.addIssue({ code: 'custom', message: 'SELECTIONS_REQUIRED', path: ['selections'] });
+    }
+  })
+  .openapi('UpdateDiscountSelectionsBody');
+
+export const UpdateDiscountSelectionsResponseSchema = z
+  .object({ updated: z.number().int() })
+  .openapi('UpdateDiscountSelectionsResponse');
+
+export const UpdateDiscountListBodySchema = DiscountConfigFieldsSchema.extend({
+  name: z.string().min(1).optional(),
+})
+  .superRefine(refineDiscountConfig)
+  .openapi('UpdateDiscountListBody');
+
+export const UpdateDiscountListResponseSchema = z
+  .object({ id: z.string().uuid() })
+  .openapi('UpdateDiscountListResponse');
+
+// ─── Inferred TS types (consumed by the service + route layers) ──────────────
+
+export type DiscountListListItem = z.infer<typeof DiscountListListItemSchema>;
+export type DiscountListDetailItem = z.infer<typeof DiscountListDetailItemSchema>;
+export type DiscountListDetail = z.infer<typeof DiscountListDetailSchema>;
+export type DiscountSelection = z.infer<typeof DiscountSelectionSchema>;
+export type UpdateDiscountListBody = z.infer<typeof UpdateDiscountListBodySchema>;
