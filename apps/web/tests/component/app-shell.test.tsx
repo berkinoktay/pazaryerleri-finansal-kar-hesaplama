@@ -44,6 +44,9 @@ import { useSwitcherPreviewStores } from '@/features/stores/hooks/use-switcher-p
 import { render, screen } from '@/../tests/helpers/render';
 
 const messages = {
+  common: {
+    roles: { owner: 'Owner', admin: 'Admin', member: 'Member', viewer: 'Viewer' },
+  },
   nav: {
     dashboard: 'Pano',
     livePerformance: 'Canlı Performans',
@@ -152,9 +155,6 @@ const messages = {
     emptyDescription: 'Bir organizasyon oluştur ya da bir davete katıl.',
     emptyCreate: '+ Yeni Organizasyon Oluştur',
     emptyJoinInvite: 'Davet Kodum Var',
-    roleOwner: 'Owner',
-    roleAdmin: 'Admin',
-    roleMember: 'Member',
     openShortcut: '⌘O ile değiştir',
   },
   themeToggle: { label: 'Tema' },

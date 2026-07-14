@@ -21,6 +21,8 @@ export interface BadgeWithOverflowProps {
   tone?: BadgeProps['tone'];
   /** Treatment (surface / solid / outline) of the primary badge. Forwarded to `Badge`. */
   variant?: BadgeProps['variant'];
+  /** Vertical size (sm / md / lg) of the primary badge. Forwarded to `Badge`. */
+  size?: BadgeProps['size'];
   /** Main badge content (typically a translated label). */
   children: React.ReactNode;
   /** When > 0, renders a "+N" muted chip to the right of the badge. */
@@ -31,20 +33,21 @@ export interface BadgeWithOverflowProps {
 export function BadgeWithOverflow({
   tone,
   variant,
+  size,
   children,
   overflowCount,
   className,
 }: BadgeWithOverflowProps): React.ReactElement {
   if (overflowCount === undefined || overflowCount <= 0) {
     return (
-      <Badge tone={tone} variant={variant} className={className}>
+      <Badge tone={tone} variant={variant} size={size} className={className}>
         {children}
       </Badge>
     );
   }
   return (
     <span className={cn('gap-2xs inline-flex items-center', className)}>
-      <Badge tone={tone} variant={variant}>
+      <Badge tone={tone} variant={variant} size={size}>
         {children}
       </Badge>
       <span className="text-muted-foreground text-2xs">+{overflowCount}</span>

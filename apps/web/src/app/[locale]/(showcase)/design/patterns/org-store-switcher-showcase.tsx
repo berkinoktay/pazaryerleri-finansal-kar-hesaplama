@@ -148,7 +148,7 @@ export function OrgStoreSwitcherShowcase(): React.ReactElement {
 
       <DemoSection
         label="Tek organizasyon"
-        hint="Tek organizasyonda sol organizasyon paneli gizlenir; yalnız mağaza listesi tam genişlikte kalır."
+        hint="Tek organizasyonda sol organizasyon paneli görünür kalır; tek organizasyon satırı rol rozetiyle birlikte listelenir ve sağda mağaza paneli durur."
       >
         <SwitcherDemo
           orgs={SINGLE_ORG}

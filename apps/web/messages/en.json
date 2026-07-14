@@ -1,5 +1,11 @@
 {
   "common": {
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "member": "Member",
+      "viewer": "Viewer"
+    },
     "infoHint": "Info",
     "a11y": {
       "viewImage": "View product image at full size"
@@ -470,10 +476,6 @@
     "emptyDescription": "Create an organization or join via invitation to start using PazarSync.",
     "emptyCreate": "+ Create New Organization",
     "emptyJoinInvite": "I Have an Invite Code",
-    "roleOwner": "Owner",
-    "roleAdmin": "Admin",
-    "roleMember": "Member",
-    "roleViewer": "Viewer",
     "openShortcut": "Switch with ⌘O",
     "activeLabel": "active"
   },
@@ -1887,12 +1889,6 @@
       "actions": {
         "editRole": "Role",
         "editAccess": "Store access"
-      },
-      "roles": {
-        "owner": "Owner",
-        "admin": "Admin",
-        "member": "Member",
-        "viewer": "Viewer"
       },
       "roleDialog": {
         "title": "Change role",

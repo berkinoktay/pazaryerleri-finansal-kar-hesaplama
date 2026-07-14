@@ -35,7 +35,7 @@ export function AccountSummaryCard({
   createdAt,
 }: AccountSummaryCardProps): React.ReactElement {
   const t = useTranslations('settings.profile.summary');
-  const tRoles = useTranslations('settings.members.roles');
+  const tRoles = useTranslations('common.roles');
   const format = useFormatter();
   const { role, accessibleStores } = useCurrentScope();
 

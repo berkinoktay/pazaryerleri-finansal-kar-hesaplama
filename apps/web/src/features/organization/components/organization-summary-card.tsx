@@ -21,7 +21,7 @@ const ROLE_KEY = {
  */
 export function OrganizationSummaryCard(): React.ReactElement {
   const t = useTranslations('settings.organization.summary');
-  const tRoles = useTranslations('settings.members.roles');
+  const tRoles = useTranslations('common.roles');
   const { org, role, accessibleStores } = useCurrentScope();
 
   const rows = [

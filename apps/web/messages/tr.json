@@ -1,5 +1,11 @@
 {
   "common": {
+    "roles": {
+      "owner": "Sahip",
+      "admin": "Yönetici",
+      "member": "Üye",
+      "viewer": "Görüntüleyici"
+    },
     "infoHint": "Bilgi",
     "a11y": {
       "viewImage": "Ürün görselini büyüt"
@@ -470,10 +476,6 @@
     "emptyDescription": "PazarSync'e başlamak için bir organizasyon oluştur ya da bir davete katıl.",
     "emptyCreate": "+ Yeni Organizasyon Oluştur",
     "emptyJoinInvite": "Davet Kodum Var",
-    "roleOwner": "Owner",
-    "roleAdmin": "Admin",
-    "roleMember": "Member",
-    "roleViewer": "Viewer",
     "openShortcut": "⌘O ile değiştir",
     "activeLabel": "aktif"
   },
@@ -1887,12 +1889,6 @@
       "actions": {
         "editRole": "Rol",
         "editAccess": "Mağaza erişimi"
-      },
-      "roles": {
-        "owner": "Sahip",
-        "admin": "Yönetici",
-        "member": "Üye",
-        "viewer": "Görüntüleyici"
       },
       "roleDialog": {
         "title": "Rolü değiştir",

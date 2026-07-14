@@ -10,7 +10,7 @@ export type MemberRole = Member['role'];
 export type Store = components['schemas']['Store'];
 
 /**
- * Stable role → i18n sub-key (settings.members.roles.*). Typed as literals so
+ * Stable role → i18n sub-key (common.roles.*). Typed as literals so
  * next-intl accepts it — `role.toLowerCase()` is plain `string` and is rejected
  * by the typed message keys.
  */

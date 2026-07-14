@@ -5,8 +5,8 @@ import { useTranslations } from 'next-intl';
 import * as React from 'react';
 
 import { MarketplaceLogo } from '@/components/patterns/marketplace-logo';
+import { RoleBadge } from '@/components/patterns/role-badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,30 +14,13 @@ import { Link } from '@/i18n/navigation';
 import { getOrgAvatarPalette, PALETTE_BG } from '@/lib/org-avatar-color';
 import { cn } from '@/lib/utils';
 
-import type { Organization, OrgRole, Store, UsePreviewStores } from './org-store-switcher';
+import type { Organization, Store, UsePreviewStores } from './org-store-switcher';
 
 type Platform = Store['platform'];
 
 const PLATFORM_KEY: Record<Platform, 'platformTRENDYOL' | 'platformHEPSIBURADA'> = {
   TRENDYOL: 'platformTRENDYOL',
   HEPSIBURADA: 'platformHEPSIBURADA',
-};
-
-const ROLE_KEY: Record<OrgRole, 'roleOwner' | 'roleAdmin' | 'roleMember' | 'roleViewer'> = {
-  OWNER: 'roleOwner',
-  ADMIN: 'roleAdmin',
-  MEMBER: 'roleMember',
-  VIEWER: 'roleViewer',
-};
-
-// Restrained role vocabulary for a dense list: OWNER gets a quiet brand-tinted
-// SURFACE chip (not a loud solid fill that shouts in every row); ADMIN a neutral
-// surface; MEMBER/VIEWER the lightest outline. The role is context, not an alarm.
-const ROLE_BADGE: Record<OrgRole, { tone: BadgeProps['tone']; variant?: BadgeProps['variant'] }> = {
-  OWNER: { tone: 'primary', variant: 'surface' },
-  ADMIN: { tone: 'neutral', variant: 'surface' },
-  MEMBER: { tone: 'neutral', variant: 'outline' },
-  VIEWER: { tone: 'neutral', variant: 'outline' },
 };
 
 // Quiet brand text CTA — shared by the Link and button forms so the create
@@ -90,7 +73,9 @@ export interface OrgStoreSwitcherPanelProps {
 /**
  * The switcher's picker body — a two-pane org+store selector rendered inside
  * whatever shell the trigger mounts (popover on desktop, dialog when the rail
- * is collapsed, drawer on mobile).
+ * is collapsed, drawer on mobile). The panes layout always renders the left org
+ * pane (a single org still shows its role badge and the create-org CTA); only
+ * the stacked mobile drawer drops the org strip when there is just one org.
  *
  * Preview model: selecting an org row/chip only PREVIEWS it — the store list
  * on the right re-targets that org without committing the scope. Picking a
@@ -178,24 +163,9 @@ export function OrgStoreSwitcherPanel({
     );
   }
 
-  // Single org — no picker needed, render only the store pane full-width.
-  if (orgs.length <= 1) {
-    return (
-      <div className="flex flex-col">
-        <StoreHeader
-          count={isLoadingStores ? null : previewStores.length}
-          onAddStore={onAddStore}
-          onRequestClose={onRequestClose}
-        />
-        {storeBody}
-        <PanelFooter withShortcut />
-      </div>
-    );
-  }
-
   return (
     <div className="grid grid-cols-[var(--spacing-switcher-orgpane)_minmax(0,1fr)]">
-      <div className="border-border bg-popover flex flex-col border-r">
+      <div className="border-border flex flex-col border-r">
         <OrgPaneHeader />
         <div className="gap-3xs p-2xs flex max-h-80 flex-col overflow-y-auto">
           {orgs.map((org) => (
@@ -209,7 +179,7 @@ export function OrgStoreSwitcherPanel({
           ))}
         </div>
       </div>
-      <div className="bg-surface-subtle flex flex-col">
+      <div className="flex flex-col">
         <StoreHeader
           count={isLoadingStores ? null : previewStores.length}
           onAddStore={onAddStore}
@@ -279,14 +249,7 @@ function OrgPaneRow({ org, isPreview, isActive, onPreview }: OrgPaneRowProps): R
       >
         {org.name}
       </span>
-      <Badge
-        tone={ROLE_BADGE[org.role].tone}
-        variant={ROLE_BADGE[org.role].variant}
-        size="sm"
-        radius="sm"
-      >
-        {t(ROLE_KEY[org.role])}
-      </Badge>
+      <RoleBadge role={org.role} size="sm" />
       <ArrowRight01Icon className="size-icon-xs text-muted-foreground-dim" aria-hidden />
       {isActive ? <span className="sr-only">{t('activeLabel')}</span> : null}
     </button>
@@ -629,11 +592,17 @@ function PanelFooter({ className, withShortcut = false }: PanelFooterProps): Rea
         className,
       )}
     >
-      <ManageRow href="/settings" icon={Settings02Icon} label={t('footerOrgSettings')} />
+      <ManageRow
+        href="/settings"
+        icon={Settings02Icon}
+        label={t('footerOrgSettings')}
+        showChevron={!withShortcut}
+      />
       <ManageRow
         href="/settings/stores"
         icon={ShoppingBag01Icon}
         label={t('footerStoreManagement')}
+        showChevron={!withShortcut}
       />
       {withShortcut ? (
         <KbdGroup aria-label={t('openShortcut')} className="ml-auto">
@@ -649,11 +618,19 @@ interface ManageRowProps {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  /** Trailing chevron. Dropped in the inline/desktop footer where two rows sit
+   * side by side (chevrons would read as a breadcrumb trail there). */
+  showChevron?: boolean;
 }
 
 /** A clear management destination row in the switcher footer (icon + label +
- * trailing chevron). Navigating closes the popover via the route change. */
-function ManageRow({ href, icon: Icon, label }: ManageRowProps): React.ReactElement {
+ * optional trailing chevron). Navigating closes the popover via the route change. */
+function ManageRow({
+  href,
+  icon: Icon,
+  label,
+  showChevron = true,
+}: ManageRowProps): React.ReactElement {
   return (
     <Link
       href={href}
@@ -665,7 +642,9 @@ function ManageRow({ href, icon: Icon, label }: ManageRowProps): React.ReactElem
     >
       <Icon className="size-icon-sm" />
       <span className="flex-1">{label}</span>
-      <ArrowRight01Icon className="size-icon-xs text-muted-foreground-dim" aria-hidden />
+      {showChevron ? (
+        <ArrowRight01Icon className="size-icon-xs text-muted-foreground-dim" aria-hidden />
+      ) : null}
     </Link>
   );
 }

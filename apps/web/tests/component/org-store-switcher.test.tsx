@@ -134,8 +134,10 @@ describe('OrgStoreSwitcher', () => {
   it('shows a role badge for each organization in the panel', async () => {
     const { user } = renderSwitcher();
     await user.click(screen.getByRole('button', { name: /Acme A\.Ş\./ }));
-    expect(await screen.findByText(/owner/i)).toBeInTheDocument();
-    expect(screen.getByText(/admin/i)).toBeInTheDocument();
+    // Turkish role labels from common.roles: OWNER → "Sahip", ADMIN → "Yönetici".
+    // Matched on ASCII-safe substrings so the assertions carry no Turkish bytes.
+    expect(await screen.findByText(/sahip/i)).toBeInTheDocument();
+    expect(screen.getByText(/netici/i)).toBeInTheDocument();
   });
 
   it('renders the empty state CTA when there are no organizations', async () => {
@@ -199,16 +201,19 @@ describe('OrgStoreSwitcher', () => {
     expect(onSelectScope).not.toHaveBeenCalled();
   });
 
-  it('hides the org pane entirely when there is a single organization', async () => {
+  it('renders the org pane even when there is a single organization', async () => {
     const singleOrg: Organization[] = [{ id: 'org-a', name: 'Acme A.Ş.', role: 'OWNER' }];
     const { user } = renderSwitcher({ orgs: singleOrg });
 
     await user.click(screen.getByRole('button', { name: /Acme A\.Ş\./ }));
 
-    // Single org → only the store pane renders; the org-list heading is absent
-    // while the stores heading (with the active org's store count) is present.
-    expect(await screen.findByText('Mağazalar (2)')).toBeInTheDocument();
-    expect(screen.queryByText('Organizasyonlar')).not.toBeInTheDocument();
+    // Single org still renders the two-pane layout: the org pane keeps its
+    // heading and the single org row (proven by its OWNER role badge, which
+    // only the org pane renders) alongside the store pane's counted heading.
+    expect(await screen.findByText('Organizasyonlar')).toBeInTheDocument();
+    expect(screen.getByText('Mağazalar (2)')).toBeInTheDocument();
+    // OWNER role badge renders "Sahip" (common.roles) — matched ASCII-safe.
+    expect(screen.getByText(/sahip/i)).toBeInTheDocument();
   });
 
   it('offers an org-only switch when the previewed org has zero stores', async () => {
