@@ -162,7 +162,7 @@ export default function ChromePatternsPage(): React.ReactElement {
       >
         <Preview
           title="OrgStoreSwitcher"
-          description="Tek-sidebar başlığındaki birleşik org+mağaza chip'i. ⌘O hotkey'i, sync warning border'ı, daraltılmış sidebar modu, boş durum CTA'ları — üç framing yan yana."
+          description="Tek-sidebar başlığındaki mağaza-öncelikli tetikleyici + iki panelli seçici (popover; daraltılmışta dialog, mobilde drawer). ⌘O ile açılır; başka organizasyonun mağazaları seçmeden önce önizlenir. Dört framing alt alta: geniş popover, daraltılmış dialog, tek organizasyon, boş durum."
         >
           <OrgStoreSwitcherShowcase />
         </Preview>

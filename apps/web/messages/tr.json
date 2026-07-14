@@ -1,5 +1,11 @@
 {
   "common": {
+    "roles": {
+      "owner": "Sahip",
+      "admin": "Yönetici",
+      "member": "Üye",
+      "viewer": "Görüntüleyici"
+    },
     "infoHint": "Bilgi",
     "a11y": {
       "viewImage": "Ürün görselini büyüt"
@@ -451,39 +457,26 @@
   },
   "orgStoreSwitcher": {
     "switchedStore": "{name} mağazasına geçildi",
-    "search": "Org veya mağaza ara…",
+    "dialogTitle": "Organizasyon ve mağaza değiştir",
     "sectionOrgs": "Organizasyonlar",
+    "sectionOrgsWithCount": "Organizasyonlar ({count})",
     "sectionStores": "Mağazalar",
-    "addOrg": "+ Yeni Organizasyon",
+    "sectionStoresWithCount": "Mağazalar ({count})",
     "connectStore": "+ Yeni Mağaza",
+    "newOrgShort": "+ Yeni",
+    "newOrgInline": "+ Yeni Organizasyon",
+    "storesEmptyInOrg": "Bu organizasyonda henüz mağaza yok",
+    "switchToOrg": "Bu organizasyona geç",
+    "storesLoadError": "Mağazalar yüklenemedi",
     "footerOrgSettings": "Org ayarları",
     "footerStoreManagement": "Mağaza yönetimi",
-    "footerNewOrg": "Yeni Organizasyon",
     "platformTRENDYOL": "Trendyol",
     "platformHEPSIBURADA": "Hepsiburada",
     "emptyTitle": "Henüz bir organizasyona sahip değilsin",
     "emptyDescription": "PazarSync'e başlamak için bir organizasyon oluştur ya da bir davete katıl.",
     "emptyCreate": "+ Yeni Organizasyon Oluştur",
     "emptyJoinInvite": "Davet Kodum Var",
-    "roleOwner": "Owner",
-    "roleAdmin": "Admin",
-    "roleMember": "Member",
-    "roleViewer": "Viewer",
-    "syncStateFresh": "Senkron",
-    "syncStateStale": "Yenile",
-    "syncStateFailed": "Senkron başarısız",
     "openShortcut": "⌘O ile değiştir",
-    "recentSection": "Son Kullanılan",
-    "allOrgsSection": "Tüm Organizasyonlar",
-    "newOrgInline": "+ Yeni Organizasyon",
-    "orgMetaStores": "{count} mağaza",
-    "orgMetaNoStores": "henüz mağaza yok",
-    "orgMetaWithSync": "{stores} · son senkron {time}",
-    "storeSyncRelative": "son senkron {time}",
-    "storeNoSync": "Henüz senkron yapılmadı",
-    "storeMetaWithPlatform": "{platform} · {sync}",
-    "multiOrgIndicator": "+{count}",
-    "multiOrgMore": "{count} organizasyon daha",
     "activeLabel": "aktif"
   },
   "userMenu": {
@@ -1896,12 +1889,6 @@
       "actions": {
         "editRole": "Rol",
         "editAccess": "Mağaza erişimi"
-      },
-      "roles": {
-        "owner": "Sahip",
-        "admin": "Yönetici",
-        "member": "Üye",
-        "viewer": "Görüntüleyici"
       },
       "roleDialog": {
         "title": "Rolü değiştir",

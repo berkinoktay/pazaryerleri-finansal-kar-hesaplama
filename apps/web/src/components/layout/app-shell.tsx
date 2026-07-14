@@ -17,6 +17,7 @@ import {
   OrgStoreSwitcher,
   type Organization,
   type Store,
+  type UsePreviewStores,
 } from '@/components/patterns/org-store-switcher';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -130,8 +131,12 @@ export interface AppShellProps {
   onSelectOrg: (orgId: string) => void;
   /** Store switch handler — wired to setActiveStoreIdAction. */
   onSelectStore: (storeId: string) => void;
-  /** Optional CTA at the bottom of the org/store dropdown to connect a new store. */
+  /** Cross-org store pick — switches org AND store in one step. */
+  onSelectScope: (orgId: string, storeId: string, storeName: string) => void;
+  /** Optional CTA in the org/store picker to connect a new store. */
   onAddStore?: () => void;
+  /** Feature-owned adapter injected into the switcher's cross-org preview. */
+  usePreviewStores: UsePreviewStores;
   children: React.ReactNode;
 }
 
@@ -157,7 +162,9 @@ export function AppShell({
   activeStoreId,
   onSelectOrg,
   onSelectStore,
+  onSelectScope,
   onAddStore,
+  usePreviewStores,
   children,
 }: AppShellProps): React.ReactElement {
   const t = useTranslations();
@@ -170,7 +177,9 @@ export function AppShell({
         activeStoreId={activeStoreId}
         onSelectOrg={onSelectOrg}
         onSelectStore={onSelectStore}
+        onSelectScope={onSelectScope}
         onAddStore={onAddStore}
+        usePreviewStores={usePreviewStores}
       />
       {/*
         SidebarInset renders the <main role="main"> landmark. Inside it: a
@@ -212,7 +221,9 @@ interface AppSidebarProps {
   activeStoreId: string | undefined;
   onSelectOrg: (orgId: string) => void;
   onSelectStore: (storeId: string) => void;
+  onSelectScope: (orgId: string, storeId: string, storeName: string) => void;
   onAddStore?: () => void;
+  usePreviewStores: UsePreviewStores;
 }
 
 function AppSidebar({
@@ -222,7 +233,9 @@ function AppSidebar({
   activeStoreId,
   onSelectOrg,
   onSelectStore,
+  onSelectScope,
   onAddStore,
+  usePreviewStores,
 }: AppSidebarProps): React.ReactElement {
   const t = useTranslations();
   const pathname = usePathname();
@@ -256,7 +269,9 @@ function AppSidebar({
             activeStoreId={activeStoreId ?? null}
             onSelectOrg={onSelectOrg}
             onSelectStore={onSelectStore}
+            onSelectScope={onSelectScope}
             onAddStore={onAddStore}
+            usePreviewStores={usePreviewStores}
             collapsed={collapsed}
           />
         </div>

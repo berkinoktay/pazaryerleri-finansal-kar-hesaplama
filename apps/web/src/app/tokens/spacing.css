@@ -103,7 +103,9 @@
   --size-modal-md: 46rem; /* medium dialog — two-column forms (e.g. Advantage upload), 736px */
   --size-modal-wide: min(64rem, 90vw); /* wide dialog (order detail) — caps at 1024px, else 90vw */
   --size-modal-tall: 85vh; /* wide dialog max height before the inner body scrolls */
-  --size-dropdown-popover: 24rem; /* org+store switcher dropdown panel (384px) */
+  --size-dropdown-popover: 24rem; /* dropdown / popover panel width (384px) */
+  --size-switcher-panel: 29rem; /* org+store switcher two-pane panel (464px) */
+  --size-switcher-orgpane: 12rem; /* org+store switcher left org pane in the two-pane layout (192px) */
   --size-tooltip: 16rem; /* InfoHint / explanation tooltip readable width (256px) — wraps a sentence without sprawling */
   --size-pagesize-select: 5rem; /* DataTablePagination per-page Select trigger (80px — fits 1–3 digit page sizes + chevron) */
   --size-headline: 56rem; /* landing hero H1 column (896px) */

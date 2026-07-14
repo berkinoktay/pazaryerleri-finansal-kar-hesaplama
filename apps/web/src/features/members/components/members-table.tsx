@@ -4,7 +4,7 @@ import { CAPABILITIES } from '@pazarsync/utils';
 import { useTranslations } from 'next-intl';
 import { useState, type ReactElement } from 'react';
 
-import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { RoleBadge } from '@/components/patterns/role-badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -17,21 +17,9 @@ import {
 } from '@/components/ui/table';
 import { useCan } from '@/providers/current-scope';
 
-import { ROLE_LABEL_KEY, type Member, type MemberRole, type Store } from '../api/members.api';
+import { type Member, type Store } from '../api/members.api';
 import { MemberRoleDialog } from './member-role-dialog';
 import { MemberStoreAccessDialog } from './member-store-access-dialog';
-
-// Same role→badge mapping as the org switcher, kept consistent across surfaces.
-// OWNER stands out (solid primary); MEMBER/VIEWER stay low-emphasis (outline).
-const ROLE_BADGE: Record<
-  MemberRole,
-  { tone: BadgeProps['tone']; variant?: BadgeProps['variant'] }
-> = {
-  OWNER: { tone: 'primary', variant: 'solid' },
-  ADMIN: { tone: 'neutral' },
-  MEMBER: { tone: 'neutral', variant: 'outline' },
-  VIEWER: { tone: 'neutral', variant: 'outline' },
-};
 
 const LOADING_ROW_COUNT = 3;
 
@@ -50,7 +38,6 @@ export function MembersTable({
   loading = false,
 }: MembersTableProps): ReactElement {
   const t = useTranslations('settings.members');
-  const tRoles = useTranslations('settings.members.roles');
   const canManageRoles = useCan(CAPABILITIES.MEMBERS_MANAGE_ROLES);
   const canManageAccess = useCan(CAPABILITIES.MEMBERS_MANAGE_ACCESS);
 
@@ -114,13 +101,7 @@ export function MembersTable({
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge
-                    tone={ROLE_BADGE[member.role].tone}
-                    variant={ROLE_BADGE[member.role].variant}
-                    size="sm"
-                  >
-                    {tRoles(ROLE_LABEL_KEY[member.role])}
-                  </Badge>
+                  <RoleBadge role={member.role} size="sm" />
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {seesAllStores

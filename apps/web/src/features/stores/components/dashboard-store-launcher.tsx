@@ -9,6 +9,7 @@ import type { Organization as SwitcherOrg } from '@/components/patterns/org-stor
 import type { Organization as OrgApiData } from '@/features/organization/api/organizations.api';
 import type { Store as ApiStore } from '@/features/stores/api/list-stores.api';
 import { useStores } from '@/features/stores/hooks/use-stores';
+import { useSwitcherPreviewStores } from '@/features/stores/hooks/use-switcher-preview-stores';
 import { toSwitcherStore } from '@/features/stores/lib/to-ui-store';
 import { useCurrentScope } from '@/providers/current-scope';
 
@@ -23,19 +24,15 @@ export interface DashboardStoreLauncherProps {
 }
 
 /**
- * Adapter — API Organization → switcher's Organization shape. The
- * switcher needs role, storeCount, lastSyncedAt, lastAccessedAt; the
- * `GET /v1/organizations` endpoint now carries all four directly so
- * this is a flat passthrough.
+ * Adapter — API Organization → switcher's Organization shape. The switcher is
+ * a pure org/store picker, so it consumes only identity fields (id, name,
+ * role) — a flat subset of the `GET /v1/organizations` payload.
  */
 function toSwitcherOrg(org: OrgApiData): SwitcherOrg {
   return {
     id: org.id,
     name: org.name,
     role: org.role,
-    storeCount: org.storeCount,
-    lastSyncedAt: org.lastSyncedAt,
-    lastAccessedAt: org.lastAccessedAt,
   };
 }
 
@@ -62,12 +59,12 @@ export function DashboardStoreLauncher({
   initialActiveStoreId,
   children,
 }: DashboardStoreLauncherProps): ReactElement {
-  const { setStore, setOrg, can } = useCurrentScope();
+  const { setStore, setOrg, setScope, can } = useCurrentScope();
   const canConnectStore = can(CAPABILITIES.STORES_CONNECT);
   const [modalOpen, setModalOpen] = useState(false);
   const [activeStoreId, setActiveStoreId] = useState<string | undefined>(initialActiveStoreId);
 
-  const storesQuery = useStores(activeOrgId ?? null, initialStores);
+  const storesQuery = useStores(activeOrgId ?? null, { initialData: initialStores });
   const switcherStores = (storesQuery.data ?? []).map(toSwitcherStore);
   const switcherOrgs = orgs.map(toSwitcherOrg);
   const effectiveActiveId = activeStoreId ?? switcherStores[0]?.id;
@@ -91,6 +88,19 @@ export function DashboardStoreLauncher({
     setOrg(orgId);
   }
 
+  function handleSelectScope(orgId: string, storeId: string, storeName: string): void {
+    // A same-org pick is really just a store switch — avoid the extra org
+    // cookie write and the cache clear that a true cross-org jump needs.
+    // The panel routes same-org picks to onSelectStore; this branch is defensive only.
+    if (orgId === activeOrgId) {
+      handleSelectStore(storeId);
+      return;
+    }
+    // Cross-org jump — the scope provider persists both cookies, clears the
+    // React Query cache (tenant boundary), then does a single refresh.
+    setScope(orgId, storeId, storeName);
+  }
+
   return (
     <>
       <AppShell
@@ -100,6 +110,8 @@ export function DashboardStoreLauncher({
         activeStoreId={effectiveActiveId}
         onSelectOrg={handleSelectOrg}
         onSelectStore={handleSelectStore}
+        onSelectScope={handleSelectScope}
+        usePreviewStores={useSwitcherPreviewStores}
         onAddStore={
           activeOrgId !== undefined && canConnectStore ? () => setModalOpen(true) : undefined
         }

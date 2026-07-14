@@ -49,7 +49,7 @@ export function MemberRoleDialog({
   onOpenChange,
 }: MemberRoleDialogProps): ReactElement {
   const t = useTranslations('settings.members');
-  const tRoles = useTranslations('settings.members.roles');
+  const tRoles = useTranslations('common.roles');
   const mutation = useUpdateMemberRole(orgId);
   const [role, setRole] = useState<MemberRole>(member.role);
 

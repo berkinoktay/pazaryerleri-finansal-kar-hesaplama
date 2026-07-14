@@ -1,5 +1,11 @@
 {
   "common": {
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "member": "Member",
+      "viewer": "Viewer"
+    },
     "infoHint": "Info",
     "a11y": {
       "viewImage": "View product image at full size"
@@ -451,39 +457,26 @@
   },
   "orgStoreSwitcher": {
     "switchedStore": "Switched to {name}",
-    "search": "Search org or store…",
+    "dialogTitle": "Switch organization and store",
     "sectionOrgs": "Organizations",
+    "sectionOrgsWithCount": "Organizations ({count})",
     "sectionStores": "Stores",
-    "addOrg": "+ New Organization",
+    "sectionStoresWithCount": "Stores ({count})",
     "connectStore": "+ New Store",
+    "newOrgShort": "+ New",
+    "newOrgInline": "+ New Organization",
+    "storesEmptyInOrg": "No stores in this organization yet",
+    "switchToOrg": "Switch to this organization",
+    "storesLoadError": "Couldn't load stores",
     "footerOrgSettings": "Org settings",
     "footerStoreManagement": "Store management",
-    "footerNewOrg": "New Organization",
     "platformTRENDYOL": "Trendyol",
     "platformHEPSIBURADA": "Hepsiburada",
     "emptyTitle": "You don't belong to an organization yet",
     "emptyDescription": "Create an organization or join via invitation to start using PazarSync.",
     "emptyCreate": "+ Create New Organization",
     "emptyJoinInvite": "I Have an Invite Code",
-    "roleOwner": "Owner",
-    "roleAdmin": "Admin",
-    "roleMember": "Member",
-    "roleViewer": "Viewer",
-    "syncStateFresh": "In sync",
-    "syncStateStale": "Refresh",
-    "syncStateFailed": "Sync failed",
     "openShortcut": "Switch with ⌘O",
-    "recentSection": "Recently Used",
-    "allOrgsSection": "All Organizations",
-    "newOrgInline": "+ New Organization",
-    "orgMetaStores": "{count} stores",
-    "orgMetaNoStores": "no stores yet",
-    "orgMetaWithSync": "{stores} · last synced {time}",
-    "storeSyncRelative": "last synced {time}",
-    "storeNoSync": "Not synced yet",
-    "storeMetaWithPlatform": "{platform} · {sync}",
-    "multiOrgIndicator": "+{count}",
-    "multiOrgMore": "{count} more organizations",
     "activeLabel": "active"
   },
   "userMenu": {
@@ -1896,12 +1889,6 @@
       "actions": {
         "editRole": "Role",
         "editAccess": "Store access"
-      },
-      "roles": {
-        "owner": "Owner",
-        "admin": "Admin",
-        "member": "Member",
-        "viewer": "Viewer"
       },
       "roleDialog": {
         "title": "Change role",

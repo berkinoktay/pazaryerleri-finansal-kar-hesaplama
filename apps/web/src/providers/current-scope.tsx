@@ -35,6 +35,12 @@ export interface CurrentScope {
   setStore: (storeId: string) => void;
   /** Switch the active org: persist the choice, then re-resolve server state. */
   setOrg: (orgId: string) => void;
+  /**
+   * Cross-org jump in one step: persist BOTH the org and store cookies, clear
+   * the tenant-scoped query cache, then a single router.refresh. When
+   * `storeName` is provided, toast the "switched to <store>" confirmation.
+   */
+  setScope: (orgId: string, storeId: string, storeName?: string) => void;
 }
 
 const CurrentScopeContext = createContext<CurrentScope | null>(null);
@@ -85,13 +91,30 @@ export function CurrentScopeProvider({
         persistThenRefresh(setActiveStoreIdAction(storeId), 'active store');
       },
       setOrg: (orgId) => {
-        // Tenant boundary crossing: every cached query is scoped to the
-        // now-previous org. Clearing the React Query cache stops a query whose
-        // key omits orgId from serving the previous tenant's data — belt-and-
-        // suspenders on top of org-scoped query keys. Store switches stay within
-        // one org (store-scoped keys carry storeId), so setStore does not clear.
+        // Tenant-boundary cache hygiene: drop the previous org's cached queries.
+        // clear() does NOT abort in-flight requests — the isolation guarantee is
+        // the org-scoped query keys: a late-resolving fetch can only write under
+        // the previous org's key, which the new tenant's UI never reads.
         queryClient.clear();
         persistThenRefresh(setActiveOrgIdAction(orgId), 'active org');
+      },
+      setScope: (orgId, storeId, storeName) => {
+        if (storeName !== undefined) {
+          toast.success(t('switchedStore', { name: storeName }));
+        }
+        // Cross-org jump: same tenant-boundary cache hygiene as setOrg. clear()
+        // evicts the previous org's cache but does NOT abort in-flight fetches;
+        // the org-scoped query keys keep a late resolver from ever reaching the
+        // new tenant's UI.
+        queryClient.clear();
+        // Persist BOTH cookies in parallel, then a SINGLE refresh once both
+        // writes settle (a lone refresh can't re-read a half-written scope).
+        persistThenRefresh(
+          Promise.all([setActiveStoreIdAction(storeId), setActiveOrgIdAction(orgId)]).then(
+            () => undefined,
+          ),
+          'active scope',
+        );
       },
     };
   }, [org, store, accessibleStores, router, queryClient, t]);
