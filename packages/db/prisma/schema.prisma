@@ -267,6 +267,27 @@ enum FlashOfferType {
   H3
 }
 
+// İndirimler (Promosyon > İndirimler) dikeyinin kurgu türü. Trendyol tüm türler için
+// AYNI ürün-seçim Excel'ini kullanır; tür + parametreler PazarSync'te liste-başına
+// saklanır ve kâr tahmini tek `effectiveUnitPrice` sözleşmesine iner (tek-ürün-sepeti
+// varsayımı — spec §5.1). Birlikte Al V2'ye bilinçli olarak dışarıda.
+enum DiscountType {
+  NET                  // koşulsuz X TL / %X
+  CONDITIONAL_BASKET   // min sepet tutarı + X TL / %X
+  CONDITIONAL_QUANTITY // N adet + X TL / %X
+  BUY_X_PAY_Y          // X al Y öde
+  NTH_PRODUCT          // sepetteki N. (en ucuz) ürüne %Y / Y TL / Y TL sabit fiyat
+  CODE                 // indirim kodu — matematiksel olarak CONDITIONAL_BASKET ile aynı
+}
+
+// İndirim değerinin türü. FIXED_PRICE yalnız NTH_PRODUCT'ta geçerlidir ("X. Ürün Y TL");
+// BUY_X_PAY_Y hiç değer taşımaz (valueKind null).
+enum DiscountValueKind {
+  AMOUNT
+  PERCENT
+  FIXED_PRICE
+}
+
 // ─── Models ──────────────────────────────────────────
 
 model UserProfile {
@@ -376,6 +397,7 @@ model Store {
   plusCommissionTariffs  PlusCommissionTariff[]
   advantageTariffs       AdvantageTariff[]
   flashProductLists      FlashProductList[]
+  discountLists          DiscountList[]
   orgPeriodFees          OrgPeriodFee[]
   commissionInvoices     CommissionInvoice[]
   memberAccess           MemberStoreAccess[]
@@ -1631,6 +1653,81 @@ model FlashProductItem {
   @@index([listId])
   @@index([storeId, barcode])
   @@map("flash_product_items")
+}
+
+model DiscountList {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
+  name           String
+  // ─── İndirim konfigürasyonu (tür başına zorunluluk Zod discriminated union'da;
+  //     DB nullable bırakır — şema doğrulamayı validator katmanına bilinçli devreder).
+  discountType    DiscountType      @map("discount_type")
+  valueKind       DiscountValueKind? @map("value_kind")
+  value           Decimal?          @db.Decimal(12, 2)
+  minBasketAmount Decimal?          @map("min_basket_amount") @db.Decimal(12, 2)
+  minQuantity     Int?              @map("min_quantity")
+  buyQuantity     Int?              @map("buy_quantity")
+  payQuantity     Int?              @map("pay_quantity")
+  nthIndex        Int?              @map("nth_index")
+  // Sipariş adedi limiti — hesabı etkilemez; özet karttaki "en fazla toplam maliyet"
+  // tavanı için saklanır (limit × sipariş başına indirim).
+  orderLimit      Int?              @map("order_limit")
+  // Kampanya penceresi — yalnız bilgi amaçlı (komisyon HER ZAMAN günceldan çözülür).
+  startsAt        DateTime?         @map("starts_at")
+  endsAt          DateTime?         @map("ends_at")
+  sourceFilename String?   @map("source_filename")
+  // Raw uploaded .xlsx bytes, kept so export byte-patches Trendyol's EXACT file.
+  sourceFile     Bytes?    @map("source_file")
+  exportedAt     DateTime? @map("exported_at")
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // NO week-uniqueness (Flash'taki gibi): aynı dosya farklı senaryolarla birden çok
+  // liste olarak yüklenebilmeli — sayfa bir "ne olurdu" simülasyon aracı.
+  store Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items DiscountListItem[]
+
+  @@index([organizationId])
+  @@index([storeId])
+  @@map("discount_lists")
+}
+
+model DiscountListItem {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  storeId        String @map("store_id") @db.Uuid
+  listId         String @map("list_id") @db.Uuid
+  // Matched seller variant (by barcode at import); null = no catalog match →
+  // profit shown as "no product". No FK: a deleted variant must not drop the row.
+  productVariantId String? @map("product_variant_id") @db.Uuid
+  // Passthrough "Trendyol Ürün ID" kept for export fidelity / display.
+  externalId   String? @map("external_id")
+  productTitle String  @map("product_title")
+  brand        String?
+  color        String?
+  barcode      String
+  modelCode    String? @map("model_code")
+  // "Güncel Satış Fiyatı" — "250 ₺" biçimli METİNDEN normalize edilir (import).
+  currentPrice Decimal @map("current_price") @db.Decimal(12, 2)
+  // "Buybox" kolonu ham metin (örn. "Kazanan"/"Kaybeden") — UI rozet + filtre.
+  buyboxStatus String? @map("buybox_status")
+  // Satıcının katılım seçimi. Import, Excel'de halihazırda "Evet" olan satırı true
+  // başlatır; export yalnız kaynaktan SAPAN hücreleri yamalar.
+  included  Boolean  @default(false)
+  // Preserves the Excel row order so export patches the right rows.
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  list DiscountList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, sortOrder])
+  @@index([organizationId])
+  @@index([listId])
+  @@index([storeId, barcode])
+  @@map("discount_list_items")
 }
 
 // ─── Profit Calculation V1 — Schema Foundation (PR-1) ──────────────────
