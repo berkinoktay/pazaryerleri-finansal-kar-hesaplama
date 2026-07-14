@@ -313,6 +313,12 @@ describe('mapTrendyolContent', () => {
       variants: [{ ...variant, commission: 7.83 }],
     });
     expect(out.variants[0]?.syncedCommissionRate).toBe('7.83');
+    // A single-decimal wire value must be padded — proves the .toFixed(2) intent.
+    const padded = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, commission: 7.8 }],
+    });
+    expect(padded.variants[0]?.syncedCommissionRate).toBe('7.80');
   });
 
   it('collapses absent and zero commission to null', () => {
