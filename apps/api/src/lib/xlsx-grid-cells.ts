@@ -2,6 +2,8 @@
 // `string | number | boolean | Date | null`). Used by every campaign-tariff
 // import/export/layout path so they read Trendyol's cells identically.
 
+import { normalizeDecimalString } from '@pazarsync/spreadsheet';
+
 /** Trimmed string, or null for an empty/absent/non-textual cell. Numbers coerce to their string form. */
 export function cellText(row: readonly unknown[], idx: number): string | null {
   const value = row[idx];
@@ -27,6 +29,23 @@ export function cellDecimalString(row: readonly unknown[], idx: number): string 
     const normalized = trimmed.includes(',')
       ? trimmed.replace(/\./g, '').replace(',', '.')
       : trimmed;
+    return /^-?\d+(\.\d+)?$/.test(normalized) ? normalized : null;
+  }
+  return null;
+}
+
+/**
+ * Like `cellDecimalString`, but currency-aware: strips ₺/$/% and a trailing "TL"
+ * before resolving Turkish separators (via the spreadsheet package's shared
+ * normalizer). Needed by the Discounts sheet, whose "Güncel Satış Fiyatı" column
+ * is TEXT like "250 ₺" — `cellDecimalString` would reject it.
+ */
+export function cellCurrencyDecimalString(row: readonly unknown[], idx: number): string | null {
+  const value = row[idx];
+  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'string') {
+    const normalized = normalizeDecimalString(value);
+    if (normalized === '') return null;
     return /^-?\d+(\.\d+)?$/.test(normalized) ? normalized : null;
   }
   return null;
