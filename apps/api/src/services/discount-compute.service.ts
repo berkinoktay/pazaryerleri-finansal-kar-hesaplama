@@ -185,8 +185,10 @@ interface ScenarioCompute {
  * Resolves the commission AT `price` (the band lookup uses this exact price — the
  * load-bearing subtlety: an item's discounted price may land in a different band than
  * its current price), then assembles the variant's econ and runs the engine. Reason
- * order (spec §5.2): commission null → NO_COMMISSION, variant null → NO_PRODUCT, else
- * the cost/shipping gate (deriveReason).
+ * order: variant null → NO_PRODUCT (the true root cause of an UNMATCHED catalog row —
+ * gated first so it is never masked by an unresolvable commission), then commission null
+ * → NO_COMMISSION, then the cost/shipping gate (deriveReason). A matched row's outcome is
+ * unaffected by this ordering — it can never hit the NO_PRODUCT branch.
  */
 function priceScenario(
   ctx: TariffAssemblyContext,
@@ -197,11 +199,11 @@ function priceScenario(
   price: Decimal,
 ): ScenarioCompute {
   const resolved = resolveDiscountCommission(commission, price);
-  if (resolved === null) {
-    return { resolved: null, calculable: false, reason: 'NO_COMMISSION', breakdown: null };
-  }
   if (variant === null) {
     return { resolved, calculable: false, reason: 'NO_PRODUCT', breakdown: null };
+  }
+  if (resolved === null) {
+    return { resolved: null, calculable: false, reason: 'NO_COMMISSION', breakdown: null };
   }
   const probe = assembleUnitEconomics(ctx, variant, {
     costAggregate: cost,

@@ -2,11 +2,16 @@ import { Decimal } from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
 import {
+  computeDiscountItem,
   effectiveUnitPrice,
   resolveDiscountCommission,
+  type DiscountCommissionInputs,
   type DiscountConfig,
+  type TariffAssemblyContext,
+  type TariffVariant,
 } from '@/services/discount-compute.service';
 import type { StoredBand } from '@/services/commission-tariff.types';
+import { NO_SHIPPING } from '@/services/tariff-compute-commons';
 
 const d = (v: string | number): Decimal => new Decimal(v);
 const price = (config: DiscountConfig, p: string | number): string =>
@@ -141,5 +146,65 @@ describe('resolveDiscountCommission', () => {
         new Decimal('250'),
       ),
     ).toBeNull();
+  });
+});
+
+describe('computeDiscountItem reason precedence', () => {
+  const ctx: TariffAssemblyContext = {
+    platform: 'TRENDYOL',
+    feeDefs: {
+      commissionVatRate: new Decimal(20),
+      stoppageRate: new Decimal('0.01'),
+      psfNet: new Decimal('10.99'),
+      psfVatRate: new Decimal(20),
+      shipVatRate: new Decimal(20),
+    },
+  };
+  // A chain that resolves NOTHING — no band, no synced rate, no category rate.
+  const noCommission: DiscountCommissionInputs = {
+    bands: null,
+    productRate: null,
+    categoryRate: null,
+  };
+  const config: DiscountConfig = { type: 'NET', valueKind: 'PERCENT', value: d(10) };
+  const variant: TariffVariant = {
+    id: 'v1',
+    stockCode: 'STK-1',
+    barcode: 'BC-1',
+    salePrice: new Decimal('100'),
+    vatRate: 20,
+    isDigital: false,
+    product: { title: 'Ürün', categoryId: null, brandId: null },
+  };
+
+  it('reports NO_PRODUCT (not NO_COMMISSION) for an unmatched row, even when the chain is empty', () => {
+    const out = computeDiscountItem(
+      ctx,
+      null,
+      undefined,
+      NO_SHIPPING,
+      noCommission,
+      d(100),
+      config,
+    );
+    expect(out.calculable).toBe(false);
+    expect(out.reason).toBe('NO_PRODUCT');
+    // No commission resolved either, so the scenario carries no rate/source.
+    expect(out.current.commissionSource).toBeNull();
+    expect(out.current.commissionPct).toBeNull();
+  });
+
+  it('reports NO_COMMISSION when the variant matched but the chain resolves nothing', () => {
+    const out = computeDiscountItem(
+      ctx,
+      variant,
+      undefined,
+      NO_SHIPPING,
+      noCommission,
+      d(100),
+      config,
+    );
+    expect(out.calculable).toBe(false);
+    expect(out.reason).toBe('NO_COMMISSION');
   });
 });
