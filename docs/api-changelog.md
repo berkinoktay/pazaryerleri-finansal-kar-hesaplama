@@ -84,6 +84,13 @@ section "Versioning" for details.
     `mode:"all"` / `"none"` flip the whole list. An empty `"set"` payload is a **422**
     `SELECTIONS_REQUIRED`. Returns `{ updated }`.
   - `DELETE .../discount-lists/{listId}` hard-deletes the list (items cascade); **204**.
+  - `POST .../discount-lists/{listId}/export` returns Trendyol's ORIGINAL uploaded file
+    (`XLSX`, `attachment; filename*=UTF-8''…`) with each row's participation written back
+    into the "Kampayaya Dahil Edilsin Mi?" column — an included row as "Evet", an excluded
+    one as "Hayır". Only cells that DEVIATE from the source are byte-patched, so every other
+    cell is byte-for-byte intact and a list with no changes vs. the original streams back
+    verbatim. Marks the list exported. **409** `CONFLICT` when the list kept no stored source
+    file (or it is unreadable / not a recognizable İndirimler export). `DATA_WRITE` capability.
 - **Generic manual-sync trigger endpoint** (`POST /v1/organizations/{orgId}/stores/{storeId}/syncs`).
   Enqueues a PENDING MANUAL `SyncLog` for the `syncType` chosen in the body
   (`{ "syncType": "ORDERS" | "PRODUCTS" | "SETTLEMENTS" | "CLAIMS" }`) and returns

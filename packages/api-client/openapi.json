@@ -20269,6 +20269,122 @@
         }
       }
     },
+    "/v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}/export": {
+      "post": {
+        "tags": [
+          "DiscountLists"
+        ],
+        "summary": "Export the discount list as a re-uploadable Trendyol Excel",
+        "description": "Returns Trendyol's ORIGINAL uploaded file with each row's participation written back into the \"Kampayaya Dahil Edilsin Mi?\" column: an included row gets \"Evet\", an excluded row gets \"Hayır\". Only cells that DEVIATE from the source are patched — every other cell is byte-for-byte unchanged, so the file can be re-uploaded to Trendyol verbatim, and a list with no changes vs. the original streams back byte-for-byte identical. Marks the list exported. Returns 409 if the list has no stored source file (or it is unreadable / not a recognizable İndirimler export).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "orgId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "listId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The patched .xlsx, ready to re-upload to Trendyol",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid auth token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role to modify store data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "List or store not found in this organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "List has no stored source file to export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "description": "Seconds to wait before retrying"
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/organizations/{orgId}/shipping-carriers": {
       "get": {
         "tags": [
