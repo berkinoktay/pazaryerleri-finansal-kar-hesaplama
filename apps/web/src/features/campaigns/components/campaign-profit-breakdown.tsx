@@ -45,11 +45,13 @@ export interface CampaignProfitBreakdownProps {
   /** Applied commission percent (e.g. "19.00"); shown in the what-if context line. */
   commissionPct?: string | null;
   /**
-   * Where the commission came from (already localized by the caller, e.g. "Tarife bandı") —
-   * rendered muted right next to the commission percent. Optional; verticals that don't resolve
-   * a source omit it and the annotation is not shown.
+   * Where the commission came from (already localized by the caller, e.g. "Tarife bandı" or
+   * "Tarife bandı · 7 - 14 Temmuz") — rendered muted right next to the commission percent.
+   * Optional; verticals that don't resolve a source omit it and the annotation is not shown.
    */
   commissionSourceLabel?: string | null;
+  /** Optional hover tooltip on the source label (e.g. the resolving tariff's name). */
+  commissionSourceTitle?: string | null;
   /** Resolved not-calculable reason text (the caller maps its vertical's enum). */
   reasonText?: string | null;
   /** True while the estimate request is in flight. */
@@ -88,6 +90,7 @@ export function CampaignProfitBreakdown({
   breakdown,
   commissionPct,
   commissionSourceLabel,
+  commissionSourceTitle,
   reasonText,
   loading,
   profitLabel,
@@ -151,7 +154,10 @@ export function CampaignProfitBreakdown({
                           {formatPercentDisplay(commissionPct)}
                         </span>
                         {commissionSourceLabel != null && commissionSourceLabel !== '' ? (
-                          <span> · {commissionSourceLabel}</span>
+                          <span title={commissionSourceTitle ?? undefined}>
+                            {' · '}
+                            {commissionSourceLabel}
+                          </span>
                         ) : null}
                       </span>
                     ) : null}

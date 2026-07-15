@@ -54,6 +54,17 @@ export function DiscountBreakdown({
   };
   const source = result?.commissionSource ?? null;
 
+  // For a 'band' source, append the resolving tariff PERIOD next to the label (e.g.
+  // "Tarife bandı · 7 - 14 Temmuz") and expose the tariff NAME as a hover tooltip — the
+  // seller sees which future-anchored week actually fed the rate. Labels are data, not i18n.
+  const periodLabel = result?.commissionPeriodLabel ?? null;
+  const baseSourceLabel = source !== null ? sourceLabel[source] : null;
+  const commissionSourceLabel =
+    baseSourceLabel !== null && source === 'band' && periodLabel !== null && periodLabel !== ''
+      ? `${baseSourceLabel} · ${periodLabel}`
+      : baseSourceLabel;
+  const commissionSourceTitle = source === 'band' ? (result?.commissionTariffName ?? null) : null;
+
   return (
     <CampaignProfitBreakdown
       open={open}
@@ -64,7 +75,8 @@ export function DiscountBreakdown({
       stockCode={stockCode}
       breakdown={result?.breakdown ?? null}
       commissionPct={result?.commissionPct ?? null}
-      commissionSourceLabel={source !== null ? sourceLabel[source] : null}
+      commissionSourceLabel={commissionSourceLabel}
+      commissionSourceTitle={commissionSourceTitle}
       reasonText={result?.reason != null ? reasonLabel(result.reason) : null}
       loading={loading}
       currentNetProfit={currentNetProfit}
