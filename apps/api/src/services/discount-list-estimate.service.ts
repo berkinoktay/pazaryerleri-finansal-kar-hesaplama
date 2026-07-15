@@ -18,8 +18,8 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveCommissionSource } from './advantage-tariff.service';
 import { resolveCommissionRate } from './commission-rate-resolver';
+import { resolveDiscountCommissionSource } from './discount-commission-source';
 import {
   computeDiscountEstimate,
   effectiveUnitPrice,
@@ -73,6 +73,7 @@ export async function estimateDiscountItem(
             buyQuantity: true,
             payQuantity: true,
             nthIndex: true,
+            startsAt: true,
           },
         },
       },
@@ -139,22 +140,15 @@ export async function estimateDiscountItem(
     }
   }
 
-  // Bands come from the store's LATEST commission tariff (its active/nearest period),
-  // matched by barcode — the same source the detail view uses.
-  let latestTariff;
-  try {
-    latestTariff = await prisma.commissionTariff.findFirst({
-      where: { organizationId: orgId, storeId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    });
-  } catch (err) {
-    mapPrismaError(err);
-  }
-  const source =
-    latestTariff !== null
-      ? await resolveCommissionSource(orgId, storeId, latestTariff.id, new Date())
-      : null;
+  // Bands come from the store's commission tariff — anchored to a future campaign start
+  // (the covering week's period), else the latest tariff resolved now — matched by
+  // barcode. The SAME source the detail view uses (discount-commission-source.ts).
+  const source = await resolveDiscountCommissionSource(
+    orgId,
+    storeId,
+    item.list.startsAt,
+    new Date(),
+  );
   const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
 
   const commission: DiscountCommissionInputs = { bands, productRate, categoryRate };
@@ -173,5 +167,9 @@ export async function estimateDiscountItem(
     calculable: computed.calculable,
     reason: computed.reason,
     breakdown: computed.breakdown,
+    // Transparency: which tariff/period fed the band tier (from the resolution, when one
+    // existed — even if THIS item fell through to product/category; null otherwise).
+    commissionTariffName: source?.tariffName ?? null,
+    commissionPeriodLabel: source?.periodLabel ?? null,
   };
 }

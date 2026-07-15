@@ -13,6 +13,7 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Discount commission bands anchor to a future campaign start, and the resolving tariff period is now exposed** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}` and `POST .../discount-lists/{listId}/items/{itemId}/estimate`). When a list's `startsAt` is in the future, the commission tariff bands are resolved from the tariff week that COVERS that start instant (across all of the store's tariffs), not just the latest-created tariff; lists with a past/absent `startsAt` are unchanged. Both `DiscountListDetail` and `EstimateDiscountItemResult` gain two nullable fields — `commissionTariffName` and `commissionPeriodLabel` — describing which tariff and period actually fed the band tier (null when no tariff resolved).
 - **`buyboxStatus` removed from the discount detail item** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`). The `items[].buyboxStatus` field is gone from `DiscountListDetailItem`; the discount vertical no longer surfaces Buybox ownership. The Excel column is still tolerated on import and simply ignored.
 - **Trendyol order webhook becomes a durable queue with a deferred ingest mode**
   (`POST /v1/webhooks/orders/{storeId}`, Paket D). The response semantics and the

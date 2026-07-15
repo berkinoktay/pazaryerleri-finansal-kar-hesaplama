@@ -7152,6 +7152,18 @@
                 ]
               }
             ]
+          },
+          "commissionTariffName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPeriodLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -7162,7 +7174,9 @@
           "commissionSource",
           "calculable",
           "reason",
-          "breakdown"
+          "breakdown",
+          "commissionTariffName",
+          "commissionPeriodLabel"
         ]
       },
       "DiscountCommissionSource": {
@@ -7281,6 +7295,18 @@
           "exported": {
             "type": "boolean"
           },
+          "commissionTariffName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPeriodLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "summary": {
             "$ref": "#/components/schemas/DiscountListSummary"
           },
@@ -7306,6 +7332,8 @@
           "startsAt",
           "endsAt",
           "exported",
+          "commissionTariffName",
+          "commissionPeriodLabel",
           "summary",
           "items"
         ]

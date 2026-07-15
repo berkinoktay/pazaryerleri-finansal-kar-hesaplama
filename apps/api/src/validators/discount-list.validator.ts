@@ -365,6 +365,10 @@ export const DiscountListDetailSchema = z
     name: z.string(),
     ...discountConfigShape,
     exported: z.boolean(),
+    // Şeffaflık: bantları besleyen komisyon tarifesi + dönem (kaynak yoksa null).
+    // Gelecekte başlayan kampanyada anchor kuralı kapsayan haftayı çözer.
+    commissionTariffName: z.string().nullable(),
+    commissionPeriodLabel: z.string().nullable(),
     summary: DiscountListSummarySchema,
     items: z.array(DiscountListDetailItemSchema),
   })
@@ -430,6 +434,10 @@ export const EstimateDiscountItemResultSchema = z
     calculable: z.boolean(),
     reason: DiscountItemReasonSchema.nullable(),
     breakdown: QuoteBreakdownSchema.nullable(),
+    // Şeffaflık: bant kademesini besleyen komisyon tarifesi + dönem. Bir kaynak
+    // çözüldüyse (kalem product/category'e düşse bile) doludur; yoksa null.
+    commissionTariffName: z.string().nullable(),
+    commissionPeriodLabel: z.string().nullable(),
   })
   .openapi('EstimateDiscountItemResult');
 

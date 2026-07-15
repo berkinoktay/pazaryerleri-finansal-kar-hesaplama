@@ -23,8 +23,8 @@ import { mapPrismaError } from '@pazarsync/sync-core';
 import type { EstimateOutcome } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
-import { resolveCommissionSource } from './advantage-tariff.service';
 import { resolveCommissionRate } from './commission-rate-resolver';
+import { resolveDiscountCommissionSource } from './discount-commission-source';
 import {
   computeDiscountItem,
   type DiscountCommissionInputs,
@@ -238,21 +238,10 @@ export async function getDiscountListDetail(
     ]);
   }
 
-  // ─── Resolve the store's LATEST commission tariff bands (1st tier) ─────────
-  let latestTariff;
-  try {
-    latestTariff = await prisma.commissionTariff.findFirst({
-      where: { organizationId: orgId, storeId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    });
-  } catch (err) {
-    mapPrismaError(err);
-  }
-  const source =
-    latestTariff !== null
-      ? await resolveCommissionSource(orgId, storeId, latestTariff.id, new Date())
-      : null;
+  // ─── Resolve the commission tariff bands (1st tier), anchored to a future ──
+  // campaign start: a future `startsAt` reads the covering week's period; else the
+  // store's latest tariff resolved now. See discount-commission-source.ts.
+  const source = await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, new Date());
 
   // ─── Category-rate fallback cache (3rd tier) — once per distinct (cat, brand) ──
   const categoryRateByKey = new Map<string, Decimal | null>();
@@ -371,6 +360,9 @@ export async function getDiscountListDetail(
     startsAt: list.startsAt !== null ? list.startsAt.toISOString() : null,
     endsAt: list.endsAt !== null ? list.endsAt.toISOString() : null,
     exported: list.exportedAt !== null,
+    // Transparency: which tariff/period actually fed the bands (null when none resolved).
+    commissionTariffName: source?.tariffName ?? null,
+    commissionPeriodLabel: source?.periodLabel ?? null,
     summary: {
       itemCount: list.items.length,
       selectedCount,
