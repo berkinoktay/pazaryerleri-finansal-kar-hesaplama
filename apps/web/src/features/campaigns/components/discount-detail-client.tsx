@@ -2,6 +2,7 @@
 
 import { ArrowLeft01Icon, Delete02Icon, DownloadCircle01Icon } from 'hugeicons-react';
 import { useTranslations } from 'next-intl';
+import { parseAsBoolean, parseAsString, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
 import { ConfirmDialog } from '@/components/patterns/confirm-dialog';
@@ -20,7 +21,6 @@ import { useExportDiscountList } from '../hooks/use-export-discount-list';
 import { useUpdateDiscountSelections } from '../hooks/use-update-discount-selections';
 import { toDiscountListView, type DiscountRow } from '../lib/adapt-discount-list';
 import {
-  EMPTY_DISCOUNT_FILTERS,
   filterDiscountRows,
   hasActiveDiscountFilters,
   profitableSelections,
@@ -77,14 +77,51 @@ export function DiscountDetailClient({
   const list = detail.data ?? null;
   const view = React.useMemo(() => (list !== null ? toDiscountListView(list) : null), [list]);
 
-  const [filters, setFilters] = React.useState<DiscountFilterState>(EMPTY_DISCOUNT_FILTERS);
+  // View state (search + the three filter chips) is URL-owned via nuqs: reload / share /
+  // back-forward reproduce the exact view. Each chip is a boolean param that drops from the URL
+  // at its default (false) and q drops when empty, so a clean view leaves no query string. The
+  // breakdown modal + config-edit dialog stay LOCAL — transient edit state, not a shareable view.
+  const [urlState, setUrlState] = useQueryStates(
+    {
+      q: parseAsString.withDefault(''),
+      buyboxLosers: parseAsBoolean.withDefault(false),
+      profitable: parseAsBoolean.withDefault(false),
+      losing: parseAsBoolean.withDefault(false),
+    },
+    { history: 'push' },
+  );
   const [breakdown, setBreakdown] = React.useState<BreakdownState | null>(null);
   const [editOpen, setEditOpen] = React.useState(false);
 
-  const applyFilters = React.useCallback((next: Partial<DiscountFilterState>): void => {
-    setFilters((prev) => ({ ...prev, ...next }));
-  }, []);
-  const resetFilters = React.useCallback((): void => setFilters(EMPTY_DISCOUNT_FILTERS), []);
+  // Derive the DiscountFilterState the toolbar + filterDiscountRows consume. Memoized on the raw
+  // params so its identity stays stable across unrelated renders — keeps the filteredRows memo
+  // below from recomputing (a fresh object each render would defeat it).
+  const filters = React.useMemo<DiscountFilterState>(
+    () => ({
+      query: urlState.q,
+      buyboxLosers: urlState.buyboxLosers,
+      profitable: urlState.profitable,
+      losing: urlState.losing,
+    }),
+    [urlState.q, urlState.buyboxLosers, urlState.profitable, urlState.losing],
+  );
+
+  const applyFilters = (next: Partial<DiscountFilterState>): void => {
+    const patch = {
+      ...(next.query !== undefined ? { q: next.query } : {}),
+      ...(next.buyboxLosers !== undefined ? { buyboxLosers: next.buyboxLosers } : {}),
+      ...(next.profitable !== undefined ? { profitable: next.profitable } : {}),
+      ...(next.losing !== undefined ? { losing: next.losing } : {}),
+    };
+    // Per-keystroke search writes REPLACE (no letter-by-letter Back history); chip toggles PUSH.
+    if (next.query !== undefined) {
+      void setUrlState(patch, { history: 'replace' });
+      return;
+    }
+    void setUrlState(patch);
+  };
+  const resetFilters = (): void =>
+    void setUrlState({ q: '', buyboxLosers: false, profitable: false, losing: false });
 
   // Stable handlers for the table `columns` — a single-row toggle and the breakdown opener never
   // change identity (the mutate fns are React-Query-stable), so `columns` never rebuilds.
