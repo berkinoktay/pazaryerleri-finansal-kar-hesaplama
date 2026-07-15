@@ -1827,7 +1827,7 @@
     },
     "actions": {
       "export": "Dışa aktar",
-      "exportEmptyHint": "Include at least one product before exporting."
+      "exportEmptyHint": "Dışa aktarmadan önce en az bir ürünü kampanyaya dahil edin."
     }
   },
   "featureStatus": {
