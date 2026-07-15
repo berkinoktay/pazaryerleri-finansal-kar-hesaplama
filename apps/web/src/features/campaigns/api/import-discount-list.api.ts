@@ -1,31 +1,15 @@
 import type { components } from '@pazarsync/api-client';
-import type { DiscountType } from '@pazarsync/db/enums';
 
 import { apiClient } from '@/lib/api-client/browser';
 import { throwApiError } from '@/lib/api-error';
 
-export type ImportDiscountListResponse = components['schemas']['ImportDiscountListResponse'];
+import type { DiscountConfigFormValues } from '../lib/discount-config';
 
-/**
- * The discount configuration carried alongside the upload. Every field except
- * `discountType` is an optional raw form string (the backend validates the combination
- * against the discount type). This is a local structural mirror of the config form model;
- * Task 14's `../lib/discount-config` owns the canonical `DiscountConfigFormValues` and will
- * re-home / alias this shape.
- */
-export interface DiscountConfigFormValues {
-  discountType: DiscountType;
-  valueKind?: string;
-  value?: string;
-  minBasketAmount?: string;
-  minQuantity?: string;
-  buyQuantity?: string;
-  payQuantity?: string;
-  nthIndex?: string;
-  orderLimit?: string;
-  startsAt?: string;
-  endsAt?: string;
-}
+// `DiscountConfigFormValues` is owned by `../lib/discount-config` (re-homed in Görev 14).
+// Re-exported here so existing import sites (e.g. use-import-discount-list) keep working.
+export type { DiscountConfigFormValues };
+
+export type ImportDiscountListResponse = components['schemas']['ImportDiscountListResponse'];
 
 export interface ImportDiscountListInput {
   file: File;
