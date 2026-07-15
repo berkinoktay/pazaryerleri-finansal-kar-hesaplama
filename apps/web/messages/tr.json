@@ -1706,12 +1706,27 @@
         "empty": "Dosyada ürün satırı bulunamadı.",
         "tooLarge": "Dosya çok büyük — daha küçük bir dosya yükleyin.",
         "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
+      },
+      "fieldErrors": {
+        "required": "This field is required.",
+        "integer": "Enter a whole number.",
+        "decimal": "Enter a valid amount (up to 2 decimals).",
+        "payLessThanBuy": "The pay quantity must be less than the buy quantity.",
+        "valueNotAllowed": "This discount type does not take a value.",
+        "nthRange": "The target item must be between 2 and 4.",
+        "fixedOnlyNth": "A fixed price is only available for the Nth item discount.",
+        "percentOver100": "The percentage cannot exceed 100.",
+        "endBeforeStart": "The end date must be after the start date.",
+        "generic": "Please check this field."
       }
     },
     "list": {
       "upload": "Excel Dosyası Yükle",
       "search": "Listelerde ara…",
       "lastUpdated": "Son güncelleme: {date}",
+      "filterLabel": "Filter by status",
+      "selectAll": "Select all",
+      "selectRow": "Select row",
       "listStatus": {
         "all": "Tümü",
         "exported": "İndirildi",
@@ -1725,7 +1740,29 @@
         "updated": "Güncellendi",
         "status": "Durum"
       },
+      "summary": {
+        "total": "Total lists",
+        "products": "Products",
+        "selected": "Included",
+        "selectedContext": "rows are included",
+        "noSelected": "no selection yet",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "all exported",
+        "exportedPending": "{count} lists awaiting export"
+      },
+      "empty": {
+        "title": "No discount list yet",
+        "description": "Start by uploading the Discounts Excel you downloaded from the Trendyol panel; set the discount and see your profit at the discounted price.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
       "bulk": {
+        "selected": "{count} lists selected",
         "delete": "Seçilenleri sil",
         "deleteTitle": "Seçili listeleri sil",
         "deleteDescription": "{count} liste ve tüm seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",

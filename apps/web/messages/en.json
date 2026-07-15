@@ -1706,12 +1706,27 @@
         "empty": "No product rows found in the file.",
         "tooLarge": "The file is too large — upload a smaller file.",
         "generic": "The file could not be uploaded. Please try again."
+      },
+      "fieldErrors": {
+        "required": "This field is required.",
+        "integer": "Enter a whole number.",
+        "decimal": "Enter a valid amount (up to 2 decimals).",
+        "payLessThanBuy": "The pay quantity must be less than the buy quantity.",
+        "valueNotAllowed": "This discount type does not take a value.",
+        "nthRange": "The target item must be between 2 and 4.",
+        "fixedOnlyNth": "A fixed price is only available for the Nth item discount.",
+        "percentOver100": "The percentage cannot exceed 100.",
+        "endBeforeStart": "The end date must be after the start date.",
+        "generic": "Please check this field."
       }
     },
     "list": {
       "upload": "Upload Excel File",
       "search": "Search list…",
       "lastUpdated": "Last updated: {date}",
+      "filterLabel": "Filter by status",
+      "selectAll": "Select all",
+      "selectRow": "Select row",
       "listStatus": {
         "all": "All",
         "exported": "Downloaded",
@@ -1725,7 +1740,29 @@
         "updated": "Updated",
         "status": "Status"
       },
+      "summary": {
+        "total": "Total lists",
+        "products": "Products",
+        "selected": "Included",
+        "selectedContext": "rows are included",
+        "noSelected": "no selection yet",
+        "exported": "Exported",
+        "exportedValue": "{count} / {total}",
+        "exportedAllDone": "all exported",
+        "exportedPending": "{count} lists awaiting export"
+      },
+      "empty": {
+        "title": "No discount list yet",
+        "description": "Start by uploading the Discounts Excel you downloaded from the Trendyol panel; set the discount and see your profit at the discounted price.",
+        "cta": "Upload Excel File"
+      },
+      "actions": {
+        "open": "Open",
+        "export": "Download",
+        "delete": "Delete"
+      },
       "bulk": {
+        "selected": "{count} lists selected",
         "delete": "Delete selected",
         "deleteTitle": "Delete selected lists",
         "deleteDescription": "{count} lists and all of their selections will be permanently deleted. This action cannot be undone.",
