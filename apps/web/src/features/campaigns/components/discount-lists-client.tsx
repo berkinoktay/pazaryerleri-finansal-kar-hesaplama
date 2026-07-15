@@ -131,6 +131,7 @@ export function DiscountsListClient({
         onSubmit={handleImport}
         submitting={importList.isPending}
         errorCode={extractFileErrorCode(importList.error)}
+        submitError={importList.error}
         onResetError={() => importList.reset()}
       />
     </>

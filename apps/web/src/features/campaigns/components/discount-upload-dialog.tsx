@@ -36,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ApiError } from '@/lib/api-error';
 
 import {
   discountConfigFormSchema,
@@ -92,6 +93,27 @@ const CLEARABLE_CONFIG_FIELDS: readonly ConfigFieldKey[] = [
   'payQuantity',
   'nthIndex',
 ];
+
+// The RHF-backed form fields — a backend VALIDATION_ERROR whose `field` is one of these maps
+// to a `form.setError`; `file` (owned by the errorCode path) and `name` (local state, rendered
+// inline) are handled outside this set so no issue renders twice.
+const RHF_FIELD_NAMES = [
+  'discountType',
+  'valueKind',
+  'value',
+  'minBasketAmount',
+  'minQuantity',
+  'buyQuantity',
+  'payQuantity',
+  'nthIndex',
+  'orderLimit',
+  'startsAt',
+  'endsAt',
+] as const satisfies readonly (keyof DiscountConfigFormValues)[];
+
+function isRhfFieldName(field: string): field is (typeof RHF_FIELD_NAMES)[number] {
+  return RHF_FIELD_NAMES.some((name) => name === field);
+}
 
 /**
  * Maps a backend file-rejection code to its localized message key bucket. Discount-specific
@@ -178,6 +200,12 @@ export interface DiscountUploadDialogProps {
   submitting?: boolean;
   /** Backend file-rejection code (from `extractFileErrorCode`), shown inline. */
   errorCode?: string | null;
+  /**
+   * The import mutation's error. On a `VALIDATION_ERROR` its `problem.errors[]` are walked into
+   * inline field messages (config via `form.setError`, `name` via an inline line) — since
+   * `VALIDATION_ERROR` is globally silenced, this is the ONLY feedback for a config/name 422.
+   */
+  submitError?: Error | null;
   /** Clears the last import error when the seller picks a different file. */
   onResetError?: () => void;
 }
@@ -196,6 +224,7 @@ export function DiscountUploadDialog({
   onSubmit,
   submitting = false,
   errorCode,
+  submitError,
   onResetError,
 }: DiscountUploadDialogProps): React.ReactElement {
   const t = useTranslations('discountsPage.upload');
@@ -207,6 +236,14 @@ export function DiscountUploadDialog({
 
   const [file, setFile] = React.useState<File | null>(null);
   const [name, setName] = React.useState('');
+
+  // `name` is local state (not RHF — the config schema is a ZodEffects that can't carry it), so
+  // its backend error is DERIVED from the mutation error rather than mirrored into state (no
+  // setState-in-effect). It clears when the next submit's error no longer carries a name issue.
+  const nameServerError = React.useMemo<string | null>(() => {
+    if (!(submitError instanceof ApiError) || submitError.code !== 'VALIDATION_ERROR') return null;
+    return submitError.problem.errors?.find((issue) => issue.field === 'name')?.code ?? null;
+  }, [submitError]);
 
   const form = useForm<DiscountConfigFormValues>({
     resolver: zodResolver(discountConfigFormSchema),
@@ -231,6 +268,22 @@ export function DiscountUploadDialog({
     for (const key of CLEARABLE_CONFIG_FIELDS) form.setValue(key, undefined);
     form.clearErrors(CLEARABLE_CONFIG_FIELDS);
   }, [form]);
+
+  // Surface backend VALIDATION_ERROR field issues inline (the global toast pipeline silences
+  // VALIDATION_ERROR). Config fields are pushed into RHF via form.setError → FormMessage; `name`
+  // is derived above; `file` is skipped because the errorCode path already owns it, so no issue
+  // renders twice. The client zod schema mirrors the backend gate 1:1, so in practice this only
+  // fires for backend-only checks or a genuine client/backend drift. (Canonical pattern from
+  // apps/web/CLAUDE.md — an effect is required because setError writes into external RHF state.)
+  React.useEffect(() => {
+    if (!(submitError instanceof ApiError) || submitError.code !== 'VALIDATION_ERROR') return;
+    for (const issue of submitError.problem.errors ?? []) {
+      if (issue.field === 'file' || issue.field === 'name') continue;
+      if (isRhfFieldName(issue.field)) {
+        form.setError(issue.field, { type: 'server', message: issue.code });
+      }
+    }
+  }, [submitError, form]);
 
   const handleOpenChange = (next: boolean): void => {
     // Reset the whole form (config + file + name) when the dialog closes so reopening starts clean.
@@ -343,8 +396,14 @@ export function DiscountUploadDialog({
                   <Input
                     id="discount-list-name"
                     value={name}
+                    invalid={nameServerError !== null}
                     onChange={(event) => setName(event.target.value)}
                   />
+                  {nameServerError !== null ? (
+                    <p className="text-2xs text-destructive font-medium" role="alert">
+                      {configFieldError(nameServerError)}
+                    </p>
+                  ) : null}
                 </div>
 
                 <FormField
