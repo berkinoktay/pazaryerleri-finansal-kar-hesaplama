@@ -1711,8 +1711,6 @@ model DiscountListItem {
   modelCode    String? @map("model_code")
   // "Güncel Satış Fiyatı" — "250 ₺" biçimli METİNDEN normalize edilir (import).
   currentPrice Decimal @map("current_price") @db.Decimal(12, 2)
-  // "Buybox" kolonu ham metin (örn. "Kazanan"/"Kaybeden") — UI rozet + filtre.
-  buyboxStatus String? @map("buybox_status")
   // Satıcının katılım seçimi. Import, Excel'de halihazırda "Evet" olan satırı true
   // başlatır; export yalnız kaynaktan SAPAN hücreleri yamalar.
   included  Boolean  @default(false)

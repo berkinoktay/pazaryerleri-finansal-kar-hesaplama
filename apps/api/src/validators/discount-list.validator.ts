@@ -337,7 +337,6 @@ export const DiscountListDetailItemSchema = z
     brand: z.string().nullable(),
     color: z.string().nullable(),
     imageUrl: z.string().nullable(),
-    buyboxStatus: z.string().nullable(),
     included: z.boolean(),
     calculable: z.boolean(),
     reason: DiscountItemReasonSchema.nullable(),

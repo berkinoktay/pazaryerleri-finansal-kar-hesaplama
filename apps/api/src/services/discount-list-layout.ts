@@ -23,7 +23,6 @@ export interface DiscountListLayout {
   readonly barcode: number;
   readonly modelCode: number;
   readonly currentPrice: number;
-  readonly buybox: number;
   /** "Kampayaya Dahil Edilsin Mi?" — the ONE column export writes back. */
   readonly included: number;
 }
@@ -47,7 +46,6 @@ export function resolveDiscountListLayout(
     barcode: col('Barkod'),
     modelCode: col('Model Kodu'),
     currentPrice: col('Güncel Satış Fiyatı'),
-    buybox: col('Buybox'),
     // Trendyol's header has a typo; match it first, fall back to the correct form.
     included:
       col('Kampayaya Dahil Edilsin Mi?') >= 0

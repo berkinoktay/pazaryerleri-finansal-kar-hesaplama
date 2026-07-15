@@ -175,7 +175,6 @@ export async function getDiscountListDetail(
             productTitle: true,
             brand: true,
             color: true,
-            buyboxStatus: true,
             included: true,
             currentPrice: true,
           },
@@ -325,7 +324,6 @@ export async function getDiscountListDetail(
       color: item.color,
       imageUrl:
         item.productVariantId !== null ? (imageMap.get(item.productVariantId) ?? null) : null,
-      buyboxStatus: item.buyboxStatus,
       included: item.included,
       calculable: computed.calculable,
       reason: computed.reason,

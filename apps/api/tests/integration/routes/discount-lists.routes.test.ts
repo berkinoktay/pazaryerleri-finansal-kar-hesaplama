@@ -41,7 +41,6 @@ interface ItemWire {
   brand: string | null;
   color: string | null;
   imageUrl: string | null;
-  buyboxStatus: string | null;
   included: boolean;
   calculable: boolean;
   reason: string | null;
@@ -150,7 +149,6 @@ async function setupFixture(): Promise<Fixture> {
       productTitle: 'İndirim Ürünü',
       brand: 'Alpaka',
       color: 'Kırmızı',
-      buyboxStatus: 'Kazanan',
       currentPrice: new Decimal('250.00'),
       included: true,
       sortOrder: 0,

@@ -31,7 +31,6 @@ interface ParsedDiscountRow {
   color: string | null;
   modelCode: string | null;
   currentPrice: string;
-  buyboxStatus: string | null;
   included: boolean;
 }
 
@@ -50,7 +49,6 @@ function parseRow(row: readonly unknown[], layout: DiscountListLayout): ParsedDi
     color: layout.color >= 0 ? cellText(row, layout.color) : null,
     modelCode: layout.modelCode >= 0 ? cellText(row, layout.modelCode) : null,
     currentPrice,
-    buyboxStatus: layout.buybox >= 0 ? cellText(row, layout.buybox) : null,
     included: cellText(row, layout.included) === DISCOUNT_INCLUDED_YES,
   };
 }
@@ -175,7 +173,6 @@ export async function importDiscountList(
         barcode: p.barcode,
         modelCode: p.modelCode,
         currentPrice: p.currentPrice,
-        buyboxStatus: p.buyboxStatus,
         included: p.included,
         sortOrder: index,
       }));

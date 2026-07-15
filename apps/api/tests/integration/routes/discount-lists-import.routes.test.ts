@@ -145,7 +145,6 @@ describe('POST .../discount-lists/import - happy path', () => {
       where: { listId: imported.listId, barcode: MATCHED_BARCODE },
     });
     expect(Number(first?.currentPrice)).toBe(250);
-    expect(first?.buyboxStatus).toBe('Kaybeden');
     expect(first?.productVariantId).not.toBeNull();
   });
 

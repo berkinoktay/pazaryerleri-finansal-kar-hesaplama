@@ -13,6 +13,7 @@ section "Versioning" for details.
 
 ### Changed
 
+- **`buyboxStatus` removed from the discount detail item** (`GET /v1/organizations/{orgId}/stores/{storeId}/discount-lists/{listId}`). The `items[].buyboxStatus` field is gone from `DiscountListDetailItem`; the discount vertical no longer surfaces Buybox ownership. The Excel column is still tolerated on import and simply ignored.
 - **Trendyol order webhook becomes a durable queue with a deferred ingest mode**
   (`POST /v1/webhooks/orders/{storeId}`, Paket D). The response semantics and the
   processing model changed; no request/response body shape change:

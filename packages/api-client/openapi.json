@@ -7386,12 +7386,6 @@
               "null"
             ]
           },
-          "buyboxStatus": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "included": {
             "type": "boolean"
           },
@@ -7483,7 +7477,6 @@
           "brand",
           "color",
           "imageUrl",
-          "buyboxStatus",
           "included",
           "calculable",
           "reason",
