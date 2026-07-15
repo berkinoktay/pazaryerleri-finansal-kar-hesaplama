@@ -144,7 +144,7 @@ jobs:
       # repos), so this OSS action fills the gap. gitleaks-action REQUIRES
       # GITHUB_TOKEN to scan PR commits — without it the step errors (which the
       # earlier continue-on-error masked as a false "pass"). Blocking as of #216.
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
