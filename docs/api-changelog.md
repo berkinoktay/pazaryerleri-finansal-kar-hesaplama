@@ -52,9 +52,27 @@ section "Versioning" for details.
 
 ### Added
 
+- **Discount list import endpoint**
+  (`POST /v1/organizations/{orgId}/stores/{storeId}/discount-lists/import`) — Fifth
+  campaign vertical, for Trendyol's "İndirimler" (Promosyon & Fiyat) product-selection
+  Excel. Multipart: the `.xlsx` `file` + an optional display `name` + the discount
+  configuration as string form fields (`discountType` = `NET` / `CONDITIONAL_BASKET` /
+  `CONDITIONAL_QUANTITY` / `BUY_X_PAY_Y` / `NTH_PRODUCT` / `CODE`, plus the per-type
+  parameters `valueKind` / `value` / `minBasketAmount` / `minQuantity` / `buyQuantity` /
+  `payQuantity` / `nthIndex` and the optional `orderLimit` / `startsAt` / `endsAt`).
+  Per-type requirements are enforced field-level — **422** `VALIDATION_ERROR` with codes
+  such as `VALUE_REQUIRED`, `MIN_BASKET_REQUIRED`, `NTH_INDEX_OUT_OF_RANGE` (2–4),
+  `PAY_MUST_BE_LESS_THAN_BUY`, `FIXED_PRICE_ONLY_FOR_NTH`, `PERCENT_OVER_100`,
+  `END_BEFORE_START`; file rejections use `field:"file"` codes (`EMPTY_DISCOUNT_FILE`,
+  `INVALID_DISCOUNT_FORMAT`, plus the shared upload guards). Columns are resolved by
+  header NAME (Trendyol's own "Kampayaya" typo matched verbatim, corrected spelling
+  accepted as fallback); the "Güncel Satış Fiyatı" TEXT column ("250 ₺" style) is
+  currency-parsed; a row already marked "Evet" imports as included. **201**
+  `{ listId, name, itemCount, matched, unmatched, skippedRows }`; the raw file is kept
+  for the byte-preserving export. `DATA_WRITE` capability.
 - **Discount list read / write endpoints** (İndirimler — `GET`, `PATCH`, `DELETE`
   under `/v1/organizations/{orgId}/stores/{storeId}/discount-lists`). Siblings of the
-  Flash Products surface, on top of the existing import upload:
+  Flash Products surface, on top of the import upload above:
   - `GET .../discount-lists` returns `{ data: [...] }`, one row per saved list with its
     discount configuration (type + per-type parameters), item count, included count and
     the exported flag. Money fields are GROSS decimal strings, dates ISO.

@@ -29,8 +29,8 @@ const app = createApp();
 const VALID_CONFIG = { discountType: 'NET', valueKind: 'PERCENT', value: '10' } as const;
 
 // A dummy file plus a VALID config passes the import form validation and reaches the
-// store-access gate — the config gate runs before the gate, so a file-only form would
-// 422 before the 404 (see discount-lists-import.routes.test.ts).
+// store-access gate — form validation runs before the store-access gate, so a
+// file-only form would 422 before the 404 (see discount-lists-import.routes.test.ts).
 const VALID_IMPORT_CONFIG = { discountType: 'NET', valueKind: 'PERCENT', value: '20' } as const;
 
 // The barcode Org A's discount item and Org B's commission band both use in the
