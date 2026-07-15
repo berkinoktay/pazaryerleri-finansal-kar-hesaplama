@@ -1708,25 +1708,25 @@
         "generic": "Dosya yüklenemedi. Lütfen tekrar deneyin."
       },
       "fieldErrors": {
-        "required": "This field is required.",
-        "integer": "Enter a whole number.",
-        "decimal": "Enter a valid amount (up to 2 decimals).",
-        "payLessThanBuy": "The pay quantity must be less than the buy quantity.",
-        "valueNotAllowed": "This discount type does not take a value.",
-        "nthRange": "The target item must be between 2 and 4.",
-        "fixedOnlyNth": "A fixed price is only available for the Nth item discount.",
-        "percentOver100": "The percentage cannot exceed 100.",
-        "endBeforeStart": "The end date must be after the start date.",
-        "generic": "Please check this field."
+        "required": "Bu alan zorunludur.",
+        "integer": "Tam sayı girin.",
+        "decimal": "Geçerli bir tutar girin (en fazla 2 ondalık).",
+        "payLessThanBuy": "Ödenecek adet, alınacak adetten küçük olmalıdır.",
+        "valueNotAllowed": "Bu indirim türü değer almaz.",
+        "nthRange": "Hedef ürün 2 ile 4 arasında olmalıdır.",
+        "fixedOnlyNth": "Sabit fiyat yalnız X. ürüne indirimde kullanılabilir.",
+        "percentOver100": "Yüzde 100'ü aşamaz.",
+        "endBeforeStart": "Bitiş tarihi başlangıçtan sonra olmalıdır.",
+        "generic": "Lütfen bu alanı kontrol edin."
       }
     },
     "list": {
       "upload": "Excel Dosyası Yükle",
       "search": "Listelerde ara…",
       "lastUpdated": "Son güncelleme: {date}",
-      "filterLabel": "Filter by status",
-      "selectAll": "Select all",
-      "selectRow": "Select row",
+      "filterLabel": "Duruma göre filtrele",
+      "selectAll": "Tümünü seç",
+      "selectRow": "Satırı seç",
       "listStatus": {
         "all": "Tümü",
         "exported": "İndirildi",
@@ -1741,28 +1741,28 @@
         "status": "Durum"
       },
       "summary": {
-        "total": "Total lists",
-        "products": "Products",
-        "selected": "Included",
-        "selectedContext": "rows are included",
-        "noSelected": "no selection yet",
-        "exported": "Exported",
+        "total": "Toplam liste",
+        "products": "Ürün",
+        "selected": "Dahil edilen",
+        "selectedContext": "satır kampanyaya dahil",
+        "noSelected": "henüz seçim yok",
+        "exported": "Dışa aktarılan",
         "exportedValue": "{count} / {total}",
-        "exportedAllDone": "all exported",
-        "exportedPending": "{count} lists awaiting export"
+        "exportedAllDone": "tümü dışa aktarıldı",
+        "exportedPending": "{count} liste dışa aktarım bekliyor"
       },
       "empty": {
-        "title": "No discount list yet",
-        "description": "Start by uploading the Discounts Excel you downloaded from the Trendyol panel; set the discount and see your profit at the discounted price.",
-        "cta": "Upload Excel File"
+        "title": "Henüz indirim listesi yok",
+        "description": "Trendyol panelinden indirdiğiniz İndirimler Excel'ini yükleyerek başlayın; indirimi ayarlayın ve indirimli fiyattaki kârınızı görün.",
+        "cta": "Excel Dosyası Yükle"
       },
       "actions": {
-        "open": "Open",
-        "export": "Download",
-        "delete": "Delete"
+        "open": "Aç",
+        "export": "İndir",
+        "delete": "Sil"
       },
       "bulk": {
-        "selected": "{count} lists selected",
+        "selected": "{count} liste seçildi",
         "delete": "Seçilenleri sil",
         "deleteTitle": "Seçili listeleri sil",
         "deleteDescription": "{count} liste ve tüm seçimleri kalıcı olarak silinecek. Bu işlem geri alınamaz.",
