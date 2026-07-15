@@ -1751,7 +1751,7 @@
       "delta": "vs current",
       "included": "Included",
       "includeRow": "Include this product",
-      "over500Warning": "A discount above ₺500 may require Trendyol approval.",
+      "over500Warning": "More than 500 products are selected — Trendyol processes only the first 500.",
       "variantNote": "This product has multiple variants; the discount applies to all of them."
     },
     "commissionSource": {
