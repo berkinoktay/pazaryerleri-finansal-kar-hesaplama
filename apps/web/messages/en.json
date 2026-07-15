@@ -1826,7 +1826,8 @@
       "notFoundDescription": "This list may have been deleted or may not belong to this store."
     },
     "actions": {
-      "export": "Export"
+      "export": "Export",
+      "exportEmptyHint": "Include at least one product before exporting."
     }
   },
   "featureStatus": {

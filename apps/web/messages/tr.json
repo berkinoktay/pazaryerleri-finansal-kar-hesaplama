@@ -1826,7 +1826,8 @@
       "notFoundDescription": "Bu liste silinmiş olabilir veya bu mağazaya ait olmayabilir."
     },
     "actions": {
-      "export": "Dışa aktar"
+      "export": "Dışa aktar",
+      "exportEmptyHint": "Include at least one product before exporting."
     }
   },
   "featureStatus": {
