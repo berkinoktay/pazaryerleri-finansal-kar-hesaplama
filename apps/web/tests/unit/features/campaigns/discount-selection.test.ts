@@ -7,7 +7,7 @@ import {
   EMPTY_DISCOUNT_FILTERS,
   filterDiscountRows,
   hasActiveDiscountFilters,
-  profitableRowIds,
+  profitableSelections,
   type DiscountFilterState,
 } from '@/features/campaigns/lib/discount-selection';
 
@@ -162,6 +162,15 @@ describe('filterDiscountRows', () => {
       const rows = [makeRow({ id: 'a', modelCode: null })];
       expect(filterDiscountRows(rows, filters({ query: 'model-1' }))).toEqual([]);
     });
+
+    it('lowercases with the Turkish locale (dotless I): "KIRMIZI BAYRAK" matches "kırmızı"', () => {
+      const rows = [
+        makeRow({ id: 'tr', productTitle: 'KIRMIZI BAYRAK', barcode: 'X', modelCode: 'Y' }),
+      ];
+      expect(filterDiscountRows(rows, filters({ query: 'kırmızı' })).map((r) => r.id)).toEqual([
+        'tr',
+      ]);
+    });
   });
 
   describe('combined filters', () => {
@@ -205,29 +214,35 @@ describe('filterDiscountRows', () => {
   });
 });
 
-// ─── profitableRowIds ─────────────────────────────────────────────────────────
+// ─── profitableSelections ─────────────────────────────────────────────────────
 
-describe('profitableRowIds', () => {
-  it('returns ids of only the strictly-profitable rows it is given', () => {
+describe('profitableSelections', () => {
+  it('is EXCLUSIVE: profitable rows → true, loss/null rows → false (all visible rows present)', () => {
     const rows = [
       makeRow({ id: 'pos', discountedNetProfit: '2.00' }),
       makeRow({ id: 'zero', discountedNetProfit: '0' }),
       makeRow({ id: 'neg', discountedNetProfit: '-4.00' }),
       makeRow({ id: 'null', discountedNetProfit: null }),
     ];
-    expect(profitableRowIds(rows)).toEqual(['pos']);
+    expect(profitableSelections(rows)).toEqual([
+      { itemId: 'pos', included: true },
+      { itemId: 'zero', included: false },
+      { itemId: 'neg', included: false },
+      { itemId: 'null', included: false },
+    ]);
   });
 
-  it('respects the caller-supplied (already filtered) row set — no hidden row leaks in', () => {
+  it('respects the caller-supplied (already filtered) row set — hidden rows are absent', () => {
     const allRows = [
       makeRow({ id: 'visible-pos', discountedNetProfit: '2.00' }),
       makeRow({ id: 'hidden-pos', discountedNetProfit: '2.00' }),
     ];
-    // Caller passes only the first row (the visible slice); the second must not appear.
-    expect(profitableRowIds([allRows[0]])).toEqual(['visible-pos']);
+    // Caller passes only the first row (the visible slice); the second must not appear at all
+    // (so mode 'set' leaves the hidden row's current selection untouched).
+    expect(profitableSelections([allRows[0]])).toEqual([{ itemId: 'visible-pos', included: true }]);
   });
 
   it('returns an empty array for empty input', () => {
-    expect(profitableRowIds([])).toEqual([]);
+    expect(profitableSelections([])).toEqual([]);
   });
 });

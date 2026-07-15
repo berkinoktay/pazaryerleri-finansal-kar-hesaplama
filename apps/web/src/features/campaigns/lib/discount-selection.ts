@@ -45,7 +45,7 @@ function matchesQuery(row: DiscountRow, needle: string): boolean {
   const haystack = [row.productTitle, row.barcode, row.modelCode]
     .filter((value): value is string => value !== null)
     .join(' ')
-    .toLowerCase();
+    .toLocaleLowerCase('tr');
   return haystack.includes(needle);
 }
 
@@ -63,7 +63,7 @@ export function filterDiscountRows(
   rows: readonly DiscountRow[],
   filters: DiscountFilterState,
 ): DiscountRow[] {
-  const needle = filters.query.trim().toLowerCase();
+  const needle = filters.query.trim().toLocaleLowerCase('tr');
   return rows.filter((row) => {
     if (needle !== '' && !matchesQuery(row, needle)) return false;
     if (filters.buyboxLosers && row.buyboxStatus !== BUYBOX_LOSER) return false;
@@ -74,10 +74,17 @@ export function filterDiscountRows(
 }
 
 /**
- * The ids of the given rows whose DISCOUNTED price still nets a profit — the target set for the
- * "kârda kalanları seç" smart-select. Callers pass the currently VISIBLE (filtered) rows so the
- * action respects the active filters.
+ * The EXCLUSIVE "kârda kalanları seç" projection over the given rows: every row whose DISCOUNTED
+ * price still nets a profit maps to `included: true`, and EVERY other row maps to `included: false`
+ * — so applying it with mode 'set' both selects the winners and deselects the rest in one shot.
+ * Callers pass the currently VISIBLE (filtered) rows, so hidden rows are absent and keep their
+ * existing selection.
  */
-export function profitableRowIds(rows: readonly DiscountRow[]): string[] {
-  return rows.filter((row) => isProfitPositive(row.discounted.netProfit)).map((row) => row.id);
+export function profitableSelections(
+  rows: readonly DiscountRow[],
+): { itemId: string; included: boolean }[] {
+  return rows.map((row) => ({
+    itemId: row.id,
+    included: isProfitPositive(row.discounted.netProfit),
+  }));
 }

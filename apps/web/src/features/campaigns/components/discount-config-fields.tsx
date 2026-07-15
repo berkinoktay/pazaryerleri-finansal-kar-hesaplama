@@ -132,6 +132,11 @@ export function useConfigFieldErrorMessage(): (code: string) => string {
         return t('percentOver100');
       case 'END_BEFORE_START':
         return t('endBeforeStart');
+      // Magnitude-bound codes (backend + client mirror) share the generic "value out of range" copy.
+      case 'VALUE_TOO_LARGE':
+      case 'MIN_BASKET_TOO_LARGE':
+      case 'INT_TOO_LARGE':
+        return t('generic');
       default:
         return t('generic');
     }

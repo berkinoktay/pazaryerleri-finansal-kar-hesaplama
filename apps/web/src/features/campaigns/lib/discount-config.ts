@@ -57,6 +57,18 @@ const NTH_INDEX_MIN = 2;
 const NTH_INDEX_MAX = 4;
 const PERCENT_MAX = 100;
 
+// Magnitude ceilings mirroring the backend gate: `value`/`minBasketAmount` are Decimal(12,2)
+// (10 integer digits + 2 decimals); the count fields are 32-bit Int, kept below 2^31-1.
+const MAX_DECIMAL_VALUE = 9999999999.99;
+const MAX_INT_VALUE = 2000000000;
+const INT_CONFIG_FIELDS = [
+  'minQuantity',
+  'buyQuantity',
+  'payQuantity',
+  'nthIndex',
+  'orderLimit',
+] as const;
+
 // Multipart upload + JSON edit both carry every config field as a STRING, so a single object
 // mirrors both entry paths — exactly like the backend's `DiscountConfigFieldsSchema`.
 const discountConfigFieldsSchema = z.object({
@@ -79,7 +91,7 @@ const discountConfigFieldsSchema = z.object({
  * issue light up the SAME inline message.
  */
 export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((val, ctx) => {
-  const need = (field: ConfigFieldKey | 'endsAt', code: string): void => {
+  const need = (field: ConfigFieldKey | 'endsAt' | 'orderLimit', code: string): void => {
     ctx.addIssue({ code: 'custom', message: code, path: [field] });
   };
 
@@ -90,6 +102,10 @@ export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((
   if (val.discountType === 'BUY_X_PAY_Y') {
     if (val.buyQuantity === undefined) need('buyQuantity', 'BUY_QUANTITY_REQUIRED');
     if (val.payQuantity === undefined) need('payQuantity', 'PAY_QUANTITY_REQUIRED');
+    // The INT_RE regex accepts '0'; a pay quantity below 1 is meaningless (buy N, pay nothing).
+    if (val.payQuantity !== undefined && Number(val.payQuantity) < 1) {
+      need('payQuantity', 'INVALID_PAY_QUANTITY');
+    }
     if (
       val.buyQuantity !== undefined &&
       val.payQuantity !== undefined &&
@@ -134,6 +150,18 @@ export const discountConfigFormSchema = discountConfigFieldsSchema.superRefine((
     new Date(val.startsAt).getTime() >= new Date(val.endsAt).getTime()
   ) {
     need('endsAt', 'END_BEFORE_START');
+  }
+
+  // Magnitude bounds — a clean inline error instead of a backend 422/500 on the write.
+  if (val.value !== undefined && Number(val.value) > MAX_DECIMAL_VALUE) {
+    need('value', 'VALUE_TOO_LARGE');
+  }
+  if (val.minBasketAmount !== undefined && Number(val.minBasketAmount) > MAX_DECIMAL_VALUE) {
+    need('minBasketAmount', 'MIN_BASKET_TOO_LARGE');
+  }
+  for (const field of INT_CONFIG_FIELDS) {
+    const raw = val[field];
+    if (raw !== undefined && Number(raw) > MAX_INT_VALUE) need(field, 'INT_TOO_LARGE');
   }
 });
 

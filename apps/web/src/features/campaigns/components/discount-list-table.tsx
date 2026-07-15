@@ -98,6 +98,7 @@ export function DiscountListTable({
             }
             onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
             aria-label={tList('selectAll')}
+            className="cursor-pointer"
           />
         ),
         cell: ({ row }) => (
@@ -105,6 +106,7 @@ export function DiscountListTable({
             checked={row.getIsSelected()}
             onCheckedChange={(value) => row.toggleSelected(!!value)}
             aria-label={tList('selectRow')}
+            className="cursor-pointer"
           />
         ),
       },

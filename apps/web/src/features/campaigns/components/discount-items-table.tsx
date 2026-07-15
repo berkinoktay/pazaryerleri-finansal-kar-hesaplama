@@ -221,11 +221,15 @@ export function DiscountItemsTable({
 
   const rowState = React.useMemo(() => ({ selectionsPending }), [selectionsPending]);
 
+  // Fresh array copy for TanStack (it mutates its own row model), memoized so the reference is
+  // stable across unrelated re-renders — only a new `rows` prop rebuilds it.
+  const data = React.useMemo(() => [...rows], [rows]);
+
   return (
     <DiscountRowStateContext.Provider value={rowState}>
       <DataTable<DiscountRow, unknown>
         columns={columns}
-        data={[...rows]}
+        data={data}
         getRowId={(row) => row.id}
         initialColumnPinning={{ left: ['include', 'product'] }}
         hasActiveFilters={hasActiveFilters}

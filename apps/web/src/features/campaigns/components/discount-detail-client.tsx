@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/patterns/page-header';
 import { PageSkeleton } from '@/components/patterns/page-skeleton';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useRouter } from '@/i18n/navigation';
+import { Link, useRouter } from '@/i18n/navigation';
 import { ApiError } from '@/lib/api-error';
 
 import { useDeleteDiscountList } from '../hooks/use-delete-discount-list';
@@ -23,7 +23,7 @@ import {
   EMPTY_DISCOUNT_FILTERS,
   filterDiscountRows,
   hasActiveDiscountFilters,
-  profitableRowIds,
+  profitableSelections,
   type DiscountFilterState,
 } from '../lib/discount-selection';
 import { downloadBlob } from '../lib/download-blob';
@@ -109,6 +109,22 @@ export function DiscountDetailClient({
     [view, filters],
   );
 
+  // No store selected: the detail query is disabled and every action needs a store, so show a
+  // store-selection state instead of the misleading "not found". Mirrors the list screen's guard.
+  if (orgId === null || storeId === null) {
+    return (
+      <EmptyState
+        title={tPage('noStore.title')}
+        description={tPage('noStore.description')}
+        action={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/settings/stores">{tPage('noStore.cta')}</Link>
+          </Button>
+        }
+      />
+    );
+  }
+
   if (detail.isLoading) {
     return <PageSkeleton label={tCommon('loading')} withBackLink statCells={5} framed />;
   }
@@ -136,7 +152,7 @@ export function DiscountDetailClient({
     );
   }
 
-  if (view === null || list === null || orgId === null || storeId === null) {
+  if (view === null || list === null) {
     return (
       <EmptyState
         title={tPage('templates.notFoundTitle')}
@@ -159,7 +175,7 @@ export function DiscountDetailClient({
   const onSelectProfitable = (): void =>
     mutateSelections({
       mode: 'set',
-      selections: profitableRowIds(filteredRows).map((itemId) => ({ itemId, included: true })),
+      selections: profitableSelections(filteredRows),
     });
 
   const onExport = (): void => {
