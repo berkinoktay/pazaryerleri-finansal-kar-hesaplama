@@ -63,6 +63,11 @@ export interface TrendyolVariant {
   variantId: number;
   supplierId: number;
   barcode: string;
+  // Variant-level commission PERCENT (e.g. 7.83) documented in the approved-products
+  // v2 example response (docs/integrations/trendyol/7-trendyol-marketplace-entegrasyonu/
+  // urun-entegrasyonu-v2/urun-filtreleme-onayli-urun-v2.md:323). Optional: treat a
+  // missing value as "Trendyol didn't say", never as an error.
+  commission?: number | null;
   attributes?: TrendyolAttribute[];
   productUrl?: string;
   onSale?: boolean;
@@ -168,6 +173,12 @@ export interface MappedProductVariant {
   // dimensionalWeight, which is exclusively the user's override (see
   // ProductVariant schema comment).
   syncedDimensionalWeight: string;
+  // Commission PERCENT synced from Trendyol (7.83 = %7.83). Unlike desi there is no
+  // zero-floor: 0/absent both mean "unknown" and collapse to null — a real %0
+  // commission does not exist on the wire, and downstream fallback chains must be
+  // able to tell "synced" from "unknown". Lands in syncedCommissionRate only; there
+  // is no user-override twin column (yet).
+  syncedCommissionRate: string | null;
 }
 
 export interface MappedProduct {
