@@ -1778,9 +1778,6 @@
     },
     "table": {
       "product": "Ürün Bilgisi",
-      "buybox": "Buybox",
-      "buyboxWinner": "Buybox kazananı",
-      "buyboxLoser": "Buybox kaybedeni",
       "currentPrice": "Güncel fiyat",
       "discountedPrice": "İndirimli fiyat",
       "delta": "Güncele göre",
@@ -1801,7 +1798,6 @@
       "clear": "Seçimleri temizle"
     },
     "filters": {
-      "buyboxLosers": "Buybox kaybedenler",
       "profitable": "Kârda kalanlar",
       "losing": "Zarara düşenler"
     },

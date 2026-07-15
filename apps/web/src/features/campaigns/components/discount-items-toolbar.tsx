@@ -31,11 +31,11 @@ export interface DiscountItemsToolbarProps {
 const TRENDYOL_SELECTION_CAP = 500;
 
 /**
- * İndirimler detail toolbar: search + three filter chips (buybox losers / profitable / losing)
- * + the smart-select popover (include all, only-profitable, clear). Mounted by BOTH the desktop
- * table's toolbar zone and the mobile cards header. Below the controls sit the over-500 warning
- * (Trendyol caps at the first 500 included products) and the variant note. The filter chips are
- * pure projections over the backend-computed profit sign — comparison, never money math.
+ * İndirimler detail toolbar: search + two filter chips (profitable / losing) + the smart-select
+ * popover (include all, only-profitable, clear). Mounted by BOTH the desktop table's toolbar zone
+ * and the mobile cards header. Below the controls sit the over-500 warning (Trendyol caps at the
+ * first 500 included products) and the variant note. The filter chips are pure projections over
+ * the backend-computed profit sign — comparison, never money math.
  */
 export function DiscountItemsToolbar({
   filters,
@@ -62,14 +62,6 @@ export function DiscountItemsToolbar({
         />
 
         <div className="gap-2xs flex flex-wrap items-center">
-          <Toggle
-            variant="outline"
-            size="sm"
-            pressed={filters.buyboxLosers}
-            onPressedChange={(pressed) => onFiltersChange({ buyboxLosers: pressed })}
-          >
-            {tFilters('buyboxLosers')}
-          </Toggle>
           <Toggle
             variant="outline"
             size="sm"

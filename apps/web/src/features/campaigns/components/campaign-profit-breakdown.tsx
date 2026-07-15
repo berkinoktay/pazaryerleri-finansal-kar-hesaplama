@@ -44,6 +44,12 @@ export interface CampaignProfitBreakdownProps {
   breakdown: QuoteBreakdownData | null;
   /** Applied commission percent (e.g. "19.00"); shown in the what-if context line. */
   commissionPct?: string | null;
+  /**
+   * Where the commission came from (already localized by the caller, e.g. "Tarife bandı") —
+   * rendered muted right next to the commission percent. Optional; verticals that don't resolve
+   * a source omit it and the annotation is not shown.
+   */
+  commissionSourceLabel?: string | null;
   /** Resolved not-calculable reason text (the caller maps its vertical's enum). */
   reasonText?: string | null;
   /** True while the estimate request is in flight. */
@@ -81,6 +87,7 @@ export function CampaignProfitBreakdown({
   stockCode,
   breakdown,
   commissionPct,
+  commissionSourceLabel,
   reasonText,
   loading,
   profitLabel,
@@ -143,6 +150,9 @@ export function CampaignProfitBreakdown({
                         <span className="text-foreground font-medium tabular-nums">
                           {formatPercentDisplay(commissionPct)}
                         </span>
+                        {commissionSourceLabel != null && commissionSourceLabel !== '' ? (
+                          <span> · {commissionSourceLabel}</span>
+                        ) : null}
                       </span>
                     ) : null}
                   </div>

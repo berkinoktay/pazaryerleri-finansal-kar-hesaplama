@@ -37,7 +37,6 @@ function detailItem() {
     brand: 'Marka B',
     color: 'Siyah',
     imageUrl: 'https://cdn.example/urun.jpg',
-    buyboxStatus: 'Kaybeden',
     included: true,
     calculable: true,
     reason: null,
@@ -85,7 +84,6 @@ describe('useDiscountListDetail', () => {
     expect(result.current.data?.id).toBe(LIST_ID);
     expect(result.current.data?.items).toHaveLength(1);
     const item = result.current.data?.items[0];
-    expect(item?.buyboxStatus).toBe('Kaybeden');
     expect(item?.current.netProfit).toBe('25.00');
     expect(item?.discounted.netProfit).toBe('10.00');
   });

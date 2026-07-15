@@ -11,16 +11,9 @@ import type { DiscountRow } from './adapt-discount-list';
  * themselves, so the no-frontend-financial-calculation rule holds.
  */
 
-// Buybox ownership labels as they arrive in the Trendyol product-selection file (data values,
-// not UI copy — so they are matched literally, never localized).
-export const BUYBOX_WINNER = 'Kazanan';
-export const BUYBOX_LOSER = 'Kaybeden';
-
-/** The detail toolbar's view state — a search string plus three independent filter chips. */
+/** The detail toolbar's view state — a search string plus two independent filter chips. */
 export interface DiscountFilterState {
   query: string;
-  /** Keep only rows that lost the buybox. */
-  buyboxLosers: boolean;
   /** Keep only rows whose discounted price still nets a profit (> 0). */
   profitable: boolean;
   /** Keep only rows whose discounted price makes a loss (< 0). */
@@ -29,16 +22,13 @@ export interface DiscountFilterState {
 
 export const EMPTY_DISCOUNT_FILTERS: DiscountFilterState = {
   query: '',
-  buyboxLosers: false,
   profitable: false,
   losing: false,
 };
 
 /** True when any chip or the search box is active — drives the table's "clear filters" CTA. */
 export function hasActiveDiscountFilters(filters: DiscountFilterState): boolean {
-  return (
-    filters.query.trim() !== '' || filters.buyboxLosers || filters.profitable || filters.losing
-  );
+  return filters.query.trim() !== '' || filters.profitable || filters.losing;
 }
 
 function matchesQuery(row: DiscountRow, needle: string): boolean {
@@ -66,7 +56,6 @@ export function filterDiscountRows(
   const needle = filters.query.trim().toLocaleLowerCase('tr');
   return rows.filter((row) => {
     if (needle !== '' && !matchesQuery(row, needle)) return false;
-    if (filters.buyboxLosers && row.buyboxStatus !== BUYBOX_LOSER) return false;
     if (filters.profitable && !isProfitPositive(row.discounted.netProfit)) return false;
     if (filters.losing && !isProfitNegative(row.discounted.netProfit)) return false;
     return true;

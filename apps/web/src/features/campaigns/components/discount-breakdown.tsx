@@ -27,8 +27,10 @@ export interface DiscountBreakdownProps {
 /**
  * İndirimler adapter over the shared {@link CampaignProfitBreakdown}: resolves this vertical's
  * not-calculable reason (which INCLUDES `NO_COMMISSION`, unlike Flash) and forwards the estimate
- * for the chosen scenario. Wired exactly like the Flash breakdown — the client owns the estimate
- * mutation + which item/scenario is open, this only renders the result.
+ * for the chosen scenario. Unlike the sibling verticals it also annotates the commission with its
+ * SOURCE (tariff band / product / category) next to the rate inside the modal — the rows
+ * themselves only show price + profit. Wired like the Flash breakdown — the client owns the
+ * estimate mutation + which item/scenario is open, this only renders the result.
  */
 export function DiscountBreakdown({
   open,
@@ -41,7 +43,17 @@ export function DiscountBreakdown({
   currentNetProfit,
 }: DiscountBreakdownProps): React.ReactElement {
   const t = useTranslations('discountsPage.breakdown');
+  const tSource = useTranslations('discountsPage.commissionSource');
   const reasonLabel = useDiscountReasonLabel();
+
+  // Concrete-key label map (next-intl's typed `t` takes a literal, not the source union).
+  const sourceLabel: Record<'band' | 'product' | 'category', string> = {
+    band: tSource('band'),
+    product: tSource('product'),
+    category: tSource('category'),
+  };
+  const source = result?.commissionSource ?? null;
+
   return (
     <CampaignProfitBreakdown
       open={open}
@@ -52,6 +64,7 @@ export function DiscountBreakdown({
       stockCode={stockCode}
       breakdown={result?.breakdown ?? null}
       commissionPct={result?.commissionPct ?? null}
+      commissionSourceLabel={source !== null ? sourceLabel[source] : null}
       reasonText={result?.reason != null ? reasonLabel(result.reason) : null}
       loading={loading}
       currentNetProfit={currentNetProfit}

@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { DiscountRow, DiscountScenario } from '@/features/campaigns/lib/adapt-discount-list';
 import {
-  BUYBOX_LOSER,
-  BUYBOX_WINNER,
   EMPTY_DISCOUNT_FILTERS,
   filterDiscountRows,
   hasActiveDiscountFilters,
@@ -25,7 +23,7 @@ function scenario(netProfit: string | null): DiscountScenario {
 
 /**
  * Minimal DiscountRow factory. `discountedNetProfit` drives the profitable/losing sign checks;
- * `buyboxStatus` drives the buybox-loser chip; the search fields are overridable for query tests.
+ * the search fields are overridable for query tests.
  */
 function makeRow(
   overrides: Partial<{
@@ -33,7 +31,6 @@ function makeRow(
     productTitle: string;
     barcode: string;
     modelCode: string | null;
-    buyboxStatus: string | null;
     discountedNetProfit: string | null;
   }> = {},
 ): DiscountRow {
@@ -42,7 +39,6 @@ function makeRow(
     productTitle = 'Kablosuz Kulaklık',
     barcode = 'BARCODE-1',
     modelCode = 'MODEL-1',
-    buyboxStatus = null,
     discountedNetProfit = '10.00',
   } = overrides;
   return {
@@ -54,7 +50,6 @@ function makeRow(
     brand: null,
     color: null,
     imageUrl: null,
-    buyboxStatus,
     included: false,
     calculable: true,
     reason: null,
@@ -83,7 +78,6 @@ describe('hasActiveDiscountFilters', () => {
   });
 
   it('is true when any chip is active', () => {
-    expect(hasActiveDiscountFilters(filters({ buyboxLosers: true }))).toBe(true);
     expect(hasActiveDiscountFilters(filters({ profitable: true }))).toBe(true);
     expect(hasActiveDiscountFilters(filters({ losing: true }))).toBe(true);
   });
@@ -99,18 +93,6 @@ describe('filterDiscountRows', () => {
 
   it('returns an empty array for empty input', () => {
     expect(filterDiscountRows([], filters({ profitable: true }))).toEqual([]);
-  });
-
-  describe('buyboxLosers chip', () => {
-    it('keeps only rows whose buybox status is the loser label', () => {
-      const rows = [
-        makeRow({ id: 'winner', buyboxStatus: BUYBOX_WINNER }),
-        makeRow({ id: 'loser', buyboxStatus: BUYBOX_LOSER }),
-        makeRow({ id: 'unknown', buyboxStatus: null }),
-      ];
-      const kept = filterDiscountRows(rows, filters({ buyboxLosers: true }));
-      expect(kept.map((r) => r.id)).toEqual(['loser']);
-    });
   });
 
   describe('profitable chip', () => {
@@ -176,39 +158,26 @@ describe('filterDiscountRows', () => {
   describe('combined filters', () => {
     it('applies every active predicate together (AND semantics)', () => {
       const rows = [
-        // loser + profitable + matches query → kept
+        // profitable + matches query → kept
         makeRow({
           id: 'keep',
           productTitle: 'Deri Cüzdan',
-          buyboxStatus: BUYBOX_LOSER,
           discountedNetProfit: '8.00',
         }),
-        // loser + profitable but fails the query
+        // profitable but fails the query
         makeRow({
           id: 'wrong-query',
           productTitle: 'Başka Ürün',
-          buyboxStatus: BUYBOX_LOSER,
           discountedNetProfit: '8.00',
         }),
-        // matches query + profitable but won the buybox
-        makeRow({
-          id: 'winner',
-          productTitle: 'Deri Cüzdan',
-          buyboxStatus: BUYBOX_WINNER,
-          discountedNetProfit: '8.00',
-        }),
-        // loser + matches query but not profitable
+        // matches query but not profitable
         makeRow({
           id: 'losing',
           productTitle: 'Deri Cüzdan',
-          buyboxStatus: BUYBOX_LOSER,
           discountedNetProfit: '-1.00',
         }),
       ];
-      const kept = filterDiscountRows(
-        rows,
-        filters({ query: 'cüzdan', buyboxLosers: true, profitable: true }),
-      );
+      const kept = filterDiscountRows(rows, filters({ query: 'cüzdan', profitable: true }));
       expect(kept.map((r) => r.id)).toEqual(['keep']);
     });
   });

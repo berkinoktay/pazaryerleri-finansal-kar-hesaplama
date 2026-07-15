@@ -18,7 +18,6 @@ import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow } from '../lib/adapt-discount-list';
-import { DiscountBuyboxBadge } from './discount-buybox-badge';
 import { ProfitDelta } from './profit-delta';
 
 /** Which price scenario a profit badge opens in the breakdown modal. */
@@ -71,11 +70,11 @@ export interface DiscountItemsTableProps {
 
 /**
  * The İndirimler detail table: one row per product with a participation checkbox, its identity,
- * buybox ownership, the CURRENT and DISCOUNTED price scenarios (each a price + a clickable
- * profit badge that opens the breakdown), the discounted scenario's commission source, and the
- * "güncele göre" profit delta. Every figure is backend-computed; the badge/delta only render.
- * The bulk selection lives in the toolbar, so there is NO header checkbox. Row count can reach
- * 500, so the body paginates.
+ * and the CURRENT and DISCOUNTED price scenarios (each a price + a clickable profit badge that
+ * opens the breakdown). The discounted scenario also carries the "güncele göre" profit delta
+ * directly under its badge (mirroring the flash detail). Every figure is backend-computed; the
+ * badge/delta only render. The bulk selection lives in the toolbar, so there is NO header
+ * checkbox. Row count can reach 500, so the body paginates.
  */
 export function DiscountItemsTable({
   rows,
@@ -88,21 +87,12 @@ export function DiscountItemsTable({
 }: DiscountItemsTableProps): React.ReactElement {
   const t = useTranslations('discountsPage.table');
   const tNoResults = useTranslations('discountsPage.noResults');
-  const tSource = useTranslations('discountsPage.commissionSource');
   const reasonEmptyLabel = useDiscountReasonEmptyLabel();
   const scale = useMarginColoring();
   // Local (not persisted): every list opens at 100%; the seller can shrink it for the session.
   const [tableScale, setTableScale] = React.useState(TABLE_SCALE_DEFAULT);
 
   const columns = React.useMemo<ColumnDef<DiscountRow>[]>(() => {
-    // Concrete-key label map (next-intl's typed `t` takes a literal, not the source union). Built
-    // inside the memo so it stays stable while `columns` does.
-    const sourceLabel: Record<'band' | 'product' | 'category', string> = {
-      band: tSource('band'),
-      product: tSource('product'),
-      category: tSource('category'),
-    };
-
     const includeColumn: ColumnDef<DiscountRow> = {
       id: 'include',
       header: t('included'),
@@ -137,12 +127,6 @@ export function DiscountItemsTable({
       },
     };
 
-    const buyboxColumn: ColumnDef<DiscountRow> = {
-      id: 'buybox',
-      header: t('buybox'),
-      cell: ({ row }) => <DiscountBuyboxBadge status={row.original.buyboxStatus} />,
-    };
-
     const currentColumn: ColumnDef<DiscountRow> = {
       id: 'current',
       header: t('currentPrice'),
@@ -170,7 +154,6 @@ export function DiscountItemsTable({
       meta: { label: t('discountedPrice') },
       cell: ({ row }) => {
         const r = row.original;
-        const source = r.discounted.commissionSource;
         return (
           <div className="gap-3xs flex flex-col items-start">
             <Currency value={r.discounted.price} className="text-sm font-medium" />
@@ -181,43 +164,24 @@ export function DiscountItemsTable({
               onOpen={() => onOpenBreakdown(r, 'discounted')}
               emptyLabel={reasonEmptyLabel(r.reason)}
             />
-            {source !== null ? (
-              <span className="text-2xs text-muted-foreground">{sourceLabel[source]}</span>
-            ) : null}
+            {/* "Güncele göre" delta sits directly under the discounted badge — mirroring the
+                flash detail's TariffProfitBlock, not a standalone column. */}
+            <ProfitDelta
+              optionNetProfit={r.discounted.netProfit}
+              currentNetProfit={r.current.netProfit}
+              label={t('delta')}
+            />
           </div>
         );
       },
     };
 
-    const deltaColumn: ColumnDef<DiscountRow> = {
-      id: 'delta',
-      header: t('delta'),
-      meta: { label: t('delta') },
-      cell: ({ row }) => {
-        const r = row.original;
-        return (
-          <ProfitDelta
-            optionNetProfit={r.discounted.netProfit}
-            currentNetProfit={r.current.netProfit}
-            label={t('delta')}
-          />
-        );
-      },
-    };
-
-    return [
-      includeColumn,
-      productColumn,
-      buyboxColumn,
-      currentColumn,
-      discountedColumn,
-      deltaColumn,
-    ];
-    // `columns` identity MUST stay STABLE. Every dep is identity-stable: `t`/`tSource` from
-    // next-intl, `onToggleInclude`/`onOpenBreakdown` from the parent's useCallback, and
-    // `reasonEmptyLabel` (useCallback-stable). `scale` only changes when the seller edits their
-    // margin ramp (rare) and there is no fragile cell input to lose.
-  }, [t, tSource, scale, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
+    return [includeColumn, productColumn, currentColumn, discountedColumn];
+    // `columns` identity MUST stay STABLE. Every dep is identity-stable: `t` from next-intl,
+    // `onToggleInclude`/`onOpenBreakdown` from the parent's useCallback, and `reasonEmptyLabel`
+    // (useCallback-stable). `scale` only changes when the seller edits their margin ramp (rare)
+    // and there is no fragile cell input to lose.
+  }, [t, scale, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
 
   const rowState = React.useMemo(() => ({ selectionsPending }), [selectionsPending]);
 

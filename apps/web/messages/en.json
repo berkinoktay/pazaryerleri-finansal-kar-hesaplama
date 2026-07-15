@@ -1778,9 +1778,6 @@
     },
     "table": {
       "product": "Product Info",
-      "buybox": "Buybox",
-      "buyboxWinner": "Buybox winner",
-      "buyboxLoser": "Buybox loser",
       "currentPrice": "Current price",
       "discountedPrice": "Discounted price",
       "delta": "vs current",
@@ -1801,7 +1798,6 @@
       "clear": "Clear selections"
     },
     "filters": {
-      "buyboxLosers": "Buybox losers",
       "profitable": "Profitable",
       "losing": "Loss-making"
     },

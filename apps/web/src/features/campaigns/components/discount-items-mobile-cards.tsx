@@ -11,7 +11,6 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow } from '../lib/adapt-discount-list';
-import { DiscountBuyboxBadge } from './discount-buybox-badge';
 import type { DiscountScenarioKey } from './discount-items-table';
 import { ProfitDelta } from './profit-delta';
 
@@ -25,9 +24,9 @@ export interface DiscountItemsMobileCardsProps {
 /**
  * Mobile layout for the İndirimler detail — one card per product as a TOP-TO-BOTTOM flow so
  * nothing competes horizontally. Full data parity with the desktop table: the participation
- * checkbox + identity + buybox on top, then the CURRENT and DISCOUNTED price scenarios (price +
- * clickable profit badge, plus the discounted scenario's commission source and the "güncele
- * göre" delta). Shown below the `md` breakpoint; the desktop table is hidden there.
+ * checkbox + identity on top, then the CURRENT and DISCOUNTED price scenarios (price + clickable
+ * profit badge, with the "güncele göre" delta under the discounted badge). Shown below the `md`
+ * breakpoint; the desktop table is hidden there.
  */
 export function DiscountItemsMobileCards({
   rows,
@@ -36,15 +35,8 @@ export function DiscountItemsMobileCards({
   onOpenBreakdown,
 }: DiscountItemsMobileCardsProps): React.ReactElement {
   const t = useTranslations('discountsPage.table');
-  const tSource = useTranslations('discountsPage.commissionSource');
   const reasonEmptyLabel = useDiscountReasonEmptyLabel();
   const scale = useMarginColoring();
-
-  const sourceLabel: Record<'band' | 'product' | 'category', string> = {
-    band: tSource('band'),
-    product: tSource('product'),
-    category: tSource('category'),
-  };
 
   return (
     <div className="gap-sm flex flex-col">
@@ -52,14 +44,13 @@ export function DiscountItemsMobileCards({
         const meta = [row.brand, row.color, row.modelCode]
           .filter((value): value is string => value !== null && value !== '')
           .join(' · ');
-        const source = row.discounted.commissionSource;
         const emptyLabel = reasonEmptyLabel(row.reason);
         return (
           <div
             key={row.id}
             className="border-border bg-card gap-md p-md flex flex-col rounded-lg border"
           >
-            {/* Identity — checkbox + image + title/meta + buybox. */}
+            {/* Identity — checkbox + image + title/meta. */}
             <div className="gap-sm flex min-w-0 items-start">
               <Checkbox
                 checked={row.included}
@@ -75,9 +66,6 @@ export function DiscountItemsMobileCards({
                   {meta !== '' ? <span>{meta}</span> : null}
                   {meta !== '' ? <span> · </span> : null}
                   <span>{row.barcode}</span>
-                </div>
-                <div className="mt-2xs flex">
-                  <DiscountBuyboxBadge status={row.buyboxStatus} />
                 </div>
               </div>
             </div>
@@ -99,7 +87,7 @@ export function DiscountItemsMobileCards({
               </div>
             </div>
 
-            {/* Discounted scenario — price + profit + commission source + delta. */}
+            {/* Discounted scenario — price + profit + "güncele göre" delta. */}
             <div className="border-border pt-md gap-2xs flex flex-col border-t">
               <span className="text-2xs text-muted-foreground font-medium">
                 {t('discountedPrice')}
@@ -114,9 +102,6 @@ export function DiscountItemsMobileCards({
                   emptyLabel={emptyLabel}
                 />
               </div>
-              {source !== null ? (
-                <span className="text-2xs text-muted-foreground">{sourceLabel[source]}</span>
-              ) : null}
               <ProfitDelta
                 optionNetProfit={row.discounted.netProfit}
                 currentNetProfit={row.current.netProfit}

@@ -41,8 +41,6 @@ export interface DiscountRow {
   brand: string | null;
   color: string | null;
   imageUrl: string | null;
-  /** Buybox ownership label from the file (e.g. winner/loser), or null when absent. */
-  buyboxStatus: string | null;
   included: boolean;
   calculable: boolean;
   reason: DiscountItemReason;
@@ -76,7 +74,6 @@ function toRow(item: DiscountListDetailItem): DiscountRow {
     brand: item.brand,
     color: item.color,
     imageUrl: item.imageUrl,
-    buyboxStatus: item.buyboxStatus,
     included: item.included,
     calculable: item.calculable,
     reason: item.reason,

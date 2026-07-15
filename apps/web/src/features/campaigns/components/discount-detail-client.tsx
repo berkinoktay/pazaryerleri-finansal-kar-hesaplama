@@ -84,7 +84,6 @@ export function DiscountDetailClient({
   const [urlState, setUrlState] = useQueryStates(
     {
       q: parseAsString.withDefault(''),
-      buyboxLosers: parseAsBoolean.withDefault(false),
       profitable: parseAsBoolean.withDefault(false),
       losing: parseAsBoolean.withDefault(false),
     },
@@ -99,17 +98,15 @@ export function DiscountDetailClient({
   const filters = React.useMemo<DiscountFilterState>(
     () => ({
       query: urlState.q,
-      buyboxLosers: urlState.buyboxLosers,
       profitable: urlState.profitable,
       losing: urlState.losing,
     }),
-    [urlState.q, urlState.buyboxLosers, urlState.profitable, urlState.losing],
+    [urlState.q, urlState.profitable, urlState.losing],
   );
 
   const applyFilters = (next: Partial<DiscountFilterState>): void => {
     const patch = {
       ...(next.query !== undefined ? { q: next.query } : {}),
-      ...(next.buyboxLosers !== undefined ? { buyboxLosers: next.buyboxLosers } : {}),
       ...(next.profitable !== undefined ? { profitable: next.profitable } : {}),
       ...(next.losing !== undefined ? { losing: next.losing } : {}),
     };
@@ -120,8 +117,7 @@ export function DiscountDetailClient({
     }
     void setUrlState(patch);
   };
-  const resetFilters = (): void =>
-    void setUrlState({ q: '', buyboxLosers: false, profitable: false, losing: false });
+  const resetFilters = (): void => void setUrlState({ q: '', profitable: false, losing: false });
 
   // Stable handlers for the table `columns` — a single-row toggle and the breakdown opener never
   // change identity (the mutate fns are React-Query-stable), so `columns` never rebuilds.
