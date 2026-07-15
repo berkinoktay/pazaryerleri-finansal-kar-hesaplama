@@ -102,6 +102,13 @@ export function DiscountDetailClient({
     [estimateMutate],
   );
 
+  // filterDiscountRows builds a Decimal per row for its profit sign checks, so recompute only when
+  // the row set or the active filters change — not on every unrelated render (e.g. a breakdown open).
+  const filteredRows = React.useMemo(
+    () => (view !== null ? filterDiscountRows(view.rows, filters) : []),
+    [view, filters],
+  );
+
   if (detail.isLoading) {
     return <PageSkeleton label={tCommon('loading')} withBackLink statCells={5} framed />;
   }
@@ -144,7 +151,6 @@ export function DiscountDetailClient({
   }
 
   const summary = view.summary;
-  const filteredRows = filterDiscountRows(view.rows, filters);
   const hasFilters = hasActiveDiscountFilters(filters);
   const exportDisabled = summary.selectedCount === 0;
 
