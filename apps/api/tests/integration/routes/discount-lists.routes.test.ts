@@ -309,6 +309,39 @@ describe('Discount Lists - list / detail / config PATCH / delete', () => {
     expect(body.errors.some((e) => e.code === 'FIXED_PRICE_ONLY_FOR_NTH')).toBe(true);
   });
 
+  it('rejects payQuantity 0 on BUY_X_PAY_Y (422 INVALID_PAY_QUANTITY)', async () => {
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discountType: 'BUY_X_PAY_Y', buyQuantity: '3', payQuantity: '0' }),
+      },
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(
+      body.errors.some((e) => e.field === 'payQuantity' && e.code === 'INVALID_PAY_QUANTITY'),
+    ).toBe(true);
+  });
+
+  it('rejects an over-large value with a clean 422 VALUE_TOO_LARGE (no DB overflow 500)', async () => {
+    const res = await app.request(
+      `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: bearer(fx.accessToken), 'Content-Type': 'application/json' },
+        // 12 integer digits — past the Decimal(12,2) ceiling of 10 integer digits.
+        body: JSON.stringify({ discountType: 'NET', valueKind: 'AMOUNT', value: '100000000000' }),
+      },
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; errors: { field: string; code: string }[] };
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.errors.some((e) => e.field === 'value' && e.code === 'VALUE_TOO_LARGE')).toBe(true);
+  });
+
   it('deletes the list (204), then the detail 404s and the list is empty', async () => {
     const del = await app.request(
       `/v1/organizations/${fx.orgId}/stores/${fx.storeId}/discount-lists/${fx.listId}`,

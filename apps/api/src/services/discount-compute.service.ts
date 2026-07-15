@@ -108,7 +108,10 @@ export function effectiveUnitPrice(price: Decimal, config: DiscountConfig): Deci
           ? applyPercent(price, config.value)
           : config.valueKind === 'AMOUNT'
             ? applyAmount(price, config.value)
-            : Decimal.max(config.value, ZERO); // FIXED_PRICE
+            : // FIXED_PRICE — floored at 0 and CLAMPED to the current price: a fixed price above
+              // the current price must not RAISE the effective unit (a discount never increases
+              // the price; this also kills a negative perOrderCost).
+              Decimal.min(price, Decimal.max(config.value, ZERO));
       return price
         .mul(n - 1)
         .add(discountedUnit)
@@ -198,7 +201,10 @@ function priceScenario(
   commission: DiscountCommissionInputs,
   price: Decimal,
 ): ScenarioCompute {
-  const resolved = resolveDiscountCommission(commission, price);
+  // Resolve the band at the 2dp WIRE price (what the scenario serializes + displays). A
+  // full-precision effectiveUnitPrice (e.g. 299.992 from NET %20 on 374.99) must not slip
+  // through the 0.01 gap between inclusive 2dp band boundaries — chain and display must agree.
+  const resolved = resolveDiscountCommission(commission, price.toDecimalPlaces(2));
   if (variant === null) {
     return { resolved, calculable: false, reason: 'NO_PRODUCT', breakdown: null };
   }

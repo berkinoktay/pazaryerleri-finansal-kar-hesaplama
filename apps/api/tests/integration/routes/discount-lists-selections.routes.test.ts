@@ -114,6 +114,23 @@ describe('PATCH .../discount-lists/{listId}/selections', () => {
     expect(included.get(s.item3)).toBe(false);
   });
 
+  it("mode 'set' dedupes a repeated itemId last-wins (updated: 1, final value from the LAST entry)", async () => {
+    const s = await seedListWithItems();
+    const res = await patchSelections(s, {
+      mode: 'set',
+      selections: [
+        { itemId: s.item1, included: false },
+        { itemId: s.item1, included: true },
+      ],
+    });
+    expect(res.status).toBe(200);
+    // One physical row touched, not two — the duplicate is collapsed before the VALUES build.
+    expect(((await res.json()) as { updated: number }).updated).toBe(1);
+
+    const included = await includedById(s.listId);
+    expect(included.get(s.item1)).toBe(true);
+  });
+
   it("mode 'set' silently skips an itemId from another list (updated: 1)", async () => {
     const s = await seedListWithItems();
     const res = await patchSelections(s, {

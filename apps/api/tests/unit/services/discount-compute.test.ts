@@ -86,6 +86,11 @@ describe('effectiveUnitPrice', () => {
     expect(
       price({ type: 'NTH_PRODUCT', valueKind: 'FIXED_PRICE', value: d(10), nthIndex: 4 }, 100),
     ).toBe('77.5');
+    // Sabit fiyat cari fiyatın ÜSTÜNDEyse birim cari fiyata kısılır (indirim fiyatı yükseltmez):
+    // (1×100 + min(100, 150)) / 2 = 100 → indirimli birim cari fiyata eşit.
+    expect(
+      price({ type: 'NTH_PRODUCT', valueKind: 'FIXED_PRICE', value: d(150), nthIndex: 2 }, 100),
+    ).toBe('100');
   });
 
   it('CODE behaves exactly like CONDITIONAL_BASKET', () => {
@@ -206,5 +211,52 @@ describe('computeDiscountItem reason precedence', () => {
     );
     expect(out.calculable).toBe(false);
     expect(out.reason).toBe('NO_COMMISSION');
+  });
+});
+
+describe('computeDiscountItem resolves the commission at the 2dp wire price', () => {
+  const ctx: TariffAssemblyContext = {
+    platform: 'TRENDYOL',
+    feeDefs: {
+      commissionVatRate: new Decimal(20),
+      stoppageRate: new Decimal('0.01'),
+      psfNet: new Decimal('10.99'),
+      psfVatRate: new Decimal(20),
+      shipVatRate: new Decimal(20),
+    },
+  };
+  const variant: TariffVariant = {
+    id: 'v1',
+    stockCode: 'STK-1',
+    barcode: 'BC-1',
+    salePrice: new Decimal('374.99'),
+    vatRate: 20,
+    isDigital: false,
+    product: { title: 'Ürün', categoryId: null, brandId: null },
+  };
+  // Touching 2dp band boundaries: band2 covers 150.00–299.99, band1 covers ≥300.00. A full-
+  // precision discounted price of 299.992 (NET %20 on 374.99) would fall through the 0.01 gap.
+  const BANDS: StoredBand[] = [
+    { key: 'band1', lowerLimit: '300', upperLimit: null, commissionPct: '10' },
+    { key: 'band2', lowerLimit: '150', upperLimit: '299.99', commissionPct: '12' },
+  ];
+
+  it('rounds the discounted price to 2dp so it resolves band2 instead of falling through the gap', () => {
+    const out = computeDiscountItem(
+      ctx,
+      variant,
+      undefined,
+      NO_SHIPPING,
+      { bands: BANDS, productRate: null, categoryRate: null },
+      new Decimal('374.99'),
+      { type: 'NET', valueKind: 'PERCENT', value: new Decimal(20) },
+    );
+    // Current price 374.99 lands in band1 (≥300) at 10%.
+    expect(out.current.commissionSource).toBe('band');
+    expect(out.current.commissionPct).toBe('10.0000');
+    // Discounted 299.992 → 2dp 299.99 lands in band2 at 12% (NOT null / a chain fall-through).
+    expect(out.discounted.price.toFixed(2)).toBe('299.99');
+    expect(out.discounted.commissionSource).toBe('band');
+    expect(out.discounted.commissionPct).toBe('12.0000');
   });
 });

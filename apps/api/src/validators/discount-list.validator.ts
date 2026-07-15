@@ -31,6 +31,21 @@ export const DiscountValueKindSchema = z.enum(DiscountValueKind).openapi('Discou
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const INT_RE = /^\d+$/;
 
+// Magnitude ceilings so an over-large config value returns a clean 422 instead of a DB numeric
+// overflow: `value`/`minBasketAmount` are Decimal(12,2) (10 integer digits + 2 decimals); the
+// count columns are 32-bit Int, kept comfortably below 2^31-1.
+const MAX_DECIMAL_VALUE = 9999999999.99;
+const MAX_INT_VALUE = 2000000000;
+
+// The count/int config fields subject to MAX_INT_VALUE — the field name is also the issue path.
+const INT_CONFIG_FIELDS = [
+  'minQuantity',
+  'buyQuantity',
+  'payQuantity',
+  'nthIndex',
+  'orderLimit',
+] as const;
+
 // Multipart form her alanı STRING taşır; JSON PATCH de aynı string sözleşmesini
 // kullanır ki iki giriş yolu tek doğrulayıcıdan geçsin.
 export const DiscountConfigFieldsSchema = z.object({
@@ -66,6 +81,10 @@ export function refineDiscountConfig(
   if (val.discountType === 'BUY_X_PAY_Y') {
     if (val.buyQuantity === undefined) need('buyQuantity', 'BUY_QUANTITY_REQUIRED');
     if (val.payQuantity === undefined) need('payQuantity', 'PAY_QUANTITY_REQUIRED');
+    // The INT_RE regex accepts '0'; a pay quantity below 1 is meaningless (buy N, pay nothing).
+    if (val.payQuantity !== undefined && Number(val.payQuantity) < 1) {
+      need('payQuantity', 'INVALID_PAY_QUANTITY');
+    }
     if (
       val.buyQuantity !== undefined &&
       val.payQuantity !== undefined &&
@@ -104,6 +123,17 @@ export function refineDiscountConfig(
     new Date(val.startsAt).getTime() >= new Date(val.endsAt).getTime()
   ) {
     need('endsAt', 'END_BEFORE_START');
+  }
+  // Magnitude bounds — a clean 422 instead of a DB numeric overflow 500 on the write.
+  if (val.value !== undefined && Number(val.value) > MAX_DECIMAL_VALUE) {
+    need('value', 'VALUE_TOO_LARGE');
+  }
+  if (val.minBasketAmount !== undefined && Number(val.minBasketAmount) > MAX_DECIMAL_VALUE) {
+    need('minBasketAmount', 'MIN_BASKET_TOO_LARGE');
+  }
+  for (const field of INT_CONFIG_FIELDS) {
+    const raw = val[field];
+    if (raw !== undefined && Number(raw) > MAX_INT_VALUE) need(field, 'INT_TOO_LARGE');
   }
 }
 

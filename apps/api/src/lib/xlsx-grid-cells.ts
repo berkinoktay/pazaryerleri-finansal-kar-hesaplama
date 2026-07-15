@@ -44,8 +44,16 @@ export function cellCurrencyDecimalString(row: readonly unknown[], idx: number):
   const value = row[idx];
   if (typeof value === 'number') return value.toString();
   if (typeof value === 'string') {
-    const normalized = normalizeDecimalString(value);
+    let normalized = normalizeDecimalString(value);
     if (normalized === '') return null;
+    // Turkish dot-only thousands ("1.250 ₺" → 1250, "1.250.000 ₺" → 1250000): after the
+    // currency strip, a value with dots but NO comma whose every dot delimits a 3-digit group
+    // is a thousands-formatted integer, not a decimal — strip the dots before validating.
+    // normalizeDecimalString leaves a comma-less string's dots intact, so they survive to here.
+    // A 2-digit tail like "1.25" fails this pattern and stays a decimal.
+    if (/^\d{1,3}(\.\d{3})+$/.test(normalized)) {
+      normalized = normalized.replace(/\./g, '');
+    }
     return /^-?\d+(\.\d+)?$/.test(normalized) ? normalized : null;
   }
   return null;

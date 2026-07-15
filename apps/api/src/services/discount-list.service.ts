@@ -335,6 +335,10 @@ export async function getDiscountListDetail(
   });
 
   // ─── Summary card — aggregated over the INCLUDED items (Decimal math) ──────
+  // Aggregation is deliberately over each row's SERIALIZED 2dp price/profit strings (i.current /
+  // i.discounted already went through serializeScenario's toFixed(2)), NOT the full-precision
+  // Decimals. So the summary equals Σ of the numbers the seller actually sees per row — no penny
+  // drift between the card total and the visible rows.
   const included = items.filter((i) => i.included);
   let perOrderCost = new Decimal(0);
   const deltas: Decimal[] = [];
@@ -475,7 +479,14 @@ export async function updateDiscountSelections(
 
   if (selections.length === 0) return { updated: 0 };
 
-  const rows = selections.map((s) => Prisma.sql`(${s.itemId}::uuid, ${s.included}::boolean)`);
+  // Dedupe last-wins: the same itemId may appear twice in one payload. A VALUES table with a
+  // duplicate id would join the target row against both source rows, letting Postgres pick either
+  // `included` nondeterministically — collapse to one row per id so the LAST choice always wins.
+  const includedByItemId = new Map<string, boolean>();
+  for (const s of selections) includedByItemId.set(s.itemId, s.included);
+  const rows = [...includedByItemId].map(
+    ([itemId, included]) => Prisma.sql`(${itemId}::uuid, ${included}::boolean)`,
+  );
 
   try {
     const updated = await prisma.$executeRaw`
