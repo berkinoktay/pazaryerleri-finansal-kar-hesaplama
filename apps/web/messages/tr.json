@@ -87,8 +87,8 @@
     },
     "dateInput": {
       "placeholder": "Tarih seç",
-      "timeLabel": "Time",
-      "done": "Done"
+      "timeLabel": "Saat",
+      "done": "Tamam"
     },
     "combobox": {
       "placeholder": "Seçim yap…",
