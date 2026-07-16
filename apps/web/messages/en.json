@@ -86,7 +86,9 @@
       "placeholder": "Pick a date range"
     },
     "dateInput": {
-      "placeholder": "Pick a date"
+      "placeholder": "Pick a date",
+      "timeLabel": "Time",
+      "done": "Done"
     },
     "combobox": {
       "placeholder": "Select…",

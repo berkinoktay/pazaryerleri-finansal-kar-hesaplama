@@ -371,6 +371,11 @@ export function DiscountConfigFields({
                 render={({ field }) => (
                   <DateInput
                     className="w-full"
+                    withTime
+                    // Default to the tariff-week rollover (08:00) so a "21 Temmuz" start lands
+                    // AFTER the week's 08:00 boundary and resolves to the 21–28 week — not the
+                    // previous one, which a 00:00 start would fall into.
+                    defaultTime={{ hours: 8, minutes: 0 }}
                     value={
                       field.value !== undefined && field.value !== '' ? new Date(field.value) : null
                     }
@@ -387,6 +392,11 @@ export function DiscountConfigFields({
                   <div className="gap-3xs flex flex-col">
                     <DateInput
                       className="w-full"
+                      withTime
+                      // Default to 07:59 — the last minute before the next tariff-week rollover —
+                      // so a chosen end day stays inside that week rather than spilling into the
+                      // next one.
+                      defaultTime={{ hours: 7, minutes: 59 }}
                       value={
                         field.value !== undefined && field.value !== ''
                           ? new Date(field.value)

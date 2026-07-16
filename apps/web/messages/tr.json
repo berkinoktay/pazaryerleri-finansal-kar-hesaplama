@@ -86,7 +86,9 @@
       "placeholder": "Tarih aralığı seç"
     },
     "dateInput": {
-      "placeholder": "Tarih seç"
+      "placeholder": "Tarih seç",
+      "timeLabel": "Time",
+      "done": "Done"
     },
     "combobox": {
       "placeholder": "Seçim yap…",
