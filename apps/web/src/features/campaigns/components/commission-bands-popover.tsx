@@ -6,11 +6,9 @@ import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
 
-import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { cn } from '@/lib/utils';
-import type { ToneKey } from '@/lib/variants';
 
 import type { AdvantageCommissionBand } from '../api/get-advantage-tariff-detail.api';
 import { formatBandRange, type BandRangeLabelFns } from '../lib/commission-band-range';
@@ -48,19 +46,18 @@ export function useCommissionBandLabels(): CommissionBandsLabels {
 }
 
 /**
- * A per-band marker chip — e.g. "which band does the CURRENT price land in?" vs the
- * DISCOUNTED price. `band` MUST be a reference to one of the {@link
- * CommissionBandsPopoverProps.bands} elements (identity match, so two prices in the same
- * band stack both chips on that one row). Optional feature: sibling verticals that pass no
- * `marks` render exactly as before.
+ * A per-band marker — e.g. "which band does the CURRENT price land in?" vs the DISCOUNTED
+ * price. `band` MUST be a reference to one of the {@link CommissionBandsPopoverProps.bands}
+ * elements (identity match). The band a mark points to gets a soft full-row highlight and its
+ * `label` as tiny muted text at the row's right end; two marks on the SAME band share one
+ * highlighted row with their labels joined by " · ". Optional feature: sibling verticals that
+ * pass no `marks` render exactly as before.
  */
 export interface CommissionBandMark {
-  /** The band this chip sits on — a reference-identical element of the `bands` array. */
+  /** The band this mark sits on — a reference-identical element of the `bands` array. */
   band: AdvantageCommissionBand;
-  /** Short chip copy, e.g. "Current" / "Discounted". */
+  /** Short muted label, e.g. "Current" / "Discounted". */
   label: string;
-  /** Chip tone; defaults to `neutral` (a muted chip). */
-  tone?: ToneKey;
 }
 
 export interface CommissionBandsPopoverProps {
@@ -69,9 +66,9 @@ export interface CommissionBandsPopoverProps {
   /** Shared band-range + popover-chrome labels (from the caller's per-namespace hook). */
   labels: CommissionBandsLabels;
   /**
-   * Optional per-band marker chips. Each mark's `band` is matched by reference against the
-   * rendered `bands`, so the band a marked price lands in shows the chip. Omitted by the
-   * Advantage/Flash callers → no chips, unchanged behaviour.
+   * Optional per-band markers. Each mark's `band` is matched by reference against the rendered
+   * `bands`; the matching row gets a soft full-row highlight + the mark label(s). Omitted by the
+   * Advantage/Flash callers → no highlight, unchanged behaviour.
    */
   marks?: readonly CommissionBandMark[];
   /**
@@ -130,32 +127,28 @@ export function CommissionBandsPopover({
             if (range === null) return null;
             // Reference-identity match: which marked prices (if any) land in THIS band.
             const bandMarks = marks?.filter((mark) => mark.band === band) ?? [];
+            const highlighted = bandMarks.length > 0;
             return (
               <li
                 key={`${band.lowerLimit ?? '∞'}-${band.upperLimit ?? '∞'}-${band.commissionPct}`}
-                className="gap-x-md text-2xs flex items-center justify-between tabular-nums"
+                className={cn(
+                  'gap-x-md text-2xs flex items-center justify-between tabular-nums',
+                  // Active band(s): a soft full-row fill in the selected-row surface token (reads
+                  // in both light and dark). Full-bleed by cancelling the popover's `p-md`
+                  // horizontal padding, then re-padding so the range/percent stay column-aligned.
+                  highlighted && 'bg-surface-row-selected -mx-md px-md py-2xs rounded-md',
+                )}
               >
-                <span
-                  className={cn(
-                    'text-foreground',
-                    bandMarks.length > 0 && 'gap-2xs inline-flex items-center',
-                  )}
-                >
-                  {range}
-                  {bandMarks.map((mark) => (
-                    <Badge
-                      key={mark.label}
-                      tone={mark.tone ?? 'neutral'}
-                      variant="surface"
-                      size="sm"
-                      radius="full"
-                    >
-                      {mark.label}
-                    </Badge>
-                  ))}
-                </span>
-                <span className="text-muted-foreground shrink-0">
-                  {formatPercentDisplay(band.commissionPct)}
+                <span className="text-foreground">{range}</span>
+                <span className="gap-sm flex items-center">
+                  {highlighted ? (
+                    <span className="text-muted-foreground">
+                      {bandMarks.map((mark) => mark.label).join(' · ')}
+                    </span>
+                  ) : null}
+                  <span className="text-muted-foreground shrink-0">
+                    {formatPercentDisplay(band.commissionPct)}
+                  </span>
                 </span>
               </li>
             );

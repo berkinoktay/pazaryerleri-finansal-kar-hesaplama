@@ -131,10 +131,10 @@ export function DiscountCommissionCell({
   const discountedBand = findBandForPrice(commissionBands, new Decimal(discounted.price));
   const bandMarks: CommissionBandMark[] = [];
   if (currentBand !== null) {
-    bandMarks.push({ band: currentBand, label: tBands('currentMark'), tone: 'neutral' });
+    bandMarks.push({ band: currentBand, label: tBands('currentMark') });
   }
   if (discountedBand !== null) {
-    bandMarks.push({ band: discountedBand, label: tBands('discountedMark'), tone: 'primary' });
+    bandMarks.push({ band: discountedBand, label: tBands('discountedMark') });
   }
 
   // Popover footer: which uploaded tariff FILE + period fed the band rate (band always carries
