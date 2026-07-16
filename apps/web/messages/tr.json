@@ -1798,7 +1798,8 @@
         "band": "Komisyon tarifesi oranı",
         "product": "Ürün komisyon oranı",
         "category": "Kategori komisyon oranı"
-      }
+      },
+      "tariffTooltip": "[TR-TODO] Based on the {tariff} file's {period} period."
     },
     "smartSelect": {
       "label": "Akıllı Seçim",

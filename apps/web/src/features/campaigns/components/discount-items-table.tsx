@@ -210,12 +210,14 @@ export function DiscountItemsTable({
       id: 'commission',
       header: t('commission'),
       meta: { label: t('commission') },
-      // Detail-level tariff name/period the tooltip needs flow through context, NOT this closure,
+      // Detail-level tariff name/period the hint needs flow through context, NOT this closure,
       // so `columns` stays identity-stable (they'd otherwise force a dep + rebuild on reload).
       cell: ({ row }) => <CommissionCellSlot row={row.original} />,
     };
 
-    return [includeColumn, productColumn, currentColumn, discountedColumn, commissionColumn];
+    // Commission sits right after the product identity — before the current/discounted price
+    // scenarios — so the seller reads "which product · at what commission" before the money.
+    return [includeColumn, productColumn, commissionColumn, currentColumn, discountedColumn];
     // `columns` identity MUST stay STABLE. Every dep is identity-stable: `t` from next-intl,
     // `onToggleInclude`/`onOpenBreakdown` from the parent's useCallback, and `reasonEmptyLabel`
     // (useCallback-stable). `scale` only changes when the seller edits their margin ramp (rare)
