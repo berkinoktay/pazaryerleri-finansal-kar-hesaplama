@@ -7307,6 +7307,9 @@
               "null"
             ]
           },
+          "commissionPeriodExpired": {
+            "type": "boolean"
+          },
           "summary": {
             "$ref": "#/components/schemas/DiscountListSummary"
           },
@@ -7334,6 +7337,7 @@
           "exported",
           "commissionTariffName",
           "commissionPeriodLabel",
+          "commissionPeriodExpired",
           "summary",
           "items"
         ]

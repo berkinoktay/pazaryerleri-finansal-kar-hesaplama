@@ -369,6 +369,10 @@ export const DiscountListDetailSchema = z
     // Gelecekte başlayan kampanyada anchor kuralı kapsayan haftayı çözer.
     commissionTariffName: z.string().nullable(),
     commissionPeriodLabel: z.string().nullable(),
+    // Çözülen dönem NOW'dan önce bittiyse (yalnız en-iyi-eldeki fallback yolunda mümkün)
+    // true — cari haftanın tarifesi henüz yüklenmemiş demektir. Kaynak yoksa ya da dönem
+    // güncel/gelecekse false.
+    commissionPeriodExpired: z.boolean(),
     summary: DiscountListSummarySchema,
     items: z.array(DiscountListDetailItemSchema),
   })

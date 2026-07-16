@@ -238,10 +238,12 @@ export async function getDiscountListDetail(
     ]);
   }
 
-  // ─── Resolve the commission tariff bands (1st tier), anchored to a future ──
-  // campaign start: a future `startsAt` reads the covering week's period; else the
-  // store's latest tariff resolved now. See discount-commission-source.ts.
-  const source = await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, new Date());
+  // ─── Resolve the commission tariff bands (1st tier), anchored to the campaign ──
+  // start: the covering week at the anchor instant, else the store's latest upload
+  // resolved now (its last-past period). `expired` is true only when that fallback
+  // landed on a period that already ended. See discount-commission-source.ts.
+  const { resolution: source, expired: commissionPeriodExpired } =
+    await resolveDiscountCommissionSource(orgId, storeId, list.startsAt, new Date());
 
   // ─── Category-rate fallback cache (3rd tier) — once per distinct (cat, brand) ──
   const categoryRateByKey = new Map<string, Decimal | null>();
@@ -363,6 +365,9 @@ export async function getDiscountListDetail(
     // Transparency: which tariff/period actually fed the bands (null when none resolved).
     commissionTariffName: source?.tariffName ?? null,
     commissionPeriodLabel: source?.periodLabel ?? null,
+    // True only when the resolution fell back to a period that already ended (the current
+    // week's tariff is not uploaded yet) — the detail warns the seller. See resolver.
+    commissionPeriodExpired,
     summary: {
       itemCount: list.items.length,
       selectedCount,

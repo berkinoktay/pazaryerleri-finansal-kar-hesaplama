@@ -140,10 +140,11 @@ export async function estimateDiscountItem(
     }
   }
 
-  // Bands come from the store's commission tariff — anchored to a future campaign start
-  // (the covering week's period), else the latest tariff resolved now — matched by
-  // barcode. The SAME source the detail view uses (discount-commission-source.ts).
-  const source = await resolveDiscountCommissionSource(
+  // Bands come from the store's commission tariff — the covering week at the anchor
+  // instant, else the latest upload resolved now — matched by barcode. The SAME source the
+  // detail view uses (discount-commission-source.ts); the estimate ignores the expired flag
+  // (the modal shows the period label, so the list-level note is the detail's job).
+  const { resolution: source } = await resolveDiscountCommissionSource(
     orgId,
     storeId,
     item.list.startsAt,
