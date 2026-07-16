@@ -1674,7 +1674,8 @@
       "edit": "Edit",
       "orderLimit": "Order limit: {count}",
       "dateRange": "{start} – {end}",
-      "assumption": "Profit is estimated for a single-item basket; multi-item baskets may differ."
+      "assumption": "Profit is estimated for a single-item basket; multi-item baskets may differ.",
+      "expiredTariffNote": "Bands come from the {period} tariff week — the current week's tariff is not uploaded yet."
     },
     "upload": {
       "title": "Upload the Discounts Excel",

@@ -1,6 +1,6 @@
 'use client';
 
-import { Edit02Icon, InformationCircleIcon } from 'hugeicons-react';
+import { Alert02Icon, Edit02Icon, InformationCircleIcon } from 'hugeicons-react';
 import { useFormatter, useTranslations } from 'next-intl';
 import * as React from 'react';
 
@@ -75,6 +75,13 @@ export function DiscountConfigCard({ list, onEdit }: DiscountConfigCardProps): R
         <InformationCircleIcon className="size-icon-xs mt-3xs shrink-0" aria-hidden />
         <span>{t('assumption')}</span>
       </div>
+
+      {list.commissionPeriodExpired && list.commissionPeriodLabel !== null ? (
+        <div className="gap-2xs text-warning text-2xs flex items-start">
+          <Alert02Icon className="size-icon-xs mt-3xs shrink-0" aria-hidden />
+          <span>{t('expiredTariffNote', { period: list.commissionPeriodLabel })}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
