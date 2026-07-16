@@ -46,18 +46,14 @@ export function useCommissionBandLabels(): CommissionBandsLabels {
 }
 
 /**
- * A per-band marker — e.g. "which band does the CURRENT price land in?" vs the DISCOUNTED
- * price. `band` MUST be a reference to one of the {@link CommissionBandsPopoverProps.bands}
- * elements (identity match). The band a mark points to gets a soft full-row highlight and its
- * `label` as tiny muted text at the row's right end; two marks on the SAME band share one
- * highlighted row with their labels joined by " · ". Optional feature: sibling verticals that
- * pass no `marks` render exactly as before.
+ * A per-band marker: the band the seller's ACTIVE price lands in. `band` MUST be a reference to
+ * one of the {@link CommissionBandsPopoverProps.bands} elements (identity match). The band a mark
+ * points to gets a solid primary full-row highlight — the fill alone marks it, no label. Optional
+ * feature: sibling verticals that pass no `marks` render exactly as before.
  */
 export interface CommissionBandMark {
-  /** The band this mark sits on — a reference-identical element of the `bands` array. */
+  /** The band this mark highlights — a reference-identical element of the `bands` array. */
   band: AdvantageCommissionBand;
-  /** Short muted label, e.g. "Current" / "Discounted". */
-  label: string;
 }
 
 export interface CommissionBandsPopoverProps {
@@ -67,7 +63,7 @@ export interface CommissionBandsPopoverProps {
   labels: CommissionBandsLabels;
   /**
    * Optional per-band markers. Each mark's `band` is matched by reference against the rendered
-   * `bands`; the matching row gets a soft full-row highlight + the mark label(s). Omitted by the
+   * `bands`; the matching row gets a solid primary full-row highlight. Omitted by the
    * Advantage/Flash callers → no highlight, unchanged behaviour.
    */
   marks?: readonly CommissionBandMark[];
@@ -119,43 +115,37 @@ export function CommissionBandsPopover({
           </button>
         )}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-auto min-w-56">
-        <span className="text-foreground mb-xs block text-xs font-semibold">{labels.title}</span>
+      <PopoverContent align="start" className="px-lg w-auto min-w-56">
+        <span className="text-foreground mb-sm block text-xs font-semibold">{labels.title}</span>
         <ul className="gap-2xs flex flex-col">
           {bands.map((band) => {
             const range = formatBandRange(band, formatCurrency, labels);
             if (range === null) return null;
-            // Reference-identity match: which marked prices (if any) land in THIS band.
-            const bandMarks = marks?.filter((mark) => mark.band === band) ?? [];
-            const highlighted = bandMarks.length > 0;
+            // Reference-identity match: does the marked (active) price land in THIS band?
+            const highlighted = marks?.some((mark) => mark.band === band) ?? false;
             return (
               <li
                 key={`${band.lowerLimit ?? '∞'}-${band.upperLimit ?? '∞'}-${band.commissionPct}`}
                 className={cn(
                   'gap-x-md text-2xs flex items-center justify-between tabular-nums',
-                  // Active band(s): a soft full-row fill in the selected-row surface token (reads
-                  // in both light and dark). Full-bleed by cancelling the popover's `p-md`
-                  // horizontal padding, then re-padding so the range/percent stay column-aligned.
-                  highlighted && 'bg-surface-row-selected -mx-md px-md py-2xs rounded-md',
+                  // Active band: a solid primary full-row fill (primary / primary-foreground are
+                  // both dual-mode). Full-bleed by cancelling the popover's `px-lg` horizontal
+                  // padding, then re-padding so the range/percent stay column-aligned. On the solid
+                  // fill ALL text is `text-primary-foreground` (never muted on solid primary).
+                  highlighted &&
+                    'bg-primary text-primary-foreground -mx-lg px-lg py-2xs rounded-sm',
                 )}
               >
-                <span className="text-foreground">{range}</span>
-                <span className="gap-sm flex items-center">
-                  {highlighted ? (
-                    <span className="text-muted-foreground">
-                      {bandMarks.map((mark) => mark.label).join(' · ')}
-                    </span>
-                  ) : null}
-                  <span className="text-muted-foreground shrink-0">
-                    {formatPercentDisplay(band.commissionPct)}
-                  </span>
+                <span className={highlighted ? undefined : 'text-foreground'}>{range}</span>
+                <span className={cn('shrink-0', !highlighted && 'text-muted-foreground')}>
+                  {formatPercentDisplay(band.commissionPct)}
                 </span>
               </li>
             );
           })}
         </ul>
         {footer !== undefined && footer !== null ? (
-          <div className="border-border mt-xs pt-xs border-t">{footer}</div>
+          <div className="border-border mt-sm pt-sm border-t">{footer}</div>
         ) : null}
       </PopoverContent>
     </Popover>

@@ -1805,9 +1805,7 @@
       "hint": "Komisyon bantlarını göster",
       "above": "{price} ve üzeri",
       "range": "{lower}–{upper}",
-      "below": "{price} ve altı",
-      "currentMark": "Güncel",
-      "discountedMark": "İndirimli"
+      "below": "{price} ve altı"
     },
     "smartSelect": {
       "label": "Akıllı Seçim",

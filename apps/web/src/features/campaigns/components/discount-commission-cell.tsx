@@ -79,7 +79,6 @@ export function DiscountCommissionCell({
   commissionBands,
 }: DiscountCommissionCellProps): React.ReactElement {
   const t = useTranslations('discountsPage.commissionColumn');
-  const tBands = useTranslations('discountsPage.commissionBands');
   const bandLabels = useDiscountCommissionBandLabels();
   const source = discounted.commissionSource;
 
@@ -125,17 +124,11 @@ export function DiscountCommissionCell({
     );
   }
 
-  // Mark which band the CURRENT price and the DISCOUNTED price each land in — pure comparison
-  // over the 2dp DISPLAY prices already on the row (no money math; every figure is backend-computed).
-  const currentBand = findBandForPrice(commissionBands, new Decimal(current.price));
-  const discountedBand = findBandForPrice(commissionBands, new Decimal(discounted.price));
-  const bandMarks: CommissionBandMark[] = [];
-  if (currentBand !== null) {
-    bandMarks.push({ band: currentBand, label: tBands('currentMark') });
-  }
-  if (discountedBand !== null) {
-    bandMarks.push({ band: discountedBand, label: tBands('discountedMark') });
-  }
+  // Highlight ONLY the ACTIVE band — the one the DISCOUNTED price lands in (that's the rate the
+  // cell shows as "baz alınan"). Pure comparison over the 2dp DISPLAY price already on the row
+  // (no money math; every figure is backend-computed).
+  const activeBand = findBandForPrice(commissionBands, new Decimal(discounted.price));
+  const bandMarks: CommissionBandMark[] = activeBand !== null ? [{ band: activeBand }] : [];
 
   // Popover footer: which uploaded tariff FILE + period fed the band rate (band always carries
   // both; the guard keeps the footer whole and drops it if the detail lacks a resolved source).
