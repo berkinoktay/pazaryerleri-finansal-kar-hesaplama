@@ -1675,7 +1675,7 @@
       "orderLimit": "Sipariş limiti: {count}",
       "dateRange": "{start} – {end}",
       "assumption": "Kâr tahmini, sepetin yalnız bu üründen oluştuğu varsayımına dayanır; çok ürünlü sepetlerde sonuç farklılaşabilir.",
-      "expiredTariffNote": "TODO_TR: Bands come from the {period} tariff week — the current week's tariff is not uploaded yet."
+      "expiredTariffNote": "Bantlar {period} tarife haftasından geliyor — güncel haftanın tarifesi henüz yüklenmedi."
     },
     "upload": {
       "title": "İndirimler Excel'ini yükleyin",
