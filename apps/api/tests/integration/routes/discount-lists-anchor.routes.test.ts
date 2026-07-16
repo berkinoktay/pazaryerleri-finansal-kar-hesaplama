@@ -839,3 +839,286 @@ describe('Discount Lists - covering-only resolution on the current path + outdat
     expect(item?.discounted.commissionSource).toBeNull();
   });
 });
+
+// ─── Split-week sub-period resolution ───────────────────────────────────────────────────────
+//
+// Berkin relies on SPLIT weeks: a single covering tariff WEEK cut into two sub-periods with
+// DIFFERENT band rates (his real data has week 21–28 split at the 24th ~07:59 into a 3-day and a
+// 4-day sub-period). The covering resolver picks the sub-period that covers the anchor
+// (`period.startsAt <= anchor < period.endsAt`, else the week's first period), so a campaign that
+// starts in the SECOND sub-period must resolve the SECOND sub-period's pct + label, and one that
+// starts in the FIRST sub-period must resolve the FIRST's. The single-period seeds elsewhere in
+// this file never exercise that intra-week branch — this fixture pins it.
+//
+// Bounds are now-relative true-instant Dates like the file's other seeds. The sub-periods are only
+// 3–4 days wide, so — unlike the ±10-day windows above — the ~3h wall-clock-as-UTC normalization
+// could flip coverage NEAR a boundary; both campaign starts are therefore placed at midday, >1 day
+// from any sub-period edge, well outside the ~3h skew.
+
+const SPLIT_BARCODE = 'DISC-SPLIT-BAND';
+const SPLIT_CATEGORY_ID = 704n;
+const SPLIT_FIRST_PCT = 10; // first sub-period band (21–24)
+const SPLIT_SECOND_PCT = 22; // second sub-period band (24–28)
+const SPLIT_TARIFF_NAME = 'Bolunmus Hafta Tarifesi';
+const SPLIT_FIRST_PERIOD_LABEL = 'Hafta 21-24';
+const SPLIT_SECOND_PERIOD_LABEL = 'Hafta 24-28';
+const HOUR_MS = 3_600_000;
+
+interface SplitWeekFixture {
+  accessToken: string;
+  orgId: string;
+  storeId: string;
+  firstSubListId: string; // startsAt inside the FIRST sub-period
+  firstSubItemId: string;
+  secondSubListId: string; // startsAt inside the SECOND sub-period
+  secondSubItemId: string;
+}
+
+async function setupSplitWeekFixture(): Promise<SplitWeekFixture> {
+  const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
+  if (carrier === null) {
+    throw new Error('SENDEOMP carrier missing - globalSetup ensureShippingReferenceData must run');
+  }
+  await ensureFeeDefinitions();
+
+  const user = await createAuthenticatedTestUser();
+  const org = await createOrganization();
+  await createMembership(org.id, user.id);
+  const store = await prisma.store.create({
+    data: {
+      organizationId: org.id,
+      name: 'Split Week Store',
+      platform: 'TRENDYOL',
+      environment: 'PRODUCTION',
+      externalAccountId: 'discount-split-test',
+      credentials: 'opaque',
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+      defaultShippingCarrierId: carrier.id,
+    },
+  });
+
+  const profile = await prisma.costProfile.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      name: 'COGS Split',
+      type: 'COGS',
+      amountGross: new Decimal('200.00'),
+      currency: 'TRY',
+      vatRate: 20,
+      fxRateMode: 'MANUAL',
+    },
+  });
+  const product = await prisma.product.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      platformContentId: 97_001n,
+      productMainId: 'pm-split',
+      title: `Bolunmus Urun ${SPLIT_BARCODE}`,
+      categoryId: SPLIT_CATEGORY_ID,
+      categoryName: 'Kategori',
+      brandId: null,
+      brandName: null,
+    },
+  });
+  const variant = await prisma.productVariant.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      productId: product.id,
+      platformVariantId: 970_010n,
+      barcode: SPLIT_BARCODE,
+      stockCode: `STK-${SPLIT_BARCODE}`,
+      salePrice: new Decimal(CURRENT_PRICE),
+      listPrice: new Decimal(CURRENT_PRICE),
+      vatRate: 20,
+      dimensionalWeight: new Decimal('3.0'),
+      syncedCommissionRate: null,
+    },
+  });
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
+  });
+
+  const now = Date.now();
+  // A 7-day tariff week ~20 days out, cut into a 3-day + 4-day sub-period at a ~08:00 boundary —
+  // mirroring the real 21–28 week (sub-periods 21–24 07:59 / 24–28 07:59).
+  const weekStartMs = now + 20 * DAY_MS + 8 * HOUR_MS; // "21st 08:00"
+  const splitMs = weekStartMs + 3 * DAY_MS; // "24th 08:00"
+  const weekEndMs = weekStartMs + 7 * DAY_MS; // "28th 08:00"
+
+  const tariff = await prisma.commissionTariff.create({
+    data: {
+      organizationId: org.id,
+      storeId: store.id,
+      name: SPLIT_TARIFF_NAME,
+      weekStartsAt: new Date(weekStartMs),
+      weekEndsAt: new Date(weekEndMs),
+      createdAt: new Date(now - DAY_MS),
+    },
+  });
+
+  // Same barcode in both sub-periods, different band pct — the only difference the resolver must
+  // key off is which sub-period covers the anchor.
+  async function seedPeriod(opts: {
+    label: string;
+    startMs: number;
+    endMs: number;
+    pct: number;
+    sortOrder: number;
+  }): Promise<void> {
+    const period = await prisma.commissionTariffPeriod.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        tariffId: tariff.id,
+        dateRangeLabel: opts.label,
+        startsAt: new Date(opts.startMs),
+        endsAt: new Date(opts.endMs),
+        sortOrder: opts.sortOrder,
+      },
+    });
+    await prisma.commissionTariffItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        periodId: period.id,
+        productVariantId: variant.id,
+        barcode: SPLIT_BARCODE,
+        stockCode: `STK-${SPLIT_BARCODE}`,
+        productTitle: `Bolunmus Urun ${SPLIT_BARCODE}`,
+        currentPrice: CURRENT_PRICE,
+        currentCommissionPct: new Decimal(opts.pct).toFixed(4),
+        bands: [{ key: 'band1', commissionPct: String(opts.pct) }],
+        sortOrder: 0,
+      },
+    });
+  }
+
+  await seedPeriod({
+    label: SPLIT_FIRST_PERIOD_LABEL,
+    startMs: weekStartMs,
+    endMs: splitMs,
+    pct: SPLIT_FIRST_PCT,
+    sortOrder: 0,
+  });
+  await seedPeriod({
+    label: SPLIT_SECOND_PERIOD_LABEL,
+    startMs: splitMs,
+    endMs: weekEndMs,
+    pct: SPLIT_SECOND_PCT,
+    sortOrder: 1,
+  });
+
+  // Midday anchors, >1 day from any sub-period edge.
+  const firstAnchorMs = weekStartMs + 1 * DAY_MS + 4 * HOUR_MS; // "22nd 12:00" — inside 1st sub-period
+  const secondAnchorMs = splitMs + 1 * DAY_MS + 4 * HOUR_MS; // "25th 12:00" — inside 2nd sub-period
+
+  async function seedList(opts: {
+    name: string;
+    startsAt: Date;
+  }): Promise<{ listId: string; itemId: string }> {
+    const list = await prisma.discountList.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        name: opts.name,
+        discountType: 'NET',
+        valueKind: 'PERCENT',
+        value: new Decimal('20.00'),
+        startsAt: opts.startsAt,
+        createdBy: user.id,
+      },
+    });
+    const item = await prisma.discountListItem.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        listId: list.id,
+        productVariantId: variant.id,
+        barcode: SPLIT_BARCODE,
+        productTitle: `Bolunmus Urun ${SPLIT_BARCODE}`,
+        currentPrice: new Decimal(CURRENT_PRICE),
+        included: true,
+        sortOrder: 0,
+      },
+    });
+    return { listId: list.id, itemId: item.id };
+  }
+
+  const firstSub = await seedList({
+    name: 'Ilk Alt Donem Kampanya',
+    startsAt: new Date(firstAnchorMs),
+  });
+  const secondSub = await seedList({
+    name: 'Ikinci Alt Donem Kampanya',
+    startsAt: new Date(secondAnchorMs),
+  });
+
+  return {
+    accessToken: user.accessToken,
+    orgId: org.id,
+    storeId: store.id,
+    firstSubListId: firstSub.listId,
+    firstSubItemId: firstSub.itemId,
+    secondSubListId: secondSub.listId,
+    secondSubItemId: secondSub.itemId,
+  };
+}
+
+describe('Discount Lists - split-week sub-period resolution', () => {
+  let sfx: SplitWeekFixture;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+    await truncateAll();
+    sfx = await setupSplitWeekFixture();
+  });
+
+  it('the covering SUB-PERIOD within a split week drives the pct + period label (second, then first)', async () => {
+    // startsAt inside the SECOND sub-period → the second period's pct (22%) and label.
+    const secondEst = await estimateFor(
+      sfx.accessToken,
+      sfx.orgId,
+      sfx.storeId,
+      sfx.secondSubListId,
+      sfx.secondSubItemId,
+    );
+    expect(secondEst.status).toBe(200);
+    expect(secondEst.body.calculable).toBe(true);
+    expect(secondEst.body.commissionSource).toBe('band');
+    expect(Number(secondEst.body.commissionPct)).toBe(SPLIT_SECOND_PCT);
+    expect(secondEst.body.commissionTariffName).toBe(SPLIT_TARIFF_NAME);
+    expect(secondEst.body.commissionPeriodLabel).toBe(SPLIT_SECOND_PERIOD_LABEL);
+
+    const secondDet = await detailFor(sfx.accessToken, sfx.orgId, sfx.storeId, sfx.secondSubListId);
+    expect(secondDet.status).toBe(200);
+    expect(secondDet.body.commissionTariffName).toBe(SPLIT_TARIFF_NAME);
+    expect(secondDet.body.commissionPeriodLabel).toBe(SPLIT_SECOND_PERIOD_LABEL);
+    const secondItem = secondDet.body.items.find((i) => i.barcode === SPLIT_BARCODE);
+    expect(secondItem?.discounted.commissionSource).toBe('band');
+    expect(Number(secondItem?.discounted.commissionPct)).toBe(SPLIT_SECOND_PCT);
+
+    // startsAt inside the FIRST sub-period → the first period's pct (10%) and label — same week,
+    // same barcode, only the anchor moved to the other side of the split.
+    const firstEst = await estimateFor(
+      sfx.accessToken,
+      sfx.orgId,
+      sfx.storeId,
+      sfx.firstSubListId,
+      sfx.firstSubItemId,
+    );
+    expect(firstEst.status).toBe(200);
+    expect(firstEst.body.commissionSource).toBe('band');
+    expect(Number(firstEst.body.commissionPct)).toBe(SPLIT_FIRST_PCT);
+    expect(firstEst.body.commissionTariffName).toBe(SPLIT_TARIFF_NAME);
+    expect(firstEst.body.commissionPeriodLabel).toBe(SPLIT_FIRST_PERIOD_LABEL);
+
+    const firstDet = await detailFor(sfx.accessToken, sfx.orgId, sfx.storeId, sfx.firstSubListId);
+    expect(firstDet.body.commissionPeriodLabel).toBe(SPLIT_FIRST_PERIOD_LABEL);
+    const firstItem = firstDet.body.items.find((i) => i.barcode === SPLIT_BARCODE);
+    expect(firstItem?.discounted.commissionSource).toBe('band');
+    expect(Number(firstItem?.discounted.commissionPct)).toBe(SPLIT_FIRST_PCT);
+  });
+});
