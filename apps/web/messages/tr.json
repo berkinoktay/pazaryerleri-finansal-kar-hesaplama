@@ -1802,13 +1802,13 @@
       "tariffTooltip": "Bu oran, {tariff} dosyasının {period} dönemine göre baz alındı."
     },
     "commissionBands": {
-      "title": "[TR-TODO] Product commission offers",
-      "hint": "[TR-TODO] Show commission bands",
-      "above": "[TR-TODO] {price} and above",
+      "title": "Ürün komisyon bantları",
+      "hint": "Komisyon bantlarını göster",
+      "above": "{price} ve üzeri",
       "range": "{lower}–{upper}",
-      "below": "[TR-TODO] {price} and below",
-      "currentMark": "[TR-TODO] Current",
-      "discountedMark": "[TR-TODO] Discounted"
+      "below": "{price} ve altı",
+      "currentMark": "Güncel",
+      "discountedMark": "İndirimli"
     },
     "smartSelect": {
       "label": "Akıllı Seçim",
