@@ -1781,7 +1781,7 @@
       "product": "Ürün Bilgisi",
       "currentPrice": "Güncel fiyat",
       "discountedPrice": "İndirimli fiyat",
-      "commission": "[TR-TODO] Commission",
+      "commission": "Komisyon",
       "delta": "Güncele göre",
       "included": "Dahil",
       "includeRow": "Bu ürünü kampanyaya dahil et",
@@ -1795,9 +1795,9 @@
     },
     "commissionColumn": {
       "source": {
-        "band": "[TR-TODO] Commission tariff rate",
-        "product": "[TR-TODO] Product commission rate",
-        "category": "[TR-TODO] Category commission rate"
+        "band": "Komisyon tarifesi oranı",
+        "product": "Ürün komisyon oranı",
+        "category": "Kategori komisyon oranı"
       }
     },
     "smartSelect": {
