@@ -1799,7 +1799,7 @@
         "product": "Ürün komisyon oranı",
         "category": "Kategori komisyon oranı"
       },
-      "tariffTooltip": "[TR-TODO] Based on the {tariff} file's {period} period."
+      "tariffTooltip": "Bu oran, {tariff} dosyasının {period} dönemine göre baz alındı."
     },
     "smartSelect": {
       "label": "Akıllı Seçim",
