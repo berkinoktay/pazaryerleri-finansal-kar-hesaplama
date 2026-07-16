@@ -7498,6 +7498,15 @@
               "netProfit",
               "marginPct"
             ]
+          },
+          "commissionBands": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/DiscountCommissionBand"
+            }
           }
         },
         "required": [
@@ -7513,8 +7522,35 @@
           "calculable",
           "reason",
           "current",
-          "discounted"
+          "discounted",
+          "commissionBands"
         ]
+      },
+      "DiscountCommissionBand": {
+        "type": "object",
+        "properties": {
+          "lowerLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upperLimit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commissionPct": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lowerLimit",
+          "upperLimit",
+          "commissionPct"
+        ],
+        "description": "Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ve o pencereye düşen komisyon oranı. Cari + indirimli fiyatın hangi banda düştüğü UI popover’ında bu ladder ile işaretlenir."
       },
       "ShippingCarrier": {
         "type": "object",

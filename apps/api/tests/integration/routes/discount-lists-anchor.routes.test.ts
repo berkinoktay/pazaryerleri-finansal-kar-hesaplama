@@ -66,6 +66,11 @@ interface DetailItemWire {
   calculable: boolean;
   reason: string | null;
   discounted: { commissionPct: string | null; commissionSource: string | null };
+  commissionBands: Array<{
+    lowerLimit: string | null;
+    upperLimit: string | null;
+    commissionPct: string;
+  }> | null;
 }
 interface DetailWire {
   commissionTariffName: string | null;
@@ -330,6 +335,10 @@ describe('Discount Lists - future-start commission anchor + tariff transparency'
     const item = body.items.find((i) => i.barcode === BAND_BARCODE);
     expect(item?.discounted.commissionSource).toBe('band');
     expect(Number(item?.discounted.commissionPct)).toBe(COVERING_PCT);
+    // The band source exposes its ladder so the UI popover can mark both prices.
+    expect(item?.commissionBands).not.toBeNull();
+    expect(item?.commissionBands?.length).toBeGreaterThan(0);
+    expect(Number(item?.commissionBands?.[0]?.commissionPct)).toBe(COVERING_PCT);
   });
 
   it('a future startsAt with NO covering week now resolves NO band (was: fell back to the latest tariff)', async () => {
@@ -351,6 +360,8 @@ describe('Discount Lists - future-start commission anchor + tariff transparency'
     const item = detBody.items.find((i) => i.barcode === BAND_BARCODE);
     expect(item?.discounted.commissionSource).toBeNull();
     expect(item?.reason).toBe('NO_COMMISSION');
+    // No covering week → no ladder to show either.
+    expect(item?.commissionBands).toBeNull();
   });
 
   it('a null startsAt anchors to now and resolves the week that COVERS now (the current tariff)', async () => {

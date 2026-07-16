@@ -327,6 +327,25 @@ const DiscountScenarioSchema = z.object({
   marginPct: z.string().nullable(),
 });
 
+// Mirrors the advantage/flash CommissionBand shape on the wire (no shared exported
+// schema — each vertical declares its own). One price band of the resolved commission
+// tariff: [lowerLimit, upperLimit] window + the commission that applies inside it.
+export const DiscountCommissionBandSchema = z
+  .object({
+    /** Lower price bound (GROSS TRY); null on the lowest band (open-ended below). */
+    lowerLimit: z.string().nullable(),
+    /** Upper price bound (GROSS TRY); null on the top band (open-ended above). */
+    upperLimit: z.string().nullable(),
+    /** The band's commission PERCENT (e.g. "13.1000"), at 4-decimal precision. */
+    commissionPct: z.string(),
+  })
+  .openapi('DiscountCommissionBand', {
+    description:
+      'Ürünün komisyon tarifesindeki bir fiyat bandı: [lowerLimit, upperLimit] penceresi ' +
+      've o pencereye düşen komisyon oranı. Cari + indirimli fiyatın hangi banda düştüğü ' +
+      'UI popover’ında bu ladder ile işaretlenir.',
+  });
+
 export const DiscountListDetailItemSchema = z
   .object({
     id: z.string().uuid(),
@@ -342,6 +361,13 @@ export const DiscountListDetailItemSchema = z
     reason: DiscountItemReasonSchema.nullable(),
     current: DiscountScenarioSchema,
     discounted: DiscountScenarioSchema,
+    /**
+     * The item's commission-band ladder (top-down), resolved from the campaign-anchored
+     * tariff week. Lets the UI show WHICH band the current + discounted price land in.
+     * Null when no covering tariff week resolved bands for the barcode (the item's rate
+     * fell to the synced product rate or category rate).
+     */
+    commissionBands: z.array(DiscountCommissionBandSchema).nullable(),
   })
   .openapi('DiscountListDetailItem');
 
@@ -451,6 +477,7 @@ export type EstimateDiscountItemResult = z.infer<typeof EstimateDiscountItemResu
 // ─── Inferred TS types (consumed by the service + route layers) ──────────────
 
 export type DiscountListListItem = z.infer<typeof DiscountListListItemSchema>;
+export type DiscountCommissionBand = z.infer<typeof DiscountCommissionBandSchema>;
 export type DiscountListDetailItem = z.infer<typeof DiscountListDetailItemSchema>;
 export type DiscountListDetail = z.infer<typeof DiscountListDetailSchema>;
 export type DiscountSelection = z.infer<typeof DiscountSelectionSchema>;

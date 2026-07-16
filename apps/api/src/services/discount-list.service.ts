@@ -37,6 +37,7 @@ import { NO_SHIPPING } from './tariff-compute-commons';
 import type { VariantCostAggregate } from '../validators/product.validator';
 import {
   discountConfigFromListRow,
+  type DiscountCommissionBand,
   type DiscountListDetail,
   type DiscountListDetailItem,
   type DiscountListListItem,
@@ -284,6 +285,18 @@ export async function getDiscountListDetail(
 
     // Three-tier chain inputs: tariff bands (by barcode) → synced product rate → category.
     const bands = source?.bandsByBarcode.get(item.barcode) ?? null;
+    // The commission-band ladder surfaced to the UI popover (the "which band does this
+    // price land in?" popup). Reuses the bands ALREADY read for the compute — no extra
+    // query. Serialized like advantage: money at 2 decimals, percent at 4. Null when
+    // there is no ladder (no covering tariff week for the barcode).
+    const commissionBands: DiscountCommissionBand[] | null =
+      bands === null
+        ? null
+        : bands.map((band) => ({
+            lowerLimit: band.lowerLimit !== null ? new Decimal(band.lowerLimit).toFixed(2) : null,
+            upperLimit: band.upperLimit !== null ? new Decimal(band.upperLimit).toFixed(2) : null,
+            commissionPct: new Decimal(band.commissionPct).toFixed(4),
+          }));
     const productRate =
       variantRow !== undefined && variantRow.syncedCommissionRate !== null
         ? new Decimal(variantRow.syncedCommissionRate.toString())
@@ -321,6 +334,7 @@ export async function getDiscountListDetail(
       reason: computed.reason,
       current: serializeScenario(computed.current),
       discounted: serializeScenario(computed.discounted),
+      commissionBands,
     };
   });
 
