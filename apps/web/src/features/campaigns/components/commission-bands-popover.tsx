@@ -127,13 +127,14 @@ export function CommissionBandsPopover({
               <li
                 key={`${band.lowerLimit ?? '∞'}-${band.upperLimit ?? '∞'}-${band.commissionPct}`}
                 className={cn(
-                  'gap-x-md text-2xs flex items-center justify-between tabular-nums',
-                  // Active band: a solid primary full-row fill (primary / primary-foreground are
-                  // both dual-mode). Full-bleed by cancelling the popover's `px-lg` horizontal
-                  // padding, then re-padding so the range/percent stay column-aligned. On the solid
-                  // fill ALL text is `text-primary-foreground` (never muted on solid primary).
-                  highlighted &&
-                    'bg-primary text-primary-foreground -mx-lg px-lg py-2xs rounded-sm',
+                  // Every row carries the same `px-sm` so the range/percent columns stay aligned
+                  // whether or not the row is highlighted.
+                  'gap-x-md text-2xs px-sm flex items-center justify-between tabular-nums',
+                  // Active band: a solid primary fill (primary / primary-foreground are both
+                  // dual-mode), INSET within the popover's `px-lg` gutter — the fill must not
+                  // touch the popover edges. On the solid fill ALL text is
+                  // `text-primary-foreground` (never muted on solid primary).
+                  highlighted && 'bg-primary text-primary-foreground py-2xs rounded-sm',
                 )}
               >
                 <span className={highlighted ? undefined : 'text-foreground'}>{range}</span>
