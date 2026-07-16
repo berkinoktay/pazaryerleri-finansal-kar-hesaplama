@@ -59,6 +59,10 @@ export interface DiscountListView {
   id: string;
   name: string;
   exported: boolean;
+  /** Name of the commission tariff feeding the bands (null when no covering week resolved). */
+  commissionTariffName: string | null;
+  /** Period label of that tariff week (e.g. "7 - 14 Temmuz"); null when unresolved. */
+  commissionPeriodLabel: string | null;
   summary: DiscountListSummary;
   rows: readonly DiscountRow[];
 }
@@ -92,6 +96,8 @@ export function toDiscountListView(detail: DiscountListDetail): DiscountListView
     id: detail.id,
     name: detail.name,
     exported: detail.exported,
+    commissionTariffName: detail.commissionTariffName,
+    commissionPeriodLabel: detail.commissionPeriodLabel,
     summary: detail.summary,
     rows: detail.items.map(toRow),
   };

@@ -18,19 +18,27 @@ import { TABLE_SCALE_DEFAULT } from '@/lib/table-scale';
 
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow } from '../lib/adapt-discount-list';
+import { DiscountCommissionCell } from './discount-commission-cell';
 import { ProfitDelta } from './profit-delta';
 
 /** Which price scenario a profit badge opens in the breakdown modal. */
 export type DiscountScenarioKey = 'current' | 'discounted';
 
 /**
- * The single VOLATILE value the cells need beyond their row data — whether a selections mutation
- * is in flight (so the checkbox disables). Streamed through CONTEXT rather than baked into the
- * `columns` closure so `columns` stays identity-stable: rebuilding it would remount every cell.
- * (`row.included` is NOT volatile-closure state — it flows through the row data.)
+ * State the cells need beyond their row data, streamed through CONTEXT rather than baked into the
+ * `columns` closure so `columns` stays identity-stable — rebuilding it would remount every cell.
+ * Carries the VOLATILE `selectionsPending` (disables the checkbox mid-mutation) plus the
+ * detail-level commission tariff name + period (the band tooltip), which are stable for a loaded
+ * detail but still live off the row. (`row.included` is NOT closure state — it flows via row data.)
  */
-const DiscountRowStateContext = React.createContext<{ selectionsPending: boolean }>({
+const DiscountRowStateContext = React.createContext<{
+  selectionsPending: boolean;
+  commissionTariffName: string | null;
+  commissionPeriodLabel: string | null;
+}>({
   selectionsPending: false,
+  commissionTariffName: null,
+  commissionPeriodLabel: null,
 });
 
 /** Participation checkbox — reads the pending flag from context, not the column closure. */
@@ -55,8 +63,28 @@ function IncludeCellSlot({
   );
 }
 
+/**
+ * Commission cell — reads the detail-level tariff name/period from context (not the column
+ * closure, keeping `columns` identity-stable) and renders the shared {@link DiscountCommissionCell}.
+ */
+function CommissionCellSlot({ row }: { row: DiscountRow }): React.ReactElement {
+  const { commissionTariffName, commissionPeriodLabel } = React.useContext(DiscountRowStateContext);
+  return (
+    <DiscountCommissionCell
+      current={row.current}
+      discounted={row.discounted}
+      tariffName={commissionTariffName}
+      periodLabel={commissionPeriodLabel}
+    />
+  );
+}
+
 export interface DiscountItemsTableProps {
   rows: readonly DiscountRow[];
+  /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
+  commissionTariffName: string | null;
+  /** Detail-level commission tariff PERIOD label — the band tooltip's second part. */
+  commissionPeriodLabel: string | null;
   /** True while a selections mutation is in flight — disables the row checkboxes. */
   selectionsPending: boolean;
   /** Persists a single row's participation choice (mode 'set'). */
@@ -78,6 +106,8 @@ export interface DiscountItemsTableProps {
  */
 export function DiscountItemsTable({
   rows,
+  commissionTariffName,
+  commissionPeriodLabel,
   selectionsPending,
   onToggleInclude,
   onOpenBreakdown,
@@ -176,14 +206,26 @@ export function DiscountItemsTable({
       },
     };
 
-    return [includeColumn, productColumn, currentColumn, discountedColumn];
+    const commissionColumn: ColumnDef<DiscountRow> = {
+      id: 'commission',
+      header: t('commission'),
+      meta: { label: t('commission') },
+      // Detail-level tariff name/period the tooltip needs flow through context, NOT this closure,
+      // so `columns` stays identity-stable (they'd otherwise force a dep + rebuild on reload).
+      cell: ({ row }) => <CommissionCellSlot row={row.original} />,
+    };
+
+    return [includeColumn, productColumn, currentColumn, discountedColumn, commissionColumn];
     // `columns` identity MUST stay STABLE. Every dep is identity-stable: `t` from next-intl,
     // `onToggleInclude`/`onOpenBreakdown` from the parent's useCallback, and `reasonEmptyLabel`
     // (useCallback-stable). `scale` only changes when the seller edits their margin ramp (rare)
     // and there is no fragile cell input to lose.
   }, [t, scale, onToggleInclude, onOpenBreakdown, reasonEmptyLabel]);
 
-  const rowState = React.useMemo(() => ({ selectionsPending }), [selectionsPending]);
+  const rowState = React.useMemo(
+    () => ({ selectionsPending, commissionTariffName, commissionPeriodLabel }),
+    [selectionsPending, commissionTariffName, commissionPeriodLabel],
+  );
 
   // Fresh array copy for TanStack (it mutates its own row model), memoized so the reference is
   // stable across unrelated re-renders — only a new `rows` prop rebuilds it.

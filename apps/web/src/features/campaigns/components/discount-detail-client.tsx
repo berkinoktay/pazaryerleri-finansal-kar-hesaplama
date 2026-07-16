@@ -299,6 +299,8 @@ export function DiscountDetailClient({
       <div className="hidden min-w-0 md:block">
         <DiscountItemsTable
           rows={filteredRows}
+          commissionTariffName={view.commissionTariffName}
+          commissionPeriodLabel={view.commissionPeriodLabel}
           selectionsPending={selectionsPending}
           onToggleInclude={onToggleInclude}
           onOpenBreakdown={openBreakdown}
@@ -311,6 +313,8 @@ export function DiscountDetailClient({
         {toolbar}
         <DiscountItemsMobileCards
           rows={filteredRows}
+          commissionTariffName={view.commissionTariffName}
+          commissionPeriodLabel={view.commissionPeriodLabel}
           selectionsPending={selectionsPending}
           onToggleInclude={onToggleInclude}
           onOpenBreakdown={openBreakdown}

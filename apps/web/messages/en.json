@@ -1781,6 +1781,7 @@
       "product": "Product Info",
       "currentPrice": "Current price",
       "discountedPrice": "Discounted price",
+      "commission": "Commission",
       "delta": "vs current",
       "included": "Included",
       "includeRow": "Include this product",
@@ -1791,6 +1792,13 @@
       "band": "Tariff band",
       "product": "Product commission",
       "category": "Category rate"
+    },
+    "commissionColumn": {
+      "source": {
+        "band": "Commission tariff rate",
+        "product": "Product commission rate",
+        "category": "Category commission rate"
+      }
     },
     "smartSelect": {
       "label": "Smart Select",

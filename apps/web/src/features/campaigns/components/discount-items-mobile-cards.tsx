@@ -11,11 +11,16 @@ import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import { useDiscountReasonEmptyLabel } from '../hooks/use-discount-reason-label';
 import type { DiscountRow } from '../lib/adapt-discount-list';
+import { DiscountCommissionCell } from './discount-commission-cell';
 import type { DiscountScenarioKey } from './discount-items-table';
 import { ProfitDelta } from './profit-delta';
 
 export interface DiscountItemsMobileCardsProps {
   rows: readonly DiscountRow[];
+  /** Detail-level commission tariff NAME feeding the bands — the band tooltip's first part. */
+  commissionTariffName: string | null;
+  /** Detail-level commission tariff PERIOD label — the band tooltip's second part. */
+  commissionPeriodLabel: string | null;
   selectionsPending: boolean;
   onToggleInclude: (itemId: string, included: boolean) => void;
   onOpenBreakdown: (row: DiscountRow, scenario: DiscountScenarioKey) => void;
@@ -30,6 +35,8 @@ export interface DiscountItemsMobileCardsProps {
  */
 export function DiscountItemsMobileCards({
   rows,
+  commissionTariffName,
+  commissionPeriodLabel,
   selectionsPending,
   onToggleInclude,
   onOpenBreakdown,
@@ -106,6 +113,17 @@ export function DiscountItemsMobileCards({
                 optionNetProfit={row.discounted.netProfit}
                 currentNetProfit={row.current.netProfit}
                 label={t('delta')}
+              />
+            </div>
+
+            {/* Commission — the rate used on the discounted price, with the band-jump transition. */}
+            <div className="border-border pt-md gap-2xs flex flex-col border-t">
+              <span className="text-2xs text-muted-foreground font-medium">{t('commission')}</span>
+              <DiscountCommissionCell
+                current={row.current}
+                discounted={row.discounted}
+                tariffName={commissionTariffName}
+                periodLabel={commissionPeriodLabel}
               />
             </div>
           </div>
