@@ -6,8 +6,11 @@ import * as React from 'react';
 
 import { formatCurrency } from '@pazarsync/utils';
 
+import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatPercentDisplay } from '@/lib/format-percent';
+import { cn } from '@/lib/utils';
+import type { ToneKey } from '@/lib/variants';
 
 import type { AdvantageCommissionBand } from '../api/get-advantage-tariff-detail.api';
 import { formatBandRange, type BandRangeLabelFns } from '../lib/commission-band-range';
@@ -44,11 +47,33 @@ export function useCommissionBandLabels(): CommissionBandsLabels {
   };
 }
 
+/**
+ * A per-band marker chip — e.g. "which band does the CURRENT price land in?" vs the
+ * DISCOUNTED price. `band` MUST be a reference to one of the {@link
+ * CommissionBandsPopoverProps.bands} elements (identity match, so two prices in the same
+ * band stack both chips on that one row). Optional feature: sibling verticals that pass no
+ * `marks` render exactly as before.
+ */
+export interface CommissionBandMark {
+  /** The band this chip sits on — a reference-identical element of the `bands` array. */
+  band: AdvantageCommissionBand;
+  /** Short chip copy, e.g. "Current" / "Discounted". */
+  label: string;
+  /** Chip tone; defaults to `neutral` (a muted chip). */
+  tone?: ToneKey;
+}
+
 export interface CommissionBandsPopoverProps {
   /** The product's commission-band ladder (top-down). Non-empty by construction of the caller. */
   bands: readonly AdvantageCommissionBand[];
   /** Shared band-range + popover-chrome labels (from the caller's per-namespace hook). */
   labels: CommissionBandsLabels;
+  /**
+   * Optional per-band marker chips. Each mark's `band` is matched by reference against the
+   * rendered `bands`, so the band a marked price lands in shows the chip. Omitted by the
+   * Advantage/Flash callers → no chips, unchanged behaviour.
+   */
+  marks?: readonly CommissionBandMark[];
 }
 
 /**
@@ -67,6 +92,7 @@ export interface CommissionBandsPopoverProps {
 export function CommissionBandsPopover({
   bands,
   labels,
+  marks,
 }: CommissionBandsPopoverProps): React.ReactElement {
   return (
     <Popover>
@@ -86,12 +112,32 @@ export function CommissionBandsPopover({
           {bands.map((band) => {
             const range = formatBandRange(band, formatCurrency, labels);
             if (range === null) return null;
+            // Reference-identity match: which marked prices (if any) land in THIS band.
+            const bandMarks = marks?.filter((mark) => mark.band === band) ?? [];
             return (
               <li
                 key={`${band.lowerLimit ?? '∞'}-${band.upperLimit ?? '∞'}-${band.commissionPct}`}
-                className="gap-x-md text-2xs flex items-baseline justify-between tabular-nums"
+                className="gap-x-md text-2xs flex items-center justify-between tabular-nums"
               >
-                <span className="text-foreground">{range}</span>
+                <span
+                  className={cn(
+                    'text-foreground',
+                    bandMarks.length > 0 && 'gap-2xs inline-flex items-center',
+                  )}
+                >
+                  {range}
+                  {bandMarks.map((mark) => (
+                    <Badge
+                      key={mark.label}
+                      tone={mark.tone ?? 'neutral'}
+                      variant="surface"
+                      size="sm"
+                      radius="full"
+                    >
+                      {mark.label}
+                    </Badge>
+                  ))}
+                </span>
                 <span className="text-muted-foreground shrink-0">
                   {formatPercentDisplay(band.commissionPct)}
                 </span>

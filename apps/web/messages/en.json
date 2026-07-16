@@ -1801,6 +1801,15 @@
       },
       "tariffTooltip": "Based on the {tariff} file's {period} period."
     },
+    "commissionBands": {
+      "title": "Product commission offers",
+      "hint": "Show commission bands",
+      "above": "{price} and above",
+      "range": "{lower}–{upper}",
+      "below": "{price} and below",
+      "currentMark": "Current",
+      "discountedMark": "Discounted"
+    },
     "smartSelect": {
       "label": "Smart Select",
       "selectAll": "Select all",

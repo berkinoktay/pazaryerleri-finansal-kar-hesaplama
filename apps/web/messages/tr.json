@@ -1801,6 +1801,15 @@
       },
       "tariffTooltip": "Bu oran, {tariff} dosyasının {period} dönemine göre baz alındı."
     },
+    "commissionBands": {
+      "title": "[TR-TODO] Product commission offers",
+      "hint": "[TR-TODO] Show commission bands",
+      "above": "[TR-TODO] {price} and above",
+      "range": "{lower}–{upper}",
+      "below": "[TR-TODO] {price} and below",
+      "currentMark": "[TR-TODO] Current",
+      "discountedMark": "[TR-TODO] Discounted"
+    },
     "smartSelect": {
       "label": "Akıllı Seçim",
       "selectAll": "Tümünü seç",

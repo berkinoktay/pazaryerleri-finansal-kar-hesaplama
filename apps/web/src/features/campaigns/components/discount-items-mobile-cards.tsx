@@ -124,6 +124,7 @@ export function DiscountItemsMobileCards({
                 discounted={row.discounted}
                 tariffName={commissionTariffName}
                 periodLabel={commissionPeriodLabel}
+                commissionBands={row.commissionBands}
               />
             </div>
           </div>

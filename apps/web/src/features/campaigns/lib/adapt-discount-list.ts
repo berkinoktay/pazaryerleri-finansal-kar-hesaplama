@@ -1,10 +1,13 @@
 import type {
+  DiscountCommissionBand,
   DiscountCommissionSource,
   DiscountItemReason,
   DiscountListDetail,
   DiscountListDetailItem,
   DiscountListSummary,
 } from '../api/get-discount-list-detail.api';
+
+export type { DiscountCommissionBand };
 
 /**
  * Component-facing shapes for the İndirimler (Discounts) DETAIL screen. Money is a GROSS decimal
@@ -48,6 +51,11 @@ export interface DiscountRow {
   current: DiscountScenario;
   /** The discounted price scenario (commission RE-resolved on the lower price). */
   discounted: DiscountScenario;
+  /**
+   * The item's commission-band ladder (top-down); null when no tariff week resolved bands
+   * for the barcode. Feeds the commission cell's bands popover (which band each price lands in).
+   */
+  commissionBands: readonly DiscountCommissionBand[] | null;
 }
 
 /**
@@ -83,6 +91,7 @@ function toRow(item: DiscountListDetailItem): DiscountRow {
     reason: item.reason,
     current: item.current,
     discounted: item.discounted,
+    commissionBands: item.commissionBands,
   };
 }
 

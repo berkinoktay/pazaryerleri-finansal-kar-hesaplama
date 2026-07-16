@@ -75,6 +75,7 @@ function CommissionCellSlot({ row }: { row: DiscountRow }): React.ReactElement {
       discounted={row.discounted}
       tariffName={commissionTariffName}
       periodLabel={commissionPeriodLabel}
+      commissionBands={row.commissionBands}
     />
   );
 }

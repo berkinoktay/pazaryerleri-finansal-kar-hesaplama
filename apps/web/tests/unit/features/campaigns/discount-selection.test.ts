@@ -55,6 +55,7 @@ function makeRow(
     reason: null,
     current: scenario('25.00'),
     discounted: scenario(discountedNetProfit),
+    commissionBands: null,
   };
 }
 
